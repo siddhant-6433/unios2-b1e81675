@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Loader2, Plus } from "lucide-react";
+import { PhoneInput } from "@/components/ui/phone-input";
 
 const SOURCES = [
   { value: "website", label: "Website" }, { value: "meta_ads", label: "Meta Ads" },
