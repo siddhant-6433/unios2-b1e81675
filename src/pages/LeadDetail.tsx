@@ -169,10 +169,7 @@ const LeadDetail = () => {
             onCall={() => {
               if (lead.phone) window.open(`tel:${lead.phone}`);
             }}
-            onWhatsApp={() => {
-              const phone = lead.phone?.replace(/[^0-9]/g, "");
-              if (phone) window.open(`https://wa.me/${phone}`);
-            }}
+            onWhatsApp={() => setShowWhatsApp(true)}
             onScheduleVisit={() => {
               // Scroll to follow-ups tab
               toast({ title: "Use the Follow-ups tab on the right to schedule a visit" });
