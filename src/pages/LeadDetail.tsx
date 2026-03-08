@@ -388,6 +388,16 @@ const LeadDetail = () => {
           </div>
         </TabsContent>
       </Tabs>
+
+      {lead && (
+        <>
+          <InterviewScoringDialog open={showInterview} onOpenChange={setShowInterview}
+            leadId={lead.id} leadName={lead.name} currentScore={lead.interview_score} currentResult={lead.interview_result} onSuccess={fetchAll} />
+          <OfferLetterDialog open={showOfferLetter} onOpenChange={setShowOfferLetter}
+            leadId={lead.id} leadName={lead.name} courseId={lead.course_id} campusId={lead.campus_id} onSuccess={fetchAll} />
+          <ConvertToStudentDialog open={showConvert} onOpenChange={setShowConvert} lead={lead} onSuccess={fetchAll} />
+        </>
+      )}
     </div>
   );
 };

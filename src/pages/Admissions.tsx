@@ -317,6 +317,9 @@ const Admissions = () => {
           </CardContent>
         </Card>
       )}
+
+      <AddLeadDialog open={showAddLead} onOpenChange={setShowAddLead} onSuccess={fetchLeads} />
+      <BulkLeadImportDialog open={showBulkImport} onOpenChange={setShowBulkImport} onSuccess={fetchLeads} />
     </div>
   );
 };
