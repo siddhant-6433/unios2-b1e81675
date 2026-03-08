@@ -88,6 +88,8 @@ const Admissions = () => {
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showAddLead, setShowAddLead] = useState(false);
+  const [showBulkImport, setShowBulkImport] = useState(false);
 
   useEffect(() => { fetchLeads(); }, []);
 
