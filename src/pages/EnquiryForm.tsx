@@ -96,6 +96,8 @@ const COURSE_CAMPUS_MAP = PROGRAMS.flatMap((p) =>
 );
 
 const EnquiryForm = () => {
+  const [searchParams] = useSearchParams();
+  const isEmbed = searchParams.get("embed") === "true";
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
