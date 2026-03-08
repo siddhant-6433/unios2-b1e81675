@@ -87,8 +87,14 @@ const LeadDetail = () => {
     if (!newNote.trim() || !id) return;
     setSavingNote(true);
     const { error } = await supabase.from("lead_notes").insert({ lead_id: id, user_id: user?.id, content: newNote.trim() });
-    if (error) toast({ title: "Error", description: error.message, variant: "destructive" });
-    else { setNewNote(""); await fetchAll(); }
+    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); }
+    else {
+      await supabase.from("lead_activities").insert({
+        lead_id: id, user_id: user?.id || null, type: "note",
+        description: newNote.trim(),
+      });
+      setNewNote(""); await fetchAll();
+    }
     setSavingNote(false);
   };
 
