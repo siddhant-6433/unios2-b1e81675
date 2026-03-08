@@ -190,8 +190,8 @@ const EnquiryForm = () => {
 
   if (submitted) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-6">
-        <Card className="max-w-md w-full border-border/60 shadow-none">
+      <div className={isEmbed ? "bg-background p-4" : "min-h-screen bg-background flex items-center justify-center p-6"}>
+        <Card className="max-w-md w-full border-border/60 shadow-none mx-auto">
           <CardContent className="p-8 text-center">
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 mx-auto mb-4">
               <CheckCircle className="h-8 w-8 text-primary" />
@@ -200,8 +200,18 @@ const EnquiryForm = () => {
             <p className="text-sm text-muted-foreground mt-2">
               Your enquiry has been received. Our admissions team will contact you within 24 hours.
             </p>
+            <div className="mt-4 p-3 rounded-xl bg-primary/5 border border-primary/10">
+              <p className="text-xs text-muted-foreground">Ready to complete your application?</p>
+              <a
+                href="/apply"
+                className="inline-flex items-center gap-1.5 mt-1.5 text-sm font-medium text-primary hover:underline"
+              >
+                Go to Application Portal <ArrowRight className="h-3.5 w-3.5" />
+              </a>
+            </div>
             <Button
-              className="mt-6 w-full"
+              variant="outline"
+              className="mt-4 w-full"
               onClick={() => {
                 setSubmitted(false);
                 setForm({ name: "", phone: "", email: "", guardian_name: "", guardian_phone: "", courseKey: "", campus: "", message: "" });
