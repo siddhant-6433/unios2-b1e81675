@@ -10,8 +10,11 @@ import { Button } from "@/components/ui/button";
 import {
   ArrowLeft, Phone, Mail, MapPin, Calendar, User, MessageSquare,
   FileText, Clock, Plus, Send, Check, X, Loader2, ChevronRight,
-  StickyNote, CalendarClock, Building2, Gift
+  StickyNote, CalendarClock, Building2, Gift, UserCheck, Bot, ArrowRight
 } from "lucide-react";
+import { InterviewScoringDialog } from "@/components/admissions/InterviewScoringDialog";
+import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
+import { ConvertToStudentDialog } from "@/components/admissions/ConvertToStudentDialog";
 
 const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", ai_called: "AI Called", counsellor_call: "Counsellor Call",
