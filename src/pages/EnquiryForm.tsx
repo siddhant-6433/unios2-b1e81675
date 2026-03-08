@@ -104,26 +104,27 @@ const EnquiryForm = () => {
     email: "",
     guardian_name: "",
     guardian_phone: "",
-    course: "",
+    courseKey: "", // "program||course" composite key
     campus: "",
     message: "",
   });
 
   const update = (field: string, value: string) => setForm((p) => ({ ...p, [field]: value }));
 
-  const selectedCourseEntry = useMemo(
-    () => COURSE_CAMPUS_MAP.find((c) => c.course === form.course),
-    [form.course]
-  );
+  const selectedCourseEntry = useMemo(() => {
+    if (!form.courseKey) return null;
+    const [program, course] = form.courseKey.split("||");
+    return COURSE_CAMPUS_MAP.find((c) => c.program === program && c.course === course) || null;
+  }, [form.courseKey]);
 
   const isSchool = selectedCourseEntry?.type === "school";
   const availableCampuses = selectedCourseEntry?.campuses || [];
 
-  // Auto-select campus if only one option
-  const handleCourseChange = (course: string) => {
-    const entry = COURSE_CAMPUS_MAP.find((c) => c.course === course);
+  const handleCourseChange = (courseKey: string) => {
+    const [program, course] = courseKey.split("||");
+    const entry = COURSE_CAMPUS_MAP.find((c) => c.program === program && c.course === course);
     const campus = entry?.campuses.length === 1 ? entry.campuses[0] : "";
-    setForm((p) => ({ ...p, course, campus }));
+    setForm((p) => ({ ...p, courseKey, campus }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
