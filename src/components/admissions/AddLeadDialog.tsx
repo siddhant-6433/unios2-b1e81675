@@ -69,6 +69,15 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {
+      // Log lead_created activity
+      if (data) {
+        await supabase.from("lead_activities").insert({
+          lead_id: data.id,
+          type: "lead_created",
+          description: `Lead created via manual entry`,
+          user_id: user?.id || null,
+        });
+      }
       toast({ title: "Lead added" });
       setForm({ name: "", phone: "", email: "", guardian_name: "", guardian_phone: "", source: "website", course_id: "", campus_id: "", counsellor_id: "", notes: "" });
       onOpenChange(false);
