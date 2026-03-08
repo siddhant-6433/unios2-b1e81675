@@ -121,7 +121,7 @@ export function PhoneInput({ value, onChange, placeholder, required, className }
         value={number}
         onChange={(e) => handleNumberChange(e.target.value)}
         placeholder={placeholder || "0".repeat(selectedCountry.digits)}
-        className="flex-1 min-w-0 rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 font-mono tracking-wider"
+        className="flex-1 min-w-0 rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
       />
     </div>
   );
