@@ -81,13 +81,13 @@ export function PhoneInput({ value, onChange, placeholder, required, className }
   const digitsOnly = number.replace(/\D/g, "");
 
   return (
-    <div className={`flex gap-1.5 ${className || ""}`}>
+    <div className={`flex gap-1.5 min-w-0 ${className || ""}`}>
       {/* Country code dropdown */}
-      <div className="relative" ref={dropdownRef}>
+      <div className="relative shrink-0" ref={dropdownRef}>
         <button
           type="button"
           onClick={() => setDropdownOpen(!dropdownOpen)}
-          className="flex items-center gap-1 rounded-xl border border-input bg-background px-2.5 py-2.5 text-sm text-foreground hover:bg-muted transition-colors h-full min-w-[88px]"
+          className="flex items-center gap-1 rounded-xl border border-input bg-background px-2 py-2.5 text-sm text-foreground hover:bg-muted transition-colors h-full"
         >
           <span className="text-base leading-none">{selectedCountry.flag}</span>
           <span className="font-medium text-xs">{selectedCountry.code}</span>
