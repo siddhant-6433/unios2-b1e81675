@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Users, GraduationCap, IndianRupee,
   ClipboardCheck, Settings, Bell, MessageSquare, Search,
-  Building2, BookOpen, BarChart3, FileText, School, LogOut
+  Building2, BookOpen, BarChart3, FileText, School, LogOut, ShieldCheck
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -26,6 +26,7 @@ const managementMenu = [
   { title: "Courses", url: "/courses", icon: School },
   { title: "Reports", url: "/reports", icon: BarChart3 },
   { title: "Documents", url: "/documents", icon: FileText },
+  { title: "User Management", url: "/admin", icon: ShieldCheck, adminOnly: true },
 ];
 
 const roleLabels: Record<string, string> = {
@@ -102,7 +103,7 @@ export function AppSidebar() {
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {managementMenu.map((item) => (
+              {managementMenu.filter((item) => !("adminOnly" in item && item.adminOnly) || role === "super_admin").map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild isActive={isActive(item.url)}>
                     <NavLink

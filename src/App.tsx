@@ -14,6 +14,7 @@ import Attendance from "./pages/Attendance";
 import Finance from "./pages/Finance";
 import Login from "./pages/Login";
 import ResetPassword from "./pages/ResetPassword";
+import AdminPanel from "./pages/AdminPanel";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -40,6 +41,7 @@ const App = () => (
                       <Route path="/students/:admissionNo" element={<StudentProfile />} />
                       <Route path="/attendance" element={<Attendance />} />
                       <Route path="/finance" element={<Finance />} />
+                      <Route path="/admin" element={<AdminPanel />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </AppLayout>
