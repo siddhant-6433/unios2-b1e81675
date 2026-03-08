@@ -279,6 +279,11 @@ const AdminPanel = () => {
           </table>
         )}
       </div>
+      <InviteUserDialog
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        onSuccess={() => fetchUsers()}
+      />
     </div>
   );
 };
