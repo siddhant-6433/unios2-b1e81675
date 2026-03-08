@@ -53,7 +53,7 @@ const SuperAdminDashboard = () => {
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <div className="rounded-xl bg-card p-6 card-shadow">
+        <div className="card-neo p-6">
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-base font-semibold text-foreground">Campus Comparison</h2>
             <span className="text-xs text-muted-foreground">Students & Fee</span>
