@@ -1,0 +1,186 @@
+import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Loader2, FileText, Plus, Gift } from "lucide-react";
+
+interface OfferLetterDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  leadId: string;
+  leadName: string;
+  courseId: string | null;
+  campusId: string | null;
+  onSuccess: () => void;
+}
+
+interface OfferLetter {
+  id: string;
+  total_fee: number;
+  scholarship_amount: number | null;
+  net_fee: number;
+  status: string;
+  acceptance_deadline: string | null;
+  accepted_at: string | null;
+  created_at: string;
+}
+
+export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, courseId, campusId, onSuccess }: OfferLetterDialogProps) {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [offers, setOffers] = useState<OfferLetter[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ total_fee: "", scholarship_amount: "0", acceptance_deadline: "" });
+
+  const fetchOffers = async () => {
+    setLoading(true);
+    const { data } = await supabase.from("offer_letters").select("*").eq("lead_id", leadId).order("created_at", { ascending: false });
+    if (data) setOffers(data);
+    setLoading(false);
+  };
+
+  useEffect(() => { if (open) fetchOffers(); }, [open]);
+
+  const handleCreate = async () => {
+    const totalFee = Number(form.total_fee);
+    const scholarship = Number(form.scholarship_amount) || 0;
+    if (!totalFee || totalFee <= 0) { toast({ title: "Error", description: "Enter valid total fee", variant: "destructive" }); return; }
+
+    setSaving(true);
+    const { error } = await supabase.from("offer_letters").insert({
+      lead_id: leadId,
+      total_fee: totalFee,
+      scholarship_amount: scholarship,
+      net_fee: totalFee - scholarship,
+      acceptance_deadline: form.acceptance_deadline || null,
+      course_id: courseId,
+      campus_id: campusId,
+      issued_by: user?.id || null,
+    });
+
+    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); }
+    else {
+      // Update lead stage and offer_amount
+      await supabase.from("leads").update({ stage: "offer_sent" as any, offer_amount: totalFee - scholarship }).eq("id", leadId);
+      await supabase.from("lead_activities").insert({
+        lead_id: leadId, user_id: user?.id || null, type: "offer",
+        description: `Offer letter issued: ₹${(totalFee - scholarship).toLocaleString("en-IN")} (Scholarship: ₹${scholarship.toLocaleString("en-IN")})`,
+      });
+      toast({ title: "Offer letter created" });
+      setShowForm(false);
+      setForm({ total_fee: "", scholarship_amount: "0", acceptance_deadline: "" });
+      fetchOffers();
+      onSuccess();
+    }
+    setSaving(false);
+  };
+
+  const updateOfferStatus = async (offerId: string, status: string) => {
+    const updates: any = { status };
+    if (status === "accepted") updates.accepted_at = new Date().toISOString();
+
+    await supabase.from("offer_letters").update(updates).eq("id", offerId);
+    if (status === "accepted") {
+      await supabase.from("leads").update({ stage: "token_paid" as any }).eq("id", leadId);
+      await supabase.from("lead_activities").insert({
+        lead_id: leadId, user_id: user?.id || null, type: "offer",
+        description: `Offer letter accepted`,
+      });
+    }
+    fetchOffers();
+    onSuccess();
+  };
+
+  const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
+  const statusColors: Record<string, string> = {
+    issued: "bg-pastel-blue", accepted: "bg-pastel-green", rejected: "bg-pastel-red", expired: "bg-muted",
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5" /> Offer Letters — {leadName}</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 mt-2">
+          {!showForm && (
+            <Button onClick={() => setShowForm(true)} size="sm" className="gap-1.5"><Plus className="h-4 w-4" />New Offer</Button>
+          )}
+
+          {showForm && (
+            <Card className="border-border/60">
+              <CardContent className="p-4 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-medium text-muted-foreground mb-1">Total Fee (₹) *</label>
+                    <input type="number" value={form.total_fee} onChange={e => setForm(p => ({ ...p, total_fee: e.target.value }))} className={inputCls} placeholder="100000" />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-muted-foreground mb-1">Scholarship (₹)</label>
+                    <input type="number" value={form.scholarship_amount} onChange={e => setForm(p => ({ ...p, scholarship_amount: e.target.value }))} className={inputCls} />
+                  </div>
+                </div>
+                {form.total_fee && (
+                  <div className="flex items-center gap-2 p-3 rounded-xl bg-pastel-green">
+                    <Gift className="h-4 w-4 text-foreground/70" />
+                    <span className="text-sm font-semibold text-foreground">Net Fee: ₹{(Number(form.total_fee) - Number(form.scholarship_amount || 0)).toLocaleString("en-IN")}</span>
+                  </div>
+                )}
+                <div>
+                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Acceptance Deadline</label>
+                  <input type="date" value={form.acceptance_deadline} onChange={e => setForm(p => ({ ...p, acceptance_deadline: e.target.value }))} className={inputCls} />
+                </div>
+                <div className="flex gap-2">
+                  <Button onClick={handleCreate} disabled={saving} size="sm" className="gap-1.5">
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Issue Offer
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setShowForm(false)}>Cancel</Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {loading ? (
+            <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+          ) : offers.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">No offer letters yet</p>
+          ) : (
+            <div className="space-y-2">
+              {offers.map(offer => (
+                <Card key={offer.id} className="border-border/60">
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="text-lg font-bold text-foreground">₹{offer.net_fee.toLocaleString("en-IN")}</p>
+                        <p className="text-xs text-muted-foreground">Total: ₹{offer.total_fee.toLocaleString("en-IN")} · Scholarship: ₹{(offer.scholarship_amount || 0).toLocaleString("en-IN")}</p>
+                      </div>
+                      <Badge className={`text-[10px] border-0 ${statusColors[offer.status] || "bg-muted"}`}>{offer.status}</Badge>
+                    </div>
+                    <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                      <span>Issued: {new Date(offer.created_at).toLocaleDateString("en-IN")}</span>
+                      {offer.acceptance_deadline && <span>Deadline: {new Date(offer.acceptance_deadline).toLocaleDateString("en-IN")}</span>}
+                      {offer.accepted_at && <span>Accepted: {new Date(offer.accepted_at).toLocaleDateString("en-IN")}</span>}
+                    </div>
+                    {offer.status === "issued" && (
+                      <div className="flex gap-2 mt-3">
+                        <Button size="sm" variant="outline" className="text-xs" onClick={() => updateOfferStatus(offer.id, "accepted")}>Mark Accepted</Button>
+                        <Button size="sm" variant="outline" className="text-xs text-destructive" onClick={() => updateOfferStatus(offer.id, "rejected")}>Mark Rejected</Button>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
