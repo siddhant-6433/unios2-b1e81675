@@ -6,35 +6,93 @@ import { PhoneInput } from "@/components/ui/phone-input";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
-// Course → campuses mapping with type info
-const COURSE_CAMPUS_MAP: { course: string; type: "school" | "college"; campuses: string[] }[] = [
-  // College courses
-  { course: "B.Tech CSE", type: "college", campuses: ["NIMT Greater Noida"] },
-  { course: "B.Tech ECE", type: "college", campuses: ["NIMT Greater Noida"] },
-  { course: "B.Tech ME", type: "college", campuses: ["NIMT Greater Noida"] },
-  { course: "B.Tech CE", type: "college", campuses: ["NIMT Greater Noida"] },
-  { course: "MBA", type: "college", campuses: ["NIMT Greater Noida", "NIMT Kotputli"] },
-  { course: "BBA", type: "college", campuses: ["NIMT Greater Noida", "NIMT Kotputli"] },
-  { course: "BCA", type: "college", campuses: ["NIMT Greater Noida"] },
-  { course: "B.Com", type: "college", campuses: ["NIMT Kotputli"] },
-  { course: "B.Ed", type: "college", campuses: ["Campus School (B.Ed / D.El.Ed)"] },
-  { course: "D.El.Ed", type: "college", campuses: ["Campus School (B.Ed / D.El.Ed)"] },
-  // IB courses
-  { course: "IB PYP", type: "school", campuses: ["Mirai Experiential School"] },
-  { course: "IB MYP", type: "school", campuses: ["Mirai Experiential School"] },
-  { course: "IB DP", type: "school", campuses: ["Mirai Experiential School"] },
-  // School classes
-  ...Array.from({ length: 8 }, (_, i) => ({
-    course: `Class ${i + 1}`,
-    type: "school" as const,
-    campuses: ["NIMT School Avantika II", "NIMT School Arthala"],
-  })),
-  ...["Class 9", "Class 10", "Class 11", "Class 12"].map((c) => ({
-    course: c,
-    type: "school" as const,
-    campuses: ["NIMT School Avantika II"],
-  })),
+// Program groups with courses and campuses from official taxonomy
+const PROGRAMS: { program: string; type: "school" | "college"; courses: { name: string; campuses: string[] }[] }[] = [
+  {
+    program: "Allied Healthcare",
+    type: "college",
+    courses: [
+      { name: "B.Sc. in Medical Radiology & Imaging Technology (BMRIT)", campuses: ["Greater Noida, Uttar Pradesh"] },
+      { name: "M.Sc. in Medical Radiology & Imaging Technology (MMRIT)", campuses: ["Greater Noida, Uttar Pradesh"] },
+      { name: "Diploma in Physiotherapy (DPT)", campuses: ["Greater Noida, Uttar Pradesh"] },
+      { name: "Bachelor of Physiotherapy (BPT)", campuses: ["Greater Noida, Uttar Pradesh"] },
+      { name: "Masters in Physiotherapy (MPT)", campuses: ["Greater Noida, Uttar Pradesh"] },
+      { name: "Diploma in Operation Theater Technician (OTT)", campuses: ["Greater Noida, Uttar Pradesh"] },
+    ],
+  },
+  {
+    program: "Pharmacy",
+    type: "college",
+    courses: [
+      { name: "Diploma in Pharmacy (D. Pharma)", campuses: ["Greater Noida, Uttar Pradesh"] },
+    ],
+  },
+  {
+    program: "Nursing",
+    type: "college",
+    courses: [
+      { name: "Bachelor of Science in Nursing (B.Sc Nursing)", campuses: ["Greater Noida, Uttar Pradesh"] },
+      { name: "Diploma in General Nursing and Midwifery (GNM)", campuses: ["Greater Noida, Uttar Pradesh"] },
+    ],
+  },
+  {
+    program: "Education",
+    type: "college",
+    courses: [
+      { name: "Bachelor of Education (B.Ed)", campuses: ["Shastri Nagar, Ghaziabad, Uttar Pradesh", "Greater Noida, Uttar Pradesh", "Kotputli, Rajasthan"] },
+      { name: "BTC/ Diploma in Elementary Education (D.El.Ed)", campuses: ["Shastri Nagar, Ghaziabad, Uttar Pradesh"] },
+    ],
+  },
+  {
+    program: "Law",
+    type: "college",
+    courses: [
+      { name: "Bachelor of Arts and Bachelor of Laws (BALLB)", campuses: ["Greater Noida, Uttar Pradesh"] },
+      { name: "Bachelor of Laws (LLB)", campuses: ["Greater Noida, Uttar Pradesh", "Kotputli, Rajasthan"] },
+    ],
+  },
+  {
+    program: "Management",
+    type: "college",
+    courses: [
+      { name: "Master of Business Administration (MBA)", campuses: ["Greater Noida, Uttar Pradesh"] },
+      { name: "Post Graduate Diploma In Management (PGDM)", campuses: ["Greater Noida, Uttar Pradesh", "Kotputli, Rajasthan"] },
+      { name: "Bachelor of Business Administration (BBA)", campuses: ["Greater Noida, Uttar Pradesh"] },
+    ],
+  },
+  {
+    program: "Computer Science",
+    type: "college",
+    courses: [
+      { name: "Bachelor of Computer Administration (BCA)", campuses: ["Greater Noida, Uttar Pradesh"] },
+    ],
+  },
+  {
+    program: "K-12 Schooling – CBSE",
+    type: "school",
+    courses: [
+      ...["Pre-Nursery", "Nursery", "KG", "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th", "11th", "12th"].map((cls) => ({
+        name: cls,
+        campuses: ["NIMT B School Avt II – CBSE"],
+      })),
+    ],
+  },
+  {
+    program: "K-12 Schooling",
+    type: "school",
+    courses: [
+      ...["Pre-Nursery", "Nursery", "KG", "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th", "11th", "12th"].map((cls) => ({
+        name: cls,
+        campuses: ["NIMT B School Arthala"],
+      })),
+    ],
+  },
 ];
+
+// Flatten for lookup: course name → { type, campuses[] }
+const COURSE_CAMPUS_MAP = PROGRAMS.flatMap((p) =>
+  p.courses.map((c) => ({ course: c.name, program: p.program, type: p.type, campuses: c.campuses }))
+);
 
 const EnquiryForm = () => {
   const { toast } = useToast();
@@ -46,26 +104,27 @@ const EnquiryForm = () => {
     email: "",
     guardian_name: "",
     guardian_phone: "",
-    course: "",
+    courseKey: "", // "program||course" composite key
     campus: "",
     message: "",
   });
 
   const update = (field: string, value: string) => setForm((p) => ({ ...p, [field]: value }));
 
-  const selectedCourseEntry = useMemo(
-    () => COURSE_CAMPUS_MAP.find((c) => c.course === form.course),
-    [form.course]
-  );
+  const selectedCourseEntry = useMemo(() => {
+    if (!form.courseKey) return null;
+    const [program, course] = form.courseKey.split("||");
+    return COURSE_CAMPUS_MAP.find((c) => c.program === program && c.course === course) || null;
+  }, [form.courseKey]);
 
   const isSchool = selectedCourseEntry?.type === "school";
   const availableCampuses = selectedCourseEntry?.campuses || [];
 
-  // Auto-select campus if only one option
-  const handleCourseChange = (course: string) => {
-    const entry = COURSE_CAMPUS_MAP.find((c) => c.course === course);
+  const handleCourseChange = (courseKey: string) => {
+    const [program, course] = courseKey.split("||");
+    const entry = COURSE_CAMPUS_MAP.find((c) => c.program === program && c.course === course);
     const campus = entry?.campuses.length === 1 ? entry.campuses[0] : "";
-    setForm((p) => ({ ...p, course, campus }));
+    setForm((p) => ({ ...p, courseKey, campus }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -88,7 +147,7 @@ const EnquiryForm = () => {
           email: form.email.trim() || undefined,
           guardian_name: form.guardian_name.trim() || undefined,
           guardian_phone: form.guardian_phone || undefined,
-          course: form.course || undefined,
+          course: selectedCourseEntry?.course || undefined,
           campus: form.campus || undefined,
           message: form.message.trim() || undefined,
         },
@@ -126,7 +185,7 @@ const EnquiryForm = () => {
               className="mt-6 w-full"
               onClick={() => {
                 setSubmitted(false);
-                setForm({ name: "", phone: "", email: "", guardian_name: "", guardian_phone: "", course: "", campus: "", message: "" });
+                setForm({ name: "", phone: "", email: "", guardian_name: "", guardian_phone: "", courseKey: "", campus: "", message: "" });
               }}
             >
               Submit Another Enquiry
@@ -173,36 +232,20 @@ const EnquiryForm = () => {
                     <BookOpen className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <select
                       required
-                      value={form.course}
+                      value={form.courseKey}
                       onChange={(e) => handleCourseChange(e.target.value)}
                       className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 appearance-none"
                     >
                       <option value="">Select course / class</option>
-                      <optgroup label="Engineering">
-                        {COURSE_CAMPUS_MAP.filter((c) => c.course.startsWith("B.Tech")).map((c) => (
-                          <option key={c.course} value={c.course}>{c.course}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Management & Commerce">
-                        {["MBA", "BBA", "BCA", "B.Com"].map((name) => (
-                          <option key={name} value={name}>{name}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Education">
-                        {["B.Ed", "D.El.Ed"].map((name) => (
-                          <option key={name} value={name}>{name}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="IB Programme">
-                        {["IB PYP", "IB MYP", "IB DP"].map((name) => (
-                          <option key={name} value={name}>{name}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="School (Class 1–12)">
-                        {Array.from({ length: 12 }, (_, i) => (
-                          <option key={i} value={`Class ${i + 1}`}>Class {i + 1}</option>
-                        ))}
-                      </optgroup>
+                      {PROGRAMS.map((p) => (
+                        <optgroup key={p.program} label={p.program}>
+                          {p.courses.map((c) => (
+                            <option key={`${p.program}-${c.name}`} value={`${p.program}||${c.name}`}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -215,11 +258,11 @@ const EnquiryForm = () => {
                     <select
                       value={form.campus}
                       onChange={(e) => update("campus", e.target.value)}
-                      disabled={!form.course || availableCampuses.length <= 1}
+                      disabled={!form.courseKey || availableCampuses.length <= 1}
                       required={availableCampuses.length > 1}
                       className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {!form.course ? (
+                      {!form.courseKey ? (
                         <option value="">Select course first</option>
                       ) : availableCampuses.length === 1 ? (
                         <option value={availableCampuses[0]}>{availableCampuses[0]}</option>
@@ -277,7 +320,7 @@ const EnquiryForm = () => {
               </div>
 
               {/* Guardian — required for school, optional for college */}
-              {(isSchool || !form.course) && (
+              {(isSchool || !form.courseKey) && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
