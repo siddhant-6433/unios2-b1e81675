@@ -70,7 +70,7 @@ const Login = () => {
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
