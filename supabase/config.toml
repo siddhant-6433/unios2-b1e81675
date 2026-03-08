@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.ai-first-call]
 verify_jwt = false
+
+[functions.lead-ingest]
+verify_jwt = false
