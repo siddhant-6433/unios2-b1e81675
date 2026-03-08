@@ -24,7 +24,7 @@ const SuperAdminDashboard = () => {
     <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {statCards.map((stat) => (
-          <div key={stat.label} className="rounded-xl bg-card p-5 card-shadow transition-all hover:card-shadow-md">
+          <div key={stat.label} className="card-neo-hover p-5">
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{stat.label}</p>
