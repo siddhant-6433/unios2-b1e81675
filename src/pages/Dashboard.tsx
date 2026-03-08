@@ -134,7 +134,7 @@ const StudentDashboard = () => (
         { label: "Fee Due", value: "₹15,000", icon: IndianRupee, color: "bg-pastel-red" },
         { label: "Announcements", value: "3", icon: Bell, color: "bg-pastel-blue" },
       ].map((stat) => (
-        <div key={stat.label} className="rounded-xl bg-card p-5 card-shadow">
+        <div key={stat.label} className="card-neo p-5">
           <div className="flex items-start justify-between">
             <div>
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{stat.label}</p>
