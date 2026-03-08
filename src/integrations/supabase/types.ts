@@ -254,6 +254,157 @@ export type Database = {
           },
         ]
       }
+      employee_profiles: {
+        Row: {
+          aadhaar_number: string | null
+          blood_group: string | null
+          campus_id: string | null
+          created_at: string
+          current_address: Json | null
+          date_of_birth: string | null
+          date_of_joining: string | null
+          department_id: string | null
+          display_name: string | null
+          dotted_line_manager: string | null
+          education: Json | null
+          employee_number: string | null
+          employment_status: string | null
+          experience: Json | null
+          first_name: string | null
+          gender: string | null
+          id: string
+          institution_id: string | null
+          job_title: string | null
+          job_title_secondary: string | null
+          last_name: string | null
+          marital_status: string | null
+          middle_name: string | null
+          mobile_number: string | null
+          nationality: string | null
+          notice_period_days: number | null
+          pan_number: string | null
+          permanent_address: Json | null
+          personal_email: string | null
+          photo_url: string | null
+          physically_handicapped: boolean | null
+          professional_summary: string | null
+          reports_to: string | null
+          residence_number: string | null
+          time_type: string | null
+          updated_at: string
+          user_id: string
+          work_email: string | null
+          work_number: string | null
+          worker_type: string | null
+        }
+        Insert: {
+          aadhaar_number?: string | null
+          blood_group?: string | null
+          campus_id?: string | null
+          created_at?: string
+          current_address?: Json | null
+          date_of_birth?: string | null
+          date_of_joining?: string | null
+          department_id?: string | null
+          display_name?: string | null
+          dotted_line_manager?: string | null
+          education?: Json | null
+          employee_number?: string | null
+          employment_status?: string | null
+          experience?: Json | null
+          first_name?: string | null
+          gender?: string | null
+          id?: string
+          institution_id?: string | null
+          job_title?: string | null
+          job_title_secondary?: string | null
+          last_name?: string | null
+          marital_status?: string | null
+          middle_name?: string | null
+          mobile_number?: string | null
+          nationality?: string | null
+          notice_period_days?: number | null
+          pan_number?: string | null
+          permanent_address?: Json | null
+          personal_email?: string | null
+          photo_url?: string | null
+          physically_handicapped?: boolean | null
+          professional_summary?: string | null
+          reports_to?: string | null
+          residence_number?: string | null
+          time_type?: string | null
+          updated_at?: string
+          user_id: string
+          work_email?: string | null
+          work_number?: string | null
+          worker_type?: string | null
+        }
+        Update: {
+          aadhaar_number?: string | null
+          blood_group?: string | null
+          campus_id?: string | null
+          created_at?: string
+          current_address?: Json | null
+          date_of_birth?: string | null
+          date_of_joining?: string | null
+          department_id?: string | null
+          display_name?: string | null
+          dotted_line_manager?: string | null
+          education?: Json | null
+          employee_number?: string | null
+          employment_status?: string | null
+          experience?: Json | null
+          first_name?: string | null
+          gender?: string | null
+          id?: string
+          institution_id?: string | null
+          job_title?: string | null
+          job_title_secondary?: string | null
+          last_name?: string | null
+          marital_status?: string | null
+          middle_name?: string | null
+          mobile_number?: string | null
+          nationality?: string | null
+          notice_period_days?: number | null
+          pan_number?: string | null
+          permanent_address?: Json | null
+          personal_email?: string | null
+          photo_url?: string | null
+          physically_handicapped?: boolean | null
+          professional_summary?: string | null
+          reports_to?: string | null
+          residence_number?: string | null
+          time_type?: string | null
+          updated_at?: string
+          user_id?: string
+          work_email?: string | null
+          work_number?: string | null
+          worker_type?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_profiles_campus_id_fkey"
+            columns: ["campus_id"]
+            isOneToOne: false
+            referencedRelation: "campuses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_profiles_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_profiles_institution_id_fkey"
+            columns: ["institution_id"]
+            isOneToOne: false
+            referencedRelation: "institutions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       fee_codes: {
         Row: {
           category: string
