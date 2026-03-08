@@ -176,7 +176,7 @@ const Admissions = () => {
                 </div>
                 <div className="space-y-2.5">
                   {stageLeads.map((lead) => (
-                    <Card key={lead.id} className="border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer group">
+                    <Card key={lead.id} onClick={() => navigate(`/admissions/${lead.id}`)} className="border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer group">
                       <CardContent className="p-4">
                         <div className="flex items-start justify-between">
                           <div>
