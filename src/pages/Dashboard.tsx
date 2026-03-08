@@ -105,7 +105,7 @@ const FacultyDashboard = () => (
         { label: "Assignments Pending", value: "3", icon: BookOpen, color: "bg-pastel-orange" },
         { label: "Announcements", value: "2", icon: Bell, color: "bg-pastel-purple" },
       ].map((stat) => (
-        <div key={stat.label} className="rounded-xl bg-card p-5 card-shadow">
+        <div key={stat.label} className="card-neo p-5">
           <div className="flex items-start justify-between">
             <div>
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{stat.label}</p>
