@@ -220,6 +220,14 @@ const LeadDetail = () => {
       <OfferLetterDialog open={showOfferLetter} onOpenChange={setShowOfferLetter}
         leadId={lead.id} leadName={lead.name} courseId={lead.course_id} campusId={lead.campus_id} onSuccess={fetchAll} />
       <ConvertToStudentDialog open={showConvert} onOpenChange={setShowConvert} lead={lead} onSuccess={fetchAll} />
+      <SendWhatsAppDialog
+        open={showWhatsApp}
+        onOpenChange={setShowWhatsApp}
+        lead={{ id: lead.id, name: lead.name, phone: lead.phone, application_id: lead.application_id }}
+        courseName={courseName}
+        campusName={campusName}
+        onSuccess={fetchAll}
+      />
     </div>
   );
 };
