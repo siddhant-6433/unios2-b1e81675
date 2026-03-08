@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { mockLeads, admissionStages, type AdmissionStage, type LeadSource } from "@/data/mockData";
 import {
   Phone, MessageSquare, ChevronRight, Plus, Search, Filter,
