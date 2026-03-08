@@ -92,7 +92,13 @@ const Login = () => {
       const { data, error } = await supabase.functions.invoke("whatsapp-otp", {
         body: { action: "verify", phone: phone.trim(), otp: otp.trim() },
       });
-      if (error) throw error;
+      if (error) {
+        const ctx = (error as any)?.context;
+        if (ctx && typeof ctx.json === "function") {
+          try { const body = await ctx.json(); throw new Error(body?.error || error.message); } catch (e: any) { if (e.message) throw e; }
+        }
+        throw error;
+      }
       if (data?.error) throw new Error(data.error);
 
       // Sign in with the custom token returned by the edge function
@@ -105,7 +111,7 @@ const Login = () => {
         navigate("/");
       }
     } catch (error: any) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
+      toast({ title: "Error", description: error.message || "Verification failed", variant: "destructive" });
     } finally {
       setSubmitting(false);
     }
