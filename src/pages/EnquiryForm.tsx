@@ -185,7 +185,7 @@ const EnquiryForm = () => {
               className="mt-6 w-full"
               onClick={() => {
                 setSubmitted(false);
-                setForm({ name: "", phone: "", email: "", guardian_name: "", guardian_phone: "", course: "", campus: "", message: "" });
+                setForm({ name: "", phone: "", email: "", guardian_name: "", guardian_phone: "", courseKey: "", campus: "", message: "" });
               }}
             >
               Submit Another Enquiry
