@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Users, GraduationCap, IndianRupee,
   ClipboardCheck, Settings, ShieldCheck, LogOut,
-  Building2, BookOpen, BarChart3, FileText, School
+  Building2, BookOpen, BarChart3, FileText, School, Search, Shuffle
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -33,6 +33,7 @@ const adminRoles: AppRole[] = ["super_admin", "campus_admin", "principal"];
 
 const mainMenu: MenuItem[] = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
+  { title: "Search", url: "/search", icon: Search, roles: staffRoles },
   { title: "Admissions", url: "/admissions", icon: GraduationCap, roles: [...adminRoles, "admission_head", "counsellor", "data_entry"] },
   { title: "Students", url: "/students", icon: Users, roles: staffRoles },
   { title: "Attendance", url: "/attendance", icon: ClipboardCheck, roles: [...staffRoles, "student", "parent"] },
@@ -41,6 +42,7 @@ const mainMenu: MenuItem[] = [
 ];
 
 const managementMenu: MenuItem[] = [
+  { title: "Lead Allocation", url: "/lead-allocation", icon: Shuffle, roles: ["super_admin", "admission_head"] },
   { title: "Campuses", url: "/campuses", icon: Building2, roles: adminRoles },
   { title: "Courses", url: "/courses", icon: School, roles: [...adminRoles, "faculty", "teacher"] },
   { title: "Reports", url: "/reports", icon: BarChart3, roles: adminRoles },

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { mockLeads, admissionStages, type AdmissionStage, type LeadSource } from "@/data/mockData";
 import {
   Phone, MessageSquare, ChevronRight, Plus, Search, Filter,
@@ -49,6 +50,7 @@ const sourceBadgeColors: Record<LeadSource, string> = {
 };
 
 const Admissions = () => {
+  const navigate = useNavigate();
   const [view, setView] = useState<"pipeline" | "list">("pipeline");
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<AdmissionStage | "all">("all");
@@ -174,7 +176,7 @@ const Admissions = () => {
                 </div>
                 <div className="space-y-2.5">
                   {stageLeads.map((lead) => (
-                    <Card key={lead.id} className="border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer group">
+                    <Card key={lead.id} onClick={() => navigate(`/admissions/${lead.id}`)} className="border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer group">
                       <CardContent className="p-4">
                         <div className="flex items-start justify-between">
                           <div>
@@ -247,7 +249,7 @@ const Admissions = () => {
               </thead>
               <tbody>
                 {filtered.map((lead) => (
-                  <tr key={lead.id} className="border-b border-border last:border-0 hover:bg-muted/30 cursor-pointer transition-colors">
+                  <tr key={lead.id} onClick={() => navigate(`/admissions/${lead.id}`)} className="border-b border-border last:border-0 hover:bg-muted/30 cursor-pointer transition-colors">
                     <td className="px-4 py-3">
                       <div className="font-medium text-foreground">{lead.name}</div>
                       <div className="text-xs text-muted-foreground">{lead.phone} · {lead.email}</div>
