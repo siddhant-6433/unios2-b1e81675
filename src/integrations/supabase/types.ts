@@ -86,6 +86,104 @@ export type Database = {
           },
         ]
       }
+      call_logs: {
+        Row: {
+          called_at: string
+          created_at: string
+          direction: string
+          disposition: string | null
+          duration_seconds: number | null
+          id: string
+          lead_id: string
+          notes: string | null
+          recording_url: string | null
+          user_id: string | null
+        }
+        Insert: {
+          called_at?: string
+          created_at?: string
+          direction?: string
+          disposition?: string | null
+          duration_seconds?: number | null
+          id?: string
+          lead_id: string
+          notes?: string | null
+          recording_url?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          called_at?: string
+          created_at?: string
+          direction?: string
+          disposition?: string | null
+          duration_seconds?: number | null
+          id?: string
+          lead_id?: string
+          notes?: string | null
+          recording_url?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_logs_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      campus_visits: {
+        Row: {
+          campus_id: string | null
+          created_at: string
+          feedback: string | null
+          id: string
+          lead_id: string
+          scheduled_by: string | null
+          status: string
+          updated_at: string
+          visit_date: string
+        }
+        Insert: {
+          campus_id?: string | null
+          created_at?: string
+          feedback?: string | null
+          id?: string
+          lead_id: string
+          scheduled_by?: string | null
+          status?: string
+          updated_at?: string
+          visit_date: string
+        }
+        Update: {
+          campus_id?: string | null
+          created_at?: string
+          feedback?: string | null
+          id?: string
+          lead_id?: string
+          scheduled_by?: string | null
+          status?: string
+          updated_at?: string
+          visit_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campus_visits_campus_id_fkey"
+            columns: ["campus_id"]
+            isOneToOne: false
+            referencedRelation: "campuses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campus_visits_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campuses: {
         Row: {
           address: string | null
@@ -183,6 +281,54 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      consultants: {
+        Row: {
+          city: string | null
+          commission_type: string | null
+          commission_value: number | null
+          created_at: string
+          email: string | null
+          id: string
+          name: string
+          notes: string | null
+          organization: string | null
+          phone: string | null
+          relationship_manager_id: string | null
+          stage: string
+          updated_at: string
+        }
+        Insert: {
+          city?: string | null
+          commission_type?: string | null
+          commission_value?: number | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          name: string
+          notes?: string | null
+          organization?: string | null
+          phone?: string | null
+          relationship_manager_id?: string | null
+          stage?: string
+          updated_at?: string
+        }
+        Update: {
+          city?: string | null
+          commission_type?: string | null
+          commission_value?: number | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          name?: string
+          notes?: string | null
+          organization?: string | null
+          phone?: string | null
+          relationship_manager_id?: string | null
+          stage?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       courses: {
         Row: {
@@ -662,6 +808,124 @@ export type Database = {
           },
         ]
       }
+      lead_allocation_rules: {
+        Row: {
+          assigned_to: string | null
+          assignment_type: string
+          conditions: Json
+          created_at: string
+          created_by: string | null
+          id: string
+          is_active: boolean
+          name: string
+          priority: number
+          round_robin_pool: string[] | null
+          updated_at: string
+        }
+        Insert: {
+          assigned_to?: string | null
+          assignment_type?: string
+          conditions?: Json
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          priority?: number
+          round_robin_pool?: string[] | null
+          updated_at?: string
+        }
+        Update: {
+          assigned_to?: string | null
+          assignment_type?: string
+          conditions?: Json
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          priority?: number
+          round_robin_pool?: string[] | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      lead_followups: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          id: string
+          lead_id: string
+          notes: string | null
+          scheduled_at: string
+          status: string
+          type: string
+          user_id: string | null
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          lead_id: string
+          notes?: string | null
+          scheduled_at: string
+          status?: string
+          type?: string
+          user_id?: string | null
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          lead_id?: string
+          notes?: string | null
+          scheduled_at?: string
+          status?: string
+          type?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_followups_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      lead_notes: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          lead_id: string
+          user_id: string | null
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          lead_id: string
+          user_id?: string | null
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          lead_id?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_notes_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       leads: {
         Row: {
           admission_no: string | null
@@ -755,6 +1019,73 @@ export type Database = {
             columns: ["course_id"]
             isOneToOne: false
             referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      offer_letters: {
+        Row: {
+          acceptance_deadline: string | null
+          accepted_at: string | null
+          campus_id: string | null
+          course_id: string | null
+          created_at: string
+          id: string
+          issued_by: string | null
+          lead_id: string
+          net_fee: number
+          scholarship_amount: number | null
+          status: string
+          total_fee: number
+        }
+        Insert: {
+          acceptance_deadline?: string | null
+          accepted_at?: string | null
+          campus_id?: string | null
+          course_id?: string | null
+          created_at?: string
+          id?: string
+          issued_by?: string | null
+          lead_id: string
+          net_fee: number
+          scholarship_amount?: number | null
+          status?: string
+          total_fee: number
+        }
+        Update: {
+          acceptance_deadline?: string | null
+          accepted_at?: string | null
+          campus_id?: string | null
+          course_id?: string | null
+          created_at?: string
+          id?: string
+          issued_by?: string | null
+          lead_id?: string
+          net_fee?: number
+          scholarship_amount?: number | null
+          status?: string
+          total_fee?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "offer_letters_campus_id_fkey"
+            columns: ["campus_id"]
+            isOneToOne: false
+            referencedRelation: "campuses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "offer_letters_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "offer_letters_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
             referencedColumns: ["id"]
           },
         ]
