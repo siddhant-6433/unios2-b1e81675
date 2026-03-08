@@ -141,16 +141,16 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // Auth: require x-api-key header matching our secret
+    // Auth: accept x-api-key OR the Supabase anon key (for website/frontend calls)
     const apiKey = req.headers.get("x-api-key");
+    const anonKeyHeader = req.headers.get("apikey");
     const expectedKey = Deno.env.get("LEAD_INGEST_API_KEY");
-    if (!expectedKey) {
-      return new Response(JSON.stringify({ error: "Server misconfigured: missing API key" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    if (apiKey !== expectedKey) {
+    const expectedAnon = Deno.env.get("SUPABASE_ANON_KEY");
+
+    const isValidApiKey = expectedKey && apiKey === expectedKey;
+    const isValidAnonKey = expectedAnon && anonKeyHeader === expectedAnon;
+
+    if (!isValidApiKey && !isValidAnonKey) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

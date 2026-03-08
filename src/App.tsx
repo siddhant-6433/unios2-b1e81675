@@ -22,6 +22,7 @@ import AdminPanel from "./pages/AdminPanel";
 import ApplyPortal from "./pages/ApplyPortal";
 import Consultants from "./pages/Consultants";
 import AdmissionAnalytics from "./pages/AdmissionAnalytics";
+import EnquiryForm from "./pages/EnquiryForm";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -37,6 +38,7 @@ const App = () => (
             <Route path="/login" element={<Login />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/apply" element={<ApplyPortal />} />
+            <Route path="/enquiry" element={<EnquiryForm />} />
             <Route
               path="/*"
               element={
