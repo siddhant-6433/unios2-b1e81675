@@ -130,10 +130,35 @@ Deno.serve(async (req) => {
       );
 
       if (!waResponse.ok) {
-        const waError = await waResponse.text();
-        console.error("WhatsApp API error:", waError);
+        const waErrorText = await waResponse.text();
+        console.error("WhatsApp API error:", waErrorText);
+
+        let parsedWaError: any = null;
+        try {
+          parsedWaError = JSON.parse(waErrorText);
+        } catch {
+          // keep raw error text fallback
+        }
+
+        const waCode = parsedWaError?.error?.code;
+        const waMessage = parsedWaError?.error?.message as string | undefined;
+
+        if (waCode === 200) {
+          return new Response(
+            JSON.stringify({
+              error:
+                "WhatsApp permission denied for this token/phone number pair. Check Meta System User access, WABA assignment, and messaging permissions.",
+              meta_error: waMessage ?? waErrorText,
+            }),
+            { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
         return new Response(
-          JSON.stringify({ error: "Failed to send WhatsApp message. Try again." }),
+          JSON.stringify({
+            error: waMessage || "Failed to send WhatsApp message. Try again.",
+            meta_error: waMessage ?? waErrorText,
+          }),
           { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
