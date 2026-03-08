@@ -1,18 +1,39 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { GraduationCap, CheckCircle, Send, User, Phone, Mail, BookOpen, MapPin, MessageSquare } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { PhoneInput, formatFullPhone, parsePhone } from "@/components/ui/phone-input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
-const CAMPUS_OPTIONS = [
-  "NIMT Greater Noida",
-  "NIMT Kotputli",
-  "NIMT School Avantika II",
-  "NIMT School Arthala",
-  "Campus School (B.Ed / D.El.Ed)",
-  "Mirai Experiential School",
+// Course → campuses mapping with type info
+const COURSE_CAMPUS_MAP: { course: string; type: "school" | "college"; campuses: string[] }[] = [
+  // College courses
+  { course: "B.Tech CSE", type: "college", campuses: ["NIMT Greater Noida"] },
+  { course: "B.Tech ECE", type: "college", campuses: ["NIMT Greater Noida"] },
+  { course: "B.Tech ME", type: "college", campuses: ["NIMT Greater Noida"] },
+  { course: "B.Tech CE", type: "college", campuses: ["NIMT Greater Noida"] },
+  { course: "MBA", type: "college", campuses: ["NIMT Greater Noida", "NIMT Kotputli"] },
+  { course: "BBA", type: "college", campuses: ["NIMT Greater Noida", "NIMT Kotputli"] },
+  { course: "BCA", type: "college", campuses: ["NIMT Greater Noida"] },
+  { course: "B.Com", type: "college", campuses: ["NIMT Kotputli"] },
+  { course: "B.Ed", type: "college", campuses: ["Campus School (B.Ed / D.El.Ed)"] },
+  { course: "D.El.Ed", type: "college", campuses: ["Campus School (B.Ed / D.El.Ed)"] },
+  // IB courses
+  { course: "IB PYP", type: "school", campuses: ["Mirai Experiential School"] },
+  { course: "IB MYP", type: "school", campuses: ["Mirai Experiential School"] },
+  { course: "IB DP", type: "school", campuses: ["Mirai Experiential School"] },
+  // School classes
+  ...Array.from({ length: 8 }, (_, i) => ({
+    course: `Class ${i + 1}`,
+    type: "school" as const,
+    campuses: ["NIMT School Avantika II", "NIMT School Arthala"],
+  })),
+  ...["Class 9", "Class 10", "Class 11", "Class 12"].map((c) => ({
+    course: c,
+    type: "school" as const,
+    campuses: ["NIMT School Avantika II"],
+  })),
 ];
 
 const EnquiryForm = () => {
@@ -32,10 +53,29 @@ const EnquiryForm = () => {
 
   const update = (field: string, value: string) => setForm((p) => ({ ...p, [field]: value }));
 
+  const selectedCourseEntry = useMemo(
+    () => COURSE_CAMPUS_MAP.find((c) => c.course === form.course),
+    [form.course]
+  );
+
+  const isSchool = selectedCourseEntry?.type === "school";
+  const availableCampuses = selectedCourseEntry?.campuses || [];
+
+  // Auto-select campus if only one option
+  const handleCourseChange = (course: string) => {
+    const entry = COURSE_CAMPUS_MAP.find((c) => c.course === course);
+    const campus = entry?.campuses.length === 1 ? entry.campuses[0] : "";
+    setForm((p) => ({ ...p, course, campus }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim() || !form.phone.trim()) {
       toast({ title: "Missing fields", description: "Name and phone are required.", variant: "destructive" });
+      return;
+    }
+    if (isSchool && (!form.guardian_name.trim() || !form.guardian_phone.trim())) {
+      toast({ title: "Missing fields", description: "Guardian name and phone are required for school admissions.", variant: "destructive" });
       return;
     }
 
@@ -48,7 +88,7 @@ const EnquiryForm = () => {
           email: form.email.trim() || undefined,
           guardian_name: form.guardian_name.trim() || undefined,
           guardian_phone: form.guardian_phone || undefined,
-          course: form.course.trim() || undefined,
+          course: form.course || undefined,
           campus: form.campus || undefined,
           message: form.message.trim() || undefined,
         },
@@ -123,6 +163,79 @@ const EnquiryForm = () => {
         <form onSubmit={handleSubmit}>
           <Card className="border-border/60 shadow-none">
             <CardContent className="p-6 space-y-5">
+              {/* Course & Campus — first */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                    Course / Class <span className="text-destructive">*</span>
+                  </label>
+                  <div className="relative">
+                    <BookOpen className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <select
+                      required
+                      value={form.course}
+                      onChange={(e) => handleCourseChange(e.target.value)}
+                      className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 appearance-none"
+                    >
+                      <option value="">Select course / class</option>
+                      <optgroup label="Engineering">
+                        {COURSE_CAMPUS_MAP.filter((c) => c.course.startsWith("B.Tech")).map((c) => (
+                          <option key={c.course} value={c.course}>{c.course}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Management & Commerce">
+                        {["MBA", "BBA", "BCA", "B.Com"].map((name) => (
+                          <option key={name} value={name}>{name}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Education">
+                        {["B.Ed", "D.El.Ed"].map((name) => (
+                          <option key={name} value={name}>{name}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="IB Programme">
+                        {["IB PYP", "IB MYP", "IB DP"].map((name) => (
+                          <option key={name} value={name}>{name}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="School (Class 1–12)">
+                        {Array.from({ length: 12 }, (_, i) => (
+                          <option key={i} value={`Class ${i + 1}`}>Class {i + 1}</option>
+                        ))}
+                      </optgroup>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                    Campus {availableCampuses.length > 1 && <span className="text-destructive">*</span>}
+                  </label>
+                  <div className="relative">
+                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <select
+                      value={form.campus}
+                      onChange={(e) => update("campus", e.target.value)}
+                      disabled={!form.course || availableCampuses.length <= 1}
+                      required={availableCampuses.length > 1}
+                      className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {!form.course ? (
+                        <option value="">Select course first</option>
+                      ) : availableCampuses.length === 1 ? (
+                        <option value={availableCampuses[0]}>{availableCampuses[0]}</option>
+                      ) : (
+                        <>
+                          <option value="">Select campus</option>
+                          {availableCampuses.map((c) => (
+                            <option key={c} value={c}>{c}</option>
+                          ))}
+                        </>
+                      )}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
               {/* Name & Phone */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
@@ -163,57 +276,32 @@ const EnquiryForm = () => {
                 </div>
               </div>
 
-              {/* Guardian */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Guardian Name</label>
-                  <div className="relative">
-                    <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <input
-                      value={form.guardian_name}
-                      onChange={(e) => update("guardian_name", e.target.value)}
-                      placeholder="Father / guardian name"
-                      className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-                    />
+              {/* Guardian — required for school, optional for college */}
+              {(isSchool || !form.course) && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                      Guardian Name {isSchool && <span className="text-destructive">*</span>}
+                    </label>
+                    <div className="relative">
+                      <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <input
+                        required={isSchool}
+                        value={form.guardian_name}
+                        onChange={(e) => update("guardian_name", e.target.value)}
+                        placeholder="Father / guardian name"
+                        className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                      />
+                    </div>
+                  </div>
+                  <div className="min-w-0">
+                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                      Guardian Phone {isSchool && <span className="text-destructive">*</span>}
+                    </label>
+                    <PhoneInput value={form.guardian_phone} onChange={(v) => update("guardian_phone", v)} required={isSchool} />
                   </div>
                 </div>
-                <div className="min-w-0">
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Guardian Phone</label>
-                  <PhoneInput value={form.guardian_phone} onChange={(v) => update("guardian_phone", v)} />
-                </div>
-              </div>
-
-              {/* Campus & Course */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Campus</label>
-                  <div className="relative">
-                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <select
-                      value={form.campus}
-                      onChange={(e) => update("campus", e.target.value)}
-                      className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 appearance-none"
-                    >
-                      <option value="">Select campus</option>
-                      {CAMPUS_OPTIONS.map((c) => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Course / Class</label>
-                  <div className="relative">
-                    <BookOpen className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <input
-                      value={form.course}
-                      onChange={(e) => update("course", e.target.value)}
-                      placeholder="e.g. B.Tech CSE, Class 10"
-                      className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-                    />
-                  </div>
-                </div>
-              </div>
+              )}
 
               {/* Message */}
               <div>
