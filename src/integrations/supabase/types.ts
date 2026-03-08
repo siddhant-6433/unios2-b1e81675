@@ -1032,6 +1032,7 @@ export type Database = {
         Row: {
           admission_no: string | null
           application_id: string | null
+          application_progress: Json | null
           campus_id: string | null
           counsellor_id: string | null
           course_id: string | null
@@ -1056,6 +1057,7 @@ export type Database = {
         Insert: {
           admission_no?: string | null
           application_id?: string | null
+          application_progress?: Json | null
           campus_id?: string | null
           counsellor_id?: string | null
           course_id?: string | null
@@ -1080,6 +1082,7 @@ export type Database = {
         Update: {
           admission_no?: string | null
           application_id?: string | null
+          application_progress?: Json | null
           campus_id?: string | null
           counsellor_id?: string | null
           course_id?: string | null
@@ -1502,6 +1505,8 @@ export type Database = {
         | "other"
       lead_stage:
         | "new_lead"
+        | "application_in_progress"
+        | "application_submitted"
         | "ai_called"
         | "counsellor_call"
         | "visit_scheduled"
@@ -1673,6 +1678,8 @@ export const Constants = {
       ],
       lead_stage: [
         "new_lead",
+        "application_in_progress",
+        "application_submitted",
         "ai_called",
         "counsellor_call",
         "visit_scheduled",

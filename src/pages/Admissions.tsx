@@ -13,20 +13,23 @@ import { AddLeadDialog } from "@/components/admissions/AddLeadDialog";
 import { BulkLeadImportDialog } from "@/components/admissions/BulkLeadImportDialog";
 
 const STAGES = [
-  "new_lead", "ai_called", "counsellor_call", "visit_scheduled",
+  "new_lead", "application_in_progress", "application_submitted", "ai_called", "counsellor_call", "visit_scheduled",
   "interview", "offer_sent", "token_paid", "pre_admitted", "admitted", "rejected"
 ] as const;
 
 type Stage = typeof STAGES[number];
 
 const STAGE_LABELS: Record<string, string> = {
-  new_lead: "New Lead", ai_called: "AI Called", counsellor_call: "Counsellor Call",
+  new_lead: "New Lead", application_in_progress: "Application In Progress", application_submitted: "Application Submitted",
+  ai_called: "AI Called", counsellor_call: "Counsellor Call",
   visit_scheduled: "Visit Scheduled", interview: "Interview", offer_sent: "Offer Sent",
   token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", rejected: "Rejected",
 };
 
 const stageColors: Record<string, string> = {
   new_lead: "bg-pastel-blue text-foreground/70",
+  application_in_progress: "bg-pastel-yellow text-foreground/70",
+  application_submitted: "bg-pastel-mint text-foreground/70",
   ai_called: "bg-pastel-purple text-foreground/70",
   counsellor_call: "bg-pastel-orange text-foreground/70",
   visit_scheduled: "bg-pastel-yellow text-foreground/70",
@@ -39,7 +42,8 @@ const stageColors: Record<string, string> = {
 };
 
 const stageIcons: Record<string, typeof Users> = {
-  new_lead: Users, ai_called: Bot, counsellor_call: Phone,
+  new_lead: Users, application_in_progress: FileText, application_submitted: CheckCircle,
+  ai_called: Bot, counsellor_call: Phone,
   visit_scheduled: MapPin, interview: UserCheck, offer_sent: FileText,
   token_paid: CheckCircle, pre_admitted: Clock, admitted: CheckCircle, rejected: XCircle,
 };
