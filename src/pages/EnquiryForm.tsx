@@ -6,35 +6,93 @@ import { PhoneInput } from "@/components/ui/phone-input";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
-// Course → campuses mapping with type info
-const COURSE_CAMPUS_MAP: { course: string; type: "school" | "college"; campuses: string[] }[] = [
-  // College courses
-  { course: "B.Tech CSE", type: "college", campuses: ["NIMT Greater Noida"] },
-  { course: "B.Tech ECE", type: "college", campuses: ["NIMT Greater Noida"] },
-  { course: "B.Tech ME", type: "college", campuses: ["NIMT Greater Noida"] },
-  { course: "B.Tech CE", type: "college", campuses: ["NIMT Greater Noida"] },
-  { course: "MBA", type: "college", campuses: ["NIMT Greater Noida", "NIMT Kotputli"] },
-  { course: "BBA", type: "college", campuses: ["NIMT Greater Noida", "NIMT Kotputli"] },
-  { course: "BCA", type: "college", campuses: ["NIMT Greater Noida"] },
-  { course: "B.Com", type: "college", campuses: ["NIMT Kotputli"] },
-  { course: "B.Ed", type: "college", campuses: ["Campus School (B.Ed / D.El.Ed)"] },
-  { course: "D.El.Ed", type: "college", campuses: ["Campus School (B.Ed / D.El.Ed)"] },
-  // IB courses
-  { course: "IB PYP", type: "school", campuses: ["Mirai Experiential School"] },
-  { course: "IB MYP", type: "school", campuses: ["Mirai Experiential School"] },
-  { course: "IB DP", type: "school", campuses: ["Mirai Experiential School"] },
-  // School classes
-  ...Array.from({ length: 8 }, (_, i) => ({
-    course: `Class ${i + 1}`,
-    type: "school" as const,
-    campuses: ["NIMT School Avantika II", "NIMT School Arthala"],
-  })),
-  ...["Class 9", "Class 10", "Class 11", "Class 12"].map((c) => ({
-    course: c,
-    type: "school" as const,
-    campuses: ["NIMT School Avantika II"],
-  })),
+// Program groups with courses and campuses from official taxonomy
+const PROGRAMS: { program: string; type: "school" | "college"; courses: { name: string; campuses: string[] }[] }[] = [
+  {
+    program: "Allied Healthcare",
+    type: "college",
+    courses: [
+      { name: "B.Sc. in Medical Radiology & Imaging Technology (BMRIT)", campuses: ["Greater Noida, Uttar Pradesh"] },
+      { name: "M.Sc. in Medical Radiology & Imaging Technology (MMRIT)", campuses: ["Greater Noida, Uttar Pradesh"] },
+      { name: "Diploma in Physiotherapy (DPT)", campuses: ["Greater Noida, Uttar Pradesh"] },
+      { name: "Bachelor of Physiotherapy (BPT)", campuses: ["Greater Noida, Uttar Pradesh"] },
+      { name: "Masters in Physiotherapy (MPT)", campuses: ["Greater Noida, Uttar Pradesh"] },
+      { name: "Diploma in Operation Theater Technician (OTT)", campuses: ["Greater Noida, Uttar Pradesh"] },
+    ],
+  },
+  {
+    program: "Pharmacy",
+    type: "college",
+    courses: [
+      { name: "Diploma in Pharmacy (D. Pharma)", campuses: ["Greater Noida, Uttar Pradesh"] },
+    ],
+  },
+  {
+    program: "Nursing",
+    type: "college",
+    courses: [
+      { name: "Bachelor of Science in Nursing (B.Sc Nursing)", campuses: ["Greater Noida, Uttar Pradesh"] },
+      { name: "Diploma in General Nursing and Midwifery (GNM)", campuses: ["Greater Noida, Uttar Pradesh"] },
+    ],
+  },
+  {
+    program: "Education",
+    type: "college",
+    courses: [
+      { name: "Bachelor of Education (B.Ed)", campuses: ["Shastri Nagar, Ghaziabad, Uttar Pradesh", "Greater Noida, Uttar Pradesh", "Kotputli, Rajasthan"] },
+      { name: "BTC/ Diploma in Elementary Education (D.El.Ed)", campuses: ["Shastri Nagar, Ghaziabad, Uttar Pradesh"] },
+    ],
+  },
+  {
+    program: "Law",
+    type: "college",
+    courses: [
+      { name: "Bachelor of Arts and Bachelor of Laws (BALLB)", campuses: ["Greater Noida, Uttar Pradesh"] },
+      { name: "Bachelor of Laws (LLB)", campuses: ["Greater Noida, Uttar Pradesh", "Kotputli, Rajasthan"] },
+    ],
+  },
+  {
+    program: "Management",
+    type: "college",
+    courses: [
+      { name: "Master of Business Administration (MBA)", campuses: ["Greater Noida, Uttar Pradesh"] },
+      { name: "Post Graduate Diploma In Management (PGDM)", campuses: ["Greater Noida, Uttar Pradesh", "Kotputli, Rajasthan"] },
+      { name: "Bachelor of Business Administration (BBA)", campuses: ["Greater Noida, Uttar Pradesh"] },
+    ],
+  },
+  {
+    program: "Computer Science",
+    type: "college",
+    courses: [
+      { name: "Bachelor of Computer Administration (BCA)", campuses: ["Greater Noida, Uttar Pradesh"] },
+    ],
+  },
+  {
+    program: "K-12 Schooling – CBSE",
+    type: "school",
+    courses: [
+      ...["Pre-Nursery", "Nursery", "KG", "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th", "11th", "12th"].map((cls) => ({
+        name: cls,
+        campuses: ["NIMT B School Avt II – CBSE"],
+      })),
+    ],
+  },
+  {
+    program: "K-12 Schooling",
+    type: "school",
+    courses: [
+      ...["Pre-Nursery", "Nursery", "KG", "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th", "11th", "12th"].map((cls) => ({
+        name: cls,
+        campuses: ["NIMT B School Arthala"],
+      })),
+    ],
+  },
 ];
+
+// Flatten for lookup: course name → { type, campuses[] }
+const COURSE_CAMPUS_MAP = PROGRAMS.flatMap((p) =>
+  p.courses.map((c) => ({ course: c.name, program: p.program, type: p.type, campuses: c.campuses }))
+);
 
 const EnquiryForm = () => {
   const { toast } = useToast();
