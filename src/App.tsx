@@ -20,6 +20,8 @@ import Login from "./pages/Login";
 import ResetPassword from "./pages/ResetPassword";
 import AdminPanel from "./pages/AdminPanel";
 import ApplyPortal from "./pages/ApplyPortal";
+import Consultants from "./pages/Consultants";
+import AdmissionAnalytics from "./pages/AdmissionAnalytics";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
