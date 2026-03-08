@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
-import { GraduationCap, CheckCircle, Send, User, Phone, Mail, BookOpen, MapPin, MessageSquare } from "lucide-react";
+import { GraduationCap, CheckCircle, Send, User, Phone, Mail, BookOpen, MapPin, MessageSquare, ArrowRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PhoneInput } from "@/components/ui/phone-input";
