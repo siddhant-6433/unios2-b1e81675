@@ -8,6 +8,9 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import Admissions from "./pages/Admissions";
+import LeadDetail from "./pages/LeadDetail";
+import LeadAllocation from "./pages/LeadAllocation";
+import GlobalSearch from "./pages/GlobalSearch";
 import Students from "./pages/Students";
 import StudentProfile from "./pages/StudentProfile";
 import Attendance from "./pages/Attendance";
@@ -39,6 +42,9 @@ const App = () => (
                     <Routes>
                       <Route path="/" element={<Dashboard />} />
                       <Route path="/admissions" element={<Admissions />} />
+                      <Route path="/admissions/:id" element={<LeadDetail />} />
+                      <Route path="/lead-allocation" element={<LeadAllocation />} />
+                      <Route path="/search" element={<GlobalSearch />} />
                       <Route path="/students" element={<Students />} />
                       <Route path="/students/:admissionNo" element={<StudentProfile />} />
                       <Route path="/attendance" element={<Attendance />} />
