@@ -1,10 +1,11 @@
 import {
   LayoutDashboard, Users, GraduationCap, IndianRupee,
   ClipboardCheck, Settings, Bell, MessageSquare, Search,
-  Building2, BookOpen, BarChart3, FileText, School
+  Building2, BookOpen, BarChart3, FileText, School, LogOut
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
   SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem,
@@ -27,15 +28,32 @@ const managementMenu = [
   { title: "Documents", url: "/documents", icon: FileText },
 ];
 
-const settingsMenu = [
-  { title: "Settings", url: "/settings", icon: Settings },
-];
+const roleLabels: Record<string, string> = {
+  super_admin: "Super Admin",
+  campus_admin: "Campus Admin",
+  principal: "Principal",
+  faculty: "Faculty",
+  teacher: "Teacher",
+  student: "Student",
+  parent: "Parent",
+  counsellor: "Counsellor",
+  accountant: "Accountant",
+  admission_head: "Admission Head",
+  data_entry: "Data Entry",
+  office_assistant: "Office Assistant",
+  hostel_warden: "Hostel Warden",
+};
 
 export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
   const isActive = (path: string) => location.pathname === path;
+  const { profile, role, signOut } = useAuth();
+
+  const displayName = profile?.display_name || "User";
+  const roleLabel = role ? (roleLabels[role] || role) : "User";
+  const initials = displayName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
 
   return (
     <Sidebar collapsible="icon" className="border-r-0">
@@ -106,20 +124,18 @@ export function AppSidebar() {
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu>
-                {settingsMenu.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild isActive={isActive(item.url)}>
-                      <NavLink
-                        to={item.url}
-                        className="gap-3 rounded-lg px-3 py-2 text-sm font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                        activeClassName="bg-sidebar-accent text-sidebar-accent-foreground font-semibold"
-                      >
-                        <item.icon className="h-[18px] w-[18px]" />
-                        {!collapsed && <span>{item.title}</span>}
-                      </NavLink>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={isActive("/settings")}>
+                    <NavLink
+                      to="/settings"
+                      className="gap-3 rounded-lg px-3 py-2 text-sm font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                      activeClassName="bg-sidebar-accent text-sidebar-accent-foreground font-semibold"
+                    >
+                      <Settings className="h-[18px] w-[18px]" />
+                      {!collapsed && <span>Settings</span>}
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -129,12 +145,15 @@ export function AppSidebar() {
             <div className="border-t border-sidebar-border px-4 py-3">
               <div className="flex items-center gap-3">
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                  SA
+                  {initials}
                 </div>
-                <div className="flex flex-col">
-                  <span className="text-sm font-medium text-foreground">Super Admin</span>
-                  <span className="text-[11px] text-muted-foreground">admin@nimt.edu</span>
+                <div className="flex flex-col flex-1 min-w-0">
+                  <span className="text-sm font-medium text-foreground truncate">{displayName}</span>
+                  <span className="text-[11px] text-muted-foreground">{roleLabel}</span>
                 </div>
+                <button onClick={signOut} className="text-muted-foreground hover:text-foreground transition-colors" title="Sign out">
+                  <LogOut className="h-4 w-4" />
+                </button>
               </div>
             </div>
           )}
