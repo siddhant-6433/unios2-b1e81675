@@ -232,7 +232,7 @@ const EnquiryForm = () => {
                     <BookOpen className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <select
                       required
-                      value={form.course}
+                      value={form.courseKey}
                       onChange={(e) => handleCourseChange(e.target.value)}
                       className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 appearance-none"
                     >
