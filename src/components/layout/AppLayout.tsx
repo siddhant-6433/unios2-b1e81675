@@ -2,6 +2,7 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { Bell, MessageSquare, Search } from "lucide-react";
 import { useLocation } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 
 const pageTitles: Record<string, string> = {
   "/": "Dashboard",
@@ -15,35 +16,44 @@ const pageTitles: Record<string, string> = {
   "/reports": "Reports",
   "/documents": "Documents",
   "/settings": "Settings",
+  "/admin": "User Management",
 };
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const title = pageTitles[location.pathname] || "NIMT UniOs";
+  const { profile } = useAuth();
 
   return (
     <SidebarProvider>
       <div className="min-h-screen flex w-full">
         <AppSidebar />
         <div className="flex-1 flex flex-col min-w-0">
-          <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-card px-4">
+          <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-card/80 backdrop-blur-sm px-5">
             <div className="flex items-center gap-3">
-              <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span className="font-medium text-foreground">{title}</span>
+              <SidebarTrigger className="text-muted-foreground hover:text-foreground transition-colors" />
+              <div className="flex items-center gap-1.5 text-sm">
+                <span className="font-semibold text-foreground">NIMT</span>
+                <span className="text-muted-foreground/50">›</span>
+                <span className="font-medium text-muted-foreground">{title}</span>
               </div>
             </div>
-            <div className="flex items-center gap-1">
-              <button className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
-                <Search className="h-[18px] w-[18px]" />
-              </button>
-              <button className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
-                <MessageSquare className="h-[18px] w-[18px]" />
-              </button>
-              <button className="relative flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
-                <Bell className="h-[18px] w-[18px]" />
-                <span className="absolute right-1.5 top-1.5 flex h-2 w-2 rounded-full bg-destructive" />
-              </button>
+            <div className="flex items-center gap-0.5">
+              {[
+                { icon: Bell, badge: true },
+                { icon: MessageSquare },
+                { icon: Search },
+              ].map(({ icon: Icon, badge }, i) => (
+                <button
+                  key={i}
+                  className="relative flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                >
+                  <Icon className="h-[18px] w-[18px]" />
+                  {badge && (
+                    <span className="absolute right-1.5 top-1.5 flex h-2 w-2 rounded-full bg-destructive ring-2 ring-card" />
+                  )}
+                </button>
+              ))}
             </div>
           </header>
           <main className="flex-1 overflow-auto p-6">
