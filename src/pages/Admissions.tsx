@@ -50,6 +50,7 @@ const sourceBadgeColors: Record<LeadSource, string> = {
 };
 
 const Admissions = () => {
+  const navigate = useNavigate();
   const [view, setView] = useState<"pipeline" | "list">("pipeline");
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<AdmissionStage | "all">("all");
