@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Loader2, Plus } from "lucide-react";
+import { PhoneInput } from "@/components/ui/phone-input";
 
 const SOURCES = [
   { value: "website", label: "Website" }, { value: "meta_ads", label: "Meta Ads" },
@@ -91,7 +92,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
             </div>
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Phone *</label>
-              <input value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} placeholder="+91..." className={inputCls} />
+              <PhoneInput value={form.phone} onChange={phone => setForm(p => ({ ...p, phone }))} required />
             </div>
           </div>
           <div>
@@ -105,7 +106,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
             </div>
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Guardian Phone</label>
-              <input value={form.guardian_phone} onChange={e => setForm(p => ({ ...p, guardian_phone: e.target.value }))} className={inputCls} />
+              <PhoneInput value={form.guardian_phone} onChange={phone => setForm(p => ({ ...p, guardian_phone: phone }))} />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">

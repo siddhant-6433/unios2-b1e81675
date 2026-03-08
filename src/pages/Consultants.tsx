@@ -9,6 +9,7 @@ import {
   Plus, Search, Loader2, Users, Building2, Phone, Mail,
   IndianRupee, MapPin, MoreHorizontal, Edit, ChevronRight
 } from "lucide-react";
+import { PhoneInput } from "@/components/ui/phone-input";
 
 const STAGES = ["new", "contacted", "onboarded", "active", "inactive"] as const;
 const stageLabels: Record<string, string> = { new: "New", contacted: "Contacted", onboarded: "Onboarded", active: "Active", inactive: "Inactive" };
@@ -188,7 +189,7 @@ const Consultants = () => {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">Phone</label>
-                <input value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} className={inputCls} />
+                <PhoneInput value={form.phone} onChange={phone => setForm(p => ({ ...p, phone }))} />
               </div>
               <div>
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">Email</label>

@@ -5,6 +5,7 @@ import { lovable } from "@/integrations/lovable/index";
 import { useAuth } from "@/contexts/AuthContext";
 import { GraduationCap, Mail, MessageCircle, Loader2, ShieldCheck, ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { PhoneInput } from "@/components/ui/phone-input";
 
 type LoginMethod = "google" | "email_otp" | "whatsapp_otp";
 
@@ -292,19 +293,14 @@ const Login = () => {
               </form>
             ) : (
               <form onSubmit={handleWhatsAppSendOtp} className="space-y-4">
-                <div className="relative">
-                  <MessageCircle className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <input
-                    type="tel"
-                    placeholder="+91 98765 43210"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className="w-full rounded-xl border border-input bg-card pl-10 pr-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-                    required
-                  />
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                    WhatsApp Number <span className="text-destructive">*</span>
+                  </label>
+                  <PhoneInput value={phone} onChange={setPhone} required />
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  Enter your registered mobile number with country code. OTP will be sent via WhatsApp.
+                  Enter your registered mobile number. OTP will be sent via WhatsApp.
                 </p>
                 <button
                   type="submit"
