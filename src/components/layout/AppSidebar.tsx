@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Users, GraduationCap, IndianRupee,
   ClipboardCheck, Settings, ShieldCheck, LogOut,
-  Building2, BookOpen, BarChart3, FileText, School, Search, Shuffle
+  Building2, BookOpen, BarChart3, FileText, School, Search, Shuffle, Handshake, PieChart
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -43,6 +43,8 @@ const mainMenu: MenuItem[] = [
 
 const managementMenu: MenuItem[] = [
   { title: "Lead Allocation", url: "/lead-allocation", icon: Shuffle, roles: ["super_admin", "admission_head"] },
+  { title: "Consultants", url: "/consultants", icon: Handshake, roles: [...adminRoles, "admission_head", "counsellor"] },
+  { title: "Admission Analytics", url: "/admission-analytics", icon: PieChart, roles: [...adminRoles, "admission_head"] },
   { title: "Campuses", url: "/campuses", icon: Building2, roles: adminRoles },
   { title: "Courses", url: "/courses", icon: School, roles: [...adminRoles, "faculty", "teacher"] },
   { title: "Reports", url: "/reports", icon: BarChart3, roles: adminRoles },

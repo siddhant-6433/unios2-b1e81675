@@ -10,8 +10,11 @@ import { Button } from "@/components/ui/button";
 import {
   ArrowLeft, Phone, Mail, MapPin, Calendar, User, MessageSquare,
   FileText, Clock, Plus, Send, Check, X, Loader2, ChevronRight,
-  StickyNote, CalendarClock, Building2, Gift
+  StickyNote, CalendarClock, Building2, Gift, UserCheck, Bot, ArrowRight
 } from "lucide-react";
+import { InterviewScoringDialog } from "@/components/admissions/InterviewScoringDialog";
+import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
+import { ConvertToStudentDialog } from "@/components/admissions/ConvertToStudentDialog";
 
 const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", ai_called: "AI Called", counsellor_call: "Counsellor Call",
@@ -43,6 +46,10 @@ const LeadDetail = () => {
   const [showVisitForm, setShowVisitForm] = useState(false);
   const [visitData, setVisitData] = useState({ visit_date: "", campus_id: "" });
   const [campuses, setCampuses] = useState<any[]>([]);
+  const [showInterview, setShowInterview] = useState(false);
+  const [showOfferLetter, setShowOfferLetter] = useState(false);
+  const [showConvert, setShowConvert] = useState(false);
+  const [aiCalling, setAiCalling] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -162,7 +169,18 @@ const LeadDetail = () => {
             <div className="flex flex-wrap gap-2 shrink-0">
               <Button size="sm" variant="outline" className="gap-1.5"><Phone className="h-3.5 w-3.5" />Call</Button>
               <Button size="sm" variant="outline" className="gap-1.5"><MessageSquare className="h-3.5 w-3.5" />WhatsApp</Button>
-              <Button size="sm" variant="outline" className="gap-1.5"><Mail className="h-3.5 w-3.5" />Email</Button>
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={async () => {
+                setAiCalling(true);
+                const { data, error } = await supabase.functions.invoke("ai-first-call", { body: { lead_id: id } });
+                setAiCalling(false);
+                if (error) toast({ title: "AI Call Error", description: error.message, variant: "destructive" });
+                else { toast({ title: "AI Call Complete" }); fetchAll(); }
+              }} disabled={aiCalling}>
+                {aiCalling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bot className="h-3.5 w-3.5" />}AI Call
+              </Button>
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setShowInterview(true)}><UserCheck className="h-3.5 w-3.5" />Interview</Button>
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setShowOfferLetter(true)}><FileText className="h-3.5 w-3.5" />Offer</Button>
+              <Button size="sm" className="gap-1.5" onClick={() => setShowConvert(true)}><ArrowRight className="h-3.5 w-3.5" />Convert</Button>
             </div>
           </div>
 
@@ -370,6 +388,16 @@ const LeadDetail = () => {
           </div>
         </TabsContent>
       </Tabs>
+
+      {lead && (
+        <>
+          <InterviewScoringDialog open={showInterview} onOpenChange={setShowInterview}
+            leadId={lead.id} leadName={lead.name} currentScore={lead.interview_score} currentResult={lead.interview_result} onSuccess={fetchAll} />
+          <OfferLetterDialog open={showOfferLetter} onOpenChange={setShowOfferLetter}
+            leadId={lead.id} leadName={lead.name} courseId={lead.course_id} campusId={lead.campus_id} onSuccess={fetchAll} />
+          <ConvertToStudentDialog open={showConvert} onOpenChange={setShowConvert} lead={lead} onSuccess={fetchAll} />
+        </>
+      )}
     </div>
   );
 };

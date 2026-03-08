@@ -2,13 +2,15 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import {
-  Phone, MessageSquare, ChevronRight, Plus, Search, Filter,
+  Phone, MessageSquare, ChevronRight, Plus, Search, Filter, Upload,
   Eye, Calendar, MoreHorizontal, Users, TrendingUp, ArrowUpRight,
   Bot, UserCheck, MapPin, FileText, CheckCircle, XCircle, Clock, Loader2
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AddLeadDialog } from "@/components/admissions/AddLeadDialog";
+import { BulkLeadImportDialog } from "@/components/admissions/BulkLeadImportDialog";
 
 const STAGES = [
   "new_lead", "ai_called", "counsellor_call", "visit_scheduled",
@@ -86,6 +88,8 @@ const Admissions = () => {
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showAddLead, setShowAddLead] = useState(false);
+  const [showBulkImport, setShowBulkImport] = useState(false);
 
   useEffect(() => { fetchLeads(); }, []);
 
@@ -141,7 +145,10 @@ const Admissions = () => {
           <h1 className="text-2xl font-bold text-foreground">Admissions CRM</h1>
           <p className="text-sm text-muted-foreground mt-1">Manage leads, applications & admissions pipeline</p>
         </div>
-        <Button className="gap-2"><Plus className="h-4 w-4" />Add Lead</Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setShowBulkImport(true)} className="gap-2"><Upload className="h-4 w-4" />Import CSV</Button>
+          <Button onClick={() => setShowAddLead(true)} className="gap-2"><Plus className="h-4 w-4" />Add Lead</Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -310,6 +317,9 @@ const Admissions = () => {
           </CardContent>
         </Card>
       )}
+
+      <AddLeadDialog open={showAddLead} onOpenChange={setShowAddLead} onSuccess={fetchLeads} />
+      <BulkLeadImportDialog open={showBulkImport} onOpenChange={setShowBulkImport} onSuccess={fetchLeads} />
     </div>
   );
 };

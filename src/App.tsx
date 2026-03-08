@@ -20,6 +20,8 @@ import Login from "./pages/Login";
 import ResetPassword from "./pages/ResetPassword";
 import AdminPanel from "./pages/AdminPanel";
 import ApplyPortal from "./pages/ApplyPortal";
+import Consultants from "./pages/Consultants";
+import AdmissionAnalytics from "./pages/AdmissionAnalytics";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -51,6 +53,8 @@ const App = () => (
                       <Route path="/attendance" element={<Attendance />} />
                       <Route path="/finance" element={<Finance />} />
                       <Route path="/admin" element={<AdminPanel />} />
+                      <Route path="/consultants" element={<Consultants />} />
+                      <Route path="/admission-analytics" element={<AdmissionAnalytics />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </AppLayout>
