@@ -15,14 +15,14 @@ const Login = () => {
       navigate("/", { replace: true });
     }
   }, [session, loading, navigate]);
+
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [forgotPassword, setForgotPassword] = useState(false);
-  const navigate = useNavigate();
   const { toast } = useToast();
 
   const handleEmailAuth = async (e: React.FormEvent) => {
