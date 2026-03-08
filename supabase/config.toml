@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.bulk-invite-users]
 verify_jwt = false
+
+[functions.whatsapp-otp]
+verify_jwt = false
