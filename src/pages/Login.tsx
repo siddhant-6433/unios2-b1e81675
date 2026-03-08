@@ -1,24 +1,33 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
+import { useAuth } from "@/contexts/AuthContext";
 import { GraduationCap, Mail, Lock, Eye, EyeOff, User } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const Login = () => {
+  const { session, loading } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!loading && session) {
+      navigate("/", { replace: true });
+    }
+  }, [session, loading, navigate]);
+
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [forgotPassword, setForgotPassword] = useState(false);
-  const navigate = useNavigate();
   const { toast } = useToast();
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setSubmitting(true);
 
     try {
       if (forgotPassword) {
@@ -47,12 +56,12 @@ const Login = () => {
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
   const handleGoogleLogin = async () => {
-    setLoading(true);
+    setSubmitting(true);
     try {
       const result = await lovable.auth.signInWithOAuth("google", {
         redirect_uri: window.location.origin,
@@ -61,7 +70,7 @@ const Login = () => {
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
@@ -157,10 +166,10 @@ const Login = () => {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={submitting}
               className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
-              {loading ? "Please wait..." : forgotPassword ? "Send Reset Link" : isSignUp ? "Create Account" : "Sign In"}
+              {submitting ? "Please wait..." : forgotPassword ? "Send Reset Link" : isSignUp ? "Create Account" : "Sign In"}
             </button>
           </form>
 
@@ -177,7 +186,7 @@ const Login = () => {
 
               <button
                 onClick={handleGoogleLogin}
-                disabled={loading}
+                disabled={submitting}
                 className="w-full flex items-center justify-center gap-2 rounded-xl border border-input bg-card py-3 text-sm font-medium text-foreground hover:bg-muted/50 transition-colors disabled:opacity-50"
               >
                 <svg className="h-4 w-4" viewBox="0 0 24 24">
