@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Loader2 } from "lucide-react";
+import { AiCallSummary } from "@/components/leads/AiCallSummary";
 import { LeadInfoCard } from "@/components/leads/LeadInfoCard";
 import { QuickActions } from "@/components/leads/QuickActions";
 import { NextFollowup } from "@/components/leads/NextFollowup";
