@@ -119,6 +119,11 @@ const ACTIVITY_CONFIG: Record<string, {
   bg: string;
   getTitle: (a: any) => string;
 }> = {
+  lead_created: {
+    icon: <Plus className="h-4 w-4" />,
+    bg: "bg-green-100 text-green-600 dark:bg-green-900/20 dark:text-green-400",
+    getTitle: () => "Lead Created",
+  },
   stage_change: {
     icon: <ArrowRight className="h-4 w-4" />,
     bg: "bg-primary/10 text-primary",

@@ -53,7 +53,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
       return;
     }
     setSaving(true);
-    const { error } = await supabase.from("leads").insert({
+    const { data, error } = await supabase.from("leads").insert({
       name: form.name.trim(),
       phone: form.phone.trim(),
       email: form.email.trim() || null,
@@ -64,11 +64,20 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
       campus_id: form.campus_id || null,
       counsellor_id: form.counsellor_id || null,
       notes: form.notes.trim() || null,
-    });
+    }).select("id").single();
     setSaving(false);
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {
+      // Log lead_created activity
+      if (data) {
+        await supabase.from("lead_activities").insert({
+          lead_id: data.id,
+          type: "lead_created",
+          description: `Lead created via manual entry`,
+          user_id: user?.id || null,
+        });
+      }
       toast({ title: "Lead added" });
       setForm({ name: "", phone: "", email: "", guardian_name: "", guardian_phone: "", source: "website", course_id: "", campus_id: "", counsellor_id: "", notes: "" });
       onOpenChange(false);
