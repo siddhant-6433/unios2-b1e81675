@@ -141,16 +141,16 @@ const LeadDetail = () => {
   if (!lead) return <div className="text-center py-20"><p className="text-muted-foreground">Lead not found</p></div>;
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-4 animate-fade-in px-0">
       {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm">
-        <Link to="/admissions" className="text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
+      <div className="flex items-center gap-2 text-sm overflow-x-auto">
+        <Link to="/admissions" className="text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 shrink-0">
           <ArrowLeft className="h-3.5 w-3.5" /> Leads
         </Link>
-        <span className="text-muted-foreground/50">/</span>
-        <span className="font-medium text-foreground">{lead.name}</span>
+        <span className="text-muted-foreground/50 shrink-0">/</span>
+        <span className="font-medium text-foreground truncate">{lead.name}</span>
         {lead.application_id && (
-          <span className="text-xs font-mono text-muted-foreground ml-1">{lead.application_id}</span>
+          <span className="text-xs font-mono text-muted-foreground ml-1 shrink-0">{lead.application_id}</span>
         )}
       </div>
 
