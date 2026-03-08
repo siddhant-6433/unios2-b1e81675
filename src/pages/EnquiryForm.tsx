@@ -200,27 +200,31 @@ const EnquiryForm = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-30">
-        <div className="max-w-2xl mx-auto px-6 py-4 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary shadow-sm">
-            <GraduationCap className="h-5 w-5 text-primary-foreground" />
+    <div className={isEmbed ? "bg-background p-4" : "min-h-screen bg-background"}>
+      {/* Header — hidden in embed mode */}
+      {!isEmbed && (
+        <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-30">
+          <div className="max-w-2xl mx-auto px-6 py-4 flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary shadow-sm">
+              <GraduationCap className="h-5 w-5 text-primary-foreground" />
+            </div>
+            <div>
+              <span className="text-sm font-bold text-foreground tracking-tight">NIMT UniOs</span>
+              <span className="text-[11px] text-muted-foreground block">Admission Enquiry</span>
+            </div>
           </div>
-          <div>
-            <span className="text-sm font-bold text-foreground tracking-tight">NIMT UniOs</span>
-            <span className="text-[11px] text-muted-foreground block">Admission Enquiry</span>
-          </div>
-        </div>
-      </header>
+        </header>
+      )}
 
-      <div className="max-w-2xl mx-auto px-6 py-8">
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-foreground">Enquire Now</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Fill in your details and our admissions team will get back to you.
-          </p>
-        </div>
+      <div className={isEmbed ? "" : "max-w-2xl mx-auto px-6 py-8"}>
+        {!isEmbed && (
+          <div className="mb-8">
+            <h1 className="text-2xl font-bold text-foreground">Enquire Now</h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              Fill in your details and our admissions team will get back to you.
+            </p>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit}>
           <Card className="border-border/60 shadow-none">
