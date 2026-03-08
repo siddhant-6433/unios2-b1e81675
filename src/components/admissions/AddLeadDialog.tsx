@@ -64,7 +64,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
       campus_id: form.campus_id || null,
       counsellor_id: form.counsellor_id || null,
       notes: form.notes.trim() || null,
-    });
+    }).select("id").single();
     setSaving(false);
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
