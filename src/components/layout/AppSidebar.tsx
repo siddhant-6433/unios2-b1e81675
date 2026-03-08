@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Users, GraduationCap, IndianRupee,
   ClipboardCheck, Settings, Bell, MessageSquare, Search,
-  Building2, BookOpen, BarChart3, FileText, School, LogOut
+  Building2, BookOpen, BarChart3, FileText, School, LogOut, ShieldCheck
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
