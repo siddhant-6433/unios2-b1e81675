@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
 import { useAuth } from "@/contexts/AuthContext";
-import { GraduationCap, Mail, Phone, Loader2 } from "lucide-react";
+import { GraduationCap, Mail, MessageCircle, Loader2, ShieldCheck, ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 type LoginMethod = "google" | "email_otp" | "whatsapp_otp";
@@ -125,7 +125,7 @@ const Login = () => {
       ),
     },
     { key: "email_otp", label: "Email OTP", icon: <Mail className="h-4 w-4" /> },
-    { key: "whatsapp_otp", label: "WhatsApp", icon: <Phone className="h-4 w-4" /> },
+    { key: "whatsapp_otp", label: "WhatsApp", icon: <MessageCircle className="h-4 w-4" /> },
   ];
 
   return (
@@ -247,7 +247,7 @@ const Login = () => {
             otpSent ? (
               <form onSubmit={handleWhatsAppVerifyOtp} className="space-y-4">
                 <div className="rounded-xl bg-primary/5 border border-primary/10 p-4 text-center">
-                  <Phone className="h-6 w-6 text-primary mx-auto mb-2" />
+                  <ShieldCheck className="h-6 w-6 text-primary mx-auto mb-2" />
                   <p className="text-xs text-muted-foreground">
                     OTP sent to <strong>{phone}</strong> via WhatsApp
                   </p>
@@ -280,7 +280,7 @@ const Login = () => {
             ) : (
               <form onSubmit={handleWhatsAppSendOtp} className="space-y-4">
                 <div className="relative">
-                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <MessageCircle className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <input
                     type="tel"
                     placeholder="+91 98765 43210"
