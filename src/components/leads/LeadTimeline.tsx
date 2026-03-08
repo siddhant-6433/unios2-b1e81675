@@ -53,11 +53,11 @@ export function LeadTimeline({
 
       {/* Tabs */}
       <Tabs defaultValue="timeline" className="w-full">
-        <TabsList className="bg-card border border-border rounded-xl p-1 h-auto">
-          <TabsTrigger value="timeline" className="rounded-lg text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Timeline</TabsTrigger>
-          <TabsTrigger value="calls" className="rounded-lg text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Calls</TabsTrigger>
-          <TabsTrigger value="notes" className="rounded-lg text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Notes</TabsTrigger>
-          <TabsTrigger value="followups" className="rounded-lg text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Follow-ups</TabsTrigger>
+        <TabsList className="bg-card border border-border rounded-xl p-1 h-auto flex-wrap">
+          <TabsTrigger value="timeline" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Timeline</TabsTrigger>
+          <TabsTrigger value="calls" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Calls</TabsTrigger>
+          <TabsTrigger value="notes" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Notes</TabsTrigger>
+          <TabsTrigger value="followups" className="rounded-lg text-xs sm:text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Follow-ups</TabsTrigger>
         </TabsList>
 
         <TabsContent value="timeline" className="mt-3">
