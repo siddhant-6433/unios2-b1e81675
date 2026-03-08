@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const whatsappToken = Deno.env.get("WHATSAPP_API_TOKEN");
     const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
-    const otpTemplateName = Deno.env.get("WHATSAPP_OTP_TEMPLATE") || "otp_login";
+    const otpTemplateName = Deno.env.get("WHATSAPP_OTP_TEMPLATE") || "unios2_login";
 
     if (!whatsappToken || !phoneNumberId) {
       return new Response(
@@ -121,12 +121,6 @@ Deno.serve(async (req) => {
               components: [
                 {
                   type: "body",
-                  parameters: [{ type: "text", text: otpCode }],
-                },
-                {
-                  type: "button",
-                  sub_type: "url",
-                  index: "0",
                   parameters: [{ type: "text", text: otpCode }],
                 },
               ],
