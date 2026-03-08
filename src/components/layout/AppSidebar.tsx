@@ -131,7 +131,7 @@ export function AppSidebar() {
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {managementMenu.filter((item) => !("adminOnly" in item && item.adminOnly) || role === "super_admin").map((item) => (
+              {visibleMgmt.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild isActive={isActive(item.url)}>
                     <NavLink
