@@ -14,6 +14,7 @@ import Attendance from "./pages/Attendance";
 import Finance from "./pages/Finance";
 import Login from "./pages/Login";
 import ResetPassword from "./pages/ResetPassword";
+import AdminPanel from "./pages/AdminPanel";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
