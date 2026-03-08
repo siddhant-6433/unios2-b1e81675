@@ -3,12 +3,15 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
 import { useAuth } from "@/contexts/AuthContext";
-import { GraduationCap, Mail, Lock, Eye, EyeOff, User } from "lucide-react";
+import { GraduationCap, Mail, Phone, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+
+type LoginMethod = "google" | "email_otp" | "whatsapp_otp";
 
 const Login = () => {
   const { session, loading } = useAuth();
   const navigate = useNavigate();
+  const { toast } = useToast();
 
   useEffect(() => {
     if (!loading && session) {
@@ -16,49 +19,12 @@ const Login = () => {
     }
   }, [session, loading, navigate]);
 
-  const [isSignUp, setIsSignUp] = useState(false);
+  const [method, setMethod] = useState<LoginMethod>("google");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
+  const [phone, setPhone] = useState("");
+  const [otp, setOtp] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [forgotPassword, setForgotPassword] = useState(false);
-  const { toast } = useToast();
-
-  const handleEmailAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
-
-    try {
-      if (forgotPassword) {
-        const { error } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: `${window.location.origin}/reset-password`,
-        });
-        if (error) throw error;
-        toast({ title: "Check your email", description: "Password reset link sent to your email." });
-        setForgotPassword(false);
-      } else if (isSignUp) {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: { display_name: displayName },
-            emailRedirectTo: window.location.origin,
-          },
-        });
-        if (error) throw error;
-        toast({ title: "Account created!", description: "Check your email to confirm your account." });
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        navigate("/");
-      }
-    } catch (error: any) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   const handleGoogleLogin = async () => {
     setSubmitting(true);
@@ -73,6 +39,94 @@ const Login = () => {
       setSubmitting(false);
     }
   };
+
+  const handleEmailOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: window.location.origin },
+      });
+      if (error) throw error;
+      setOtpSent(true);
+      toast({ title: "Check your email", description: "A magic link has been sent to your email." });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleWhatsAppSendOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!phone.trim()) return;
+    setSubmitting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("whatsapp-otp", {
+        body: { action: "send", phone: phone.trim() },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      setOtpSent(true);
+      toast({ title: "OTP Sent", description: "Check your WhatsApp for the verification code." });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleWhatsAppVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otp.trim()) return;
+    setSubmitting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("whatsapp-otp", {
+        body: { action: "verify", phone: phone.trim(), otp: otp.trim() },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      // Sign in with the custom token returned by the edge function
+      if (data?.token) {
+        const { error: signInError } = await supabase.auth.setSession({
+          access_token: data.token.access_token,
+          refresh_token: data.token.refresh_token,
+        });
+        if (signInError) throw signInError;
+        navigate("/");
+      }
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const resetState = () => {
+    setOtpSent(false);
+    setOtp("");
+    setEmail("");
+    setPhone("");
+  };
+
+  const methods: { key: LoginMethod; label: string; icon: React.ReactNode }[] = [
+    {
+      key: "google",
+      label: "Google",
+      icon: (
+        <svg className="h-4 w-4" viewBox="0 0 24 24">
+          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
+          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+        </svg>
+      ),
+    },
+    { key: "email_otp", label: "Email OTP", icon: <Mail className="h-4 w-4" /> },
+    { key: "whatsapp_otp", label: "WhatsApp", icon: <Phone className="h-4 w-4" /> },
+  ];
 
   return (
     <div className="min-h-screen flex bg-background">
@@ -101,115 +155,157 @@ const Login = () => {
           </div>
 
           <div>
-            <h2 className="text-xl font-bold text-foreground">
-              {forgotPassword ? "Reset Password" : isSignUp ? "Create Account" : "Welcome Back"}
-            </h2>
-            <p className="text-sm text-muted-foreground mt-1">
-              {forgotPassword
-                ? "Enter your email to receive a reset link."
-                : isSignUp
-                ? "Sign up to get started."
-                : "Sign in to your account."}
-            </p>
+            <h2 className="text-xl font-bold text-foreground">Welcome Back</h2>
+            <p className="text-sm text-muted-foreground mt-1">Choose how you'd like to sign in.</p>
           </div>
 
-          <form onSubmit={handleEmailAuth} className="space-y-4">
-            {isSignUp && !forgotPassword && (
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <input
-                  type="text"
-                  placeholder="Full Name"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  className="w-full rounded-xl border border-input bg-card pl-10 pr-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-                  required
-                />
-              </div>
-            )}
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input
-                type="email"
-                placeholder="Email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-xl border border-input bg-card pl-10 pr-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-                required
-              />
-            </div>
-            {!forgotPassword && (
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <input
-                  type={showPassword ? "text" : "password"}
-                  placeholder="Password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full rounded-xl border border-input bg-card pl-10 pr-10 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-                  required
-                  minLength={6}
-                />
-                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            )}
-
-            {!isSignUp && !forgotPassword && (
-              <div className="flex justify-end">
-                <button type="button" onClick={() => setForgotPassword(true)} className="text-xs text-primary hover:underline">
-                  Forgot password?
-                </button>
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
-            >
-              {submitting ? "Please wait..." : forgotPassword ? "Send Reset Link" : isSignUp ? "Create Account" : "Sign In"}
-            </button>
-          </form>
-
-          {!forgotPassword && (
-            <>
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-border" />
-                </div>
-                <div className="relative flex justify-center text-xs">
-                  <span className="bg-background px-3 text-muted-foreground">or continue with</span>
-                </div>
-              </div>
-
+          {/* Method selector */}
+          <div className="flex rounded-xl bg-muted p-1 gap-1">
+            {methods.map((m) => (
               <button
-                onClick={handleGoogleLogin}
-                disabled={submitting}
-                className="w-full flex items-center justify-center gap-2 rounded-xl border border-input bg-card py-3 text-sm font-medium text-foreground hover:bg-muted/50 transition-colors disabled:opacity-50"
+                key={m.key}
+                onClick={() => { setMethod(m.key); resetState(); }}
+                className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2.5 text-xs font-medium transition-colors ${
+                  method === m.key
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
               >
-                <svg className="h-4 w-4" viewBox="0 0 24 24">
-                  <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
-                  <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
-                  <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
-                  <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
-                </svg>
-                Sign in with Google
+                {m.icon}
+                {m.label}
               </button>
-            </>
+            ))}
+          </div>
+
+          {/* Google */}
+          {method === "google" && (
+            <button
+              onClick={handleGoogleLogin}
+              disabled={submitting}
+              className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+            >
+              {submitting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <>
+                  <svg className="h-4 w-4" viewBox="0 0 24 24">
+                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="white" fillOpacity={0.8} />
+                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="white" fillOpacity={0.9} />
+                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="white" fillOpacity={0.7} />
+                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="white" fillOpacity={0.85} />
+                  </svg>
+                  Continue with Google
+                </>
+              )}
+            </button>
           )}
 
-          <p className="text-center text-sm text-muted-foreground">
-            {forgotPassword ? (
-              <button onClick={() => setForgotPassword(false)} className="text-primary hover:underline">
-                ← Back to sign in
-              </button>
-            ) : isSignUp ? (
-              <>Already have an account?{" "}<button onClick={() => setIsSignUp(false)} className="text-primary hover:underline">Sign in</button></>
+          {/* Email OTP */}
+          {method === "email_otp" && (
+            otpSent ? (
+              <div className="space-y-4 text-center">
+                <div className="rounded-xl bg-primary/5 border border-primary/10 p-6">
+                  <Mail className="h-8 w-8 text-primary mx-auto mb-3" />
+                  <p className="text-sm font-medium text-foreground">Magic link sent!</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Check <strong>{email}</strong> and click the link to sign in.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setOtpSent(false)}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Use a different email
+                </button>
+              </div>
             ) : (
-              <>Don't have an account?{" "}<button onClick={() => setIsSignUp(true)} className="text-primary hover:underline">Sign up</button></>
-            )}
+              <form onSubmit={handleEmailOtp} className="space-y-4">
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="email"
+                    placeholder="Enter your email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full rounded-xl border border-input bg-card pl-10 pr-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                    required
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={submitting || !email.trim()}
+                  className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Send Magic Link"}
+                </button>
+              </form>
+            )
+          )}
+
+          {/* WhatsApp OTP */}
+          {method === "whatsapp_otp" && (
+            otpSent ? (
+              <form onSubmit={handleWhatsAppVerifyOtp} className="space-y-4">
+                <div className="rounded-xl bg-primary/5 border border-primary/10 p-4 text-center">
+                  <Phone className="h-6 w-6 text-primary mx-auto mb-2" />
+                  <p className="text-xs text-muted-foreground">
+                    OTP sent to <strong>{phone}</strong> via WhatsApp
+                  </p>
+                </div>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="Enter 6-digit OTP"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  className="w-full rounded-xl border border-input bg-card px-4 py-3 text-sm text-foreground text-center tracking-[0.3em] font-mono placeholder:text-muted-foreground placeholder:tracking-normal focus:outline-none focus:ring-2 focus:ring-ring/20"
+                  required
+                />
+                <button
+                  type="submit"
+                  disabled={submitting || otp.length !== 6}
+                  className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify & Sign In"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setOtpSent(false); setOtp(""); }}
+                  className="w-full text-xs text-primary hover:underline"
+                >
+                  Use a different number
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={handleWhatsAppSendOtp} className="space-y-4">
+                <div className="relative">
+                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="tel"
+                    placeholder="+91 98765 43210"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    className="w-full rounded-xl border border-input bg-card pl-10 pr-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                    required
+                  />
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Enter your registered mobile number with country code. OTP will be sent via WhatsApp.
+                </p>
+                <button
+                  type="submit"
+                  disabled={submitting || !phone.trim()}
+                  className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Send WhatsApp OTP"}
+                </button>
+              </form>
+            )
+          )}
+
+          <p className="text-center text-[11px] text-muted-foreground">
+            By signing in, you agree to NIMT UniOs terms and policies.
           </p>
         </div>
       </div>
