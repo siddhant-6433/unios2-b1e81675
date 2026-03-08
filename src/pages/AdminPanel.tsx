@@ -3,7 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Navigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, Users, Search, ChevronDown, Check, X, Loader2 } from "lucide-react";
+import { Shield, Users, Search, ChevronDown, Check, X, Loader2, UserPlus } from "lucide-react";
+import InviteUserDialog from "@/components/admin/InviteUserDialog";
 import type { Database } from "@/integrations/supabase/types";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
@@ -40,6 +41,7 @@ const AdminPanel = () => {
   const [search, setSearch] = useState("");
   const [editingUser, setEditingUser] = useState<string | null>(null);
   const [savingUser, setSavingUser] = useState<string | null>(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
   const { toast } = useToast();
 
   const fetchUsers = async () => {
@@ -154,9 +156,18 @@ const AdminPanel = () => {
           <h1 className="text-2xl font-bold text-foreground">User Management</h1>
           <p className="text-sm text-muted-foreground mt-1">Assign and manage roles for all users.</p>
         </div>
-        <div className="flex items-center gap-2 rounded-xl bg-pastel-purple px-3 py-1.5">
-          <Shield className="h-4 w-4 text-foreground/70" />
-          <span className="text-xs font-semibold text-foreground/80">Super Admin Only</span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setInviteOpen(true)}
+            className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            <UserPlus className="h-4 w-4" />
+            Invite User
+          </button>
+          <div className="flex items-center gap-2 rounded-xl bg-pastel-purple px-3 py-1.5">
+            <Shield className="h-4 w-4 text-foreground/70" />
+            <span className="text-xs font-semibold text-foreground/80">Super Admin Only</span>
+          </div>
         </div>
       </div>
 
@@ -268,6 +279,11 @@ const AdminPanel = () => {
           </table>
         )}
       </div>
+      <InviteUserDialog
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        onSuccess={() => fetchUsers()}
+      />
     </div>
   );
 };
