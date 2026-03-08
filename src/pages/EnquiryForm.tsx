@@ -147,7 +147,7 @@ const EnquiryForm = () => {
           email: form.email.trim() || undefined,
           guardian_name: form.guardian_name.trim() || undefined,
           guardian_phone: form.guardian_phone || undefined,
-          course: form.course || undefined,
+          course: selectedCourseEntry?.course || undefined,
           campus: form.campus || undefined,
           message: form.message.trim() || undefined,
         },
