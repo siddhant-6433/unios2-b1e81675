@@ -106,7 +106,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
             </div>
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Guardian Phone</label>
-              <input value={form.guardian_phone} onChange={e => setForm(p => ({ ...p, guardian_phone: e.target.value }))} className={inputCls} />
+              <PhoneInput value={form.guardian_phone} onChange={phone => setForm(p => ({ ...p, guardian_phone: phone }))} />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">

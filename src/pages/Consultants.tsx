@@ -189,7 +189,7 @@ const Consultants = () => {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">Phone</label>
-                <input value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} className={inputCls} />
+                <PhoneInput value={form.phone} onChange={phone => setForm(p => ({ ...p, phone }))} />
               </div>
               <div>
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">Email</label>
