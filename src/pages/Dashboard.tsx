@@ -39,7 +39,7 @@ const SuperAdminDashboard = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="rounded-xl bg-card p-6 card-shadow">
+        <div className="card-neo p-6">
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-base font-semibold text-foreground">Admission Funnel</h2>
             <span className="text-xs text-muted-foreground">2026 Session</span>
