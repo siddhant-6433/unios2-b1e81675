@@ -262,7 +262,7 @@ const EnquiryForm = () => {
                       required={availableCampuses.length > 1}
                       className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {!form.course ? (
+                      {!form.courseKey ? (
                         <option value="">Select course first</option>
                       ) : availableCampuses.length === 1 ? (
                         <option value={availableCampuses[0]}>{availableCampuses[0]}</option>
