@@ -236,31 +236,15 @@ const EnquiryForm = () => {
                       className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 appearance-none"
                     >
                       <option value="">Select course / class</option>
-                      <optgroup label="Engineering">
-                        {COURSE_CAMPUS_MAP.filter((c) => c.course.startsWith("B.Tech")).map((c) => (
-                          <option key={c.course} value={c.course}>{c.course}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Management & Commerce">
-                        {["MBA", "BBA", "BCA", "B.Com"].map((name) => (
-                          <option key={name} value={name}>{name}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Education">
-                        {["B.Ed", "D.El.Ed"].map((name) => (
-                          <option key={name} value={name}>{name}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="IB Programme">
-                        {["IB PYP", "IB MYP", "IB DP"].map((name) => (
-                          <option key={name} value={name}>{name}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="School (Class 1–12)">
-                        {Array.from({ length: 12 }, (_, i) => (
-                          <option key={i} value={`Class ${i + 1}`}>Class {i + 1}</option>
-                        ))}
-                      </optgroup>
+                      {PROGRAMS.map((p) => (
+                        <optgroup key={p.program} label={p.program}>
+                          {p.courses.map((c) => (
+                            <option key={`${p.program}-${c.name}`} value={c.name}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
                     </select>
                   </div>
                 </div>
