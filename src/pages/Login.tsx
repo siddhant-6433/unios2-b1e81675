@@ -125,7 +125,7 @@ const Login = () => {
       ),
     },
     { key: "email_otp", label: "Email OTP", icon: <Mail className="h-4 w-4" /> },
-    { key: "whatsapp_otp", label: "WhatsApp", icon: <Phone className="h-4 w-4" /> },
+    { key: "whatsapp_otp", label: "WhatsApp", icon: <MessageCircle className="h-4 w-4" /> },
   ];
 
   return (
