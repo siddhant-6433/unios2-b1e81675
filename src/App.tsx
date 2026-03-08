@@ -30,6 +30,7 @@ const App = () => (
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/apply" element={<ApplyPortal />} />
             <Route
               path="/*"
               element={
