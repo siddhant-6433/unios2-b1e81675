@@ -79,7 +79,8 @@ export function AppSidebar() {
 
   const visibleMain = mainMenu.filter(canSee);
   const visibleMgmt = managementMenu.filter(canSee);
-
+  const linkClass = "gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium text-sidebar-foreground transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
+  const activeClass = "!bg-primary !text-primary-foreground font-semibold shadow-sm";
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
