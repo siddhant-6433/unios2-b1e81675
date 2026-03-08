@@ -186,7 +186,7 @@ const Login = () => {
 
               <button
                 onClick={handleGoogleLogin}
-                disabled={loading}
+                disabled={submitting}
                 className="w-full flex items-center justify-center gap-2 rounded-xl border border-input bg-card py-3 text-sm font-medium text-foreground hover:bg-muted/50 transition-colors disabled:opacity-50"
               >
                 <svg className="h-4 w-4" viewBox="0 0 24 24">
