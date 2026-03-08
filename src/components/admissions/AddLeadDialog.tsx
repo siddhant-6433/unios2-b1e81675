@@ -53,7 +53,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
       return;
     }
     setSaving(true);
-    const { error } = await supabase.from("leads").insert({
+    const { data, error } = await supabase.from("leads").insert({
       name: form.name.trim(),
       phone: form.phone.trim(),
       email: form.email.trim() || null,
