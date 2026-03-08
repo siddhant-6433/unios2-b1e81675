@@ -9,18 +9,19 @@ import {
 interface LeadTimelineProps {
   activities: any[];
   notes: any[];
-  followups: any[];
-  visits: any[];
   callLogs: any[];
   newNote: string;
   setNewNote: (v: string) => void;
   onAddNote: () => void;
   savingNote: boolean;
-  onCompleteFollowup: (id: string) => void;
-  onAddFollowup: (data: { scheduled_at: string; type: string; notes: string }) => void;
-  onScheduleVisit: (data: { visit_date: string; campus_id: string }) => void;
-  onUpdateVisitStatus: (id: string, status: string) => void;
-  campuses: any[];
+  // Keep for backwards compat — not used in rendering
+  followups?: any[];
+  visits?: any[];
+  onCompleteFollowup?: (id: string) => void;
+  onAddFollowup?: (data: { scheduled_at: string; type: string; notes: string }) => void;
+  onScheduleVisit?: (data: { visit_date: string; campus_id: string }) => void;
+  onUpdateVisitStatus?: (id: string, status: string) => void;
+  campuses?: any[];
 }
 
 export function LeadTimeline({
