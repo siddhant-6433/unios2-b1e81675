@@ -188,7 +188,11 @@ const LeadDetail = () => {
         </div>
 
         {/* Right Column */}
-        <div>
+        <div className="space-y-4">
+          {/* AI Call Summary - golden highlight card */}
+          <AiCallSummary
+            callLog={callLogs.find((c) => c.direction === "outbound" && c.notes) || callLogs[0] || null}
+          />
           <LeadTimeline
             activities={activities}
             notes={notes}
