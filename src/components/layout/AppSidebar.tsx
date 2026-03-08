@@ -75,8 +75,11 @@ export function AppSidebar() {
   const roleLabel = role ? (roleLabels[role] || role) : "User";
   const initials = displayName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
 
-  const linkClass = "gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium text-sidebar-foreground transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
-  const activeClass = "!bg-primary !text-primary-foreground font-semibold shadow-sm";
+  const canSee = (item: MenuItem) => !item.roles || (role && item.roles.includes(role));
+
+  const visibleMain = mainMenu.filter(canSee);
+  const visibleMgmt = managementMenu.filter(canSee);
+
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
