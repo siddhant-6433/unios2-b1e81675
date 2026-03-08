@@ -101,6 +101,22 @@ const EnquiryForm = () => {
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const formRef = useRef<HTMLDivElement>(null);
+
+  // Auto-resize messaging for embed mode
+  useEffect(() => {
+    if (!isEmbed || !formRef.current) return;
+    const observer = new ResizeObserver(() => {
+      if (formRef.current) {
+        window.parent.postMessage(
+          { type: "nimt-enquiry-resize", height: formRef.current.scrollHeight + 32 },
+          "*"
+        );
+      }
+    });
+    observer.observe(formRef.current);
+    return () => observer.disconnect();
+  }, [isEmbed, submitted]);
   const [form, setForm] = useState({
     name: "",
     phone: "",
