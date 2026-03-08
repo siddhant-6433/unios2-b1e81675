@@ -41,9 +41,8 @@ const EnquiryForm = () => {
 
     setSubmitting(true);
     try {
-      const { data, error } = await supabase.functions.invoke("lead-ingest", {
+      const { data, error } = await supabase.functions.invoke("lead-ingest?source=website", {
         body: {
-          source: "website",
           name: form.name.trim(),
           phone: form.phone,
           email: form.email.trim() || undefined,
@@ -52,9 +51,6 @@ const EnquiryForm = () => {
           course: form.course.trim() || undefined,
           campus: form.campus || undefined,
           message: form.message.trim() || undefined,
-        },
-        headers: {
-          "x-api-key": import.meta.env.VITE_LEAD_INGEST_KEY || "",
         },
       });
 
