@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Navigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, Users, Search, ChevronDown, Check, X, Loader2, UserPlus, FileSpreadsheet } from "lucide-react";
+import { Shield, Users, Search, X, Loader2, UserPlus, FileSpreadsheet, Phone, Eye } from "lucide-react";
 import InviteUserDialog from "@/components/admin/InviteUserDialog";
 import BulkImportDialog from "@/components/admin/BulkImportDialog";
+import EditPhoneDialog from "@/components/admin/EditPhoneDialog";
+import EmployeeProfileDialog from "@/components/admin/EmployeeProfileDialog";
 import type { Database } from "@/integrations/supabase/types";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
@@ -37,6 +39,7 @@ interface UserWithRole {
 
 const AdminPanel = () => {
   const { role, loading: authLoading } = useAuth();
+  const navigate = useNavigate();
   const [users, setUsers] = useState<UserWithRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -44,6 +47,8 @@ const AdminPanel = () => {
   const [savingUser, setSavingUser] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [phoneEdit, setPhoneEdit] = useState<{ userId: string; name: string; phone: string | null } | null>(null);
+  const [employeeProfile, setEmployeeProfile] = useState<{ userId: string; name: string } | null>(null);
   const { toast } = useToast();
 
   const fetchUsers = async () => {
@@ -86,9 +91,7 @@ const AdminPanel = () => {
   };
 
   useEffect(() => {
-    if (role === "super_admin") {
-      fetchUsers();
-    }
+    if (role === "super_admin") fetchUsers();
   }, [role]);
 
   const handleRoleChange = async (userId: string, newRole: AppRole | "none") => {
@@ -98,17 +101,14 @@ const AdminPanel = () => {
 
     try {
       if (newRole === "none") {
-        // Remove role
         if (user.role_id) {
           const { error } = await supabase.from("user_roles").delete().eq("id", user.role_id);
           if (error) throw error;
         }
       } else if (user.role_id) {
-        // Update existing role
         const { error } = await supabase.from("user_roles").update({ role: newRole }).eq("id", user.role_id);
         if (error) throw error;
       } else {
-        // Insert new role
         const { error } = await supabase.from("user_roles").insert({ user_id: userId, role: newRole });
         if (error) throw error;
       }
@@ -123,6 +123,15 @@ const AdminPanel = () => {
     }
   };
 
+  const handleViewProfile = (user: UserWithRole) => {
+    if (user.role === "student") {
+      // Navigate to student profile (would need admission number lookup)
+      navigate("/students");
+    } else {
+      setEmployeeProfile({ userId: user.user_id, name: user.display_name || "Unnamed" });
+    }
+  };
+
   if (authLoading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -131,13 +140,12 @@ const AdminPanel = () => {
     );
   }
 
-  if (role !== "super_admin") {
-    return <Navigate to="/" replace />;
-  }
+  if (role !== "super_admin") return <Navigate to="/" replace />;
 
   const filtered = users.filter(
     (u) =>
       (u.display_name || "").toLowerCase().includes(search.toLowerCase()) ||
+      (u.phone || "").toLowerCase().includes(search.toLowerCase()) ||
       (u.campus || "").toLowerCase().includes(search.toLowerCase()) ||
       (u.role || "").toLowerCase().includes(search.toLowerCase())
   );
@@ -156,20 +164,14 @@ const AdminPanel = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">User Management</h1>
-          <p className="text-sm text-muted-foreground mt-1">Assign and manage roles for all users.</p>
+          <p className="text-sm text-muted-foreground mt-1">Assign roles, edit phone numbers, and manage user profiles.</p>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setBulkOpen(true)}
-            className="flex items-center gap-2 rounded-xl border border-input bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
-          >
+          <button onClick={() => setBulkOpen(true)} className="flex items-center gap-2 rounded-xl border border-input bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors">
             <FileSpreadsheet className="h-4 w-4" />
             Bulk Import
           </button>
-          <button
-            onClick={() => setInviteOpen(true)}
-            className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
+          <button onClick={() => setInviteOpen(true)} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
             <UserPlus className="h-4 w-4" />
             Invite User
           </button>
@@ -185,7 +187,7 @@ const AdminPanel = () => {
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <input
           type="text"
-          placeholder="Search by name, campus, or role..."
+          placeholder="Search by name, phone, campus, or role..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full rounded-xl border border-input bg-card pl-9 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
@@ -216,6 +218,7 @@ const AdminPanel = () => {
             <thead>
               <tr className="border-b border-border text-left">
                 <th className="px-4 py-3 font-medium text-muted-foreground">User</th>
+                <th className="px-4 py-3 font-medium text-muted-foreground">Phone (OTP)</th>
                 <th className="px-4 py-3 font-medium text-muted-foreground">Campus</th>
                 <th className="px-4 py-3 font-medium text-muted-foreground">Current Role</th>
                 <th className="px-4 py-3 font-medium text-muted-foreground text-right">Actions</th>
@@ -223,12 +226,7 @@ const AdminPanel = () => {
             </thead>
             <tbody>
               {filtered.map((user) => {
-                const initials = (user.display_name || "?")
-                  .split(" ")
-                  .map((n) => n[0])
-                  .join("")
-                  .slice(0, 2)
-                  .toUpperCase();
+                const initials = (user.display_name || "?").split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
                 const isEditing = editingUser === user.user_id;
                 const isSaving = savingUser === user.user_id;
 
@@ -241,8 +239,21 @@ const AdminPanel = () => {
                         </div>
                         <div>
                           <p className="font-medium text-foreground">{user.display_name || "Unnamed"}</p>
-                          <p className="text-[11px] text-muted-foreground">{user.phone || "No phone"}</p>
                         </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-sm ${user.phone ? "text-foreground" : "text-muted-foreground italic"}`}>
+                          {user.phone || "Not set"}
+                        </span>
+                        <button
+                          onClick={() => setPhoneEdit({ userId: user.user_id, name: user.display_name || "User", phone: user.phone })}
+                          className="rounded-lg p-1 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                          title="Edit phone number"
+                        >
+                          <Phone className="h-3.5 w-3.5" />
+                        </button>
                       </div>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{user.campus || "—"}</td>
@@ -272,14 +283,24 @@ const AdminPanel = () => {
                       )}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      {!isEditing && (
+                      <div className="flex items-center justify-end gap-2">
                         <button
-                          onClick={() => setEditingUser(user.user_id)}
-                          className="rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+                          onClick={() => handleViewProfile(user)}
+                          className="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/80 transition-colors flex items-center gap-1"
+                          title={user.role === "student" ? "View Student Profile" : "View Employee Profile"}
                         >
-                          Change Role
+                          <Eye className="h-3.5 w-3.5" />
+                          {user.role === "student" ? "Student" : "Profile"}
                         </button>
-                      )}
+                        {!isEditing && (
+                          <button
+                            onClick={() => setEditingUser(user.user_id)}
+                            className="rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+                          >
+                            Change Role
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -288,15 +309,22 @@ const AdminPanel = () => {
           </table>
         )}
       </div>
-      <InviteUserDialog
-        open={inviteOpen}
-        onClose={() => setInviteOpen(false)}
+
+      <InviteUserDialog open={inviteOpen} onClose={() => setInviteOpen(false)} onSuccess={() => fetchUsers()} />
+      <BulkImportDialog open={bulkOpen} onClose={() => setBulkOpen(false)} onSuccess={() => fetchUsers()} />
+      <EditPhoneDialog
+        open={!!phoneEdit}
+        onClose={() => setPhoneEdit(null)}
         onSuccess={() => fetchUsers()}
+        userId={phoneEdit?.userId || ""}
+        userName={phoneEdit?.name || ""}
+        currentPhone={phoneEdit?.phone || null}
       />
-      <BulkImportDialog
-        open={bulkOpen}
-        onClose={() => setBulkOpen(false)}
-        onSuccess={() => fetchUsers()}
+      <EmployeeProfileDialog
+        open={!!employeeProfile}
+        onClose={() => setEmployeeProfile(null)}
+        userId={employeeProfile?.userId || ""}
+        userName={employeeProfile?.name || ""}
       />
     </div>
   );
