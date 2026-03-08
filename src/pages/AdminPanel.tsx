@@ -41,6 +41,7 @@ const AdminPanel = () => {
   const [search, setSearch] = useState("");
   const [editingUser, setEditingUser] = useState<string | null>(null);
   const [savingUser, setSavingUser] = useState<string | null>(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
   const { toast } = useToast();
 
   const fetchUsers = async () => {
