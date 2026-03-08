@@ -64,7 +64,7 @@ const SuperAdminDashboard = () => {
     const stages = Object.keys(STAGE_LABELS);
     const funnelCounts = await Promise.all(
       stages.map(async (stage) => {
-        const { count } = await supabase.from("leads").select("id", { count: "exact", head: true }).eq("stage", stage);
+        const { count } = await supabase.from("leads").select("id", { count: "exact", head: true }).eq("stage", stage as any);
         return { stage: STAGE_LABELS[stage], count: count || 0 };
       })
     );
