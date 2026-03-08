@@ -85,15 +85,13 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
           <DialogTitle>Add New Lead</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 mt-2">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Name *</label>
-              <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="Student name" className={inputCls} />
-            </div>
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Phone *</label>
-              <PhoneInput value={form.phone} onChange={phone => setForm(p => ({ ...p, phone }))} required />
-            </div>
+          <div>
+            <label className="block text-[11px] font-medium text-muted-foreground mb-1">Name *</label>
+            <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="Student name" className={inputCls} />
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium text-muted-foreground mb-1">Phone *</label>
+            <PhoneInput value={form.phone} onChange={phone => setForm(p => ({ ...p, phone }))} required />
           </div>
           <div>
             <label className="block text-[11px] font-medium text-muted-foreground mb-1">Email</label>
