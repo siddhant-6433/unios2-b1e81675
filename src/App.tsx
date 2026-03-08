@@ -15,6 +15,7 @@ import Finance from "./pages/Finance";
 import Login from "./pages/Login";
 import ResetPassword from "./pages/ResetPassword";
 import AdminPanel from "./pages/AdminPanel";
+import ApplyPortal from "./pages/ApplyPortal";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -29,6 +30,7 @@ const App = () => (
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/apply" element={<ApplyPortal />} />
             <Route
               path="/*"
               element={
