@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
 import { useAuth } from "@/contexts/AuthContext";
-import { GraduationCap, Mail, Phone, Loader2 } from "lucide-react";
+import { GraduationCap, Mail, MessageCircle, Loader2, ShieldCheck, ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 type LoginMethod = "google" | "email_otp" | "whatsapp_otp";
