@@ -293,6 +293,11 @@ const AdminPanel = () => {
         onClose={() => setInviteOpen(false)}
         onSuccess={() => fetchUsers()}
       />
+      <BulkImportDialog
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        onSuccess={() => fetchUsers()}
+      />
     </div>
   );
 };
