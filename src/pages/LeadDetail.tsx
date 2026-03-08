@@ -17,13 +17,15 @@ import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
 import { ConvertToStudentDialog } from "@/components/admissions/ConvertToStudentDialog";
 
 const STAGE_LABELS: Record<string, string> = {
-  new_lead: "New Lead", ai_called: "AI Called", counsellor_call: "Counsellor Call",
+  new_lead: "New Lead", application_in_progress: "Application In Progress", application_submitted: "Application Submitted",
+  ai_called: "AI Called", counsellor_call: "Counsellor Call",
   visit_scheduled: "Visit Scheduled", interview: "Interview", offer_sent: "Offer Sent",
   token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", rejected: "Rejected",
 };
 
 const STAGE_COLORS: Record<string, string> = {
-  new_lead: "bg-pastel-blue", ai_called: "bg-pastel-purple", counsellor_call: "bg-pastel-orange",
+  new_lead: "bg-pastel-blue", application_in_progress: "bg-pastel-yellow", application_submitted: "bg-pastel-mint",
+  ai_called: "bg-pastel-purple", counsellor_call: "bg-pastel-orange",
   visit_scheduled: "bg-pastel-yellow", interview: "bg-pastel-mint", offer_sent: "bg-pastel-green",
   token_paid: "bg-primary/15", pre_admitted: "bg-primary/20", admitted: "bg-primary text-primary-foreground", rejected: "bg-pastel-red",
 };
