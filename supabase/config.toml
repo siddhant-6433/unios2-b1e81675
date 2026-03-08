@@ -2,3 +2,6 @@ project_id = "sctttxxgtsoeodulosdg"
 
 [functions.invite-user]
 verify_jwt = false
+
+[functions.bulk-invite-users]
+verify_jwt = false
