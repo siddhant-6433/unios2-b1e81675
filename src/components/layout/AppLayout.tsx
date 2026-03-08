@@ -1,6 +1,7 @@
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { Bell, MessageSquare, Search } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -39,21 +40,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               </div>
             </div>
             <div className="flex items-center gap-0.5">
-              {[
-                { icon: Bell, badge: true },
-                { icon: MessageSquare },
-                { icon: Search },
-              ].map(({ icon: Icon, badge }, i) => (
-                <button
-                  key={i}
-                  className="relative flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-                >
-                  <Icon className="h-[18px] w-[18px]" />
-                  {badge && (
-                    <span className="absolute right-1.5 top-1.5 flex h-2 w-2 rounded-full bg-destructive ring-2 ring-card" />
-                  )}
-                </button>
-              ))}
+              <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-muted-foreground">
+                <Bell className="h-[18px] w-[18px]" />
+                <span className="absolute right-1.5 top-1.5 flex h-2 w-2 rounded-full bg-destructive ring-2 ring-card" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-muted-foreground">
+                <MessageSquare className="h-[18px] w-[18px]" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-muted-foreground">
+                <Search className="h-[18px] w-[18px]" />
+              </Button>
             </div>
           </header>
           <main className="flex-1 overflow-auto p-6">
