@@ -112,12 +112,12 @@ const LeadDetail = () => {
 
   const updateStage = async (newStage: string) => {
     if (!id || !lead) return;
-    const { error } = await supabase.from("leads").update({ stage: newStage }).eq("id", id);
+    const { error } = await supabase.from("leads").update({ stage: newStage as any }).eq("id", id);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
     await supabase.from("lead_activities").insert({
-      lead_id: id, user_id: user?.id, type: "stage_change",
+      lead_id: id, user_id: user?.id || null, type: "stage_change",
       description: `Stage changed from ${STAGE_LABELS[lead.stage] || lead.stage} to ${STAGE_LABELS[newStage] || newStage}`,
-      old_stage: lead.stage, new_stage: newStage,
+      old_stage: lead.stage as any, new_stage: newStage as any,
     });
     await fetchAll();
   };
