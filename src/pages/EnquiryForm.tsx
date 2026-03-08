@@ -258,7 +258,7 @@ const EnquiryForm = () => {
                     <select
                       value={form.campus}
                       onChange={(e) => update("campus", e.target.value)}
-                      disabled={!form.course || availableCampuses.length <= 1}
+                      disabled={!form.courseKey || availableCampuses.length <= 1}
                       required={availableCampuses.length > 1}
                       className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
                     >
