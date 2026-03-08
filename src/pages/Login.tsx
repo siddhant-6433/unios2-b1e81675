@@ -166,10 +166,10 @@ const Login = () => {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={submitting}
               className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
-              {loading ? "Please wait..." : forgotPassword ? "Send Reset Link" : isSignUp ? "Create Account" : "Sign In"}
+              {submitting ? "Please wait..." : forgotPassword ? "Send Reset Link" : isSignUp ? "Create Account" : "Sign In"}
             </button>
           </form>
 
