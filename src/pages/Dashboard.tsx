@@ -147,7 +147,7 @@ const StudentDashboard = () => (
         </div>
       ))}
     </div>
-    <div className="rounded-xl bg-card p-8 card-shadow text-center">
+    <div className="card-neo p-8 text-center">
       <GraduationCap className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
       <p className="text-sm text-muted-foreground">Your academic overview, schedule, and results will appear here.</p>
     </div>
