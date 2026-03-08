@@ -247,7 +247,7 @@ const Login = () => {
             otpSent ? (
               <form onSubmit={handleWhatsAppVerifyOtp} className="space-y-4">
                 <div className="rounded-xl bg-primary/5 border border-primary/10 p-4 text-center">
-                  <Phone className="h-6 w-6 text-primary mx-auto mb-2" />
+                  <ShieldCheck className="h-6 w-6 text-primary mx-auto mb-2" />
                   <p className="text-xs text-muted-foreground">
                     OTP sent to <strong>{phone}</strong> via WhatsApp
                   </p>
