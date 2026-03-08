@@ -46,6 +46,10 @@ const LeadDetail = () => {
   const [showVisitForm, setShowVisitForm] = useState(false);
   const [visitData, setVisitData] = useState({ visit_date: "", campus_id: "" });
   const [campuses, setCampuses] = useState<any[]>([]);
+  const [showInterview, setShowInterview] = useState(false);
+  const [showOfferLetter, setShowOfferLetter] = useState(false);
+  const [showConvert, setShowConvert] = useState(false);
+  const [aiCalling, setAiCalling] = useState(false);
 
   useEffect(() => {
     if (!id) return;
