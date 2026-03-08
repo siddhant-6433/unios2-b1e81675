@@ -320,7 +320,7 @@ const EnquiryForm = () => {
               </div>
 
               {/* Guardian — required for school, optional for college */}
-              {(isSchool || !form.course) && (
+              {(isSchool || !form.courseKey) && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
