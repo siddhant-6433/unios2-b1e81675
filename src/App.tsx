@@ -7,6 +7,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import Admissions from "./pages/Admissions";
 import Students from "./pages/Students";
+import StudentProfile from "./pages/StudentProfile";
 import Attendance from "./pages/Attendance";
 import Finance from "./pages/Finance";
 import NotFound from "./pages/NotFound";
@@ -24,6 +25,7 @@ const App = () => (
             <Route path="/" element={<Dashboard />} />
             <Route path="/admissions" element={<Admissions />} />
             <Route path="/students" element={<Students />} />
+            <Route path="/students/:admissionNo" element={<StudentProfile />} />
             <Route path="/attendance" element={<Attendance />} />
             <Route path="/finance" element={<Finance />} />
             <Route path="*" element={<NotFound />} />
