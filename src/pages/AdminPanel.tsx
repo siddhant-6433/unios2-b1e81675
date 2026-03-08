@@ -3,7 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Navigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, Users, Search, ChevronDown, Check, X, Loader2 } from "lucide-react";
+import { Shield, Users, Search, ChevronDown, Check, X, Loader2, UserPlus } from "lucide-react";
+import InviteUserDialog from "@/components/admin/InviteUserDialog";
 import type { Database } from "@/integrations/supabase/types";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
