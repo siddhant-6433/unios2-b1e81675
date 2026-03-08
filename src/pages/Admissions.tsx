@@ -9,6 +9,8 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AddLeadDialog } from "@/components/admissions/AddLeadDialog";
+import { BulkLeadImportDialog } from "@/components/admissions/BulkLeadImportDialog";
 
 const STAGES = [
   "new_lead", "ai_called", "counsellor_call", "visit_scheduled",
