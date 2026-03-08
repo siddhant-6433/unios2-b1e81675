@@ -368,6 +368,54 @@ export type Database = {
           },
         ]
       }
+      daily_attendance: {
+        Row: {
+          batch_id: string | null
+          created_at: string
+          date: string
+          id: string
+          marked_by: string | null
+          status: string
+          student_id: string
+          subject: string | null
+        }
+        Insert: {
+          batch_id?: string | null
+          created_at?: string
+          date: string
+          id?: string
+          marked_by?: string | null
+          status?: string
+          student_id: string
+          subject?: string | null
+        }
+        Update: {
+          batch_id?: string | null
+          created_at?: string
+          date?: string
+          id?: string
+          marked_by?: string | null
+          status?: string
+          student_id?: string
+          subject?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_attendance_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_attendance_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       departments: {
         Row: {
           code: string
@@ -547,6 +595,60 @@ export type Database = {
             columns: ["institution_id"]
             isOneToOne: false
             referencedRelation: "institutions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      exam_records: {
+        Row: {
+          batch_id: string | null
+          created_at: string
+          exam_date: string | null
+          exam_type: string
+          grade: string | null
+          id: string
+          max_marks: number
+          obtained_marks: number
+          student_id: string
+          subject: string
+        }
+        Insert: {
+          batch_id?: string | null
+          created_at?: string
+          exam_date?: string | null
+          exam_type?: string
+          grade?: string | null
+          id?: string
+          max_marks: number
+          obtained_marks?: number
+          student_id: string
+          subject: string
+        }
+        Update: {
+          batch_id?: string | null
+          created_at?: string
+          exam_date?: string | null
+          exam_type?: string
+          grade?: string | null
+          id?: string
+          max_marks?: number
+          obtained_marks?: number
+          student_id?: string
+          subject?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "exam_records_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "exam_records_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
             referencedColumns: ["id"]
           },
         ]
