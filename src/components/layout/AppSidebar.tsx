@@ -26,6 +26,7 @@ const managementMenu = [
   { title: "Courses", url: "/courses", icon: School },
   { title: "Reports", url: "/reports", icon: BarChart3 },
   { title: "Documents", url: "/documents", icon: FileText },
+  { title: "User Management", url: "/admin", icon: ShieldCheck, adminOnly: true },
 ];
 
 const roleLabels: Record<string, string> = {
