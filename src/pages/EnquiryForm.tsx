@@ -216,7 +216,7 @@ const EnquiryForm = () => {
   }
 
   return (
-    <div className={isEmbed ? "bg-background p-4" : "min-h-screen bg-background"}>
+    <div ref={formRef} className={isEmbed ? "bg-background p-4" : "min-h-screen bg-background"}>
       {/* Header — hidden in embed mode */}
       {!isEmbed && (
         <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-30">
