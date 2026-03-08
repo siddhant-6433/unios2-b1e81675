@@ -6,55 +6,55 @@
 
 @layer base {
   :root {
-    --background: 220 20% 97%;
-    --foreground: 220 20% 10%;
+    --background: 150 14% 96%;
+    --foreground: 220 20% 12%;
 
     --card: 0 0% 100%;
-    --card-foreground: 220 20% 10%;
+    --card-foreground: 220 20% 12%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 220 20% 10%;
+    --popover-foreground: 220 20% 12%;
 
     --primary: 175 40% 40%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 14% 96%;
-    --secondary-foreground: 220 20% 10%;
+    --secondary: 150 10% 94%;
+    --secondary-foreground: 220 20% 12%;
 
-    --muted: 220 14% 96%;
-    --muted-foreground: 220 10% 50%;
+    --muted: 150 10% 94%;
+    --muted-foreground: 220 8% 52%;
 
-    --accent: 220 14% 96%;
-    --accent-foreground: 220 20% 10%;
+    --accent: 150 12% 94%;
+    --accent-foreground: 220 20% 12%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 13% 91%;
-    --input: 220 13% 91%;
+    --border: 150 10% 91%;
+    --input: 150 10% 89%;
     --ring: 175 40% 40%;
 
-    --radius: 0.875rem;
+    --radius: 1rem;
 
     /* Sidebar */
-    --sidebar-background: 30 20% 98%;
-    --sidebar-foreground: 220 10% 40%;
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 220 10% 42%;
     --sidebar-primary: 175 40% 40%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 175 30% 95%;
-    --sidebar-accent-foreground: 175 40% 30%;
-    --sidebar-border: 220 13% 93%;
+    --sidebar-accent: 175 35% 95%;
+    --sidebar-accent-foreground: 175 40% 28%;
+    --sidebar-border: 150 10% 93%;
     --sidebar-ring: 175 40% 40%;
 
     /* Pastel tokens */
-    --pastel-purple: 250 80% 94%;
-    --pastel-green: 150 50% 92%;
-    --pastel-blue: 215 80% 94%;
-    --pastel-orange: 30 90% 92%;
-    --pastel-red: 0 80% 94%;
-    --pastel-yellow: 45 90% 92%;
-    --pastel-mint: 165 50% 92%;
-    --pastel-pink: 330 70% 94%;
+    --pastel-purple: 250 80% 95%;
+    --pastel-green: 150 50% 93%;
+    --pastel-blue: 215 80% 95%;
+    --pastel-orange: 30 90% 93%;
+    --pastel-red: 0 80% 95%;
+    --pastel-yellow: 45 90% 93%;
+    --pastel-mint: 165 50% 93%;
+    --pastel-pink: 330 70% 95%;
 
     /* Stage colors */
     --stage-new: 215 80% 94%;
@@ -72,6 +72,11 @@
     --chart-3: 45 80% 55%;
     --chart-4: 0 65% 55%;
     --chart-5: 215 70% 55%;
+
+    /* Success / Warning / Info */
+    --success: 150 60% 40%;
+    --warning: 35 90% 55%;
+    --info: 215 70% 55%;
   }
 
   * {
@@ -85,10 +90,23 @@
 }
 
 @layer utilities {
+  .card-neo {
+    @apply rounded-2xl bg-card border border-border/60;
+    box-shadow: 0 1px 3px 0 hsl(150 14% 10% / 0.03), 0 1px 2px -1px hsl(150 14% 10% / 0.02);
+  }
+  .card-neo-hover {
+    @apply card-neo transition-all duration-200;
+  }
+  .card-neo-hover:hover {
+    box-shadow: 0 4px 12px -2px hsl(150 14% 10% / 0.06), 0 2px 6px -2px hsl(150 14% 10% / 0.03);
+    transform: translateY(-1px);
+  }
+  /* Legacy compat */
   .card-shadow {
-    box-shadow: 0 1px 3px 0 hsl(220 20% 10% / 0.04), 0 1px 2px -1px hsl(220 20% 10% / 0.04);
+    @apply border border-border/60;
+    box-shadow: 0 1px 3px 0 hsl(150 14% 10% / 0.03), 0 1px 2px -1px hsl(150 14% 10% / 0.02);
   }
   .card-shadow-md {
-    box-shadow: 0 4px 6px -1px hsl(220 20% 10% / 0.05), 0 2px 4px -2px hsl(220 20% 10% / 0.04);
+    box-shadow: 0 4px 12px -2px hsl(150 14% 10% / 0.06), 0 2px 6px -2px hsl(150 14% 10% / 0.03);
   }
 }

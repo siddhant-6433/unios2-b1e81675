@@ -24,7 +24,7 @@ const SuperAdminDashboard = () => {
     <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {statCards.map((stat) => (
-          <div key={stat.label} className="rounded-xl bg-card p-5 card-shadow transition-all hover:card-shadow-md">
+          <div key={stat.label} className="card-neo-hover p-5">
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{stat.label}</p>
@@ -39,7 +39,7 @@ const SuperAdminDashboard = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="rounded-xl bg-card p-6 card-shadow">
+        <div className="card-neo p-6">
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-base font-semibold text-foreground">Admission Funnel</h2>
             <span className="text-xs text-muted-foreground">2026 Session</span>
@@ -53,7 +53,7 @@ const SuperAdminDashboard = () => {
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <div className="rounded-xl bg-card p-6 card-shadow">
+        <div className="card-neo p-6">
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-base font-semibold text-foreground">Campus Comparison</h2>
             <span className="text-xs text-muted-foreground">Students & Fee</span>
@@ -86,7 +86,7 @@ const SuperAdminDashboard = () => {
           { label: "12", sub: "Fee Reminders", bg: "bg-pastel-red" },
           { label: "8", sub: "Today's Classes", bg: "bg-pastel-green" },
         ].map((item) => (
-          <div key={item.sub} className={`rounded-xl ${item.bg} p-5 flex items-center gap-4 cursor-pointer transition-transform hover:scale-[1.02]`}>
+          <div key={item.sub} className={`rounded-2xl ${item.bg} border border-border/40 p-5 flex items-center gap-4 cursor-pointer transition-all duration-200 hover:scale-[1.02] hover:shadow-sm`}>
             <span className="text-3xl font-bold text-foreground/80">{item.label}</span>
             <span className="text-sm font-medium text-foreground/60">{item.sub}</span>
           </div>
@@ -105,7 +105,7 @@ const FacultyDashboard = () => (
         { label: "Assignments Pending", value: "3", icon: BookOpen, color: "bg-pastel-orange" },
         { label: "Announcements", value: "2", icon: Bell, color: "bg-pastel-purple" },
       ].map((stat) => (
-        <div key={stat.label} className="rounded-xl bg-card p-5 card-shadow">
+        <div key={stat.label} className="card-neo p-5">
           <div className="flex items-start justify-between">
             <div>
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{stat.label}</p>
@@ -118,7 +118,7 @@ const FacultyDashboard = () => (
         </div>
       ))}
     </div>
-    <div className="rounded-xl bg-card p-8 card-shadow text-center">
+    <div className="card-neo p-8 text-center">
       <BookOpen className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
       <p className="text-sm text-muted-foreground">Your class schedule and assignments will appear here.</p>
     </div>
@@ -134,7 +134,7 @@ const StudentDashboard = () => (
         { label: "Fee Due", value: "₹15,000", icon: IndianRupee, color: "bg-pastel-red" },
         { label: "Announcements", value: "3", icon: Bell, color: "bg-pastel-blue" },
       ].map((stat) => (
-        <div key={stat.label} className="rounded-xl bg-card p-5 card-shadow">
+        <div key={stat.label} className="card-neo p-5">
           <div className="flex items-start justify-between">
             <div>
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{stat.label}</p>
@@ -147,7 +147,7 @@ const StudentDashboard = () => (
         </div>
       ))}
     </div>
-    <div className="rounded-xl bg-card p-8 card-shadow text-center">
+    <div className="card-neo p-8 text-center">
       <GraduationCap className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
       <p className="text-sm text-muted-foreground">Your academic overview, schedule, and results will appear here.</p>
     </div>
@@ -162,7 +162,7 @@ const ParentDashboard = () => (
         { label: "Fee Due", value: "₹15,000", icon: IndianRupee, color: "bg-pastel-red" },
         { label: "Announcements", value: "3", icon: Bell, color: "bg-pastel-blue" },
       ].map((stat) => (
-        <div key={stat.label} className="rounded-xl bg-card p-5 card-shadow">
+        <div key={stat.label} className="card-neo p-5">
           <div className="flex items-start justify-between">
             <div>
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{stat.label}</p>
@@ -175,7 +175,7 @@ const ParentDashboard = () => (
         </div>
       ))}
     </div>
-    <div className="rounded-xl bg-card p-8 card-shadow text-center">
+    <div className="card-neo p-8 text-center">
       <Users className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
       <p className="text-sm text-muted-foreground">Your child's performance and updates will appear here.</p>
     </div>
