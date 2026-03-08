@@ -92,7 +92,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
             </div>
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Phone *</label>
-              <input value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} placeholder="+91..." className={inputCls} />
+              <PhoneInput value={form.phone} onChange={phone => setForm(p => ({ ...p, phone }))} required />
             </div>
           </div>
           <div>
