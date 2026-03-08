@@ -1,19 +1,8 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Phone, X, ChevronDown } from "lucide-react";
-
-const COUNTRY_CODES = [
-  { code: "+91", flag: "🇮🇳", name: "India", digits: 10 },
-  { code: "+1", flag: "🇺🇸", name: "USA", digits: 10 },
-  { code: "+44", flag: "🇬🇧", name: "UK", digits: 10 },
-  { code: "+971", flag: "🇦🇪", name: "UAE", digits: 9 },
-  { code: "+966", flag: "🇸🇦", name: "Saudi Arabia", digits: 9 },
-  { code: "+65", flag: "🇸🇬", name: "Singapore", digits: 8 },
-  { code: "+61", flag: "🇦🇺", name: "Australia", digits: 9 },
-  { code: "+977", flag: "🇳🇵", name: "Nepal", digits: 10 },
-  { code: "+880", flag: "🇧🇩", name: "Bangladesh", digits: 10 },
-];
+import { Loader2, Phone, X } from "lucide-react";
+import { PhoneInput, parsePhone, COUNTRY_CODES } from "@/components/ui/phone-input";
 
 interface EditPhoneDialogProps {
   open: boolean;
@@ -24,38 +13,25 @@ interface EditPhoneDialogProps {
   currentPhone: string | null;
 }
 
-const parseExistingPhone = (phone: string | null) => {
-  if (!phone) return { countryCode: "+91", number: "" };
-  const trimmed = phone.replace(/[\s\-]/g, "");
-  const match = COUNTRY_CODES.find((c) => trimmed.startsWith(c.code));
-  if (match) return { countryCode: match.code, number: trimmed.slice(match.code.length) };
-  // If starts with 0, strip it
-  if (trimmed.startsWith("0")) return { countryCode: "+91", number: trimmed.slice(1) };
-  return { countryCode: "+91", number: trimmed };
-};
-
 const EditPhoneDialog = ({ open, onClose, onSuccess, userId, userName, currentPhone }: EditPhoneDialogProps) => {
-  const parsed = parseExistingPhone(currentPhone);
-  const [countryCode, setCountryCode] = useState(parsed.countryCode);
-  const [number, setNumber] = useState(parsed.number);
+  const [fullPhone, setFullPhone] = useState(currentPhone || "");
   const [saving, setSaving] = useState(false);
-  const [dropdownOpen, setDropdownOpen] = useState(false);
   const { toast } = useToast();
 
   if (!open) return null;
 
-  const selectedCountry = COUNTRY_CODES.find((c) => c.code === countryCode) || COUNTRY_CODES[0];
-  const digitsOnly = number.replace(/\D/g, "");
-  const isValid = digitsOnly.length === selectedCountry.digits;
+  const parsed = parsePhone(fullPhone);
+  const country = COUNTRY_CODES.find((c) => c.code === parsed.countryCode) || COUNTRY_CODES[0];
+  const digitsOnly = parsed.number.replace(/\D/g, "");
+  const isValid = digitsOnly.length === country.digits;
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isValid) {
-      toast({ title: "Invalid number", description: `Enter exactly ${selectedCountry.digits} digits for ${selectedCountry.name}.`, variant: "destructive" });
+      toast({ title: "Invalid number", description: `Enter exactly ${country.digits} digits for ${country.name}.`, variant: "destructive" });
       return;
     }
 
-    const fullPhone = `${countryCode}${digitsOnly}`;
     setSaving(true);
     try {
       const { error } = await supabase
@@ -64,7 +40,7 @@ const EditPhoneDialog = ({ open, onClose, onSuccess, userId, userName, currentPh
         .eq("user_id", userId);
       if (error) throw error;
 
-      toast({ title: "Phone updated", description: `Mobile number set to ${countryCode} ${digitsOnly} for ${userName}.` });
+      toast({ title: "Phone updated", description: `Mobile number set to ${fullPhone} for ${userName}.` });
       onSuccess();
       onClose();
     } catch (err: any) {
@@ -97,54 +73,9 @@ const EditPhoneDialog = ({ open, onClose, onSuccess, userId, userName, currentPh
             <label className="block text-xs font-medium text-muted-foreground mb-1.5">
               Mobile Number <span className="text-destructive">*</span>
             </label>
-            <div className="flex gap-2">
-              {/* Country Code Dropdown */}
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setDropdownOpen(!dropdownOpen)}
-                  className="flex items-center gap-1.5 rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground hover:bg-muted transition-colors min-w-[100px]"
-                >
-                  <span className="text-base">{selectedCountry.flag}</span>
-                  <span className="font-medium">{selectedCountry.code}</span>
-                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground ml-auto" />
-                </button>
-
-                {dropdownOpen && (
-                  <>
-                    <div className="fixed inset-0 z-10" onClick={() => setDropdownOpen(false)} />
-                    <div className="absolute top-full left-0 mt-1 z-20 w-56 rounded-xl border border-border bg-card card-shadow overflow-hidden">
-                      {COUNTRY_CODES.map((c) => (
-                        <button
-                          key={c.code}
-                          type="button"
-                          onClick={() => { setCountryCode(c.code); setDropdownOpen(false); }}
-                          className={`flex items-center gap-3 w-full px-3 py-2.5 text-sm hover:bg-muted transition-colors text-left ${
-                            c.code === countryCode ? "bg-primary/10 text-primary" : "text-foreground"
-                          }`}
-                        >
-                          <span className="text-base">{c.flag}</span>
-                          <span className="flex-1">{c.name}</span>
-                          <span className="text-muted-foreground font-mono text-xs">{c.code}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Number Input */}
-              <input
-                type="tel"
-                required
-                value={number}
-                onChange={(e) => setNumber(e.target.value.replace(/\D/g, "").slice(0, selectedCountry.digits))}
-                placeholder={"0".repeat(selectedCountry.digits)}
-                className="flex-1 rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 font-mono tracking-wider"
-              />
-            </div>
+            <PhoneInput value={fullPhone} onChange={setFullPhone} required />
             <p className="text-[10px] text-muted-foreground mt-1.5">
-              {digitsOnly.length}/{selectedCountry.digits} digits
+              {digitsOnly.length}/{country.digits} digits
               {isValid && <span className="text-primary ml-1">✓ Valid</span>}
             </p>
           </div>
