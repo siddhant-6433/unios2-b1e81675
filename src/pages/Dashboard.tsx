@@ -86,7 +86,7 @@ const SuperAdminDashboard = () => {
           { label: "12", sub: "Fee Reminders", bg: "bg-pastel-red" },
           { label: "8", sub: "Today's Classes", bg: "bg-pastel-green" },
         ].map((item) => (
-          <div key={item.sub} className={`rounded-xl ${item.bg} p-5 flex items-center gap-4 cursor-pointer transition-transform hover:scale-[1.02]`}>
+          <div key={item.sub} className={`rounded-2xl ${item.bg} border border-border/40 p-5 flex items-center gap-4 cursor-pointer transition-all duration-200 hover:scale-[1.02] hover:shadow-sm`}>
             <span className="text-3xl font-bold text-foreground/80">{item.label}</span>
             <span className="text-sm font-medium text-foreground/60">{item.sub}</span>
           </div>
