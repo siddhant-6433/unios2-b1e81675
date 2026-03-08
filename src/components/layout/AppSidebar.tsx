@@ -12,21 +12,40 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 
-const mainMenu = [
+type AppRole = 
+  | "super_admin" | "campus_admin" | "principal" | "admission_head"
+  | "counsellor" | "accountant" | "faculty" | "teacher"
+  | "data_entry" | "office_assistant" | "hostel_warden" | "student" | "parent";
+
+type MenuItem = { title: string; url: string; icon: any; roles?: AppRole[] };
+
+const allRolesExcept = (...excluded: AppRole[]): AppRole[] => {
+  const all: AppRole[] = [
+    "super_admin","campus_admin","principal","admission_head","counsellor",
+    "accountant","faculty","teacher","data_entry","office_assistant",
+    "hostel_warden","student","parent",
+  ];
+  return all.filter(r => !excluded.includes(r));
+};
+
+const staffRoles = allRolesExcept("student", "parent");
+const adminRoles: AppRole[] = ["super_admin", "campus_admin", "principal"];
+
+const mainMenu: MenuItem[] = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
-  { title: "Admissions", url: "/admissions", icon: GraduationCap },
-  { title: "Students", url: "/students", icon: Users },
-  { title: "Attendance", url: "/attendance", icon: ClipboardCheck },
-  { title: "Finance", url: "/finance", icon: IndianRupee },
-  { title: "Exams", url: "/exams", icon: BookOpen },
+  { title: "Admissions", url: "/admissions", icon: GraduationCap, roles: [...adminRoles, "admission_head", "counsellor", "data_entry"] },
+  { title: "Students", url: "/students", icon: Users, roles: staffRoles },
+  { title: "Attendance", url: "/attendance", icon: ClipboardCheck, roles: [...staffRoles, "student", "parent"] },
+  { title: "Finance", url: "/finance", icon: IndianRupee, roles: [...adminRoles, "accountant"] },
+  { title: "Exams", url: "/exams", icon: BookOpen, roles: [...staffRoles, "student", "parent"] },
 ];
 
-const managementMenu = [
-  { title: "Campuses", url: "/campuses", icon: Building2 },
-  { title: "Courses", url: "/courses", icon: School },
-  { title: "Reports", url: "/reports", icon: BarChart3 },
-  { title: "Documents", url: "/documents", icon: FileText },
-  { title: "User Management", url: "/admin", icon: ShieldCheck, adminOnly: true },
+const managementMenu: MenuItem[] = [
+  { title: "Campuses", url: "/campuses", icon: Building2, roles: adminRoles },
+  { title: "Courses", url: "/courses", icon: School, roles: [...adminRoles, "faculty", "teacher"] },
+  { title: "Reports", url: "/reports", icon: BarChart3, roles: adminRoles },
+  { title: "Documents", url: "/documents", icon: FileText, roles: staffRoles },
+  { title: "User Management", url: "/admin", icon: ShieldCheck, roles: ["super_admin"] },
 ];
 
 const roleLabels: Record<string, string> = {
