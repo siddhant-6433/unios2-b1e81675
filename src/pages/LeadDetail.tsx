@@ -169,7 +169,18 @@ const LeadDetail = () => {
             <div className="flex flex-wrap gap-2 shrink-0">
               <Button size="sm" variant="outline" className="gap-1.5"><Phone className="h-3.5 w-3.5" />Call</Button>
               <Button size="sm" variant="outline" className="gap-1.5"><MessageSquare className="h-3.5 w-3.5" />WhatsApp</Button>
-              <Button size="sm" variant="outline" className="gap-1.5"><Mail className="h-3.5 w-3.5" />Email</Button>
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={async () => {
+                setAiCalling(true);
+                const { data, error } = await supabase.functions.invoke("ai-first-call", { body: { lead_id: id } });
+                setAiCalling(false);
+                if (error) toast({ title: "AI Call Error", description: error.message, variant: "destructive" });
+                else { toast({ title: "AI Call Complete" }); fetchAll(); }
+              }} disabled={aiCalling}>
+                {aiCalling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bot className="h-3.5 w-3.5" />}AI Call
+              </Button>
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setShowInterview(true)}><UserCheck className="h-3.5 w-3.5" />Interview</Button>
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setShowOfferLetter(true)}><FileText className="h-3.5 w-3.5" />Offer</Button>
+              <Button size="sm" className="gap-1.5" onClick={() => setShowConvert(true)}><ArrowRight className="h-3.5 w-3.5" />Convert</Button>
             </div>
           </div>
 
