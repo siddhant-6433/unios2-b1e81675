@@ -73,6 +73,85 @@ export const mockAttendance: AttendanceRecord[] = [
   { id: "S008", studentName: "Rajesh Kumar", admissionNo: "AN2025120", status: "Absent" },
 ];
 
+export interface StudentProfile {
+  id: string;
+  name: string;
+  admissionNo: string;
+  course: string;
+  batch: string;
+  campus: string;
+  department: string;
+  session: string;
+  dob: string;
+  gender: string;
+  phone: string;
+  email: string;
+  fatherName: string;
+  motherName: string;
+  address: string;
+  bloodGroup: string;
+  photo: string;
+  status: "Active" | "Inactive";
+  admissionDate: string;
+}
+
+export interface ExamRecord {
+  id: string;
+  admissionNo: string;
+  subject: string;
+  examType: string;
+  maxMarks: number;
+  obtained: number;
+  grade: string;
+  date: string;
+}
+
+export interface AttendanceHistory {
+  id: string;
+  admissionNo: string;
+  date: string;
+  status: "Present" | "Absent" | "Late";
+  subject: string;
+}
+
+export const mockStudentProfiles: StudentProfile[] = [
+  { id: "SP001", name: "Meera Iyer", admissionNo: "AN2026001", course: "B.Tech CSE", batch: "B.Tech CSE - Sem 2 - A", campus: "Main Campus", department: "Computer Science", session: "2025-26", dob: "2006-04-15", gender: "Female", phone: "9876543217", email: "meera@email.com", fatherName: "Suresh Iyer", motherName: "Lakshmi Iyer", address: "42 MG Road, Bangalore", bloodGroup: "B+", photo: "", status: "Active", admissionDate: "2025-07-01" },
+  { id: "SP002", name: "Aarav Singh", admissionNo: "AN2025045", course: "MBA", batch: "MBA - Sem 2 - A", campus: "City Campus", department: "Management", session: "2025-26", dob: "2003-08-22", gender: "Male", phone: "9876543218", email: "aarav@email.com", fatherName: "Rajesh Singh", motherName: "Sunita Singh", address: "15 Nehru Nagar, Delhi", bloodGroup: "O+", photo: "", status: "Active", admissionDate: "2025-07-05" },
+  { id: "SP003", name: "Priya Verma", admissionNo: "AN2025078", course: "BBA", batch: "BBA - Sem 2 - A", campus: "City Campus", department: "Management", session: "2025-26", dob: "2005-01-10", gender: "Female", phone: "9876543219", email: "priya@email.com", fatherName: "Anil Verma", motherName: "Rekha Verma", address: "8 Jubilee Hills, Hyderabad", bloodGroup: "A+", photo: "", status: "Active", admissionDate: "2025-07-03" },
+  { id: "SP004", name: "Rohan Das", admissionNo: "PAN2026007", course: "B.Tech ME", batch: "B.Tech ME - Sem 2 - A", campus: "Main Campus", department: "Mechanical Engineering", session: "2025-26", dob: "2005-11-30", gender: "Male", phone: "9876543216", email: "rohan@email.com", fatherName: "Bikash Das", motherName: "Anima Das", address: "23 Salt Lake, Kolkata", bloodGroup: "AB+", photo: "", status: "Active", admissionDate: "2025-07-02" },
+  { id: "SP005", name: "Neha Kapoor", admissionNo: "AN2025102", course: "B.Tech CSE", batch: "B.Tech CSE - Sem 2 - B", campus: "Main Campus", department: "Computer Science", session: "2025-26", dob: "2005-06-18", gender: "Female", phone: "9876543220", email: "neha@email.com", fatherName: "Vikram Kapoor", motherName: "Shalini Kapoor", address: "56 Koramangala, Bangalore", bloodGroup: "O-", photo: "", status: "Active", admissionDate: "2025-07-04" },
+  { id: "SP006", name: "Suresh Babu", admissionNo: "AN2025110", course: "B.Tech ECE", batch: "B.Tech ECE - Sem 2 - A", campus: "Main Campus", department: "Electronics", session: "2025-26", dob: "2005-03-25", gender: "Male", phone: "9876543221", email: "suresh@email.com", fatherName: "Ramesh Babu", motherName: "Geetha Babu", address: "12 Anna Nagar, Chennai", bloodGroup: "B-", photo: "", status: "Active", admissionDate: "2025-07-06" },
+];
+
+export const mockExamRecords: ExamRecord[] = [
+  { id: "E001", admissionNo: "AN2026001", subject: "Data Structures", examType: "Mid-Term", maxMarks: 50, obtained: 42, grade: "A", date: "2026-01-15" },
+  { id: "E002", admissionNo: "AN2026001", subject: "Mathematics II", examType: "Mid-Term", maxMarks: 50, obtained: 38, grade: "B+", date: "2026-01-16" },
+  { id: "E003", admissionNo: "AN2026001", subject: "Digital Electronics", examType: "Mid-Term", maxMarks: 50, obtained: 45, grade: "A+", date: "2026-01-17" },
+  { id: "E004", admissionNo: "AN2026001", subject: "English", examType: "Mid-Term", maxMarks: 50, obtained: 35, grade: "B", date: "2026-01-18" },
+  { id: "E005", admissionNo: "AN2025045", subject: "Marketing Management", examType: "Mid-Term", maxMarks: 100, obtained: 72, grade: "B+", date: "2026-01-20" },
+  { id: "E006", admissionNo: "AN2025045", subject: "Financial Accounting", examType: "Mid-Term", maxMarks: 100, obtained: 65, grade: "B", date: "2026-01-21" },
+  { id: "E007", admissionNo: "AN2025078", subject: "Business Communication", examType: "Mid-Term", maxMarks: 100, obtained: 88, grade: "A", date: "2026-01-20" },
+  { id: "E008", admissionNo: "PAN2026007", subject: "Thermodynamics", examType: "Mid-Term", maxMarks: 50, obtained: 30, grade: "B-", date: "2026-01-15" },
+];
+
+export const mockAttendanceHistory: AttendanceHistory[] = [
+  { id: "AH001", admissionNo: "AN2026001", date: "2026-03-01", status: "Present", subject: "Data Structures" },
+  { id: "AH002", admissionNo: "AN2026001", date: "2026-03-01", status: "Present", subject: "Mathematics II" },
+  { id: "AH003", admissionNo: "AN2026001", date: "2026-03-02", status: "Absent", subject: "Digital Electronics" },
+  { id: "AH004", admissionNo: "AN2026001", date: "2026-03-02", status: "Present", subject: "English" },
+  { id: "AH005", admissionNo: "AN2026001", date: "2026-03-03", status: "Present", subject: "Data Structures" },
+  { id: "AH006", admissionNo: "AN2026001", date: "2026-03-03", status: "Late", subject: "Mathematics II" },
+  { id: "AH007", admissionNo: "AN2026001", date: "2026-03-04", status: "Present", subject: "Digital Electronics" },
+  { id: "AH008", admissionNo: "AN2026001", date: "2026-03-05", status: "Present", subject: "Data Structures" },
+  { id: "AH009", admissionNo: "AN2026001", date: "2026-03-05", status: "Present", subject: "English" },
+  { id: "AH010", admissionNo: "AN2026001", date: "2026-03-06", status: "Absent", subject: "Mathematics II" },
+  { id: "AH011", admissionNo: "AN2025045", date: "2026-03-01", status: "Present", subject: "Marketing Management" },
+  { id: "AH012", admissionNo: "AN2025045", date: "2026-03-02", status: "Late", subject: "Financial Accounting" },
+  { id: "AH013", admissionNo: "AN2025078", date: "2026-03-01", status: "Present", subject: "Business Communication" },
+  { id: "AH014", admissionNo: "PAN2026007", date: "2026-03-01", status: "Present", subject: "Thermodynamics" },
+  { id: "AH015", admissionNo: "PAN2026007", date: "2026-03-02", status: "Absent", subject: "Thermodynamics" },
+];
+
 export const dashboardStats = {
   superAdmin: {
     totalCampuses: 3,
