@@ -280,7 +280,7 @@ const Login = () => {
             ) : (
               <form onSubmit={handleWhatsAppSendOtp} className="space-y-4">
                 <div className="relative">
-                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <MessageCircle className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <input
                     type="tel"
                     placeholder="+91 98765 43210"
