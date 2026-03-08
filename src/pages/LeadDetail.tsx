@@ -12,6 +12,7 @@ import { LeadTimeline } from "@/components/leads/LeadTimeline";
 import { InterviewScoringDialog } from "@/components/admissions/InterviewScoringDialog";
 import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
 import { ConvertToStudentDialog } from "@/components/admissions/ConvertToStudentDialog";
+import { SendWhatsAppDialog } from "@/components/leads/SendWhatsAppDialog";
 
 const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", application_in_progress: "Application In Progress", application_submitted: "Application Submitted",
@@ -38,6 +39,7 @@ const LeadDetail = () => {
   const [showInterview, setShowInterview] = useState(false);
   const [showOfferLetter, setShowOfferLetter] = useState(false);
   const [showConvert, setShowConvert] = useState(false);
+  const [showWhatsApp, setShowWhatsApp] = useState(false);
   const [aiCalling, setAiCalling] = useState(false);
   const [counsellorName, setCounsellorName] = useState<string | undefined>();
   const [courseName, setCourseName] = useState<string | undefined>();
@@ -167,10 +169,7 @@ const LeadDetail = () => {
             onCall={() => {
               if (lead.phone) window.open(`tel:${lead.phone}`);
             }}
-            onWhatsApp={() => {
-              const phone = lead.phone?.replace(/[^0-9]/g, "");
-              if (phone) window.open(`https://wa.me/${phone}`);
-            }}
+            onWhatsApp={() => setShowWhatsApp(true)}
             onScheduleVisit={() => {
               // Scroll to follow-ups tab
               toast({ title: "Use the Follow-ups tab on the right to schedule a visit" });
@@ -221,6 +220,14 @@ const LeadDetail = () => {
       <OfferLetterDialog open={showOfferLetter} onOpenChange={setShowOfferLetter}
         leadId={lead.id} leadName={lead.name} courseId={lead.course_id} campusId={lead.campus_id} onSuccess={fetchAll} />
       <ConvertToStudentDialog open={showConvert} onOpenChange={setShowConvert} lead={lead} onSuccess={fetchAll} />
+      <SendWhatsAppDialog
+        open={showWhatsApp}
+        onOpenChange={setShowWhatsApp}
+        lead={{ id: lead.id, name: lead.name, phone: lead.phone, application_id: lead.application_id }}
+        courseName={courseName}
+        campusName={campusName}
+        onSuccess={fetchAll}
+      />
     </div>
   );
 };
