@@ -160,6 +160,13 @@ const AdminPanel = () => {
         </div>
         <div className="flex items-center gap-3">
           <button
+            onClick={() => setBulkOpen(true)}
+            className="flex items-center gap-2 rounded-xl border border-input bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            Bulk Import
+          </button>
+          <button
             onClick={() => setInviteOpen(true)}
             className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
           >
