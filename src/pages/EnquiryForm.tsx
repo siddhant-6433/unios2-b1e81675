@@ -240,7 +240,7 @@ const EnquiryForm = () => {
                       {PROGRAMS.map((p) => (
                         <optgroup key={p.program} label={p.program}>
                           {p.courses.map((c) => (
-                            <option key={`${p.program}-${c.name}`} value={c.name}>
+                            <option key={`${p.program}-${c.name}`} value={`${p.program}||${c.name}`}>
                               {c.name}
                             </option>
                           ))}
