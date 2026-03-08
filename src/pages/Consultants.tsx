@@ -9,6 +9,7 @@ import {
   Plus, Search, Loader2, Users, Building2, Phone, Mail,
   IndianRupee, MapPin, MoreHorizontal, Edit, ChevronRight
 } from "lucide-react";
+import { PhoneInput } from "@/components/ui/phone-input";
 
 const STAGES = ["new", "contacted", "onboarded", "active", "inactive"] as const;
 const stageLabels: Record<string, string> = { new: "New", contacted: "Contacted", onboarded: "Onboarded", active: "Active", inactive: "Inactive" };
