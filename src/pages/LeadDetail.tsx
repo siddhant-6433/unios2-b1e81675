@@ -179,6 +179,7 @@ const LeadDetail = () => {
         lead_id: id, user_id: profileId, type: "visit",
         description: `Campus visit scheduled for ${new Date(data.visit_date).toLocaleDateString("en-IN")}${campusLabel ? ` at ${campusLabel}` : ""}`,
       });
+      await autoAdvanceStage("visit_scheduled");
       await fetchAll();
     }
   };
