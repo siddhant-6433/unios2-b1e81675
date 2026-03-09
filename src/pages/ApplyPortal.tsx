@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   GraduationCap, FileText, Upload, User, Phone, Mail, Calendar,
   CheckCircle, ArrowRight, ArrowLeft, Loader2, BookOpen, MapPin,
@@ -71,14 +71,12 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (lead: any) => void })
     }
     setLoading(true);
     try {
-      // Verify OTP
       const { data: verifyData, error: verifyErr } = await supabase.functions.invoke("whatsapp-otp", {
         body: { phone, otp, action: "verify" },
       });
       if (verifyErr) throw verifyErr;
       if (!verifyData?.verified) throw new Error("Invalid or expired OTP");
 
-      // Find lead by phone
       const { data: lead, error: leadErr } = await supabase
         .from("leads")
         .select("*")
@@ -122,7 +120,6 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (lead: any) => void })
         return;
       }
 
-      // Still need OTP verification for the lead's phone
       setPhone(lead.phone);
       setLoginMode("phone");
       toast({ title: "Found! Verify your phone to continue." });
@@ -223,6 +220,186 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (lead: any) => void })
   );
 }
 
+// ─── Intake Cycle & Course Selection (Step 0 before application) ───
+function IntakeCoursePicker({
+  lead,
+  onSaved,
+}: {
+  lead: any;
+  onSaved: (updatedLead: any) => void;
+}) {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const [sessions, setSessions] = useState<{ id: string; name: string }[]>([]);
+  const [courses, setCourses] = useState<any[]>([]);
+  const [selectedSession, setSelectedSession] = useState(lead.session_id || "");
+  const [selectedCourse, setSelectedCourse] = useState(lead.course_id || "");
+
+  useEffect(() => {
+    Promise.all([
+      supabase.from("admission_sessions").select("id, name").eq("is_active", true).order("name"),
+      supabase.from("courses").select(`
+        id, name, code, department_id,
+        departments!inner (
+          id, name, institution_id,
+          institutions!inner (
+            id, name, campus_id,
+            campuses!inner ( id, name )
+          )
+        )
+      `).order("name"),
+    ]).then(([sessRes, courseRes]) => {
+      if (sessRes.data) setSessions(sessRes.data);
+      if (courseRes.data) setCourses(courseRes.data);
+    });
+  }, []);
+
+  // Group courses by campus → department
+  const coursesByGroup = useMemo(() => {
+    const map = new Map<string, { label: string; courses: { id: string; name: string }[] }>();
+    courses.forEach((c: any) => {
+      const campusName = c.departments?.institutions?.campuses?.name || "Unknown";
+      const deptName = c.departments?.name || "Unknown";
+      const key = `${campusName} — ${deptName}`;
+      if (!map.has(key)) map.set(key, { label: key, courses: [] });
+      map.get(key)!.courses.push({ id: c.id, name: c.name });
+    });
+    return Array.from(map.values());
+  }, [courses]);
+
+  // Derive campus_id from selected course
+  const selectedCampusId = useMemo(() => {
+    if (!selectedCourse) return null;
+    const match = courses.find((c: any) => c.id === selectedCourse);
+    return match?.departments?.institutions?.campus_id || null;
+  }, [selectedCourse, courses]);
+
+  const handleSave = async () => {
+    if (!selectedSession) {
+      toast({ title: "Please select an intake cycle", variant: "destructive" });
+      return;
+    }
+    if (!selectedCourse) {
+      toast({ title: "Please select a course", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+
+    // Generate application_id if not exists
+    const appId = lead.application_id || `APP-${new Date().getFullYear().toString().slice(-2)}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+
+    const updateData: any = {
+      course_id: selectedCourse,
+      campus_id: selectedCampusId,
+      application_id: appId,
+    };
+
+    // Only update stage if still new_lead
+    if (lead.stage === "new_lead") {
+      updateData.stage = "application_in_progress";
+    }
+
+    const { error } = await supabase
+      .from("leads")
+      .update(updateData)
+      .eq("id", lead.id);
+
+    if (error) {
+      toast({ title: "Save failed", description: error.message, variant: "destructive" });
+      setSaving(false);
+      return;
+    }
+
+    // Log activity
+    await supabase.from("lead_activities").insert({
+      lead_id: lead.id,
+      type: "application_started",
+      description: `Application started for session: ${sessions.find(s => s.id === selectedSession)?.name || selectedSession}`,
+      ...(lead.stage === "new_lead" ? { old_stage: "new_lead" as any, new_stage: "application_in_progress" as any } : {}),
+    });
+
+    toast({ title: "Course & intake selected" });
+    setSaving(false);
+    onSaved({
+      ...lead,
+      ...updateData,
+      application_id: appId,
+      stage: updateData.stage || lead.stage,
+    });
+  };
+
+  const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
+
+  return (
+    <div className="min-h-screen bg-background">
+      <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-30">
+        <div className="max-w-3xl mx-auto px-6 py-4 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary shadow-sm">
+            <GraduationCap className="h-5 w-5 text-primary-foreground" />
+          </div>
+          <div>
+            <span className="text-sm font-bold text-foreground tracking-tight">NIMT UniOs</span>
+            <span className="text-[11px] text-muted-foreground block">Application Portal</span>
+          </div>
+        </div>
+      </header>
+
+      <div className="max-w-3xl mx-auto px-6 py-8">
+        <div className="mb-6">
+          <h1 className="text-xl font-bold text-foreground">Welcome, {lead.name}</h1>
+          <p className="text-sm text-muted-foreground">Select your intake cycle and preferred course to begin your application.</p>
+        </div>
+
+        <Card className="border-border/60 shadow-none">
+          <CardContent className="p-6 space-y-5">
+            <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-muted-foreground" /> Intake Cycle & Course
+            </h2>
+
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Intake Cycle (Session) *</label>
+              <select value={selectedSession} onChange={e => setSelectedSession(e.target.value)} className={inputCls}>
+                <option value="">Select intake cycle</option>
+                {sessions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Preferred Course *</label>
+              <select value={selectedCourse} onChange={e => setSelectedCourse(e.target.value)} className={inputCls}>
+                <option value="">Select course</option>
+                {coursesByGroup.map(g => (
+                  <optgroup key={g.label} label={g.label}>
+                    {g.courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+
+            {selectedCourse && selectedCampusId && (
+              <div className="flex items-center gap-2 p-3 rounded-xl bg-muted/50">
+                <MapPin className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">
+                  Campus: <span className="font-medium text-foreground">
+                    {courses.find((c: any) => c.id === selectedCourse)?.departments?.institutions?.campuses?.name || "—"}
+                  </span>
+                </span>
+              </div>
+            )}
+
+            <div className="flex justify-end">
+              <Button onClick={handleSave} disabled={saving || !selectedSession || !selectedCourse} className="gap-2">
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+                Continue to Application
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Application Form ───
 const ApplyPortal = () => {
   const { toast } = useToast();
@@ -231,6 +408,7 @@ const ApplyPortal = () => {
   const [saving, setSaving] = useState(false);
   const [progress, setProgress] = useState<AppProgress>(DEFAULT_PROGRESS);
   const [submitted, setSubmitted] = useState(false);
+  const [needsIntake, setNeedsIntake] = useState(false);
 
   // Form data
   const [personal, setPersonal] = useState({
@@ -257,7 +435,17 @@ const ApplyPortal = () => {
     // Check if already submitted
     if (lead.stage === "application_submitted") {
       setSubmitted(true);
+      setNeedsIntake(false);
+      return;
     }
+
+    // If no course selected yet, show intake picker first
+    if (!lead.course_id) {
+      setNeedsIntake(true);
+      return;
+    }
+
+    setNeedsIntake(false);
 
     // Move to first incomplete step
     const steps = ["personal_details", "education_details", "application_fee_paid", "documents_uploaded"] as const;
@@ -265,11 +453,15 @@ const ApplyPortal = () => {
     setStep(firstIncomplete >= 0 ? firstIncomplete : 0);
   }, [lead]);
 
+  const handleIntakeSaved = (updatedLead: any) => {
+    setLead(updatedLead);
+    setNeedsIntake(false);
+  };
+
   const updateProgress = async (key: keyof AppProgress, value: boolean) => {
     const newProgress = { ...progress, [key]: value };
     setProgress(newProgress);
 
-    // Determine new stage
     const allDone = Object.values(newProgress).every(Boolean);
     const newStage = allDone ? "application_submitted" : "application_in_progress";
 
@@ -285,7 +477,6 @@ const ApplyPortal = () => {
       console.error("Progress save error:", error);
     }
 
-    // Log activity
     await supabase.from("lead_activities").insert({
       lead_id: lead.id,
       type: "application_progress",
@@ -326,7 +517,6 @@ const ApplyPortal = () => {
   const saveEducationDetails = async () => {
     setSaving(true);
     try {
-      // Store education details in notes (since we don't have dedicated columns)
       const eduNote = `Previous School: ${education.previous_school}\nClass: ${education.previous_class}\nBoard: ${education.board}\nPercentage: ${education.percentage}%\nPassing Year: ${education.passing_year}`;
       
       await supabase.from("lead_notes").insert({
@@ -345,7 +535,6 @@ const ApplyPortal = () => {
   };
 
   const markFeePaid = async () => {
-    // This will be replaced with actual Stripe payment
     setSaving(true);
     try {
       await updateProgress("application_fee_paid", true);
@@ -373,6 +562,11 @@ const ApplyPortal = () => {
   // ── Not logged in ──
   if (!lead) {
     return <OtpLogin onAuthenticated={setLead} />;
+  }
+
+  // ── Needs intake cycle & course selection ──
+  if (needsIntake) {
+    return <IntakeCoursePicker lead={lead} onSaved={handleIntakeSaved} />;
   }
 
   // ── Application submitted ──
@@ -404,6 +598,7 @@ const ApplyPortal = () => {
   }
 
   const completedCount = Object.values(progress).filter(Boolean).length;
+  const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 
   return (
     <div className="min-h-screen bg-background">
@@ -435,6 +630,11 @@ const ApplyPortal = () => {
         <div className="mb-6">
           <h1 className="text-xl font-bold text-foreground">Welcome, {lead.name}</h1>
           <p className="text-sm text-muted-foreground">Complete all steps below to submit your application.</p>
+          {lead.application_id && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Application ID: <span className="font-mono font-semibold text-primary">{lead.application_id}</span>
+            </p>
+          )}
         </div>
 
         {/* Step Progress */}
@@ -479,7 +679,7 @@ const ApplyPortal = () => {
                     required
                     value={personal.name}
                     onChange={(e) => setPersonal({ ...personal, name: e.target.value })}
-                    className="w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                    className={inputCls}
                   />
                 </div>
                 <div>
@@ -488,7 +688,7 @@ const ApplyPortal = () => {
                     type="email"
                     value={personal.email}
                     onChange={(e) => setPersonal({ ...personal, email: e.target.value })}
-                    className="w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                    className={inputCls}
                   />
                 </div>
                 <div>
@@ -497,7 +697,7 @@ const ApplyPortal = () => {
                     type="date"
                     value={personal.dob}
                     onChange={(e) => setPersonal({ ...personal, dob: e.target.value })}
-                    className="w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                    className={inputCls}
                   />
                 </div>
                 <div>
@@ -505,7 +705,7 @@ const ApplyPortal = () => {
                   <input
                     value={personal.guardian_name}
                     onChange={(e) => setPersonal({ ...personal, guardian_name: e.target.value })}
-                    className="w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                    className={inputCls}
                   />
                 </div>
                 <div className="min-w-0">
@@ -519,7 +719,7 @@ const ApplyPortal = () => {
                   value={personal.address}
                   onChange={(e) => setPersonal({ ...personal, address: e.target.value })}
                   rows={2}
-                  className="w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 resize-none"
+                  className={`${inputCls} resize-none`}
                 />
               </div>
               <div className="flex justify-end">
@@ -546,7 +746,7 @@ const ApplyPortal = () => {
                     value={education.previous_school}
                     onChange={(e) => setEducation({ ...education, previous_school: e.target.value })}
                     placeholder="Name of last institution"
-                    className="w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                    className={`${inputCls} placeholder:text-muted-foreground`}
                   />
                 </div>
                 <div>
@@ -555,7 +755,7 @@ const ApplyPortal = () => {
                     value={education.previous_class}
                     onChange={(e) => setEducation({ ...education, previous_class: e.target.value })}
                     placeholder="e.g. 12th, B.Sc"
-                    className="w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                    className={`${inputCls} placeholder:text-muted-foreground`}
                   />
                 </div>
                 <div>
@@ -564,7 +764,7 @@ const ApplyPortal = () => {
                     value={education.board}
                     onChange={(e) => setEducation({ ...education, board: e.target.value })}
                     placeholder="e.g. CBSE, AKTU"
-                    className="w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                    className={`${inputCls} placeholder:text-muted-foreground`}
                   />
                 </div>
                 <div>
@@ -573,7 +773,7 @@ const ApplyPortal = () => {
                     value={education.percentage}
                     onChange={(e) => setEducation({ ...education, percentage: e.target.value })}
                     placeholder="e.g. 85 or 8.5"
-                    className="w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                    className={`${inputCls} placeholder:text-muted-foreground`}
                   />
                 </div>
                 <div>
@@ -582,7 +782,7 @@ const ApplyPortal = () => {
                     value={education.passing_year}
                     onChange={(e) => setEducation({ ...education, passing_year: e.target.value })}
                     placeholder="e.g. 2025"
-                    className="w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                    className={`${inputCls} placeholder:text-muted-foreground`}
                   />
                 </div>
               </div>

@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   Users, IndianRupee, AlertTriangle, GraduationCap, Building2,
   ClipboardCheck, BookOpen, CalendarDays, Bell, TrendingUp,
-  ArrowUpRight, ChevronRight, Phone, MessageSquare, MoreHorizontal, Loader2
+  ArrowUpRight, ChevronRight, Phone, MessageSquare, MoreHorizontal, Loader2, FileText
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -12,15 +12,18 @@ import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 
 const STAGE_LABELS: Record<string, string> = {
-  new_lead: "New Lead", ai_called: "AI Called", counsellor_call: "Counsellor Call",
+  new_lead: "New Lead", application_in_progress: "App In Progress", application_submitted: "App Submitted",
+  ai_called: "AI Called", counsellor_call: "Counsellor Call",
   visit_scheduled: "Visit Scheduled", interview: "Interview", offer_sent: "Offer Sent",
   token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted",
 };
 
 const funnelColors = [
-  "bg-primary", "bg-primary/85", "bg-primary/70",
-  "bg-chart-2", "bg-chart-2/80", "bg-chart-3",
-  "bg-chart-3/80", "bg-chart-5", "bg-chart-4",
+  "bg-primary", "bg-chart-2", "bg-chart-3",
+  "bg-primary/85", "bg-primary/70",
+  "bg-chart-2/80", "bg-chart-3/80",
+  "bg-chart-5", "bg-chart-5/80",
+  "bg-chart-4", "bg-chart-4/80",
 ];
 
 const stageBadgeClass: Record<string, string> = {
@@ -39,6 +42,8 @@ const SuperAdminDashboard = () => {
   const [studentCount, setStudentCount] = useState(0);
   const [funnel, setFunnel] = useState<{ stage: string; count: number }[]>([]);
   const [recentLeads, setRecentLeads] = useState<any[]>([]);
+  const [appInProgress, setAppInProgress] = useState(0);
+  const [appSubmitted, setAppSubmitted] = useState(0);
 
   useEffect(() => { fetchDashboard(); }, []);
 
@@ -46,19 +51,23 @@ const SuperAdminDashboard = () => {
     setLoading(true);
     const today = new Date().toISOString().slice(0, 10);
 
-    const [leadsRes, todayRes, admittedRes, studentsRes, recentRes] = await Promise.all([
+    const [leadsRes, todayRes, admittedRes, studentsRes, recentRes, appInProgRes, appSubmRes] = await Promise.all([
       supabase.from("leads").select("id", { count: "exact", head: true }),
       supabase.from("leads").select("id", { count: "exact", head: true }).gte("created_at", today),
       supabase.from("leads").select("id", { count: "exact", head: true }).eq("stage", "admitted"),
       supabase.from("students").select("id", { count: "exact", head: true }),
       supabase.from("leads").select("id, name, phone, stage, source, created_at, courses:course_id(name), campuses:campus_id(name)")
         .order("created_at", { ascending: false }).limit(5),
+      supabase.from("leads").select("id", { count: "exact", head: true }).eq("stage", "application_in_progress"),
+      supabase.from("leads").select("id", { count: "exact", head: true }).eq("stage", "application_submitted"),
     ]);
 
     setLeadCount(leadsRes.count || 0);
     setTodayLeads(todayRes.count || 0);
     setAdmittedCount(admittedRes.count || 0);
     setStudentCount(studentsRes.count || 0);
+    setAppInProgress(appInProgRes.count || 0);
+    setAppSubmitted(appSubmRes.count || 0);
 
     // Build funnel - query counts per stage
     const stages = Object.keys(STAGE_LABELS);
@@ -88,9 +97,9 @@ const SuperAdminDashboard = () => {
 
   const statCards = [
     { label: "Total Leads", value: String(leadCount), sub: `+${todayLeads} today`, subColor: "text-primary", icon: Users, iconBg: "bg-pastel-blue" },
-    { label: "Total Students", value: String(studentCount), sub: "Enrolled", subColor: "text-primary", icon: GraduationCap, iconBg: "bg-pastel-green" },
-    { label: "Conversions", value: String(admittedCount), sub: `${conversionRate}% rate`, subColor: "text-primary", icon: TrendingUp, iconBg: "bg-pastel-orange" },
-    { label: "Admitted", value: String(admittedCount), sub: "Total admitted", subColor: "text-primary", icon: CalendarDays, iconBg: "bg-pastel-purple" },
+    { label: "Applications In Progress", value: String(appInProgress), sub: "Filling application", subColor: "text-chart-2", icon: FileText, iconBg: "bg-pastel-orange" },
+    { label: "Applications Submitted", value: String(appSubmitted), sub: "Ready for review", subColor: "text-chart-3", icon: ClipboardCheck, iconBg: "bg-pastel-green" },
+    { label: "Admitted", value: String(admittedCount), sub: `${conversionRate}% conversion`, subColor: "text-primary", icon: GraduationCap, iconBg: "bg-pastel-purple" },
   ];
 
   return (
