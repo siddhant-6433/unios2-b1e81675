@@ -18,6 +18,7 @@ interface LeadInfoCardProps {
   counsellorName?: string;
   courseName?: string;
   campusName?: string;
+  campusCity?: string;
   coursesByDepartment?: { department: string; courses: { id: string; name: string }[] }[];
   getCampusesForCourse?: (courseId: string | null) => CampusOption[];
   onStageChange: (stage: string) => void;
@@ -25,7 +26,7 @@ interface LeadInfoCardProps {
 }
 
 export function LeadInfoCard({
-  lead, counsellorName, courseName, campusName,
+  lead, counsellorName, courseName, campusName, campusCity,
   coursesByDepartment, getCampusesForCourse,
   onStageChange, onFieldUpdate,
 }: LeadInfoCardProps) {
