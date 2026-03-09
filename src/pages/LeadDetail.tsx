@@ -227,10 +227,10 @@ const LeadDetail = () => {
               if (lead.phone) window.open(`tel:${lead.phone}`);
             }}
             onWhatsApp={() => setShowWhatsApp(true)}
-            onScheduleVisit={() => {
-              // Scroll to follow-ups tab
-              toast({ title: "Use the Follow-ups tab on the right to schedule a visit" });
-            }}
+            onScheduleVisit={() => scheduleVisit({
+              visit_date: new Date(Date.now() + 86400000).toISOString(),
+              campus_id: lead.campus_id || "",
+            })}
             onInterview={() => setShowInterview(true)}
             onOffer={() => setShowOfferLetter(true)}
             onConvert={() => setShowConvert(true)}
@@ -240,7 +240,9 @@ const LeadDetail = () => {
           />
           <NextFollowup
             followups={followups}
-            onSchedule={() => toast({ title: "Use the Follow-ups tab on the right" })}
+            onSchedule={addFollowup}
+            campuses={campuses}
+            onScheduleVisit={scheduleVisit}
           />
         </div>
 
