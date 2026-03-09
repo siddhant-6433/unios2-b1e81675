@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Phone, Mail, MapPin, FileText, Building2, User, Globe, UserCheck, Sparkles, Pencil, Check, X,
+  Phone, Mail, MapPin, FileText, Building2, User, Globe, UserCheck, Sparkles, Pencil, Check, X, GraduationCap,
 } from "lucide-react";
 import type { CourseOption, CampusOption } from "@/hooks/useCourseCampusLink";
 
@@ -43,7 +43,7 @@ export function LeadInfoCard({
       <CardContent className="p-0">
         {/* Avatar + Name */}
         <div className="flex items-center gap-4 p-5 pb-4">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-lg font-bold text-primary shrink-0">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-lg font-bold text-primary-foreground shrink-0">
             {initials}
           </div>
           <div className="min-w-0">
@@ -70,7 +70,8 @@ export function LeadInfoCard({
         <div className="border-t border-border divide-y divide-border">
           {/* Course — grouped dropdown */}
           <EditableSelectRow
-            icon={<FileText className="h-4 w-4" />}
+            icon={<GraduationCap className="h-4 w-4" />}
+            iconColor="bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400"
             label="Course"
             value={lead.course_id}
             displayValue={courseName || "Not set"}
@@ -79,7 +80,6 @@ export function LeadInfoCard({
             fieldLabel="Course"
             onSave={(field, value, label) => {
               onFieldUpdate?.(field, value, label);
-              // Auto-set campus if course maps to exactly one campus
               if (value && getCampusesForCourse) {
                 const campuses = getCampusesForCourse(value);
                 if (campuses.length === 1 && campuses[0].id !== lead.campus_id) {
@@ -92,6 +92,7 @@ export function LeadInfoCard({
           {/* Campus — filtered by course */}
           <EditableSelectRow
             icon={<Building2 className="h-4 w-4" />}
+            iconColor="bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400"
             label="Campus"
             value={lead.campus_id}
             displayValue={campusName || "Not set"}
@@ -103,13 +104,25 @@ export function LeadInfoCard({
           />
 
           {/* Email — inline text edit */}
-          <EditableInfoRow icon={<Mail className="h-4 w-4" />} label="Email" field="email" fieldLabel="Email"
-            value={lead.email || ""} onSave={onFieldUpdate} />
+          <EditableInfoRow
+            icon={<Mail className="h-4 w-4" />}
+            iconColor="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
+            label="Email" field="email" fieldLabel="Email"
+            value={lead.email || ""} onSave={onFieldUpdate}
+          />
 
-          <InfoRow icon={<Globe className="h-4 w-4" />} label="Source" value={lead.source?.replace(/_/g, " ")} className="capitalize" />
+          <InfoRow
+            icon={<Globe className="h-4 w-4" />}
+            iconColor="bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400"
+            label="Source" value={lead.source?.replace(/_/g, " ")} className="capitalize"
+          />
 
           {counsellorName && (
-            <InfoRow icon={<UserCheck className="h-4 w-4" />} label="Assigned to" value={counsellorName} />
+            <InfoRow
+              icon={<UserCheck className="h-4 w-4" />}
+              iconColor="bg-pink-100 text-pink-600 dark:bg-pink-900/30 dark:text-pink-400"
+              label="Assigned to" value={counsellorName}
+            />
           )}
 
           {/* Guardian — inline text edit */}
@@ -117,7 +130,9 @@ export function LeadInfoCard({
 
           {(lead.pre_admission_no || lead.admission_no) && (
             <div className="px-5 py-3 flex items-center gap-3">
-              <Sparkles className="h-4 w-4 text-muted-foreground shrink-0" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 shrink-0">
+                <Sparkles className="h-4 w-4 text-primary" />
+              </div>
               <div className="flex gap-2 flex-wrap">
                 {lead.pre_admission_no && <Badge variant="outline" className="text-xs text-primary border-primary/30">PAN: {lead.pre_admission_no}</Badge>}
                 {lead.admission_no && <Badge className="text-xs bg-primary text-primary-foreground">AN: {lead.admission_no}</Badge>}
@@ -130,7 +145,7 @@ export function LeadInfoCard({
           <div className="px-5 py-3 border-t border-border flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Interest Level</span>
             <Badge
-              className={`text-xs border-0 ${
+              className={`text-xs font-semibold border-0 ${
                 lead.interview_score >= 7 ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
                 : lead.interview_score >= 4 ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
                 : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
@@ -201,8 +216,8 @@ function EditableText({ field, label, value, onSave, className }: {
 
 // ── Editable info row (text input) ──────────────────────────
 
-function EditableInfoRow({ icon, label, field, fieldLabel, value, onSave }: {
-  icon: React.ReactNode; label: string; field: string; fieldLabel: string;
+function EditableInfoRow({ icon, iconColor, label, field, fieldLabel, value, onSave }: {
+  icon: React.ReactNode; iconColor: string; label: string; field: string; fieldLabel: string;
   value: string; onSave?: (field: string, value: string | null, label: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -220,7 +235,9 @@ function EditableInfoRow({ icon, label, field, fieldLabel, value, onSave }: {
 
   return (
     <div className="px-5 py-3 flex items-start gap-3">
-      <span className="text-muted-foreground mt-0.5 shrink-0">{icon}</span>
+      <div className={`flex h-8 w-8 items-center justify-center rounded-lg shrink-0 mt-0.5 ${iconColor}`}>
+        {icon}
+      </div>
       <div className="min-w-0 flex-1">
         <p className="text-[11px] text-muted-foreground">{label}</p>
         {editing ? (
@@ -247,8 +264,8 @@ function EditableInfoRow({ icon, label, field, fieldLabel, value, onSave }: {
 
 // ── Editable select row (dropdown with optional groups) ─────
 
-function EditableSelectRow({ icon, label, value, displayValue, options, groups, field, fieldLabel, onSave, disabled }: {
-  icon: React.ReactNode; label: string; value: string | null; displayValue: string;
+function EditableSelectRow({ icon, iconColor, label, value, displayValue, options, groups, field, fieldLabel, onSave, disabled }: {
+  icon: React.ReactNode; iconColor: string; label: string; value: string | null; displayValue: string;
   options?: { value: string; label: string }[];
   groups?: { department: string; courses: { id: string; name: string }[] }[];
   field: string; fieldLabel: string;
@@ -259,7 +276,9 @@ function EditableSelectRow({ icon, label, value, displayValue, options, groups, 
 
   return (
     <div className="px-5 py-3 flex items-start gap-3">
-      <span className="text-muted-foreground mt-0.5 shrink-0">{icon}</span>
+      <div className={`flex h-8 w-8 items-center justify-center rounded-lg shrink-0 mt-0.5 ${iconColor}`}>
+        {icon}
+      </div>
       <div className="min-w-0 flex-1">
         <p className="text-[11px] text-muted-foreground">{label}</p>
         {editing ? (
@@ -319,7 +338,9 @@ function EditableGuardianRow({ lead, onSave }: { lead: any; onSave?: (field: str
 
   return (
     <div className="px-5 py-3 flex items-start gap-3">
-      <span className="text-muted-foreground mt-0.5 shrink-0"><User className="h-4 w-4" /></span>
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg shrink-0 mt-0.5 bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400">
+        <User className="h-4 w-4" />
+      </div>
       <div className="min-w-0 flex-1">
         <p className="text-[11px] text-muted-foreground">Guardian</p>
         {editing ? (
@@ -352,10 +373,12 @@ function EditableGuardianRow({ lead, onSave }: { lead: any; onSave?: (field: str
 
 // ── Static info row ─────────────────────────────────────────
 
-function InfoRow({ icon, label, value, className }: { icon: React.ReactNode; label: string; value: string; className?: string }) {
+function InfoRow({ icon, iconColor, label, value, className }: { icon: React.ReactNode; iconColor: string; label: string; value: string; className?: string }) {
   return (
     <div className="px-5 py-3 flex items-start gap-3">
-      <span className="text-muted-foreground mt-0.5 shrink-0">{icon}</span>
+      <div className={`flex h-8 w-8 items-center justify-center rounded-lg shrink-0 mt-0.5 ${iconColor}`}>
+        {icon}
+      </div>
       <div className="min-w-0">
         <p className="text-[11px] text-muted-foreground">{label}</p>
         <p className={`text-sm font-medium text-foreground mt-0.5 ${className || ""}`}>{value}</p>

@@ -23,39 +23,39 @@ export function QuickActions({
 }: QuickActionsProps) {
   const [open, setOpen] = useState(false);
 
-  // Primary actions always visible
   const primaryActions = (
     <>
-      <Button onClick={onCall} className="w-full justify-start gap-3 h-11 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90">
-        <Phone className="h-4 w-4" /> Call Now
+      <Button onClick={onCall} className="w-full justify-start gap-3 h-11 rounded-xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground hover:from-primary/90 hover:to-primary/70 shadow-md shadow-primary/20">
+        <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-white/20"><Phone className="h-3.5 w-3.5" /></div> Call Now
       </Button>
-      <Button onClick={onWhatsApp} variant="outline" className="w-full justify-start gap-3 h-11 rounded-xl">
-        <MessageSquare className="h-4 w-4" /> Send WhatsApp
+      <Button onClick={onWhatsApp} variant="outline" className="w-full justify-start gap-3 h-11 rounded-xl hover:bg-green-50 dark:hover:bg-green-950/20 border-green-200 dark:border-green-800/40">
+        <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-green-100 dark:bg-green-900/30"><MessageSquare className="h-3.5 w-3.5 text-green-600 dark:text-green-400" /></div> Send WhatsApp
       </Button>
     </>
   );
 
-  // Secondary actions collapsible on mobile
   const secondaryActions = (
     <>
-      <Button onClick={onScheduleVisit} variant="outline" className="w-full justify-start gap-3 h-11 rounded-xl">
-        <Calendar className="h-4 w-4" /> Schedule Visit
+      <Button onClick={onScheduleVisit} variant="outline" className="w-full justify-start gap-3 h-11 rounded-xl hover:bg-violet-50 dark:hover:bg-violet-950/20">
+        <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-violet-100 dark:bg-violet-900/30"><Calendar className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400" /></div> Schedule Visit
       </Button>
-      <Button onClick={onOffer} variant="outline" className="w-full justify-start gap-3 h-11 rounded-xl">
-        <FileText className="h-4 w-4" /> Generate Offer
+      <Button onClick={onOffer} variant="outline" className="w-full justify-start gap-3 h-11 rounded-xl hover:bg-teal-50 dark:hover:bg-teal-950/20">
+        <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-teal-100 dark:bg-teal-900/30"><FileText className="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" /></div> Generate Offer
       </Button>
-      <Button onClick={onAiCall} variant="outline" className="w-full justify-start gap-3 h-11 rounded-xl" disabled={aiCalling}>
-        {aiCalling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />} AI Call
+      <Button onClick={onAiCall} variant="outline" className="w-full justify-start gap-3 h-11 rounded-xl hover:bg-amber-50 dark:hover:bg-amber-950/20" disabled={aiCalling}>
+        <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-900/30">
+          {aiCalling ? <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-600" /> : <Bot className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />}
+        </div> AI Call
       </Button>
-      <Button onClick={onInterview} variant="outline" className="w-full justify-start gap-3 h-11 rounded-xl">
-        <UserCheck className="h-4 w-4" /> Interview Score
+      <Button onClick={onInterview} variant="outline" className="w-full justify-start gap-3 h-11 rounded-xl hover:bg-indigo-50 dark:hover:bg-indigo-950/20">
+        <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-indigo-100 dark:bg-indigo-900/30"><UserCheck className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" /></div> Interview Score
       </Button>
       <Button onClick={onConvert} variant="outline" className="w-full justify-start gap-3 h-11 rounded-xl border-primary/30 text-primary hover:bg-primary/5">
-        <ArrowRight className="h-4 w-4" /> Convert to Student
+        <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-primary/10"><ArrowRight className="h-3.5 w-3.5 text-primary" /></div> Convert to Student
       </Button>
       {onAddSecondaryCounsellor && (
-        <Button onClick={onAddSecondaryCounsellor} variant="outline" className="w-full justify-start gap-3 h-11 rounded-xl">
-          <UserPlus className="h-4 w-4" /> Add Secondary Counsellor
+        <Button onClick={onAddSecondaryCounsellor} variant="outline" className="w-full justify-start gap-3 h-11 rounded-xl hover:bg-pink-50 dark:hover:bg-pink-950/20">
+          <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-pink-100 dark:bg-pink-900/30"><UserPlus className="h-3.5 w-3.5 text-pink-600 dark:text-pink-400" /></div> Add Secondary Counsellor
         </Button>
       )}
     </>
@@ -68,13 +68,12 @@ export function QuickActions({
 
         {/* Mobile: primary + collapsible secondary */}
         <div className="lg:hidden space-y-2">
-          {/* Primary row as horizontal buttons on mobile */}
           <div className="grid grid-cols-2 gap-2">
-            <Button onClick={onCall} className="justify-center gap-2 h-11 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-sm">
+            <Button onClick={onCall} className="justify-center gap-2 h-11 rounded-xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground shadow-md shadow-primary/20 text-sm">
               <Phone className="h-4 w-4" /> Call
             </Button>
-            <Button onClick={onWhatsApp} variant="outline" className="justify-center gap-2 h-11 rounded-xl text-sm">
-              <MessageSquare className="h-4 w-4" /> WhatsApp
+            <Button onClick={onWhatsApp} variant="outline" className="justify-center gap-2 h-11 rounded-xl text-sm border-green-200 dark:border-green-800/40">
+              <MessageSquare className="h-4 w-4 text-green-600" /> WhatsApp
             </Button>
           </div>
           <Collapsible open={open} onOpenChange={setOpen}>
