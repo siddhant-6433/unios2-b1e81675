@@ -52,7 +52,7 @@ const LeadDetail = () => {
 
   const fetchAll = async () => {
     setLoading(true);
-    const [leadRes, notesRes, followupsRes, visitsRes, activitiesRes, campusesRes, callLogsRes] = await Promise.all([
+    const [leadRes, notesRes, followupsRes, visitsRes, activitiesRes, campusesRes, callLogsRes, coursesRes] = await Promise.all([
       supabase.from("leads").select("*").eq("id", id).single(),
       supabase.from("lead_notes").select("*").eq("lead_id", id).order("created_at", { ascending: false }),
       supabase.from("lead_followups").select("*").eq("lead_id", id).order("scheduled_at", { ascending: true }),
@@ -60,6 +60,7 @@ const LeadDetail = () => {
       supabase.from("lead_activities").select("*").eq("lead_id", id).order("created_at", { ascending: false }).limit(50),
       supabase.from("campuses").select("id, name"),
       supabase.from("call_logs").select("*").eq("lead_id", id!).order("called_at", { ascending: false }),
+      supabase.from("courses").select("id, name"),
     ]);
     if (leadRes.data) {
       setLead(leadRes.data);
