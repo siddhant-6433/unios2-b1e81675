@@ -185,6 +185,11 @@ const LeadDetail = () => {
 
   const updateStage = async (newStage: string) => {
     if (!id || !lead || lead.stage === newStage) return;
+    // Prevent going back to new_lead once moved past it
+    if (newStage === "new_lead" && lead.stage !== "new_lead") {
+      toast({ title: "Cannot revert", description: "Lead cannot be moved back to New Lead stage.", variant: "destructive" });
+      return;
+    }
     const { error } = await supabase.from("leads").update({ stage: newStage as any }).eq("id", id);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
     await supabase.from("lead_activities").insert({
@@ -193,6 +198,19 @@ const LeadDetail = () => {
       old_stage: lead.stage as any, new_stage: newStage as any,
     });
     await fetchAll();
+  };
+
+  /** Auto-advance stage when an action implies progression */
+  const autoAdvanceStage = async (targetStage: string) => {
+    if (!id || !lead) return;
+    if (shouldAutoAdvance(lead.stage, targetStage)) {
+      await supabase.from("leads").update({ stage: targetStage as any }).eq("id", id);
+      await supabase.from("lead_activities").insert({
+        lead_id: id, user_id: profileId, type: "stage_change",
+        description: `Stage auto-advanced from ${STAGE_LABELS[lead.stage] || lead.stage} to ${STAGE_LABELS[targetStage] || targetStage}`,
+        old_stage: lead.stage as any, new_stage: targetStage as any,
+      });
+    }
   };
 
   const updateField = async (field: string, value: string | null, label: string) => {
