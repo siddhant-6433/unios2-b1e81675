@@ -170,11 +170,11 @@ const LeadDetail = () => {
     let oldDisplay = oldValue || "Not set";
     let newDisplay = value || "Not set";
     if (field === "course_id") {
-      oldDisplay = courses.find(c => c.id === oldValue)?.name || "Not set";
-      newDisplay = courses.find(c => c.id === value)?.name || "Not set";
+      oldDisplay = courseOptions.find(c => c.id === oldValue)?.name || "Not set";
+      newDisplay = courseOptions.find(c => c.id === value)?.name || "Not set";
     } else if (field === "campus_id") {
-      oldDisplay = campuses.find(c => c.id === oldValue)?.name || "Not set";
-      newDisplay = campuses.find(c => c.id === value)?.name || "Not set";
+      oldDisplay = courseOptions.find(c => c.campus_id === oldValue)?.campus_name || campuses.find(c => c.id === oldValue)?.name || "Not set";
+      newDisplay = courseOptions.find(c => c.campus_id === value)?.campus_name || campuses.find(c => c.id === value)?.name || "Not set";
     }
 
     const activityPayload = {
