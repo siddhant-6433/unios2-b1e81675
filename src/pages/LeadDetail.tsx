@@ -93,11 +93,11 @@ const LeadDetail = () => {
   const addNote = async () => {
     if (!newNote.trim() || !id) return;
     setSavingNote(true);
-    const { error } = await supabase.from("lead_notes").insert({ lead_id: id, user_id: user?.id, content: newNote.trim() });
+    const { error } = await supabase.from("lead_notes").insert({ lead_id: id, user_id: profileId, content: newNote.trim() });
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); }
     else {
       await supabase.from("lead_activities").insert({
-        lead_id: id, user_id: user?.id || null, type: "note",
+        lead_id: id, user_id: profileId, type: "note",
         description: newNote.trim(),
       });
       setNewNote(""); await fetchAll();
@@ -114,7 +114,7 @@ const LeadDetail = () => {
     if (error) toast({ title: "Error", description: error.message, variant: "destructive" });
     else {
       await supabase.from("lead_activities").insert({
-        lead_id: id, user_id: user?.id || null, type: "followup",
+        lead_id: id, user_id: profileId, type: "followup",
         description: `Follow-up scheduled (${data.type}) for ${new Date(data.scheduled_at).toLocaleDateString("en-IN")}${data.notes ? `. ${data.notes}` : ""}`,
       });
       await fetchAll();
@@ -124,7 +124,7 @@ const LeadDetail = () => {
   const completeFollowup = async (fid: string) => {
     await supabase.from("lead_followups").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", fid);
     await supabase.from("lead_activities").insert({
-      lead_id: id!, user_id: user?.id || null, type: "followup",
+      lead_id: id!, user_id: profileId, type: "followup",
       description: "Follow-up marked as completed",
     });
     await fetchAll();
@@ -140,7 +140,7 @@ const LeadDetail = () => {
     if (error) toast({ title: "Error", description: error.message, variant: "destructive" });
     else {
       await supabase.from("lead_activities").insert({
-        lead_id: id, user_id: user?.id || null, type: "visit",
+        lead_id: id, user_id: profileId, type: "visit",
         description: `Campus visit scheduled for ${new Date(data.visit_date).toLocaleDateString("en-IN")}${campusLabel ? ` at ${campusLabel}` : ""}`,
       });
       await fetchAll();
@@ -152,7 +152,7 @@ const LeadDetail = () => {
     const { error } = await supabase.from("leads").update({ stage: newStage as any }).eq("id", id);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
     await supabase.from("lead_activities").insert({
-      lead_id: id, user_id: user?.id || null, type: "stage_change",
+      lead_id: id, user_id: profileId, type: "stage_change",
       description: `Stage changed from ${STAGE_LABELS[lead.stage] || lead.stage} to ${STAGE_LABELS[newStage] || newStage}`,
       old_stage: lead.stage as any, new_stage: newStage as any,
     });
@@ -165,7 +165,6 @@ const LeadDetail = () => {
     const { error } = await supabase.from("leads").update({ [field]: value } as any).eq("id", id);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
 
-    // Resolve display values for foreign keys
     let oldDisplay = oldValue || "Not set";
     let newDisplay = value || "Not set";
     if (field === "course_id") {
@@ -177,7 +176,7 @@ const LeadDetail = () => {
     }
 
     await supabase.from("lead_activities").insert({
-      lead_id: id, user_id: user?.id || null, type: "info_update",
+      lead_id: id, user_id: profileId, type: "info_update",
       description: `${label} changed from "${oldDisplay}" to "${newDisplay}"`,
     });
     toast({ title: `${label} updated` });
