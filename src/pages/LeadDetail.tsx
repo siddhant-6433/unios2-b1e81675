@@ -258,6 +258,13 @@ const LeadDetail = () => {
         campusName={campusName}
         onSuccess={fetchAll}
       />
+      <AddSecondaryCounsellorDialog
+        open={showSecondaryCounsellor}
+        onOpenChange={setShowSecondaryCounsellor}
+        leadId={lead.id}
+        leadName={lead.name}
+        onSuccess={fetchAll}
+      />
     </div>
   );
 };

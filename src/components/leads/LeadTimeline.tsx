@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Send, Loader2, ArrowRight, Phone, StickyNote, Bot, MapPin, Clock, Check, Plus, MessageSquare, Link2,
-  CalendarCheck, FileText, UserCheck, GraduationCap, Mail, ClipboardList,
+  CalendarCheck, FileText, UserCheck, GraduationCap, Mail, ClipboardList, Edit,
 } from "lucide-react";
 
 interface LeadTimelineProps {
