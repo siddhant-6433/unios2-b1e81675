@@ -216,7 +216,10 @@ const LeadDetail = () => {
             counsellorName={counsellorName}
             courseName={courseName}
             campusName={campusName}
+            courses={courses}
+            campusesList={campuses}
             onStageChange={updateStage}
+            onFieldUpdate={updateField}
           />
           <QuickActions
             onCall={() => {
