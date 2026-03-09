@@ -46,8 +46,6 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
   // Auto-select campus when course changes
   const handleCourseChange = (courseId: string) => {
     const campuses = getCampusesForCourse(courseId || null);
-    const autoCampus = campuses.length === 1 ? campuses[0].id : "";
-    setForm(p => ({ ...p, course_id: courseId, campus_id: autoCanvas(p, autoCanvas) || autoaCampus }));
     setForm(p => ({ ...p, course_id: courseId, campus_id: campuses.length === 1 ? campuses[0].id : "" }));
   };
 
