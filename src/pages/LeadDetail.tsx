@@ -354,6 +354,34 @@ const LeadDetail = () => {
         leadName={lead.name}
         onSuccess={fetchAll}
       />
+
+      {/* Transfer Dialog */}
+      <TransferLeadDialog
+        open={showTransfer}
+        onOpenChange={setShowTransfer}
+        leadIds={id ? [id] : []}
+        leadNames={[lead.name]}
+        onSuccess={fetchAll}
+      />
+
+      {/* Delete Confirmation */}
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete "{lead.name}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this lead and all associated data (notes, activities, follow-ups, offer letters, etc.). This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingLead}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteLead} disabled={deletingLead} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {deletingLead && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
