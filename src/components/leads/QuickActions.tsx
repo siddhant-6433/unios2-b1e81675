@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
-  Phone, MessageSquare, Calendar, FileText, ArrowRight, Bot, UserCheck, Loader2, ChevronDown,
+  Phone, MessageSquare, Calendar, FileText, ArrowRight, Bot, UserCheck, Loader2, ChevronDown, UserPlus,
 } from "lucide-react";
 
 interface QuickActionsProps {
@@ -15,10 +15,11 @@ interface QuickActionsProps {
   onConvert: () => void;
   onAiCall: () => void;
   aiCalling: boolean;
+  onAddSecondaryCounsellor?: () => void;
 }
 
 export function QuickActions({
-  onCall, onWhatsApp, onScheduleVisit, onInterview, onOffer, onConvert, onAiCall, aiCalling,
+  onCall, onWhatsApp, onScheduleVisit, onInterview, onOffer, onConvert, onAiCall, aiCalling, onAddSecondaryCounsellor,
 }: QuickActionsProps) {
   const [open, setOpen] = useState(false);
 
@@ -52,6 +53,11 @@ export function QuickActions({
       <Button onClick={onConvert} variant="outline" className="w-full justify-start gap-3 h-11 rounded-xl border-primary/30 text-primary hover:bg-primary/5">
         <ArrowRight className="h-4 w-4" /> Convert to Student
       </Button>
+      {onAddSecondaryCounsellor && (
+        <Button onClick={onAddSecondaryCounsellor} variant="outline" className="w-full justify-start gap-3 h-11 rounded-xl">
+          <UserPlus className="h-4 w-4" /> Add Secondary Counsellor
+        </Button>
+      )}
     </>
   );
 

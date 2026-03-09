@@ -13,6 +13,7 @@ import { InterviewScoringDialog } from "@/components/admissions/InterviewScoring
 import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
 import { ConvertToStudentDialog } from "@/components/admissions/ConvertToStudentDialog";
 import { SendWhatsAppDialog } from "@/components/leads/SendWhatsAppDialog";
+import { AddSecondaryCounsellorDialog } from "@/components/leads/AddSecondaryCounsellorDialog";
 
 const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", application_in_progress: "Application In Progress", application_submitted: "Application Submitted",
@@ -41,6 +42,7 @@ const LeadDetail = () => {
   const [showConvert, setShowConvert] = useState(false);
   const [showWhatsApp, setShowWhatsApp] = useState(false);
   const [aiCalling, setAiCalling] = useState(false);
+  const [showSecondaryCounsellor, setShowSecondaryCounsellor] = useState(false);
   const [counsellorName, setCounsellorName] = useState<string | undefined>();
   const [courseName, setCourseName] = useState<string | undefined>();
   const [campusName, setCampusName] = useState<string | undefined>();
@@ -202,6 +204,7 @@ const LeadDetail = () => {
             onConvert={() => setShowConvert(true)}
             onAiCall={triggerAiCall}
             aiCalling={aiCalling}
+            onAddSecondaryCounsellor={() => setShowSecondaryCounsellor(true)}
           />
           <NextFollowup
             followups={followups}
@@ -253,6 +256,13 @@ const LeadDetail = () => {
         lead={{ id: lead.id, name: lead.name, phone: lead.phone, application_id: lead.application_id }}
         courseName={courseName}
         campusName={campusName}
+        onSuccess={fetchAll}
+      />
+      <AddSecondaryCounsellorDialog
+        open={showSecondaryCounsellor}
+        onOpenChange={setShowSecondaryCounsellor}
+        leadId={lead.id}
+        leadName={lead.name}
         onSuccess={fetchAll}
       />
     </div>

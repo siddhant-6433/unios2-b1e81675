@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Send, Loader2, ArrowRight, Phone, StickyNote, Bot, MapPin, Clock, Check, Plus, MessageSquare, Link2,
-  CalendarCheck, FileText, UserCheck, GraduationCap, Mail, ClipboardList,
+  CalendarCheck, FileText, UserCheck, GraduationCap, Mail, ClipboardList, Edit,
 } from "lucide-react";
 
 interface LeadTimelineProps {
@@ -184,6 +184,11 @@ const ACTIVITY_CONFIG: Record<string, {
     icon: <Mail className="h-4 w-4" />,
     bg: "bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400",
     getTitle: () => "Email sent",
+  },
+  info_update: {
+    icon: <Edit className="h-4 w-4" />,
+    bg: "bg-slate-100 text-slate-600 dark:bg-slate-900/20 dark:text-slate-400",
+    getTitle: () => "Info Updated",
   },
 };
 
