@@ -53,6 +53,11 @@ export function QuickActions({
       <Button onClick={onConvert} variant="outline" className="w-full justify-start gap-3 h-11 rounded-xl border-primary/30 text-primary hover:bg-primary/5">
         <ArrowRight className="h-4 w-4" /> Convert to Student
       </Button>
+      {onAddSecondaryCounsellor && (
+        <Button onClick={onAddSecondaryCounsellor} variant="outline" className="w-full justify-start gap-3 h-11 rounded-xl">
+          <UserPlus className="h-4 w-4" /> Add Secondary Counsellor
+        </Button>
+      )}
     </>
   );
 
