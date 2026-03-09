@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, User, Phone, Mail, MapPin, Calendar, Heart, GraduationCap, Check, X, Clock, BookOpen, Loader2 } from "lucide-react";
+import { ArrowLeft, User, Phone, Mail, MapPin, Calendar, Heart, GraduationCap, Check, X, Clock, BookOpen, Loader2, TrendingUp, BarChart3, Activity, Filter } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 const StudentProfile = () => {
   const { admissionNo } = useParams<{ admissionNo: string }>();
@@ -16,7 +17,6 @@ const StudentProfile = () => {
 
   const fetchStudent = async () => {
     setLoading(true);
-    // Find student by admission_no or pre_admission_no
     let { data } = await supabase.from("students")
       .select("*, courses:course_id(name), campuses:campus_id(name), batches:batch_id(name), admission_sessions:session_id(name)")
       .eq("admission_no", admissionNo)
@@ -32,7 +32,6 @@ const StudentProfile = () => {
 
     if (data) {
       setStudent(data);
-      // Fetch related data
       const [feesRes, attendanceRes, examsRes] = await Promise.all([
         supabase.from("fee_ledger").select("*, fee_codes:fee_code_id(code, name, category)").eq("student_id", data.id).order("due_date"),
         supabase.from("daily_attendance").select("*").eq("student_id", data.id).order("date", { ascending: false }).limit(50),
@@ -59,60 +58,124 @@ const StudentProfile = () => {
   }
 
   const attendancePresent = attendance.filter(a => a.status === "present").length;
+  const attendanceAbsent = attendance.filter(a => a.status === "absent").length;
   const attendanceTotal = attendance.length;
   const attendancePct = attendanceTotal > 0 ? Math.round((attendancePresent / attendanceTotal) * 100) : 0;
   const totalFee = fees.reduce((s, f) => s + Number(f.total_amount || 0), 0);
   const totalPaid = fees.reduce((s, f) => s + Number(f.paid_amount || 0), 0);
   const totalBalance = fees.reduce((s, f) => s + Number(f.balance || 0), 0);
   const displayNo = student.admission_no || student.pre_admission_no || "—";
+  const avgScore = exams.length > 0 ? (exams.reduce((s, e) => s + (e.max_marks > 0 ? (e.obtained_marks / e.max_marks) * 100 : 0), 0) / exams.length).toFixed(1) : "0";
+  const initials = student.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase();
 
-  const statusBg: Record<string, string> = { present: "bg-pastel-green text-foreground/80", absent: "bg-pastel-red text-foreground/80", late: "bg-pastel-yellow text-foreground/80" };
-  const feeStatusBg: Record<string, string> = { paid: "bg-pastel-green text-foreground/80", due: "bg-pastel-yellow text-foreground/80", overdue: "bg-pastel-red text-foreground/80" };
+  const statusBg: Record<string, string> = { present: "bg-success/10 text-success", absent: "bg-destructive/10 text-destructive", late: "bg-warning/10 text-warning" };
+  const feeStatusBg: Record<string, string> = { paid: "bg-success/10 text-success", due: "bg-warning/10 text-warning", overdue: "bg-destructive/10 text-destructive" };
   const gradeColor = (grade: string) => {
-    if (!grade) return "bg-muted text-foreground/80";
-    if (grade.startsWith("A")) return "bg-pastel-green text-foreground/80";
-    if (grade.startsWith("B")) return "bg-pastel-blue text-foreground/80";
-    return "bg-pastel-yellow text-foreground/80";
+    if (!grade) return "bg-muted text-foreground/60";
+    if (grade.startsWith("A")) return "bg-success/10 text-success";
+    if (grade.startsWith("B")) return "bg-info/10 text-info";
+    return "bg-warning/10 text-warning";
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-5 animate-fade-in">
       <Link to="/students" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
         <ArrowLeft className="h-4 w-4" />Back to Students
       </Link>
 
-      <div className="rounded-xl bg-card card-shadow p-6">
-        <div className="flex flex-col sm:flex-row gap-5">
-          <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-primary/10 text-2xl font-bold text-primary shrink-0">
-            {student.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2)}
+      {/* Profile Header */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 text-xl font-bold text-primary shrink-0">
+            {initials}
           </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex flex-wrap items-center gap-3">
+          <div>
+            <div className="flex items-center gap-2">
               <h1 className="text-xl font-bold text-foreground">{student.name}</h1>
-              <span className={`rounded-md px-2.5 py-0.5 text-[11px] font-semibold capitalize ${student.status === "active" ? "bg-pastel-green text-foreground/80" : "bg-pastel-red text-foreground/80"}`}>
+              <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold capitalize ${student.status === "active" ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
                 {student.status.replace("_", " ")}
               </span>
             </div>
-            <p className="text-sm text-muted-foreground mt-0.5 font-mono">{displayNo}</p>
-            <div className="flex flex-wrap gap-x-5 gap-y-1.5 mt-3 text-sm text-muted-foreground">
-              <span className="flex items-center gap-1.5"><GraduationCap className="h-3.5 w-3.5" />{student.courses?.name || "—"}</span>
-              <span className="flex items-center gap-1.5"><BookOpen className="h-3.5 w-3.5" />{student.batches?.name || "—"}</span>
-              <span className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5" />{student.campuses?.name || "—"}</span>
+            <p className="text-sm text-muted-foreground mt-0.5">Here's a look at performance and analytics · <span className="font-mono">{displayNo}</span></p>
+          </div>
+        </div>
+        <Button variant="outline" size="sm" className="gap-2 rounded-lg">
+          <Filter className="h-3.5 w-3.5" /> Filter
+        </Button>
+      </div>
+
+      {/* Stats Cards Row */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="rounded-xl bg-card card-shadow p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-success/10">
+              <TrendingUp className="h-4 w-4 text-success" />
+            </div>
+            <span className="text-[10px] font-medium text-success bg-success/10 px-2 py-0.5 rounded-full">+{attendancePct}%</span>
+          </div>
+          <p className="text-2xl font-bold text-foreground">{attendancePct}%</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Attendance rate</p>
+          {/* Mini sparkline placeholder */}
+          <div className="flex items-end gap-0.5 mt-3 h-6">
+            {[40, 60, 45, 70, 85, 65, 90, 75, 80, 95].map((h, i) => (
+              <div key={i} className="flex-1 rounded-sm bg-success/20" style={{ height: `${h}%` }} />
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-xl bg-card card-shadow p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-chart-5/10">
+              <BarChart3 className="h-4 w-4 text-chart-5" />
+            </div>
+            <span className="text-[10px] font-medium text-chart-5 bg-chart-5/10 px-2 py-0.5 rounded-full">{exams.length} exams</span>
+          </div>
+          <p className="text-2xl font-bold text-foreground">{avgScore}%</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Average exam score</p>
+          {/* Mini bar chart */}
+          <div className="flex items-end gap-1 mt-3 h-6">
+            {exams.slice(0, 8).map((e, i) => (
+              <div key={i} className="flex-1 rounded-sm bg-chart-5/20" style={{ height: `${e.max_marks > 0 ? (e.obtained_marks / e.max_marks) * 100 : 30}%` }} />
+            ))}
+            {exams.length === 0 && Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="flex-1 rounded-sm bg-muted" style={{ height: "20%" }} />
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-xl bg-card card-shadow p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-chart-2/10">
+              <Activity className="h-4 w-4 text-chart-2" />
             </div>
           </div>
-          <div className="flex sm:flex-col gap-4 sm:gap-2 sm:items-end shrink-0">
-            <div className="text-right"><p className="text-[11px] text-muted-foreground">Attendance</p><p className="text-lg font-bold text-foreground">{attendancePct}%</p></div>
-            <div className="text-right"><p className="text-[11px] text-muted-foreground">Fee Balance</p><p className="text-lg font-bold text-foreground">₹{totalBalance.toLocaleString("en-IN")}</p></div>
+          <div className="flex items-baseline gap-3">
+            <div className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-success" />
+              <span className="text-lg font-bold text-foreground">{attendancePresent}</span>
+              <span className="text-[11px] text-muted-foreground">Present</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-destructive" />
+              <span className="text-lg font-bold text-foreground">{attendanceAbsent}</span>
+              <span className="text-[11px] text-muted-foreground">Absent</span>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">Activity summary</p>
+          <div className="flex gap-1 mt-3">
+            <div className="h-2 rounded-full bg-success flex-1" style={{ flex: attendancePresent || 1 }} />
+            <div className="h-2 rounded-full bg-destructive" style={{ flex: attendanceAbsent || 1 }} />
           </div>
         </div>
       </div>
 
+      {/* Tabs */}
       <Tabs defaultValue="details" className="w-full">
-        <TabsList className="bg-card border border-border rounded-xl p-1 h-auto flex-wrap">
-          <TabsTrigger value="details" className="rounded-lg text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Basic Details</TabsTrigger>
-          <TabsTrigger value="fees" className="rounded-lg text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Fee Ledger</TabsTrigger>
-          <TabsTrigger value="attendance" className="rounded-lg text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Attendance</TabsTrigger>
-          <TabsTrigger value="exams" className="rounded-lg text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Exams</TabsTrigger>
+        <TabsList className="bg-card border border-border rounded-lg p-1 h-auto flex-wrap">
+          <TabsTrigger value="details" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Details</TabsTrigger>
+          <TabsTrigger value="fees" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Fee Ledger</TabsTrigger>
+          <TabsTrigger value="attendance" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Attendance</TabsTrigger>
+          <TabsTrigger value="exams" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Exams</TabsTrigger>
         </TabsList>
 
         <TabsContent value="details">
@@ -151,9 +214,9 @@ const StudentProfile = () => {
         <TabsContent value="fees">
           <div className="mt-4 space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <StatCard label="Total Fee" value={`₹${totalFee.toLocaleString("en-IN")}`} bg="bg-pastel-blue" />
-              <StatCard label="Paid" value={`₹${totalPaid.toLocaleString("en-IN")}`} bg="bg-pastel-green" />
-              <StatCard label="Balance" value={`₹${totalBalance.toLocaleString("en-IN")}`} bg={totalBalance > 0 ? "bg-pastel-red" : "bg-pastel-green"} />
+              <StatCard label="Total Fee" value={`₹${totalFee.toLocaleString("en-IN")}`} icon={<span className="text-xs font-bold">₹</span>} color="bg-chart-5/10 text-chart-5" />
+              <StatCard label="Paid" value={`₹${totalPaid.toLocaleString("en-IN")}`} icon={<Check className="h-3.5 w-3.5" />} color="bg-success/10 text-success" />
+              <StatCard label="Balance" value={`₹${totalBalance.toLocaleString("en-IN")}`} icon={<Clock className="h-3.5 w-3.5" />} color={totalBalance > 0 ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"} />
             </div>
             <div className="rounded-xl bg-card card-shadow overflow-hidden">
               <table className="w-full text-sm">
@@ -162,7 +225,6 @@ const StudentProfile = () => {
                     <th className="px-4 py-3 font-medium text-muted-foreground">Fee Code</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground">Term</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground text-right">Total</th>
-                    <th className="px-4 py-3 font-medium text-muted-foreground text-right">Concession</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground text-right">Paid</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground text-right">Balance</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground">Due Date</th>
@@ -171,18 +233,17 @@ const StudentProfile = () => {
                 </thead>
                 <tbody>
                   {fees.length === 0 ? (
-                    <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No fee records found</td></tr>
+                    <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No fee records found</td></tr>
                   ) : fees.map((f: any) => (
                     <tr key={f.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
                       <td className="px-4 py-3 font-medium text-foreground">{f.fee_codes?.code || "—"}</td>
                       <td className="px-4 py-3 text-muted-foreground">{f.term}</td>
                       <td className="px-4 py-3 text-right text-foreground">₹{Number(f.total_amount).toLocaleString("en-IN")}</td>
-                      <td className="px-4 py-3 text-right text-muted-foreground">₹{Number(f.concession).toLocaleString("en-IN")}</td>
                       <td className="px-4 py-3 text-right text-foreground">₹{Number(f.paid_amount).toLocaleString("en-IN")}</td>
                       <td className="px-4 py-3 text-right font-medium text-foreground">₹{Number(f.balance || 0).toLocaleString("en-IN")}</td>
                       <td className="px-4 py-3 text-muted-foreground">{f.due_date ? new Date(f.due_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"}</td>
                       <td className="px-4 py-3">
-                        <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold capitalize ${feeStatusBg[f.status] || "bg-muted"}`}>{f.status}</span>
+                        <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold capitalize ${feeStatusBg[f.status] || "bg-muted"}`}>{f.status}</span>
                       </td>
                     </tr>
                   ))}
@@ -195,10 +256,10 @@ const StudentProfile = () => {
         <TabsContent value="attendance">
           <div className="mt-4 space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-              <StatCard label="Total Classes" value={String(attendanceTotal)} bg="bg-pastel-blue" />
-              <StatCard label="Present" value={String(attendancePresent)} bg="bg-pastel-green" />
-              <StatCard label="Absent" value={String(attendance.filter(a => a.status === "absent").length)} bg="bg-pastel-red" />
-              <StatCard label="Late" value={String(attendance.filter(a => a.status === "late").length)} bg="bg-pastel-yellow" />
+              <StatCard label="Total Classes" value={String(attendanceTotal)} icon={<BookOpen className="h-3.5 w-3.5" />} color="bg-chart-5/10 text-chart-5" />
+              <StatCard label="Present" value={String(attendancePresent)} icon={<Check className="h-3.5 w-3.5" />} color="bg-success/10 text-success" />
+              <StatCard label="Absent" value={String(attendanceAbsent)} icon={<X className="h-3.5 w-3.5" />} color="bg-destructive/10 text-destructive" />
+              <StatCard label="Late" value={String(attendance.filter(a => a.status === "late").length)} icon={<Clock className="h-3.5 w-3.5" />} color="bg-warning/10 text-warning" />
             </div>
             <div className="rounded-xl bg-card card-shadow overflow-hidden">
               <table className="w-full text-sm">
@@ -217,7 +278,7 @@ const StudentProfile = () => {
                       <td className="px-4 py-3 text-foreground">{new Date(a.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td>
                       <td className="px-4 py-3 text-muted-foreground">{a.subject || "—"}</td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold capitalize ${statusBg[a.status] || "bg-muted"}`}>
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold capitalize ${statusBg[a.status] || "bg-muted"}`}>
                           {a.status === "present" && <Check className="h-3 w-3" />}
                           {a.status === "absent" && <X className="h-3 w-3" />}
                           {a.status === "late" && <Clock className="h-3 w-3" />}
@@ -240,7 +301,7 @@ const StudentProfile = () => {
                   <tr className="border-b border-border text-left">
                     <th className="px-4 py-3 font-medium text-muted-foreground">Subject</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground">Exam Type</th>
-                    <th className="px-4 py-3 font-medium text-muted-foreground text-center">Max Marks</th>
+                    <th className="px-4 py-3 font-medium text-muted-foreground text-center">Max</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground text-center">Obtained</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground text-center">%</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground">Grade</th>
@@ -258,7 +319,7 @@ const StudentProfile = () => {
                       <td className="px-4 py-3 text-center font-medium text-foreground">{e.obtained_marks}</td>
                       <td className="px-4 py-3 text-center text-muted-foreground">{e.max_marks > 0 ? Math.round((e.obtained_marks / e.max_marks) * 100) : 0}%</td>
                       <td className="px-4 py-3">
-                        <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${gradeColor(e.grade || "")}`}>{e.grade || "—"}</span>
+                        <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${gradeColor(e.grade || "")}`}>{e.grade || "—"}</span>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{e.exam_date ? new Date(e.exam_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"}</td>
                     </tr>
@@ -280,10 +341,10 @@ const Detail = ({ label, value }: { label: string; value: string }) => (
   </div>
 );
 
-const StatCard = ({ label, value, bg }: { label: string; value: string; bg: string }) => (
+const StatCard = ({ label, value, icon, color }: { label: string; value: string; icon: React.ReactNode; color: string }) => (
   <div className="rounded-xl bg-card card-shadow p-4 flex items-center gap-3">
-    <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${bg}`}>
-      <span className="text-xs font-bold text-foreground/70">{value.charAt(0) === "₹" ? "₹" : "#"}</span>
+    <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${color}`}>
+      {icon}
     </div>
     <div>
       <p className="text-[11px] text-muted-foreground">{label}</p>
