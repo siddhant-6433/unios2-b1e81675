@@ -37,6 +37,7 @@ const LeadDetail = () => {
   const [newNote, setNewNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
   const [campuses, setCampuses] = useState<any[]>([]);
+  const [courses, setCourses] = useState<any[]>([]);
   const [showInterview, setShowInterview] = useState(false);
   const [showOfferLetter, setShowOfferLetter] = useState(false);
   const [showConvert, setShowConvert] = useState(false);
