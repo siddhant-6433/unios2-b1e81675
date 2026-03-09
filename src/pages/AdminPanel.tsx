@@ -165,9 +165,27 @@ const AdminPanel = () => {
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">User Management</h1>
-          <p className="text-sm text-muted-foreground mt-1">Assign roles, edit phone numbers, and manage user profiles.</p>
+          <h1 className="text-2xl font-bold text-foreground">Admin Panel</h1>
+          <p className="text-sm text-muted-foreground mt-1">Manage users, roles, and teams</p>
         </div>
+        <div className="flex items-center gap-2 rounded-xl bg-pastel-purple px-3 py-1.5">
+          <Shield className="h-4 w-4 text-foreground/70" />
+          <span className="text-xs font-semibold text-foreground/80">Super Admin Only</span>
+        </div>
+      </div>
+
+      <Tabs defaultValue="users" className="w-full">
+        <TabsList className="bg-transparent border-b border-border rounded-none p-0 h-auto gap-0 w-full justify-start">
+          <TabsTrigger value="users" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
+            Users & Roles
+          </TabsTrigger>
+          <TabsTrigger value="teams" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
+            Teams
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="users" className="mt-6">
+        <div className="space-y-6">
         <div className="flex items-center gap-3">
           <button onClick={() => setBulkOpen(true)} className="flex items-center gap-2 rounded-xl border border-input bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors">
             <FileSpreadsheet className="h-4 w-4" />
