@@ -129,7 +129,7 @@ const LeadDetail = () => {
   const addNote = async () => {
     if (!newNote.trim() || !id) return;
     setSavingNote(true);
-    const { error } = await supabase.from("lead_notes").insert({ lead_id: id, user_id: profileId, content: newNote.trim() });
+    const { error } = await supabase.from("lead_notes").insert({ lead_id: id, user_id: user?.id, content: newNote.trim() });
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); }
     else {
       await supabase.from("lead_activities").insert({
