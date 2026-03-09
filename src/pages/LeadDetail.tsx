@@ -53,7 +53,7 @@ const LeadDetail = () => {
 
   const fetchAll = async () => {
     setLoading(true);
-    const [leadRes, notesRes, followupsRes, visitsRes, activitiesRes, campusesRes, callLogsRes, coursesRes] = await Promise.all([
+    const [leadRes, notesRes, followupsRes, visitsRes, activitiesRes, campusesRes, callLogsRes, coursesRes, profileRes] = await Promise.all([
       supabase.from("leads").select("*").eq("id", id).single(),
       supabase.from("lead_notes").select("*").eq("lead_id", id).order("created_at", { ascending: false }),
       supabase.from("lead_followups").select("*").eq("lead_id", id).order("scheduled_at", { ascending: true }),
@@ -62,10 +62,11 @@ const LeadDetail = () => {
       supabase.from("campuses").select("id, name"),
       supabase.from("call_logs").select("*").eq("lead_id", id!).order("called_at", { ascending: false }),
       supabase.from("courses").select("id, name"),
+      user?.id ? supabase.from("profiles").select("id").eq("user_id", user.id).single() : Promise.resolve({ data: null }),
     ]);
+    if (profileRes.data) setProfileId((profileRes.data as any).id);
     if (leadRes.data) {
       setLead(leadRes.data);
-      // Fetch related names
       if (leadRes.data.counsellor_id) {
         const { data } = await supabase.from("profiles").select("display_name").eq("id", leadRes.data.counsellor_id).single();
         setCounsellorName(data?.display_name || undefined);
