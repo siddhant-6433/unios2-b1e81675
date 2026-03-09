@@ -105,22 +105,39 @@ const LeadDetail = () => {
       scheduled_at: data.scheduled_at, type: data.type, notes: data.notes || null,
     });
     if (error) toast({ title: "Error", description: error.message, variant: "destructive" });
-    else await fetchAll();
+    else {
+      await supabase.from("lead_activities").insert({
+        lead_id: id, user_id: user?.id || null, type: "followup",
+        description: `Follow-up scheduled (${data.type}) for ${new Date(data.scheduled_at).toLocaleDateString("en-IN")}${data.notes ? `. ${data.notes}` : ""}`,
+      });
+      await fetchAll();
+    }
   };
 
   const completeFollowup = async (fid: string) => {
     await supabase.from("lead_followups").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", fid);
+    await supabase.from("lead_activities").insert({
+      lead_id: id!, user_id: user?.id || null, type: "followup",
+      description: "Follow-up marked as completed",
+    });
     await fetchAll();
   };
 
   const scheduleVisit = async (data: { visit_date: string; campus_id: string }) => {
     if (!data.visit_date || !id) return;
+    const campusLabel = campuses.find(c => c.id === data.campus_id)?.name || "";
     const { error } = await supabase.from("campus_visits").insert({
       lead_id: id, scheduled_by: user?.id,
       visit_date: data.visit_date, campus_id: data.campus_id || null,
     });
     if (error) toast({ title: "Error", description: error.message, variant: "destructive" });
-    else await fetchAll();
+    else {
+      await supabase.from("lead_activities").insert({
+        lead_id: id, user_id: user?.id || null, type: "visit",
+        description: `Campus visit scheduled for ${new Date(data.visit_date).toLocaleDateString("en-IN")}${campusLabel ? ` at ${campusLabel}` : ""}`,
+      });
+      await fetchAll();
+    }
   };
 
   const updateStage = async (newStage: string) => {
