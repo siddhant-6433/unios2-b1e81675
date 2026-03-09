@@ -15,6 +15,7 @@ interface QuickActionsProps {
   onConvert: () => void;
   onAiCall: () => void;
   aiCalling: boolean;
+  onAddSecondaryCounsellor?: () => void;
 }
 
 export function QuickActions({
