@@ -63,6 +63,8 @@ const SuperAdminDashboard = () => {
     setTodayLeads(todayRes.count || 0);
     setAdmittedCount(admittedRes.count || 0);
     setStudentCount(studentsRes.count || 0);
+    setAppInProgress(appInProgRes.count || 0);
+    setAppSubmitted(appSubmRes.count || 0);
 
     // Build funnel - query counts per stage
     const stages = Object.keys(STAGE_LABELS);
