@@ -277,12 +277,16 @@ function EditableGuardianRow({ lead, onSave }: { lead: any; onSave?: (field: str
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(lead.guardian_name || "");
   const [phone, setPhone] = useState(lead.guardian_phone || "");
+  const [phoneError, setPhoneError] = useState<string | null>(null);
 
   const save = () => {
     const trimmedName = name.trim();
     const trimmedPhone = phone.trim();
+    const phoneValidation = validateField("guardian_phone", trimmedPhone);
+    if (phoneValidation) { setPhoneError(phoneValidation); return; }
     if (trimmedName !== (lead.guardian_name || "")) onSave?.("guardian_name", trimmedName || null, "Guardian Name");
     if (trimmedPhone !== (lead.guardian_phone || "")) onSave?.("guardian_phone", trimmedPhone || null, "Guardian Phone");
+    setPhoneError(null);
     setEditing(false);
   };
 
