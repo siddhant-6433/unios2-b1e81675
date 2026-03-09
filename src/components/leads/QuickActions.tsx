@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
-  Phone, MessageSquare, Calendar, FileText, ArrowRight, Bot, UserCheck, Loader2, ChevronDown,
+  Phone, MessageSquare, Calendar, FileText, ArrowRight, Bot, UserCheck, Loader2, ChevronDown, UserPlus,
 } from "lucide-react";
 
 interface QuickActionsProps {
