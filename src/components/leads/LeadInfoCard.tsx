@@ -103,6 +103,16 @@ export function LeadInfoCard({
             disabled={filteredCampuses.length <= 1}
           />
 
+          {/* City — auto-derived from campus */}
+          {campusCity && (
+            <InfoRow
+              icon={<MapPin className="h-4 w-4" />}
+              iconColor="bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400"
+              label="City"
+              value={campusCity}
+            />
+          )}
+
           {/* Email — inline text edit */}
           <EditableInfoRow
             icon={<Mail className="h-4 w-4" />}
