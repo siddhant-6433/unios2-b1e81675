@@ -1,16 +1,26 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { useIsTeamLeader } from "@/hooks/useTeamLeader";
+import { useToast } from "@/hooks/use-toast";
 import {
   Phone, MessageSquare, ChevronRight, Plus, Search, Filter, Upload,
   Eye, Calendar, MoreHorizontal, Users, TrendingUp, ArrowUpRight,
-  Bot, UserCheck, MapPin, FileText, CheckCircle, XCircle, Clock, Loader2
+  Bot, UserCheck, MapPin, FileText, CheckCircle, XCircle, Clock, Loader2,
+  Trash2, ArrowRightLeft
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { AddLeadDialog } from "@/components/admissions/AddLeadDialog";
 import { BulkLeadImportDialog } from "@/components/admissions/BulkLeadImportDialog";
+import { TransferLeadDialog } from "@/components/admissions/TransferLeadDialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const STAGES = [
   "new_lead", "application_in_progress", "application_submitted", "ai_called", "counsellor_call", "visit_scheduled",
@@ -86,6 +96,9 @@ interface Lead {
 
 const Admissions = () => {
   const navigate = useNavigate();
+  const { role } = useAuth();
+  const isTeamLeader = useIsTeamLeader();
+  const { toast } = useToast();
   const [view, setView] = useState<"pipeline" | "list">("pipeline");
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("all");
@@ -94,6 +107,15 @@ const Admissions = () => {
   const [loading, setLoading] = useState(true);
   const [showAddLead, setShowAddLead] = useState(false);
   const [showBulkImport, setShowBulkImport] = useState(false);
+
+  // Selection & bulk actions
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const isSuperAdmin = role === "super_admin";
+  const canTransfer = isSuperAdmin || isTeamLeader;
 
   useEffect(() => { fetchLeads(); }, []);
 
@@ -113,7 +135,38 @@ const Admissions = () => {
         counsellor_name: l.profiles?.display_name || "Unassigned",
       })));
     }
+    setSelectedIds(new Set());
     setLoading(false);
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filtered.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map(l => l.id)));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    setDeleting(true);
+    const ids = Array.from(selectedIds);
+    const { error } = await supabase.from("leads").delete().in("id", ids);
+    if (error) {
+      toast({ title: "Delete failed", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Leads deleted", description: `${ids.length} lead(s) deleted successfully.` });
+    }
+    setDeleting(false);
+    setShowDeleteConfirm(false);
+    await fetchLeads();
   };
 
   const filtered = leads.filter((l) => {
@@ -142,6 +195,8 @@ const Admissions = () => {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
   }
 
+  const selectedLeadNames = Array.from(selectedIds).map(id => leads.find(l => l.id === id)?.name || "").filter(Boolean);
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
@@ -154,6 +209,26 @@ const Admissions = () => {
           <Button onClick={() => setShowAddLead(true)} className="gap-2"><Plus className="h-4 w-4" />Add Lead</Button>
         </div>
       </div>
+
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
+          <span className="text-sm font-medium text-foreground">{selectedIds.size} lead{selectedIds.size > 1 ? "s" : ""} selected</span>
+          <div className="ml-auto flex gap-2">
+            {canTransfer && (
+              <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowTransfer(true)}>
+                <ArrowRightLeft className="h-4 w-4" /> Transfer
+              </Button>
+            )}
+            {isSuperAdmin && (
+              <Button variant="destructive" size="sm" className="gap-2" onClick={() => setShowDeleteConfirm(true)}>
+                <Trash2 className="h-4 w-4" /> Delete
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>Clear</Button>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((stat) => (
@@ -220,10 +295,19 @@ const Admissions = () => {
                 </div>
                 <div className="space-y-2.5">
                   {stageLeads.map((lead) => (
-                    <Card key={lead.id} onClick={() => navigate(`/admissions/${lead.id}`)} className="border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer group">
-                      <CardContent className="p-4">
+                    <Card key={lead.id} className="border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer group relative">
+                      {(isSuperAdmin || canTransfer) && (
+                        <div className="absolute top-3 right-3 z-10" onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            checked={selectedIds.has(lead.id)}
+                            onCheckedChange={() => toggleSelect(lead.id)}
+                            className="h-4 w-4"
+                          />
+                        </div>
+                      )}
+                      <CardContent className="p-4" onClick={() => navigate(`/admissions/${lead.id}`)}>
                         <div className="flex items-start justify-between">
-                          <div>
+                          <div className="pr-6">
                             <h4 className="text-sm font-semibold text-foreground">{lead.name}</h4>
                             <p className="text-xs text-primary font-medium mt-0.5">{lead.course_name}</p>
                           </div>
@@ -269,6 +353,15 @@ const Admissions = () => {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/50">
+                  {(isSuperAdmin || canTransfer) && (
+                    <th className="px-3 py-3 w-10">
+                      <Checkbox
+                        checked={selectedIds.size === filtered.length && filtered.length > 0}
+                        onCheckedChange={toggleSelectAll}
+                        className="h-4 w-4"
+                      />
+                    </th>
+                  )}
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Lead</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Course / Campus</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Stage</th>
@@ -281,32 +374,41 @@ const Admissions = () => {
               </thead>
               <tbody>
                 {filtered.map((lead) => (
-                  <tr key={lead.id} onClick={() => navigate(`/admissions/${lead.id}`)} className="border-b border-border last:border-0 hover:bg-muted/30 cursor-pointer transition-colors">
-                    <td className="px-4 py-3">
+                  <tr key={lead.id} className="border-b border-border last:border-0 hover:bg-muted/30 cursor-pointer transition-colors">
+                    {(isSuperAdmin || canTransfer) && (
+                      <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={selectedIds.has(lead.id)}
+                          onCheckedChange={() => toggleSelect(lead.id)}
+                          className="h-4 w-4"
+                        />
+                      </td>
+                    )}
+                    <td className="px-4 py-3" onClick={() => navigate(`/admissions/${lead.id}`)}>
                       <div className="font-medium text-foreground">{lead.name}</div>
                       <div className="text-xs text-muted-foreground">{lead.phone} · {lead.email || "—"}</div>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3" onClick={() => navigate(`/admissions/${lead.id}`)}>
                       <div className="text-foreground">{lead.course_name}</div>
                       <div className="text-xs text-muted-foreground">{lead.campus_name}</div>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3" onClick={() => navigate(`/admissions/${lead.id}`)}>
                       <Badge className={`text-[11px] font-medium border-0 ${stageColors[lead.stage] || "bg-muted"}`}>
                         {STAGE_LABELS[lead.stage] || lead.stage}
                       </Badge>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3" onClick={() => navigate(`/admissions/${lead.id}`)}>
                       <Badge className={`text-[11px] font-medium border-0 ${sourceBadgeColors[lead.source] || "bg-muted"}`}>
                         {sourceLabels[lead.source] || lead.source}
                       </Badge>
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground text-sm">{lead.counsellor_name}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 text-muted-foreground text-sm" onClick={() => navigate(`/admissions/${lead.id}`)}>{lead.counsellor_name}</td>
+                    <td className="px-4 py-3" onClick={() => navigate(`/admissions/${lead.id}`)}>
                       {lead.application_id && <div className="text-xs font-mono text-muted-foreground">{lead.application_id}</div>}
                       {lead.pre_admission_no && <div className="text-xs font-mono text-primary">{lead.pre_admission_no}</div>}
                       {lead.admission_no && <div className="text-xs font-mono font-semibold text-primary">{lead.admission_no}</div>}
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground text-sm">{new Date(lead.created_at).toLocaleDateString("en-IN")}</td>
+                    <td className="px-4 py-3 text-muted-foreground text-sm" onClick={() => navigate(`/admissions/${lead.id}`)}>{new Date(lead.created_at).toLocaleDateString("en-IN")}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-center gap-1">
                         <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground"><Phone className="h-3.5 w-3.5" /></Button>
@@ -324,6 +426,34 @@ const Admissions = () => {
 
       <AddLeadDialog open={showAddLead} onOpenChange={setShowAddLead} onSuccess={fetchLeads} />
       <BulkLeadImportDialog open={showBulkImport} onOpenChange={setShowBulkImport} onSuccess={fetchLeads} />
+
+      {/* Bulk Transfer Dialog */}
+      <TransferLeadDialog
+        open={showTransfer}
+        onOpenChange={setShowTransfer}
+        leadIds={Array.from(selectedIds)}
+        leadNames={selectedLeadNames}
+        onSuccess={fetchLeads}
+      />
+
+      {/* Bulk Delete Confirmation */}
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedIds.size} lead{selectedIds.size > 1 ? "s" : ""}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the selected lead{selectedIds.size > 1 ? "s" : ""} and all associated data (notes, activities, follow-ups, offer letters, etc.). This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleBulkDelete} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {deleting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
