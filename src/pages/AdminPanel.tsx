@@ -4,10 +4,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { Shield, Users, Search, X, Loader2, UserPlus, FileSpreadsheet, Phone, Eye } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import InviteUserDialog from "@/components/admin/InviteUserDialog";
 import BulkImportDialog from "@/components/admin/BulkImportDialog";
 import EditPhoneDialog from "@/components/admin/EditPhoneDialog";
 import EmployeeProfileDialog from "@/components/admin/EmployeeProfileDialog";
+import TeamManagement from "@/components/admin/TeamManagement";
 import type { Database } from "@/integrations/supabase/types";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
