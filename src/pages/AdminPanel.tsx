@@ -347,6 +347,13 @@ const AdminPanel = () => {
         userName={employeeProfile?.name || ""}
       />
     </div>
+        </TabsContent>
+
+        <TabsContent value="teams" className="mt-6">
+          <TeamManagement />
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 };
 
