@@ -30,6 +30,23 @@ const STAGE_LABELS: Record<string, string> = {
   token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", rejected: "Rejected",
 };
 
+const STAGE_ORDER = [
+  "new_lead", "application_in_progress", "application_submitted",
+  "ai_called", "counsellor_call", "visit_scheduled", "interview",
+  "offer_sent", "token_paid", "pre_admitted", "admitted",
+];
+
+const stageIndex = (stage: string) => {
+  const idx = STAGE_ORDER.indexOf(stage);
+  return idx === -1 ? -1 : idx;
+};
+
+/** Auto-advance lead stage only if newStage is ahead of current stage (forward-only). */
+const shouldAutoAdvance = (currentStage: string, newStage: string) => {
+  if (currentStage === "rejected") return false;
+  return stageIndex(newStage) > stageIndex(currentStage);
+};
+
 const LeadDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -136,6 +153,10 @@ const LeadDetail = () => {
         lead_id: id, user_id: profileId, type: "followup",
         description: `Follow-up scheduled (${data.type}) for ${new Date(data.scheduled_at).toLocaleDateString("en-IN")}${data.notes ? `. ${data.notes}` : ""}`,
       });
+      // Auto-advance to counsellor_call when a call/whatsapp followup is scheduled
+      if (data.type === "call" || data.type === "whatsapp") {
+        await autoAdvanceStage("counsellor_call");
+      }
       await fetchAll();
     }
   };
@@ -162,12 +183,18 @@ const LeadDetail = () => {
         lead_id: id, user_id: profileId, type: "visit",
         description: `Campus visit scheduled for ${new Date(data.visit_date).toLocaleDateString("en-IN")}${campusLabel ? ` at ${campusLabel}` : ""}`,
       });
+      await autoAdvanceStage("visit_scheduled");
       await fetchAll();
     }
   };
 
   const updateStage = async (newStage: string) => {
     if (!id || !lead || lead.stage === newStage) return;
+    // Prevent going back to new_lead once moved past it
+    if (newStage === "new_lead" && lead.stage !== "new_lead") {
+      toast({ title: "Cannot revert", description: "Lead cannot be moved back to New Lead stage.", variant: "destructive" });
+      return;
+    }
     const { error } = await supabase.from("leads").update({ stage: newStage as any }).eq("id", id);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
     await supabase.from("lead_activities").insert({
@@ -176,6 +203,19 @@ const LeadDetail = () => {
       old_stage: lead.stage as any, new_stage: newStage as any,
     });
     await fetchAll();
+  };
+
+  /** Auto-advance stage when an action implies progression */
+  const autoAdvanceStage = async (targetStage: string) => {
+    if (!id || !lead) return;
+    if (shouldAutoAdvance(lead.stage, targetStage)) {
+      await supabase.from("leads").update({ stage: targetStage as any }).eq("id", id);
+      await supabase.from("lead_activities").insert({
+        lead_id: id, user_id: profileId, type: "stage_change",
+        description: `Stage auto-advanced from ${STAGE_LABELS[lead.stage] || lead.stage} to ${STAGE_LABELS[targetStage] || targetStage}`,
+        old_stage: lead.stage as any, new_stage: targetStage as any,
+      });
+    }
   };
 
   const updateField = async (field: string, value: string | null, label: string) => {
