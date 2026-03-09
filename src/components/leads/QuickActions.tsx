@@ -19,7 +19,7 @@ interface QuickActionsProps {
 }
 
 export function QuickActions({
-  onCall, onWhatsApp, onScheduleVisit, onInterview, onOffer, onConvert, onAiCall, aiCalling,
+  onCall, onWhatsApp, onScheduleVisit, onInterview, onOffer, onConvert, onAiCall, aiCalling, onAddSecondaryCounsellor,
 }: QuickActionsProps) {
   const [open, setOpen] = useState(false);
 
