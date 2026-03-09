@@ -27,9 +27,11 @@ export function InterviewScoringDialog({ open, onOpenChange, leadId, leadName, c
   const handleSave = async () => {
     setSaving(true);
     const updates: any = { interview_score: score, interview_result: result };
-    // Auto-advance stage if passed
+    // Auto-advance: scoring means interview stage at minimum
+    // If passed → move toward offer_sent, if failed → rejected
     if (result === "passed") updates.stage = "offer_sent";
-    if (result === "failed") updates.stage = "rejected";
+    else if (result === "failed") updates.stage = "rejected";
+    else updates.stage = "interview";
 
     const { error } = await supabase.from("leads").update(updates).eq("id", leadId);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); setSaving(false); return; }
