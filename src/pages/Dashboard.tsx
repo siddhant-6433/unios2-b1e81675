@@ -48,13 +48,15 @@ const SuperAdminDashboard = () => {
     setLoading(true);
     const today = new Date().toISOString().slice(0, 10);
 
-    const [leadsRes, todayRes, admittedRes, studentsRes, recentRes] = await Promise.all([
+    const [leadsRes, todayRes, admittedRes, studentsRes, recentRes, appInProgRes, appSubmRes] = await Promise.all([
       supabase.from("leads").select("id", { count: "exact", head: true }),
       supabase.from("leads").select("id", { count: "exact", head: true }).gte("created_at", today),
       supabase.from("leads").select("id", { count: "exact", head: true }).eq("stage", "admitted"),
       supabase.from("students").select("id", { count: "exact", head: true }),
       supabase.from("leads").select("id, name, phone, stage, source, created_at, courses:course_id(name), campuses:campus_id(name)")
         .order("created_at", { ascending: false }).limit(5),
+      supabase.from("leads").select("id", { count: "exact", head: true }).eq("stage", "application_in_progress"),
+      supabase.from("leads").select("id", { count: "exact", head: true }).eq("stage", "application_submitted"),
     ]);
 
     setLeadCount(leadsRes.count || 0);
