@@ -4,10 +4,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { Shield, Users, Search, X, Loader2, UserPlus, FileSpreadsheet, Phone, Eye } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import InviteUserDialog from "@/components/admin/InviteUserDialog";
 import BulkImportDialog from "@/components/admin/BulkImportDialog";
 import EditPhoneDialog from "@/components/admin/EditPhoneDialog";
 import EmployeeProfileDialog from "@/components/admin/EmployeeProfileDialog";
+import TeamManagement from "@/components/admin/TeamManagement";
 import type { Database } from "@/integrations/supabase/types";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
@@ -163,169 +165,147 @@ const AdminPanel = () => {
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">User Management</h1>
-          <p className="text-sm text-muted-foreground mt-1">Assign roles, edit phone numbers, and manage user profiles.</p>
+          <h1 className="text-2xl font-bold text-foreground">Admin Panel</h1>
+          <p className="text-sm text-muted-foreground mt-1">Manage users, roles, and teams</p>
         </div>
-        <div className="flex items-center gap-3">
-          <button onClick={() => setBulkOpen(true)} className="flex items-center gap-2 rounded-xl border border-input bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors">
-            <FileSpreadsheet className="h-4 w-4" />
-            Bulk Import
-          </button>
-          <button onClick={() => setInviteOpen(true)} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
-            <UserPlus className="h-4 w-4" />
-            Invite User
-          </button>
-          <div className="flex items-center gap-2 rounded-xl bg-pastel-purple px-3 py-1.5">
-            <Shield className="h-4 w-4 text-foreground/70" />
-            <span className="text-xs font-semibold text-foreground/80">Super Admin Only</span>
-          </div>
+        <div className="flex items-center gap-2 rounded-xl bg-pastel-purple px-3 py-1.5">
+          <Shield className="h-4 w-4 text-foreground/70" />
+          <span className="text-xs font-semibold text-foreground/80">Super Admin Only</span>
         </div>
       </div>
 
-      {/* Search */}
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <input
-          type="text"
-          placeholder="Search by name, phone, campus, or role..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full rounded-xl border border-input bg-card pl-9 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-        />
-      </div>
+      <Tabs defaultValue="users" className="w-full">
+        <TabsList className="bg-transparent border-b border-border rounded-none p-0 h-auto gap-0 w-full justify-start">
+          <TabsTrigger value="users" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
+            Users & Roles
+          </TabsTrigger>
+          <TabsTrigger value="teams" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
+            Teams
+          </TabsTrigger>
+        </TabsList>
 
-      {/* Summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <SummaryCard label="Total Users" value={users.length} bg="bg-pastel-blue" />
-        <SummaryCard label="With Roles" value={users.filter((u) => u.role).length} bg="bg-pastel-green" />
-        <SummaryCard label="No Role" value={users.filter((u) => !u.role).length} bg="bg-pastel-yellow" />
-        <SummaryCard label="Admins" value={users.filter((u) => u.role === "super_admin" || u.role === "campus_admin").length} bg="bg-pastel-purple" />
-      </div>
+        <TabsContent value="users" className="mt-6">
+          <div className="space-y-6">
+            <div className="flex items-center gap-3">
+              <button onClick={() => setBulkOpen(true)} className="flex items-center gap-2 rounded-xl border border-input bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors">
+                <FileSpreadsheet className="h-4 w-4" /> Bulk Import
+              </button>
+              <button onClick={() => setInviteOpen(true)} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
+                <UserPlus className="h-4 w-4" /> Invite User
+              </button>
+            </div>
 
-      {/* User Table */}
-      <div className="rounded-xl bg-card card-shadow overflow-hidden">
-        {loading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <div className="relative max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <input type="text" placeholder="Search by name, phone, campus, or role..." value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full rounded-xl border border-input bg-card pl-9 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20" />
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <SummaryCard label="Total Users" value={users.length} bg="bg-pastel-blue" />
+              <SummaryCard label="With Roles" value={users.filter((u) => u.role).length} bg="bg-pastel-green" />
+              <SummaryCard label="No Role" value={users.filter((u) => !u.role).length} bg="bg-pastel-yellow" />
+              <SummaryCard label="Admins" value={users.filter((u) => u.role === "super_admin" || u.role === "campus_admin").length} bg="bg-pastel-purple" />
+            </div>
+
+            <div className="rounded-xl bg-card card-shadow overflow-hidden">
+              {loading ? (
+                <div className="flex items-center justify-center py-16">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : filtered.length === 0 ? (
+                <div className="py-16 text-center">
+                  <Users className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
+                  <p className="text-sm text-muted-foreground">No users found</p>
+                </div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left">
+                      <th className="px-4 py-3 font-medium text-muted-foreground">User</th>
+                      <th className="px-4 py-3 font-medium text-muted-foreground">Phone (OTP)</th>
+                      <th className="px-4 py-3 font-medium text-muted-foreground">Campus</th>
+                      <th className="px-4 py-3 font-medium text-muted-foreground">Current Role</th>
+                      <th className="px-4 py-3 font-medium text-muted-foreground text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((user) => {
+                      const initials = (user.display_name || "?").split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
+                      const isEditing = editingUser === user.user_id;
+                      const isSaving = savingUser === user.user_id;
+                      return (
+                        <tr key={user.user_id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary shrink-0">{initials}</div>
+                              <p className="font-medium text-foreground">{user.display_name || "Unnamed"}</p>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-sm ${user.phone ? "text-foreground" : "text-muted-foreground italic"}`}>{user.phone || "Not set"}</span>
+                              <button onClick={() => setPhoneEdit({ userId: user.user_id, name: user.display_name || "User", phone: user.phone })}
+                                className="rounded-lg p-1 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors" title="Edit phone number">
+                                <Phone className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">{user.campus || "—"}</td>
+                          <td className="px-4 py-3">
+                            {isEditing ? (
+                              <div className="flex items-center gap-2">
+                                <select defaultValue={user.role || "none"} onChange={(e) => handleRoleChange(user.user_id, e.target.value as AppRole | "none")} disabled={isSaving}
+                                  className="rounded-lg border border-input bg-card px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
+                                  <option value="none">No Role</option>
+                                  {ALL_ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                                </select>
+                                {isSaving && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                                <button onClick={() => setEditingUser(null)} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+                              </div>
+                            ) : (
+                              <span className={`rounded-md px-2.5 py-0.5 text-[11px] font-semibold ${getRoleBadgeClass(user.role)}`}>
+                                {user.role ? ALL_ROLES.find((r) => r.value === user.role)?.label || user.role : "No Role"}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <button onClick={() => handleViewProfile(user)}
+                                className="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/80 transition-colors flex items-center gap-1"
+                                title={user.role === "student" ? "View Student Profile" : "View Employee Profile"}>
+                                <Eye className="h-3.5 w-3.5" />{user.role === "student" ? "Student" : "Profile"}
+                              </button>
+                              {!isEditing && (
+                                <button onClick={() => setEditingUser(user.user_id)}
+                                  className="rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors">
+                                  Change Role
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <InviteUserDialog open={inviteOpen} onClose={() => setInviteOpen(false)} onSuccess={() => fetchUsers()} />
+            <BulkImportDialog open={bulkOpen} onClose={() => setBulkOpen(false)} onSuccess={() => fetchUsers()} />
+            <EditPhoneDialog open={!!phoneEdit} onClose={() => setPhoneEdit(null)} onSuccess={() => fetchUsers()}
+              userId={phoneEdit?.userId || ""} userName={phoneEdit?.name || ""} currentPhone={phoneEdit?.phone || null} />
+            <EmployeeProfileDialog open={!!employeeProfile} onClose={() => setEmployeeProfile(null)}
+              userId={employeeProfile?.userId || ""} userName={employeeProfile?.name || ""} />
           </div>
-        ) : filtered.length === 0 ? (
-          <div className="py-16 text-center">
-            <Users className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
-            <p className="text-sm text-muted-foreground">No users found</p>
-          </div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-left">
-                <th className="px-4 py-3 font-medium text-muted-foreground">User</th>
-                <th className="px-4 py-3 font-medium text-muted-foreground">Phone (OTP)</th>
-                <th className="px-4 py-3 font-medium text-muted-foreground">Campus</th>
-                <th className="px-4 py-3 font-medium text-muted-foreground">Current Role</th>
-                <th className="px-4 py-3 font-medium text-muted-foreground text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((user) => {
-                const initials = (user.display_name || "?").split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
-                const isEditing = editingUser === user.user_id;
-                const isSaving = savingUser === user.user_id;
+        </TabsContent>
 
-                return (
-                  <tr key={user.user_id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary shrink-0">
-                          {initials}
-                        </div>
-                        <div>
-                          <p className="font-medium text-foreground">{user.display_name || "Unnamed"}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-sm ${user.phone ? "text-foreground" : "text-muted-foreground italic"}`}>
-                          {user.phone || "Not set"}
-                        </span>
-                        <button
-                          onClick={() => setPhoneEdit({ userId: user.user_id, name: user.display_name || "User", phone: user.phone })}
-                          className="rounded-lg p-1 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-                          title="Edit phone number"
-                        >
-                          <Phone className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground">{user.campus || "—"}</td>
-                    <td className="px-4 py-3">
-                      {isEditing ? (
-                        <div className="flex items-center gap-2">
-                          <select
-                            defaultValue={user.role || "none"}
-                            onChange={(e) => handleRoleChange(user.user_id, e.target.value as AppRole | "none")}
-                            disabled={isSaving}
-                            className="rounded-lg border border-input bg-card px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-                          >
-                            <option value="none">No Role</option>
-                            {ALL_ROLES.map((r) => (
-                              <option key={r.value} value={r.value}>{r.label}</option>
-                            ))}
-                          </select>
-                          {isSaving && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
-                          <button onClick={() => setEditingUser(null)} className="text-muted-foreground hover:text-foreground">
-                            <X className="h-4 w-4" />
-                          </button>
-                        </div>
-                      ) : (
-                        <span className={`rounded-md px-2.5 py-0.5 text-[11px] font-semibold ${getRoleBadgeClass(user.role)}`}>
-                          {user.role ? ALL_ROLES.find((r) => r.value === user.role)?.label || user.role : "No Role"}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => handleViewProfile(user)}
-                          className="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/80 transition-colors flex items-center gap-1"
-                          title={user.role === "student" ? "View Student Profile" : "View Employee Profile"}
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                          {user.role === "student" ? "Student" : "Profile"}
-                        </button>
-                        {!isEditing && (
-                          <button
-                            onClick={() => setEditingUser(user.user_id)}
-                            className="rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
-                          >
-                            Change Role
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      <InviteUserDialog open={inviteOpen} onClose={() => setInviteOpen(false)} onSuccess={() => fetchUsers()} />
-      <BulkImportDialog open={bulkOpen} onClose={() => setBulkOpen(false)} onSuccess={() => fetchUsers()} />
-      <EditPhoneDialog
-        open={!!phoneEdit}
-        onClose={() => setPhoneEdit(null)}
-        onSuccess={() => fetchUsers()}
-        userId={phoneEdit?.userId || ""}
-        userName={phoneEdit?.name || ""}
-        currentPhone={phoneEdit?.phone || null}
-      />
-      <EmployeeProfileDialog
-        open={!!employeeProfile}
-        onClose={() => setEmployeeProfile(null)}
-        userId={employeeProfile?.userId || ""}
-        userName={employeeProfile?.name || ""}
-      />
+        <TabsContent value="teams" className="mt-6">
+          <TeamManagement />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };
