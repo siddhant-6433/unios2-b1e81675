@@ -10,6 +10,7 @@ import BulkImportDialog from "@/components/admin/BulkImportDialog";
 import EditPhoneDialog from "@/components/admin/EditPhoneDialog";
 import EmployeeProfileDialog from "@/components/admin/EmployeeProfileDialog";
 import TeamManagement from "@/components/admin/TeamManagement";
+import CourseCampusMaster from "@/components/admin/CourseCampusMaster";
 import type { Database } from "@/integrations/supabase/types";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
