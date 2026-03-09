@@ -49,6 +49,7 @@ const LeadDetail = () => {
   const [counsellorName, setCounsellorName] = useState<string | undefined>();
   const [courseName, setCourseName] = useState<string | undefined>();
   const [campusName, setCampusName] = useState<string | undefined>();
+  const [campusCity, setCampusCity] = useState<string | undefined>();
   const [profileId, setProfileId] = useState<string | null>(null);
 
   useEffect(() => { if (id) fetchAll(); }, [id]);
