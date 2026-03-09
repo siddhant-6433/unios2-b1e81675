@@ -218,12 +218,26 @@ const LeadDetail = () => {
     else { toast({ title: "AI Call Complete" }); fetchAll(); }
   };
 
+  const handleDeleteLead = async () => {
+    if (!id) return;
+    setDeletingLead(true);
+    const { error } = await supabase.from("leads").delete().eq("id", id);
+    if (error) {
+      toast({ title: "Delete failed", description: error.message, variant: "destructive" });
+      setDeletingLead(false);
+      setShowDeleteConfirm(false);
+    } else {
+      toast({ title: "Lead deleted", description: `${lead?.name || "Lead"} has been deleted.` });
+      navigate("/admissions");
+    }
+  };
+
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
   if (!lead) return <div className="text-center py-20"><p className="text-muted-foreground">Lead not found</p></div>;
 
   return (
     <div className="space-y-4 animate-fade-in px-0">
-      {/* Breadcrumb */}
+      {/* Breadcrumb + Actions */}
       <div className="flex items-center gap-2 text-sm overflow-x-auto">
         <Link to="/admissions" className="text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 shrink-0">
           <ArrowLeft className="h-3.5 w-3.5" /> Leads
@@ -233,6 +247,19 @@ const LeadDetail = () => {
         {lead.application_id && (
           <span className="text-xs font-mono text-muted-foreground ml-1 shrink-0">{lead.application_id}</span>
         )}
+        {/* Action buttons for super_admin / team leader */}
+        <div className="ml-auto flex items-center gap-2 shrink-0">
+          {canTransfer && (
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => setShowTransfer(true)}>
+              <ArrowRightLeft className="h-3.5 w-3.5" /> Transfer
+            </Button>
+          )}
+          {isSuperAdmin && (
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => setShowDeleteConfirm(true)}>
+              <Trash2 className="h-3.5 w-3.5" /> Delete
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Two-column layout */}
