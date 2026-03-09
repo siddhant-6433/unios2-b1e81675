@@ -72,7 +72,12 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
-  const isActive = (path: string) => location.pathname === path;
+  const isActive = (path: string) => {
+    if (path.includes("?")) {
+      return location.pathname + location.search === path;
+    }
+    return location.pathname === path;
+  };
   const { profile, role, signOut } = useAuth();
 
   const displayName = profile?.display_name || "User";
