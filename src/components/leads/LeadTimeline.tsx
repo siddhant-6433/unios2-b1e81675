@@ -201,7 +201,12 @@ const ACTIVITY_CONFIG: Record<string, {
   },
 };
 
-const DEFAULT_CONFIG = {
+const DEFAULT_CONFIG: {
+  icon: React.ReactNode;
+  bg: string;
+  getTitle: (a: any) => string;
+  getSub?: (a: any) => string | null;
+} = {
   icon: <Clock className="h-3.5 w-3.5" />,
   bg: "bg-muted text-muted-foreground",
   getTitle: () => "Activity",
