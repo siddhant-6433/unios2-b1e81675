@@ -231,6 +231,7 @@ const LeadDetail = () => {
             counsellorName={counsellorName}
             courseName={courseName}
             campusName={campusName}
+            campusCity={campusCity}
             coursesByDepartment={coursesByDepartment}
             getCampusesForCourse={getCampusesForCourse}
             onStageChange={updateStage}
