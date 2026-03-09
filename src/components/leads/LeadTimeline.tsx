@@ -185,6 +185,11 @@ const ACTIVITY_CONFIG: Record<string, {
     bg: "bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400",
     getTitle: () => "Email sent",
   },
+  info_update: {
+    icon: <Edit className="h-4 w-4" />,
+    bg: "bg-slate-100 text-slate-600 dark:bg-slate-900/20 dark:text-slate-400",
+    getTitle: () => "Info Updated",
+  },
 };
 
 const DEFAULT_CONFIG = {
