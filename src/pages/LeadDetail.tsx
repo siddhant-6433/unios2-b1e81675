@@ -37,6 +37,7 @@ const LeadDetail = () => {
   const [newNote, setNewNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
   const [campuses, setCampuses] = useState<any[]>([]);
+  const [courses, setCourses] = useState<any[]>([]);
   const [showInterview, setShowInterview] = useState(false);
   const [showOfferLetter, setShowOfferLetter] = useState(false);
   const [showConvert, setShowConvert] = useState(false);
@@ -51,7 +52,7 @@ const LeadDetail = () => {
 
   const fetchAll = async () => {
     setLoading(true);
-    const [leadRes, notesRes, followupsRes, visitsRes, activitiesRes, campusesRes, callLogsRes] = await Promise.all([
+    const [leadRes, notesRes, followupsRes, visitsRes, activitiesRes, campusesRes, callLogsRes, coursesRes] = await Promise.all([
       supabase.from("leads").select("*").eq("id", id).single(),
       supabase.from("lead_notes").select("*").eq("lead_id", id).order("created_at", { ascending: false }),
       supabase.from("lead_followups").select("*").eq("lead_id", id).order("scheduled_at", { ascending: true }),
@@ -59,6 +60,7 @@ const LeadDetail = () => {
       supabase.from("lead_activities").select("*").eq("lead_id", id).order("created_at", { ascending: false }).limit(50),
       supabase.from("campuses").select("id, name"),
       supabase.from("call_logs").select("*").eq("lead_id", id!).order("called_at", { ascending: false }),
+      supabase.from("courses").select("id, name"),
     ]);
     if (leadRes.data) {
       setLead(leadRes.data);
@@ -82,6 +84,7 @@ const LeadDetail = () => {
     if (activitiesRes.data) setActivities(activitiesRes.data);
     if (campusesRes.data) setCampuses(campusesRes.data);
     if (callLogsRes.data) setCallLogs(callLogsRes.data);
+    if (coursesRes.data) setCourses(coursesRes.data);
     setLoading(false);
   };
 
@@ -154,6 +157,31 @@ const LeadDetail = () => {
     await fetchAll();
   };
 
+  const updateField = async (field: string, value: string | null, label: string) => {
+    if (!id || !lead) return;
+    const oldValue = lead[field];
+    const { error } = await supabase.from("leads").update({ [field]: value } as any).eq("id", id);
+    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+
+    // Resolve display values for foreign keys
+    let oldDisplay = oldValue || "Not set";
+    let newDisplay = value || "Not set";
+    if (field === "course_id") {
+      oldDisplay = courses.find(c => c.id === oldValue)?.name || "Not set";
+      newDisplay = courses.find(c => c.id === value)?.name || "Not set";
+    } else if (field === "campus_id") {
+      oldDisplay = campuses.find(c => c.id === oldValue)?.name || "Not set";
+      newDisplay = campuses.find(c => c.id === value)?.name || "Not set";
+    }
+
+    await supabase.from("lead_activities").insert({
+      lead_id: id, user_id: user?.id || null, type: "info_update",
+      description: `${label} changed from "${oldDisplay}" to "${newDisplay}"`,
+    });
+    toast({ title: `${label} updated` });
+    await fetchAll();
+  };
+
   const triggerAiCall = async () => {
     setAiCalling(true);
     const { error } = await supabase.functions.invoke("ai-first-call", { body: { lead_id: id } });
@@ -188,7 +216,10 @@ const LeadDetail = () => {
             counsellorName={counsellorName}
             courseName={courseName}
             campusName={campusName}
+            courses={courses}
+            campusesList={campuses}
             onStageChange={updateStage}
+            onFieldUpdate={updateField}
           />
           <QuickActions
             onCall={() => {

@@ -1,7 +1,8 @@
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Phone, Mail, MapPin, FileText, Building2, User, Globe, UserCheck, Sparkles,
+  Phone, Mail, MapPin, FileText, Building2, User, Globe, UserCheck, Sparkles, Pencil, Check, X,
 } from "lucide-react";
 
 const STAGE_LABELS: Record<string, string> = {
@@ -16,10 +17,16 @@ interface LeadInfoCardProps {
   counsellorName?: string;
   courseName?: string;
   campusName?: string;
+  courses?: { id: string; name: string }[];
+  campusesList?: { id: string; name: string }[];
   onStageChange: (stage: string) => void;
+  onFieldUpdate?: (field: string, value: string | null, label: string) => void;
 }
 
-export function LeadInfoCard({ lead, counsellorName, courseName, campusName, onStageChange }: LeadInfoCardProps) {
+export function LeadInfoCard({
+  lead, counsellorName, courseName, campusName, courses, campusesList,
+  onStageChange, onFieldUpdate,
+}: LeadInfoCardProps) {
   const initials = lead.name
     .split(" ")
     .map((n: string) => n[0])
@@ -36,8 +43,8 @@ export function LeadInfoCard({ lead, counsellorName, courseName, campusName, onS
             {initials}
           </div>
           <div className="min-w-0">
-            <h2 className="text-lg font-bold text-foreground truncate">{lead.name}</h2>
-            <p className="text-sm text-muted-foreground">{lead.phone}</p>
+            <EditableText field="name" label="Name" value={lead.name} onSave={onFieldUpdate} className="text-lg font-bold text-foreground" />
+            <EditableText field="phone" label="Phone" value={lead.phone} onSave={onFieldUpdate} className="text-sm text-muted-foreground" />
           </div>
         </div>
 
@@ -57,22 +64,43 @@ export function LeadInfoCard({ lead, counsellorName, courseName, campusName, onS
 
         {/* Info rows */}
         <div className="border-t border-border divide-y divide-border">
-          {courseName && (
-            <InfoRow icon={<FileText className="h-4 w-4" />} label="Course" value={courseName} />
-          )}
-          {campusName && (
-            <InfoRow icon={<Building2 className="h-4 w-4" />} label="Campus" value={campusName} />
-          )}
-          {lead.email && (
-            <InfoRow icon={<Mail className="h-4 w-4" />} label="Email" value={lead.email} />
-          )}
+          {/* Course — dropdown edit */}
+          <EditableSelectRow
+            icon={<FileText className="h-4 w-4" />}
+            label="Course"
+            value={lead.course_id}
+            displayValue={courseName || "Not set"}
+            options={(courses || []).map(c => ({ value: c.id, label: c.name }))}
+            field="course_id"
+            fieldLabel="Course"
+            onSave={onFieldUpdate}
+          />
+
+          {/* Campus — dropdown edit */}
+          <EditableSelectRow
+            icon={<Building2 className="h-4 w-4" />}
+            label="Campus"
+            value={lead.campus_id}
+            displayValue={campusName || "Not set"}
+            options={(campusesList || []).map(c => ({ value: c.id, label: c.name }))}
+            field="campus_id"
+            fieldLabel="Campus"
+            onSave={onFieldUpdate}
+          />
+
+          {/* Email — inline text edit */}
+          <EditableInfoRow icon={<Mail className="h-4 w-4" />} label="Email" field="email" fieldLabel="Email"
+            value={lead.email || ""} onSave={onFieldUpdate} />
+
           <InfoRow icon={<Globe className="h-4 w-4" />} label="Source" value={lead.source?.replace(/_/g, " ")} className="capitalize" />
+
           {counsellorName && (
             <InfoRow icon={<UserCheck className="h-4 w-4" />} label="Assigned to" value={counsellorName} />
           )}
-          {lead.guardian_name && (
-            <InfoRow icon={<User className="h-4 w-4" />} label="Guardian" value={`${lead.guardian_name}${lead.guardian_phone ? ` · ${lead.guardian_phone}` : ""}`} />
-          )}
+
+          {/* Guardian — inline text edit */}
+          <EditableGuardianRow lead={lead} onSave={onFieldUpdate} />
+
           {(lead.pre_admission_no || lead.admission_no) && (
             <div className="px-5 py-3 flex items-center gap-3">
               <Sparkles className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -84,7 +112,6 @@ export function LeadInfoCard({ lead, counsellorName, courseName, campusName, onS
           )}
         </div>
 
-        {/* Interest Level (mock based on interview score) */}
         {lead.interview_score != null && (
           <div className="px-5 py-3 border-t border-border flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Interest Level</span>
@@ -103,6 +130,168 @@ export function LeadInfoCard({ lead, counsellorName, courseName, campusName, onS
     </Card>
   );
 }
+
+// ── Inline editable text (click to edit) ────────────────────
+
+function EditableText({ field, label, value, onSave, className }: {
+  field: string; label: string; value: string; onSave?: (field: string, value: string | null, label: string) => void; className?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+
+  const save = () => {
+    const trimmed = draft.trim();
+    if (trimmed && trimmed !== value) onSave?.(field, trimmed, label);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.key === "Enter" && save()}
+          className="rounded-lg border border-input bg-background px-2 py-0.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 min-w-0 flex-1"
+          autoFocus maxLength={200} />
+        <button onClick={save} className="text-primary hover:text-primary/80 p-0.5"><Check className="h-3.5 w-3.5" /></button>
+        <button onClick={() => { setDraft(value); setEditing(false); }} className="text-muted-foreground hover:text-foreground p-0.5"><X className="h-3.5 w-3.5" /></button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="group flex items-center gap-1.5 cursor-pointer" onClick={() => { setDraft(value); setEditing(true); }}>
+      <span className={className}>{value || "—"}</span>
+      <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+    </div>
+  );
+}
+
+// ── Editable info row (text input) ──────────────────────────
+
+function EditableInfoRow({ icon, label, field, fieldLabel, value, onSave }: {
+  icon: React.ReactNode; label: string; field: string; fieldLabel: string;
+  value: string; onSave?: (field: string, value: string | null, label: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+
+  const save = () => {
+    const trimmed = draft.trim();
+    if (trimmed !== value) onSave?.(field, trimmed || null, fieldLabel);
+    setEditing(false);
+  };
+
+  return (
+    <div className="px-5 py-3 flex items-start gap-3">
+      <span className="text-muted-foreground mt-0.5 shrink-0">{icon}</span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] text-muted-foreground">{label}</p>
+        {editing ? (
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.key === "Enter" && save()}
+              className="rounded-lg border border-input bg-background px-2 py-0.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 min-w-0 flex-1"
+              autoFocus maxLength={255} />
+            <button onClick={save} className="text-primary p-0.5"><Check className="h-3.5 w-3.5" /></button>
+            <button onClick={() => { setDraft(value); setEditing(false); }} className="text-muted-foreground p-0.5"><X className="h-3.5 w-3.5" /></button>
+          </div>
+        ) : (
+          <div className="group flex items-center gap-1.5 cursor-pointer mt-0.5" onClick={() => { setDraft(value); setEditing(true); }}>
+            <p className="text-sm font-medium text-foreground">{value || "Not set"}</p>
+            <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Editable select row (dropdown) ──────────────────────────
+
+function EditableSelectRow({ icon, label, value, displayValue, options, field, fieldLabel, onSave }: {
+  icon: React.ReactNode; label: string; value: string | null; displayValue: string;
+  options: { value: string; label: string }[]; field: string; fieldLabel: string;
+  onSave?: (field: string, value: string | null, label: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+
+  return (
+    <div className="px-5 py-3 flex items-start gap-3">
+      <span className="text-muted-foreground mt-0.5 shrink-0">{icon}</span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] text-muted-foreground">{label}</p>
+        {editing ? (
+          <select
+            defaultValue={value || ""}
+            onChange={e => {
+              const v = e.target.value || null;
+              if (v !== value) onSave?.(field, v, fieldLabel);
+              setEditing(false);
+            }}
+            onBlur={() => setEditing(false)}
+            className="w-full rounded-lg border border-input bg-background px-2 py-1 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 mt-0.5"
+            autoFocus
+          >
+            <option value="">Not set</option>
+            {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        ) : (
+          <div className="group flex items-center gap-1.5 cursor-pointer mt-0.5" onClick={() => setEditing(true)}>
+            <p className="text-sm font-medium text-foreground">{displayValue}</p>
+            <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Guardian row (dual fields) ──────────────────────────────
+
+function EditableGuardianRow({ lead, onSave }: { lead: any; onSave?: (field: string, value: string | null, label: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(lead.guardian_name || "");
+  const [phone, setPhone] = useState(lead.guardian_phone || "");
+
+  const save = () => {
+    const trimmedName = name.trim();
+    const trimmedPhone = phone.trim();
+    if (trimmedName !== (lead.guardian_name || "")) onSave?.("guardian_name", trimmedName || null, "Guardian Name");
+    if (trimmedPhone !== (lead.guardian_phone || "")) onSave?.("guardian_phone", trimmedPhone || null, "Guardian Phone");
+    setEditing(false);
+  };
+
+  return (
+    <div className="px-5 py-3 flex items-start gap-3">
+      <span className="text-muted-foreground mt-0.5 shrink-0"><User className="h-4 w-4" /></span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] text-muted-foreground">Guardian</p>
+        {editing ? (
+          <div className="space-y-1.5 mt-0.5">
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="Guardian name"
+              className="w-full rounded-lg border border-input bg-background px-2 py-0.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+              autoFocus maxLength={100} />
+            <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="Guardian phone"
+              className="w-full rounded-lg border border-input bg-background px-2 py-0.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+              maxLength={20} />
+            <div className="flex items-center gap-1.5">
+              <button onClick={save} className="text-primary p-0.5"><Check className="h-3.5 w-3.5" /></button>
+              <button onClick={() => { setName(lead.guardian_name || ""); setPhone(lead.guardian_phone || ""); setEditing(false); }}
+                className="text-muted-foreground p-0.5"><X className="h-3.5 w-3.5" /></button>
+            </div>
+          </div>
+        ) : (
+          <div className="group flex items-center gap-1.5 cursor-pointer mt-0.5" onClick={() => { setName(lead.guardian_name || ""); setPhone(lead.guardian_phone || ""); setEditing(true); }}>
+            <p className="text-sm font-medium text-foreground">
+              {lead.guardian_name ? `${lead.guardian_name}${lead.guardian_phone ? ` · ${lead.guardian_phone}` : ""}` : "Not set"}
+            </p>
+            <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Static info row ─────────────────────────────────────────
 
 function InfoRow({ icon, label, value, className }: { icon: React.ReactNode; label: string; value: string; className?: string }) {
   return (
