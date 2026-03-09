@@ -176,11 +176,17 @@ const LeadDetail = () => {
     }
 
     const activityPayload = {
-      lead_id: id, user_id: profileId, type: "info_update",
+      lead_id: id, user_id: profileId || null, type: "info_update" as const,
       description: `${label} changed from "${oldDisplay}" to "${newDisplay}"`,
     };
-    const { error: actError } = await supabase.from("lead_activities").insert(activityPayload);
-    if (actError) console.error("Activity log failed:", actError);
+    console.log("Inserting activity:", activityPayload, "profileId:", profileId);
+    const { error: actError, data: actData } = await supabase.from("lead_activities").insert(activityPayload).select();
+    if (actError) {
+      console.error("Activity log failed:", actError);
+      toast({ title: "Warning", description: "Field updated but activity log failed: " + actError.message, variant: "destructive" });
+    } else {
+      console.log("Activity logged:", actData);
+    }
     toast({ title: `${label} updated` });
     await fetchAll();
   };
