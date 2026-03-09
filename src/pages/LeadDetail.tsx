@@ -49,6 +49,7 @@ const LeadDetail = () => {
   const [counsellorName, setCounsellorName] = useState<string | undefined>();
   const [courseName, setCourseName] = useState<string | undefined>();
   const [campusName, setCampusName] = useState<string | undefined>();
+  const [campusCity, setCampusCity] = useState<string | undefined>();
   const [profileId, setProfileId] = useState<string | null>(null);
 
   useEffect(() => { if (id) fetchAll(); }, [id]);
@@ -78,8 +79,11 @@ const LeadDetail = () => {
         setCourseName(data?.name || undefined);
       }
       if (leadRes.data.campus_id) {
-        const { data } = await supabase.from("campuses").select("name").eq("id", leadRes.data.campus_id).single();
+        const { data } = await supabase.from("campuses").select("name, city, state").eq("id", leadRes.data.campus_id).single();
         setCampusName(data?.name || undefined);
+        setCampusCity(data?.city ? (data.state ? `${data.city}, ${data.state}` : data.city) : undefined);
+      } else {
+        setCampusCity(undefined);
       }
     }
     if (notesRes.data) setNotes(notesRes.data);
@@ -227,6 +231,7 @@ const LeadDetail = () => {
             counsellorName={counsellorName}
             courseName={courseName}
             campusName={campusName}
+            campusCity={campusCity}
             coursesByDepartment={coursesByDepartment}
             getCampusesForCourse={getCampusesForCourse}
             onStageChange={updateStage}

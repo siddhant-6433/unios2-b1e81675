@@ -18,6 +18,7 @@ interface LeadInfoCardProps {
   counsellorName?: string;
   courseName?: string;
   campusName?: string;
+  campusCity?: string;
   coursesByDepartment?: { department: string; courses: { id: string; name: string }[] }[];
   getCampusesForCourse?: (courseId: string | null) => CampusOption[];
   onStageChange: (stage: string) => void;
@@ -25,7 +26,7 @@ interface LeadInfoCardProps {
 }
 
 export function LeadInfoCard({
-  lead, counsellorName, courseName, campusName,
+  lead, counsellorName, courseName, campusName, campusCity,
   coursesByDepartment, getCampusesForCourse,
   onStageChange, onFieldUpdate,
 }: LeadInfoCardProps) {
@@ -102,6 +103,16 @@ export function LeadInfoCard({
             onSave={onFieldUpdate}
             disabled={filteredCampuses.length <= 1}
           />
+
+          {/* City — auto-derived from campus */}
+          {campusCity && (
+            <InfoRow
+              icon={<MapPin className="h-4 w-4" />}
+              iconColor="bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400"
+              label="City"
+              value={campusCity}
+            />
+          )}
 
           {/* Email — inline text edit */}
           <EditableInfoRow
