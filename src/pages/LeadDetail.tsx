@@ -30,6 +30,23 @@ const STAGE_LABELS: Record<string, string> = {
   token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", rejected: "Rejected",
 };
 
+const STAGE_ORDER = [
+  "new_lead", "application_in_progress", "application_submitted",
+  "ai_called", "counsellor_call", "visit_scheduled", "interview",
+  "offer_sent", "token_paid", "pre_admitted", "admitted",
+];
+
+const stageIndex = (stage: string) => {
+  const idx = STAGE_ORDER.indexOf(stage);
+  return idx === -1 ? -1 : idx;
+};
+
+/** Auto-advance lead stage only if newStage is ahead of current stage (forward-only). */
+const shouldAutoAdvance = (currentStage: string, newStage: string) => {
+  if (currentStage === "rejected") return false;
+  return stageIndex(newStage) > stageIndex(currentStage);
+};
+
 const LeadDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();

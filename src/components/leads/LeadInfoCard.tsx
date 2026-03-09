@@ -61,9 +61,11 @@ export function LeadInfoCard({
             onChange={(e) => onStageChange(e.target.value)}
             className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
           >
-            {Object.entries(STAGE_LABELS).map(([key, label]) => (
-              <option key={key} value={key}>{label}</option>
-            ))}
+            {Object.entries(STAGE_LABELS)
+              .filter(([key]) => key === lead.stage || (lead.stage !== "new_lead" ? key !== "new_lead" : true))
+              .map(([key, label]) => (
+                <option key={key} value={key}>{label}</option>
+              ))}
           </select>
         </div>
 
