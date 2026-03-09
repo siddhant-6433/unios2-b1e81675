@@ -204,6 +204,7 @@ const LeadDetail = () => {
             onConvert={() => setShowConvert(true)}
             onAiCall={triggerAiCall}
             aiCalling={aiCalling}
+            onAddSecondaryCounsellor={() => setShowSecondaryCounsellor(true)}
           />
           <NextFollowup
             followups={followups}
