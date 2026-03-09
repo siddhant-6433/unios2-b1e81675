@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import {
   Phone, Mail, MapPin, FileText, Building2, User, Globe, UserCheck, Sparkles, Pencil, Check, X,
 } from "lucide-react";
+import type { CourseOption, CampusOption } from "@/hooks/useCourseCampusLink";
 
 const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", application_in_progress: "Application In Progress", application_submitted: "Application Submitted",
@@ -17,14 +18,15 @@ interface LeadInfoCardProps {
   counsellorName?: string;
   courseName?: string;
   campusName?: string;
-  courses?: { id: string; name: string }[];
-  campusesList?: { id: string; name: string }[];
+  coursesByDepartment?: { department: string; courses: { id: string; name: string }[] }[];
+  getCampusesForCourse?: (courseId: string | null) => CampusOption[];
   onStageChange: (stage: string) => void;
   onFieldUpdate?: (field: string, value: string | null, label: string) => void;
 }
 
 export function LeadInfoCard({
-  lead, counsellorName, courseName, campusName, courses, campusesList,
+  lead, counsellorName, courseName, campusName,
+  coursesByDepartment, getCampusesForCourse,
   onStageChange, onFieldUpdate,
 }: LeadInfoCardProps) {
   const initials = lead.name
@@ -33,6 +35,8 @@ export function LeadInfoCard({
     .join("")
     .slice(0, 2)
     .toUpperCase();
+
+  const filteredCampuses = getCampusesForCourse?.(lead.course_id) || [];
 
   return (
     <Card className="border-border/60 overflow-hidden">
@@ -64,28 +68,38 @@ export function LeadInfoCard({
 
         {/* Info rows */}
         <div className="border-t border-border divide-y divide-border">
-          {/* Course — dropdown edit */}
+          {/* Course — grouped dropdown */}
           <EditableSelectRow
             icon={<FileText className="h-4 w-4" />}
             label="Course"
             value={lead.course_id}
             displayValue={courseName || "Not set"}
-            options={(courses || []).map(c => ({ value: c.id, label: c.name }))}
+            groups={coursesByDepartment}
             field="course_id"
             fieldLabel="Course"
-            onSave={onFieldUpdate}
+            onSave={(field, value, label) => {
+              onFieldUpdate?.(field, value, label);
+              // Auto-set campus if course maps to exactly one campus
+              if (value && getCampusesForCourse) {
+                const campuses = getCampusesForCourse(value);
+                if (campuses.length === 1 && campuses[0].id !== lead.campus_id) {
+                  onFieldUpdate?.("campus_id", campuses[0].id, "Campus");
+                }
+              }
+            }}
           />
 
-          {/* Campus — dropdown edit */}
+          {/* Campus — filtered by course */}
           <EditableSelectRow
             icon={<Building2 className="h-4 w-4" />}
             label="Campus"
             value={lead.campus_id}
             displayValue={campusName || "Not set"}
-            options={(campusesList || []).map(c => ({ value: c.id, label: c.name }))}
+            options={filteredCampuses.map(c => ({ value: c.id, label: c.name }))}
             field="campus_id"
             fieldLabel="Campus"
             onSave={onFieldUpdate}
+            disabled={filteredCampuses.length <= 1}
           />
 
           {/* Email — inline text edit */}
@@ -231,12 +245,15 @@ function EditableInfoRow({ icon, label, field, fieldLabel, value, onSave }: {
   );
 }
 
-// ── Editable select row (dropdown) ──────────────────────────
+// ── Editable select row (dropdown with optional groups) ─────
 
-function EditableSelectRow({ icon, label, value, displayValue, options, field, fieldLabel, onSave }: {
+function EditableSelectRow({ icon, label, value, displayValue, options, groups, field, fieldLabel, onSave, disabled }: {
   icon: React.ReactNode; label: string; value: string | null; displayValue: string;
-  options: { value: string; label: string }[]; field: string; fieldLabel: string;
+  options?: { value: string; label: string }[];
+  groups?: { department: string; courses: { id: string; name: string }[] }[];
+  field: string; fieldLabel: string;
   onSave?: (field: string, value: string | null, label: string) => void;
+  disabled?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
 
@@ -258,12 +275,22 @@ function EditableSelectRow({ icon, label, value, displayValue, options, field, f
             autoFocus
           >
             <option value="">Not set</option>
-            {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            {groups
+              ? groups.map(g => (
+                  <optgroup key={g.department} label={g.department}>
+                    {g.courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </optgroup>
+                ))
+              : options?.map(o => <option key={o.value} value={o.value}>{o.label}</option>)
+            }
           </select>
         ) : (
-          <div className="group flex items-center gap-1.5 cursor-pointer mt-0.5" onClick={() => setEditing(true)}>
+          <div
+            className={`group flex items-center gap-1.5 mt-0.5 ${disabled ? "cursor-default" : "cursor-pointer"}`}
+            onClick={() => !disabled && setEditing(true)}
+          >
             <p className="text-sm font-medium text-foreground">{displayValue}</p>
-            <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+            {!disabled && <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />}
           </div>
         )}
       </div>

@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Loader2, Plus } from "lucide-react";
 import { PhoneInput } from "@/components/ui/phone-input";
+import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
 
 const SOURCES = [
   { value: "website", label: "Website" }, { value: "meta_ads", label: "Meta Ads" },
@@ -25,27 +26,28 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
   const { user } = useAuth();
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
-  const [courses, setCourses] = useState<{ id: string; name: string }[]>([]);
-  const [campuses, setCampuses] = useState<{ id: string; name: string }[]>([]);
   const [counsellors, setCounsellors] = useState<{ id: string; display_name: string }[]>([]);
+  const { coursesByDepartment, getCampusesForCourse } = useCourseCampusLink();
 
   const [form, setForm] = useState({
     name: "", phone: "", email: "", guardian_name: "", guardian_phone: "",
     source: "website" as string, course_id: "", campus_id: "", counsellor_id: "", notes: "",
   });
 
+  const filteredCampuses = getCampusesForCourse(form.course_id || null);
+
   useEffect(() => {
     if (!open) return;
-    Promise.all([
-      supabase.from("courses").select("id, name"),
-      supabase.from("campuses").select("id, name"),
-      supabase.from("profiles").select("id, display_name"),
-    ]).then(([c, ca, co]) => {
-      if (c.data) setCourses(c.data);
-      if (ca.data) setCampuses(ca.data);
-      if (co.data) setCounsellors(co.data.filter((p: any) => p.display_name));
+    supabase.from("profiles").select("id, display_name").then(({ data }) => {
+      if (data) setCounsellors(data.filter((p: any) => p.display_name));
     });
   }, [open]);
+
+  // Auto-select campus when course changes
+  const handleCourseChange = (courseId: string) => {
+    const campuses = getCampusesForCourse(courseId || null);
+    setForm(p => ({ ...p, course_id: courseId, campus_id: campuses.length === 1 ? campuses[0].id : "" }));
+  };
 
   const handleSubmit = async () => {
     if (!form.name.trim() || !form.phone.trim()) {
@@ -69,7 +71,6 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {
-      // Log lead_created activity
       if (data) {
         await supabase.from("lead_activities").insert({
           lead_id: data.id,
@@ -127,18 +128,35 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
             </div>
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Course</label>
-              <select value={form.course_id} onChange={e => setForm(p => ({ ...p, course_id: e.target.value }))} className={inputCls}>
+              <select value={form.course_id} onChange={e => handleCourseChange(e.target.value)} className={inputCls}>
                 <option value="">Select course</option>
-                {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {coursesByDepartment.map(g => (
+                  <optgroup key={g.department} label={g.department}>
+                    {g.courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </optgroup>
+                ))}
               </select>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Campus</label>
-              <select value={form.campus_id} onChange={e => setForm(p => ({ ...p, campus_id: e.target.value }))} className={inputCls}>
-                <option value="">Select campus</option>
-                {campuses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              <select
+                value={form.campus_id}
+                onChange={e => setForm(p => ({ ...p, campus_id: e.target.value }))}
+                className={inputCls}
+                disabled={filteredCampuses.length <= 1}
+              >
+                {!form.course_id ? (
+                  <option value="">Select course first</option>
+                ) : filteredCampuses.length === 1 ? (
+                  <option value={filteredCampuses[0].id}>{filteredCampuses[0].name}</option>
+                ) : (
+                  <>
+                    <option value="">Select campus</option>
+                    {filteredCampuses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </>
+                )}
               </select>
             </div>
             <div>

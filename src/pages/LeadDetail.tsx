@@ -14,6 +14,7 @@ import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
 import { ConvertToStudentDialog } from "@/components/admissions/ConvertToStudentDialog";
 import { SendWhatsAppDialog } from "@/components/leads/SendWhatsAppDialog";
 import { AddSecondaryCounsellorDialog } from "@/components/leads/AddSecondaryCounsellorDialog";
+import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
 
 const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", application_in_progress: "Application In Progress", application_submitted: "Application Submitted",
@@ -27,6 +28,7 @@ const LeadDetail = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { user } = useAuth();
+  const { coursesByDepartment, getCampusesForCourse, courseOptions } = useCourseCampusLink();
   const [lead, setLead] = useState<any>(null);
   const [notes, setNotes] = useState<any[]>([]);
   const [followups, setFollowups] = useState<any[]>([]);
@@ -168,11 +170,11 @@ const LeadDetail = () => {
     let oldDisplay = oldValue || "Not set";
     let newDisplay = value || "Not set";
     if (field === "course_id") {
-      oldDisplay = courses.find(c => c.id === oldValue)?.name || "Not set";
-      newDisplay = courses.find(c => c.id === value)?.name || "Not set";
+      oldDisplay = courseOptions.find(c => c.id === oldValue)?.name || "Not set";
+      newDisplay = courseOptions.find(c => c.id === value)?.name || "Not set";
     } else if (field === "campus_id") {
-      oldDisplay = campuses.find(c => c.id === oldValue)?.name || "Not set";
-      newDisplay = campuses.find(c => c.id === value)?.name || "Not set";
+      oldDisplay = courseOptions.find(c => c.campus_id === oldValue)?.campus_name || campuses.find(c => c.id === oldValue)?.name || "Not set";
+      newDisplay = courseOptions.find(c => c.campus_id === value)?.campus_name || campuses.find(c => c.id === value)?.name || "Not set";
     }
 
     const activityPayload = {
@@ -225,8 +227,8 @@ const LeadDetail = () => {
             counsellorName={counsellorName}
             courseName={courseName}
             campusName={campusName}
-            courses={courses}
-            campusesList={campuses}
+            coursesByDepartment={coursesByDepartment}
+            getCampusesForCourse={getCampusesForCourse}
             onStageChange={updateStage}
             onFieldUpdate={updateField}
           />
