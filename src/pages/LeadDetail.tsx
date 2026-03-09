@@ -79,8 +79,11 @@ const LeadDetail = () => {
         setCourseName(data?.name || undefined);
       }
       if (leadRes.data.campus_id) {
-        const { data } = await supabase.from("campuses").select("name").eq("id", leadRes.data.campus_id).single();
+        const { data } = await supabase.from("campuses").select("name, city, state").eq("id", leadRes.data.campus_id).single();
         setCampusName(data?.name || undefined);
+        setCampusCity(data?.city ? (data.state ? `${data.city}, ${data.state}` : data.city) : undefined);
+      } else {
+        setCampusCity(undefined);
       }
     }
     if (notesRes.data) setNotes(notesRes.data);
