@@ -175,10 +175,12 @@ const LeadDetail = () => {
       newDisplay = campuses.find(c => c.id === value)?.name || "Not set";
     }
 
-    await supabase.from("lead_activities").insert({
+    const activityPayload = {
       lead_id: id, user_id: profileId, type: "info_update",
       description: `${label} changed from "${oldDisplay}" to "${newDisplay}"`,
-    });
+    };
+    const { error: actError } = await supabase.from("lead_activities").insert(activityPayload);
+    if (actError) console.error("Activity log failed:", actError);
     toast({ title: `${label} updated` });
     await fetchAll();
   };
