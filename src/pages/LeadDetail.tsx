@@ -2,8 +2,15 @@ import { useState, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, Trash2, ArrowRightLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { TransferLeadDialog } from "@/components/admissions/TransferLeadDialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { AiCallSummary } from "@/components/leads/AiCallSummary";
 import { LeadInfoCard } from "@/components/leads/LeadInfoCard";
 import { QuickActions } from "@/components/leads/QuickActions";
@@ -27,7 +34,10 @@ const LeadDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, role } = useAuth();
+  const isTeamLeader = useIsTeamLeader();
+  const isSuperAdmin = role === "super_admin";
+  const canTransfer = isSuperAdmin || isTeamLeader;
   const { coursesByDepartment, getCampusesForCourse, courseOptions } = useCourseCampusLink();
   const [lead, setLead] = useState<any>(null);
   const [notes, setNotes] = useState<any[]>([]);
@@ -46,6 +56,9 @@ const LeadDetail = () => {
   const [showWhatsApp, setShowWhatsApp] = useState(false);
   const [aiCalling, setAiCalling] = useState(false);
   const [showSecondaryCounsellor, setShowSecondaryCounsellor] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
+  const [deletingLead, setDeletingLead] = useState(false);
   const [counsellorName, setCounsellorName] = useState<string | undefined>();
   const [courseName, setCourseName] = useState<string | undefined>();
   const [campusName, setCampusName] = useState<string | undefined>();
@@ -205,12 +218,26 @@ const LeadDetail = () => {
     else { toast({ title: "AI Call Complete" }); fetchAll(); }
   };
 
+  const handleDeleteLead = async () => {
+    if (!id) return;
+    setDeletingLead(true);
+    const { error } = await supabase.from("leads").delete().eq("id", id);
+    if (error) {
+      toast({ title: "Delete failed", description: error.message, variant: "destructive" });
+      setDeletingLead(false);
+      setShowDeleteConfirm(false);
+    } else {
+      toast({ title: "Lead deleted", description: `${lead?.name || "Lead"} has been deleted.` });
+      navigate("/admissions");
+    }
+  };
+
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
   if (!lead) return <div className="text-center py-20"><p className="text-muted-foreground">Lead not found</p></div>;
 
   return (
     <div className="space-y-4 animate-fade-in px-0">
-      {/* Breadcrumb */}
+      {/* Breadcrumb + Actions */}
       <div className="flex items-center gap-2 text-sm overflow-x-auto">
         <Link to="/admissions" className="text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 shrink-0">
           <ArrowLeft className="h-3.5 w-3.5" /> Leads
@@ -220,6 +247,19 @@ const LeadDetail = () => {
         {lead.application_id && (
           <span className="text-xs font-mono text-muted-foreground ml-1 shrink-0">{lead.application_id}</span>
         )}
+        {/* Action buttons for super_admin / team leader */}
+        <div className="ml-auto flex items-center gap-2 shrink-0">
+          {canTransfer && (
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => setShowTransfer(true)}>
+              <ArrowRightLeft className="h-3.5 w-3.5" /> Transfer
+            </Button>
+          )}
+          {isSuperAdmin && (
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => setShowDeleteConfirm(true)}>
+              <Trash2 className="h-3.5 w-3.5" /> Delete
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Two-column layout */}
@@ -314,6 +354,34 @@ const LeadDetail = () => {
         leadName={lead.name}
         onSuccess={fetchAll}
       />
+
+      {/* Transfer Dialog */}
+      <TransferLeadDialog
+        open={showTransfer}
+        onOpenChange={setShowTransfer}
+        leadIds={id ? [id] : []}
+        leadNames={[lead.name]}
+        onSuccess={fetchAll}
+      />
+
+      {/* Delete Confirmation */}
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete "{lead.name}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this lead and all associated data (notes, activities, follow-ups, offer letters, etc.). This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingLead}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteLead} disabled={deletingLead} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {deletingLead && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
