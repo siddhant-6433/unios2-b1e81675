@@ -300,12 +300,13 @@ function EditableGuardianRow({ lead, onSave }: { lead: any; onSave?: (field: str
             <input value={name} onChange={e => setName(e.target.value)} placeholder="Guardian name"
               className="w-full rounded-lg border border-input bg-background px-2 py-0.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
               autoFocus maxLength={100} />
-            <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="Guardian phone"
-              className="w-full rounded-lg border border-input bg-background px-2 py-0.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+            <input value={phone} onChange={e => { setPhone(e.target.value); setPhoneError(null); }} placeholder="Guardian phone"
+              className={`w-full rounded-lg border ${phoneError ? "border-destructive" : "border-input"} bg-background px-2 py-0.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20`}
               maxLength={20} />
+            {phoneError && <p className="text-[11px] text-destructive">{phoneError}</p>}
             <div className="flex items-center gap-1.5">
               <button onClick={save} className="text-primary p-0.5"><Check className="h-3.5 w-3.5" /></button>
-              <button onClick={() => { setName(lead.guardian_name || ""); setPhone(lead.guardian_phone || ""); setEditing(false); }}
+              <button onClick={() => { setName(lead.guardian_name || ""); setPhone(lead.guardian_phone || ""); setPhoneError(null); setEditing(false); }}
                 className="text-muted-foreground p-0.5"><X className="h-3.5 w-3.5" /></button>
             </div>
           </div>
