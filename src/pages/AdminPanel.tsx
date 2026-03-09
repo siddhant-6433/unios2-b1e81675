@@ -311,7 +311,7 @@ const AdminPanel = () => {
           <TeamManagement />
         </TabsContent>
 
-        <TabsContent value="master" className="mt-6">
+        <TabsContent value="course-campus" className="mt-6">
           <CourseCampusMaster />
         </TabsContent>
       </Tabs>
