@@ -14,6 +14,7 @@ import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
 import { ConvertToStudentDialog } from "@/components/admissions/ConvertToStudentDialog";
 import { SendWhatsAppDialog } from "@/components/leads/SendWhatsAppDialog";
 import { AddSecondaryCounsellorDialog } from "@/components/leads/AddSecondaryCounsellorDialog";
+import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
 
 const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", application_in_progress: "Application In Progress", application_submitted: "Application Submitted",
