@@ -10,6 +10,7 @@ import BulkImportDialog from "@/components/admin/BulkImportDialog";
 import EditPhoneDialog from "@/components/admin/EditPhoneDialog";
 import EmployeeProfileDialog from "@/components/admin/EmployeeProfileDialog";
 import TeamManagement from "@/components/admin/TeamManagement";
+import CourseCampusMaster from "@/components/admin/CourseCampusMaster";
 import type { Database } from "@/integrations/supabase/types";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
@@ -182,6 +183,9 @@ const AdminPanel = () => {
           <TabsTrigger value="teams" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
             Teams
           </TabsTrigger>
+          <TabsTrigger value="master" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
+            Course & Campus
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="users" className="mt-6">
@@ -304,6 +308,10 @@ const AdminPanel = () => {
 
         <TabsContent value="teams" className="mt-6">
           <TeamManagement />
+        </TabsContent>
+
+        <TabsContent value="master" className="mt-6">
+          <CourseCampusMaster />
         </TabsContent>
       </Tabs>
     </div>
