@@ -153,6 +153,10 @@ const LeadDetail = () => {
         lead_id: id, user_id: profileId, type: "followup",
         description: `Follow-up scheduled (${data.type}) for ${new Date(data.scheduled_at).toLocaleDateString("en-IN")}${data.notes ? `. ${data.notes}` : ""}`,
       });
+      // Auto-advance to counsellor_call when a call/whatsapp followup is scheduled
+      if (data.type === "call" || data.type === "whatsapp") {
+        await autoAdvanceStage("counsellor_call");
+      }
       await fetchAll();
     }
   };
