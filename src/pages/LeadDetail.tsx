@@ -28,6 +28,7 @@ const LeadDetail = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { user } = useAuth();
+  const { coursesByDepartment, getCampusesForCourse, courseOptions } = useCourseCampusLink();
   const [lead, setLead] = useState<any>(null);
   const [notes, setNotes] = useState<any[]>([]);
   const [followups, setFollowups] = useState<any[]>([]);
