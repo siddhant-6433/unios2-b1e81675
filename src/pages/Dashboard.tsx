@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   Users, IndianRupee, AlertTriangle, GraduationCap, Building2,
   ClipboardCheck, BookOpen, CalendarDays, Bell, TrendingUp,
-  ArrowUpRight, ChevronRight, Phone, MessageSquare, MoreHorizontal, Loader2
+  ArrowUpRight, ChevronRight, Phone, MessageSquare, MoreHorizontal, Loader2, FileText
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
