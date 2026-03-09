@@ -56,6 +56,9 @@ const LeadDetail = () => {
   const [showWhatsApp, setShowWhatsApp] = useState(false);
   const [aiCalling, setAiCalling] = useState(false);
   const [showSecondaryCounsellor, setShowSecondaryCounsellor] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
+  const [deletingLead, setDeletingLead] = useState(false);
   const [counsellorName, setCounsellorName] = useState<string | undefined>();
   const [courseName, setCourseName] = useState<string | undefined>();
   const [campusName, setCampusName] = useState<string | undefined>();
