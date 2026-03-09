@@ -47,12 +47,13 @@ const LeadDetail = () => {
   const [counsellorName, setCounsellorName] = useState<string | undefined>();
   const [courseName, setCourseName] = useState<string | undefined>();
   const [campusName, setCampusName] = useState<string | undefined>();
+  const [profileId, setProfileId] = useState<string | null>(null);
 
   useEffect(() => { if (id) fetchAll(); }, [id]);
 
   const fetchAll = async () => {
     setLoading(true);
-    const [leadRes, notesRes, followupsRes, visitsRes, activitiesRes, campusesRes, callLogsRes, coursesRes] = await Promise.all([
+    const [leadRes, notesRes, followupsRes, visitsRes, activitiesRes, campusesRes, callLogsRes, coursesRes, profileRes] = await Promise.all([
       supabase.from("leads").select("*").eq("id", id).single(),
       supabase.from("lead_notes").select("*").eq("lead_id", id).order("created_at", { ascending: false }),
       supabase.from("lead_followups").select("*").eq("lead_id", id).order("scheduled_at", { ascending: true }),
@@ -61,10 +62,11 @@ const LeadDetail = () => {
       supabase.from("campuses").select("id, name"),
       supabase.from("call_logs").select("*").eq("lead_id", id!).order("called_at", { ascending: false }),
       supabase.from("courses").select("id, name"),
+      user?.id ? supabase.from("profiles").select("id").eq("user_id", user.id).single() : Promise.resolve({ data: null }),
     ]);
+    if (profileRes.data) setProfileId((profileRes.data as any).id);
     if (leadRes.data) {
       setLead(leadRes.data);
-      // Fetch related names
       if (leadRes.data.counsellor_id) {
         const { data } = await supabase.from("profiles").select("display_name").eq("id", leadRes.data.counsellor_id).single();
         setCounsellorName(data?.display_name || undefined);
@@ -91,11 +93,11 @@ const LeadDetail = () => {
   const addNote = async () => {
     if (!newNote.trim() || !id) return;
     setSavingNote(true);
-    const { error } = await supabase.from("lead_notes").insert({ lead_id: id, user_id: user?.id, content: newNote.trim() });
+    const { error } = await supabase.from("lead_notes").insert({ lead_id: id, user_id: profileId, content: newNote.trim() });
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); }
     else {
       await supabase.from("lead_activities").insert({
-        lead_id: id, user_id: user?.id || null, type: "note",
+        lead_id: id, user_id: profileId, type: "note",
         description: newNote.trim(),
       });
       setNewNote(""); await fetchAll();
@@ -112,7 +114,7 @@ const LeadDetail = () => {
     if (error) toast({ title: "Error", description: error.message, variant: "destructive" });
     else {
       await supabase.from("lead_activities").insert({
-        lead_id: id, user_id: user?.id || null, type: "followup",
+        lead_id: id, user_id: profileId, type: "followup",
         description: `Follow-up scheduled (${data.type}) for ${new Date(data.scheduled_at).toLocaleDateString("en-IN")}${data.notes ? `. ${data.notes}` : ""}`,
       });
       await fetchAll();
@@ -122,7 +124,7 @@ const LeadDetail = () => {
   const completeFollowup = async (fid: string) => {
     await supabase.from("lead_followups").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", fid);
     await supabase.from("lead_activities").insert({
-      lead_id: id!, user_id: user?.id || null, type: "followup",
+      lead_id: id!, user_id: profileId, type: "followup",
       description: "Follow-up marked as completed",
     });
     await fetchAll();
@@ -138,7 +140,7 @@ const LeadDetail = () => {
     if (error) toast({ title: "Error", description: error.message, variant: "destructive" });
     else {
       await supabase.from("lead_activities").insert({
-        lead_id: id, user_id: user?.id || null, type: "visit",
+        lead_id: id, user_id: profileId, type: "visit",
         description: `Campus visit scheduled for ${new Date(data.visit_date).toLocaleDateString("en-IN")}${campusLabel ? ` at ${campusLabel}` : ""}`,
       });
       await fetchAll();
@@ -150,7 +152,7 @@ const LeadDetail = () => {
     const { error } = await supabase.from("leads").update({ stage: newStage as any }).eq("id", id);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
     await supabase.from("lead_activities").insert({
-      lead_id: id, user_id: user?.id || null, type: "stage_change",
+      lead_id: id, user_id: profileId, type: "stage_change",
       description: `Stage changed from ${STAGE_LABELS[lead.stage] || lead.stage} to ${STAGE_LABELS[newStage] || newStage}`,
       old_stage: lead.stage as any, new_stage: newStage as any,
     });
@@ -163,7 +165,6 @@ const LeadDetail = () => {
     const { error } = await supabase.from("leads").update({ [field]: value } as any).eq("id", id);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
 
-    // Resolve display values for foreign keys
     let oldDisplay = oldValue || "Not set";
     let newDisplay = value || "Not set";
     if (field === "course_id") {
@@ -175,7 +176,7 @@ const LeadDetail = () => {
     }
 
     await supabase.from("lead_activities").insert({
-      lead_id: id, user_id: user?.id || null, type: "info_update",
+      lead_id: id, user_id: profileId, type: "info_update",
       description: `${label} changed from "${oldDisplay}" to "${newDisplay}"`,
     });
     toast({ title: `${label} updated` });
@@ -226,10 +227,10 @@ const LeadDetail = () => {
               if (lead.phone) window.open(`tel:${lead.phone}`);
             }}
             onWhatsApp={() => setShowWhatsApp(true)}
-            onScheduleVisit={() => {
-              // Scroll to follow-ups tab
-              toast({ title: "Use the Follow-ups tab on the right to schedule a visit" });
-            }}
+            onScheduleVisit={() => scheduleVisit({
+              visit_date: new Date(Date.now() + 86400000).toISOString(),
+              campus_id: lead.campus_id || "",
+            })}
             onInterview={() => setShowInterview(true)}
             onOffer={() => setShowOfferLetter(true)}
             onConvert={() => setShowConvert(true)}
@@ -239,7 +240,9 @@ const LeadDetail = () => {
           />
           <NextFollowup
             followups={followups}
-            onSchedule={() => toast({ title: "Use the Follow-ups tab on the right" })}
+            onSchedule={addFollowup}
+            campuses={campuses}
+            onScheduleVisit={scheduleVisit}
           />
         </div>
 

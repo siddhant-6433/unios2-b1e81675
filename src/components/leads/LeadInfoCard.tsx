@@ -133,26 +133,46 @@ export function LeadInfoCard({
 
 // ── Inline editable text (click to edit) ────────────────────
 
+function validateField(field: string, value: string): string | null {
+  if (field === "email" && value) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(value)) return "Invalid email address";
+  }
+  if ((field === "phone" || field === "guardian_phone") && value) {
+    const phoneRegex = /^[+]?[\d\s\-()]{7,20}$/;
+    if (!phoneRegex.test(value)) return "Invalid phone number";
+  }
+  if (field === "name" && !value.trim()) return "Name cannot be empty";
+  return null;
+}
+
 function EditableText({ field, label, value, onSave, className }: {
   field: string; label: string; value: string; onSave?: (field: string, value: string | null, label: string) => void; className?: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
+  const [error, setError] = useState<string | null>(null);
 
   const save = () => {
     const trimmed = draft.trim();
+    const validationError = validateField(field, trimmed);
+    if (validationError) { setError(validationError); return; }
     if (trimmed && trimmed !== value) onSave?.(field, trimmed, label);
+    setError(null);
     setEditing(false);
   };
 
   if (editing) {
     return (
-      <div className="flex items-center gap-1.5">
-        <input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.key === "Enter" && save()}
-          className="rounded-lg border border-input bg-background px-2 py-0.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 min-w-0 flex-1"
-          autoFocus maxLength={200} />
-        <button onClick={save} className="text-primary hover:text-primary/80 p-0.5"><Check className="h-3.5 w-3.5" /></button>
-        <button onClick={() => { setDraft(value); setEditing(false); }} className="text-muted-foreground hover:text-foreground p-0.5"><X className="h-3.5 w-3.5" /></button>
+      <div className="space-y-1">
+        <div className="flex items-center gap-1.5">
+          <input value={draft} onChange={e => { setDraft(e.target.value); setError(null); }} onKeyDown={e => e.key === "Enter" && save()}
+            className={`rounded-lg border ${error ? "border-destructive" : "border-input"} bg-background px-2 py-0.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 min-w-0 flex-1`}
+            autoFocus maxLength={200} />
+          <button onClick={save} className="text-primary hover:text-primary/80 p-0.5"><Check className="h-3.5 w-3.5" /></button>
+          <button onClick={() => { setDraft(value); setError(null); setEditing(false); }} className="text-muted-foreground hover:text-foreground p-0.5"><X className="h-3.5 w-3.5" /></button>
+        </div>
+        {error && <p className="text-[11px] text-destructive">{error}</p>}
       </div>
     );
   }
@@ -173,10 +193,14 @@ function EditableInfoRow({ icon, label, field, fieldLabel, value, onSave }: {
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
+  const [error, setError] = useState<string | null>(null);
 
   const save = () => {
     const trimmed = draft.trim();
+    const validationError = validateField(field, trimmed);
+    if (validationError) { setError(validationError); return; }
     if (trimmed !== value) onSave?.(field, trimmed || null, fieldLabel);
+    setError(null);
     setEditing(false);
   };
 
@@ -186,12 +210,15 @@ function EditableInfoRow({ icon, label, field, fieldLabel, value, onSave }: {
       <div className="min-w-0 flex-1">
         <p className="text-[11px] text-muted-foreground">{label}</p>
         {editing ? (
-          <div className="flex items-center gap-1.5 mt-0.5">
-            <input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.key === "Enter" && save()}
-              className="rounded-lg border border-input bg-background px-2 py-0.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 min-w-0 flex-1"
-              autoFocus maxLength={255} />
-            <button onClick={save} className="text-primary p-0.5"><Check className="h-3.5 w-3.5" /></button>
-            <button onClick={() => { setDraft(value); setEditing(false); }} className="text-muted-foreground p-0.5"><X className="h-3.5 w-3.5" /></button>
+          <div className="space-y-1 mt-0.5">
+            <div className="flex items-center gap-1.5">
+              <input value={draft} onChange={e => { setDraft(e.target.value); setError(null); }} onKeyDown={e => e.key === "Enter" && save()}
+                className={`rounded-lg border ${error ? "border-destructive" : "border-input"} bg-background px-2 py-0.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 min-w-0 flex-1`}
+                autoFocus maxLength={255} />
+              <button onClick={save} className="text-primary p-0.5"><Check className="h-3.5 w-3.5" /></button>
+              <button onClick={() => { setDraft(value); setError(null); setEditing(false); }} className="text-muted-foreground p-0.5"><X className="h-3.5 w-3.5" /></button>
+            </div>
+            {error && <p className="text-[11px] text-destructive">{error}</p>}
           </div>
         ) : (
           <div className="group flex items-center gap-1.5 cursor-pointer mt-0.5" onClick={() => { setDraft(value); setEditing(true); }}>
@@ -250,12 +277,16 @@ function EditableGuardianRow({ lead, onSave }: { lead: any; onSave?: (field: str
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(lead.guardian_name || "");
   const [phone, setPhone] = useState(lead.guardian_phone || "");
+  const [phoneError, setPhoneError] = useState<string | null>(null);
 
   const save = () => {
     const trimmedName = name.trim();
     const trimmedPhone = phone.trim();
+    const phoneValidation = validateField("guardian_phone", trimmedPhone);
+    if (phoneValidation) { setPhoneError(phoneValidation); return; }
     if (trimmedName !== (lead.guardian_name || "")) onSave?.("guardian_name", trimmedName || null, "Guardian Name");
     if (trimmedPhone !== (lead.guardian_phone || "")) onSave?.("guardian_phone", trimmedPhone || null, "Guardian Phone");
+    setPhoneError(null);
     setEditing(false);
   };
 
@@ -269,12 +300,13 @@ function EditableGuardianRow({ lead, onSave }: { lead: any; onSave?: (field: str
             <input value={name} onChange={e => setName(e.target.value)} placeholder="Guardian name"
               className="w-full rounded-lg border border-input bg-background px-2 py-0.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
               autoFocus maxLength={100} />
-            <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="Guardian phone"
-              className="w-full rounded-lg border border-input bg-background px-2 py-0.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+            <input value={phone} onChange={e => { setPhone(e.target.value); setPhoneError(null); }} placeholder="Guardian phone"
+              className={`w-full rounded-lg border ${phoneError ? "border-destructive" : "border-input"} bg-background px-2 py-0.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20`}
               maxLength={20} />
+            {phoneError && <p className="text-[11px] text-destructive">{phoneError}</p>}
             <div className="flex items-center gap-1.5">
               <button onClick={save} className="text-primary p-0.5"><Check className="h-3.5 w-3.5" /></button>
-              <button onClick={() => { setName(lead.guardian_name || ""); setPhone(lead.guardian_phone || ""); setEditing(false); }}
+              <button onClick={() => { setName(lead.guardian_name || ""); setPhone(lead.guardian_phone || ""); setPhoneError(null); setEditing(false); }}
                 className="text-muted-foreground p-0.5"><X className="h-3.5 w-3.5" /></button>
             </div>
           </div>
