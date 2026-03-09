@@ -34,7 +34,10 @@ const LeadDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, role } = useAuth();
+  const isTeamLeader = useIsTeamLeader();
+  const isSuperAdmin = role === "super_admin";
+  const canTransfer = isSuperAdmin || isTeamLeader;
   const { coursesByDepartment, getCampusesForCourse, courseOptions } = useCourseCampusLink();
   const [lead, setLead] = useState<any>(null);
   const [notes, setNotes] = useState<any[]>([]);
