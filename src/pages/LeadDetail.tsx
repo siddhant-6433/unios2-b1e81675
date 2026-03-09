@@ -84,6 +84,7 @@ const LeadDetail = () => {
     if (activitiesRes.data) setActivities(activitiesRes.data);
     if (campusesRes.data) setCampuses(campusesRes.data);
     if (callLogsRes.data) setCallLogs(callLogsRes.data);
+    if (coursesRes.data) setCourses(coursesRes.data);
     setLoading(false);
   };
 
