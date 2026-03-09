@@ -94,9 +94,9 @@ const SuperAdminDashboard = () => {
 
   const statCards = [
     { label: "Total Leads", value: String(leadCount), sub: `+${todayLeads} today`, subColor: "text-primary", icon: Users, iconBg: "bg-pastel-blue" },
-    { label: "Total Students", value: String(studentCount), sub: "Enrolled", subColor: "text-primary", icon: GraduationCap, iconBg: "bg-pastel-green" },
-    { label: "Conversions", value: String(admittedCount), sub: `${conversionRate}% rate`, subColor: "text-primary", icon: TrendingUp, iconBg: "bg-pastel-orange" },
-    { label: "Admitted", value: String(admittedCount), sub: "Total admitted", subColor: "text-primary", icon: CalendarDays, iconBg: "bg-pastel-purple" },
+    { label: "Applications In Progress", value: String(appInProgress), sub: "Filling application", subColor: "text-chart-2", icon: FileText, iconBg: "bg-pastel-orange" },
+    { label: "Applications Submitted", value: String(appSubmitted), sub: "Ready for review", subColor: "text-chart-3", icon: ClipboardCheck, iconBg: "bg-pastel-green" },
+    { label: "Admitted", value: String(admittedCount), sub: `${conversionRate}% conversion`, subColor: "text-primary", icon: GraduationCap, iconBg: "bg-pastel-purple" },
   ];
 
   return (
