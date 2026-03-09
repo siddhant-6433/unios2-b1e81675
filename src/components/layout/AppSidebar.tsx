@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Users, GraduationCap, IndianRupee,
   ClipboardCheck, Settings, ShieldCheck, LogOut,
-  Building2, BookOpen, BarChart3, FileText, School, Search, Shuffle, Handshake, PieChart
+  Building2, BookOpen, BarChart3, FileText, School, Search, Shuffle, Handshake, PieChart, ChevronDown
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -9,8 +9,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
   SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem,
+  SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 type AppRole = 
   | "super_admin" | "campus_admin" | "principal" | "admission_head"
@@ -34,17 +36,21 @@ const adminRoles: AppRole[] = ["super_admin", "campus_admin", "principal"];
 const mainMenu: MenuItem[] = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Search", url: "/search", icon: Search, roles: staffRoles },
-  { title: "Admissions", url: "/admissions", icon: GraduationCap, roles: [...adminRoles, "admission_head", "counsellor", "data_entry"] },
   { title: "Students", url: "/students", icon: Users, roles: staffRoles },
   { title: "Attendance", url: "/attendance", icon: ClipboardCheck, roles: [...staffRoles, "student", "parent"] },
   { title: "Finance", url: "/finance", icon: IndianRupee, roles: [...adminRoles, "accountant"] },
   { title: "Exams", url: "/exams", icon: BookOpen, roles: [...staffRoles, "student", "parent"] },
 ];
 
-const managementMenu: MenuItem[] = [
+// Sub-items under the collapsible "Admissions" group
+const admissionSubMenu: MenuItem[] = [
+  { title: "Leads", url: "/admissions", icon: GraduationCap, roles: [...adminRoles, "admission_head", "counsellor", "data_entry"] },
   { title: "Lead Allocation", url: "/lead-allocation", icon: Shuffle, roles: ["super_admin", "admission_head"] },
   { title: "Consultants", url: "/consultants", icon: Handshake, roles: [...adminRoles, "admission_head", "counsellor"] },
   { title: "Admission Analytics", url: "/admission-analytics", icon: PieChart, roles: [...adminRoles, "admission_head"] },
+];
+
+const managementMenu: MenuItem[] = [
   { title: "Campuses", url: "/admin?tab=course-campus", icon: Building2, roles: adminRoles },
   { title: "Courses", url: "/admin?tab=course-campus", icon: School, roles: [...adminRoles, "faculty", "teacher"] },
   { title: "Reports", url: "/reports", icon: BarChart3, roles: adminRoles },
@@ -87,9 +93,14 @@ export function AppSidebar() {
   const canSee = (item: MenuItem) => !item.roles || (role && item.roles.includes(role));
 
   const visibleMain = mainMenu.filter(canSee);
+  const visibleAdmission = admissionSubMenu.filter(canSee);
   const visibleMgmt = managementMenu.filter(canSee);
+
+  const isAdmissionActive = admissionSubMenu.some(item => isActive(item.url));
+
   const linkClass = "gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium text-sidebar-foreground transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
   const activeClass = "!bg-primary !text-primary-foreground font-semibold shadow-sm";
+  const subLinkClass = "gap-2.5 rounded-lg px-3 py-2 text-[12.5px] font-medium text-sidebar-foreground transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
@@ -130,33 +141,75 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+
+              {/* Collapsible Admissions group */}
+              {visibleAdmission.length > 0 && (
+                <Collapsible defaultOpen={isAdmissionActive} className="group/collapsible">
+                  <SidebarMenuItem>
+                    <CollapsibleTrigger asChild>
+                      <SidebarMenuButton
+                        className={`${linkClass} justify-between`}
+                        isActive={isAdmissionActive}
+                      >
+                        <span className="flex items-center gap-3">
+                          <GraduationCap className="h-[18px] w-[18px]" />
+                          {!collapsed && <span>Admissions</span>}
+                        </span>
+                        {!collapsed && (
+                          <ChevronDown className="h-4 w-4 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                        )}
+                      </SidebarMenuButton>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <SidebarMenuSub>
+                        {visibleAdmission.map((item) => (
+                          <SidebarMenuSubItem key={item.title}>
+                            <SidebarMenuSubButton asChild isActive={isActive(item.url)}>
+                              <NavLink
+                                to={item.url}
+                                className={subLinkClass}
+                                activeClassName={activeClass}
+                              >
+                                <item.icon className="h-4 w-4" />
+                                <span>{item.title}</span>
+                              </NavLink>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        ))}
+                      </SidebarMenuSub>
+                    </CollapsibleContent>
+                  </SidebarMenuItem>
+                </Collapsible>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <SidebarGroup>
-          <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/60 px-4 mb-1">
-            Management
-          </SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {visibleMgmt.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild isActive={isActive(item.url)}>
-                    <NavLink
-                      to={item.url}
-                      className={linkClass}
-                      activeClassName={activeClass}
-                    >
-                      <item.icon className="h-[18px] w-[18px]" />
-                      {!collapsed && <span>{item.title}</span>}
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {visibleMgmt.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/60 px-4 mb-1">
+              Management
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {visibleMgmt.map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild isActive={isActive(item.url)}>
+                      <NavLink
+                        to={item.url}
+                        className={linkClass}
+                        activeClassName={activeClass}
+                      >
+                        <item.icon className="h-[18px] w-[18px]" />
+                        {!collapsed && <span>{item.title}</span>}
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
 
         <div className="mt-auto">
           <SidebarGroup>
