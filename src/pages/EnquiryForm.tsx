@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { GraduationCap, CheckCircle, Send, User, Phone, Mail, BookOpen, MapPin, MessageSquare, ArrowRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -6,94 +6,7 @@ import { Button } from "@/components/ui/button";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-
-// Program groups with courses and campuses from official taxonomy
-const PROGRAMS: { program: string; type: "school" | "college"; courses: { name: string; campuses: string[] }[] }[] = [
-  {
-    program: "Allied Healthcare",
-    type: "college",
-    courses: [
-      { name: "B.Sc. in Medical Radiology & Imaging Technology (BMRIT)", campuses: ["Greater Noida, Uttar Pradesh"] },
-      { name: "M.Sc. in Medical Radiology & Imaging Technology (MMRIT)", campuses: ["Greater Noida, Uttar Pradesh"] },
-      { name: "Diploma in Physiotherapy (DPT)", campuses: ["Greater Noida, Uttar Pradesh"] },
-      { name: "Bachelor of Physiotherapy (BPT)", campuses: ["Greater Noida, Uttar Pradesh"] },
-      { name: "Masters in Physiotherapy (MPT)", campuses: ["Greater Noida, Uttar Pradesh"] },
-      { name: "Diploma in Operation Theater Technician (OTT)", campuses: ["Greater Noida, Uttar Pradesh"] },
-    ],
-  },
-  {
-    program: "Pharmacy",
-    type: "college",
-    courses: [
-      { name: "Diploma in Pharmacy (D. Pharma)", campuses: ["Greater Noida, Uttar Pradesh"] },
-    ],
-  },
-  {
-    program: "Nursing",
-    type: "college",
-    courses: [
-      { name: "Bachelor of Science in Nursing (B.Sc Nursing)", campuses: ["Greater Noida, Uttar Pradesh"] },
-      { name: "Diploma in General Nursing and Midwifery (GNM)", campuses: ["Greater Noida, Uttar Pradesh"] },
-    ],
-  },
-  {
-    program: "Education",
-    type: "college",
-    courses: [
-      { name: "Bachelor of Education (B.Ed)", campuses: ["Shastri Nagar, Ghaziabad, Uttar Pradesh", "Greater Noida, Uttar Pradesh", "Kotputli, Rajasthan"] },
-      { name: "BTC/ Diploma in Elementary Education (D.El.Ed)", campuses: ["Shastri Nagar, Ghaziabad, Uttar Pradesh"] },
-    ],
-  },
-  {
-    program: "Law",
-    type: "college",
-    courses: [
-      { name: "Bachelor of Arts and Bachelor of Laws (BALLB)", campuses: ["Greater Noida, Uttar Pradesh"] },
-      { name: "Bachelor of Laws (LLB)", campuses: ["Greater Noida, Uttar Pradesh", "Kotputli, Rajasthan"] },
-    ],
-  },
-  {
-    program: "Management",
-    type: "college",
-    courses: [
-      { name: "Master of Business Administration (MBA)", campuses: ["Greater Noida, Uttar Pradesh"] },
-      { name: "Post Graduate Diploma In Management (PGDM)", campuses: ["Greater Noida, Uttar Pradesh", "Kotputli, Rajasthan"] },
-      { name: "Bachelor of Business Administration (BBA)", campuses: ["Greater Noida, Uttar Pradesh"] },
-    ],
-  },
-  {
-    program: "Computer Science",
-    type: "college",
-    courses: [
-      { name: "Bachelor of Computer Administration (BCA)", campuses: ["Greater Noida, Uttar Pradesh"] },
-    ],
-  },
-  {
-    program: "K-12 Schooling – CBSE",
-    type: "school",
-    courses: [
-      ...["Pre-Nursery", "Nursery", "KG", "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th", "11th", "12th"].map((cls) => ({
-        name: cls,
-        campuses: ["NIMT B School Avt II – CBSE"],
-      })),
-    ],
-  },
-  {
-    program: "K-12 Schooling",
-    type: "school",
-    courses: [
-      ...["Pre-Nursery", "Nursery", "KG", "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th", "11th", "12th"].map((cls) => ({
-        name: cls,
-        campuses: ["NIMT B School Arthala"],
-      })),
-    ],
-  },
-];
-
-// Flatten for lookup: course name → { type, campuses[] }
-const COURSE_CAMPUS_MAP = PROGRAMS.flatMap((p) =>
-  p.courses.map((c) => ({ course: c.name, program: p.program, type: p.type, campuses: c.campuses }))
-);
+import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
 
 const EnquiryForm = () => {
   const [searchParams] = useSearchParams();
@@ -102,6 +15,7 @@ const EnquiryForm = () => {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const formRef = useRef<HTMLDivElement>(null);
+  const { coursesByDepartment, getCampusesForCourse, courseOptions } = useCourseCampusLink();
 
   // Auto-resize messaging for embed mode
   useEffect(() => {
@@ -117,33 +31,32 @@ const EnquiryForm = () => {
     observer.observe(formRef.current);
     return () => observer.disconnect();
   }, [isEmbed, submitted]);
+
   const [form, setForm] = useState({
     name: "",
     phone: "",
     email: "",
     guardian_name: "",
     guardian_phone: "",
-    courseKey: "", // "program||course" composite key
-    campus: "",
+    course_id: "",
+    campus_id: "",
     message: "",
   });
 
   const update = (field: string, value: string) => setForm((p) => ({ ...p, [field]: value }));
 
-  const selectedCourseEntry = useMemo(() => {
-    if (!form.courseKey) return null;
-    const [program, course] = form.courseKey.split("||");
-    return COURSE_CAMPUS_MAP.find((c) => c.program === program && c.course === course) || null;
-  }, [form.courseKey]);
+  const filteredCampuses = getCampusesForCourse(form.course_id || null);
+  const selectedCourse = courseOptions.find(c => c.id === form.course_id);
+  // Determine if school type based on department/institution name
+  const isSchool = selectedCourse?.institution_name?.toLowerCase().includes("school") || false;
 
-  const isSchool = selectedCourseEntry?.type === "school";
-  const availableCampuses = selectedCourseEntry?.campuses || [];
-
-  const handleCourseChange = (courseKey: string) => {
-    const [program, course] = courseKey.split("||");
-    const entry = COURSE_CAMPUS_MAP.find((c) => c.program === program && c.course === course);
-    const campus = entry?.campuses.length === 1 ? entry.campuses[0] : "";
-    setForm((p) => ({ ...p, courseKey, campus }));
+  const handleCourseChange = (courseId: string) => {
+    const campuses = getCampusesForCourse(courseId || null);
+    setForm((p) => ({
+      ...p,
+      course_id: courseId,
+      campus_id: campuses.length === 1 ? campuses[0].id : "",
+    }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -159,6 +72,9 @@ const EnquiryForm = () => {
 
     setSubmitting(true);
     try {
+      const courseName = courseOptions.find(c => c.id === form.course_id)?.name;
+      const campusName = filteredCampuses.find(c => c.id === form.campus_id)?.name;
+
       const { data, error } = await supabase.functions.invoke("lead-ingest?source=website", {
         body: {
           name: form.name.trim(),
@@ -166,8 +82,10 @@ const EnquiryForm = () => {
           email: form.email.trim() || undefined,
           guardian_name: form.guardian_name.trim() || undefined,
           guardian_phone: form.guardian_phone || undefined,
-          course: selectedCourseEntry?.course || undefined,
-          campus: form.campus || undefined,
+          course: courseName || undefined,
+          campus: campusName || undefined,
+          course_id: form.course_id || undefined,
+          campus_id: form.campus_id || undefined,
           message: form.message.trim() || undefined,
         },
       });
@@ -214,7 +132,7 @@ const EnquiryForm = () => {
               className="mt-4 w-full"
               onClick={() => {
                 setSubmitted(false);
-                setForm({ name: "", phone: "", email: "", guardian_name: "", guardian_phone: "", courseKey: "", campus: "", message: "" });
+                setForm({ name: "", phone: "", email: "", guardian_name: "", guardian_phone: "", course_id: "", campus_id: "", message: "" });
               }}
             >
               Submit Another Enquiry
@@ -265,15 +183,15 @@ const EnquiryForm = () => {
                     <BookOpen className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <select
                       required
-                      value={form.courseKey}
+                      value={form.course_id}
                       onChange={(e) => handleCourseChange(e.target.value)}
                       className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 appearance-none"
                     >
                       <option value="">Select course / class</option>
-                      {PROGRAMS.map((p) => (
-                        <optgroup key={p.program} label={p.program}>
-                          {p.courses.map((c) => (
-                            <option key={`${p.program}-${c.name}`} value={`${p.program}||${c.name}`}>
+                      {coursesByDepartment.map((g) => (
+                        <optgroup key={g.department} label={g.department}>
+                          {g.courses.map((c) => (
+                            <option key={c.id} value={c.id}>
                               {c.name}
                             </option>
                           ))}
@@ -284,26 +202,26 @@ const EnquiryForm = () => {
                 </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-                    Campus {availableCampuses.length > 1 && <span className="text-destructive">*</span>}
+                    Campus {filteredCampuses.length > 1 && <span className="text-destructive">*</span>}
                   </label>
                   <div className="relative">
                     <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <select
-                      value={form.campus}
-                      onChange={(e) => update("campus", e.target.value)}
-                      disabled={!form.courseKey || availableCampuses.length <= 1}
-                      required={availableCampuses.length > 1}
+                      value={form.campus_id}
+                      onChange={(e) => update("campus_id", e.target.value)}
+                      disabled={!form.course_id || filteredCampuses.length <= 1}
+                      required={filteredCampuses.length > 1}
                       className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {!form.courseKey ? (
+                      {!form.course_id ? (
                         <option value="">Select course first</option>
-                      ) : availableCampuses.length === 1 ? (
-                        <option value={availableCampuses[0]}>{availableCampuses[0]}</option>
+                      ) : filteredCampuses.length === 1 ? (
+                        <option value={filteredCampuses[0].id}>{filteredCampuses[0].name}</option>
                       ) : (
                         <>
                           <option value="">Select campus</option>
-                          {availableCampuses.map((c) => (
-                            <option key={c} value={c}>{c}</option>
+                          {filteredCampuses.map((c) => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
                           ))}
                         </>
                       )}
@@ -353,7 +271,7 @@ const EnquiryForm = () => {
               </div>
 
               {/* Guardian — required for school, optional for college */}
-              {(isSchool || !form.courseKey) && (
+              {(isSchool || !form.course_id) && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
@@ -393,17 +311,17 @@ const EnquiryForm = () => {
                   />
                 </div>
               </div>
+
+              <Button type="submit" className="w-full gap-2" disabled={submitting}>
+                {submitting ? (
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                Submit Enquiry
+              </Button>
             </CardContent>
           </Card>
-
-          <Button type="submit" disabled={submitting} className="mt-6 w-full gap-2">
-            <Send className="h-4 w-4" />
-            {submitting ? "Submitting…" : "Submit Enquiry"}
-          </Button>
-
-          <p className="text-[11px] text-muted-foreground text-center mt-4">
-            By submitting, you agree to be contacted by our admissions team via phone, WhatsApp, or email.
-          </p>
         </form>
       </div>
     </div>
