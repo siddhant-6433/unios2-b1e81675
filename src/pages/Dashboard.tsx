@@ -39,6 +39,8 @@ const SuperAdminDashboard = () => {
   const [studentCount, setStudentCount] = useState(0);
   const [funnel, setFunnel] = useState<{ stage: string; count: number }[]>([]);
   const [recentLeads, setRecentLeads] = useState<any[]>([]);
+  const [appInProgress, setAppInProgress] = useState(0);
+  const [appSubmitted, setAppSubmitted] = useState(0);
 
   useEffect(() => { fetchDashboard(); }, []);
 
