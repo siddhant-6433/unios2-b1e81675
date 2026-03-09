@@ -19,9 +19,11 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 const funnelColors = [
-  "bg-primary", "bg-primary/85", "bg-primary/70",
-  "bg-chart-2", "bg-chart-2/80", "bg-chart-3",
-  "bg-chart-3/80", "bg-chart-5", "bg-chart-4",
+  "bg-primary", "bg-chart-2", "bg-chart-3",
+  "bg-primary/85", "bg-primary/70",
+  "bg-chart-2/80", "bg-chart-3/80",
+  "bg-chart-5", "bg-chart-5/80",
+  "bg-chart-4", "bg-chart-4/80",
 ];
 
 const stageBadgeClass: Record<string, string> = {
