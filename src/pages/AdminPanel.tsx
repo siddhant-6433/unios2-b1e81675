@@ -346,7 +346,7 @@ const AdminPanel = () => {
         userId={employeeProfile?.userId || ""}
         userName={employeeProfile?.name || ""}
       />
-    </div>
+        </div>
         </TabsContent>
 
         <TabsContent value="teams" className="mt-6">
