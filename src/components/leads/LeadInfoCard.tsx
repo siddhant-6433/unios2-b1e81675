@@ -193,10 +193,14 @@ function EditableInfoRow({ icon, label, field, fieldLabel, value, onSave }: {
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
+  const [error, setError] = useState<string | null>(null);
 
   const save = () => {
     const trimmed = draft.trim();
+    const validationError = validateField(field, trimmed);
+    if (validationError) { setError(validationError); return; }
     if (trimmed !== value) onSave?.(field, trimmed || null, fieldLabel);
+    setError(null);
     setEditing(false);
   };
 
@@ -206,12 +210,15 @@ function EditableInfoRow({ icon, label, field, fieldLabel, value, onSave }: {
       <div className="min-w-0 flex-1">
         <p className="text-[11px] text-muted-foreground">{label}</p>
         {editing ? (
-          <div className="flex items-center gap-1.5 mt-0.5">
-            <input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.key === "Enter" && save()}
-              className="rounded-lg border border-input bg-background px-2 py-0.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 min-w-0 flex-1"
-              autoFocus maxLength={255} />
-            <button onClick={save} className="text-primary p-0.5"><Check className="h-3.5 w-3.5" /></button>
-            <button onClick={() => { setDraft(value); setEditing(false); }} className="text-muted-foreground p-0.5"><X className="h-3.5 w-3.5" /></button>
+          <div className="space-y-1 mt-0.5">
+            <div className="flex items-center gap-1.5">
+              <input value={draft} onChange={e => { setDraft(e.target.value); setError(null); }} onKeyDown={e => e.key === "Enter" && save()}
+                className={`rounded-lg border ${error ? "border-destructive" : "border-input"} bg-background px-2 py-0.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 min-w-0 flex-1`}
+                autoFocus maxLength={255} />
+              <button onClick={save} className="text-primary p-0.5"><Check className="h-3.5 w-3.5" /></button>
+              <button onClick={() => { setDraft(value); setError(null); setEditing(false); }} className="text-muted-foreground p-0.5"><X className="h-3.5 w-3.5" /></button>
+            </div>
+            {error && <p className="text-[11px] text-destructive">{error}</p>}
           </div>
         ) : (
           <div className="group flex items-center gap-1.5 cursor-pointer mt-0.5" onClick={() => { setDraft(value); setEditing(true); }}>
