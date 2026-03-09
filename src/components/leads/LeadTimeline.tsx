@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Send, Loader2, ArrowRight, Phone, StickyNote, Bot, MapPin, Clock, Check, Plus, MessageSquare, Link2,
+  CalendarCheck, FileText, UserCheck, GraduationCap, Mail, ClipboardList,
 } from "lucide-react";
 
 interface LeadTimelineProps {
@@ -153,6 +154,36 @@ const ACTIVITY_CONFIG: Record<string, {
     icon: <MapPin className="h-4 w-4" />,
     bg: "bg-violet-100 text-violet-600 dark:bg-violet-900/20 dark:text-violet-400",
     getTitle: () => "Campus visit",
+  },
+  followup: {
+    icon: <CalendarCheck className="h-4 w-4" />,
+    bg: "bg-orange-100 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400",
+    getTitle: () => "Follow-up",
+  },
+  offer: {
+    icon: <FileText className="h-4 w-4" />,
+    bg: "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400",
+    getTitle: () => "Offer Letter",
+  },
+  interview: {
+    icon: <UserCheck className="h-4 w-4" />,
+    bg: "bg-indigo-100 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400",
+    getTitle: () => "Interview",
+  },
+  conversion: {
+    icon: <GraduationCap className="h-4 w-4" />,
+    bg: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
+    getTitle: () => "Conversion",
+  },
+  application_progress: {
+    icon: <ClipboardList className="h-4 w-4" />,
+    bg: "bg-sky-100 text-sky-600 dark:bg-sky-900/20 dark:text-sky-400",
+    getTitle: () => "Application Progress",
+  },
+  email: {
+    icon: <Mail className="h-4 w-4" />,
+    bg: "bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400",
+    getTitle: () => "Email sent",
   },
 };
 
