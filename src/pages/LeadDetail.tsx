@@ -2,8 +2,15 @@ import { useState, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, Trash2, ArrowRightLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { TransferLeadDialog } from "@/components/admissions/TransferLeadDialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { AiCallSummary } from "@/components/leads/AiCallSummary";
 import { LeadInfoCard } from "@/components/leads/LeadInfoCard";
 import { QuickActions } from "@/components/leads/QuickActions";
