@@ -45,8 +45,8 @@ const managementMenu: MenuItem[] = [
   { title: "Lead Allocation", url: "/lead-allocation", icon: Shuffle, roles: ["super_admin", "admission_head"] },
   { title: "Consultants", url: "/consultants", icon: Handshake, roles: [...adminRoles, "admission_head", "counsellor"] },
   { title: "Admission Analytics", url: "/admission-analytics", icon: PieChart, roles: [...adminRoles, "admission_head"] },
-  { title: "Campuses", url: "/campuses", icon: Building2, roles: adminRoles },
-  { title: "Courses", url: "/courses", icon: School, roles: [...adminRoles, "faculty", "teacher"] },
+  { title: "Campuses", url: "/admin?tab=course-campus", icon: Building2, roles: adminRoles },
+  { title: "Courses", url: "/admin?tab=course-campus", icon: School, roles: [...adminRoles, "faculty", "teacher"] },
   { title: "Reports", url: "/reports", icon: BarChart3, roles: adminRoles },
   { title: "Documents", url: "/documents", icon: FileText, roles: staffRoles },
   { title: "User Management", url: "/admin", icon: ShieldCheck, roles: ["super_admin"] },
@@ -72,7 +72,12 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
-  const isActive = (path: string) => location.pathname === path;
+  const isActive = (path: string) => {
+    if (path.includes("?")) {
+      return location.pathname + location.search === path;
+    }
+    return location.pathname === path;
+  };
   const { profile, role, signOut } = useAuth();
 
   const displayName = profile?.display_name || "User";

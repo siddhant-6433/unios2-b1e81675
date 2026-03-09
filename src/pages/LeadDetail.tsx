@@ -175,10 +175,18 @@ const LeadDetail = () => {
       newDisplay = campuses.find(c => c.id === value)?.name || "Not set";
     }
 
-    await supabase.from("lead_activities").insert({
-      lead_id: id, user_id: profileId, type: "info_update",
+    const activityPayload = {
+      lead_id: id, user_id: profileId || null, type: "info_update" as const,
       description: `${label} changed from "${oldDisplay}" to "${newDisplay}"`,
-    });
+    };
+    console.log("Inserting activity:", activityPayload, "profileId:", profileId);
+    const { error: actError, data: actData } = await supabase.from("lead_activities").insert(activityPayload).select();
+    if (actError) {
+      console.error("Activity log failed:", actError);
+      toast({ title: "Warning", description: "Field updated but activity log failed: " + actError.message, variant: "destructive" });
+    } else {
+      console.log("Activity logged:", actData);
+    }
     toast({ title: `${label} updated` });
     await fetchAll();
   };
