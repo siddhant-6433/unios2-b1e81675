@@ -157,6 +157,31 @@ const LeadDetail = () => {
     await fetchAll();
   };
 
+  const updateField = async (field: string, value: string | null, label: string) => {
+    if (!id || !lead) return;
+    const oldValue = lead[field];
+    const { error } = await supabase.from("leads").update({ [field]: value } as any).eq("id", id);
+    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+
+    // Resolve display values for foreign keys
+    let oldDisplay = oldValue || "Not set";
+    let newDisplay = value || "Not set";
+    if (field === "course_id") {
+      oldDisplay = courses.find(c => c.id === oldValue)?.name || "Not set";
+      newDisplay = courses.find(c => c.id === value)?.name || "Not set";
+    } else if (field === "campus_id") {
+      oldDisplay = campuses.find(c => c.id === oldValue)?.name || "Not set";
+      newDisplay = campuses.find(c => c.id === value)?.name || "Not set";
+    }
+
+    await supabase.from("lead_activities").insert({
+      lead_id: id, user_id: user?.id || null, type: "info_update",
+      description: `${label} changed from "${oldDisplay}" to "${newDisplay}"`,
+    });
+    toast({ title: `${label} updated` });
+    await fetchAll();
+  };
+
   const triggerAiCall = async () => {
     setAiCalling(true);
     const { error } = await supabase.functions.invoke("ai-first-call", { body: { lead_id: id } });
