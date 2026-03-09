@@ -230,6 +230,10 @@ const LeadDetail = () => {
             onScheduleVisit={scheduleVisit}
             onUpdateVisitStatus={async (vid, status) => {
               await supabase.from("campus_visits").update({ status }).eq("id", vid);
+              await supabase.from("lead_activities").insert({
+                lead_id: id!, user_id: user?.id || null, type: "visit",
+                description: `Campus visit status updated to ${status}`,
+              });
               await fetchAll();
             }}
             campuses={campuses}
