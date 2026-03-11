@@ -17,6 +17,7 @@ const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text
 
 export function CourseSelector({ phone, leadName, onComplete }: Props) {
   const { toast } = useToast();
+  const portal = usePortal();
   const [sessions, setSessions] = useState<{ id: string; name: string }[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
   const [selectedSession, setSelectedSession] = useState('');
