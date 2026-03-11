@@ -58,8 +58,8 @@ const SuperAdminDashboard = () => {
       supabase.from("students").select("id", { count: "exact", head: true }),
       supabase.from("leads").select("id, name, phone, stage, source, created_at, courses:course_id(name), campuses:campus_id(name)")
         .order("created_at", { ascending: false }).limit(5),
-      supabase.from("leads").select("id", { count: "exact", head: true }).eq("stage", "application_in_progress"),
-      supabase.from("leads").select("id", { count: "exact", head: true }).eq("stage", "application_submitted"),
+      supabase.from("applications").select("id", { count: "exact", head: true }).eq("status", "draft"),
+      supabase.from("applications").select("id", { count: "exact", head: true }).eq("status", "submitted"),
     ]);
 
     setLeadCount(leadsRes.count || 0);
