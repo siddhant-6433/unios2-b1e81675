@@ -19,6 +19,7 @@ import { ExtracurricularDetails } from "@/components/apply/ExtracurricularDetail
 import { PaymentSection } from "@/components/apply/PaymentSection";
 import { DocumentUpload } from "@/components/apply/DocumentUpload";
 import { ReviewSubmit } from "@/components/apply/ReviewSubmit";
+import { PortalProvider, usePortal } from "@/components/apply/PortalContext";
 
 // ─── OTP Login Screen ───
 function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: string) => void }) {
