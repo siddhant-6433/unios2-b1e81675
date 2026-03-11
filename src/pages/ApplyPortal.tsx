@@ -19,6 +19,8 @@ import { ExtracurricularDetails } from "@/components/apply/ExtracurricularDetail
 import { PaymentSection } from "@/components/apply/PaymentSection";
 import { DocumentUpload } from "@/components/apply/DocumentUpload";
 import { ReviewSubmit } from "@/components/apply/ReviewSubmit";
+import { SiblingDetails } from "@/components/apply/SiblingDetails";
+import { ParentQuestionnaire } from "@/components/apply/ParentQuestionnaire";
 import { PortalProvider, usePortal } from "@/components/apply/PortalContext";
 
 // ─── OTP Login Screen ───
@@ -65,7 +67,6 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
       if (verifyErr) throw verifyErr;
       if (!verifyData?.verified) throw new Error("Invalid or expired OTP");
 
-      // Check for existing lead to get name
       const { data: lead } = await supabase
         .from("leads")
         .select("name")
@@ -89,7 +90,6 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
     }
     setLoading(true);
     try {
-      // Look up in applications table
       const { data: app, error } = await supabase
         .from("applications")
         .select("phone, full_name")
@@ -98,7 +98,6 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
 
       if (error) throw error;
       if (!app) {
-        // Fallback: check leads table
         const { data: lead } = await supabase
           .from("leads")
           .select("phone, name")
@@ -196,28 +195,92 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
   );
 }
 
+// ─── Step definitions ───
+import { User, Users, BookOpen, Trophy, CreditCard, Upload, FileSearch, Baby, MessageSquare } from "lucide-react";
+
+const SCHOOL_STEPS = [
+  { key: "personal", label: "Personal", icon: User },
+  { key: "parents", label: "Parents", icon: Users },
+  { key: "siblings", label: "Siblings", icon: Baby },
+  { key: "questionnaire", label: "Questionnaire", icon: MessageSquare },
+  { key: "academic", label: "Academic", icon: BookOpen },
+  { key: "payment", label: "Payment", icon: CreditCard },
+  { key: "documents", label: "Documents", icon: Upload },
+  { key: "review", label: "Review", icon: FileSearch },
+] as const;
+
+const DEFAULT_STEPS = [
+  { key: "personal", label: "Personal", icon: User },
+  { key: "parents", label: "Parents", icon: Users },
+  { key: "academic", label: "Academic", icon: BookOpen },
+  { key: "extracurricular", label: "Extra", icon: Trophy },
+  { key: "payment", label: "Payment", icon: CreditCard },
+  { key: "documents", label: "Documents", icon: Upload },
+  { key: "review", label: "Review", icon: FileSearch },
+] as const;
+
+function DynamicStepProgress({ steps, currentStep, completedSections, onStepClick }: {
+  steps: readonly { key: string; label: string; icon: any }[];
+  currentStep: number;
+  completedSections: Record<string, boolean>;
+  onStepClick: (step: number) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1 mb-8 overflow-x-auto pb-2">
+      {steps.map((s, i) => {
+        const done = completedSections[s.key] === true;
+        const active = currentStep === i;
+        const Icon = s.icon;
+        return (
+          <button
+            key={s.key}
+            onClick={() => onStepClick(i)}
+            className={`flex-1 min-w-[44px] flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-xl text-xs font-medium transition-all ${
+              done
+                ? "bg-primary/10 text-primary"
+                : active
+                ? "bg-card border border-border text-foreground shadow-sm"
+                : "text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            {done ? (
+              <CheckCircle className="h-4 w-4 shrink-0" />
+            ) : (
+              <Icon className="h-4 w-4 shrink-0" />
+            )}
+            <span className="hidden md:inline truncate">{s.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Main Portal ───
 const ApplyPortal = () => {
   const { toast } = useToast();
+  const portal = usePortal();
+  const isSchool = portal.programCategories.includes("school");
 
-  // Auth state
   const [authed, setAuthed] = useState(false);
   const [phone, setPhone] = useState("");
   const [leadName, setLeadName] = useState("");
+  const [childDob, setChildDob] = useState("");
 
-  // Application state
   const [app, setApp] = useState<ApplicationData | null>(null);
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [showCourseSelector, setShowCourseSelector] = useState(true);
 
+  const steps = isSchool ? SCHOOL_STEPS : DEFAULT_STEPS;
+  const totalSteps = steps.length;
+
   const handleAuthenticated = async (phoneVal: string, name: string) => {
     setPhone(phoneVal);
     setLeadName(name);
     setAuthed(true);
 
-    // Check for existing draft application
     const { data: existingApp } = await supabase
       .from("applications")
       .select("*")
@@ -245,19 +308,18 @@ const ApplyPortal = () => {
       } as ApplicationData;
 
       setApp(appData);
+      if (appData.dob) setChildDob(appData.dob);
       setShowCourseSelector(false);
 
-      // Check if already submitted
       if (existingApp.status === 'submitted') {
         setSubmitted(true);
         return;
       }
 
-      // Find first incomplete step
-      const sections = ['personal', 'parents', 'academic', 'extracurricular', 'payment', 'documents', 'review'];
-      const cs = appData.completed_sections;
-      const firstIncomplete = sections.findIndex(s => !(cs as any)[s]);
-      setStep(firstIncomplete >= 0 ? firstIncomplete : 6);
+      const stepKeys = steps.map(s => s.key);
+      const cs = appData.completed_sections as Record<string, boolean>;
+      const firstIncomplete = stepKeys.findIndex(k => !cs[k]);
+      setStep(firstIncomplete >= 0 ? firstIncomplete : totalSteps - 1);
     }
   };
 
@@ -268,7 +330,6 @@ const ApplyPortal = () => {
     const primaryCategory = selections[0]?.program_category || 'undergraduate';
     const feeAmount = calculateFee(selections);
 
-    // Build flags
     const flags: string[] = [];
     if (feeAmount > 0) flags.push('payment_pending');
 
@@ -285,6 +346,7 @@ const ApplyPortal = () => {
       program_category: primaryCategory,
       flags,
       completed_sections: DEFAULT_APPLICATION.completed_sections,
+      ...(childDob ? { dob: childDob } : {}),
     };
 
     const { data: inserted, error } = await supabase
@@ -299,7 +361,6 @@ const ApplyPortal = () => {
       return;
     }
 
-    // Update lead stage if linked
     if (leadId) {
       await supabase.from("leads").update({
         stage: "application_in_progress" as any,
@@ -331,6 +392,7 @@ const ApplyPortal = () => {
       school_details: {},
       completed_sections: DEFAULT_APPLICATION.completed_sections,
       flags,
+      dob: childDob || '',
     } as ApplicationData);
     setShowCourseSelector(false);
     setStep(0);
@@ -346,7 +408,6 @@ const ApplyPortal = () => {
       ? { ...app.completed_sections, [sectionKey]: true }
       : app.completed_sections;
 
-    // Build flags
     const flags = [...(app.flags || [])];
     const academic = (updates.academic_details || app.academic_details) as any;
     if (academic?.class_12?.result_status === 'not_declared' || academic?.graduation?.result_status === 'not_declared') {
@@ -393,7 +454,6 @@ const ApplyPortal = () => {
       return;
     }
 
-    // Update lead stage
     if (app.lead_id) {
       await supabase.from("leads").update({
         stage: "application_submitted" as any,
@@ -432,9 +492,15 @@ const ApplyPortal = () => {
   if (showCourseSelector) {
     return (
       <div className="min-h-screen bg-background">
-        <Header appId={null} completedCount={0} onLogout={() => { setAuthed(false); setApp(null); }} />
+        <Header appId={null} completedCount={0} totalSteps={totalSteps} onLogout={() => { setAuthed(false); setApp(null); }} />
         <div className="max-w-3xl mx-auto px-6 py-8">
-          <CourseSelector phone={phone} leadName={leadName} onComplete={handleCourseSelected} />
+          <CourseSelector
+            phone={phone}
+            leadName={leadName}
+            childDob={childDob}
+            onDobChange={setChildDob}
+            onComplete={handleCourseSelected}
+          />
         </div>
       </div>
     );
@@ -466,9 +532,118 @@ const ApplyPortal = () => {
 
   const completedCount = Object.values(app.completed_sections).filter(Boolean).length;
 
+  // Build step rendering based on portal type
+  const renderStep = () => {
+    const stepKey = steps[step]?.key;
+
+    if (stepKey === "personal") {
+      return (
+        <PersonalDetails
+          data={app}
+          onChange={onChange}
+          onNext={() => handleStepNext('personal', step + 1)}
+          saving={saving}
+        />
+      );
+    }
+    if (stepKey === "parents") {
+      return (
+        <ParentDetails
+          data={app}
+          onChange={onChange}
+          onNext={() => handleStepNext('parents', step + 1)}
+          onBack={() => setStep(step - 1)}
+          saving={saving}
+        />
+      );
+    }
+    if (stepKey === "siblings") {
+      return (
+        <SiblingDetails
+          data={app}
+          onChange={onChange}
+          onNext={() => handleStepNext('siblings', step + 1)}
+          onBack={() => setStep(step - 1)}
+          saving={saving}
+        />
+      );
+    }
+    if (stepKey === "questionnaire") {
+      return (
+        <ParentQuestionnaire
+          data={app}
+          onChange={onChange}
+          onNext={() => handleStepNext('questionnaire', step + 1)}
+          onBack={() => setStep(step - 1)}
+          saving={saving}
+        />
+      );
+    }
+    if (stepKey === "academic") {
+      return (
+        <AcademicDetails
+          data={app}
+          onChange={onChange}
+          onNext={() => handleStepNext('academic', step + 1)}
+          onBack={() => setStep(step - 1)}
+          saving={saving}
+        />
+      );
+    }
+    if (stepKey === "extracurricular") {
+      return (
+        <ExtracurricularDetails
+          data={app}
+          onChange={onChange}
+          onNext={() => handleStepNext('extracurricular', step + 1)}
+          onBack={() => setStep(step - 1)}
+          saving={saving}
+        />
+      );
+    }
+    if (stepKey === "payment") {
+      return (
+        <PaymentSection
+          data={app}
+          onChange={onChange}
+          onNext={async () => {
+            await saveSection({ payment_status: app.payment_status }, 'payment');
+            setStep(step + 1);
+          }}
+          onBack={() => setStep(step - 1)}
+          saving={saving}
+        />
+      );
+    }
+    if (stepKey === "documents") {
+      return (
+        <DocumentUpload
+          data={app}
+          onNext={async () => {
+            await saveSection({}, 'documents');
+            setStep(step + 1);
+          }}
+          onBack={() => setStep(step - 1)}
+          saving={saving}
+        />
+      );
+    }
+    if (stepKey === "review") {
+      return (
+        <ReviewSubmit
+          data={app}
+          onBack={() => setStep(step - 1)}
+          onSubmit={handleSubmit}
+          saving={saving}
+        />
+      );
+    }
+    return null;
+  };
+
   return (
     <div className="min-h-screen bg-background">
-      <Header appId={app.application_id} completedCount={completedCount} onLogout={() => { setAuthed(false); setApp(null); }} />
+      <Header appId={app.application_id} completedCount={completedCount} totalSteps={totalSteps} onLogout={() => { setAuthed(false); setApp(null); }} />
 
       <div className="max-w-3xl mx-auto px-6 py-8">
         <div className="mb-6">
@@ -479,76 +654,16 @@ const ApplyPortal = () => {
           </p>
         </div>
 
-        <StepProgress currentStep={step} completedSections={app.completed_sections as any} onStepClick={setStep} />
+        <DynamicStepProgress
+          steps={steps}
+          currentStep={step}
+          completedSections={app.completed_sections as any}
+          onStepClick={setStep}
+        />
 
         <Card className="border-border/60 shadow-none">
           <CardContent className="p-6">
-            {step === 0 && (
-              <PersonalDetails
-                data={app}
-                onChange={onChange}
-                onNext={() => handleStepNext('personal', 1)}
-                saving={saving}
-              />
-            )}
-            {step === 1 && (
-              <ParentDetails
-                data={app}
-                onChange={onChange}
-                onNext={() => handleStepNext('parents', 2)}
-                onBack={() => setStep(0)}
-                saving={saving}
-              />
-            )}
-            {step === 2 && (
-              <AcademicDetails
-                data={app}
-                onChange={onChange}
-                onNext={() => handleStepNext('academic', 3)}
-                onBack={() => setStep(1)}
-                saving={saving}
-              />
-            )}
-            {step === 3 && (
-              <ExtracurricularDetails
-                data={app}
-                onChange={onChange}
-                onNext={() => handleStepNext('extracurricular', 4)}
-                onBack={() => setStep(2)}
-                saving={saving}
-              />
-            )}
-            {step === 4 && (
-              <PaymentSection
-                data={app}
-                onChange={onChange}
-                onNext={async () => {
-                  await saveSection({ payment_status: app.payment_status }, 'payment');
-                  setStep(5);
-                }}
-                onBack={() => setStep(3)}
-                saving={saving}
-              />
-            )}
-            {step === 5 && (
-              <DocumentUpload
-                data={app}
-                onNext={async () => {
-                  await saveSection({}, 'documents');
-                  setStep(6);
-                }}
-                onBack={() => setStep(4)}
-                saving={saving}
-              />
-            )}
-            {step === 6 && (
-              <ReviewSubmit
-                data={app}
-                onBack={() => setStep(5)}
-                onSubmit={handleSubmit}
-                saving={saving}
-              />
-            )}
+            {renderStep()}
           </CardContent>
         </Card>
       </div>
@@ -557,7 +672,7 @@ const ApplyPortal = () => {
 };
 
 // ─── Header ───
-function Header({ appId, completedCount, onLogout }: { appId: string | null; completedCount: number; onLogout: () => void }) {
+function Header({ appId, completedCount, totalSteps, onLogout }: { appId: string | null; completedCount: number; totalSteps: number; onLogout: () => void }) {
   const portal = usePortal();
   return (
     <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-30">
@@ -572,7 +687,7 @@ function Header({ appId, completedCount, onLogout }: { appId: string | null; com
         <div className="flex items-center gap-3">
           {appId && (
             <Badge className="bg-primary/10 text-primary border-0 text-xs">
-              {completedCount}/7 complete
+              {completedCount}/{totalSteps} complete
             </Badge>
           )}
           <Button variant="ghost" size="sm" onClick={onLogout}>
