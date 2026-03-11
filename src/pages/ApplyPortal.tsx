@@ -1,8 +1,6 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import {
-  GraduationCap, FileText, Upload, User, Phone, Mail, Calendar,
-  CheckCircle, ArrowRight, ArrowLeft, Loader2, BookOpen, MapPin,
-  CreditCard, LogOut, Shield
+  GraduationCap, CheckCircle, Loader2, LogOut,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,30 +9,19 @@ import { PhoneInput } from "@/components/ui/phone-input";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
-// ─── Sub-stage progress type ───
-interface AppProgress {
-  personal_details: boolean;
-  education_details: boolean;
-  application_fee_paid: boolean;
-  documents_uploaded: boolean;
-}
-
-const DEFAULT_PROGRESS: AppProgress = {
-  personal_details: false,
-  education_details: false,
-  application_fee_paid: false,
-  documents_uploaded: false,
-};
-
-const STEPS = [
-  { key: "personal_details", label: "Personal Details", icon: User },
-  { key: "education_details", label: "Education Details", icon: BookOpen },
-  { key: "application_fee_paid", label: "Application Fee", icon: CreditCard },
-  { key: "documents_uploaded", label: "Upload Documents", icon: Upload },
-] as const;
+import { ApplicationData, DEFAULT_APPLICATION, generateApplicationId, calculateFee, CourseSelection } from "@/components/apply/types";
+import { StepProgress } from "@/components/apply/StepProgress";
+import { CourseSelector } from "@/components/apply/CourseSelector";
+import { PersonalDetails } from "@/components/apply/PersonalDetails";
+import { ParentDetails } from "@/components/apply/ParentDetails";
+import { AcademicDetails } from "@/components/apply/AcademicDetails";
+import { ExtracurricularDetails } from "@/components/apply/ExtracurricularDetails";
+import { PaymentSection } from "@/components/apply/PaymentSection";
+import { DocumentUpload } from "@/components/apply/DocumentUpload";
+import { ReviewSubmit } from "@/components/apply/ReviewSubmit";
 
 // ─── OTP Login Screen ───
-function OtpLogin({ onAuthenticated }: { onAuthenticated: (lead: any) => void }) {
+function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: string) => void }) {
   const { toast } = useToast();
   const [phone, setPhone] = useState("");
   const [otpSent, setOtpSent] = useState(false);
@@ -77,22 +64,16 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (lead: any) => void })
       if (verifyErr) throw verifyErr;
       if (!verifyData?.verified) throw new Error("Invalid or expired OTP");
 
-      const { data: lead, error: leadErr } = await supabase
+      // Check for existing lead to get name
+      const { data: lead } = await supabase
         .from("leads")
-        .select("*")
+        .select("name")
         .eq("phone", phone)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (leadErr) throw leadErr;
-      if (!lead) {
-        toast({ title: "No application found", description: "Please submit an enquiry first.", variant: "destructive" });
-        setLoading(false);
-        return;
-      }
-
-      onAuthenticated(lead);
+      onAuthenticated(phone, lead?.name || "Applicant");
     } catch (err: any) {
       toast({ title: "Verification failed", description: err.message, variant: "destructive" });
     } finally {
@@ -107,20 +88,32 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (lead: any) => void })
     }
     setLoading(true);
     try {
-      const { data: lead, error } = await supabase
-        .from("leads")
-        .select("*")
+      // Look up in applications table
+      const { data: app, error } = await supabase
+        .from("applications")
+        .select("phone, full_name")
         .eq("application_id", applicationId.trim().toUpperCase())
         .maybeSingle();
 
       if (error) throw error;
-      if (!lead) {
-        toast({ title: "Application not found", description: "Check your Application ID and try again.", variant: "destructive" });
-        setLoading(false);
-        return;
+      if (!app) {
+        // Fallback: check leads table
+        const { data: lead } = await supabase
+          .from("leads")
+          .select("phone, name")
+          .eq("application_id", applicationId.trim().toUpperCase())
+          .maybeSingle();
+
+        if (!lead) {
+          toast({ title: "Application not found", variant: "destructive" });
+          setLoading(false);
+          return;
+        }
+        setPhone(lead.phone);
+      } else {
+        setPhone(app.phone);
       }
 
-      setPhone(lead.phone);
       setLoginMode("phone");
       toast({ title: "Found! Verify your phone to continue." });
     } catch (err: any) {
@@ -140,24 +133,20 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (lead: any) => void })
             </div>
             <div>
               <h2 className="text-lg font-bold text-foreground">Application Portal</h2>
-              <p className="text-xs text-muted-foreground">Login to continue your application</p>
+              <p className="text-xs text-muted-foreground">Login to start or continue your application</p>
             </div>
           </div>
 
           {loginMode === "phone" ? (
             <div className="space-y-4">
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-                  Phone Number (used during enquiry)
-                </label>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">WhatsApp Number</label>
                 <PhoneInput value={phone} onChange={setPhone} required />
               </div>
 
               {otpSent && (
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-                    Enter OTP sent via WhatsApp
-                  </label>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Enter OTP sent via WhatsApp</label>
                   <input
                     type="text"
                     maxLength={6}
@@ -169,29 +158,19 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (lead: any) => void })
                 </div>
               )}
 
-              <Button
-                className="w-full gap-2"
-                disabled={loading}
-                onClick={otpSent ? handleVerifyOtp : handleSendOtp}
-              >
+              <Button className="w-full gap-2" disabled={loading} onClick={otpSent ? handleVerifyOtp : handleSendOtp}>
                 {loading && <Loader2 className="h-4 w-4 animate-spin" />}
                 {otpSent ? "Verify & Continue" : "Send OTP via WhatsApp"}
               </Button>
 
-              <button
-                type="button"
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-center"
-                onClick={() => setLoginMode("appid")}
-              >
+              <button type="button" className="text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-center" onClick={() => setLoginMode("appid")}>
                 Login with Application ID instead
               </button>
             </div>
           ) : (
             <div className="space-y-4">
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-                  Application ID
-                </label>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Application ID</label>
                 <input
                   value={applicationId}
                   onChange={(e) => setApplicationId(e.target.value)}
@@ -205,11 +184,7 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (lead: any) => void })
                 Find My Application
               </Button>
 
-              <button
-                type="button"
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-center"
-                onClick={() => setLoginMode("phone")}
-              >
+              <button type="button" className="text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-center" onClick={() => setLoginMode("phone")}>
                 Login with phone number instead
               </button>
             </div>
@@ -220,89 +195,173 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (lead: any) => void })
   );
 }
 
-// ─── Intake Cycle & Course Selection (Step 0 before application) ───
-function IntakeCoursePicker({
-  lead,
-  onSaved,
-}: {
-  lead: any;
-  onSaved: (updatedLead: any) => void;
-}) {
+// ─── Main Portal ───
+const ApplyPortal = () => {
   const { toast } = useToast();
+
+  // Auth state
+  const [authed, setAuthed] = useState(false);
+  const [phone, setPhone] = useState("");
+  const [leadName, setLeadName] = useState("");
+
+  // Application state
+  const [app, setApp] = useState<ApplicationData | null>(null);
+  const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
-  const [sessions, setSessions] = useState<{ id: string; name: string }[]>([]);
-  const [courses, setCourses] = useState<any[]>([]);
-  const [selectedSession, setSelectedSession] = useState(lead.session_id || "");
-  const [selectedCourse, setSelectedCourse] = useState(lead.course_id || "");
+  const [submitted, setSubmitted] = useState(false);
+  const [showCourseSelector, setShowCourseSelector] = useState(true);
 
-  useEffect(() => {
-    Promise.all([
-      supabase.from("admission_sessions").select("id, name").eq("is_active", true).order("name"),
-      supabase.from("courses").select(`
-        id, name, code, department_id,
-        departments!inner (
-          id, name, institution_id,
-          institutions!inner (
-            id, name, campus_id,
-            campuses!inner ( id, name )
-          )
-        )
-      `).order("name"),
-    ]).then(([sessRes, courseRes]) => {
-      if (sessRes.data) setSessions(sessRes.data);
-      if (courseRes.data) setCourses(courseRes.data);
-    });
-  }, []);
+  const handleAuthenticated = async (phoneVal: string, name: string) => {
+    setPhone(phoneVal);
+    setLeadName(name);
+    setAuthed(true);
 
-  // Group courses by campus → department
-  const coursesByGroup = useMemo(() => {
-    const map = new Map<string, { label: string; courses: { id: string; name: string }[] }>();
-    courses.forEach((c: any) => {
-      const campusName = c.departments?.institutions?.campuses?.name || "Unknown";
-      const deptName = c.departments?.name || "Unknown";
-      const key = `${campusName} — ${deptName}`;
-      if (!map.has(key)) map.set(key, { label: key, courses: [] });
-      map.get(key)!.courses.push({ id: c.id, name: c.name });
-    });
-    return Array.from(map.values());
-  }, [courses]);
+    // Check for existing draft application
+    const { data: existingApp } = await supabase
+      .from("applications")
+      .select("*")
+      .eq("phone", phoneVal)
+      .eq("status", "draft")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-  // Derive campus_id from selected course
-  const selectedCampusId = useMemo(() => {
-    if (!selectedCourse) return null;
-    const match = courses.find((c: any) => c.id === selectedCourse);
-    return match?.departments?.institutions?.campus_id || null;
-  }, [selectedCourse, courses]);
+    if (existingApp) {
+      const appData: ApplicationData = {
+        ...DEFAULT_APPLICATION,
+        ...existingApp,
+        course_selections: (existingApp.course_selections as any) || [],
+        address: (existingApp.address as any) || {},
+        father: (existingApp.father as any) || {},
+        mother: (existingApp.mother as any) || {},
+        guardian: (existingApp.guardian as any) || {},
+        academic_details: (existingApp.academic_details as any) || {},
+        result_status: (existingApp.result_status as any) || {},
+        extracurricular: (existingApp.extracurricular as any) || {},
+        school_details: (existingApp.school_details as any) || {},
+        completed_sections: (existingApp.completed_sections as any) || DEFAULT_APPLICATION.completed_sections,
+        flags: (existingApp.flags as string[]) || [],
+      } as ApplicationData;
 
-  const handleSave = async () => {
-    if (!selectedSession) {
-      toast({ title: "Please select an intake cycle", variant: "destructive" });
-      return;
+      setApp(appData);
+      setShowCourseSelector(false);
+
+      // Check if already submitted
+      if (existingApp.status === 'submitted') {
+        setSubmitted(true);
+        return;
+      }
+
+      // Find first incomplete step
+      const sections = ['personal', 'parents', 'academic', 'extracurricular', 'payment', 'documents', 'review'];
+      const cs = appData.completed_sections;
+      const firstIncomplete = sections.findIndex(s => !(cs as any)[s]);
+      setStep(firstIncomplete >= 0 ? firstIncomplete : 6);
     }
-    if (!selectedCourse) {
-      toast({ title: "Please select a course", variant: "destructive" });
-      return;
-    }
+  };
+
+  const handleCourseSelected = async (sessionId: string, selections: CourseSelection[], leadId: string | null) => {
     setSaving(true);
 
-    // Generate application_id if not exists
-    const appId = lead.application_id || `APP-${new Date().getFullYear().toString().slice(-2)}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    const appId = generateApplicationId();
+    const primaryCategory = selections[0]?.program_category || 'undergraduate';
+    const feeAmount = calculateFee(selections);
 
-    const updateData: any = {
-      course_id: selectedCourse,
-      campus_id: selectedCampusId,
+    // Build flags
+    const flags: string[] = [];
+    if (feeAmount > 0) flags.push('payment_pending');
+
+    const newApp: any = {
       application_id: appId,
+      lead_id: leadId,
+      session_id: sessionId,
+      status: 'draft',
+      course_selections: selections,
+      full_name: leadName,
+      phone,
+      whatsapp_verified: true,
+      fee_amount: feeAmount,
+      program_category: primaryCategory,
+      flags,
+      completed_sections: DEFAULT_APPLICATION.completed_sections,
     };
 
-    // Only update stage if still new_lead
-    if (lead.stage === "new_lead") {
-      updateData.stage = "application_in_progress";
+    const { data: inserted, error } = await supabase
+      .from("applications")
+      .insert(newApp)
+      .select()
+      .single();
+
+    if (error) {
+      toast({ title: "Failed to create application", description: error.message, variant: "destructive" });
+      setSaving(false);
+      return;
     }
 
+    // Update lead stage if linked
+    if (leadId) {
+      await supabase.from("leads").update({
+        stage: "application_in_progress" as any,
+        application_id: appId,
+        course_id: selections[0]?.course_id,
+        campus_id: selections[0]?.campus_id,
+      }).eq("id", leadId);
+
+      await supabase.from("lead_activities").insert({
+        lead_id: leadId,
+        type: "application_started",
+        description: `Application ${appId} started with ${selections.length} course(s)`,
+        old_stage: "new_lead" as any,
+        new_stage: "application_in_progress" as any,
+      });
+    }
+
+    setApp({
+      ...DEFAULT_APPLICATION,
+      ...inserted,
+      course_selections: selections,
+      address: {},
+      father: {},
+      mother: {},
+      guardian: {},
+      academic_details: {},
+      result_status: {},
+      extracurricular: {},
+      school_details: {},
+      completed_sections: DEFAULT_APPLICATION.completed_sections,
+      flags,
+    } as ApplicationData);
+    setShowCourseSelector(false);
+    setStep(0);
+    setSaving(false);
+    toast({ title: "Application created", description: `ID: ${appId}` });
+  };
+
+  const saveSection = async (updates: Partial<ApplicationData>, sectionKey?: string) => {
+    if (!app) return;
+    setSaving(true);
+
+    const newSections = sectionKey
+      ? { ...app.completed_sections, [sectionKey]: true }
+      : app.completed_sections;
+
+    // Build flags
+    const flags = [...(app.flags || [])];
+    const academic = (updates.academic_details || app.academic_details) as any;
+    if (academic?.class_12?.result_status === 'not_declared' || academic?.graduation?.result_status === 'not_declared') {
+      if (!flags.includes('result_awaited')) flags.push('result_awaited');
+    }
+
+    const saveData: any = {
+      ...updates,
+      completed_sections: newSections,
+      flags,
+    };
+
     const { error } = await supabase
-      .from("leads")
-      .update(updateData)
-      .eq("id", lead.id);
+      .from("applications")
+      .update(saveData)
+      .eq("id", app.id);
 
     if (error) {
       toast({ title: "Save failed", description: error.message, variant: "destructive" });
@@ -310,267 +369,78 @@ function IntakeCoursePicker({
       return;
     }
 
-    // Log activity
-    await supabase.from("lead_activities").insert({
-      lead_id: lead.id,
-      type: "application_started",
-      description: `Application started for session: ${sessions.find(s => s.id === selectedSession)?.name || selectedSession}`,
-      ...(lead.stage === "new_lead" ? { old_stage: "new_lead" as any, new_stage: "application_in_progress" as any } : {}),
-    });
-
-    toast({ title: "Course & intake selected" });
+    setApp(prev => prev ? { ...prev, ...updates, completed_sections: newSections, flags } : prev);
     setSaving(false);
-    onSaved({
-      ...lead,
-      ...updateData,
-      application_id: appId,
-      stage: updateData.stage || lead.stage,
-    });
   };
 
-  const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
-
-  return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-30">
-        <div className="max-w-3xl mx-auto px-6 py-4 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary shadow-sm">
-            <GraduationCap className="h-5 w-5 text-primary-foreground" />
-          </div>
-          <div>
-            <span className="text-sm font-bold text-foreground tracking-tight">NIMT UniOs</span>
-            <span className="text-[11px] text-muted-foreground block">Application Portal</span>
-          </div>
-        </div>
-      </header>
-
-      <div className="max-w-3xl mx-auto px-6 py-8">
-        <div className="mb-6">
-          <h1 className="text-xl font-bold text-foreground">Welcome, {lead.name}</h1>
-          <p className="text-sm text-muted-foreground">Select your intake cycle and preferred course to begin your application.</p>
-        </div>
-
-        <Card className="border-border/60 shadow-none">
-          <CardContent className="p-6 space-y-5">
-            <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-              <Calendar className="h-5 w-5 text-muted-foreground" /> Intake Cycle & Course
-            </h2>
-
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Intake Cycle (Session) *</label>
-              <select value={selectedSession} onChange={e => setSelectedSession(e.target.value)} className={inputCls}>
-                <option value="">Select intake cycle</option>
-                {sessions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </div>
-
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Preferred Course *</label>
-              <select value={selectedCourse} onChange={e => setSelectedCourse(e.target.value)} className={inputCls}>
-                <option value="">Select course</option>
-                {coursesByGroup.map(g => (
-                  <optgroup key={g.label} label={g.label}>
-                    {g.courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </optgroup>
-                ))}
-              </select>
-            </div>
-
-            {selectedCourse && selectedCampusId && (
-              <div className="flex items-center gap-2 p-3 rounded-xl bg-muted/50">
-                <MapPin className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm text-muted-foreground">
-                  Campus: <span className="font-medium text-foreground">
-                    {courses.find((c: any) => c.id === selectedCourse)?.departments?.institutions?.campuses?.name || "—"}
-                  </span>
-                </span>
-              </div>
-            )}
-
-            <div className="flex justify-end">
-              <Button onClick={handleSave} disabled={saving || !selectedSession || !selectedCourse} className="gap-2">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                Continue to Application
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-// ─── Main Application Form ───
-const ApplyPortal = () => {
-  const { toast } = useToast();
-  const [lead, setLead] = useState<any>(null);
-  const [step, setStep] = useState(0);
-  const [saving, setSaving] = useState(false);
-  const [progress, setProgress] = useState<AppProgress>(DEFAULT_PROGRESS);
-  const [submitted, setSubmitted] = useState(false);
-  const [needsIntake, setNeedsIntake] = useState(false);
-
-  // Form data
-  const [personal, setPersonal] = useState({
-    name: "", email: "", guardian_name: "", guardian_phone: "", dob: "", address: "",
-  });
-  const [education, setEducation] = useState({
-    previous_school: "", previous_class: "", percentage: "", board: "", passing_year: "",
-  });
-
-  // Initialize form from lead data
-  useEffect(() => {
-    if (!lead) return;
-    const prog = (lead.application_progress as AppProgress) || DEFAULT_PROGRESS;
-    setProgress(prog);
-    setPersonal({
-      name: lead.name || "",
-      email: lead.email || "",
-      guardian_name: lead.guardian_name || "",
-      guardian_phone: lead.guardian_phone || "",
-      dob: "",
-      address: "",
-    });
-
-    // Check if already submitted
-    if (lead.stage === "application_submitted") {
-      setSubmitted(true);
-      setNeedsIntake(false);
-      return;
-    }
-
-    // If no course selected yet, show intake picker first
-    if (!lead.course_id) {
-      setNeedsIntake(true);
-      return;
-    }
-
-    setNeedsIntake(false);
-
-    // Move to first incomplete step
-    const steps = ["personal_details", "education_details", "application_fee_paid", "documents_uploaded"] as const;
-    const firstIncomplete = steps.findIndex((s) => !prog[s]);
-    setStep(firstIncomplete >= 0 ? firstIncomplete : 0);
-  }, [lead]);
-
-  const handleIntakeSaved = (updatedLead: any) => {
-    setLead(updatedLead);
-    setNeedsIntake(false);
-  };
-
-  const updateProgress = async (key: keyof AppProgress, value: boolean) => {
-    const newProgress = { ...progress, [key]: value };
-    setProgress(newProgress);
-
-    const allDone = Object.values(newProgress).every(Boolean);
-    const newStage = allDone ? "application_submitted" : "application_in_progress";
+  const handleSubmit = async () => {
+    if (!app) return;
+    setSaving(true);
 
     const { error } = await supabase
-      .from("leads")
+      .from("applications")
       .update({
-        application_progress: newProgress as any,
-        stage: newStage,
+        status: 'submitted',
+        submitted_at: new Date().toISOString(),
+        completed_sections: { ...app.completed_sections, review: true } as any,
       })
-      .eq("id", lead.id);
+      .eq("id", app.id);
 
     if (error) {
-      console.error("Progress save error:", error);
-    }
-
-    await supabase.from("lead_activities").insert({
-      lead_id: lead.id,
-      type: "application_progress",
-      description: `Application step completed: ${key.replace(/_/g, " ")}`,
-      ...(allDone ? { new_stage: "application_submitted" as any, old_stage: lead.stage } : {}),
-    });
-
-    if (allDone) {
-      setSubmitted(true);
-    }
-  };
-
-  const savePersonalDetails = async () => {
-    setSaving(true);
-    try {
-      const { error } = await supabase
-        .from("leads")
-        .update({
-          name: personal.name.trim(),
-          email: personal.email.trim() || null,
-          guardian_name: personal.guardian_name.trim() || null,
-          guardian_phone: personal.guardian_phone || null,
-          stage: "application_in_progress" as any,
-        })
-        .eq("id", lead.id);
-
-      if (error) throw error;
-      await updateProgress("personal_details", true);
-      toast({ title: "Personal details saved" });
-      setStep(1);
-    } catch (err: any) {
-      toast({ title: "Save failed", description: err.message, variant: "destructive" });
-    } finally {
+      toast({ title: "Submit failed", description: error.message, variant: "destructive" });
       setSaving(false);
+      return;
     }
-  };
 
-  const saveEducationDetails = async () => {
-    setSaving(true);
-    try {
-      const eduNote = `Previous School: ${education.previous_school}\nClass: ${education.previous_class}\nBoard: ${education.board}\nPercentage: ${education.percentage}%\nPassing Year: ${education.passing_year}`;
-      
-      await supabase.from("lead_notes").insert({
-        lead_id: lead.id,
-        content: `[Education Details]\n${eduNote}`,
+    // Update lead stage
+    if (app.lead_id) {
+      await supabase.from("leads").update({
+        stage: "application_submitted" as any,
+        application_progress: { personal_details: true, education_details: true, application_fee_paid: true, documents_uploaded: true } as any,
+      }).eq("id", app.lead_id);
+
+      await supabase.from("lead_activities").insert({
+        lead_id: app.lead_id,
+        type: "application_submitted",
+        description: `Application ${app.application_id} submitted`,
+        old_stage: "application_in_progress" as any,
+        new_stage: "application_submitted" as any,
       });
-
-      await updateProgress("education_details", true);
-      toast({ title: "Education details saved" });
-      setStep(2);
-    } catch (err: any) {
-      toast({ title: "Save failed", description: err.message, variant: "destructive" });
-    } finally {
-      setSaving(false);
     }
+
+    setSubmitted(true);
+    setSaving(false);
+    toast({ title: "Application submitted!" });
   };
 
-  const markFeePaid = async () => {
-    setSaving(true);
-    try {
-      await updateProgress("application_fee_paid", true);
-      toast({ title: "Application fee recorded" });
-      setStep(3);
-    } catch (err: any) {
-      toast({ title: "Failed", description: err.message, variant: "destructive" });
-    } finally {
-      setSaving(false);
-    }
+  const onChange = (updates: Partial<ApplicationData>) => {
+    setApp(prev => prev ? { ...prev, ...updates } : prev);
   };
 
-  const markDocumentsUploaded = async () => {
-    setSaving(true);
-    try {
-      await updateProgress("documents_uploaded", true);
-      toast({ title: "Documents uploaded successfully" });
-    } catch (err: any) {
-      toast({ title: "Upload failed", description: err.message, variant: "destructive" });
-    } finally {
-      setSaving(false);
-    }
+  const handleStepNext = async (sectionKey: string, nextStep: number) => {
+    await saveSection({}, sectionKey);
+    setStep(nextStep);
   };
 
   // ── Not logged in ──
-  if (!lead) {
-    return <OtpLogin onAuthenticated={setLead} />;
+  if (!authed) {
+    return <OtpLogin onAuthenticated={handleAuthenticated} />;
   }
 
-  // ── Needs intake cycle & course selection ──
-  if (needsIntake) {
-    return <IntakeCoursePicker lead={lead} onSaved={handleIntakeSaved} />;
+  // ── Course selection ──
+  if (showCourseSelector) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header appId={null} completedCount={0} onLogout={() => { setAuthed(false); setApp(null); }} />
+        <div className="max-w-3xl mx-auto px-6 py-8">
+          <CourseSelector phone={phone} leadName={leadName} onComplete={handleCourseSelected} />
+        </div>
+      </div>
+    );
   }
 
-  // ── Application submitted ──
-  if (submitted) {
+  // ── Submitted ──
+  if (submitted && app) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-6">
         <Card className="max-w-md w-full border-border/60 shadow-none">
@@ -579,16 +449,10 @@ const ApplyPortal = () => {
               <CheckCircle className="h-8 w-8 text-primary" />
             </div>
             <h2 className="text-xl font-bold text-foreground">Application Submitted!</h2>
-            <p className="text-sm text-muted-foreground mt-2">
-              Your application has been received. Application ID:
-            </p>
-            <p className="text-lg font-mono font-bold text-primary mt-1">
-              {lead.application_id || lead.id.slice(0, 8).toUpperCase()}
-            </p>
-            <p className="text-xs text-muted-foreground mt-4">
-              Our admissions team will review your application and contact you shortly.
-            </p>
-            <Button variant="outline" className="mt-6" onClick={() => { setLead(null); setSubmitted(false); }}>
+            <p className="text-sm text-muted-foreground mt-2">Your application has been received.</p>
+            <p className="text-lg font-mono font-bold text-primary mt-1">{app.application_id}</p>
+            <p className="text-xs text-muted-foreground mt-4">Our admissions team will review your application and contact you shortly.</p>
+            <Button variant="outline" className="mt-6" onClick={() => { setAuthed(false); setApp(null); setSubmitted(false); }}>
               <LogOut className="h-4 w-4 mr-2" /> Logout
             </Button>
           </CardContent>
@@ -597,297 +461,127 @@ const ApplyPortal = () => {
     );
   }
 
-  const completedCount = Object.values(progress).filter(Boolean).length;
-  const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
+  if (!app) return null;
+
+  const completedCount = Object.values(app.completed_sections).filter(Boolean).length;
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-30">
-        <div className="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary shadow-sm">
-              <GraduationCap className="h-5 w-5 text-primary-foreground" />
-            </div>
-            <div>
-              <span className="text-sm font-bold text-foreground tracking-tight">NIMT UniOs</span>
-              <span className="text-[11px] text-muted-foreground block">Application Portal</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <Badge className="bg-primary/10 text-primary border-0 text-xs">
-              {completedCount}/4 complete
-            </Badge>
-            <Button variant="ghost" size="sm" onClick={() => { setLead(null); setSubmitted(false); }}>
-              <LogOut className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      </header>
+      <Header appId={app.application_id} completedCount={completedCount} onLogout={() => { setAuthed(false); setApp(null); }} />
 
       <div className="max-w-3xl mx-auto px-6 py-8">
-        {/* Welcome */}
         <div className="mb-6">
-          <h1 className="text-xl font-bold text-foreground">Welcome, {lead.name}</h1>
-          <p className="text-sm text-muted-foreground">Complete all steps below to submit your application.</p>
-          {lead.application_id && (
-            <p className="text-xs text-muted-foreground mt-1">
-              Application ID: <span className="font-mono font-semibold text-primary">{lead.application_id}</span>
-            </p>
-          )}
+          <h1 className="text-xl font-bold text-foreground">Welcome, {app.full_name || leadName}</h1>
+          <p className="text-sm text-muted-foreground">Complete all steps to submit your application.</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Application ID: <span className="font-mono font-semibold text-primary">{app.application_id}</span>
+          </p>
         </div>
 
-        {/* Step Progress */}
-        <div className="flex items-center gap-1 mb-8">
-          {STEPS.map((s, i) => {
-            const done = progress[s.key];
-            const active = step === i;
-            return (
-              <button
-                key={s.key}
-                onClick={() => setStep(i)}
-                className={`flex-1 flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
-                  done
-                    ? "bg-primary/10 text-primary"
-                    : active
-                    ? "bg-card border border-border text-foreground shadow-sm"
-                    : "text-muted-foreground hover:bg-muted"
-                }`}
-              >
-                {done ? (
-                  <CheckCircle className="h-4 w-4 shrink-0" />
-                ) : (
-                  <s.icon className="h-4 w-4 shrink-0" />
-                )}
-                <span className="hidden sm:inline">{s.label}</span>
-              </button>
-            );
-          })}
-        </div>
+        <StepProgress currentStep={step} completedSections={app.completed_sections as any} onStepClick={setStep} />
 
-        {/* ── Step 0: Personal Details ── */}
-        {step === 0 && (
-          <Card className="border-border/60 shadow-none">
-            <CardContent className="p-6 space-y-5">
-              <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-                <User className="h-5 w-5 text-muted-foreground" /> Personal Details
-              </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Full Name *</label>
-                  <input
-                    required
-                    value={personal.name}
-                    onChange={(e) => setPersonal({ ...personal, name: e.target.value })}
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email</label>
-                  <input
-                    type="email"
-                    value={personal.email}
-                    onChange={(e) => setPersonal({ ...personal, email: e.target.value })}
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Date of Birth</label>
-                  <input
-                    type="date"
-                    value={personal.dob}
-                    onChange={(e) => setPersonal({ ...personal, dob: e.target.value })}
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Guardian Name</label>
-                  <input
-                    value={personal.guardian_name}
-                    onChange={(e) => setPersonal({ ...personal, guardian_name: e.target.value })}
-                    className={inputCls}
-                  />
-                </div>
-                <div className="min-w-0">
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Guardian Phone</label>
-                  <PhoneInput value={personal.guardian_phone} onChange={(v) => setPersonal({ ...personal, guardian_phone: v })} />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Address</label>
-                <textarea
-                  value={personal.address}
-                  onChange={(e) => setPersonal({ ...personal, address: e.target.value })}
-                  rows={2}
-                  className={`${inputCls} resize-none`}
-                />
-              </div>
-              <div className="flex justify-end">
-                <Button onClick={savePersonalDetails} disabled={saving || !personal.name.trim()} className="gap-2">
-                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                  Save & Continue
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* ── Step 1: Education Details ── */}
-        {step === 1 && (
-          <Card className="border-border/60 shadow-none">
-            <CardContent className="p-6 space-y-5">
-              <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-                <BookOpen className="h-5 w-5 text-muted-foreground" /> Education Details
-              </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Previous School / College</label>
-                  <input
-                    value={education.previous_school}
-                    onChange={(e) => setEducation({ ...education, previous_school: e.target.value })}
-                    placeholder="Name of last institution"
-                    className={`${inputCls} placeholder:text-muted-foreground`}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Last Class / Degree</label>
-                  <input
-                    value={education.previous_class}
-                    onChange={(e) => setEducation({ ...education, previous_class: e.target.value })}
-                    placeholder="e.g. 12th, B.Sc"
-                    className={`${inputCls} placeholder:text-muted-foreground`}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Board / University</label>
-                  <input
-                    value={education.board}
-                    onChange={(e) => setEducation({ ...education, board: e.target.value })}
-                    placeholder="e.g. CBSE, AKTU"
-                    className={`${inputCls} placeholder:text-muted-foreground`}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Percentage / CGPA</label>
-                  <input
-                    value={education.percentage}
-                    onChange={(e) => setEducation({ ...education, percentage: e.target.value })}
-                    placeholder="e.g. 85 or 8.5"
-                    className={`${inputCls} placeholder:text-muted-foreground`}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Passing Year</label>
-                  <input
-                    value={education.passing_year}
-                    onChange={(e) => setEducation({ ...education, passing_year: e.target.value })}
-                    placeholder="e.g. 2025"
-                    className={`${inputCls} placeholder:text-muted-foreground`}
-                  />
-                </div>
-              </div>
-              <div className="flex justify-between">
-                <Button variant="outline" onClick={() => setStep(0)} className="gap-2">
-                  <ArrowLeft className="h-4 w-4" /> Back
-                </Button>
-                <Button onClick={saveEducationDetails} disabled={saving} className="gap-2">
-                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                  Save & Continue
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* ── Step 2: Application Fee ── */}
-        {step === 2 && (
-          <Card className="border-border/60 shadow-none">
-            <CardContent className="p-6 space-y-5">
-              <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-                <CreditCard className="h-5 w-5 text-muted-foreground" /> Application Fee
-              </h2>
-
-              {progress.application_fee_paid ? (
-                <div className="text-center py-8">
-                  <CheckCircle className="h-12 w-12 text-primary mx-auto mb-3" />
-                  <p className="text-sm font-medium text-foreground">Application fee has been paid</p>
-                  <p className="text-xs text-muted-foreground mt-1">You can proceed to the next step.</p>
-                </div>
-              ) : (
-                <div className="text-center py-8 space-y-4">
-                  <div className="inline-flex items-center justify-center h-16 w-16 rounded-full bg-primary/10 mx-auto">
-                    <CreditCard className="h-8 w-8 text-primary" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-foreground">₹500</p>
-                    <p className="text-sm text-muted-foreground">Application Processing Fee</p>
-                  </div>
-                  <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-                    This is a non-refundable application processing fee. Online payment integration coming soon — 
-                    please contact our admissions team or pay at the campus.
-                  </p>
-                  <Button onClick={markFeePaid} disabled={saving} variant="outline" className="gap-2">
-                    {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-                    <Shield className="h-4 w-4" /> Mark as Paid (Staff Use)
-                  </Button>
-                </div>
-              )}
-
-              <div className="flex justify-between">
-                <Button variant="outline" onClick={() => setStep(1)} className="gap-2">
-                  <ArrowLeft className="h-4 w-4" /> Back
-                </Button>
-                <Button onClick={() => setStep(3)} disabled={!progress.application_fee_paid} className="gap-2">
-                  Continue <ArrowRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* ── Step 3: Documents ── */}
-        {step === 3 && (
-          <Card className="border-border/60 shadow-none">
-            <CardContent className="p-6 space-y-5">
-              <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-                <Upload className="h-5 w-5 text-muted-foreground" /> Upload Documents
-              </h2>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {[
-                  { label: "Passport Photo", desc: "Recent photo (JPG/PNG)" },
-                  { label: "Previous Marksheet", desc: "Last year's marksheet" },
-                  { label: "Aadhaar Card", desc: "Front & back (PDF/JPG)" },
-                  { label: "Transfer Certificate", desc: "If applicable" },
-                ].map((doc) => (
-                  <Card key={doc.label} className="border-border/60 border-dashed shadow-none">
-                    <CardContent className="p-5 text-center">
-                      <Upload className="h-6 w-6 text-muted-foreground/40 mx-auto mb-2" />
-                      <h4 className="text-sm font-semibold text-foreground">{doc.label}</h4>
-                      <p className="text-xs text-muted-foreground mt-0.5">{doc.desc}</p>
-                      <Button variant="outline" size="sm" className="mt-3 text-xs">
-                        Choose File
-                      </Button>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-
-              <div className="flex justify-between">
-                <Button variant="outline" onClick={() => setStep(2)} className="gap-2">
-                  <ArrowLeft className="h-4 w-4" /> Back
-                </Button>
-                <Button onClick={markDocumentsUploaded} disabled={saving} className="gap-2">
-                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-                  Submit Application
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        <Card className="border-border/60 shadow-none">
+          <CardContent className="p-6">
+            {step === 0 && (
+              <PersonalDetails
+                data={app}
+                onChange={onChange}
+                onNext={() => handleStepNext('personal', 1)}
+                saving={saving}
+              />
+            )}
+            {step === 1 && (
+              <ParentDetails
+                data={app}
+                onChange={onChange}
+                onNext={() => handleStepNext('parents', 2)}
+                onBack={() => setStep(0)}
+                saving={saving}
+              />
+            )}
+            {step === 2 && (
+              <AcademicDetails
+                data={app}
+                onChange={onChange}
+                onNext={() => handleStepNext('academic', 3)}
+                onBack={() => setStep(1)}
+                saving={saving}
+              />
+            )}
+            {step === 3 && (
+              <ExtracurricularDetails
+                data={app}
+                onChange={onChange}
+                onNext={() => handleStepNext('extracurricular', 4)}
+                onBack={() => setStep(2)}
+                saving={saving}
+              />
+            )}
+            {step === 4 && (
+              <PaymentSection
+                data={app}
+                onChange={onChange}
+                onNext={async () => {
+                  await saveSection({ payment_status: app.payment_status }, 'payment');
+                  setStep(5);
+                }}
+                onBack={() => setStep(3)}
+                saving={saving}
+              />
+            )}
+            {step === 5 && (
+              <DocumentUpload
+                data={app}
+                onNext={async () => {
+                  await saveSection({}, 'documents');
+                  setStep(6);
+                }}
+                onBack={() => setStep(4)}
+                saving={saving}
+              />
+            )}
+            {step === 6 && (
+              <ReviewSubmit
+                data={app}
+                onBack={() => setStep(5)}
+                onSubmit={handleSubmit}
+                saving={saving}
+              />
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
 };
+
+// ─── Header ───
+function Header({ appId, completedCount, onLogout }: { appId: string | null; completedCount: number; onLogout: () => void }) {
+  return (
+    <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-30">
+      <div className="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary shadow-sm">
+            <GraduationCap className="h-5 w-5 text-primary-foreground" />
+          </div>
+          <div>
+            <span className="text-sm font-bold text-foreground tracking-tight">NIMT UniOs</span>
+            <span className="text-[11px] text-muted-foreground block">Application Portal</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          {appId && (
+            <Badge className="bg-primary/10 text-primary border-0 text-xs">
+              {completedCount}/7 complete
+            </Badge>
+          )}
+          <Button variant="ghost" size="sm" onClick={onLogout}>
+            <LogOut className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    </header>
+  );
+}
 
 export default ApplyPortal;
