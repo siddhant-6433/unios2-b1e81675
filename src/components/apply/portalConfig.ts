@@ -1,7 +1,7 @@
-import nimtLogo from "@/assets/mirai-logo-dark.svg"; // placeholder for NIMT — reuse dark logo
 import miraiLogoGreen from "@/assets/mirai-logo-green.svg";
+import nimtBeaconLogo from "@/assets/nimt-beacon-logo.png";
 
-export type PortalId = "nimt" | "mirai";
+export type PortalId = "nimt" | "beacon" | "mirai";
 
 export interface PortalConfig {
   id: PortalId;
@@ -16,6 +16,8 @@ export interface PortalConfig {
   gradeKeywords: string[];
   /** Program categories visible in this portal */
   programCategories: string[];
+  /** Hostnames that auto-resolve to this portal */
+  hostnames: string[];
 }
 
 export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
@@ -23,13 +25,34 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     id: "nimt",
     name: "NIMT University",
     tagline: "Application Portal",
-    logo: nimtLogo,
+    logo: nimtBeaconLogo, // fallback — replace with dedicated NIMT University logo when available
     cssVars: {
-      // Default teal theme — no overrides needed, uses index.css defaults
+      // Default teal theme — uses index.css defaults
     },
-    institutionTypes: [], // all
+    institutionTypes: ["university", "college"],
     gradeKeywords: [],
     programCategories: ["undergraduate", "postgraduate", "mba_pgdm", "bed", "deled", "professional"],
+    hostnames: [],
+  },
+  beacon: {
+    id: "beacon",
+    name: "NIMT Beacon School",
+    tagline: "Future Ready CBSE School",
+    logo: nimtBeaconLogo,
+    cssVars: {
+      "--primary": "227 100% 50%",            // #0044FF vivid blue
+      "--primary-foreground": "0 0% 100%",
+      "--ring": "227 100% 50%",
+      "--sidebar-primary": "227 100% 50%",
+      "--sidebar-accent": "227 100% 95%",
+      "--sidebar-accent-foreground": "227 100% 35%",
+      "--accent": "227 80% 95%",
+      "--accent-foreground": "227 100% 30%",
+    },
+    institutionTypes: ["school"],
+    gradeKeywords: ["nursery", "lkg", "ukg", "toddler", "montessori", "grade", "class", "playgroup", "pre-primary", "pre nur", "kg"],
+    programCategories: ["school"],
+    hostnames: ["nimtbeaconschool.com", "www.nimtbeaconschool.com"],
   },
   mirai: {
     id: "mirai",
@@ -37,7 +60,7 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     tagline: "Future Ready IB School",
     logo: miraiLogoGreen,
     cssVars: {
-      "--primary": "100 18% 53%",           // #77966D sage green
+      "--primary": "100 18% 53%",             // #77966D sage green
       "--primary-foreground": "0 0% 100%",
       "--ring": "100 18% 53%",
       "--sidebar-primary": "100 18% 53%",
@@ -49,18 +72,28 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     institutionTypes: ["school"],
     gradeKeywords: ["nursery", "lkg", "ukg", "toddler", "montessori", "grade", "class", "playgroup", "pre-primary"],
     programCategories: ["school"],
+    hostnames: ["miraischool.in", "www.miraischool.in", "apply.miraischool.in"],
   },
 };
 
 /**
- * Detect portal from URL: /apply?portal=mirai or /apply/mirai
+ * Detect portal from: 1) hostname, 2) query param, 3) path segment
  */
 export function detectPortal(search: string, pathname: string): PortalId {
+  // 1. Hostname detection (for custom domains)
+  const hostname = window.location.hostname.toLowerCase();
+  for (const config of Object.values(PORTAL_CONFIGS)) {
+    if (config.hostnames.some(h => hostname === h || hostname.endsWith("." + h))) {
+      return config.id;
+    }
+  }
+
+  // 2. Query param: ?portal=mirai
   const params = new URLSearchParams(search);
   const fromQuery = params.get("portal")?.toLowerCase();
   if (fromQuery && fromQuery in PORTAL_CONFIGS) return fromQuery as PortalId;
 
-  // Check path segments: /apply/mirai
+  // 3. Path segment: /apply/beacon
   const segments = pathname.split("/").filter(Boolean);
   const last = segments[segments.length - 1]?.toLowerCase();
   if (last && last in PORTAL_CONFIGS) return last as PortalId;
