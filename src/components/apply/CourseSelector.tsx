@@ -1,23 +1,27 @@
 import { useState, useEffect, useMemo } from "react";
-import { ArrowRight, Loader2, Calendar, MapPin, GripVertical, Plus, X } from "lucide-react";
+import { ArrowRight, Loader2, Calendar, MapPin, GripVertical, Plus, X, AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { CourseSelection, determineProgramCategory, calculateFee } from "./types";
 import { usePortal } from "./PortalContext";
+import { filterCoursesByAge, validateAge, AgeValidationResult } from "./ageValidation";
 
 interface Props {
   phone: string;
   leadName: string;
+  childDob: string;
+  onDobChange: (dob: string) => void;
   onComplete: (sessionId: string, selections: CourseSelection[], leadId: string | null) => void;
 }
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 
-export function CourseSelector({ phone, leadName, onComplete }: Props) {
+export function CourseSelector({ phone, leadName, childDob, onDobChange, onComplete }: Props) {
   const { toast } = useToast();
   const portal = usePortal();
+  const isSchoolPortal = portal.programCategories.includes("school");
   const [sessions, setSessions] = useState<{ id: string; name: string }[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
   const [selectedSession, setSelectedSession] = useState('');
@@ -33,7 +37,7 @@ export function CourseSelector({ phone, leadName, onComplete }: Props) {
         departments!inner (
           id, name, institution_id,
           institutions!inner (
-            id, name, campus_id,
+            id, name, campus_id, type,
             campuses!inner ( id, name )
           )
         )
@@ -45,15 +49,13 @@ export function CourseSelector({ phone, leadName, onComplete }: Props) {
   }, []);
 
   // Filter courses based on portal config
-  const filteredCourses = useMemo(() => {
+  const portalFilteredCourses = useMemo(() => {
     if (portal.gradeKeywords.length === 0 && portal.institutionTypes.length === 0) return courses;
     return courses.filter((c: any) => {
-      // Filter by institution type
       if (portal.institutionTypes.length > 0) {
         const instType = c.departments?.institutions?.type?.toLowerCase() || "";
         if (!portal.institutionTypes.some(t => instType.includes(t))) return false;
       }
-      // Filter by grade keywords
       if (portal.gradeKeywords.length > 0) {
         const nameAndCode = (c.name + " " + c.code).toLowerCase();
         if (!portal.gradeKeywords.some(kw => nameAndCode.includes(kw))) return false;
@@ -61,6 +63,12 @@ export function CourseSelector({ phone, leadName, onComplete }: Props) {
       return true;
     });
   }, [courses, portal]);
+
+  // Apply age filtering for school portals
+  const filteredCourses = useMemo(() => {
+    if (!isSchoolPortal || !childDob) return portalFilteredCourses;
+    return filterCoursesByAge(portalFilteredCourses, childDob, portal.id);
+  }, [portalFilteredCourses, childDob, isSchoolPortal, portal.id]);
 
   const coursesByGroup = useMemo(() => {
     const map = new Map<string, { label: string; courses: any[] }>();
@@ -76,7 +84,7 @@ export function CourseSelector({ phone, leadName, onComplete }: Props) {
 
   const addCourse = () => {
     if (!addingCourse) return;
-    const course = courses.find((c: any) => c.id === addingCourse);
+    const course = filteredCourses.find((c: any) => c.id === addingCourse);
     if (!course || selections.some(s => s.course_id === addingCourse)) return;
 
     const campusName = course.departments?.institutions?.campuses?.name || '';
@@ -112,16 +120,31 @@ export function CourseSelector({ phone, leadName, onComplete }: Props) {
     });
   };
 
+  // Get age validation for selected courses
+  const getSelectionValidation = (s: CourseSelection): AgeValidationResult | null => {
+    if (!isSchoolPortal || !childDob) return null;
+    return validateAge(childDob, s.course_name, "", portal.id);
+  };
+
   const estimatedFee = calculateFee(selections);
+
+  // Check if any selection has strict age block
+  const hasStrictBlock = selections.some(s => {
+    const v = getSelectionValidation(s);
+    return v && !v.eligible && v.enforcement === "strict";
+  });
 
   const handleContinue = async () => {
     if (!selectedSession || selections.length === 0) {
       toast({ title: 'Select session and at least one course', variant: 'destructive' });
       return;
     }
+    if (hasStrictBlock) {
+      toast({ title: 'Age requirement not met', description: 'Remove ineligible grades to continue.', variant: 'destructive' });
+      return;
+    }
     setSaving(true);
 
-    // Find or create lead
     const { data: existingLead } = await supabase
       .from("leads")
       .select("id")
@@ -138,8 +161,33 @@ export function CourseSelector({ phone, leadName, onComplete }: Props) {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-bold text-foreground">Welcome, {leadName}</h1>
-        <p className="text-sm text-muted-foreground">Select your intake cycle and preferred courses to begin.</p>
+        <p className="text-sm text-muted-foreground">
+          {isSchoolPortal
+            ? "Enter your child's date of birth and select the grade to begin."
+            : "Select your intake cycle and preferred courses to begin."}
+        </p>
       </div>
+
+      {/* Child DOB for school portals */}
+      {isSchoolPortal && (
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+            Child's Date of Birth *
+          </label>
+          <input
+            type="date"
+            value={childDob}
+            onChange={e => onDobChange(e.target.value)}
+            className={inputCls}
+          />
+          {childDob && (
+            <p className="text-xs text-muted-foreground mt-1">
+              <Info className="h-3 w-3 inline mr-1" />
+              Age eligibility is calculated as of July 31st of the admission year.
+            </p>
+          )}
+        </div>
+      )}
 
       <div>
         <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
@@ -152,17 +200,27 @@ export function CourseSelector({ phone, leadName, onComplete }: Props) {
       </div>
 
       <div>
-        <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Add Course</label>
+        <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+          {isSchoolPortal ? "Select Grade" : "Add Course"}
+        </label>
         <div className="flex gap-2">
           <select value={addingCourse} onChange={e => setAddingCourse(e.target.value)} className={`${inputCls} flex-1`}>
-            <option value="">Select course to add</option>
+            <option value="">{isSchoolPortal ? "Select grade to add" : "Select course to add"}</option>
             {coursesByGroup.map(g => (
               <optgroup key={g.label} label={g.label}>
-                {g.courses.map((c: any) => (
-                  <option key={c.id} value={c.id} disabled={selections.some(s => s.course_id === c.id)}>
-                    {c.name}
-                  </option>
-                ))}
+                {g.courses.map((c: any) => {
+                  const ageInfo = c.ageValidation;
+                  const ineligible = ageInfo && !ageInfo.eligible && ageInfo.enforcement === "strict";
+                  return (
+                    <option
+                      key={c.id}
+                      value={c.id}
+                      disabled={selections.some(s => s.course_id === c.id) || !!ineligible}
+                    >
+                      {c.name}{ageInfo && !ageInfo.eligible ? ` (Age: ${ageInfo.ageAsOfJuly31}y — ${ageInfo.enforcement === "strict" ? "ineligible" : "guidance"})` : ""}
+                    </option>
+                  );
+                })}
               </optgroup>
             ))}
           </select>
@@ -174,26 +232,50 @@ export function CourseSelector({ phone, leadName, onComplete }: Props) {
 
       {selections.length > 0 && (
         <div className="space-y-2">
-          <label className="text-xs font-medium text-muted-foreground block">Selected Courses (drag to reorder preference)</label>
-          {selections.map((s, i) => (
-            <div key={s.course_id} className="flex items-center gap-3 p-3 rounded-xl bg-muted/50 border border-border/40">
-              <button onClick={() => moveUp(i)} className="text-muted-foreground hover:text-foreground" disabled={i === 0}>
-                <GripVertical className="h-4 w-4" />
-              </button>
-              <Badge className="bg-primary/10 text-primary border-0 text-xs shrink-0">
-                P{s.preference_order}
-              </Badge>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-foreground truncate">{s.course_name}</p>
-                <p className="text-xs text-muted-foreground flex items-center gap-1">
-                  <MapPin className="h-3 w-3" /> {s.campus_name}
-                </p>
+          <label className="text-xs font-medium text-muted-foreground block">
+            {isSchoolPortal ? "Selected Grade(s)" : "Selected Courses (drag to reorder preference)"}
+          </label>
+          {selections.map((s, i) => {
+            const ageVal = getSelectionValidation(s);
+            return (
+              <div key={s.course_id} className="space-y-0">
+                <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/50 border border-border/40">
+                  <button onClick={() => moveUp(i)} className="text-muted-foreground hover:text-foreground" disabled={i === 0}>
+                    <GripVertical className="h-4 w-4" />
+                  </button>
+                  <Badge className="bg-primary/10 text-primary border-0 text-xs shrink-0">
+                    P{s.preference_order}
+                  </Badge>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate">{s.course_name}</p>
+                    <p className="text-xs text-muted-foreground flex items-center gap-1">
+                      <MapPin className="h-3 w-3" /> {s.campus_name}
+                    </p>
+                  </div>
+                  <button onClick={() => removeCourse(s.course_id)} className="text-muted-foreground hover:text-destructive">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                {/* Age validation banner */}
+                {ageVal && !ageVal.eligible && (
+                  <div className={`mx-3 px-3 py-2 rounded-b-lg text-xs flex items-start gap-1.5 ${
+                    ageVal.enforcement === "strict"
+                      ? "bg-destructive/10 text-destructive border border-t-0 border-destructive/20"
+                      : "bg-warning/10 text-warning-foreground border border-t-0 border-warning/20"
+                  }`}>
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span>{ageVal.message}</span>
+                  </div>
+                )}
+                {ageVal && ageVal.eligible && ageVal.matchedGrade && (
+                  <div className="mx-3 px-3 py-1.5 rounded-b-lg text-xs flex items-center gap-1.5 bg-primary/5 text-primary border border-t-0 border-primary/10">
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                    <span>{ageVal.message}</span>
+                  </div>
+                )}
               </div>
-              <button onClick={() => removeCourse(s.course_id)} className="text-muted-foreground hover:text-destructive">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          ))}
+            );
+          })}
 
           <div className="flex items-center justify-between p-3 rounded-xl bg-primary/5 border border-primary/10">
             <span className="text-sm text-muted-foreground">Estimated Application Fee</span>
@@ -205,7 +287,7 @@ export function CourseSelector({ phone, leadName, onComplete }: Props) {
       )}
 
       <div className="flex justify-end">
-        <Button onClick={handleContinue} disabled={saving || !selectedSession || selections.length === 0} className="gap-2">
+        <Button onClick={handleContinue} disabled={saving || !selectedSession || selections.length === 0 || hasStrictBlock} className="gap-2">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
           Continue to Application
         </Button>
