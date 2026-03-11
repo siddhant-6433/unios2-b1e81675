@@ -124,17 +124,17 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
     }
   };
 
+  const portal = usePortal();
+
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-6">
       <Card className="max-w-md w-full border-border/60 shadow-none">
         <CardContent className="p-8">
           <div className="flex items-center gap-3 mb-6">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary shadow-sm">
-              <GraduationCap className="h-5 w-5 text-primary-foreground" />
-            </div>
+            <img src={portal.logo} alt={portal.name} className="h-10 w-10 rounded-xl object-contain" />
             <div>
-              <h2 className="text-lg font-bold text-foreground">Application Portal</h2>
-              <p className="text-xs text-muted-foreground">Login to start or continue your application</p>
+              <h2 className="text-lg font-bold text-foreground">{portal.name}</h2>
+              <p className="text-xs text-muted-foreground">{portal.tagline}</p>
             </div>
           </div>
 
