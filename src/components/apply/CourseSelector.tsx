@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { CourseSelection, determineProgramCategory, calculateFee } from "./types";
+import { usePortal } from "./PortalContext";
 
 interface Props {
   phone: string;
