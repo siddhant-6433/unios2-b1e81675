@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { CourseSelection, determineProgramCategory, calculateFee } from "./types";
+import { usePortal } from "./PortalContext";
 
 interface Props {
   phone: string;
@@ -16,6 +17,7 @@ const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text
 
 export function CourseSelector({ phone, leadName, onComplete }: Props) {
   const { toast } = useToast();
+  const portal = usePortal();
   const [sessions, setSessions] = useState<{ id: string; name: string }[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
   const [selectedSession, setSelectedSession] = useState('');
@@ -42,9 +44,27 @@ export function CourseSelector({ phone, leadName, onComplete }: Props) {
     });
   }, []);
 
+  // Filter courses based on portal config
+  const filteredCourses = useMemo(() => {
+    if (portal.gradeKeywords.length === 0 && portal.institutionTypes.length === 0) return courses;
+    return courses.filter((c: any) => {
+      // Filter by institution type
+      if (portal.institutionTypes.length > 0) {
+        const instType = c.departments?.institutions?.type?.toLowerCase() || "";
+        if (!portal.institutionTypes.some(t => instType.includes(t))) return false;
+      }
+      // Filter by grade keywords
+      if (portal.gradeKeywords.length > 0) {
+        const nameAndCode = (c.name + " " + c.code).toLowerCase();
+        if (!portal.gradeKeywords.some(kw => nameAndCode.includes(kw))) return false;
+      }
+      return true;
+    });
+  }, [courses, portal]);
+
   const coursesByGroup = useMemo(() => {
     const map = new Map<string, { label: string; courses: any[] }>();
-    courses.forEach((c: any) => {
+    filteredCourses.forEach((c: any) => {
       const campusName = c.departments?.institutions?.campuses?.name || "Unknown";
       const deptName = c.departments?.name || "Unknown";
       const key = `${campusName} — ${deptName}`;
@@ -52,7 +72,7 @@ export function CourseSelector({ phone, leadName, onComplete }: Props) {
       map.get(key)!.courses.push(c);
     });
     return Array.from(map.values());
-  }, [courses]);
+  }, [filteredCourses]);
 
   const addCourse = () => {
     if (!addingCourse) return;

@@ -19,6 +19,7 @@ import { ExtracurricularDetails } from "@/components/apply/ExtracurricularDetail
 import { PaymentSection } from "@/components/apply/PaymentSection";
 import { DocumentUpload } from "@/components/apply/DocumentUpload";
 import { ReviewSubmit } from "@/components/apply/ReviewSubmit";
+import { PortalProvider, usePortal } from "@/components/apply/PortalContext";
 
 // ─── OTP Login Screen ───
 function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: string) => void }) {
@@ -123,17 +124,17 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
     }
   };
 
+  const portal = usePortal();
+
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-6">
       <Card className="max-w-md w-full border-border/60 shadow-none">
         <CardContent className="p-8">
           <div className="flex items-center gap-3 mb-6">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary shadow-sm">
-              <GraduationCap className="h-5 w-5 text-primary-foreground" />
-            </div>
+            <img src={portal.logo} alt={portal.name} className="h-10 w-10 rounded-xl object-contain" />
             <div>
-              <h2 className="text-lg font-bold text-foreground">Application Portal</h2>
-              <p className="text-xs text-muted-foreground">Login to start or continue your application</p>
+              <h2 className="text-lg font-bold text-foreground">{portal.name}</h2>
+              <p className="text-xs text-muted-foreground">{portal.tagline}</p>
             </div>
           </div>
 
@@ -557,16 +558,15 @@ const ApplyPortal = () => {
 
 // ─── Header ───
 function Header({ appId, completedCount, onLogout }: { appId: string | null; completedCount: number; onLogout: () => void }) {
+  const portal = usePortal();
   return (
     <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-30">
       <div className="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary shadow-sm">
-            <GraduationCap className="h-5 w-5 text-primary-foreground" />
-          </div>
+          <img src={portal.logo} alt={portal.name} className="h-10 w-10 rounded-xl object-contain" />
           <div>
-            <span className="text-sm font-bold text-foreground tracking-tight">NIMT UniOs</span>
-            <span className="text-[11px] text-muted-foreground block">Application Portal</span>
+            <span className="text-sm font-bold text-foreground tracking-tight">{portal.name}</span>
+            <span className="text-[11px] text-muted-foreground block">{portal.tagline}</span>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -584,4 +584,13 @@ function Header({ appId, completedCount, onLogout }: { appId: string | null; com
   );
 }
 
-export default ApplyPortal;
+// ─── Wrapped with PortalProvider ───
+function ApplyPortalWrapper() {
+  return (
+    <PortalProvider>
+      <ApplyPortal />
+    </PortalProvider>
+  );
+}
+
+export default ApplyPortalWrapper;
