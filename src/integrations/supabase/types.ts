@@ -41,6 +41,135 @@ export type Database = {
         }
         Relationships: []
       }
+      applications: {
+        Row: {
+          aadhaar: string | null
+          academic_details: Json | null
+          address: Json | null
+          apaar_id: string | null
+          application_id: string
+          category: string | null
+          completed_sections: Json | null
+          course_selections: Json
+          created_at: string
+          dob: string | null
+          email: string | null
+          extracurricular: Json | null
+          father: Json | null
+          fee_amount: number | null
+          flags: string[] | null
+          full_name: string
+          gender: string | null
+          guardian: Json | null
+          id: string
+          institution_id: string | null
+          lead_id: string | null
+          mother: Json | null
+          nationality: string | null
+          payment_ref: string | null
+          payment_status: string | null
+          pen_number: string | null
+          phone: string
+          program_category: string | null
+          result_status: Json | null
+          school_details: Json | null
+          session_id: string | null
+          status: string
+          submitted_at: string | null
+          updated_at: string
+          whatsapp_verified: boolean | null
+        }
+        Insert: {
+          aadhaar?: string | null
+          academic_details?: Json | null
+          address?: Json | null
+          apaar_id?: string | null
+          application_id: string
+          category?: string | null
+          completed_sections?: Json | null
+          course_selections?: Json
+          created_at?: string
+          dob?: string | null
+          email?: string | null
+          extracurricular?: Json | null
+          father?: Json | null
+          fee_amount?: number | null
+          flags?: string[] | null
+          full_name?: string
+          gender?: string | null
+          guardian?: Json | null
+          id?: string
+          institution_id?: string | null
+          lead_id?: string | null
+          mother?: Json | null
+          nationality?: string | null
+          payment_ref?: string | null
+          payment_status?: string | null
+          pen_number?: string | null
+          phone?: string
+          program_category?: string | null
+          result_status?: Json | null
+          school_details?: Json | null
+          session_id?: string | null
+          status?: string
+          submitted_at?: string | null
+          updated_at?: string
+          whatsapp_verified?: boolean | null
+        }
+        Update: {
+          aadhaar?: string | null
+          academic_details?: Json | null
+          address?: Json | null
+          apaar_id?: string | null
+          application_id?: string
+          category?: string | null
+          completed_sections?: Json | null
+          course_selections?: Json
+          created_at?: string
+          dob?: string | null
+          email?: string | null
+          extracurricular?: Json | null
+          father?: Json | null
+          fee_amount?: number | null
+          flags?: string[] | null
+          full_name?: string
+          gender?: string | null
+          guardian?: Json | null
+          id?: string
+          institution_id?: string | null
+          lead_id?: string | null
+          mother?: Json | null
+          nationality?: string | null
+          payment_ref?: string | null
+          payment_status?: string | null
+          pen_number?: string | null
+          phone?: string
+          program_category?: string | null
+          result_status?: Json | null
+          school_details?: Json | null
+          session_id?: string | null
+          status?: string
+          submitted_at?: string | null
+          updated_at?: string
+          whatsapp_verified?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "applications_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "applications_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "admission_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       batches: {
         Row: {
           course_id: string
