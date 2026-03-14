@@ -10,7 +10,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
 import { useToast } from "@/hooks/use-toast";
 
-import { ApplicationData, DEFAULT_APPLICATION, generateApplicationId, calculateFee, CourseSelection } from "@/components/apply/types";
+import { ApplicationData, DEFAULT_APPLICATION, generateApplicationId, calculateFee, CourseSelection, FEE_MAP } from "@/components/apply/types";
+import { validateDobEligibility, ELIGIBILITY_RULES } from "@/components/apply/eligibilityRules";
 import { StepProgress } from "@/components/apply/StepProgress";
 import { CourseSelector } from "@/components/apply/CourseSelector";
 import { PersonalDetails } from "@/components/apply/PersonalDetails";
