@@ -117,15 +117,24 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
       if (verifyData?.error) throw new Error(verifyData.error);
       if (!verifyData?.success && !verifyData?.verified) throw new Error("Invalid or expired OTP");
 
-      const { data: lead } = await supabase
-        .from("leads")
-        .select("name")
-        .eq("phone", phone)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      if (loginMode === "google_phone") {
+        // Update profile with phone for Google-authenticated user
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          await supabase.from("profiles").update({ phone }).eq("user_id", session.user.id);
+        }
+        onAuthenticated(phone, googleName || "Applicant");
+      } else {
+        const { data: lead } = await supabase
+          .from("leads")
+          .select("name")
+          .eq("phone", phone)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-      onAuthenticated(phone, lead?.name || "Applicant");
+        onAuthenticated(phone, lead?.name || "Applicant");
+      }
     } catch (err: any) {
       toast({ title: "Verification failed", description: err.message, variant: "destructive" });
     } finally {
