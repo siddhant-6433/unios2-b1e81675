@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import {
-  GraduationCap, CheckCircle, Loader2, LogOut,
+  GraduationCap, CheckCircle, Loader2, LogOut, MapPin, Pencil, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
