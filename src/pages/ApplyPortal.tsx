@@ -43,7 +43,13 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
       const { data, error } = await supabase.functions.invoke("whatsapp-otp", {
         body: { phone, action: "send" },
       });
-      if (error) throw error;
+      if (error) {
+        const ctx = (error as any)?.context;
+        if (ctx && typeof ctx.json === "function") {
+          try { const body = await ctx.json(); throw new Error(body?.error || error.message); } catch (e: any) { if (e.message) throw e; }
+        }
+        throw error;
+      }
       if (data?.error) throw new Error(data.error);
       setOtpSent(true);
       toast({ title: "OTP sent via WhatsApp" });
