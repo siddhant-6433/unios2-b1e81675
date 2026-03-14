@@ -137,6 +137,22 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
     }
   };
 
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  const handleGoogleSignIn = async () => {
+    setGoogleLoading(true);
+    try {
+      const result = await lovable.auth.signInWithOAuth("google", {
+        redirect_uri: window.location.href,
+      });
+      if (result.error) throw result.error;
+    } catch (err: any) {
+      toast({ title: "Google sign-in failed", description: err.message, variant: "destructive" });
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
   const portal = usePortal();
 
   return (
