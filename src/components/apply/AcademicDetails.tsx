@@ -117,8 +117,20 @@ function AcademicBlock({
         </div>
         {showSubjects && prefix === 'class_12' && (
           <div className="sm:col-span-2">
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Subjects / Stream</label>
-            <input value={data.subjects || ''} onChange={e => update('subjects', e.target.value)} placeholder="e.g. PCM, Commerce, Arts" className={inputCls} />
+            <SubjectTagInput
+              label="Subjects / Stream"
+              options={CLASS_12_SUBJECTS}
+              selected={
+                data.subjects
+                  ? typeof data.subjects === 'string'
+                    ? data.subjects.split(',').map((s: string) => s.trim()).filter(Boolean)
+                    : data.subjects
+                  : []
+              }
+              onChange={(vals) => update('subjects', vals.join(', '))}
+              placeholder="Select your 12th subjects…"
+              allowCustom
+            />
           </div>
         )}
       </div>
