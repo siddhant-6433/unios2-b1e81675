@@ -817,13 +817,11 @@ const ApplyPortal = () => {
       <Header appId={app.application_id} completedCount={completedCount} totalSteps={totalSteps} onLogout={() => { setAuthed(false); setApp(null); }} />
 
       <div className="max-w-3xl mx-auto px-6 py-8">
-        <div className="mb-6">
-          <h1 className="text-xl font-bold text-foreground">Welcome, {app.full_name || leadName}</h1>
-          <p className="text-sm text-muted-foreground">Complete all steps to submit your application.</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Application ID: <span className="font-mono font-semibold text-primary">{app.application_id}</span>
-          </p>
-        </div>
+        <CourseSummaryBanner
+          app={app}
+          leadName={leadName}
+          onEdit={() => setShowCourseSelector(true)}
+        />
 
         <DynamicStepProgress
           steps={steps}
