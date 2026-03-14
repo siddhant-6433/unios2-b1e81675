@@ -660,7 +660,7 @@ const ApplyPortal = () => {
   if (showCourseSelector) {
     return (
       <div className="min-h-screen bg-background">
-        <Header appId={null} completedCount={0} totalSteps={totalSteps} onLogout={() => { setAuthed(false); setApp(null); }} />
+        <Header appId={app?.application_id || null} completedCount={0} totalSteps={totalSteps} onLogout={() => { setAuthed(false); setApp(null); }} />
         <div className="max-w-3xl mx-auto px-6 py-8">
           <CourseSelector
             phone={phone}
@@ -668,6 +668,9 @@ const ApplyPortal = () => {
             childDob={childDob}
             onDobChange={setChildDob}
             onComplete={handleCourseSelected}
+            existingSelections={app?.course_selections}
+            existingSession={app?.session_id || undefined}
+            onCancel={app ? () => setShowCourseSelector(false) : undefined}
           />
         </div>
       </div>
