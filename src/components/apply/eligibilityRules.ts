@@ -180,25 +180,45 @@ export function validateAcademicEligibility(
     }
   }
 
-  // Subject prerequisites
+  // Subject prerequisites — expanded group matching
   if (rules.subjectPrerequisites && rules.subjectPrerequisites.length > 0) {
     const c12 = academicDetails?.class_12;
-    const subjects = c12?.subjects?.toLowerCase() || '';
-    const hasMatch = rules.subjectPrerequisites.some(
-      prereq => subjects.includes(prereq.toLowerCase())
+    // Parse subjects: support both comma-separated string and already-split array
+    const rawSubjects: string = typeof c12?.subjects === 'string' ? c12.subjects : '';
+    const studentSubjects = rawSubjects
+      .split(',')
+      .map((s: string) => s.trim())
+      .filter(Boolean);
+
+    // Check if "Any Stream" is one of the prerequisites — always pass
+    const anyStream = rules.subjectPrerequisites.some(
+      p => p.toLowerCase().includes('any stream') || p.toLowerCase() === 'any'
     );
-    if (c12 && subjects && !hasMatch) {
-      results.push({
-        field: 'class_12',
-        message: `This course requires one of: ${rules.subjectPrerequisites.join(', ')} stream in Class 12.`,
-        type: 'error',
-      });
-    } else if (!subjects && c12) {
-      results.push({
-        field: 'class_12',
-        message: `Please enter your Class 12 subjects. Required: ${rules.subjectPrerequisites.join(' / ')}.`,
-        type: 'warning',
-      });
+
+    if (!anyStream) {
+      if (c12 && studentSubjects.length > 0) {
+        // Student has subjects selected — check if any prerequisite group is satisfied
+        const hasMatch = rules.subjectPrerequisites.some(prereq =>
+          isSubjectGroupSatisfied(prereq, studentSubjects)
+        );
+        if (!hasMatch) {
+          const groupLabels = rules.subjectPrerequisites.map(p => {
+            const expanded = SUBJECT_GROUP_MAP[p.toUpperCase()];
+            return expanded ? `${p} (${expanded.join(', ')})` : p;
+          });
+          results.push({
+            field: 'class_12',
+            message: `This course requires one of: ${groupLabels.join(' OR ')} in Class 12.`,
+            type: 'error',
+          });
+        }
+      } else if (c12 && studentSubjects.length === 0) {
+        results.push({
+          field: 'class_12',
+          message: `Please select your Class 12 subjects. Required: ${rules.subjectPrerequisites.join(' / ')}.`,
+          type: 'warning',
+        });
+      }
     }
   }
 
