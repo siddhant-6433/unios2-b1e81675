@@ -73,6 +73,28 @@ export const ELIGIBILITY_RULES: Record<string, EligibilityRule> = {
   deled: { minAge: 17, class12MinMarks: 45 },
 };
 
+/** Subject group expansion map — acronym → required individual subjects */
+export const SUBJECT_GROUP_MAP: Record<string, string[]> = {
+  PCB: ['Physics', 'Chemistry', 'Biology'],
+  PCM: ['Physics', 'Chemistry', 'Mathematics'],
+  PCMB: ['Physics', 'Chemistry', 'Mathematics', 'Biology'],
+  Commerce: ['Accountancy', 'Business Studies', 'Economics'],
+};
+
+/** Check if a prerequisite group is satisfied by the student's selected subjects */
+export function isSubjectGroupSatisfied(group: string, studentSubjects: string[]): boolean {
+  const normalizedStudentSubjects = studentSubjects.map(s => s.toLowerCase().trim());
+  // "Any Stream" means no restriction
+  if (group.toLowerCase().includes('any stream') || group.toLowerCase() === 'any') return true;
+  // Check if it's a known acronym
+  const expanded = SUBJECT_GROUP_MAP[group.toUpperCase()];
+  if (expanded) {
+    return expanded.every(req => normalizedStudentSubjects.includes(req.toLowerCase()));
+  }
+  // Treat as a single subject name
+  return normalizedStudentSubjects.includes(group.toLowerCase());
+}
+
 /** Parse marks string to percentage. Values ≤ 10 are treated as CGPA (×9.5). */
 export function parseMarksToPercentage(marks: string | undefined): number | null {
   if (!marks) return null;
@@ -158,25 +180,45 @@ export function validateAcademicEligibility(
     }
   }
 
-  // Subject prerequisites
+  // Subject prerequisites — expanded group matching
   if (rules.subjectPrerequisites && rules.subjectPrerequisites.length > 0) {
     const c12 = academicDetails?.class_12;
-    const subjects = c12?.subjects?.toLowerCase() || '';
-    const hasMatch = rules.subjectPrerequisites.some(
-      prereq => subjects.includes(prereq.toLowerCase())
+    // Parse subjects: support both comma-separated string and already-split array
+    const rawSubjects: string = typeof c12?.subjects === 'string' ? c12.subjects : '';
+    const studentSubjects = rawSubjects
+      .split(',')
+      .map((s: string) => s.trim())
+      .filter(Boolean);
+
+    // Check if "Any Stream" is one of the prerequisites — always pass
+    const anyStream = rules.subjectPrerequisites.some(
+      p => p.toLowerCase().includes('any stream') || p.toLowerCase() === 'any'
     );
-    if (c12 && subjects && !hasMatch) {
-      results.push({
-        field: 'class_12',
-        message: `This course requires one of: ${rules.subjectPrerequisites.join(', ')} stream in Class 12.`,
-        type: 'error',
-      });
-    } else if (!subjects && c12) {
-      results.push({
-        field: 'class_12',
-        message: `Please enter your Class 12 subjects. Required: ${rules.subjectPrerequisites.join(' / ')}.`,
-        type: 'warning',
-      });
+
+    if (!anyStream) {
+      if (c12 && studentSubjects.length > 0) {
+        // Student has subjects selected — check if any prerequisite group is satisfied
+        const hasMatch = rules.subjectPrerequisites.some(prereq =>
+          isSubjectGroupSatisfied(prereq, studentSubjects)
+        );
+        if (!hasMatch) {
+          const groupLabels = rules.subjectPrerequisites.map(p => {
+            const expanded = SUBJECT_GROUP_MAP[p.toUpperCase()];
+            return expanded ? `${p} (${expanded.join(', ')})` : p;
+          });
+          results.push({
+            field: 'class_12',
+            message: `This course requires one of: ${groupLabels.join(' OR ')} in Class 12.`,
+            type: 'error',
+          });
+        }
+      } else if (c12 && studentSubjects.length === 0) {
+        results.push({
+          field: 'class_12',
+          message: `Please select your Class 12 subjects. Required: ${rules.subjectPrerequisites.join(' / ')}.`,
+          type: 'warning',
+        });
+      }
     }
   }
 

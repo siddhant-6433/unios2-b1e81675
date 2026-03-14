@@ -3,6 +3,18 @@ import { ArrowRight, ArrowLeft, Loader2, AlertTriangle, Info } from "lucide-reac
 import { Button } from "@/components/ui/button";
 import { ApplicationData } from "./types";
 import { validateAcademicEligibility, ValidationResult, fetchEligibilityRules, EligibilityRule } from "./eligibilityRules";
+import { SubjectTagInput } from "./SubjectTagInput";
+
+const CLASS_12_SUBJECTS = [
+  "Physics", "Chemistry", "Biology", "Mathematics", "English", "Hindi",
+  "Economics", "Accountancy", "Business Studies", "History", "Political Science",
+  "Geography", "Computer Science", "Sociology", "Psychology", "Physical Education", "Home Science",
+];
+
+const GRADUATION_DEGREES = [
+  "B.A.", "B.Sc.", "B.Com.", "BBA", "B.Tech.", "B.E.", "BCA", "BPT",
+  "B.Sc. Nursing", "B.Pharm.", "LLB", "B.Ed.", "MBBS", "BMRIT", "B.Sc. Radiology",
+];
 
 interface Props {
   data: ApplicationData;
@@ -21,6 +33,7 @@ function AcademicBlock({
   onChange,
   showResultPending,
   showSubjects,
+  showDegreeSelector,
   validationError,
 }: {
   title: string;
@@ -29,6 +42,7 @@ function AcademicBlock({
   onChange: (v: Record<string, any>) => void;
   showResultPending?: boolean;
   showSubjects?: boolean;
+  showDegreeSelector?: boolean;
   validationError?: ValidationResult;
 }) {
   const data = academic[prefix] || {};
@@ -43,10 +57,23 @@ function AcademicBlock({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {prefix === 'graduation' ? (
           <>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Degree</label>
-              <input value={data.degree || ''} onChange={e => update('degree', e.target.value)} className={inputCls} />
-            </div>
+            {showDegreeSelector ? (
+              <div>
+                <SubjectTagInput
+                  label="Degree"
+                  options={GRADUATION_DEGREES}
+                  selected={data.degree ? [data.degree] : []}
+                  onChange={(vals) => update('degree', vals[vals.length - 1] || '')}
+                  placeholder="Select or type degree…"
+                  allowCustom
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Degree</label>
+                <input value={data.degree || ''} onChange={e => update('degree', e.target.value)} className={inputCls} />
+              </div>
+            )}
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">University</label>
               <input value={data.university || ''} onChange={e => update('university', e.target.value)} className={inputCls} />
@@ -90,8 +117,20 @@ function AcademicBlock({
         </div>
         {showSubjects && prefix === 'class_12' && (
           <div className="sm:col-span-2">
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Subjects / Stream</label>
-            <input value={data.subjects || ''} onChange={e => update('subjects', e.target.value)} placeholder="e.g. PCM, Commerce, Arts" className={inputCls} />
+            <SubjectTagInput
+              label="Subjects / Stream"
+              options={CLASS_12_SUBJECTS}
+              selected={
+                data.subjects
+                  ? typeof data.subjects === 'string'
+                    ? data.subjects.split(',').map((s: string) => s.trim()).filter(Boolean)
+                    : data.subjects
+                  : []
+              }
+              onChange={(vals) => update('subjects', vals.join(', '))}
+              placeholder="Select your 12th subjects…"
+              allowCustom
+            />
           </div>
         )}
       </div>
@@ -113,10 +152,20 @@ function AcademicBlock({
                 <p className="text-xs text-foreground font-medium">Result Awaited — you can still apply</p>
                 {prefix === 'class_12' && (
                   <>
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground mb-1 block">Subjects</label>
-                      <input value={data.subjects || ''} onChange={e => update('subjects', e.target.value)} placeholder="e.g. PCM, Commerce" className={inputCls} />
-                    </div>
+                    <SubjectTagInput
+                      label="Subjects"
+                      options={CLASS_12_SUBJECTS}
+                      selected={
+                        data.subjects
+                          ? typeof data.subjects === 'string'
+                            ? data.subjects.split(',').map((s: string) => s.trim()).filter(Boolean)
+                            : data.subjects
+                          : []
+                      }
+                      onChange={(vals) => update('subjects', vals.join(', '))}
+                      placeholder="Select your 12th subjects…"
+                      allowCustom
+                    />
                     <div>
                       <label className="text-xs font-medium text-muted-foreground mb-1 block">Expected Result Month</label>
                       <input value={data.expected_month || ''} onChange={e => update('expected_month', e.target.value)} placeholder="e.g. June 2026" className={inputCls} />
@@ -238,7 +287,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
             validationError={errorMap['class_12']}
           />
           {showGraduation && (
-            <AcademicBlock title="Graduation" prefix="graduation" academic={academic} onChange={updateAcademic} showResultPending validationError={errorMap['graduation']} />
+            <AcademicBlock title="Graduation" prefix="graduation" academic={academic} onChange={updateAcademic} showResultPending showDegreeSelector validationError={errorMap['graduation']} />
           )}
         </>
       )}
