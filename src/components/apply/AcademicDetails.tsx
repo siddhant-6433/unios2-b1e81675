@@ -152,10 +152,20 @@ function AcademicBlock({
                 <p className="text-xs text-foreground font-medium">Result Awaited — you can still apply</p>
                 {prefix === 'class_12' && (
                   <>
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground mb-1 block">Subjects</label>
-                      <input value={data.subjects || ''} onChange={e => update('subjects', e.target.value)} placeholder="e.g. PCM, Commerce" className={inputCls} />
-                    </div>
+                    <SubjectTagInput
+                      label="Subjects"
+                      options={CLASS_12_SUBJECTS}
+                      selected={
+                        data.subjects
+                          ? typeof data.subjects === 'string'
+                            ? data.subjects.split(',').map((s: string) => s.trim()).filter(Boolean)
+                            : data.subjects
+                          : []
+                      }
+                      onChange={(vals) => update('subjects', vals.join(', '))}
+                      placeholder="Select your 12th subjects…"
+                      allowCustom
+                    />
                     <div>
                       <label className="text-xs font-medium text-muted-foreground mb-1 block">Expected Result Month</label>
                       <input value={data.expected_month || ''} onChange={e => update('expected_month', e.target.value)} placeholder="e.g. June 2026" className={inputCls} />
