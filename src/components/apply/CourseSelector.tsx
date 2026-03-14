@@ -14,6 +14,9 @@ interface Props {
   childDob: string;
   onDobChange: (dob: string) => void;
   onComplete: (sessionId: string, selections: CourseSelection[], leadId: string | null) => void;
+  existingSelections?: CourseSelection[];
+  existingSession?: string;
+  onCancel?: () => void;
 }
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
