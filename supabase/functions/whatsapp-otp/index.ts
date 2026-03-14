@@ -33,6 +33,14 @@ Deno.serve(async (req) => {
     const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
     const otpTemplateName = Deno.env.get("WHATSAPP_OTP_TEMPLATE") || "unios2_login";
 
+    // Diagnostic logging (no secret values)
+    console.log("[whatsapp-otp] Secret diagnostics:", {
+      WHATSAPP_API_TOKEN: !!whatsappToken,
+      WHATSAPP_PHONE_NUMBER_ID: !!phoneNumberId,
+      phoneNumberId_length: phoneNumberId?.length ?? 0,
+      templateName: otpTemplateName,
+    });
+
     if (!whatsappToken || !phoneNumberId) {
       return new Response(
         JSON.stringify({ error: "WhatsApp API not configured. Contact administrator." }),
@@ -43,7 +51,6 @@ Deno.serve(async (req) => {
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
     const { action, phone, otp } = await req.json();
 
-    // Normalize phone: ensure starts with +
     const normalizedPhone = phone?.startsWith("+") ? phone : `+${phone}`;
 
     if (action === "send") {
@@ -51,20 +58,6 @@ Deno.serve(async (req) => {
         return new Response(
           JSON.stringify({ error: "Valid phone number required" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      // Check if phone exists in profiles
-      const { data: profile } = await adminClient
-        .from("profiles")
-        .select("user_id")
-        .eq("phone", normalizedPhone)
-        .single();
-
-      if (!profile) {
-        return new Response(
-          JSON.stringify({ error: "No account found with this phone number. Contact your administrator." }),
-          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
@@ -98,11 +91,13 @@ Deno.serve(async (req) => {
       await adminClient.from("whatsapp_otps").insert({
         phone: normalizedPhone,
         otp_hash: otpHash,
-        expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 min expiry
+        expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
       });
 
       // Send via Meta WhatsApp Cloud API
-      const waPhone = normalizedPhone.replace(/[^0-9]/g, ""); // digits only for API
+      const waPhone = normalizedPhone.replace(/[^0-9]/g, "");
+      console.log("[whatsapp-otp] Sending to:", waPhone, "template:", otpTemplateName, "phoneNumberId:", phoneNumberId);
+
       const waResponse = await fetch(
         `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
         {
@@ -131,35 +126,26 @@ Deno.serve(async (req) => {
 
       if (!waResponse.ok) {
         const waErrorText = await waResponse.text();
-        console.error("WhatsApp API error:", waErrorText);
+        console.error("[whatsapp-otp] Meta API error:", waResponse.status, waErrorText);
 
         let parsedWaError: any = null;
         try {
           parsedWaError = JSON.parse(waErrorText);
         } catch {
-          // keep raw error text fallback
+          // keep raw
         }
 
         const waCode = parsedWaError?.error?.code;
         const waMessage = parsedWaError?.error?.message as string | undefined;
-
-        if (waCode === 200) {
-          return new Response(
-            JSON.stringify({
-              error:
-                "WhatsApp permission denied for this token/phone number pair. Check Meta System User access, WABA assignment, and messaging permissions.",
-              meta_error: waMessage ?? waErrorText,
-            }),
-            { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
-        }
+        const fbtrace = parsedWaError?.error?.fbtrace_id;
 
         return new Response(
           JSON.stringify({
             error: waMessage || "Failed to send WhatsApp message. Try again.",
-            meta_error: waMessage ?? waErrorText,
+            meta_code: waCode,
+            meta_fbtrace: fbtrace,
           }),
-          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          { status: waResponse.status >= 400 && waResponse.status < 500 ? 403 : 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
@@ -201,7 +187,7 @@ Deno.serve(async (req) => {
         .update({ verified: true })
         .eq("id", otpRecord.id);
 
-      // Find user by phone
+      // Find user by phone (for staff login flow)
       const { data: profile } = await adminClient
         .from("profiles")
         .select("user_id")
@@ -209,21 +195,14 @@ Deno.serve(async (req) => {
         .single();
 
       if (!profile) {
+        // No staff profile — this is an applicant OTP verification (no session needed)
         return new Response(
-          JSON.stringify({ error: "User not found" }),
-          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          JSON.stringify({ success: true, verified: true }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
-      // Generate a session for this user
-      // We use admin API to generate a magic link and then exchange it
-      const { data: linkData, error: linkError } =
-        await adminClient.auth.admin.generateLink({
-          type: "magiclink",
-          email: "", // We'll get the email from the user
-        });
-
-      // Alternative: get user's email and create a session directly
+      // Staff login: generate session
       const { data: userData } = await adminClient.auth.admin.getUserById(profile.user_id);
 
       if (!userData?.user?.email) {
@@ -233,7 +212,6 @@ Deno.serve(async (req) => {
         );
       }
 
-      // Generate a magic link for the user's email
       const { data: magicLink, error: magicError } =
         await adminClient.auth.admin.generateLink({
           type: "magiclink",
@@ -247,7 +225,6 @@ Deno.serve(async (req) => {
         );
       }
 
-      // Verify the OTP token from the magic link to get session tokens
       const { data: sessionData, error: verifyError } = await adminClient.auth.verifyOtp({
         token_hash: magicLink.properties.hashed_token,
         type: "magiclink",
@@ -263,6 +240,7 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({
           success: true,
+          verified: true,
           token: {
             access_token: sessionData.session.access_token,
             refresh_token: sessionData.session.refresh_token,
@@ -277,7 +255,7 @@ Deno.serve(async (req) => {
       { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err: any) {
-    console.error("WhatsApp OTP error:", err);
+    console.error("[whatsapp-otp] Error:", err);
     return new Response(
       JSON.stringify({ error: err.message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
