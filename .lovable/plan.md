@@ -1,10 +1,10 @@
 
 
-## Update WhatsApp Access Token
+## Update WHATSAPP_PHONE_NUMBER_ID Secret
 
-Update the `WHATSAPP_API_TOKEN` runtime secret with a fresh token value.
+**What**: Update the `WHATSAPP_PHONE_NUMBER_ID` runtime secret with a new value.
 
-### Steps
-1. Use the `add_secret` tool to prompt you to securely enter the new **WHATSAPP_API_TOKEN** value
-2. No code changes required
+**How**: Use the `add_secret` tool to prompt you for the new Phone Number ID value. This will overwrite the existing secret in the backend configuration.
+
+The edge function `whatsapp-otp` will automatically pick up the new value on the next invocation.
 
