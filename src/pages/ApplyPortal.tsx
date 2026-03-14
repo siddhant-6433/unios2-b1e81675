@@ -32,7 +32,43 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
   const [applicationId, setApplicationId] = useState("");
-  const [loginMode, setLoginMode] = useState<"phone" | "appid">("phone");
+  const [loginMode, setLoginMode] = useState<"phone" | "appid" | "google_phone">("phone");
+  const [googleName, setGoogleName] = useState("");
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  // Check for existing Supabase session (e.g. after Google OAuth redirect)
+  useEffect(() => {
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        const name = session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email || "Applicant";
+        const userPhone = session.user.phone;
+
+        // Check if user has phone in profile
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("phone, display_name")
+          .eq("user_id", session.user.id)
+          .maybeSingle();
+
+        if (profile?.phone) {
+          onAuthenticated(profile.phone, profile.display_name || name);
+          return;
+        }
+
+        if (userPhone) {
+          onAuthenticated(userPhone, name);
+          return;
+        }
+
+        // Google user without phone — ask for phone + WhatsApp verification
+        setGoogleName(name);
+        setLoginMode("google_phone");
+      }
+      setCheckingSession(false);
+    };
+    checkSession();
+  }, []);
 
   const handleSendOtp = async () => {
     if (!phone || phone.length < 12) {
