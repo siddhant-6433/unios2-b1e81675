@@ -21,14 +21,15 @@ interface Props {
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 
-export function CourseSelector({ phone, leadName, childDob, onDobChange, onComplete }: Props) {
+export function CourseSelector({ phone, leadName, childDob, onDobChange, onComplete, existingSelections, existingSession, onCancel }: Props) {
   const { toast } = useToast();
   const portal = usePortal();
   const isSchoolPortal = portal.programCategories.includes("school");
+  const isEditing = !!(existingSelections && existingSelections.length > 0);
   const [sessions, setSessions] = useState<{ id: string; name: string }[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
-  const [selectedSession, setSelectedSession] = useState('');
-  const [selections, setSelections] = useState<CourseSelection[]>([]);
+  const [selectedSession, setSelectedSession] = useState(existingSession || '');
+  const [selections, setSelections] = useState<CourseSelection[]>(existingSelections || []);
   const [addingCourse, setAddingCourse] = useState('');
   const [saving, setSaving] = useState(false);
 
