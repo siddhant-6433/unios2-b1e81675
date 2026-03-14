@@ -290,10 +290,13 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
         </div>
       )}
 
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        {onCancel && (
+          <Button variant="outline" onClick={onCancel}>Cancel</Button>
+        )}
         <Button onClick={handleContinue} disabled={saving || !selectedSession || selections.length === 0 || hasStrictBlock} className="gap-2">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-          Continue to Application
+          {isEditing ? "Update Selections" : "Continue to Application"}
         </Button>
       </div>
     </div>
