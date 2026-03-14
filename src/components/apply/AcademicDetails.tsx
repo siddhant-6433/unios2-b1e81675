@@ -1,6 +1,7 @@
 import { ArrowRight, ArrowLeft, Loader2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ApplicationData } from "./types";
+import { validateAcademicEligibility, ValidationResult } from "./eligibilityRules";
 
 interface Props {
   data: ApplicationData;
@@ -18,12 +19,14 @@ function AcademicBlock({
   academic,
   onChange,
   showResultPending,
+  validationError,
 }: {
   title: string;
   prefix: string;
   academic: Record<string, any>;
   onChange: (v: Record<string, any>) => void;
   showResultPending?: boolean;
+  validationError?: ValidationResult;
 }) {
   const data = academic[prefix] || {};
   const update = (field: string, val: string) => {
@@ -69,6 +72,12 @@ function AcademicBlock({
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Marks / Percentage / CGPA</label>
           <input value={data.marks || ''} onChange={e => update('marks', e.target.value)} placeholder="e.g. 85% or 8.5" className={inputCls} />
+          {validationError && (
+            <div className="mt-1.5 flex items-start gap-1.5 text-destructive">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <span className="text-xs">{validationError.message}</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -126,6 +135,14 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
   const needsGraduation = ['postgraduate', 'mba_pgdm', 'professional', 'bed', 'deled'].includes(cat);
   const academic = data.academic_details || {};
 
+  const validationErrors = validateAcademicEligibility(cat, academic);
+  const errorMap = validationErrors.reduce<Record<string, ValidationResult>>((acc, e) => {
+    acc[e.field] = e;
+    return acc;
+  }, {});
+
+  const hasBlockingErrors = validationErrors.some(e => e.type === 'error');
+
   const updateAcademic = (v: Record<string, any>) => {
     onChange({ academic_details: v });
   };
@@ -151,18 +168,25 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
       ) : (
         <>
           <AcademicBlock title="Class 10" prefix="class_10" academic={academic} onChange={updateAcademic} />
-          <AcademicBlock title="Class 12" prefix="class_12" academic={academic} onChange={updateAcademic} showResultPending />
+          <AcademicBlock title="Class 12" prefix="class_12" academic={academic} onChange={updateAcademic} showResultPending validationError={errorMap['class_12']} />
           {needsGraduation && (
-            <AcademicBlock title="Graduation" prefix="graduation" academic={academic} onChange={updateAcademic} showResultPending />
+            <AcademicBlock title="Graduation" prefix="graduation" academic={academic} onChange={updateAcademic} showResultPending validationError={errorMap['graduation']} />
           )}
         </>
+      )}
+
+      {hasBlockingErrors && (
+        <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20 flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+          <p className="text-xs text-destructive font-medium">You do not meet the minimum marks eligibility. Please review the fields above.</p>
+        </div>
       )}
 
       <div className="flex justify-between">
         <Button variant="outline" onClick={onBack} className="gap-2">
           <ArrowLeft className="h-4 w-4" /> Back
         </Button>
-        <Button onClick={onNext} disabled={saving} className="gap-2">
+        <Button onClick={onNext} disabled={saving || hasBlockingErrors} className="gap-2">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
           Save & Continue
         </Button>

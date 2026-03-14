@@ -33,9 +33,10 @@ interface PhoneInputProps {
   placeholder?: string;
   required?: boolean;
   className?: string;
+  disabled?: boolean;
 }
 
-export function PhoneInput({ value, onChange, placeholder, required, className }: PhoneInputProps) {
+export function PhoneInput({ value, onChange, placeholder, required, className, disabled }: PhoneInputProps) {
   const parsed = parsePhone(value);
   const [countryCode, setCountryCode] = useState(parsed.countryCode);
   const [number, setNumber] = useState(parsed.number);
@@ -81,20 +82,21 @@ export function PhoneInput({ value, onChange, placeholder, required, className }
   const digitsOnly = number.replace(/\D/g, "");
 
   return (
-    <div className={`flex gap-1.5 min-w-0 ${className || ""}`}>
+    <div className={`flex gap-1.5 min-w-0 ${disabled ? 'opacity-60 pointer-events-none' : ''} ${className || ""}`}>
       {/* Country code dropdown */}
       <div className="relative shrink-0" ref={dropdownRef}>
         <button
           type="button"
-          onClick={() => setDropdownOpen(!dropdownOpen)}
+          onClick={() => !disabled && setDropdownOpen(!dropdownOpen)}
+          disabled={disabled}
           className="flex items-center gap-1 rounded-xl border border-input bg-background px-2 py-2.5 text-sm text-foreground hover:bg-muted transition-colors h-full"
         >
           <span className="text-base leading-none">{selectedCountry.flag}</span>
           <span className="font-medium text-xs">{selectedCountry.code}</span>
-          <ChevronDown className="h-3 w-3 text-muted-foreground ml-auto" />
+          {!disabled && <ChevronDown className="h-3 w-3 text-muted-foreground ml-auto" />}
         </button>
 
-        {dropdownOpen && (
+        {dropdownOpen && !disabled && (
           <div className="absolute top-full left-0 mt-1 z-50 w-52 rounded-xl border border-border bg-card shadow-lg overflow-hidden animate-fade-in">
             {COUNTRY_CODES.map((c) => (
               <button
@@ -118,10 +120,11 @@ export function PhoneInput({ value, onChange, placeholder, required, className }
       <input
         type="tel"
         required={required}
+        disabled={disabled}
         value={number}
         onChange={(e) => handleNumberChange(e.target.value)}
         placeholder={placeholder || "0".repeat(selectedCountry.digits)}
-        className="flex-1 min-w-0 rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+        className="flex-1 min-w-0 rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:cursor-not-allowed"
       />
     </div>
   );
