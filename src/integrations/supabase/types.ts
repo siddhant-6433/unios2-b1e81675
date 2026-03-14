@@ -577,6 +577,62 @@ export type Database = {
           },
         ]
       }
+      eligibility_rules: {
+        Row: {
+          class_12_min_marks: number | null
+          course_id: string
+          created_at: string
+          entrance_exam_name: string | null
+          entrance_exam_required: boolean | null
+          graduation_min_marks: number | null
+          id: string
+          max_age: number | null
+          min_age: number | null
+          notes: string | null
+          requires_graduation: boolean | null
+          subject_prerequisites: string[] | null
+          updated_at: string
+        }
+        Insert: {
+          class_12_min_marks?: number | null
+          course_id: string
+          created_at?: string
+          entrance_exam_name?: string | null
+          entrance_exam_required?: boolean | null
+          graduation_min_marks?: number | null
+          id?: string
+          max_age?: number | null
+          min_age?: number | null
+          notes?: string | null
+          requires_graduation?: boolean | null
+          subject_prerequisites?: string[] | null
+          updated_at?: string
+        }
+        Update: {
+          class_12_min_marks?: number | null
+          course_id?: string
+          created_at?: string
+          entrance_exam_name?: string | null
+          entrance_exam_required?: boolean | null
+          graduation_min_marks?: number | null
+          id?: string
+          max_age?: number | null
+          min_age?: number | null
+          notes?: string | null
+          requires_graduation?: boolean | null
+          subject_prerequisites?: string[] | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "eligibility_rules_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: true
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       employee_profiles: {
         Row: {
           aadhaar_number: string | null

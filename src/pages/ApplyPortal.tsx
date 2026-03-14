@@ -11,7 +11,7 @@ import { lovable } from "@/integrations/lovable/index";
 import { useToast } from "@/hooks/use-toast";
 
 import { ApplicationData, DEFAULT_APPLICATION, generateApplicationId, calculateFee, CourseSelection, FEE_MAP } from "@/components/apply/types";
-import { validateDobEligibility, ELIGIBILITY_RULES } from "@/components/apply/eligibilityRules";
+import { validateDobEligibility, fetchEligibilityRules, EligibilityRule } from "@/components/apply/eligibilityRules";
 import { StepProgress } from "@/components/apply/StepProgress";
 import { CourseSelector } from "@/components/apply/CourseSelector";
 import { PersonalDetails } from "@/components/apply/PersonalDetails";
@@ -407,7 +407,22 @@ function CourseSummaryBanner({ app, leadName, onEdit }: { app: ApplicationData; 
   const dob = app.dob;
   const programCategory = app.program_category || '';
 
-  const ageValidation = dob && programCategory ? validateDobEligibility(programCategory, dob) : null;
+  // Fetch DB rules for eligibility badges
+  const [courseRules, setCourseRules] = useState<Record<string, EligibilityRule>>({});
+  useEffect(() => {
+    const ids = selections.map(s => s.course_id);
+    if (ids.length) fetchEligibilityRules(ids).then(setCourseRules);
+  }, [selections]);
+
+  // Merge rules for age validation
+  const mergedRule = Object.keys(courseRules).length > 0
+    ? Object.values(courseRules).reduce<EligibilityRule>((acc, r) => ({
+        minAge: Math.max(acc.minAge || 0, r.minAge || 0) || undefined,
+        maxAge: acc.maxAge && r.maxAge ? Math.min(acc.maxAge, r.maxAge) : (acc.maxAge || r.maxAge),
+      }), {})
+    : undefined;
+
+  const ageValidation = dob && programCategory ? validateDobEligibility(programCategory, dob, 2026, mergedRule) : null;
 
   return (
     <div className="mb-6 space-y-3">
