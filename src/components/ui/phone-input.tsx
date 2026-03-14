@@ -33,9 +33,10 @@ interface PhoneInputProps {
   placeholder?: string;
   required?: boolean;
   className?: string;
+  disabled?: boolean;
 }
 
-export function PhoneInput({ value, onChange, placeholder, required, className }: PhoneInputProps) {
+export function PhoneInput({ value, onChange, placeholder, required, className, disabled }: PhoneInputProps) {
   const parsed = parsePhone(value);
   const [countryCode, setCountryCode] = useState(parsed.countryCode);
   const [number, setNumber] = useState(parsed.number);
