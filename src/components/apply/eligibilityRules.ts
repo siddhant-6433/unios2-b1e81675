@@ -73,6 +73,28 @@ export const ELIGIBILITY_RULES: Record<string, EligibilityRule> = {
   deled: { minAge: 17, class12MinMarks: 45 },
 };
 
+/** Subject group expansion map — acronym → required individual subjects */
+export const SUBJECT_GROUP_MAP: Record<string, string[]> = {
+  PCB: ['Physics', 'Chemistry', 'Biology'],
+  PCM: ['Physics', 'Chemistry', 'Mathematics'],
+  PCMB: ['Physics', 'Chemistry', 'Mathematics', 'Biology'],
+  Commerce: ['Accountancy', 'Business Studies', 'Economics'],
+};
+
+/** Check if a prerequisite group is satisfied by the student's selected subjects */
+export function isSubjectGroupSatisfied(group: string, studentSubjects: string[]): boolean {
+  const normalizedStudentSubjects = studentSubjects.map(s => s.toLowerCase().trim());
+  // "Any Stream" means no restriction
+  if (group.toLowerCase().includes('any stream') || group.toLowerCase() === 'any') return true;
+  // Check if it's a known acronym
+  const expanded = SUBJECT_GROUP_MAP[group.toUpperCase()];
+  if (expanded) {
+    return expanded.every(req => normalizedStudentSubjects.includes(req.toLowerCase()));
+  }
+  // Treat as a single subject name
+  return normalizedStudentSubjects.includes(group.toLowerCase());
+}
+
 /** Parse marks string to percentage. Values ≤ 10 are treated as CGPA (×9.5). */
 export function parseMarksToPercentage(marks: string | undefined): number | null {
   if (!marks) return null;
