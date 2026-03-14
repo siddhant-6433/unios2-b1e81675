@@ -1,7 +1,8 @@
-import { ArrowRight, ArrowLeft, Loader2, AlertTriangle } from "lucide-react";
+import { useState, useEffect } from "react";
+import { ArrowRight, ArrowLeft, Loader2, AlertTriangle, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ApplicationData } from "./types";
-import { validateAcademicEligibility, ValidationResult } from "./eligibilityRules";
+import { validateAcademicEligibility, ValidationResult, fetchEligibilityRules, EligibilityRule } from "./eligibilityRules";
 
 interface Props {
   data: ApplicationData;
@@ -19,6 +20,7 @@ function AcademicBlock({
   academic,
   onChange,
   showResultPending,
+  showSubjects,
   validationError,
 }: {
   title: string;
@@ -26,6 +28,7 @@ function AcademicBlock({
   academic: Record<string, any>;
   onChange: (v: Record<string, any>) => void;
   showResultPending?: boolean;
+  showSubjects?: boolean;
   validationError?: ValidationResult;
 }) {
   const data = academic[prefix] || {};
@@ -72,13 +75,25 @@ function AcademicBlock({
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Marks / Percentage / CGPA</label>
           <input value={data.marks || ''} onChange={e => update('marks', e.target.value)} placeholder="e.g. 85% or 8.5" className={inputCls} />
-          {validationError && (
+          {validationError && validationError.type === 'error' && (
             <div className="mt-1.5 flex items-start gap-1.5 text-destructive">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
               <span className="text-xs">{validationError.message}</span>
             </div>
           )}
+          {validationError && validationError.type === 'warning' && (
+            <div className="mt-1.5 flex items-start gap-1.5 text-warning">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <span className="text-xs">{validationError.message}</span>
+            </div>
+          )}
         </div>
+        {showSubjects && prefix === 'class_12' && (
+          <div className="sm:col-span-2">
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Subjects / Stream</label>
+            <input value={data.subjects || ''} onChange={e => update('subjects', e.target.value)} placeholder="e.g. PCM, Commerce, Arts" className={inputCls} />
+          </div>
+        )}
       </div>
 
       {showResultPending && (
@@ -135,21 +150,66 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
   const needsGraduation = ['postgraduate', 'mba_pgdm', 'professional', 'bed', 'deled'].includes(cat);
   const academic = data.academic_details || {};
 
-  const validationErrors = validateAcademicEligibility(cat, academic);
+  // Fetch DB-driven eligibility rules
+  const [courseRules, setCourseRules] = useState<Record<string, EligibilityRule>>({});
+  const [rulesLoaded, setRulesLoaded] = useState(false);
+
+  useEffect(() => {
+    const courseIds = (data.course_selections || []).map(s => s.course_id);
+    if (courseIds.length) {
+      fetchEligibilityRules(courseIds).then(rules => {
+        setCourseRules(rules);
+        setRulesLoaded(true);
+      });
+    } else {
+      setRulesLoaded(true);
+    }
+  }, [data.course_selections]);
+
+  // Merge rules: use strictest across all selected courses, or fallback to category
+  const mergedRule: EligibilityRule | undefined = rulesLoaded && Object.keys(courseRules).length > 0
+    ? Object.values(courseRules).reduce<EligibilityRule>((acc, r) => ({
+        minAge: Math.max(acc.minAge || 0, r.minAge || 0) || undefined,
+        maxAge: acc.maxAge && r.maxAge ? Math.min(acc.maxAge, r.maxAge) : (acc.maxAge || r.maxAge),
+        class12MinMarks: Math.max(acc.class12MinMarks || 0, r.class12MinMarks || 0) || undefined,
+        graduationMinMarks: Math.max(acc.graduationMinMarks || 0, r.graduationMinMarks || 0) || undefined,
+        requiresGraduation: acc.requiresGraduation || r.requiresGraduation,
+        entranceExamName: r.entranceExamName || acc.entranceExamName,
+        entranceExamRequired: acc.entranceExamRequired || r.entranceExamRequired,
+        subjectPrerequisites: r.subjectPrerequisites?.length ? r.subjectPrerequisites : acc.subjectPrerequisites,
+        notes: [acc.notes, r.notes].filter(Boolean).join('; ') || undefined,
+      }), {})
+    : undefined;
+
+  const hasSubjectPrereqs = mergedRule?.subjectPrerequisites && mergedRule.subjectPrerequisites.length > 0;
+
+  const validationErrors = validateAcademicEligibility(cat, academic, mergedRule);
   const errorMap = validationErrors.reduce<Record<string, ValidationResult>>((acc, e) => {
-    acc[e.field] = e;
+    if (!acc[e.field]) acc[e.field] = e;
     return acc;
   }, {});
 
   const hasBlockingErrors = validationErrors.some(e => e.type === 'error');
+  const infoMessages = validationErrors.filter(e => e.type === 'info');
 
   const updateAcademic = (v: Record<string, any>) => {
     onChange({ academic_details: v });
   };
 
+  // Also check if graduation is needed based on DB rules
+  const showGraduation = needsGraduation || mergedRule?.requiresGraduation;
+
   return (
     <div className="space-y-6">
       <h2 className="text-lg font-semibold text-foreground">Academic Details</h2>
+
+      {/* Info banners for entrance exams and notes */}
+      {infoMessages.map((msg, i) => (
+        <div key={i} className="p-3 rounded-xl bg-primary/5 border border-primary/20 flex items-start gap-2">
+          <Info className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+          <p className="text-xs text-foreground">{msg.message}</p>
+        </div>
+      ))}
 
       {isSchool ? (
         <div className="space-y-3">
@@ -168,8 +228,16 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
       ) : (
         <>
           <AcademicBlock title="Class 10" prefix="class_10" academic={academic} onChange={updateAcademic} />
-          <AcademicBlock title="Class 12" prefix="class_12" academic={academic} onChange={updateAcademic} showResultPending validationError={errorMap['class_12']} />
-          {needsGraduation && (
+          <AcademicBlock
+            title="Class 12"
+            prefix="class_12"
+            academic={academic}
+            onChange={updateAcademic}
+            showResultPending
+            showSubjects={!!hasSubjectPrereqs}
+            validationError={errorMap['class_12']}
+          />
+          {showGraduation && (
             <AcademicBlock title="Graduation" prefix="graduation" academic={academic} onChange={updateAcademic} showResultPending validationError={errorMap['graduation']} />
           )}
         </>
@@ -178,7 +246,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
       {hasBlockingErrors && (
         <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20 flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
-          <p className="text-xs text-destructive font-medium">You do not meet the minimum marks eligibility. Please review the fields above.</p>
+          <p className="text-xs text-destructive font-medium">You do not meet the minimum eligibility requirements. Please review the fields above.</p>
         </div>
       )}
 

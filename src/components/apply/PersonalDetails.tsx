@@ -1,8 +1,9 @@
+import { useState, useEffect } from "react";
 import { ArrowRight, Loader2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { ApplicationData } from "./types";
-import { validateDobEligibility } from "./eligibilityRules";
+import { validateDobEligibility, fetchEligibilityRules, EligibilityRule } from "./eligibilityRules";
 
 interface Props {
   data: ApplicationData;
@@ -16,8 +17,26 @@ const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text
 export function PersonalDetails({ data, onChange, onNext, saving }: Props) {
   const address = data.address || {};
 
+  // Fetch DB-driven eligibility rules for age validation
+  const [mergedRule, setMergedRule] = useState<EligibilityRule | undefined>(undefined);
+
+  useEffect(() => {
+    const courseIds = (data.course_selections || []).map(s => s.course_id);
+    if (courseIds.length) {
+      fetchEligibilityRules(courseIds).then(rules => {
+        if (Object.keys(rules).length > 0) {
+          const merged = Object.values(rules).reduce<EligibilityRule>((acc, r) => ({
+            minAge: Math.max(acc.minAge || 0, r.minAge || 0) || undefined,
+            maxAge: acc.maxAge && r.maxAge ? Math.min(acc.maxAge, r.maxAge) : (acc.maxAge || r.maxAge),
+          }), {});
+          setMergedRule(merged);
+        }
+      });
+    }
+  }, [data.course_selections]);
+
   const dobWarning = data.program_category !== 'school'
-    ? validateDobEligibility(data.program_category, data.dob, 2026)
+    ? validateDobEligibility(data.program_category, data.dob, 2026, mergedRule)
     : null;
 
   return (

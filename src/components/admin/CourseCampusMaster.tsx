@@ -2,10 +2,12 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Building2, GraduationCap, Pencil, Check, X, Plus, Trash2, Loader2, ChevronDown, ChevronRight,
+  Building2, GraduationCap, Pencil, Check, X, Plus, Loader2, ChevronDown, ChevronRight, Shield,
 } from "lucide-react";
+import EligibilityRuleDialog, { EligibilityRuleRow } from "./EligibilityRuleDialog";
 
 interface Campus {
   id: string; name: string; code: string; city: string | null; state: string | null; address: string | null;
@@ -26,6 +28,7 @@ export default function CourseCampusMaster() {
   const [institutions, setInstitutions] = useState<Institution[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
+  const [eligibilityRules, setEligibilityRules] = useState<Record<string, EligibilityRuleRow>>({});
   const [loading, setLoading] = useState(true);
   const [expandedCampus, setExpandedCampus] = useState<string | null>(null);
   const [expandedDept, setExpandedDept] = useState<string | null>(null);
@@ -38,26 +41,38 @@ export default function CourseCampusMaster() {
 
   // Add states
   const [addingCampus, setAddingCampus] = useState(false);
-  const [addingDept, setAddingDept] = useState<string | null>(null); // institution_id
-  const [addingCourse, setAddingCourse] = useState<string | null>(null); // department_id
+  const [addingDept, setAddingDept] = useState<string | null>(null);
+  const [addingCourse, setAddingCourse] = useState<string | null>(null);
   const [newCampus, setNewCampus] = useState({ name: "", code: "", city: "", state: "" });
   const [newDept, setNewDept] = useState({ name: "", code: "" });
   const [newCourse, setNewCourse] = useState({ name: "", code: "", duration_years: 3, type: "semester" });
+
+  // Eligibility dialog
+  const [ruleDialogOpen, setRuleDialogOpen] = useState(false);
+  const [ruleDialogCourse, setRuleDialogCourse] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => { fetchAll(); }, []);
 
   const fetchAll = async () => {
     setLoading(true);
-    const [c, i, d, co] = await Promise.all([
+    const [c, i, d, co, er] = await Promise.all([
       supabase.from("campuses").select("*").order("name"),
       supabase.from("institutions").select("*").order("name"),
       supabase.from("departments").select("*").order("name"),
       supabase.from("courses").select("*").order("name"),
+      supabase.from("eligibility_rules").select("*"),
     ]);
     if (c.data) setCampuses(c.data);
     if (i.data) setInstitutions(i.data);
     if (d.data) setDepartments(d.data);
     if (co.data) setCourses(co.data);
+    if (er.data) {
+      const map: Record<string, EligibilityRuleRow> = {};
+      for (const row of er.data as unknown as EligibilityRuleRow[]) {
+        map[row.course_id] = row;
+      }
+      setEligibilityRules(map);
+    }
     setLoading(false);
   };
 
@@ -72,12 +87,10 @@ export default function CourseCampusMaster() {
 
   const addCampus = async () => {
     if (!newCampus.name || !newCampus.code) return;
-    // Also create a default institution for the campus
     const { data: campusData, error } = await supabase.from("campuses").insert({
       name: newCampus.name, code: newCampus.code, city: newCampus.city || null, state: newCampus.state || null,
     }).select().single();
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
-    // Create default institution
     await supabase.from("institutions").insert({
       name: newCampus.name, code: newCampus.code, campus_id: campusData.id, type: "college",
     });
@@ -111,6 +124,32 @@ export default function CourseCampusMaster() {
     toast({ title: "Course added" }); setAddingCourse(null); setNewCourse({ name: "", code: "", duration_years: 3, type: "semester" }); fetchAll();
   };
 
+  const openRuleDialog = (course: Course) => {
+    setRuleDialogCourse({ id: course.id, name: course.name });
+    setRuleDialogOpen(true);
+  };
+
+  const renderRuleBadges = (courseId: string) => {
+    const rule = eligibilityRules[courseId];
+    if (!rule) return null;
+    const badges: string[] = [];
+    if (rule.min_age) badges.push(`Age ≥${rule.min_age}`);
+    if (rule.max_age) badges.push(`Age ≤${rule.max_age}`);
+    if (rule.class_12_min_marks) badges.push(`12th ≥${rule.class_12_min_marks}%`);
+    if (rule.graduation_min_marks) badges.push(`Grad ≥${rule.graduation_min_marks}%`);
+    if (rule.requires_graduation) badges.push("UG Req");
+    if (rule.entrance_exam_required && rule.entrance_exam_name) badges.push(rule.entrance_exam_name);
+    if (rule.subject_prerequisites?.length) badges.push(rule.subject_prerequisites.join("/"));
+    if (!badges.length) return null;
+    return (
+      <div className="flex items-center gap-1 flex-wrap">
+        {badges.map((b, i) => (
+          <Badge key={i} variant="outline" className="text-[9px] px-1.5 py-0 h-4 bg-muted/50">{b}</Badge>
+        ))}
+      </div>
+    );
+  };
+
   if (loading) return <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
 
   return (
@@ -122,7 +161,6 @@ export default function CourseCampusMaster() {
         </Button>
       </div>
 
-      {/* Add campus form */}
       {addingCampus && (
         <Card className="border-primary/30">
           <CardContent className="p-4 space-y-2">
@@ -141,7 +179,6 @@ export default function CourseCampusMaster() {
         </Card>
       )}
 
-      {/* Campus tree */}
       {campuses.map(campus => {
         const isExpanded = expandedCampus === campus.id;
         const campusInstitutions = institutions.filter(i => i.campus_id === campus.id);
@@ -205,30 +242,40 @@ export default function CourseCampusMaster() {
                               <div className="pl-7 pb-3 space-y-1">
                                 {deptCourses.map(course => {
                                   const isCourseEditing = editingCourse === course.id;
+                                  const hasRule = !!eligibilityRules[course.id];
                                   return (
-                                    <div key={course.id} className="flex items-center gap-3 py-1.5 px-3 rounded-lg hover:bg-muted/30 group">
-                                      <GraduationCap className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                                      {isCourseEditing ? (
-                                        <div className="flex items-center gap-2 flex-1" onClick={e => e.stopPropagation()}>
-                                          <input value={courseDraft.name || ""} onChange={e => setCourseDraft({ ...courseDraft, name: e.target.value })} className={`${inputCls} flex-1`} />
-                                          <input value={courseDraft.code || ""} onChange={e => setCourseDraft({ ...courseDraft, code: e.target.value })} className={`${inputCls} w-20`} placeholder="Code" />
-                                          <input type="number" value={courseDraft.duration_years || 1} onChange={e => setCourseDraft({ ...courseDraft, duration_years: Number(e.target.value) })} className={`${inputCls} w-16`} min={1} />
-                                          <button onClick={() => saveCourse(course.id)} className="text-primary p-0.5"><Check className="h-3.5 w-3.5" /></button>
-                                          <button onClick={() => setEditingCourse(null)} className="text-muted-foreground p-0.5"><X className="h-3.5 w-3.5" /></button>
-                                        </div>
-                                      ) : (
-                                        <>
-                                          <span className="text-sm text-foreground flex-1">{course.name}</span>
-                                          <span className="text-[11px] text-muted-foreground">{course.code} · {course.duration_years}yr · {course.type}</span>
-                                          <button onClick={e => { e.stopPropagation(); setEditingCourse(course.id); setCourseDraft({ name: course.name, code: course.code, duration_years: course.duration_years }); }}
-                                            className="text-muted-foreground hover:text-primary p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><Pencil className="h-3 w-3" /></button>
-                                        </>
+                                    <div key={course.id} className="space-y-1">
+                                      <div className="flex items-center gap-3 py-1.5 px-3 rounded-lg hover:bg-muted/30 group">
+                                        <GraduationCap className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                        {isCourseEditing ? (
+                                          <div className="flex items-center gap-2 flex-1" onClick={e => e.stopPropagation()}>
+                                            <input value={courseDraft.name || ""} onChange={e => setCourseDraft({ ...courseDraft, name: e.target.value })} className={`${inputCls} flex-1`} />
+                                            <input value={courseDraft.code || ""} onChange={e => setCourseDraft({ ...courseDraft, code: e.target.value })} className={`${inputCls} w-20`} placeholder="Code" />
+                                            <input type="number" value={courseDraft.duration_years || 1} onChange={e => setCourseDraft({ ...courseDraft, duration_years: Number(e.target.value) })} className={`${inputCls} w-16`} min={1} />
+                                            <button onClick={() => saveCourse(course.id)} className="text-primary p-0.5"><Check className="h-3.5 w-3.5" /></button>
+                                            <button onClick={() => setEditingCourse(null)} className="text-muted-foreground p-0.5"><X className="h-3.5 w-3.5" /></button>
+                                          </div>
+                                        ) : (
+                                          <>
+                                            <span className="text-sm text-foreground flex-1">{course.name}</span>
+                                            <span className="text-[11px] text-muted-foreground">{course.code} · {course.duration_years}yr · {course.type}</span>
+                                            <button onClick={e => { e.stopPropagation(); openRuleDialog(course); }}
+                                              className={`p-0.5 transition-opacity ${hasRule ? 'text-primary' : 'text-muted-foreground opacity-0 group-hover:opacity-100'}`}
+                                              title="Eligibility Rules">
+                                              <Shield className="h-3.5 w-3.5" />
+                                            </button>
+                                            <button onClick={e => { e.stopPropagation(); setEditingCourse(course.id); setCourseDraft({ name: course.name, code: course.code, duration_years: course.duration_years }); }}
+                                              className="text-muted-foreground hover:text-primary p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><Pencil className="h-3 w-3" /></button>
+                                          </>
+                                        )}
+                                      </div>
+                                      {renderRuleBadges(course.id) && (
+                                        <div className="px-3 pl-10">{renderRuleBadges(course.id)}</div>
                                       )}
                                     </div>
                                   );
                                 })}
 
-                                {/* Add course form */}
                                 {addingCourse === dept.id ? (
                                   <div className="flex items-center gap-2 px-3 pt-1">
                                     <input placeholder="Course name *" value={newCourse.name} onChange={e => setNewCourse({ ...newCourse, name: e.target.value })} className={`${inputCls} flex-1`} />
@@ -254,7 +301,6 @@ export default function CourseCampusMaster() {
                         );
                       })}
 
-                      {/* Add department */}
                       {addingDept === inst.id ? (
                         <div className="flex items-center gap-2 py-3">
                           <input placeholder="Department name *" value={newDept.name} onChange={e => setNewDept({ ...newDept, name: e.target.value })} className={`${inputCls} flex-1`} />
@@ -276,6 +322,18 @@ export default function CourseCampusMaster() {
           </Card>
         );
       })}
+
+      {/* Eligibility Rule Dialog */}
+      {ruleDialogCourse && (
+        <EligibilityRuleDialog
+          open={ruleDialogOpen}
+          onOpenChange={setRuleDialogOpen}
+          courseId={ruleDialogCourse.id}
+          courseName={ruleDialogCourse.name}
+          existingRule={eligibilityRules[ruleDialogCourse.id] || null}
+          onSaved={fetchAll}
+        />
+      )}
     </div>
   );
 }
