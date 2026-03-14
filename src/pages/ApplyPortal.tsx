@@ -469,12 +469,37 @@ const ApplyPortal = () => {
   const handleCourseSelected = async (sessionId: string, selections: CourseSelection[], leadId: string | null) => {
     setSaving(true);
 
-    const appId = generateApplicationId();
     const primaryCategory = selections[0]?.program_category || 'undergraduate';
     const feeAmount = calculateFee(selections);
-
     const flags: string[] = [];
     if (feeAmount > 0) flags.push('payment_pending');
+
+    // If app already exists, update instead of insert
+    if (app) {
+      const { error } = await supabase
+        .from("applications")
+        .update({
+          course_selections: selections as any,
+          fee_amount: feeAmount,
+          program_category: primaryCategory,
+          session_id: sessionId,
+        })
+        .eq("id", app.id);
+
+      if (error) {
+        toast({ title: "Failed to update courses", description: error.message, variant: "destructive" });
+        setSaving(false);
+        return;
+      }
+
+      setApp(prev => prev ? { ...prev, course_selections: selections, fee_amount: feeAmount, program_category: primaryCategory, session_id: sessionId } : prev);
+      setShowCourseSelector(false);
+      setSaving(false);
+      toast({ title: "Course selections updated" });
+      return;
+    }
+
+    const appId = generateApplicationId();
 
     const newApp: any = {
       application_id: appId,
