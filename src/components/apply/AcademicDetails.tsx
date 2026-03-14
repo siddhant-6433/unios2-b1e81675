@@ -3,6 +3,18 @@ import { ArrowRight, ArrowLeft, Loader2, AlertTriangle, Info } from "lucide-reac
 import { Button } from "@/components/ui/button";
 import { ApplicationData } from "./types";
 import { validateAcademicEligibility, ValidationResult, fetchEligibilityRules, EligibilityRule } from "./eligibilityRules";
+import { SubjectTagInput } from "./SubjectTagInput";
+
+const CLASS_12_SUBJECTS = [
+  "Physics", "Chemistry", "Biology", "Mathematics", "English", "Hindi",
+  "Economics", "Accountancy", "Business Studies", "History", "Political Science",
+  "Geography", "Computer Science", "Sociology", "Psychology", "Physical Education", "Home Science",
+];
+
+const GRADUATION_DEGREES = [
+  "B.A.", "B.Sc.", "B.Com.", "BBA", "B.Tech.", "B.E.", "BCA", "BPT",
+  "B.Sc. Nursing", "B.Pharm.", "LLB", "B.Ed.", "MBBS", "BMRIT", "B.Sc. Radiology",
+];
 
 interface Props {
   data: ApplicationData;
