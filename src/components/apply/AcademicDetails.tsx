@@ -277,7 +277,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
             validationError={errorMap['class_12']}
           />
           {showGraduation && (
-            <AcademicBlock title="Graduation" prefix="graduation" academic={academic} onChange={updateAcademic} showResultPending validationError={errorMap['graduation']} />
+            <AcademicBlock title="Graduation" prefix="graduation" academic={academic} onChange={updateAcademic} showResultPending showDegreeSelector validationError={errorMap['graduation']} />
           )}
         </>
       )}
