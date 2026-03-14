@@ -70,8 +70,15 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
       const { data: verifyData, error: verifyErr } = await supabase.functions.invoke("whatsapp-otp", {
         body: { phone, otp, action: "verify" },
       });
-      if (verifyErr) throw verifyErr;
-      if (!verifyData?.verified) throw new Error("Invalid or expired OTP");
+      if (verifyErr) {
+        const ctx = (verifyErr as any)?.context;
+        if (ctx && typeof ctx.json === "function") {
+          try { const body = await ctx.json(); throw new Error(body?.error || verifyErr.message); } catch (e: any) { if (e.message) throw e; }
+        }
+        throw verifyErr;
+      }
+      if (verifyData?.error) throw new Error(verifyData.error);
+      if (!verifyData?.success && !verifyData?.verified) throw new Error("Invalid or expired OTP");
 
       const { data: lead } = await supabase
         .from("leads")
