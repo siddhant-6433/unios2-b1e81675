@@ -14,18 +14,22 @@ interface Props {
   childDob: string;
   onDobChange: (dob: string) => void;
   onComplete: (sessionId: string, selections: CourseSelection[], leadId: string | null) => void;
+  existingSelections?: CourseSelection[];
+  existingSession?: string;
+  onCancel?: () => void;
 }
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 
-export function CourseSelector({ phone, leadName, childDob, onDobChange, onComplete }: Props) {
+export function CourseSelector({ phone, leadName, childDob, onDobChange, onComplete, existingSelections, existingSession, onCancel }: Props) {
   const { toast } = useToast();
   const portal = usePortal();
   const isSchoolPortal = portal.programCategories.includes("school");
+  const isEditing = !!(existingSelections && existingSelections.length > 0);
   const [sessions, setSessions] = useState<{ id: string; name: string }[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
-  const [selectedSession, setSelectedSession] = useState('');
-  const [selections, setSelections] = useState<CourseSelection[]>([]);
+  const [selectedSession, setSelectedSession] = useState(existingSession || '');
+  const [selections, setSelections] = useState<CourseSelection[]>(existingSelections || []);
   const [addingCourse, setAddingCourse] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -286,10 +290,13 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
         </div>
       )}
 
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        {onCancel && (
+          <Button variant="outline" onClick={onCancel}>Cancel</Button>
+        )}
         <Button onClick={handleContinue} disabled={saving || !selectedSession || selections.length === 0 || hasStrictBlock} className="gap-2">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-          Continue to Application
+          {isEditing ? "Update Selections" : "Continue to Application"}
         </Button>
       </div>
     </div>

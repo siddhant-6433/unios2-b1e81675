@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import {
-  GraduationCap, CheckCircle, Loader2, LogOut,
+  GraduationCap, CheckCircle, Loader2, LogOut, MapPin, Pencil, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +10,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
 import { useToast } from "@/hooks/use-toast";
 
-import { ApplicationData, DEFAULT_APPLICATION, generateApplicationId, calculateFee, CourseSelection } from "@/components/apply/types";
+import { ApplicationData, DEFAULT_APPLICATION, generateApplicationId, calculateFee, CourseSelection, FEE_MAP } from "@/components/apply/types";
+import { validateDobEligibility, ELIGIBILITY_RULES } from "@/components/apply/eligibilityRules";
 import { StepProgress } from "@/components/apply/StepProgress";
 import { CourseSelector } from "@/components/apply/CourseSelector";
 import { PersonalDetails } from "@/components/apply/PersonalDetails";
@@ -398,6 +399,76 @@ function DynamicStepProgress({ steps, currentStep, completedSections, onStepClic
   );
 }
 
+// ─── Course Summary Banner ───
+function CourseSummaryBanner({ app, leadName, onEdit }: { app: ApplicationData; leadName: string; onEdit: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const selections = app.course_selections || [];
+  const estimatedFee = calculateFee(selections);
+  const dob = app.dob;
+  const programCategory = app.program_category || '';
+
+  const ageValidation = dob && programCategory ? validateDobEligibility(programCategory, dob) : null;
+
+  return (
+    <div className="mb-6 space-y-3">
+      <div>
+        <h1 className="text-xl font-bold text-foreground">Welcome, {app.full_name || leadName}</h1>
+        <p className="text-sm text-muted-foreground">Complete all steps to submit your application.</p>
+        <p className="text-xs text-muted-foreground mt-1">
+          Application ID: <span className="font-mono font-semibold text-primary">{app.application_id}</span>
+        </p>
+      </div>
+
+      <div className="rounded-xl border border-border/60 bg-muted/30 overflow-hidden">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-muted/50 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <GraduationCap className="h-4 w-4 text-primary" />
+            <span className="text-sm font-medium text-foreground">
+              {selections.length} Course{selections.length !== 1 ? 's' : ''} Selected
+            </span>
+            {estimatedFee > 0 && (
+              <Badge className="bg-primary/10 text-primary border-0 text-xs">
+                Fee: ₹{estimatedFee.toLocaleString('en-IN')}
+              </Badge>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1" onClick={(e) => { e.stopPropagation(); onEdit(); }}>
+              <Pencil className="h-3 w-3" /> Edit
+            </Button>
+            {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+          </div>
+        </button>
+
+        {expanded && (
+          <div className="px-4 pb-3 space-y-2 border-t border-border/40">
+            {selections.map((s, i) => (
+              <div key={s.course_id} className="flex items-center gap-3 py-2">
+                <Badge className="bg-primary/10 text-primary border-0 text-xs shrink-0">P{s.preference_order}</Badge>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{s.course_name}</p>
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    <MapPin className="h-3 w-3" /> {s.campus_name}
+                  </p>
+                </div>
+                <Badge variant="outline" className="text-[10px] shrink-0">{s.program_category}</Badge>
+              </div>
+            ))}
+            {ageValidation && (
+              <div className="px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-xs">
+                {ageValidation.message}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Portal ───
 const ApplyPortal = () => {
   const { toast } = useToast();
@@ -468,12 +539,37 @@ const ApplyPortal = () => {
   const handleCourseSelected = async (sessionId: string, selections: CourseSelection[], leadId: string | null) => {
     setSaving(true);
 
-    const appId = generateApplicationId();
     const primaryCategory = selections[0]?.program_category || 'undergraduate';
     const feeAmount = calculateFee(selections);
-
     const flags: string[] = [];
     if (feeAmount > 0) flags.push('payment_pending');
+
+    // If app already exists, update instead of insert
+    if (app) {
+      const { error } = await supabase
+        .from("applications")
+        .update({
+          course_selections: selections as any,
+          fee_amount: feeAmount,
+          program_category: primaryCategory,
+          session_id: sessionId,
+        })
+        .eq("id", app.id);
+
+      if (error) {
+        toast({ title: "Failed to update courses", description: error.message, variant: "destructive" });
+        setSaving(false);
+        return;
+      }
+
+      setApp(prev => prev ? { ...prev, course_selections: selections, fee_amount: feeAmount, program_category: primaryCategory, session_id: sessionId } : prev);
+      setShowCourseSelector(false);
+      setSaving(false);
+      toast({ title: "Course selections updated" });
+      return;
+    }
+
+    const appId = generateApplicationId();
 
     const newApp: any = {
       application_id: appId,
@@ -634,7 +730,7 @@ const ApplyPortal = () => {
   if (showCourseSelector) {
     return (
       <div className="min-h-screen bg-background">
-        <Header appId={null} completedCount={0} totalSteps={totalSteps} onLogout={() => { setAuthed(false); setApp(null); }} />
+        <Header appId={app?.application_id || null} completedCount={0} totalSteps={totalSteps} onLogout={() => { setAuthed(false); setApp(null); }} />
         <div className="max-w-3xl mx-auto px-6 py-8">
           <CourseSelector
             phone={phone}
@@ -642,6 +738,9 @@ const ApplyPortal = () => {
             childDob={childDob}
             onDobChange={setChildDob}
             onComplete={handleCourseSelected}
+            existingSelections={app?.course_selections}
+            existingSession={app?.session_id || undefined}
+            onCancel={app ? () => setShowCourseSelector(false) : undefined}
           />
         </div>
       </div>
@@ -788,13 +887,11 @@ const ApplyPortal = () => {
       <Header appId={app.application_id} completedCount={completedCount} totalSteps={totalSteps} onLogout={() => { setAuthed(false); setApp(null); }} />
 
       <div className="max-w-3xl mx-auto px-6 py-8">
-        <div className="mb-6">
-          <h1 className="text-xl font-bold text-foreground">Welcome, {app.full_name || leadName}</h1>
-          <p className="text-sm text-muted-foreground">Complete all steps to submit your application.</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Application ID: <span className="font-mono font-semibold text-primary">{app.application_id}</span>
-          </p>
-        </div>
+        <CourseSummaryBanner
+          app={app}
+          leadName={leadName}
+          onEdit={() => setShowCourseSelector(true)}
+        />
 
         <DynamicStepProgress
           steps={steps}
