@@ -33,6 +33,7 @@ function AcademicBlock({
   onChange,
   showResultPending,
   showSubjects,
+  showDegreeSelector,
   validationError,
 }: {
   title: string;
@@ -41,6 +42,7 @@ function AcademicBlock({
   onChange: (v: Record<string, any>) => void;
   showResultPending?: boolean;
   showSubjects?: boolean;
+  showDegreeSelector?: boolean;
   validationError?: ValidationResult;
 }) {
   const data = academic[prefix] || {};
