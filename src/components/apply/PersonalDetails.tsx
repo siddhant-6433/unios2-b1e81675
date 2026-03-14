@@ -1,6 +1,8 @@
-import { ArrowRight, Loader2 } from "lucide-react";
+import { ArrowRight, Loader2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { ApplicationData } from "./types";
+import { validateDobEligibility } from "./eligibilityRules";
 
 interface Props {
   data: ApplicationData;
@@ -13,6 +15,10 @@ const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text
 
 export function PersonalDetails({ data, onChange, onNext, saving }: Props) {
   const address = data.address || {};
+
+  const dobWarning = data.program_category !== 'school'
+    ? validateDobEligibility(data.program_category, data.dob, 2026)
+    : null;
 
   return (
     <div className="space-y-5">
@@ -35,6 +41,12 @@ export function PersonalDetails({ data, onChange, onNext, saving }: Props) {
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Date of Birth</label>
           <input type="date" value={data.dob} onChange={e => onChange({ dob: e.target.value })} className={inputCls} />
+          {dobWarning && (
+            <div className="mt-1.5 flex items-start gap-1.5 text-destructive">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <span className="text-xs">{dobWarning.message}</span>
+            </div>
+          )}
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nationality</label>
@@ -53,7 +65,7 @@ export function PersonalDetails({ data, onChange, onNext, saving }: Props) {
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Phone *</label>
-          <input value={data.phone} disabled className={`${inputCls} opacity-60`} />
+          <PhoneInput value={data.phone} onChange={() => {}} disabled />
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email</label>
@@ -101,7 +113,7 @@ export function PersonalDetails({ data, onChange, onNext, saving }: Props) {
       </div>
 
       <div className="flex justify-end">
-        <Button onClick={onNext} disabled={saving || !data.full_name.trim()} className="gap-2">
+        <Button onClick={onNext} disabled={saving || !data.full_name.trim() || !!dobWarning} className="gap-2">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
           Save & Continue
         </Button>

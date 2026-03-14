@@ -1,5 +1,6 @@
 import { ArrowRight, ArrowLeft, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { ApplicationData } from "./types";
 
 interface Props {
@@ -39,7 +40,10 @@ function ParentBlock({
         )}
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Phone</label>
-          <input value={value.phone || ''} onChange={e => onChange({ ...value, phone: e.target.value })} className={inputCls} />
+          <PhoneInput
+            value={value.phone || ''}
+            onChange={(phone) => onChange({ ...value, phone })}
+          />
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email (optional)</label>
