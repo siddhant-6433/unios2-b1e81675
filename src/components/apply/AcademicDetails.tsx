@@ -57,10 +57,23 @@ function AcademicBlock({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {prefix === 'graduation' ? (
           <>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Degree</label>
-              <input value={data.degree || ''} onChange={e => update('degree', e.target.value)} className={inputCls} />
-            </div>
+            {showDegreeSelector ? (
+              <div>
+                <SubjectTagInput
+                  label="Degree"
+                  options={GRADUATION_DEGREES}
+                  selected={data.degree ? [data.degree] : []}
+                  onChange={(vals) => update('degree', vals[vals.length - 1] || '')}
+                  placeholder="Select or type degree…"
+                  allowCustom
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Degree</label>
+                <input value={data.degree || ''} onChange={e => update('degree', e.target.value)} className={inputCls} />
+              </div>
+            )}
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">University</label>
               <input value={data.university || ''} onChange={e => update('university', e.target.value)} className={inputCls} />
