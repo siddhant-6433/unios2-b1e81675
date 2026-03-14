@@ -399,6 +399,76 @@ function DynamicStepProgress({ steps, currentStep, completedSections, onStepClic
   );
 }
 
+// ─── Course Summary Banner ───
+function CourseSummaryBanner({ app, leadName, onEdit }: { app: ApplicationData; leadName: string; onEdit: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const selections = app.course_selections || [];
+  const estimatedFee = calculateFee(selections);
+  const dob = app.dob;
+  const programCategory = app.program_category || '';
+
+  const ageValidation = dob && programCategory ? validateDobEligibility(programCategory, dob) : null;
+
+  return (
+    <div className="mb-6 space-y-3">
+      <div>
+        <h1 className="text-xl font-bold text-foreground">Welcome, {app.full_name || leadName}</h1>
+        <p className="text-sm text-muted-foreground">Complete all steps to submit your application.</p>
+        <p className="text-xs text-muted-foreground mt-1">
+          Application ID: <span className="font-mono font-semibold text-primary">{app.application_id}</span>
+        </p>
+      </div>
+
+      <div className="rounded-xl border border-border/60 bg-muted/30 overflow-hidden">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-muted/50 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <GraduationCap className="h-4 w-4 text-primary" />
+            <span className="text-sm font-medium text-foreground">
+              {selections.length} Course{selections.length !== 1 ? 's' : ''} Selected
+            </span>
+            {estimatedFee > 0 && (
+              <Badge className="bg-primary/10 text-primary border-0 text-xs">
+                Fee: ₹{estimatedFee.toLocaleString('en-IN')}
+              </Badge>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1" onClick={(e) => { e.stopPropagation(); onEdit(); }}>
+              <Pencil className="h-3 w-3" /> Edit
+            </Button>
+            {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+          </div>
+        </button>
+
+        {expanded && (
+          <div className="px-4 pb-3 space-y-2 border-t border-border/40">
+            {selections.map((s, i) => (
+              <div key={s.course_id} className="flex items-center gap-3 py-2">
+                <Badge className="bg-primary/10 text-primary border-0 text-xs shrink-0">P{s.preference_order}</Badge>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{s.course_name}</p>
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    <MapPin className="h-3 w-3" /> {s.campus_name}
+                  </p>
+                </div>
+                <Badge variant="outline" className="text-[10px] shrink-0">{s.program_category}</Badge>
+              </div>
+            ))}
+            {ageValidation && (
+              <div className="px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-xs">
+                {ageValidation.message}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Portal ───
 const ApplyPortal = () => {
   const { toast } = useToast();
