@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { ArrowRight, ArrowLeft, Loader2, AlertTriangle, Info, CheckCircle, XCircle, ChevronDown, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -14,6 +14,7 @@ import {
   ValidationResult,
 } from "./eligibilityRules";
 import { SubjectTagInput } from "./SubjectTagInput";
+import { BOARDS_LIST, UNIVERSITIES_LIST, isPredefinedBoard, isPredefinedUniversity } from "./boardsAndUniversities";
 
 const CLASS_12_SUBJECTS = [
   "Physics", "Chemistry", "Biology", "Mathematics", "English", "Hindi",
@@ -38,6 +39,15 @@ const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text
 
 const SESSION_YEAR = 2026; // TODO: derive from active session
 
+/** Generate year options from dobYear to current year, descending */
+function getYearOptions(dobYear?: number): number[] {
+  const start = Math.max(1926, dobYear || 1926);
+  const end = new Date().getFullYear();
+  const years: number[] = [];
+  for (let y = end; y >= start; y--) years.push(y);
+  return years;
+}
+
 /* ── Per-Course Eligibility Card ─────────────────────────── */
 function EligibilityCards({ results }: { results: CourseEligibilityResult[] }) {
   if (!results.length) return null;
@@ -58,26 +68,21 @@ function EligibilityCards({ results }: { results: CourseEligibilityResult[] }) {
               </span>
             </div>
             <div className="flex flex-wrap gap-1.5 ml-6">
-              {/* DOB */}
               {cr.dobResult ? (
                 <StatusBadge type={cr.dobResult.type} label={cr.dobResult.message} />
               ) : (
                 <StatusBadge type="pass" label="Age OK" />
               )}
-              {/* Academic */}
               {cr.results.filter(r => r.type !== 'info').map((r, i) => (
                 <StatusBadge key={i} type={r.type} label={r.message} />
               ))}
-              {/* Year */}
               {cr.yearResults.map((r, i) => (
                 <StatusBadge key={`yr-${i}`} type={r.type} label={r.message} />
               ))}
-              {/* If no errors at all */}
               {!cr.hasErrors && cr.results.filter(r => r.type !== 'info').length === 0 && cr.yearResults.length === 0 && (
                 <StatusBadge type="pass" label="All criteria met" />
               )}
             </div>
-            {/* Info messages */}
             {cr.results.filter(r => r.type === 'info').map((r, i) => (
               <div key={`info-${i}`} className="ml-6 mt-1 flex items-start gap-1.5 text-muted-foreground">
                 <Info className="h-3 w-3 shrink-0 mt-0.5" />
@@ -108,6 +113,33 @@ function StatusBadge({ type, label }: { type: 'error' | 'warning' | 'info' | 'pa
   );
 }
 
+/* ── Year Select Dropdown ─────────────────────────── */
+function YearSelect({ value, onChange, dobYear, yearError }: {
+  value: string;
+  onChange: (v: string) => void;
+  dobYear?: number;
+  yearError?: string;
+}) {
+  const years = useMemo(() => getYearOptions(dobYear), [dobYear]);
+  return (
+    <div>
+      <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Year</label>
+      <select value={value || ''} onChange={e => onChange(e.target.value)} className={inputCls}>
+        <option value="">Select year</option>
+        {years.map(y => (
+          <option key={y} value={y.toString()}>{y}</option>
+        ))}
+      </select>
+      {yearError && (
+        <div className="mt-1.5 flex items-start gap-1.5 text-destructive">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+          <span className="text-xs">{yearError}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Academic Block ─────────────────────────── */
 function AcademicBlock({
   title,
@@ -121,6 +153,7 @@ function AcademicBlock({
   yearError,
   removable,
   onRemove,
+  dobYear,
 }: {
   title: string;
   prefix: string;
@@ -133,14 +166,27 @@ function AcademicBlock({
   yearError?: string;
   removable?: boolean;
   onRemove?: () => void;
+  dobYear?: number;
 }) {
   const data = academic[prefix] || {};
   const update = (field: string, val: string) => {
-    onChange({ ...academic, [prefix]: { ...data, [field]: val } });
+    const newData = { ...academic, [prefix]: { ...data, [field]: val } };
+    onChange(newData);
   };
   const isPending = data.result_status === 'not_declared';
+  const isGradBlock = prefix.startsWith('graduation') || prefix.startsWith('additional_');
 
   const fieldError = validationErrors?.find(e => e.field === prefix || e.field === 'class_12');
+
+  // Flag custom board/university
+  const handleBoardChange = (vals: string[]) => {
+    const board = vals[vals.length - 1] || '';
+    update('board', board);
+  };
+  const handleUniversityChange = (vals: string[]) => {
+    const uni = vals[vals.length - 1] || '';
+    update('university', uni);
+  };
 
   return (
     <div className="space-y-3">
@@ -153,7 +199,7 @@ function AcademicBlock({
         )}
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {prefix.startsWith('graduation') || prefix.startsWith('additional_') ? (
+        {isGradBlock ? (
           <>
             {showDegreeSelector ? (
               <div>
@@ -173,8 +219,14 @@ function AcademicBlock({
               </div>
             )}
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">University</label>
-              <input value={data.university || ''} onChange={e => update('university', e.target.value)} className={inputCls} />
+              <SubjectTagInput
+                label="University"
+                options={UNIVERSITIES_LIST}
+                selected={data.university ? [data.university] : []}
+                onChange={handleUniversityChange}
+                placeholder="Search university…"
+                allowCustom
+              />
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">College</label>
@@ -184,8 +236,14 @@ function AcademicBlock({
         ) : (
           <>
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Board</label>
-              <input value={data.board || ''} onChange={e => update('board', e.target.value)} placeholder="e.g. CBSE, ICSE" className={inputCls} />
+              <SubjectTagInput
+                label="Board"
+                options={BOARDS_LIST}
+                selected={data.board ? [data.board] : []}
+                onChange={handleBoardChange}
+                placeholder="Search board…"
+                allowCustom
+              />
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">School</label>
@@ -193,16 +251,12 @@ function AcademicBlock({
             </div>
           </>
         )}
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Year</label>
-          <input value={data.year || ''} onChange={e => update('year', e.target.value)} placeholder="e.g. 2025" className={inputCls} />
-          {yearError && (
-            <div className="mt-1.5 flex items-start gap-1.5 text-destructive">
-              <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-              <span className="text-xs">{yearError}</span>
-            </div>
-          )}
-        </div>
+        <YearSelect
+          value={data.year || ''}
+          onChange={v => update('year', v)}
+          dobYear={dobYear}
+          yearError={yearError}
+        />
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Marks / Percentage / CGPA</label>
           <input value={data.marks || ''} onChange={e => update('marks', e.target.value)} placeholder="e.g. 85% or 8.5" className={inputCls} />
@@ -229,7 +283,6 @@ function AcademicBlock({
               placeholder="Select your 12th subjects…"
               allowCustom
             />
-            {/* Show subject-specific errors inline */}
             {validationErrors?.filter(e => e.field === 'class_12' && e.type === 'error').map((e, i) => (
               <div key={i} className="mt-1.5 flex items-start gap-1.5 text-destructive">
                 <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
@@ -257,7 +310,6 @@ function AcademicBlock({
                 <p className="text-xs text-foreground font-medium">Result Awaited — you can still apply</p>
                 {prefix === 'class_12' && (
                   <>
-                    {/* Always show subjects even in pending state */}
                     {showSubjects && (
                       <SubjectTagInput
                         label="Subjects"
@@ -301,6 +353,116 @@ function AcademicBlock({
   );
 }
 
+/* ── Entrance Exam Section ─────────────────────────── */
+interface EntranceExam {
+  exam_name: string;
+  status: 'yet_to_appear' | 'not_declared' | 'declared';
+  score?: string;
+  expected_date?: string;
+  is_custom?: boolean;
+}
+
+function EntranceExamSection({
+  exams,
+  onChange,
+  courseExamNames,
+}: {
+  exams: EntranceExam[];
+  onChange: (exams: EntranceExam[]) => void;
+  courseExamNames: string[];
+}) {
+  // Auto-populate from course rules on first render
+  useEffect(() => {
+    if (exams.length === 0 && courseExamNames.length > 0) {
+      onChange(courseExamNames.map(name => ({ exam_name: name, status: 'yet_to_appear' })));
+    }
+  }, [courseExamNames.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const updateExam = (idx: number, field: string, val: string) => {
+    const updated = [...exams];
+    updated[idx] = { ...updated[idx], [field]: val };
+    onChange(updated);
+  };
+
+  const addCustomExam = () => {
+    onChange([...exams, { exam_name: '', status: 'yet_to_appear', is_custom: true }]);
+  };
+
+  const removeExam = (idx: number) => {
+    onChange(exams.filter((_, i) => i !== idx));
+  };
+
+  if (courseExamNames.length === 0 && exams.length === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      <h3 className="text-sm font-semibold text-foreground">Entrance Exams</h3>
+      {exams.map((ex, idx) => (
+        <Card key={idx} className="border-border/60 shadow-none">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              {ex.is_custom ? (
+                <input
+                  value={ex.exam_name}
+                  onChange={e => updateExam(idx, 'exam_name', e.target.value)}
+                  placeholder="Exam name"
+                  className={`${inputCls} max-w-xs`}
+                />
+              ) : (
+                <h4 className="text-sm font-medium text-foreground">{ex.exam_name}</h4>
+              )}
+              {ex.is_custom && (
+                <Button variant="ghost" size="sm" onClick={() => removeExam(idx)} className="text-destructive h-7 px-2">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Status</label>
+                <select
+                  value={ex.status}
+                  onChange={e => updateExam(idx, 'status', e.target.value)}
+                  className={inputCls}
+                >
+                  <option value="yet_to_appear">Yet to Appear</option>
+                  <option value="not_declared">Result Not Declared</option>
+                  <option value="declared">Result Declared</option>
+                </select>
+              </div>
+              {ex.status === 'declared' && (
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Score / Rank</label>
+                  <input
+                    value={ex.score || ''}
+                    onChange={e => updateExam(idx, 'score', e.target.value)}
+                    placeholder="e.g. 120 marks or Rank 5000"
+                    className={inputCls}
+                  />
+                </div>
+              )}
+              {ex.status === 'not_declared' && (
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Expected Result Date</label>
+                  <input
+                    value={ex.expected_date || ''}
+                    onChange={e => updateExam(idx, 'expected_date', e.target.value)}
+                    placeholder="e.g. July 2026"
+                    className={inputCls}
+                  />
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+      <Button variant="outline" size="sm" onClick={addCustomExam} className="gap-2 text-xs">
+        <Plus className="h-3.5 w-3.5" /> Add Other Exam
+      </Button>
+    </div>
+  );
+}
+
 /* ── Main Component ─────────────────────────── */
 export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Props) {
   const cat = data.program_category;
@@ -308,6 +470,10 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
   const needsGraduation = ['postgraduate', 'mba_pgdm', 'professional', 'bed', 'deled'].includes(cat);
   const academic = data.academic_details || {};
   const additionalQualifications: Record<string, any>[] = (academic as any).additional_qualifications || [];
+  const entranceExams: EntranceExam[] = (academic as any).entrance_exams || [];
+
+  // DOB year for filtering year dropdowns
+  const dobYear = data.dob ? new Date(data.dob).getFullYear() : undefined;
 
   // Fetch DB-driven eligibility rules
   const [courseRules, setCourseRules] = useState<Record<string, EligibilityRule>>({});
@@ -326,12 +492,19 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
     }
   }, [data.course_selections]);
 
-  // Any course has subject prerequisites?
-  const anyHasSubjectPrereqs = rulesLoaded && Object.values(courseRules).some(
-    r => r.subjectPrerequisites && r.subjectPrerequisites.length > 0
-  );
+  // Deduplicated entrance exam names from course rules
+  const courseExamNames = useMemo(() => {
+    const names = new Set<string>();
+    Object.values(courseRules).forEach(r => {
+      if (r.entranceExamRequired && r.entranceExamName) {
+        // Some have comma-separated like "NEET, NAT"
+        r.entranceExamName.split(',').map(n => n.trim()).filter(Boolean).forEach(n => names.add(n));
+      }
+    });
+    return Array.from(names);
+  }, [courseRules]);
 
-  // Always show subjects for non-school (needed for validation)
+  // Always show subjects for non-school
   const showSubjects = !isSchool;
 
   // Per-course eligibility
@@ -355,19 +528,30 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
     yearErrorMap[ye.field] = ye.message;
   }
 
-  // Block submission only if ALL courses have errors (or year errors exist which are global)
   const allCoursesHaveErrors = perCourseResults.length > 0 && perCourseResults.every(cr => cr.hasErrors);
   const hasYearErrors = yearErrors.length > 0;
   const hasBlockingErrors = allCoursesHaveErrors || hasYearErrors;
 
-  // Also check if graduation is needed based on DB rules
   const showGraduation = needsGraduation || Object.values(courseRules).some(r => r.requiresGraduation);
 
-  // Collect validation errors for inline display (from first course or combined)
   const firstCourseResults = perCourseResults[0]?.results || [];
 
   const updateAcademic = (v: Record<string, any>) => {
-    onChange({ academic_details: v });
+    // Check for custom boards/universities and flag
+    const flags = [...(data.flags || [])];
+    const checkCustom = (obj: any, key: string, checker: (v: string) => boolean, flagName: string) => {
+      if (obj && obj[key] && !checker(obj[key])) {
+        if (!flags.includes(flagName)) flags.push(flagName);
+      }
+    };
+    checkCustom(v.class_10, 'board', isPredefinedBoard, 'custom_board');
+    checkCustom(v.class_12, 'board', isPredefinedBoard, 'custom_board');
+    checkCustom(v.graduation, 'university', isPredefinedUniversity, 'custom_university');
+    (v.additional_qualifications || []).forEach((q: any) => {
+      checkCustom(q, 'university', isPredefinedUniversity, 'custom_university');
+    });
+
+    onChange({ academic_details: v, flags });
   };
 
   // Additional qualifications management
@@ -388,9 +572,11 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
     updateAcademic(updated);
   };
 
-  // Determine if this is a PG/LLB course that allows multiple qualifications
+  const updateEntranceExams = (exams: EntranceExam[]) => {
+    updateAcademic({ ...academic, entrance_exams: exams });
+  };
+
   const allowMultipleQualifications = needsGraduation || cat === 'professional';
-  // UG courses can optionally add graduation
   const isUG = !isSchool && !needsGraduation && cat !== 'professional';
 
   return (
@@ -424,6 +610,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
             academic={academic}
             onChange={updateAcademic}
             yearError={yearErrorMap['class_10_year']}
+            dobYear={dobYear}
           />
           <AcademicBlock
             title="Class 12"
@@ -434,6 +621,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
             showSubjects={showSubjects}
             validationErrors={firstCourseResults}
             yearError={yearErrorMap['class_12_year']}
+            dobYear={dobYear}
           />
 
           {/* Graduation — required for PG/professional */}
@@ -447,6 +635,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
               showDegreeSelector
               validationErrors={firstCourseResults}
               yearError={yearErrorMap['graduation_year']}
+              dobYear={dobYear}
             />
           )}
 
@@ -467,6 +656,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
                   onChange={updateAcademic}
                   showResultPending
                   showDegreeSelector
+                  dobYear={dobYear}
                 />
               </CollapsibleContent>
             </Collapsible>
@@ -480,21 +670,28 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
                   key={idx}
                   title={`Additional Qualification ${idx + 1}`}
                   prefix={`additional_${idx}`}
-                  academic={
-                    // Create a virtual academic object so the block reads from the right place
-                    { [`additional_${idx}`]: q }
-                  }
+                  academic={{ [`additional_${idx}`]: q }}
                   onChange={(v) => updateQualification(idx, v[`additional_${idx}`] || {})}
                   showResultPending
                   showDegreeSelector
                   removable
                   onRemove={() => removeQualification(idx)}
+                  dobYear={dobYear}
                 />
               ))}
               <Button variant="outline" size="sm" onClick={addQualification} className="gap-2 text-xs">
                 <Plus className="h-3.5 w-3.5" /> Add Another Qualification
               </Button>
             </div>
+          )}
+
+          {/* Entrance Exams */}
+          {!isSchool && (
+            <EntranceExamSection
+              exams={entranceExams}
+              onChange={updateEntranceExams}
+              courseExamNames={courseExamNames}
+            />
           )}
         </>
       )}

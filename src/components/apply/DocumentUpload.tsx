@@ -5,9 +5,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { ApplicationData } from "./types";
+import { PhotoUpload } from "./PhotoUpload";
 
 interface Props {
   data: ApplicationData;
+  onChange: (data: Partial<ApplicationData>) => void;
   onNext: () => void;
   onBack: () => void;
   saving: boolean;
@@ -58,10 +60,46 @@ function getRequiredDocs(category: string, academicDetails?: Record<string, any>
     base.push({ key: 'graduation_certificate', label: 'Graduation Degree Certificate', desc: 'Optional', required: false });
   }
 
+  // Optional graduation entered by UG applicants
+  if (!['postgraduate', 'mba_pgdm', 'professional', 'bed', 'deled'].includes(category)) {
+    const optGrad = academicDetails?.graduation;
+    if (optGrad && (optGrad.degree || optGrad.university)) {
+      if (optGrad.result_status !== 'not_declared') {
+        base.push({ key: 'graduation_marksheet', label: 'Graduation Marksheet (Optional)', desc: 'If available', required: false });
+      }
+    }
+  }
+
+  // Additional qualifications marksheets
+  const additionalQuals: any[] = academicDetails?.additional_qualifications || [];
+  additionalQuals.forEach((q: any, idx: number) => {
+    if (q && (q.degree || q.university) && q.result_status !== 'not_declared') {
+      base.push({
+        key: `additional_qual_${idx}_marksheet`,
+        label: `${q.degree || `Qualification ${idx + 1}`} Marksheet`,
+        desc: 'All semesters',
+        required: false,
+      });
+    }
+  });
+
+  // Entrance exam scorecards
+  const exams: any[] = academicDetails?.entrance_exams || [];
+  exams.forEach((ex: any) => {
+    if (ex && ex.status === 'declared' && ex.exam_name) {
+      base.push({
+        key: `entrance_${ex.exam_name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}_scorecard`,
+        label: `${ex.exam_name} Scorecard`,
+        desc: 'Score/rank card',
+        required: false,
+      });
+    }
+  });
+
   return base;
 }
 
-export function DocumentUpload({ data, onNext, onBack, saving }: Props) {
+export function DocumentUpload({ data, onChange, onNext, onBack, saving }: Props) {
   const { toast } = useToast();
   const [uploaded, setUploaded] = useState<Record<string, boolean>>({});
   const [uploading, setUploading] = useState<string | null>(null);
@@ -90,6 +128,15 @@ export function DocumentUpload({ data, onNext, onBack, saving }: Props) {
         <h2 className="text-lg font-semibold text-foreground">Upload Documents</h2>
         <p className="text-sm text-muted-foreground">Upload required documents. Accepted: PDF, JPG, PNG (max 5MB).</p>
       </div>
+
+      {/* Passport Photo */}
+      {data.program_category !== 'school' && (
+        <PhotoUpload
+          applicationId={data.application_id}
+          existingUrl={data.passport_photo_path ? undefined : undefined}
+          onUploaded={(path) => onChange({ passport_photo_path: path })}
+        />
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {docs.map(doc => (
