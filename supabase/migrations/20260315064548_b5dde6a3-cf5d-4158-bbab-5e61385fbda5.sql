@@ -1,0 +1,1 @@
+UPDATE eligibility_rules SET subject_prerequisites = ARRAY['Any Stream (English Mandatory)'] WHERE course_id = '8952dafa-322d-4c29-abc9-b30c23dab363';
