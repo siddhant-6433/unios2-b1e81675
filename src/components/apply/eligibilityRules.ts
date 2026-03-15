@@ -1,5 +1,5 @@
 /**
- * Academic eligibility rules — now DB-driven with hardcoded fallback.
+ * Academic eligibility rules — DB-driven with hardcoded fallback.
  * Marks parsing: values ≤ 10 treated as CGPA → converted via CGPA × 9.5.
  */
 
@@ -95,6 +95,21 @@ export function isSubjectGroupSatisfied(group: string, studentSubjects: string[]
   return normalizedStudentSubjects.includes(group.toLowerCase());
 }
 
+/**
+ * Parse mandatory individual subjects from prereq strings like "Any Stream (English Mandatory)".
+ * Returns array of mandatory subject names.
+ */
+export function parseMandatorySubjects(prerequisites: string[]): string[] {
+  const mandatory: string[] = [];
+  for (const prereq of prerequisites) {
+    const match = prereq.match(/\(([^)]+)\s+[Mm]andatory\)/);
+    if (match) {
+      mandatory.push(match[1].trim());
+    }
+  }
+  return mandatory;
+}
+
 /** Parse marks string to percentage. Values ≤ 10 are treated as CGPA (×9.5). */
 export function parseMarksToPercentage(marks: string | undefined): number | null {
   if (!marks) return null;
@@ -134,6 +149,7 @@ export function validateAcademicEligibility(
   programCategory: string,
   academicDetails: Record<string, any>,
   courseRule?: EligibilityRule,
+  additionalQualifications?: Record<string, any>[],
 ): ValidationResult[] {
   const rules = getRule(programCategory, courseRule);
   const results: ValidationResult[] = [];
@@ -153,17 +169,27 @@ export function validateAcademicEligibility(
     }
   }
 
-  // Graduation marks check
+  // Graduation marks check — for LLB, check primary + additional qualifications
   if (rules.graduationMinMarks) {
     const grad = academicDetails?.graduation;
-    if (grad && grad.result_status !== 'not_declared') {
-      const pct = parseMarksToPercentage(grad?.marks);
-      if (pct !== null && pct < rules.graduationMinMarks) {
-        results.push({
-          field: 'graduation',
-          message: `Minimum ${rules.graduationMinMarks}% required in Graduation. You have ${pct.toFixed(1)}%.`,
-          type: 'error',
-        });
+    const primaryPasses = checkGraduationMarks(grad, rules.graduationMinMarks);
+
+    // Check additional qualifications too (LLB multi-degree case)
+    const additionalPasses = (additionalQualifications || []).some(q =>
+      checkGraduationMarks(q, rules.graduationMinMarks!)
+    );
+
+    if (!primaryPasses && !additionalPasses) {
+      // Only error if primary graduation has marks entered
+      if (grad && grad.result_status !== 'not_declared') {
+        const pct = parseMarksToPercentage(grad?.marks);
+        if (pct !== null && pct < rules.graduationMinMarks) {
+          results.push({
+            field: 'graduation',
+            message: `Minimum ${rules.graduationMinMarks}% required in Graduation. You have ${pct.toFixed(1)}%.`,
+            type: 'error',
+          });
+        }
       }
     }
   }
@@ -180,24 +206,44 @@ export function validateAcademicEligibility(
     }
   }
 
-  // Subject prerequisites — expanded group matching
+  // Subject prerequisites — expanded group matching + mandatory subject parsing
   if (rules.subjectPrerequisites && rules.subjectPrerequisites.length > 0) {
     const c12 = academicDetails?.class_12;
-    // Parse subjects: support both comma-separated string and already-split array
     const rawSubjects: string = typeof c12?.subjects === 'string' ? c12.subjects : '';
     const studentSubjects = rawSubjects
       .split(',')
       .map((s: string) => s.trim())
       .filter(Boolean);
 
-    // Check if "Any Stream" is one of the prerequisites — always pass
     const anyStream = rules.subjectPrerequisites.some(
       p => p.toLowerCase().includes('any stream') || p.toLowerCase() === 'any'
     );
 
-    if (!anyStream) {
+    // Check mandatory subjects extracted from parenthetical (e.g., English Mandatory)
+    const mandatorySubjects = parseMandatorySubjects(rules.subjectPrerequisites);
+    if (mandatorySubjects.length > 0 && c12) {
+      if (studentSubjects.length === 0) {
+        results.push({
+          field: 'class_12',
+          message: `Please select your Class 12 subjects. ${mandatorySubjects.join(', ')} is mandatory.`,
+          type: 'error',
+        });
+      } else {
+        const normalizedStudent = studentSubjects.map((s: string) => s.toLowerCase());
+        for (const mandatory of mandatorySubjects) {
+          if (!normalizedStudent.includes(mandatory.toLowerCase())) {
+            results.push({
+              field: 'class_12',
+              message: `${mandatory} is a mandatory subject for this course.`,
+              type: 'error',
+            });
+          }
+        }
+      }
+    }
+
+    if (!anyStream && mandatorySubjects.length === 0) {
       if (c12 && studentSubjects.length > 0) {
-        // Student has subjects selected — check if any prerequisite group is satisfied
         const hasMatch = rules.subjectPrerequisites.some(prereq =>
           isSubjectGroupSatisfied(prereq, studentSubjects)
         );
@@ -212,11 +258,11 @@ export function validateAcademicEligibility(
             type: 'error',
           });
         }
-      } else if (c12 && studentSubjects.length === 0) {
+      } else if (!c12 || studentSubjects.length === 0) {
         results.push({
           field: 'class_12',
           message: `Please select your Class 12 subjects. Required: ${rules.subjectPrerequisites.join(' / ')}.`,
-          type: 'warning',
+          type: 'error',
         });
       }
     }
@@ -241,6 +287,13 @@ export function validateAcademicEligibility(
   }
 
   return results;
+}
+
+/** Helper: check if a graduation record meets min marks */
+function checkGraduationMarks(grad: Record<string, any> | undefined, minMarks: number): boolean {
+  if (!grad || grad.result_status === 'not_declared') return false;
+  const pct = parseMarksToPercentage(grad?.marks);
+  return pct !== null && pct >= minMarks;
 }
 
 export function validateDobEligibility(
@@ -269,4 +322,94 @@ export function validateDobEligibility(
     };
   }
   return null;
+}
+
+/** Validate academic years: class 10/12 years, gap, graduation year */
+export function validateAcademicYears(
+  academicDetails: Record<string, any>,
+  sessionYear: number,
+  requiresGraduation?: boolean,
+): ValidationResult[] {
+  const results: ValidationResult[] = [];
+  const c10Year = parseInt(academicDetails?.class_10?.year);
+  const c12Year = parseInt(academicDetails?.class_12?.year);
+  const gradYear = parseInt(academicDetails?.graduation?.year);
+
+  if (!isNaN(c10Year) && c10Year > sessionYear - 2) {
+    results.push({
+      field: 'class_10_year',
+      message: `Class 10 year must be ≤ ${sessionYear - 2} for the ${sessionYear}-${(sessionYear + 1).toString().slice(-2)} session.`,
+      type: 'error',
+    });
+  }
+
+  if (!isNaN(c12Year) && c12Year > sessionYear) {
+    results.push({
+      field: 'class_12_year',
+      message: `Class 12 year must be ≤ ${sessionYear} for the ${sessionYear}-${(sessionYear + 1).toString().slice(-2)} session.`,
+      type: 'error',
+    });
+  }
+
+  if (!isNaN(c10Year) && !isNaN(c12Year) && c12Year - c10Year < 2) {
+    results.push({
+      field: 'class_12_year',
+      message: `Gap between Class 10 (${c10Year}) and Class 12 (${c12Year}) must be at least 2 years.`,
+      type: 'error',
+    });
+  }
+
+  if (requiresGraduation && !isNaN(gradYear) && gradYear > sessionYear) {
+    results.push({
+      field: 'graduation_year',
+      message: `Graduation year must be ≤ ${sessionYear} for the ${sessionYear}-${(sessionYear + 1).toString().slice(-2)} session.`,
+      type: 'error',
+    });
+  }
+
+  return results;
+}
+
+/** Per-course eligibility result */
+export interface CourseEligibilityResult {
+  courseId: string;
+  courseName: string;
+  campusName: string;
+  preferenceOrder: number;
+  results: ValidationResult[];
+  dobResult: ValidationResult | null;
+  yearResults: ValidationResult[];
+  hasErrors: boolean;
+}
+
+/** Validate eligibility for each course preference independently */
+export function validatePerCourseEligibility(
+  programCategory: string,
+  academicDetails: Record<string, any>,
+  dob: string,
+  courseSelections: { course_id: string; course_name: string; campus_name: string; preference_order: number }[],
+  courseRules: Record<string, EligibilityRule>,
+  sessionYear: number,
+  additionalQualifications?: Record<string, any>[],
+): CourseEligibilityResult[] {
+  return courseSelections.map(cs => {
+    const rule = courseRules[cs.course_id];
+    const results = validateAcademicEligibility(programCategory, academicDetails, rule, additionalQualifications);
+    const dobResult = validateDobEligibility(programCategory, dob, sessionYear, rule);
+    const yearResults = validateAcademicYears(academicDetails, sessionYear, rule?.requiresGraduation);
+    const hasErrors = results.some(r => r.type === 'error')
+      || dobResult?.type === 'error'
+      || yearResults.some(r => r.type === 'error');
+
+    return {
+      courseId: cs.course_id,
+      courseName: cs.course_name,
+      campusName: cs.campus_name,
+      preferenceOrder: cs.preference_order,
+      results,
+      dobResult,
+      yearResults,
+      hasErrors: !!hasErrors,
+    };
+  });
 }
