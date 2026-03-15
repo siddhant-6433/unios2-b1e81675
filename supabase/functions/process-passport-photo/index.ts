@@ -62,15 +62,11 @@ serve(async (req) => {
 
     const data = await response.json();
     
-    // Extract image from content array
+    // Extract image from message.images array (image generation models return here)
     let processedImage: string | null = null;
-    const content = data.choices?.[0]?.message?.content;
-    
-    if (Array.isArray(content)) {
-      const imageContent = content.find((item: any) => item.type === "image_url");
-      if (imageContent?.image_url?.url) {
-        processedImage = imageContent.image_url.url;
-      }
+    const images = data.choices?.[0]?.message?.images;
+    if (Array.isArray(images) && images.length > 0) {
+      processedImage = images[0]?.image_url?.url || null;
     }
 
     return new Response(
