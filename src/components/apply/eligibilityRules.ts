@@ -14,6 +14,7 @@ export interface EligibilityRule {
   entranceExamName?: string;
   entranceExamRequired?: boolean;
   subjectPrerequisites?: string[];
+  subjectMinMarks?: Record<string, number>;
   notes?: string;
 }
 
@@ -29,6 +30,7 @@ export interface EligibilityRuleDB {
   entrance_exam_name: string | null;
   entrance_exam_required: boolean;
   subject_prerequisites: string[] | null;
+  subject_min_marks: Record<string, number> | null;
   notes: string | null;
 }
 
@@ -43,6 +45,7 @@ export function dbRuleToEligibility(row: EligibilityRuleDB): EligibilityRule {
     entranceExamName: row.entrance_exam_name ?? undefined,
     entranceExamRequired: row.entrance_exam_required,
     subjectPrerequisites: row.subject_prerequisites ?? undefined,
+    subjectMinMarks: row.subject_min_marks ?? undefined,
     notes: row.notes ?? undefined,
   };
 }
@@ -262,6 +265,29 @@ export function validateAcademicEligibility(
         results.push({
           field: 'class_12',
           message: `Please select your Class 12 subjects. Required: ${rules.subjectPrerequisites.join(' / ')}.`,
+          type: 'error',
+        });
+      }
+    }
+  }
+
+  // Subject-wise minimum marks check (e.g., English 40% for GNM)
+  if (rules.subjectMinMarks && Object.keys(rules.subjectMinMarks).length > 0) {
+    const c12 = academicDetails?.class_12;
+    const subjectMarks: Record<string, string> = c12?.subject_marks || {};
+    for (const [subject, minPct] of Object.entries(rules.subjectMinMarks)) {
+      const rawMark = subjectMarks[subject];
+      const pct = parseMarksToPercentage(rawMark);
+      if (pct === null) {
+        results.push({
+          field: 'subject_marks',
+          message: `${subject} marks required (minimum ${minPct}%). Please enter your ${subject} marks.`,
+          type: 'error',
+        });
+      } else if (pct < minPct) {
+        results.push({
+          field: 'subject_marks',
+          message: `Minimum ${minPct}% required in ${subject}. You have ${pct.toFixed(1)}%.`,
           type: 'error',
         });
       }

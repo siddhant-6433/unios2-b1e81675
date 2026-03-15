@@ -497,11 +497,27 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
     const names = new Set<string>();
     Object.values(courseRules).forEach(r => {
       if (r.entranceExamRequired && r.entranceExamName) {
-        // Some have comma-separated like "NEET, NAT"
         r.entranceExamName.split(',').map(n => n.trim()).filter(Boolean).forEach(n => names.add(n));
       }
     });
     return Array.from(names);
+  }, [courseRules]);
+
+  // Deduplicated subject-wise marks requirements across all course preferences
+  const requiredSubjectMarks = useMemo(() => {
+    const subjects = new Map<string, number>();
+    Object.values(courseRules).forEach(r => {
+      if (r.subjectMinMarks) {
+        for (const [subject, min] of Object.entries(r.subjectMinMarks)) {
+          const existing = subjects.get(subject);
+          // Keep the lowest minimum (most lenient) across courses
+          if (existing === undefined || min < existing) {
+            subjects.set(subject, min);
+          }
+        }
+      }
+    });
+    return subjects;
   }, [courseRules]);
 
   // Always show subjects for non-school
@@ -623,6 +639,43 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
             yearError={yearErrorMap['class_12_year']}
             dobYear={dobYear}
           />
+
+          {/* Subject-wise marks inputs (e.g., English for GNM) */}
+          {requiredSubjectMarks.size > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-foreground">Subject-wise Marks (Class 12)</h3>
+              <p className="text-xs text-muted-foreground">Some of your selected courses require minimum marks in specific subjects.</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {Array.from(requiredSubjectMarks.entries()).map(([subject, minPct]) => {
+                  const subjectMarks = (academic as any)?.class_12?.subject_marks || {};
+                  const val = subjectMarks[subject] || '';
+                  const subjectError = perCourseResults.flatMap(cr => cr.results).find(r => r.field === 'subject_marks' && r.message.includes(subject));
+                  return (
+                    <div key={subject}>
+                      <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                        {subject} Marks / % <span className="text-muted-foreground/70">(min {minPct}%)</span>
+                      </label>
+                      <input
+                        value={val}
+                        onChange={e => {
+                          const newMarks = { ...((academic as any)?.class_12?.subject_marks || {}), [subject]: e.target.value };
+                          updateAcademic({ ...academic, class_12: { ...(academic as any)?.class_12, subject_marks: newMarks } });
+                        }}
+                        placeholder={`e.g. 45 or 4.5 CGPA`}
+                        className={inputCls}
+                      />
+                      {subjectError && subjectError.type === 'error' && (
+                        <div className="mt-1.5 flex items-start gap-1.5 text-destructive">
+                          <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                          <span className="text-xs">{subjectError.message}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Graduation — required for PG/professional */}
           {showGraduation && (

@@ -1,0 +1,1 @@
+ALTER TABLE public.eligibility_rules ADD COLUMN subject_min_marks jsonb DEFAULT NULL;
