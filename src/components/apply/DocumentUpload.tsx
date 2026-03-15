@@ -22,15 +22,22 @@ interface DocSpec {
   required: boolean;
 }
 
-function getRequiredDocs(category: string, academicDetails?: Record<string, any>): DocSpec[] {
+function getRequiredDocs(
+  category: string, 
+  academicDetails?: Record<string, any>, 
+  courseSelections?: { course_name: string }[]
+): DocSpec[] {
   const c10Status = academicDetails?.class_10?.result_status;
   const c12Status = academicDetails?.class_12?.result_status;
   const gradStatus = academicDetails?.graduation?.result_status;
 
   if (category === 'school') {
+    const courseNames = courseSelections?.map(s => s.course_name.toLowerCase()).join(' ') || '';
+    const isAboveKG = /grade|class\s*[1-9]/i.test(courseNames);
+
     return [
       { key: 'birth_certificate', label: 'Birth Certificate', desc: 'PDF or image', required: true },
-      { key: 'report_card', label: 'Previous Class Report Card', desc: 'Last year marksheet', required: true },
+      { key: 'report_card', label: 'Previous Class Report Card', desc: 'Last year marksheet', required: isAboveKG },
       { key: 'student_photo', label: 'Student Photograph', desc: 'Passport size photo', required: true },
       { key: 'transfer_certificate', label: 'Transfer Certificate', desc: 'If applicable', required: false },
       { key: 'aadhaar', label: 'Aadhaar Card', desc: 'Front & back', required: false },
@@ -103,7 +110,11 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving }: Props
   const { toast } = useToast();
   const [uploaded, setUploaded] = useState<Record<string, boolean>>({});
   const [uploading, setUploading] = useState<string | null>(null);
-  const docs = getRequiredDocs(data.program_category, data.academic_details as Record<string, any>);
+  const docs = getRequiredDocs(
+    data.program_category, 
+    data.academic_details as Record<string, any>,
+    data.course_selections
+  );
 
   const handleUpload = async (docKey: string, file: File) => {
     setUploading(docKey);

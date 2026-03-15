@@ -49,6 +49,14 @@ export interface ApplicationData {
   apaar_id: string;
   pen_number: string;
   academic_details: {
+    previous_school?: { 
+      prev_school_name?: string; 
+      board?: string; 
+      last_class?: string; 
+      academic_year?: string; 
+      percentage?: string; 
+      tc_available?: 'yes' | 'no' 
+    };
     class_10?: { board?: string; school?: string; year?: string; marks?: string; result_status?: string };
     class_12?: { board?: string; school?: string; year?: string; marks?: string; result_status?: string; expected_month?: string; subjects?: string };
     graduation?: { degree?: string; university?: string; college?: string; year?: string; marks?: string; result_status?: string; cgpa_till_sem?: string; semesters_completed?: string };

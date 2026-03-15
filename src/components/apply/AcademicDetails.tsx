@@ -56,49 +56,79 @@ function getYearOptions(dobYear?: number): number[] {
 }
 
 /* ── Per-Course Eligibility Card ─────────────────────────── */
-function EligibilityCards({ results }: { results: CourseEligibilityResult[] }) {
+function EligibilityCards({ results, isSchool }: { results: CourseEligibilityResult[]; isSchool?: boolean }) {
   if (!results.length) return null;
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <h3 className="text-sm font-semibold text-foreground">Course Eligibility Status</h3>
-      {results.map(cr => (
-        <Card key={cr.courseId} className={`border shadow-none ${cr.hasErrors ? 'border-destructive/30 bg-destructive/5' : 'border-primary/30 bg-primary/5'}`}>
-          <CardContent className="p-3">
-            <div className="flex items-center gap-2 mb-1.5">
-              {cr.hasErrors
-                ? <XCircle className="h-4 w-4 text-destructive shrink-0" />
-                : <CheckCircle className="h-4 w-4 text-primary shrink-0" />
-              }
-              <span className="text-sm font-medium text-foreground">
-                Pref {cr.preferenceOrder}: {cr.courseName} — {cr.campusName}
-              </span>
-            </div>
-            <div className="flex flex-wrap gap-1.5 ml-6">
-              {cr.dobResult ? (
-                <StatusBadge type={cr.dobResult.type} label={cr.dobResult.message} />
-              ) : (
-                <StatusBadge type="pass" label="Age OK" />
-              )}
-              {cr.results.filter(r => r.type !== 'info').map((r, i) => (
-                <StatusBadge key={i} type={r.type} label={r.message} />
-              ))}
-              {cr.yearResults.map((r, i) => (
-                <StatusBadge key={`yr-${i}`} type={r.type} label={r.message} />
-              ))}
-              {!cr.hasErrors && cr.results.filter(r => r.type !== 'info').length === 0 && cr.yearResults.length === 0 && (
-                <StatusBadge type="pass" label="All criteria met" />
-              )}
-            </div>
-            {cr.results.filter(r => r.type === 'info').map((r, i) => (
-              <div key={`info-${i}`} className="ml-6 mt-1 flex items-start gap-1.5 text-muted-foreground">
-                <Info className="h-3 w-3 shrink-0 mt-0.5" />
-                <span className="text-xs">{r.message}</span>
+      {results.map(cr => {
+        const hasAgeError = cr.dobResult?.type === 'error';
+        return (
+          <Card key={cr.courseId} className={`border shadow-none ${cr.hasErrors ? 'border-destructive/30 bg-destructive/5' : 'border-primary/30 bg-primary/5'}`}>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  {cr.hasErrors
+                    ? <XCircle className="h-4 w-4 text-destructive shrink-0" />
+                    : <CheckCircle className="h-4 w-4 text-primary shrink-0" />
+                  }
+                  <span className="text-sm font-semibold text-foreground">
+                    {cr.courseName}
+                  </span>
+                </div>
+                {isSchool && (
+                  <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${hasAgeError ? 'bg-destructive/10 text-destructive border border-destructive/20' : 'bg-primary/10 text-primary border border-primary/20'}`}>
+                    {hasAgeError ? (
+                      <>
+                        <XCircle className="h-3.5 w-3.5" /> Not eligible for selected class
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="h-3.5 w-3.5" /> Eligible for selected class
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
-            ))}
-          </CardContent>
-        </Card>
-      ))}
+              
+              <div className="flex flex-wrap gap-1.5 ml-6">
+                {!isSchool && (
+                  cr.dobResult ? (
+                    <StatusBadge type={cr.dobResult.type} label={cr.dobResult.message} />
+                  ) : (
+                    <StatusBadge type="pass" label="Age OK" />
+                  )
+                )}
+                {cr.results.filter(r => r.type !== 'info').map((r, i) => (
+                  <StatusBadge key={i} type={r.type} label={r.message} />
+                ))}
+                {cr.yearResults.map((r, i) => (
+                  <StatusBadge key={`yr-${i}`} type={r.type} label={r.message} />
+                ))}
+                {!cr.hasErrors && cr.results.filter(r => r.type !== 'info').length === 0 && cr.yearResults.length === 0 && !isSchool && (
+                  <StatusBadge type="pass" label="All criteria met" />
+                )}
+              </div>
+              
+              {/* Show the detailed age error message if it exists */}
+              {isSchool && cr.dobResult && (
+                <div className="ml-6 mt-2 p-2 rounded-lg bg-destructive/10 border border-destructive/20 text-xs text-destructive">
+                  <p className="font-semibold mb-1">Eligibility Issue:</p>
+                  {cr.dobResult.message}
+                </div>
+              )}
+
+              {cr.results.filter(r => r.type === 'info').map((r, i) => (
+                <div key={`info-${i}`} className="ml-6 mt-2 flex items-start gap-1.5 text-muted-foreground">
+                  <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  <span className="text-xs">{r.message}</span>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        );
+      })}
     </div>
   );
 }
@@ -481,42 +511,92 @@ function SchoolAcademicBlock({
   courseSelections: { course_name: string }[];
 }) {
   const courseNames = courseSelections.map(s => s.course_name.toLowerCase()).join(' ');
-  const isPreNurseryOrNursery = /pre.?nur|nursery|toddler|playgroup|pre.?primary/i.test(courseNames)
+  const isPreNurseryOrNursery = /pre.?nur|nursery|playgroup/i.test(courseNames)
     && !/lkg|ukg|grade|class\s*[1-9]/i.test(courseNames);
+  const isKG = /kg|lkg|ukg|kendergarten/i.test(courseNames) && !/grade|class\s*[1-9]/i.test(courseNames);
+  
+  const isOptional = isPreNurseryOrNursery || isKG;
+  const hideBlock = isPreNurseryOrNursery;
+
+  const prevSchool = academic.previous_school || {};
+
+  const updatePrevSchool = (key: string, value: string) => {
+    updateAcademic({ ...academic, previous_school: { ...prevSchool, [key]: value } });
+  };
+
+  if (hideBlock) {
+    return (
+      <div className="space-y-3">
+        <p className="text-sm text-muted-foreground">Previous school details</p>
+        <div className="p-3 rounded-xl bg-primary/5 border border-primary/10 flex items-start gap-2">
+          <Info className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+          <p className="text-xs text-foreground">
+            Since you are applying for Pre-Nursery / Nursery, previous academic details are <strong>not required</strong>.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">
-        Previous school details {isPreNurseryOrNursery ? '(optional for Pre-Nursery / Nursery applicants)' : '(if applicable)'}
+        Previous school details {isOptional ? '(Optional for KG applicants)' : ''}
       </p>
-      {isPreNurseryOrNursery && (
-        <div className="p-3 rounded-xl bg-primary/5 border border-primary/10 flex items-start gap-2">
-          <Info className="h-4 w-4 text-primary shrink-0 mt-0.5" />
-          <p className="text-xs text-foreground">
-            Since you are applying for Pre-Nursery / Nursery, previous school details are <strong>not required</strong>. Fill in only if applicable.
-          </p>
-        </div>
-      )}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Previous Class / Grade</label>
-          <input value={academic.previous_class || ''} onChange={e => updateAcademic({ ...academic, previous_class: e.target.value })} placeholder="e.g. UKG, Class 1" className={inputCls} />
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+            Previous Class / Grade {!isOptional && <span className="text-destructive">*</span>}
+          </label>
+          <input required={!isOptional} value={prevSchool.last_class || ''} onChange={e => updatePrevSchool('last_class', e.target.value)} placeholder="e.g. UKG, Class 1" className={inputCls} />
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Previous School Name</label>
-          <input value={academic.previous_school || ''} onChange={e => updateAcademic({ ...academic, previous_school: e.target.value })} placeholder="School name" className={inputCls} />
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+            Previous School Name {!isOptional && <span className="text-destructive">*</span>}
+          </label>
+          <input required={!isOptional} value={prevSchool.prev_school_name || ''} onChange={e => updatePrevSchool('prev_school_name', e.target.value)} placeholder="School name" className={inputCls} />
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Board / Affiliation</label>
-          <input value={academic.previous_board || ''} onChange={e => updateAcademic({ ...academic, previous_board: e.target.value })} placeholder="e.g. CBSE, IB, State Board" className={inputCls} />
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Board / Curriculum</label>
+          <div className="relative">
+            <select
+              value={prevSchool.board || ''}
+              onChange={e => updatePrevSchool('board', e.target.value)}
+              className={`${inputCls} appearance-none`}
+            >
+              <option value="">Select board...</option>
+              <option value="CBSE">CBSE</option>
+              <option value="ICSE">ICSE / ISC</option>
+              <option value="State Board">State Board</option>
+              <option value="IB">IB</option>
+              <option value="Cambridge">Cambridge (IGCSE)</option>
+              <option value="Other">Other</option>
+            </select>
+            <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          </div>
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Marks / Percentage</label>
-          <input value={academic.previous_marks || ''} onChange={e => updateAcademic({ ...academic, previous_marks: e.target.value })} placeholder="e.g. 85% or A+" className={inputCls} />
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Marks / Grade</label>
+          <input value={prevSchool.percentage || ''} onChange={e => updatePrevSchool('percentage', e.target.value)} placeholder="e.g. 85% or A+" className={inputCls} />
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Year of Completion</label>
-          <input value={academic.previous_year || ''} onChange={e => updateAcademic({ ...academic, previous_year: e.target.value })} placeholder="e.g. 2025" className={inputCls} />
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Academic Year</label>
+          <input value={prevSchool.academic_year || ''} onChange={e => updatePrevSchool('academic_year', e.target.value)} placeholder="e.g. 2025" className={inputCls} />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Transfer Certificate Available?</label>
+          <div className="relative">
+            <select
+              value={prevSchool.tc_available || ''}
+              onChange={e => updatePrevSchool('tc_available', e.target.value)}
+              className={`${inputCls} appearance-none`}
+            >
+              <option value="">Select...</option>
+              <option value="yes">Yes</option>
+              <option value="no">No, will submit later</option>
+            </select>
+            <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          </div>
         </div>
       </div>
     </div>

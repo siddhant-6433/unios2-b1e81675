@@ -3,7 +3,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, Users, Search, X, Loader2, UserPlus, FileSpreadsheet, Phone, Eye } from "lucide-react";
+import { 
+  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X
+} from "lucide-react";
+import EligibilityConfigPanel from "@/components/admin/EligibilityConfigPanel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import InviteUserDialog from "@/components/admin/InviteUserDialog";
 import BulkImportDialog from "@/components/admin/BulkImportDialog";
@@ -187,6 +190,9 @@ const AdminPanel = () => {
           <TabsTrigger value="course-campus" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
             Course & Campus
           </TabsTrigger>
+          <TabsTrigger value="eligibility" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
+            Eligibility Config
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="users" className="mt-6">
@@ -313,6 +319,10 @@ const AdminPanel = () => {
 
         <TabsContent value="course-campus" className="mt-6">
           <CourseCampusMaster />
+        </TabsContent>
+
+        <TabsContent value="eligibility" className="mt-6">
+          <EligibilityConfigPanel />
         </TabsContent>
       </Tabs>
     </div>
