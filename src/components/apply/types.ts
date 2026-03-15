@@ -40,7 +40,9 @@ export interface ApplicationData {
     class_12?: { board?: string; school?: string; year?: string; marks?: string; result_status?: string; expected_month?: string; subjects?: string };
     graduation?: { degree?: string; university?: string; college?: string; year?: string; marks?: string; result_status?: string; cgpa_till_sem?: string; semesters_completed?: string };
     additional_qualifications?: { degree?: string; university?: string; college?: string; year?: string; marks?: string; result_status?: string; cgpa_till_sem?: string; semesters_completed?: string }[];
+    entrance_exams?: { exam_name: string; status: 'yet_to_appear' | 'not_declared' | 'declared'; score?: string; expected_date?: string; is_custom?: boolean }[];
   };
+  passport_photo_path?: string;
   result_status: Record<string, any>;
   extracurricular: {
     achievements?: string;
@@ -89,6 +91,7 @@ export const DEFAULT_APPLICATION: Omit<ApplicationData, 'id' | 'application_id'>
   apaar_id: '',
   pen_number: '',
   academic_details: {},
+  passport_photo_path: undefined,
   result_status: {},
   extracurricular: {},
   school_details: {},
