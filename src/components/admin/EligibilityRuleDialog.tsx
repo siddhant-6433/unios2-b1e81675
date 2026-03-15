@@ -90,6 +90,9 @@ export default function EligibilityRuleDialog({ open, onOpenChange, courseId, co
       entrance_exam_required: examRequired,
       subject_prerequisites: prereqs.length > 0 ? prereqs : null,
       notes: notes || null,
+      subject_min_marks: subjectMinMarks.length > 0
+        ? Object.fromEntries(subjectMinMarks.filter(s => s.subject && s.min).map(s => [s.subject, parseFloat(s.min)]))
+        : null,
     };
 
     const { error } = existingRule
