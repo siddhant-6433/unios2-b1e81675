@@ -168,6 +168,43 @@ export default function EligibilityRuleDialog({ open, onOpenChange, courseId, co
             <p className="text-[11px] text-muted-foreground mt-1">Comma-separated list of accepted streams/subjects in Class 12</p>
           </div>
 
+          {/* Subject-wise Minimum Marks */}
+          <div className="space-y-2">
+            <Label className="text-xs font-medium">Subject-wise Minimum Marks (Class 12)</Label>
+            <p className="text-[11px] text-muted-foreground">e.g. English 40% for GNM</p>
+            {subjectMinMarks.map((entry, idx) => (
+              <div key={idx} className="flex gap-2 items-end">
+                <div className="flex-1">
+                  <Input
+                    value={entry.subject}
+                    onChange={e => {
+                      const updated = [...subjectMinMarks];
+                      updated[idx] = { ...updated[idx], subject: e.target.value };
+                      setSubjectMinMarks(updated);
+                    }}
+                    placeholder="Subject name (e.g. English)"
+                  />
+                </div>
+                <div className="w-24">
+                  <Input
+                    type="number"
+                    value={entry.min}
+                    onChange={e => {
+                      const updated = [...subjectMinMarks];
+                      updated[idx] = { ...updated[idx], min: e.target.value };
+                      setSubjectMinMarks(updated);
+                    }}
+                    placeholder="Min %"
+                  />
+                </div>
+                <Button variant="ghost" size="sm" className="h-10 px-2 text-destructive" onClick={() => setSubjectMinMarks(subjectMinMarks.filter((_, i) => i !== idx))}>✕</Button>
+              </div>
+            ))}
+            <Button variant="outline" size="sm" onClick={() => setSubjectMinMarks([...subjectMinMarks, { subject: '', min: '' }])} className="text-xs">
+              + Add Subject
+            </Button>
+          </div>
+
           {/* Notes */}
           <div>
             <Label className="text-xs">Notes (shown to applicant)</Label>

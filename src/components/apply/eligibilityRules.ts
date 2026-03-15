@@ -271,6 +271,29 @@ export function validateAcademicEligibility(
     }
   }
 
+  // Subject-wise minimum marks check (e.g., English 40% for GNM)
+  if (rules.subjectMinMarks && Object.keys(rules.subjectMinMarks).length > 0) {
+    const c12 = academicDetails?.class_12;
+    const subjectMarks: Record<string, string> = c12?.subject_marks || {};
+    for (const [subject, minPct] of Object.entries(rules.subjectMinMarks)) {
+      const rawMark = subjectMarks[subject];
+      const pct = parseMarksToPercentage(rawMark);
+      if (pct === null) {
+        results.push({
+          field: 'subject_marks',
+          message: `${subject} marks required (minimum ${minPct}%). Please enter your ${subject} marks.`,
+          type: 'error',
+        });
+      } else if (pct < minPct) {
+        results.push({
+          field: 'subject_marks',
+          message: `Minimum ${minPct}% required in ${subject}. You have ${pct.toFixed(1)}%.`,
+          type: 'error',
+        });
+      }
+    }
+  }
+
   // Entrance exam info
   if (rules.entranceExamRequired && rules.entranceExamName) {
     results.push({
