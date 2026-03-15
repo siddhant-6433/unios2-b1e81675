@@ -20,6 +20,13 @@ const CLASS_12_SUBJECTS = [
   "Physics", "Chemistry", "Biology", "Mathematics", "English", "Hindi",
   "Economics", "Accountancy", "Business Studies", "History", "Political Science",
   "Geography", "Computer Science", "Sociology", "Psychology", "Physical Education", "Home Science",
+  "Sanskrit", "Urdu", "French", "German", "Spanish", "Japanese",
+  "Informatics Practices", "Biotechnology", "Engineering Graphics",
+  "Entrepreneurship", "Legal Studies", "Media Studies", "Fine Arts",
+  "Music", "Painting", "Fashion Studies", "Agriculture",
+  "Electronics", "Electrical Technology", "Mechanical Technology",
+  "Environmental Science", "Philosophy", "Telugu", "Tamil", "Kannada",
+  "Malayalam", "Bengali", "Marathi", "Gujarati", "Punjabi", "Odia", "Assamese",
 ];
 
 const GRADUATION_DEGREES = [
