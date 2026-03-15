@@ -20,7 +20,11 @@ interface DocSpec {
   required: boolean;
 }
 
-function getRequiredDocs(category: string): DocSpec[] {
+function getRequiredDocs(category: string, academicDetails?: Record<string, any>): DocSpec[] {
+  const c10Status = academicDetails?.class_10?.result_status;
+  const c12Status = academicDetails?.class_12?.result_status;
+  const gradStatus = academicDetails?.graduation?.result_status;
+
   if (category === 'school') {
     return [
       { key: 'birth_certificate', label: 'Birth Certificate', desc: 'PDF or image', required: true },
@@ -32,18 +36,26 @@ function getRequiredDocs(category: string): DocSpec[] {
     ];
   }
 
-  const base: DocSpec[] = [
-    { key: 'class_10_marksheet', label: 'Class 10 Marksheet', desc: 'PDF or image', required: true },
-    { key: 'class_12_marksheet', label: 'Class 12 Marksheet', desc: 'PDF or image', required: true },
-    { key: 'class_10_certificate', label: '10th Pass Certificate', desc: 'Optional', required: false },
-    { key: 'class_12_certificate', label: '12th Pass Certificate', desc: 'Optional', required: false },
-  ];
+  const base: DocSpec[] = [];
+
+  // Class 10 marksheet — only if result declared
+  if (c10Status !== 'not_declared') {
+    base.push({ key: 'class_10_marksheet', label: 'Class 10 Marksheet', desc: 'PDF or image', required: true });
+  }
+  base.push({ key: 'class_10_certificate', label: '10th Pass Certificate', desc: 'Optional', required: false });
+
+  // Class 12 marksheet — only if result declared
+  if (c12Status !== 'not_declared') {
+    base.push({ key: 'class_12_marksheet', label: 'Class 12 Marksheet', desc: 'PDF or image', required: true });
+  }
+  base.push({ key: 'class_12_certificate', label: '12th Pass Certificate', desc: 'Optional', required: false });
 
   if (['postgraduate', 'mba_pgdm', 'professional', 'bed', 'deled'].includes(category)) {
-    base.push(
-      { key: 'graduation_marksheet', label: 'Graduation Marksheet', desc: 'All semesters', required: true },
-      { key: 'graduation_certificate', label: 'Graduation Degree Certificate', desc: 'Optional', required: false },
-    );
+    // Graduation marksheet — only if result declared
+    if (gradStatus !== 'not_declared') {
+      base.push({ key: 'graduation_marksheet', label: 'Graduation Marksheet', desc: 'All semesters', required: true });
+    }
+    base.push({ key: 'graduation_certificate', label: 'Graduation Degree Certificate', desc: 'Optional', required: false });
   }
 
   return base;
@@ -53,7 +65,7 @@ export function DocumentUpload({ data, onNext, onBack, saving }: Props) {
   const { toast } = useToast();
   const [uploaded, setUploaded] = useState<Record<string, boolean>>({});
   const [uploading, setUploading] = useState<string | null>(null);
-  const docs = getRequiredDocs(data.program_category);
+  const docs = getRequiredDocs(data.program_category, data.academic_details as Record<string, any>);
 
   const handleUpload = async (docKey: string, file: File) => {
     setUploading(docKey);

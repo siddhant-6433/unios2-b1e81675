@@ -36,9 +36,10 @@ export interface ApplicationData {
   apaar_id: string;
   pen_number: string;
   academic_details: {
-    class_10?: { board?: string; school?: string; year?: string; marks?: string };
+    class_10?: { board?: string; school?: string; year?: string; marks?: string; result_status?: string };
     class_12?: { board?: string; school?: string; year?: string; marks?: string; result_status?: string; expected_month?: string; subjects?: string };
-    graduation?: { degree?: string; university?: string; college?: string; year?: string; result_status?: string; cgpa_till_sem?: string; semesters_completed?: string };
+    graduation?: { degree?: string; university?: string; college?: string; year?: string; marks?: string; result_status?: string; cgpa_till_sem?: string; semesters_completed?: string };
+    additional_qualifications?: { degree?: string; university?: string; college?: string; year?: string; marks?: string; result_status?: string; cgpa_till_sem?: string; semesters_completed?: string }[];
   };
   result_status: Record<string, any>;
   extracurricular: {
