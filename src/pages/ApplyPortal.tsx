@@ -875,6 +875,7 @@ const ApplyPortal = () => {
       return (
         <DocumentUpload
           data={app}
+          onChange={(partial) => setApp(prev => ({ ...prev, ...partial }))}
           onNext={async () => {
             await saveSection({}, 'documents');
             setStep(step + 1);
