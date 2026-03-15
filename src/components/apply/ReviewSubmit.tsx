@@ -130,33 +130,90 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
             ))}
           </Section>
 
-          <Section title="Personal Details">
+          <Section title={data.program_category === 'school' ? 'Child Details' : 'Personal Details'}>
             <Row label="Name" value={data.full_name} />
             <Row label="Gender" value={data.gender} />
-            <Row label="Date of Birth" value={data.dob} />
+            <Row label="Date of Birth" value={data.dob ? (() => {
+              const d = new Date(data.dob);
+              if (isNaN(d.getTime())) return data.dob;
+              const dd = String(d.getDate()).padStart(2, '0');
+              const mm = String(d.getMonth() + 1).padStart(2, '0');
+              const yy = String(d.getFullYear()).slice(-2);
+              return `${dd}/${mm}/${yy}`;
+            })() : undefined} />
             <Row label="Phone" value={data.phone} />
             <Row label="Email" value={data.email} />
             <Row label="Nationality" value={data.nationality} />
             <Row label="Category" value={data.category} />
+            {data.nationality === 'Indian' || !data.nationality
+              ? <Row label="Aadhaar" value={data.aadhaar} />
+              : <Row label="Passport" value={data.passport_number} />
+            }
+            {data.apaar_id && <Row label="APAAR ID" value={data.apaar_id} />}
+            {data.pen_number && <Row label="PEN Number" value={data.pen_number} />}
             <Row label="Address" value={[addr.line1, addr.city, addr.state, addr.pin_code].filter(Boolean).join(', ')} />
           </Section>
 
           <Section title="Parent Details">
-            <Row label="Father" value={data.father?.name} />
-            <Row label="Mother" value={data.mother?.name} />
-            {data.guardian?.name && <Row label="Guardian" value={data.guardian.name} />}
+            {data.program_category === 'school' ? (
+              <>
+                {/* Father - school */}
+                {(data.father?.first_name || data.father?.name) && (
+                  <>
+                    <Row label="Father" value={[data.father?.first_name, data.father?.last_name].filter(Boolean).join(' ') || data.father?.name} />
+                    <Row label="Father Nationality" value={data.father?.nationality} />
+                    <Row label="Father Education" value={data.father?.education} />
+                    <Row label="Father Employer" value={data.father?.employer_name} />
+                    <Row label="Father Position" value={data.father?.current_position} />
+                    <Row label="Father Email" value={data.father?.email} />
+                    <Row label="Father Mobile" value={data.father?.phone_mobile || data.father?.phone} />
+                  </>
+                )}
+                {/* Mother - school */}
+                {(data.mother?.first_name || data.mother?.name) && (
+                  <>
+                    <Row label="Mother" value={[data.mother?.first_name, data.mother?.last_name].filter(Boolean).join(' ') || data.mother?.name} />
+                    <Row label="Mother Nationality" value={data.mother?.nationality} />
+                    <Row label="Mother Education" value={data.mother?.education} />
+                    <Row label="Mother Employer" value={data.mother?.employer_name} />
+                    <Row label="Mother Position" value={data.mother?.current_position} />
+                    <Row label="Mother Email" value={data.mother?.email} />
+                    <Row label="Mother Mobile" value={data.mother?.phone_mobile || data.mother?.phone} />
+                  </>
+                )}
+                {data.guardian?.name && <Row label="Guardian" value={data.guardian.name} />}
+              </>
+            ) : (
+              <>
+                <Row label="Father" value={data.father?.name} />
+                <Row label="Mother" value={data.mother?.name} />
+                {data.guardian?.name && <Row label="Guardian" value={data.guardian.name} />}
+              </>
+            )}
           </Section>
 
           <Section title="Academic Details">
-            {(academic as any).class_10?.board && <Row label="Class 10 Board" value={(academic as any).class_10.board} />}
-            {(academic as any).class_10?.year && <Row label="Class 10 Year" value={(academic as any).class_10.year} />}
-            {(academic as any).class_10?.marks && <Row label="Class 10 Marks" value={(academic as any).class_10.marks} />}
-            {(academic as any).class_12?.board && <Row label="Class 12 Board" value={(academic as any).class_12.board} />}
-            {(academic as any).class_12?.year && <Row label="Class 12 Year" value={(academic as any).class_12.year} />}
-            {(academic as any).class_12?.marks && <Row label="Class 12 Marks" value={(academic as any).class_12.marks} />}
-            {(academic as any).class_12?.subjects && <Row label="Class 12 Subjects" value={(academic as any).class_12.subjects} />}
-            {(academic as any).graduation?.degree && <Row label="Graduation" value={`${(academic as any).graduation.degree} — ${(academic as any).graduation.university || ''}`} />}
-            {(academic as any).graduation?.marks && <Row label="Graduation Marks" value={(academic as any).graduation.marks} />}
+            {data.program_category === 'school' ? (
+              <>
+                <Row label="Previous Class" value={(academic as any).previous_class} />
+                <Row label="Previous School" value={(academic as any).previous_school} />
+                <Row label="Board" value={(academic as any).previous_board} />
+                <Row label="Marks" value={(academic as any).previous_marks} />
+                <Row label="Year" value={(academic as any).previous_year} />
+              </>
+            ) : (
+              <>
+                {(academic as any).class_10?.board && <Row label="Class 10 Board" value={(academic as any).class_10.board} />}
+                {(academic as any).class_10?.year && <Row label="Class 10 Year" value={(academic as any).class_10.year} />}
+                {(academic as any).class_10?.marks && <Row label="Class 10 Marks" value={(academic as any).class_10.marks} />}
+                {(academic as any).class_12?.board && <Row label="Class 12 Board" value={(academic as any).class_12.board} />}
+                {(academic as any).class_12?.year && <Row label="Class 12 Year" value={(academic as any).class_12.year} />}
+                {(academic as any).class_12?.marks && <Row label="Class 12 Marks" value={(academic as any).class_12.marks} />}
+                {(academic as any).class_12?.subjects && <Row label="Class 12 Subjects" value={(academic as any).class_12.subjects} />}
+                {(academic as any).graduation?.degree && <Row label="Graduation" value={`${(academic as any).graduation.degree} — ${(academic as any).graduation.university || ''}`} />}
+                {(academic as any).graduation?.marks && <Row label="Graduation Marks" value={(academic as any).graduation.marks} />}
+              </>
+            )}
           </Section>
 
           {entranceExams.length > 0 && (

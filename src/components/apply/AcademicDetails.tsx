@@ -470,6 +470,59 @@ function EntranceExamSection({
   );
 }
 
+/* ── School Academic Block ─────────────────────────── */
+function SchoolAcademicBlock({
+  academic,
+  updateAcademic,
+  courseSelections,
+}: {
+  academic: Record<string, any>;
+  updateAcademic: (v: Record<string, any>) => void;
+  courseSelections: { course_name: string }[];
+}) {
+  const courseNames = courseSelections.map(s => s.course_name.toLowerCase()).join(' ');
+  const isPreNurseryOrNursery = /pre.?nur|nursery|toddler|playgroup|pre.?primary/i.test(courseNames)
+    && !/lkg|ukg|grade|class\s*[1-9]/i.test(courseNames);
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">
+        Previous school details {isPreNurseryOrNursery ? '(optional for Pre-Nursery / Nursery applicants)' : '(if applicable)'}
+      </p>
+      {isPreNurseryOrNursery && (
+        <div className="p-3 rounded-xl bg-primary/5 border border-primary/10 flex items-start gap-2">
+          <Info className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+          <p className="text-xs text-foreground">
+            Since you are applying for Pre-Nursery / Nursery, previous school details are <strong>not required</strong>. Fill in only if applicable.
+          </p>
+        </div>
+      )}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Previous Class / Grade</label>
+          <input value={academic.previous_class || ''} onChange={e => updateAcademic({ ...academic, previous_class: e.target.value })} placeholder="e.g. UKG, Class 1" className={inputCls} />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Previous School Name</label>
+          <input value={academic.previous_school || ''} onChange={e => updateAcademic({ ...academic, previous_school: e.target.value })} placeholder="School name" className={inputCls} />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Board / Affiliation</label>
+          <input value={academic.previous_board || ''} onChange={e => updateAcademic({ ...academic, previous_board: e.target.value })} placeholder="e.g. CBSE, IB, State Board" className={inputCls} />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Marks / Percentage</label>
+          <input value={academic.previous_marks || ''} onChange={e => updateAcademic({ ...academic, previous_marks: e.target.value })} placeholder="e.g. 85% or A+" className={inputCls} />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Year of Completion</label>
+          <input value={academic.previous_year || ''} onChange={e => updateAcademic({ ...academic, previous_year: e.target.value })} placeholder="e.g. 2025" className={inputCls} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Main Component ─────────────────────────── */
 export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Props) {
   const cat = data.program_category;
@@ -612,20 +665,11 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
       )}
 
       {isSchool ? (
-        <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">Previous class report card details (if applicable).</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Previous Class/Grade</label>
-              <input value={(academic as any).previous_class || ''} onChange={e => updateAcademic({ ...academic, previous_class: e.target.value })} className={inputCls} />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">School Name</label>
-              <input value={(academic as any).previous_school || ''} onChange={e => updateAcademic({ ...academic, previous_school: e.target.value })} className={inputCls} />
-            </div>
-          </div>
-        </div>
-      ) : (
+        <SchoolAcademicBlock
+          academic={academic}
+          updateAcademic={updateAcademic}
+          courseSelections={data.course_selections || []}
+        />) : (
         <>
           <AcademicBlock
             title="Class 10"

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { ApplicationData } from "./types";
 import { validateDobEligibility, fetchEligibilityRules, EligibilityRule } from "./eligibilityRules";
+import { getNationalityOptions, isIndianNationality } from "./countries";
 
 interface Props {
   data: ApplicationData;
@@ -14,8 +15,46 @@ interface Props {
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 
+const NATIONALITIES = getNationalityOptions();
+
+function DobInput({ value, onChange, className }: { value: string; onChange: (v: string) => void; className?: string }) {
+  return (
+    <input
+      type="text"
+      placeholder="dd/mm/yy"
+      value={value ? (() => {
+        const d = new Date(value);
+        if (isNaN(d.getTime())) return value;
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const yy = String(d.getFullYear()).slice(-2);
+        return `${dd}/${mm}/${yy}`;
+      })() : ''}
+      onChange={e => {
+        let val = e.target.value.replace(/[^\d/]/g, '');
+        const digits = val.replace(/\//g, '');
+        if (digits.length <= 2) val = digits;
+        else if (digits.length <= 4) val = digits.slice(0, 2) + '/' + digits.slice(2);
+        else val = digits.slice(0, 2) + '/' + digits.slice(2, 4) + '/' + digits.slice(4, 6);
+        const parts = val.split('/');
+        if (parts.length === 3 && parts[0].length === 2 && parts[1].length === 2 && parts[2].length === 2) {
+          const year = parseInt(parts[2], 10);
+          const fullYear = year <= 50 ? 2000 + year : 1900 + year;
+          onChange(`${fullYear}-${parts[1]}-${parts[0]}`);
+        } else {
+          onChange(val);
+        }
+      }}
+      maxLength={8}
+      className={className || inputCls}
+    />
+  );
+}
+
 export function PersonalDetails({ data, onChange, onNext, saving }: Props) {
   const address = data.address || {};
+  const isSchool = data.program_category === 'school';
+  const isIndian = isIndianNationality(data.nationality);
 
   // Fetch DB-driven eligibility rules for age validation
   const [mergedRule, setMergedRule] = useState<EligibilityRule | undefined>(undefined);
@@ -41,7 +80,9 @@ export function PersonalDetails({ data, onChange, onNext, saving }: Props) {
 
   return (
     <div className="space-y-5">
-      <h2 className="text-lg font-semibold text-foreground">Personal Details</h2>
+      <h2 className="text-lg font-semibold text-foreground">
+        {isSchool ? 'Child Details' : 'Personal Details'}
+      </h2>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
@@ -58,8 +99,10 @@ export function PersonalDetails({ data, onChange, onNext, saving }: Props) {
           </select>
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Date of Birth</label>
-          <input type="date" value={data.dob} onChange={e => onChange({ dob: e.target.value })} className={inputCls} />
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+            Date of Birth {isSchool ? '*' : ''}
+          </label>
+          <DobInput value={data.dob} onChange={v => onChange({ dob: v })} className={inputCls} />
           {dobWarning && (
             <div className="mt-1.5 flex items-start gap-1.5 text-destructive">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
@@ -69,7 +112,23 @@ export function PersonalDetails({ data, onChange, onNext, saving }: Props) {
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nationality</label>
-          <input value={data.nationality} onChange={e => onChange({ nationality: e.target.value })} className={inputCls} />
+          <select
+            value={data.nationality || 'Indian'}
+            onChange={e => {
+              const nat = e.target.value;
+              onChange({
+                nationality: nat,
+                // Clear the other field when switching
+                aadhaar: nat === 'Indian' ? data.aadhaar : '',
+                passport_number: nat !== 'Indian' ? data.passport_number : '',
+              });
+            }}
+            className={inputCls}
+          >
+            {NATIONALITIES.map(n => (
+              <option key={n.value} value={n.value}>{n.label}</option>
+            ))}
+          </select>
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Category</label>
@@ -78,10 +137,32 @@ export function PersonalDetails({ data, onChange, onNext, saving }: Props) {
             {["General", "OBC", "SC", "ST", "EWS"].map(c => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Aadhaar (optional)</label>
-          <input value={data.aadhaar} onChange={e => onChange({ aadhaar: e.target.value.replace(/\D/g, '').slice(0, 12) })} placeholder="12-digit number" className={inputCls} />
-        </div>
+        {/* Conditional: Aadhaar for Indian, Passport for others */}
+        {isIndian ? (
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+              🇮🇳 Aadhaar No (optional)
+            </label>
+            <input
+              value={data.aadhaar}
+              onChange={e => onChange({ aadhaar: e.target.value.replace(/\D/g, '').slice(0, 12) })}
+              placeholder="12-digit number"
+              className={inputCls}
+            />
+          </div>
+        ) : (
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+              🛂 Passport No (optional)
+            </label>
+            <input
+              value={data.passport_number}
+              onChange={e => onChange({ passport_number: e.target.value.toUpperCase().slice(0, 15) })}
+              placeholder="Passport number"
+              className={inputCls}
+            />
+          </div>
+        )}
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Phone *</label>
           <PhoneInput value={data.phone} onChange={() => {}} disabled />
@@ -98,7 +179,7 @@ export function PersonalDetails({ data, onChange, onNext, saving }: Props) {
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">APAAR ID (optional)</label>
           <input value={data.apaar_id} onChange={e => onChange({ apaar_id: e.target.value.replace(/\D/g, '').slice(0, 12) })} placeholder="12-digit Academic Bank ID" className={inputCls} />
         </div>
-        {data.program_category === 'school' && (
+        {isSchool && (
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">PEN Number (optional)</label>
             <input value={data.pen_number} onChange={e => onChange({ pen_number: e.target.value })} className={inputCls} />

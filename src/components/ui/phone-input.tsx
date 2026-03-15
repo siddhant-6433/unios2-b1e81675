@@ -1,22 +1,16 @@
 import { useState, useRef, useEffect } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Search } from "lucide-react";
+import { COUNTRIES } from "@/components/apply/countries";
 
-const COUNTRY_CODES = [
-  { code: "+91", flag: "🇮🇳", name: "India", digits: 10 },
-  { code: "+1", flag: "🇺🇸", name: "USA", digits: 10 },
-  { code: "+44", flag: "🇬🇧", name: "UK", digits: 10 },
-  { code: "+971", flag: "🇦🇪", name: "UAE", digits: 9 },
-  { code: "+966", flag: "🇸🇦", name: "Saudi Arabia", digits: 9 },
-  { code: "+65", flag: "🇸🇬", name: "Singapore", digits: 8 },
-  { code: "+61", flag: "🇦🇺", name: "Australia", digits: 9 },
-  { code: "+977", flag: "🇳🇵", name: "Nepal", digits: 10 },
-  { code: "+880", flag: "🇧🇩", name: "Bangladesh", digits: 10 },
-];
+// Re-export for backward compatibility
+export const COUNTRY_CODES = COUNTRIES;
 
 export const parsePhone = (phone: string | null) => {
   if (!phone) return { countryCode: "+91", number: "" };
   const trimmed = phone.replace(/[\s\-]/g, "");
-  const match = COUNTRY_CODES.find((c) => trimmed.startsWith(c.code));
+  // Try longest codes first (e.g. +971 before +97)
+  const sorted = [...COUNTRIES].sort((a, b) => b.code.length - a.code.length);
+  const match = sorted.find((c) => trimmed.startsWith(c.code));
   if (match) return { countryCode: match.code, number: trimmed.slice(match.code.length) };
   if (trimmed.startsWith("0")) return { countryCode: "+91", number: trimmed.slice(1) };
   return { countryCode: "+91", number: trimmed };
@@ -41,9 +35,11 @@ export function PhoneInput({ value, onChange, placeholder, required, className, 
   const [countryCode, setCountryCode] = useState(parsed.countryCode);
   const [number, setNumber] = useState(parsed.number);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
-  const selectedCountry = COUNTRY_CODES.find((c) => c.code === countryCode) || COUNTRY_CODES[0];
+  const selectedCountry = COUNTRIES.find((c) => c.code === countryCode) || COUNTRIES[0];
 
   // Sync from external value changes
   useEffect(() => {
@@ -58,10 +54,18 @@ export function PhoneInput({ value, onChange, placeholder, required, className, 
     const handler = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setDropdownOpen(false);
+        setSearch("");
       }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
+  }, [dropdownOpen]);
+
+  // Focus search when dropdown opens
+  useEffect(() => {
+    if (dropdownOpen && searchRef.current) {
+      searchRef.current.focus();
+    }
   }, [dropdownOpen]);
 
   const handleNumberChange = (val: string) => {
@@ -73,13 +77,19 @@ export function PhoneInput({ value, onChange, placeholder, required, className, 
   const handleCountryChange = (code: string) => {
     setCountryCode(code);
     setDropdownOpen(false);
-    const country = COUNTRY_CODES.find((c) => c.code === code) || COUNTRY_CODES[0];
+    setSearch("");
+    const country = COUNTRIES.find((c) => c.code === code) || COUNTRIES[0];
     const digits = number.replace(/\D/g, "").slice(0, country.digits);
     setNumber(digits);
     onChange(formatFullPhone(code, digits));
   };
 
-  const digitsOnly = number.replace(/\D/g, "");
+  const filteredCountries = search
+    ? COUNTRIES.filter(c =>
+        c.name.toLowerCase().includes(search.toLowerCase()) ||
+        c.code.includes(search)
+      )
+    : COUNTRIES;
 
   return (
     <div className={`flex gap-1.5 min-w-0 ${disabled ? 'opacity-60 pointer-events-none' : ''} ${className || ""}`}>
@@ -97,21 +107,41 @@ export function PhoneInput({ value, onChange, placeholder, required, className, 
         </button>
 
         {dropdownOpen && !disabled && (
-          <div className="absolute top-full left-0 mt-1 z-50 w-52 rounded-xl border border-border bg-card shadow-lg overflow-hidden animate-fade-in">
-            {COUNTRY_CODES.map((c) => (
-              <button
-                key={c.code}
-                type="button"
-                onClick={() => handleCountryChange(c.code)}
-                className={`flex items-center gap-2.5 w-full px-3 py-2 text-sm hover:bg-muted transition-colors text-left ${
-                  c.code === countryCode ? "bg-primary/10 text-primary" : "text-foreground"
-                }`}
-              >
-                <span className="text-base">{c.flag}</span>
-                <span className="flex-1 text-xs">{c.name}</span>
-                <span className="text-muted-foreground font-mono text-[11px]">{c.code}</span>
-              </button>
-            ))}
+          <div className="absolute top-full left-0 mt-1 z-50 w-60 rounded-xl border border-border bg-card shadow-lg overflow-hidden animate-fade-in">
+            {/* Search input */}
+            <div className="p-2 border-b border-border">
+              <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-muted/50">
+                <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <input
+                  ref={searchRef}
+                  type="text"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Search country..."
+                  className="bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none w-full"
+                />
+              </div>
+            </div>
+            {/* Country list */}
+            <div className="max-h-48 overflow-y-auto">
+              {filteredCountries.map((c, i) => (
+                <button
+                  key={`${c.code}-${c.name}-${i}`}
+                  type="button"
+                  onClick={() => handleCountryChange(c.code)}
+                  className={`flex items-center gap-2.5 w-full px-3 py-2 text-sm hover:bg-muted transition-colors text-left ${
+                    c.code === countryCode && c.name === selectedCountry.name ? "bg-primary/10 text-primary" : "text-foreground"
+                  }`}
+                >
+                  <span className="text-base">{c.flag}</span>
+                  <span className="flex-1 text-xs truncate">{c.name}</span>
+                  <span className="text-muted-foreground font-mono text-[11px]">{c.code}</span>
+                </button>
+              ))}
+              {filteredCountries.length === 0 && (
+                <p className="text-xs text-muted-foreground text-center py-3">No countries found</p>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -129,5 +159,3 @@ export function PhoneInput({ value, onChange, placeholder, required, className, 
     </div>
   );
 }
-
-export { COUNTRY_CODES };

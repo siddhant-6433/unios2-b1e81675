@@ -183,7 +183,7 @@ const StudentProfile = () => {
             <div className="rounded-xl bg-card card-shadow p-5 space-y-4">
               <h3 className="text-sm font-semibold text-foreground">Personal Information</h3>
               <div className="grid grid-cols-2 gap-y-3 gap-x-4 text-sm">
-                <Detail label="Date of Birth" value={student.dob ? new Date(student.dob).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"} />
+                <Detail label="Date of Birth" value={student.dob ? (() => { const d = new Date(student.dob); const dd = String(d.getDate()).padStart(2, '0'); const mm = String(d.getMonth() + 1).padStart(2, '0'); const yy = String(d.getFullYear()).slice(-2); return `${dd}/${mm}/${yy}`; })() : "—"} />
                 <Detail label="Gender" value={student.gender || "—"} />
                 <Detail label="Blood Group" value={student.blood_group || "—"} />
                 <Detail label="Phone" value={student.phone || "—"} />

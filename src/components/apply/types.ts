@@ -20,6 +20,7 @@ export interface ApplicationData {
   nationality: string;
   category: string;
   aadhaar: string;
+  passport_number: string;
   phone: string;
   email: string;
   whatsapp_verified: boolean;
@@ -30,8 +31,20 @@ export interface ApplicationData {
     country?: string;
     pin_code?: string;
   };
-  father: { name?: string; phone?: string; email?: string; occupation?: string };
-  mother: { name?: string; phone?: string; email?: string; occupation?: string };
+  father: {
+    name?: string; first_name?: string; last_name?: string; dob?: string;
+    nationality?: string; id_type?: string; id_number?: string;
+    education?: string; annual_income?: string; employer_name?: string;
+    current_position?: string; marital_status?: string;
+    phone?: string; phone_mobile?: string; phone_home?: string; email?: string; occupation?: string;
+  };
+  mother: {
+    name?: string; first_name?: string; last_name?: string; dob?: string;
+    nationality?: string; id_type?: string; id_number?: string;
+    education?: string; annual_income?: string; employer_name?: string;
+    current_position?: string; marital_status?: string;
+    phone?: string; phone_mobile?: string; phone_home?: string; email?: string; occupation?: string;
+  };
   guardian: { name?: string; relationship?: string; phone?: string; email?: string };
   apaar_id: string;
   pen_number: string;
@@ -81,6 +94,7 @@ export const DEFAULT_APPLICATION: Omit<ApplicationData, 'id' | 'application_id'>
   nationality: 'Indian',
   category: '',
   aadhaar: '',
+  passport_number: '',
   phone: '',
   email: '',
   whatsapp_verified: false,
