@@ -647,7 +647,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
               <p className="text-xs text-muted-foreground">Some of your selected courses require minimum marks in specific subjects.</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {Array.from(requiredSubjectMarks.entries()).map(([subject, minPct]) => {
-                  const subjectMarks = academic?.class_12?.subject_marks || {};
+                  const subjectMarks = (academic as any)?.class_12?.subject_marks || {};
                   const val = subjectMarks[subject] || '';
                   const subjectError = perCourseResults.flatMap(cr => cr.results).find(r => r.field === 'subject_marks' && r.message.includes(subject));
                   return (
@@ -658,8 +658,8 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
                       <input
                         value={val}
                         onChange={e => {
-                          const newMarks = { ...(academic?.class_12?.subject_marks || {}), [subject]: e.target.value };
-                          updateAcademic({ ...academic, class_12: { ...(academic?.class_12 || {}), subject_marks: newMarks } });
+                          const newMarks = { ...((academic as any)?.class_12?.subject_marks || {}), [subject]: e.target.value };
+                          updateAcademic({ ...academic, class_12: { ...(academic as any)?.class_12, subject_marks: newMarks } });
                         }}
                         placeholder={`e.g. 45 or 4.5 CGPA`}
                         className={inputCls}
