@@ -22,7 +22,7 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash-image",
+        model: "google/gemini-3.1-flash-image-preview",
         messages: [
           {
             role: "user",
@@ -61,10 +61,20 @@ serve(async (req) => {
     }
 
     const data = await response.json();
-    const processedImage = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+    
+    // Extract image from content array
+    let processedImage: string | null = null;
+    const content = data.choices?.[0]?.message?.content;
+    
+    if (Array.isArray(content)) {
+      const imageContent = content.find((item: any) => item.type === "image_url");
+      if (imageContent?.image_url?.url) {
+        processedImage = imageContent.image_url.url;
+      }
+    }
 
     return new Response(
-      JSON.stringify({ processedImage: processedImage || null }),
+      JSON.stringify({ processedImage }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (e) {
