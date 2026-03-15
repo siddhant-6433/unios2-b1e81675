@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Camera, Upload, Loader2, CheckCircle, Info, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -21,10 +21,17 @@ export function PhotoUpload({ applicationId, onUploaded, existingUrl }: Props) {
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Attach stream to video element whenever showWebcam becomes true
+  useEffect(() => {
+    if (showWebcam && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [showWebcam]);
+
   const processAndUpload = useCallback(async (imageDataUrl: string) => {
     setProcessing(true);
     try {
-      // Call edge function for AI background removal
       const { data: fnData, error: fnError } = await supabase.functions.invoke('process-passport-photo', {
         body: { image: imageDataUrl, applicationId },
       });
@@ -34,7 +41,6 @@ export function PhotoUpload({ applicationId, onUploaded, existingUrl }: Props) {
       const processedUrl = fnData?.processedImage || imageDataUrl;
       setPreview(processedUrl);
 
-      // Upload to storage
       const base64 = processedUrl.split(',')[1];
       if (!base64) throw new Error('Invalid image data');
       const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
@@ -49,7 +55,6 @@ export function PhotoUpload({ applicationId, onUploaded, existingUrl }: Props) {
       toast({ title: 'Passport photo uploaded successfully' });
     } catch (err: any) {
       console.error('Photo processing error:', err);
-      // Fallback: upload without processing
       try {
         const base64 = imageDataUrl.split(',')[1];
         if (base64) {
@@ -85,10 +90,6 @@ export function PhotoUpload({ applicationId, onUploaded, existingUrl }: Props) {
         video: { facingMode: 'user', width: 480, height: 640 },
       });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-      }
       setShowWebcam(true);
     } catch {
       toast({ title: 'Camera access denied', description: 'Please allow camera permission', variant: 'destructive' });
@@ -129,7 +130,6 @@ export function PhotoUpload({ applicationId, onUploaded, existingUrl }: Props) {
           )}
         </div>
 
-        {/* Instructions */}
         <div className="p-3 rounded-lg bg-muted/50 border border-border/40">
           <div className="flex items-start gap-2">
             <Info className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
@@ -155,17 +155,16 @@ export function PhotoUpload({ applicationId, onUploaded, existingUrl }: Props) {
           </div>
         )}
 
-        {showWebcam && !processing && (
-          <div className="space-y-3">
-            <video ref={videoRef} className="w-full max-w-xs mx-auto rounded-lg border border-border" autoPlay playsInline muted />
-            <div className="flex justify-center gap-3">
-              <Button onClick={capturePhoto} size="sm" className="gap-2">
-                <Camera className="h-4 w-4" /> Capture
-              </Button>
-              <Button onClick={stopWebcam} variant="outline" size="sm">Cancel</Button>
-            </div>
+        {/* Always render video element, hide when not active */}
+        <div className={showWebcam && !processing ? "space-y-3" : "hidden"}>
+          <video ref={videoRef} className="w-full max-w-xs mx-auto rounded-lg border border-border" autoPlay playsInline muted />
+          <div className="flex justify-center gap-3">
+            <Button onClick={capturePhoto} size="sm" className="gap-2">
+              <Camera className="h-4 w-4" /> Capture
+            </Button>
+            <Button onClick={stopWebcam} variant="outline" size="sm">Cancel</Button>
           </div>
-        )}
+        </div>
 
         {!preview && !processing && !showWebcam && (
           <div className="flex flex-col sm:flex-row gap-3">
