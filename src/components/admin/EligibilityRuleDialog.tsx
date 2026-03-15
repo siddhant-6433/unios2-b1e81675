@@ -58,10 +58,17 @@ export default function EligibilityRuleDialog({ open, onOpenChange, courseId, co
       setExamRequired(existingRule.entrance_exam_required);
       setSubjectPrereqs(existingRule.subject_prerequisites?.join(", ") || "");
       setNotes(existingRule.notes || "");
+      // Parse subject_min_marks from existing rule
+      const smm = (existingRule as any).subject_min_marks;
+      if (smm && typeof smm === 'object') {
+        setSubjectMinMarks(Object.entries(smm).map(([subject, min]) => ({ subject, min: String(min) })));
+      } else {
+        setSubjectMinMarks([]);
+      }
     } else {
       setMinAge(""); setMaxAge(""); setClass12Min(""); setGradMin("");
       setRequiresGrad(false); setExamName(""); setExamRequired(false);
-      setSubjectPrereqs(""); setNotes("");
+      setSubjectPrereqs(""); setNotes(""); setSubjectMinMarks([]);
     }
   }, [existingRule, open]);
 
