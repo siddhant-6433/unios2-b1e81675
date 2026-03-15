@@ -14,6 +14,8 @@ export interface PortalConfig {
   institutionTypes: string[];
   /** Filter course names matching these keywords (empty = all) */
   gradeKeywords: string[];
+  /** Filter courses based on their associated campus names (empty = all) */
+  campusKeywords: string[];
   /** Program categories visible in this portal */
   programCategories: string[];
   /** Hostnames that auto-resolve to this portal */
@@ -31,6 +33,7 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     },
     institutionTypes: ["university", "college"],
     gradeKeywords: [],
+    campusKeywords: [],
     programCategories: ["undergraduate", "postgraduate", "mba_pgdm", "bed", "deled", "professional"],
     hostnames: [],
   },
@@ -51,6 +54,7 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     },
     institutionTypes: ["school"],
     gradeKeywords: ["nursery", "lkg", "ukg", "toddler", "montessori", "grade", "class", "playgroup", "pre-primary", "pre nur", "kg"],
+    campusKeywords: ["avantika", "arthala", "beacon"],
     programCategories: ["school"],
     hostnames: ["nimtbeaconschool.com", "www.nimtbeaconschool.com"],
   },
@@ -71,6 +75,7 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     },
     institutionTypes: ["school"],
     gradeKeywords: ["nursery", "lkg", "ukg", "toddler", "montessori", "grade", "class", "playgroup", "pre-primary"],
+    campusKeywords: ["mirai"],
     programCategories: ["school"],
     hostnames: ["miraischool.in", "www.miraischool.in", "apply.miraischool.in"],
   },

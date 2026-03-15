@@ -54,7 +54,7 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
 
   // Filter courses based on portal config
   const portalFilteredCourses = useMemo(() => {
-    if (portal.gradeKeywords.length === 0 && portal.institutionTypes.length === 0) return courses;
+    if (portal.gradeKeywords.length === 0 && portal.institutionTypes.length === 0 && (!portal.campusKeywords || portal.campusKeywords.length === 0)) return courses;
     return courses.filter((c: any) => {
       if (portal.institutionTypes.length > 0) {
         const instType = c.departments?.institutions?.type?.toLowerCase() || "";
@@ -63,6 +63,10 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
       if (portal.gradeKeywords.length > 0) {
         const nameAndCode = (c.name + " " + c.code).toLowerCase();
         if (!portal.gradeKeywords.some(kw => nameAndCode.includes(kw))) return false;
+      }
+      if (portal.campusKeywords && portal.campusKeywords.length > 0) {
+        const campusName = (c.departments?.institutions?.campuses?.name || "").toLowerCase();
+        if (!portal.campusKeywords.some(kw => campusName.includes(kw))) return false;
       }
       return true;
     });

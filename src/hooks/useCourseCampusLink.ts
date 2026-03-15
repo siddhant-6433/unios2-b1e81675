@@ -10,6 +10,7 @@ export interface CourseOption {
   department_name: string;
   institution_id: string;
   institution_name: string;
+  institution_type: string;
   campus_id: string;
   campus_name: string;
 }
@@ -37,7 +38,7 @@ export function useCourseCampusLink() {
           departments!inner (
             id, name, institution_id,
             institutions!inner (
-              id, name, campus_id,
+              id, name, campus_id, type,
               campuses!inner ( id, name )
             )
           )
@@ -59,6 +60,7 @@ export function useCourseCampusLink() {
         department_name: c.departments.name,
         institution_id: c.departments.institutions.id,
         institution_name: c.departments.institutions.name,
+        institution_type: c.departments.institutions.type,
         campus_id: c.departments.institutions.campuses.id,
         campus_name: c.departments.institutions.campuses.name,
       }));
@@ -100,13 +102,13 @@ export function useCourseCampusLink() {
 
   /** Grouped courses by department for optgroup display */
   const coursesByDepartment = useMemo(() => {
-    const map = new Map<string, { department: string; courses: { id: string; name: string }[] }>();
+    const map = new Map<string, { department: string; courses: { id: string; name: string; code: string; institution_type: string }[] }>();
     courseOptions.forEach((c) => {
       const key = `${c.campus_name} — ${c.department_name}`;
       if (!map.has(key)) {
         map.set(key, { department: key, courses: [] });
       }
-      map.get(key)!.courses.push({ id: c.id, name: c.name });
+      map.get(key)!.courses.push({ id: c.id, name: c.name, code: c.code, institution_type: c.institution_type });
     });
     return Array.from(map.values());
   }, [courseOptions]);

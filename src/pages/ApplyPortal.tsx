@@ -509,14 +509,19 @@ const ApplyPortal = () => {
     setLeadName(name);
     setAuthed(true);
 
-    const { data: existingApp } = await supabase
+    // Fetch all drafts for this phone to find the one matching the current portal
+    const { data: existingApps } = await supabase
       .from("applications")
       .select("*")
       .eq("phone", phoneVal)
       .eq("status", "draft")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .order("created_at", { ascending: false });
+
+    // Find the one that belongs to this portal
+    const existingApp = existingApps?.find(app => {
+      const flags = (app.flags as string[]) || [];
+      return flags.includes(`portal:${portal.id}`);
+    });
 
     if (existingApp) {
       const appData: ApplicationData = {
@@ -585,6 +590,7 @@ const ApplyPortal = () => {
     }
 
     const appId = generateApplicationId();
+    const flagsForNewApp = [...flags, `portal:${portal.id}`];
 
     const newApp: any = {
       application_id: appId,
@@ -597,7 +603,7 @@ const ApplyPortal = () => {
       whatsapp_verified: true,
       fee_amount: feeAmount,
       program_category: primaryCategory,
-      flags,
+      flags: flagsForNewApp,
       completed_sections: DEFAULT_APPLICATION.completed_sections,
       ...(childDob ? { dob: childDob } : {}),
     };
@@ -644,7 +650,7 @@ const ApplyPortal = () => {
       extracurricular: {},
       school_details: {},
       completed_sections: DEFAULT_APPLICATION.completed_sections,
-      flags,
+      flags: flagsForNewApp,
       dob: childDob || '',
     } as ApplicationData);
     setShowCourseSelector(false);

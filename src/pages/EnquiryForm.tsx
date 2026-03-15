@@ -7,6 +7,7 @@ import { PhoneInput } from "@/components/ui/phone-input";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
+import { PORTAL_CONFIGS, detectPortal } from "@/components/apply/portalConfig";
 
 const EnquiryForm = () => {
   const [searchParams] = useSearchParams();
@@ -49,6 +50,42 @@ const EnquiryForm = () => {
   const selectedCourse = courseOptions.find(c => c.id === form.course_id);
   // Determine if school type based on department/institution name
   const isSchool = selectedCourse?.institution_name?.toLowerCase().includes("school") || false;
+
+  // Detect which portal is currently active (e.g. from the domain name or ?portal query)
+  const currentPortalId = detectPortal(window.location.search, window.location.pathname);
+  const portalConfig = PORTAL_CONFIGS[currentPortalId];
+
+  // Filter the course groups based on the portal config (institutions, grade keywords, campus keywords)
+  const filteredCourseGroups = coursesByDepartment.map(g => {
+    return {
+      ...g,
+      courses: g.courses.filter(c => {
+        // Institution type check
+        if (portalConfig.institutionTypes.length > 0) {
+          const instType = c.institution_type?.toLowerCase() || "";
+          if (!portalConfig.institutionTypes.some(t => instType.includes(t))) return false;
+        }
+        
+        // Grade keyword check
+        if (portalConfig.gradeKeywords.length > 0) {
+          const nameAndCode = (c.name + " " + c.code).toLowerCase();
+          if (!portalConfig.gradeKeywords.some(kw => nameAndCode.includes(kw))) return false;
+        }
+
+        // Campus keyword check
+        if (portalConfig.campusKeywords && portalConfig.campusKeywords.length > 0) {
+          const matchCampuses = getCampusesForCourse(c.id);
+          const foundMatchingCampus = matchCampuses.some(campus => {
+            const cName = campus.name.toLowerCase();
+            return portalConfig.campusKeywords.some(kw => cName.includes(kw));
+          });
+          if (!foundMatchingCampus) return false;
+        }
+        
+        return true;
+      })
+    };
+  }).filter(g => g.courses.length > 0);
 
   const handleCourseChange = (courseId: string) => {
     const campuses = getCampusesForCourse(courseId || null);
@@ -188,7 +225,7 @@ const EnquiryForm = () => {
                       className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 appearance-none"
                     >
                       <option value="">Select course / class</option>
-                      {coursesByDepartment.map((g) => (
+                      {filteredCourseGroups.map((g) => (
                         <optgroup key={g.department} label={g.department}>
                           {g.courses.map((c) => (
                             <option key={c.id} value={c.id}>
