@@ -91,6 +91,7 @@ export const DEFAULT_APPLICATION: Omit<ApplicationData, 'id' | 'application_id'>
   apaar_id: '',
   pen_number: '',
   academic_details: {},
+  passport_photo_path: undefined,
   result_status: {},
   extracurricular: {},
   school_details: {},
