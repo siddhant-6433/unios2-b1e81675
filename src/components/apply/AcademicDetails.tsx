@@ -497,11 +497,27 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
     const names = new Set<string>();
     Object.values(courseRules).forEach(r => {
       if (r.entranceExamRequired && r.entranceExamName) {
-        // Some have comma-separated like "NEET, NAT"
         r.entranceExamName.split(',').map(n => n.trim()).filter(Boolean).forEach(n => names.add(n));
       }
     });
     return Array.from(names);
+  }, [courseRules]);
+
+  // Deduplicated subject-wise marks requirements across all course preferences
+  const requiredSubjectMarks = useMemo(() => {
+    const subjects = new Map<string, number>();
+    Object.values(courseRules).forEach(r => {
+      if (r.subjectMinMarks) {
+        for (const [subject, min] of Object.entries(r.subjectMinMarks)) {
+          const existing = subjects.get(subject);
+          // Keep the lowest minimum (most lenient) across courses
+          if (existing === undefined || min < existing) {
+            subjects.set(subject, min);
+          }
+        }
+      }
+    });
+    return subjects;
   }, [courseRules]);
 
   // Always show subjects for non-school
