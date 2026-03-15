@@ -30,6 +30,7 @@ export interface EligibilityRuleDB {
   entrance_exam_name: string | null;
   entrance_exam_required: boolean;
   subject_prerequisites: string[] | null;
+  subject_min_marks: Record<string, number> | null;
   notes: string | null;
 }
 
