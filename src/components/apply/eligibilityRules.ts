@@ -45,6 +45,7 @@ export function dbRuleToEligibility(row: EligibilityRuleDB): EligibilityRule {
     entranceExamName: row.entrance_exam_name ?? undefined,
     entranceExamRequired: row.entrance_exam_required,
     subjectPrerequisites: row.subject_prerequisites ?? undefined,
+    subjectMinMarks: row.subject_min_marks ?? undefined,
     notes: row.notes ?? undefined,
   };
 }

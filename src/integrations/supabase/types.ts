@@ -590,6 +590,7 @@ export type Database = {
           min_age: number | null
           notes: string | null
           requires_graduation: boolean | null
+          subject_min_marks: Json | null
           subject_prerequisites: string[] | null
           updated_at: string
         }
@@ -605,6 +606,7 @@ export type Database = {
           min_age?: number | null
           notes?: string | null
           requires_graduation?: boolean | null
+          subject_min_marks?: Json | null
           subject_prerequisites?: string[] | null
           updated_at?: string
         }
@@ -620,6 +622,7 @@ export type Database = {
           min_age?: number | null
           notes?: string | null
           requires_graduation?: boolean | null
+          subject_min_marks?: Json | null
           subject_prerequisites?: string[] | null
           updated_at?: string
         }
