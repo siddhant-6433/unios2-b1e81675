@@ -641,7 +641,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
           />
 
           {/* Subject-wise marks inputs (e.g., English for GNM) */}
-          {requiredSubjectMarks.size > 0 && (
+          {requiredSubjectMarks.size > 0 && academic?.class_12?.result_status !== 'not_declared' && (
             <div className="space-y-3">
               <h3 className="text-sm font-semibold text-foreground">Subject-wise Marks (Class 12)</h3>
               <p className="text-xs text-muted-foreground">Some of your selected courses require minimum marks in specific subjects.</p>
