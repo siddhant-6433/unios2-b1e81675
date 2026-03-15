@@ -45,6 +45,7 @@ export default function EligibilityRuleDialog({ open, onOpenChange, courseId, co
   const [examRequired, setExamRequired] = useState(false);
   const [subjectPrereqs, setSubjectPrereqs] = useState("");
   const [notes, setNotes] = useState("");
+  const [subjectMinMarks, setSubjectMinMarks] = useState<{ subject: string; min: string }[]>([]);
 
   useEffect(() => {
     if (existingRule) {
