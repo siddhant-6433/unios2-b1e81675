@@ -53,8 +53,11 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
       "--accent-foreground": "227 100% 30%",
     },
     institutionTypes: ["school"],
-    gradeKeywords: ["nursery", "lkg", "ukg", "toddler", "montessori", "grade", "class", "playgroup", "pre-primary", "pre nur", "kg"],
-    campusKeywords: ["avantika", "arthala", "beacon"],
+    gradeKeywords: [
+      "nursery", "lkg", "ukg", "toddler", "montessori", "grade", "class", "std", "primary", "secondary", "senior",
+      "playgroup", "pre-primary", "pre nur", "kg", "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii"
+    ],
+    campusKeywords: ["avantika", "arthala", "beacon", "ghaziabad"],
     programCategories: ["school"],
     hostnames: ["nimtbeaconschool.com", "www.nimtbeaconschool.com"],
   },
@@ -74,7 +77,7 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
       "--accent-foreground": "100 18% 30%",
     },
     institutionTypes: ["school"],
-    gradeKeywords: ["nursery", "lkg", "ukg", "toddler", "montessori", "grade", "class", "playgroup", "pre-primary"],
+    gradeKeywords: ["nursery", "lkg", "ukg", "toddler", "montessori", "grade", "class", "playgroup", "pre-primary", "eyp", "pyp"],
     campusKeywords: ["mirai"],
     programCategories: ["school"],
     hostnames: ["miraischool.in", "www.miraischool.in", "apply.miraischool.in"],

@@ -123,18 +123,21 @@ export function parseMarksToPercentage(marks: string | undefined): number | null
   return num;
 }
 
-/** Calculate age as of July 31 of the given admission year. */
-export function calculateAgeAsOfJuly(dob: string, admissionYear: number): number | null {
+/** Calculate age as of a specific cutoff date in the given admission year. Returns fractional age. */
+export function calculateAgeAtCutoff(dob: string, admissionYear: number, cutoffMonth = 6, cutoffDay = 31): number | null {
   if (!dob) return null;
   const birthDate = new Date(dob);
   if (isNaN(birthDate.getTime())) return null;
-  const cutoff = new Date(admissionYear, 6, 31);
-  let age = cutoff.getFullYear() - birthDate.getFullYear();
-  const monthDiff = cutoff.getMonth() - birthDate.getMonth();
-  if (monthDiff < 0 || (monthDiff === 0 && cutoff.getDate() < birthDate.getDate())) {
-    age--;
-  }
-  return age;
+
+  const cutoffDate = new Date(admissionYear, cutoffMonth, cutoffDay);
+  
+  // Calculate difference in milliseconds
+  const diffMs = cutoffDate.getTime() - birthDate.getTime();
+  if (diffMs < 0) return 0;
+
+  // Convert to years with 2 decimal places precision for rules like 1.6y
+  const years = diffMs / (1000 * 60 * 60 * 24 * 365.25);
+  return Math.round(years * 10) / 10;
 }
 
 export interface ValidationResult {
@@ -327,26 +330,48 @@ export function validateDobEligibility(
   dob: string,
   admissionYear: number = new Date().getFullYear(),
   courseRule?: EligibilityRule,
+  courseName?: string,
+  campusName?: string,
 ): ValidationResult | null {
   const rules = getRule(programCategory, courseRule);
   if (!dob) return null;
-  const age = calculateAgeAsOfJuly(dob, admissionYear);
+
+  // Mirai uses June 1st cutoff (Month index 5)
+  const isMirai = campusName?.toLowerCase().includes('mirai');
+  const cutoffMonth = isMirai ? 5 : 6;
+  const cutoffDay = isMirai ? 1 : 31;
+  const cutoffLabel = isMirai ? `June 1, ${admissionYear}` : `July 31, ${admissionYear}`;
+
+  const age = calculateAgeAtCutoff(dob, admissionYear, cutoffMonth, cutoffDay);
   if (age === null) return null;
+
+  const isGrade1 = courseName?.toLowerCase().includes('grade i') || courseName?.toLowerCase().includes('pyp 1');
+  
+  // Rule check helper
+  const getValidationType = (isMin: boolean): 'error' | 'warning' => {
+    // Grade I is mandatory
+    if (isGrade1) return 'error';
+    // For other school grades, it's flexible (warning)
+    if (programCategory === 'school') return 'warning';
+    return 'error';
+  };
 
   if (rules.minAge && age < rules.minAge) {
     return {
       field: 'dob',
-      message: `Minimum age ${rules.minAge} years required (as of July 31, ${admissionYear}). Applicant is ${age} years old.`,
-      type: 'error',
+      message: `Minimum age ${rules.minAge} years required (as of ${cutoffLabel}). Applicant is ${age} years old.`,
+      type: getValidationType(true),
     };
   }
+  
   if (rules.maxAge && age > rules.maxAge) {
     return {
       field: 'dob',
-      message: `Maximum age ${rules.maxAge} years allowed (as of July 31, ${admissionYear}). Applicant is ${age} years old.`,
-      type: 'error',
+      message: `Maximum age ${rules.maxAge} years allowed (as of ${cutoffLabel}). Applicant is ${age} years old.`,
+      type: getValidationType(false),
     };
   }
+
   return null;
 }
 
@@ -421,7 +446,7 @@ export function validatePerCourseEligibility(
   return courseSelections.map(cs => {
     const rule = courseRules[cs.course_id];
     const results = validateAcademicEligibility(programCategory, academicDetails, rule, additionalQualifications);
-    const dobResult = validateDobEligibility(programCategory, dob, sessionYear, rule);
+    const dobResult = validateDobEligibility(programCategory, dob, sessionYear, rule, cs.course_name, cs.campus_name);
     const yearResults = validateAcademicYears(academicDetails, sessionYear, rule?.requiresGraduation);
     const hasErrors = results.some(r => r.type === 'error')
       || dobResult?.type === 'error'

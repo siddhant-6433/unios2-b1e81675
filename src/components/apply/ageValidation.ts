@@ -33,44 +33,35 @@ export const NIMT_BEACON_GRADES: GradeAgeRule[] = [
   { grade: "Grade X", keywords: ["grade x", "grade 10", "class 10", "class x"], minAge: 14, maxAge: 16 },
 ];
 
-// Mirai School: Nursery to Grade V, age as guidance (not strict block)
+// Mirai School: Full 10 grade structure with June 1 cutoff and flexible rules (except Grade I)
 export const MIRAI_GRADES: GradeAgeRule[] = [
-  { grade: "Nursery", keywords: ["nursery"], minAge: 3, maxAge: 4.5 },
-  { grade: "LKG", keywords: ["lkg", "lower kg"], minAge: 3.5, maxAge: 5 },
-  { grade: "UKG", keywords: ["ukg", "upper kg"], minAge: 4.5, maxAge: 6 },
-  { grade: "Grade I", keywords: ["grade i", "grade 1", "class 1", "class i"], minAge: 5.5, maxAge: 7 },
-  { grade: "Grade II", keywords: ["grade ii", "grade 2", "class 2", "class ii"], minAge: 6, maxAge: 8 },
-  { grade: "Grade III", keywords: ["grade iii", "grade 3", "class 3", "class iii"], minAge: 7, maxAge: 9 },
-  { grade: "Grade IV", keywords: ["grade iv", "grade 4", "class 4", "class iv"], minAge: 8, maxAge: 10 },
-  { grade: "Grade V", keywords: ["grade v", "grade 5", "class 5", "class v"], minAge: 9, maxAge: 11 },
+  { grade: "Toddlers", keywords: ["toddler"], minAge: 1.6, maxAge: 2.6 },
+  { grade: "Montessori", keywords: ["montessori"], minAge: 2, maxAge: 3.5 },
+  { grade: "EYP 1 (Junior/Nursery)", keywords: ["nursery", "eyp 1", "eyp1"], minAge: 3, maxAge: 4.5 },
+  { grade: "EYP 2 (Senior/LKG)", keywords: ["lkg", "eyp 2", "eyp2"], minAge: 4, maxAge: 5.5 },
+  { grade: "EYP 3 (Graduation/UKG)", keywords: ["ukg", "eyp 3", "eyp3"], minAge: 5, maxAge: 6.5 },
+  { grade: "PYP 1 (Grade I)", keywords: ["grade i", "pyp 1", "pyp1"], minAge: 6, maxAge: 7.5 },
+  { grade: "PYP 2 (Grade II)", keywords: ["grade ii", "pyp 2", "pyp2"], minAge: 7, maxAge: 8.5 },
+  { grade: "PYP 3 (Grade III)", keywords: ["grade iii", "pyp 3", "pyp3"], minAge: 8, maxAge: 9.5 },
+  { grade: "PYP 4 (Grade IV)", keywords: ["grade iv", "pyp 4", "pyp4"], minAge: 9, maxAge: 10.5 },
+  { grade: "PYP 5 (Grade V)", keywords: ["grade v", "pyp 5", "pyp5"], minAge: 10, maxAge: 11.5 },
 ];
 
 /**
- * Calculate age in years (with decimals) as of July 31 of the admission year.
+ * Calculate age in years (with decimals) as of a reference date in the admission year.
  */
-export function calculateAgeAsOfJuly31(dob: string, admissionYear?: number): number {
+export function calculateAgeAsOfCutoff(dob: string, admissionYear?: number, month = 6, day = 31): number {
   const birthDate = new Date(dob);
   if (isNaN(birthDate.getTime())) return -1;
 
   const year = admissionYear || new Date().getFullYear();
-  const refDate = new Date(year, 6, 31); // July 31
+  const refDate = new Date(year, month, day);
 
-  let ageYears = refDate.getFullYear() - birthDate.getFullYear();
-  const monthDiff = refDate.getMonth() - birthDate.getMonth();
-  const dayDiff = refDate.getDate() - birthDate.getDate();
-
-  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
-    ageYears--;
-  }
-
-  // Calculate fractional part
-  const lastBirthday = new Date(refDate.getFullYear() - (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0) ? 1 : 0), birthDate.getMonth(), birthDate.getDate());
-  if (lastBirthday > refDate) lastBirthday.setFullYear(lastBirthday.getFullYear() - 1);
-  const nextBirthday = new Date(lastBirthday);
-  nextBirthday.setFullYear(nextBirthday.getFullYear() + 1);
-  const fraction = (refDate.getTime() - lastBirthday.getTime()) / (nextBirthday.getTime() - lastBirthday.getTime());
-
-  return ageYears + fraction;
+  const diffMs = refDate.getTime() - birthDate.getTime();
+  if (diffMs < 0) return 0;
+  
+  const years = diffMs / (1000 * 60 * 60 * 24 * 365.25);
+  return Math.round(years * 10) / 10;
 }
 
 export type AgeValidationResult = {
@@ -92,25 +83,31 @@ export function validateAge(
   portalId: "nimt" | "beacon" | "mirai",
   admissionYear?: number
 ): AgeValidationResult {
-  const age = calculateAgeAsOfJuly31(dob, admissionYear);
+  const isMirai = portalId === "mirai";
+  const cutoffMonth = isMirai ? 5 : 6;
+  const cutoffDay = isMirai ? 1 : 31;
+  const cutoffLabel = isMirai ? "June 1" : "July 31";
+
+  const age = calculateAgeAsOfCutoff(dob, admissionYear, cutoffMonth, cutoffDay);
   if (age < 0) return { eligible: true, enforcement: "guidance", message: "", ageAsOfJuly31: 0, matchedGrade: null };
 
-  const rules = portalId === "mirai" ? MIRAI_GRADES : NIMT_BEACON_GRADES;
-  const enforcement = portalId === "mirai" ? "guidance" : "strict";
+  const rules = isMirai ? MIRAI_GRADES : NIMT_BEACON_GRADES;
   const nameAndCode = (courseName + " " + courseCode).toLowerCase();
 
   // Find matching grade rule
   const rule = rules.find(r => r.keywords.some(kw => nameAndCode.includes(kw)));
   if (!rule) return { eligible: true, enforcement: "guidance", message: "", ageAsOfJuly31: age, matchedGrade: null };
 
-  const roundedAge = Math.round(age * 10) / 10;
+  // For Mirai, everything is flexible (guidance) except Grade I
+  const isMandatory = portalId === "beacon" || (isMirai && (nameAndCode.includes("grade i") || nameAndCode.includes("pyp 1")));
+  const enforcement = isMandatory ? "strict" : "guidance";
 
   if (age < rule.minAge) {
     return {
       eligible: false,
       enforcement,
-      message: `Child will be ${roundedAge} years as of July 31. Minimum age for ${rule.grade} is ${rule.minAge} years.`,
-      ageAsOfJuly31: roundedAge,
+      message: `Child will be ${age} years as of ${cutoffLabel}. Minimum age for ${rule.grade} is ${rule.minAge} years.`,
+      ageAsOfJuly31: age,
       matchedGrade: rule.grade,
     };
   }
@@ -118,13 +115,13 @@ export function validateAge(
     return {
       eligible: false,
       enforcement,
-      message: `Child will be ${roundedAge} years as of July 31. Maximum age for ${rule.grade} is ${rule.maxAge} years.`,
-      ageAsOfJuly31: roundedAge,
+      message: `Child will be ${age} years as of ${cutoffLabel}. Maximum age for ${rule.grade} is ${rule.maxAge} years.`,
+      ageAsOfJuly31: age,
       matchedGrade: rule.grade,
     };
   }
 
-  return { eligible: true, enforcement, message: `Age ${roundedAge} years as of July 31 — eligible for ${rule.grade}.`, ageAsOfJuly31: roundedAge, matchedGrade: rule.grade };
+  return { eligible: true, enforcement, message: `Age ${age} years as of ${cutoffLabel} — eligible for ${rule.grade}.`, ageAsOfJuly31: age, matchedGrade: rule.grade };
 }
 
 /**
