@@ -8,6 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
 import { PORTAL_CONFIGS, detectPortal } from "@/components/apply/portalConfig";
+import { getSchoolGradeSortRank } from "@/components/apply/ageValidation";
 
 const EnquiryForm = () => {
   const [searchParams] = useSearchParams();
@@ -65,7 +66,7 @@ const EnquiryForm = () => {
           const instType = c.institution_type?.toLowerCase() || "";
           if (!portalConfig.institutionTypes.some(t => instType.includes(t))) return false;
         }
-        
+
         // Grade keyword check
         if (portalConfig.gradeKeywords.length > 0) {
           const nameAndCode = (c.name + " " + c.code).toLowerCase();
@@ -81,8 +82,13 @@ const EnquiryForm = () => {
           });
           if (!foundMatchingCampus) return false;
         }
-        
+
         return true;
+      }).sort((a, b) => {
+        const rankA = getSchoolGradeSortRank(a.name || "", a.code || "", currentPortalId);
+        const rankB = getSchoolGradeSortRank(b.name || "", b.code || "", currentPortalId);
+        if (rankA !== rankB) return rankA - rankB;
+        return (a.name || "").localeCompare(b.name || "");
       })
     };
   }).filter(g => g.courses.length > 0);

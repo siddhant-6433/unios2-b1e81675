@@ -6,7 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { CourseSelection, determineProgramCategory, calculateFee } from "./types";
 import { usePortal } from "./PortalContext";
-import { filterCoursesByAge, validateAge, AgeValidationResult } from "./ageValidation";
+import { filterCoursesByAge, validateAge, AgeValidationResult, getSchoolGradeSortRank } from "./ageValidation";
 
 interface Props {
   phone: string;
@@ -87,8 +87,17 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
       if (!map.has(key)) map.set(key, { label: key, courses: [] });
       map.get(key)!.courses.push(c);
     });
-    return Array.from(map.values());
-  }, [filteredCourses]);
+
+    return Array.from(map.values()).map(group => ({
+      ...group,
+      courses: [...group.courses].sort((a: any, b: any) => {
+        const rankA = getSchoolGradeSortRank(a.name || "", a.code || "", portal.id);
+        const rankB = getSchoolGradeSortRank(b.name || "", b.code || "", portal.id);
+        if (rankA !== rankB) return rankA - rankB;
+        return (a.name || "").localeCompare(b.name || "");
+      }),
+    }));
+  }, [filteredCourses, portal.id]);
 
   const addCourse = () => {
     if (!addingCourse) return;

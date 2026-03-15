@@ -73,6 +73,18 @@ export type AgeValidationResult = {
   matchedGrade: string | null;
 };
 
+
+export function getSchoolGradeSortRank(
+  courseName: string,
+  courseCode: string,
+  portalId: "nimt" | "beacon" | "mirai",
+): number {
+  const rules = portalId === "mirai" ? MIRAI_GRADES : NIMT_BEACON_GRADES;
+  const nameAndCode = `${courseName} ${courseCode}`.toLowerCase();
+  const idx = rules.findIndex((r) => r.keywords.some((kw) => nameAndCode.includes(kw)));
+  return idx >= 0 ? idx : Number.MAX_SAFE_INTEGER;
+}
+
 /**
  * Validate if a child's DOB is appropriate for a given course.
  */

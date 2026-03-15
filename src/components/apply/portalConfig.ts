@@ -56,8 +56,7 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     gradeKeywords: [
       "nursery", "lkg", "ukg", "toddler", "montessori", "grade", "class", "std", "primary", "secondary", "senior",
       "playgroup", "pre-primary", "pre nur", "kg", "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii",
-      "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th", "11th", "12th",
-      "1", "2", "3", "4", "5", "6", "7", "8", "9", "0"
+      "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th", "11th", "12th"
     ],
     campusKeywords: ["avantika", "arthala", "beacon", "ghaziabad"],
     programCategories: ["school"],
