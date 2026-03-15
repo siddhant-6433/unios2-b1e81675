@@ -14,6 +14,7 @@ export interface EligibilityRule {
   entranceExamName?: string;
   entranceExamRequired?: boolean;
   subjectPrerequisites?: string[];
+  subjectMinMarks?: Record<string, number>;
   notes?: string;
 }
 
