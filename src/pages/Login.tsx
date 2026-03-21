@@ -7,7 +7,7 @@ import { GraduationCap, Mail, MessageCircle, Loader2, ShieldCheck, ArrowLeft } f
 import { useToast } from "@/hooks/use-toast";
 import { PhoneInput } from "@/components/ui/phone-input";
 
-type LoginMethod = "google" | "email_otp" | "whatsapp_otp";
+type LoginMethod = "google" | "email_otp" | "whatsapp_otp" | "dev_password";
 
 const Login = () => {
   const { session, loading } = useAuth();
@@ -20,7 +20,9 @@ const Login = () => {
     }
   }, [session, loading, navigate]);
 
-  const [method, setMethod] = useState<LoginMethod>("google");
+  const [method, setMethod] = useState<LoginMethod>(import.meta.env.DEV ? "dev_password" : "google");
+  const [devEmail, setDevEmail] = useState("");
+  const [devPassword, setDevPassword] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
@@ -118,6 +120,20 @@ const Login = () => {
     }
   };
 
+  const handleDevPasswordLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email: devEmail, password: devPassword });
+      if (error) throw error;
+      navigate("/");
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const resetState = () => {
     setOtpSent(false);
     setOtp("");
@@ -126,6 +142,11 @@ const Login = () => {
   };
 
   const methods: { key: LoginMethod; label: string; icon: React.ReactNode }[] = [
+    ...(import.meta.env.DEV ? [{
+      key: "dev_password" as LoginMethod,
+      label: "Dev",
+      icon: <ShieldCheck className="h-4 w-4 text-orange-500" />,
+    }] : []),
     {
       key: "google",
       label: "Google",
@@ -190,6 +211,38 @@ const Login = () => {
               </button>
             ))}
           </div>
+
+          {/* Dev Password Login (localhost only) */}
+          {method === "dev_password" && import.meta.env.DEV && (
+            <form onSubmit={handleDevPasswordLogin} className="space-y-4">
+              <div className="rounded-xl bg-orange-500/10 border border-orange-500/20 px-4 py-2 text-xs text-orange-700 dark:text-orange-400 font-medium">
+                Dev mode — not visible in production
+              </div>
+              <input
+                type="email"
+                placeholder="Email"
+                value={devEmail}
+                onChange={e => setDevEmail(e.target.value)}
+                className="w-full rounded-xl border border-input bg-card px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                required
+              />
+              <input
+                type="password"
+                placeholder="Password"
+                value={devPassword}
+                onChange={e => setDevPassword(e.target.value)}
+                className="w-full rounded-xl border border-input bg-card px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                required
+              />
+              <button
+                type="submit"
+                disabled={submitting || !devEmail || !devPassword}
+                className="w-full rounded-xl bg-orange-500 py-3 text-sm font-medium text-white hover:bg-orange-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign In (Dev)"}
+              </button>
+            </form>
+          )}
 
           {/* Google */}
           {method === "google" && (
