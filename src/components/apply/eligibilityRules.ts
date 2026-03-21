@@ -404,8 +404,8 @@ export function validateAcademicYears(
 
   if (!isNaN(c10Year) && !isNaN(c12Year) && c12Year - c10Year < 2) {
     results.push({
-      field: 'class_12_year',
-      message: `Gap between Class 10 (${c10Year}) and Class 12 (${c12Year}) must be at least 2 years.`,
+      field: 'class_10_year',
+      message: `Class 10 year must be at least 2 years before Class 12 (${c12Year}). Select ${c12Year - 2} or earlier.`,
       type: 'error',
     });
   }

@@ -46,10 +46,10 @@ const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text
 
 const SESSION_YEAR = 2026; // TODO: derive from active session
 
-/** Generate year options from dobYear to current year, descending */
-function getYearOptions(dobYear?: number): number[] {
+/** Generate year options descending from maxYear (or current year) down to dobYear */
+function getYearOptions(dobYear?: number, maxYear?: number): number[] {
   const start = Math.max(1926, dobYear || 1926);
-  const end = new Date().getFullYear();
+  const end = maxYear !== undefined ? maxYear : new Date().getFullYear();
   const years: number[] = [];
   for (let y = end; y >= start; y--) years.push(y);
   return years;
@@ -151,13 +151,14 @@ function StatusBadge({ type, label }: { type: 'error' | 'warning' | 'info' | 'pa
 }
 
 /* ── Year Select Dropdown ─────────────────────────── */
-function YearSelect({ value, onChange, dobYear, yearError }: {
+function YearSelect({ value, onChange, dobYear, maxYear, yearError }: {
   value: string;
   onChange: (v: string) => void;
   dobYear?: number;
+  maxYear?: number;
   yearError?: string;
 }) {
-  const years = useMemo(() => getYearOptions(dobYear), [dobYear]);
+  const years = useMemo(() => getYearOptions(dobYear, maxYear), [dobYear, maxYear]);
   return (
     <div>
       <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Year</label>
@@ -201,6 +202,7 @@ function AcademicBlock({
   showDegreeSelector?: boolean;
   validationErrors?: ValidationResult[];
   yearError?: string;
+  maxYear?: number;
   removable?: boolean;
   onRemove?: () => void;
   dobYear?: number;
@@ -292,6 +294,7 @@ function AcademicBlock({
           value={data.year || ''}
           onChange={v => update('year', v)}
           dobYear={dobYear}
+          maxYear={maxYear}
           yearError={yearError}
         />
         <div>
@@ -752,14 +755,6 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
         />) : (
         <>
           <AcademicBlock
-            title="Class 10"
-            prefix="class_10"
-            academic={academic}
-            onChange={updateAcademic}
-            yearError={yearErrorMap['class_10_year']}
-            dobYear={dobYear}
-          />
-          <AcademicBlock
             title="Class 12"
             prefix="class_12"
             academic={academic}
@@ -769,6 +764,19 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
             validationErrors={firstCourseResults}
             yearError={yearErrorMap['class_12_year']}
             dobYear={dobYear}
+          />
+          <AcademicBlock
+            title="Class 10"
+            prefix="class_10"
+            academic={academic}
+            onChange={updateAcademic}
+            yearError={yearErrorMap['class_10_year']}
+            dobYear={dobYear}
+            maxYear={
+              academic?.class_12?.year
+                ? parseInt(academic.class_12.year, 10) - 2
+                : undefined
+            }
           />
 
           {/* Subject-wise marks inputs (e.g., English for GNM) */}
