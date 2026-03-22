@@ -23,7 +23,13 @@ import ApplyPortal from "./pages/ApplyPortal";
 import Consultants from "./pages/Consultants";
 import AdmissionAnalytics from "./pages/AdmissionAnalytics";
 import EnquiryForm from "./pages/EnquiryForm";
+import Exams from "./pages/Exams";
+import Reports from "./pages/Reports";
+import Documents from "./pages/Documents";
+import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
+import TermsOfService from "./pages/TermsOfService";
 
 const queryClient = new QueryClient();
 
@@ -42,6 +48,8 @@ const App = () => (
             <Route path="/apply/beacon" element={<ApplyPortal />} />
             <Route path="/apply/mirai" element={<ApplyPortal />} />
             <Route path="/enquiry" element={<EnquiryForm />} />
+            <Route path="/privacy" element={<PrivacyPolicy />} />
+            <Route path="/terms" element={<TermsOfService />} />
             <Route
               path="/*"
               element={
@@ -60,6 +68,10 @@ const App = () => (
                       <Route path="/admin" element={<AdminPanel />} />
                       <Route path="/consultants" element={<Consultants />} />
                       <Route path="/admission-analytics" element={<AdmissionAnalytics />} />
+                      <Route path="/exams" element={<Exams />} />
+                      <Route path="/reports" element={<Reports />} />
+                      <Route path="/documents" element={<Documents />} />
+                      <Route path="/settings" element={<Settings />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </AppLayout>

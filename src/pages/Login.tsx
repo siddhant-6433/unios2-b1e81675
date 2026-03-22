@@ -367,7 +367,10 @@ const Login = () => {
           )}
 
           <p className="text-center text-[11px] text-muted-foreground">
-            By signing in, you agree to NIMT UniOs terms and policies.
+            By signing in, you agree to our{" "}
+            <a href="/terms" className="underline hover:text-foreground transition-colors">Terms of Service</a>
+            {" "}and{" "}
+            <a href="/privacy" className="underline hover:text-foreground transition-colors">Privacy Policy</a>.
           </p>
         </div>
       </div>

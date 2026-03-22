@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowRight, ArrowLeft, Loader2, CreditCard, CheckCircle, Shield, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
+import { usePaymentGateways } from "@/hooks/usePaymentGateways";
 import { ApplicationData } from "./types";
 
 interface Props {
@@ -15,41 +16,67 @@ interface Props {
 declare global {
   interface Window {
     Cashfree: any;
+    EasebuzzCheckout: any;
   }
 }
 
 export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props) {
-  const isPaid = data.payment_status === 'paid';
+  const isPaid = data.payment_status === "paid";
   const isWaived = data.fee_amount === 0;
 
+  const { portalGateways, loading: gwLoading } = usePaymentGateways();
+  const [selectedGateway, setSelectedGateway] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sdkReady, setSdkReady] = useState(false);
   const cashfreeRef = useRef<any>(null);
 
+  // Auto-select single gateway
+  useEffect(() => {
+    if (!gwLoading && portalGateways.length === 1) {
+      setSelectedGateway(portalGateways[0].gateway);
+    }
+  }, [gwLoading, portalGateways]);
+
   // Load Cashfree JS SDK
   useEffect(() => {
     if (isWaived || isPaid) return;
-    if (document.getElementById("cashfree-sdk")) {
-      setSdkReady(true);
-      return;
-    }
+    const needsCashfree = !selectedGateway || selectedGateway === "cashfree";
+    if (!needsCashfree) return;
+    if (document.getElementById("cashfree-sdk")) { setSdkReady(true); return; }
     const script = document.createElement("script");
     script.id = "cashfree-sdk";
     script.src = "https://sdk.cashfree.com/js/v3/cashfree.js";
     script.onload = () => setSdkReady(true);
     document.body.appendChild(script);
-  }, [isWaived, isPaid]);
+  }, [isWaived, isPaid, selectedGateway]);
 
-  const handleMarkPaid = () => {
-    onChange({ payment_status: 'paid' });
-  };
+  // Load EaseBuzz JS SDK
+  useEffect(() => {
+    if (isWaived || isPaid) return;
+    if (selectedGateway !== "easebuzz") return;
+    if (document.getElementById("easebuzz-sdk")) { setSdkReady(true); return; }
+    const script = document.createElement("script");
+    script.id = "easebuzz-sdk";
+    script.src = "https://ebz-static.s3.ap-south-1.amazonaws.com/easecheckout/easebuzz-checkout.js";
+    script.onload = () => setSdkReady(true);
+    document.body.appendChild(script);
+  }, [isWaived, isPaid, selectedGateway]);
 
-  const handlePay = async () => {
+  // Reset sdkReady when gateway changes so we wait for the right SDK
+  useEffect(() => {
+    setSdkReady(false);
+    if (!selectedGateway || isWaived || isPaid) return;
+    const sdkId = selectedGateway === "cashfree" ? "cashfree-sdk" : "easebuzz-sdk";
+    if (document.getElementById(sdkId)) setSdkReady(true);
+  }, [selectedGateway]);
+
+  const handleMarkPaid = () => onChange({ payment_status: "paid" });
+
+  const handlePayCashfree = async () => {
     setError(null);
     setLoading(true);
     try {
-      // 1. Create Cashfree order
       const { data: fnData, error: fnError } = await supabase.functions.invoke("cashfree-payment", {
         body: {
           action: "create-order",
@@ -66,43 +93,107 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
 
       const { order_id, payment_session_id } = fnData;
 
-      // 2. Init Cashfree SDK and open checkout
       if (!cashfreeRef.current) {
         cashfreeRef.current = window.Cashfree({ mode: import.meta.env.DEV ? "sandbox" : "production" });
       }
 
-      cashfreeRef.current.checkout({
-        paymentSessionId: payment_session_id,
-        redirectTarget: "_modal",
-      }).then(async (result: any) => {
-        if (result.error) {
-          setError(result.error.message || "Payment failed. Please try again.");
+      cashfreeRef.current
+        .checkout({ paymentSessionId: payment_session_id, redirectTarget: "_modal" })
+        .then(async (result: any) => {
+          if (result.error) {
+            setError(result.error.message || "Payment failed. Please try again.");
+            setLoading(false);
+            return;
+          }
+
+          const { data: verifyData, error: verifyError } = await supabase.functions.invoke("cashfree-payment", {
+            body: { action: "verify-payment", order_id },
+          });
+
+          if (verifyError) throw new Error(verifyError.message);
+
+          if (verifyData?.order_status === "PAID") {
+            onChange({ payment_status: "paid", payment_ref: order_id });
+          } else {
+            setError("Payment could not be confirmed. If amount was deducted, contact support.");
+          }
           setLoading(false);
-          return;
-        }
-
-        // 3. Verify payment with backend
-        const { data: verifyData, error: verifyError } = await supabase.functions.invoke("cashfree-payment", {
-          body: { action: "verify-payment", order_id },
+        })
+        .catch((err: any) => {
+          setError(err?.message || "Payment was cancelled.");
+          setLoading(false);
         });
+    } catch (err: any) {
+      setError(err.message || "Something went wrong. Please try again.");
+      setLoading(false);
+    }
+  };
 
-        if (verifyError) throw new Error(verifyError.message);
+  const handlePayEasebuzz = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      const txnid = `APP_${data.application_id.replace(/-/g, "_")}_${Date.now()}`;
+      const nameParts = (data.full_name || "Applicant").trim().split(" ");
+      const firstname = nameParts[0];
 
-        if (verifyData?.order_status === "PAID") {
-          onChange({ payment_status: "paid", payment_ref: order_id });
-        } else {
-          setError("Payment could not be confirmed. If amount was deducted, contact support.");
-        }
-        setLoading(false);
-      }).catch((err: any) => {
-        setError(err?.message || "Payment was cancelled.");
-        setLoading(false);
+      const { data: fnData, error: fnError } = await supabase.functions.invoke("easebuzz-payment", {
+        body: {
+          action: "initiate",
+          txnid,
+          amount: data.fee_amount,
+          productinfo: "Application Fee",
+          firstname,
+          email: data.email || undefined,
+          phone: data.phone,
+        },
+      });
+
+      if (fnError) throw new Error(fnError.message);
+      if (fnData?.error) throw new Error(fnData.error);
+
+      const { access_key, merchant_key, env } = fnData;
+
+      const ebMode = env === "test" ? "test" : "prod";
+      const easebuzzCheckout = new window.EasebuzzCheckout(merchant_key, ebMode);
+
+      easebuzzCheckout.initiatePayment({
+        accessKey: access_key,
+        onResponse: async (response: any) => {
+          if (response.status === "success" || response.txnStatus === "SUCCESS") {
+            // Verify server-side
+            const { data: verifyData, error: verifyError } = await supabase.functions.invoke("easebuzz-payment", {
+              body: { action: "verify-payment", txnid },
+            });
+
+            if (verifyError) {
+              setError("Could not verify payment. If amount was deducted, contact support.");
+            } else if (verifyData?.status === "success") {
+              onChange({ payment_status: "paid", payment_ref: verifyData.easepayid || txnid });
+            } else {
+              setError("Payment could not be confirmed. If amount was deducted, contact support.");
+            }
+          } else if (response.status === "failed" || response.txnStatus === "FAILED") {
+            setError("Payment failed. Please try again.");
+          } else {
+            setError("Payment was cancelled or incomplete.");
+          }
+          setLoading(false);
+        },
       });
     } catch (err: any) {
       setError(err.message || "Something went wrong. Please try again.");
       setLoading(false);
     }
   };
+
+  const handlePay = () => {
+    if (selectedGateway === "easebuzz") return handlePayEasebuzz();
+    return handlePayCashfree();
+  };
+
+  const activeGatewayName =
+    portalGateways.find((g) => g.gateway === selectedGateway)?.display_name ?? "Pay";
 
   return (
     <div className="space-y-5">
@@ -128,7 +219,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
             <CreditCard className="h-8 w-8 text-primary" />
           </div>
           <div>
-            <p className="text-2xl font-bold text-foreground">₹{data.fee_amount.toLocaleString('en-IN')}</p>
+            <p className="text-2xl font-bold text-foreground">₹{data.fee_amount.toLocaleString("en-IN")}</p>
             <p className="text-sm text-muted-foreground">Application Processing Fee</p>
           </div>
 
@@ -137,9 +228,43 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
               {data.course_selections.map((cs, i) => (
                 <div key={i} className="flex justify-between px-4">
                   <span>{cs.course_name}</span>
-                  <span className="font-medium">₹{(data.fee_amount / data.course_selections.length).toLocaleString('en-IN')}</span>
+                  <span className="font-medium">
+                    ₹{(data.fee_amount / data.course_selections.length).toLocaleString("en-IN")}
+                  </span>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Gateway selector — only shown when multiple are enabled */}
+          {!gwLoading && portalGateways.length > 1 && (
+            <div className="flex justify-center gap-3 flex-wrap">
+              {portalGateways.map((gw) => (
+                <button
+                  key={gw.gateway}
+                  onClick={() => setSelectedGateway(gw.gateway)}
+                  className={`rounded-xl border px-4 py-2 text-xs font-medium transition-colors ${
+                    selectedGateway === gw.gateway
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border bg-card text-muted-foreground hover:border-primary/50"
+                  }`}
+                >
+                  {gw.display_name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {gwLoading && (
+            <div className="flex justify-center">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          )}
+
+          {!gwLoading && portalGateways.length === 0 && (
+            <div className="flex items-center gap-2 text-destructive text-xs max-w-sm mx-auto bg-destructive/10 rounded-md px-3 py-2">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>Online payment is currently unavailable. Please contact the admissions office.</span>
             </div>
           )}
 
@@ -150,19 +275,25 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
             </div>
           )}
 
-          <Button
-            onClick={handlePay}
-            disabled={loading || !sdkReady || saving}
-            className="gap-2 px-8"
-          >
-            {loading ? (
-              <><Loader2 className="h-4 w-4 animate-spin" /> Processing...</>
-            ) : (
-              <><CreditCard className="h-4 w-4" /> Pay ₹{data.fee_amount.toLocaleString('en-IN')}</>
-            )}
-          </Button>
+          {!gwLoading && portalGateways.length > 0 && (
+            <>
+              <Button
+                onClick={handlePay}
+                disabled={loading || !sdkReady || saving || !selectedGateway}
+                className="gap-2 px-8"
+              >
+                {loading ? (
+                  <><Loader2 className="h-4 w-4 animate-spin" /> Processing...</>
+                ) : (
+                  <><CreditCard className="h-4 w-4" /> Pay ₹{data.fee_amount.toLocaleString("en-IN")}</>
+                )}
+              </Button>
 
-          <p className="text-xs text-muted-foreground">Secured by Cashfree Payments</p>
+              <p className="text-xs text-muted-foreground">
+                Secured by {activeGatewayName}
+              </p>
+            </>
+          )}
 
           {import.meta.env.DEV && (
             <Button onClick={handleMarkPaid} disabled={saving} variant="outline" size="sm" className="gap-2 opacity-60">

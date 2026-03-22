@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.cashfree-payment]
 verify_jwt = false
+
+[functions.easebuzz-payment]
+verify_jwt = false
