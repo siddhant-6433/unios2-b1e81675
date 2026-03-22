@@ -2,17 +2,35 @@ import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { usePaymentGateways, PaymentGateway } from "@/hooks/usePaymentGateways";
-import { Loader2, CreditCard, ToggleLeft, ToggleRight, Info } from "lucide-react";
+import { Loader2, CreditCard, ToggleLeft, ToggleRight, Info, AlertCircle, RefreshCw } from "lucide-react";
 
 const GATEWAY_LOGOS: Record<string, string> = {
   cashfree: "https://cashfree.com/favicon.ico",
   easebuzz: "https://easebuzz.in/favicon.ico",
 };
 
+const DEFAULT_GATEWAYS = [
+  { gateway: "cashfree",  display_name: "Cashfree Payments", is_enabled_fee_collection: true, is_enabled_portal_payment: true },
+  { gateway: "easebuzz",  display_name: "EaseBuzz",          is_enabled_fee_collection: true, is_enabled_portal_payment: true },
+];
+
 export default function PaymentGatewaysPanel() {
-  const { gateways, loading, refetch } = usePaymentGateways();
+  const { gateways, loading, error, refetch } = usePaymentGateways();
   const [saving, setSaving] = useState<string | null>(null);
+  const [seeding, setSeeding] = useState(false);
   const { toast } = useToast();
+
+  const seedGateways = async () => {
+    setSeeding(true);
+    for (const gw of DEFAULT_GATEWAYS) {
+      await (supabase as any)
+        .from("payment_gateway_config")
+        .upsert(gw, { onConflict: "gateway" });
+    }
+    await refetch();
+    setSeeding(false);
+    toast({ title: "Gateways seeded", description: "Default gateways have been added." });
+  };
 
   const toggle = async (
     gateway: string,
@@ -41,13 +59,47 @@ export default function PaymentGatewaysPanel() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-5 flex gap-3">
+          <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-foreground">Failed to load payment gateways</p>
+            <p className="text-xs text-muted-foreground font-mono">{error}</p>
+            {error.toLowerCase().includes("relation") && (
+              <p className="text-xs text-muted-foreground mt-2">
+                The <code className="bg-muted px-1 rounded">payment_gateway_config</code> table doesn't exist yet.
+                Run the pending migration with <code className="bg-muted px-1 rounded">npx supabase db push --linked</code>, or click below to seed now.
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex gap-3">
+          <button onClick={refetch} className="flex items-center gap-2 rounded-xl border border-input bg-card px-4 py-2 text-sm font-medium hover:bg-muted transition-colors">
+            <RefreshCw className="h-4 w-4" /> Retry
+          </button>
+          <button onClick={seedGateways} disabled={seeding} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-60">
+            {seeding ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+            Seed Default Gateways
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-base font-semibold text-foreground">Payment Gateways</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Control which gateways are available for each payment context.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Payment Gateways</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Control which gateways are available for each payment context.
+          </p>
+        </div>
+        <button onClick={refetch} className="rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" title="Refresh">
+          <RefreshCw className="h-4 w-4" />
+        </button>
       </div>
 
       {/* Column headers */}
@@ -72,9 +124,13 @@ export default function PaymentGatewaysPanel() {
         ))}
 
         {gateways.length === 0 && (
-          <div className="rounded-xl border border-border bg-card p-8 text-center">
-            <CreditCard className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
+          <div className="rounded-xl border border-border bg-card p-8 text-center space-y-3">
+            <CreditCard className="h-8 w-8 text-muted-foreground/30 mx-auto" />
             <p className="text-sm text-muted-foreground">No gateways configured</p>
+            <button onClick={seedGateways} disabled={seeding} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-60">
+              {seeding ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+              Add Default Gateways
+            </button>
           </div>
         )}
       </div>

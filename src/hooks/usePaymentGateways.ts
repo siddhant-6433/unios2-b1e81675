@@ -11,12 +11,16 @@ export interface PaymentGateway {
 export function usePaymentGateways() {
   const [gateways, setGateways] = useState<PaymentGateway[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const refetch = async () => {
-    const { data } = await (supabase as any)
+    setLoading(true);
+    setError(null);
+    const { data, error: qErr } = await (supabase as any)
       .from("payment_gateway_config")
       .select("gateway, display_name, is_enabled_fee_collection, is_enabled_portal_payment")
       .order("gateway");
+    if (qErr) setError(qErr.message);
     setGateways((data as PaymentGateway[]) || []);
     setLoading(false);
   };
@@ -26,6 +30,7 @@ export function usePaymentGateways() {
   return {
     gateways,
     loading,
+    error,
     refetch,
     portalGateways: gateways.filter((g) => g.is_enabled_portal_payment),
     feeGateways:    gateways.filter((g) => g.is_enabled_fee_collection),
