@@ -20,3 +20,9 @@ verify_jwt = false
 
 [functions.process-passport-photo]
 verify_jwt = false
+
+[functions.set-user-password]
+verify_jwt = false
+
+[functions.cashfree-payment]
+verify_jwt = false

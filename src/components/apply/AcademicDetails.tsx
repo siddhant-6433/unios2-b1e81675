@@ -189,6 +189,7 @@ function AcademicBlock({
   showDegreeSelector,
   validationErrors,
   yearError,
+  maxYear,
   removable,
   onRemove,
   dobYear,
@@ -217,14 +218,23 @@ function AcademicBlock({
 
   const fieldError = validationErrors?.find(e => e.field === prefix || e.field === 'class_12');
 
-  // Flag custom board/university
+  // Board change — handles explicit "Other (not in list)" selection
   const handleBoardChange = (vals: string[]) => {
     const board = vals[vals.length - 1] || '';
-    update('board', board);
+    if (board === 'Other (not in list)') {
+      onChange({ ...academic, [prefix]: { ...data, board: 'Other', board_other: '' } });
+    } else {
+      onChange({ ...academic, [prefix]: { ...data, board, board_other: undefined } });
+    }
   };
+  // University change — handles explicit "Other (not in list)" selection
   const handleUniversityChange = (vals: string[]) => {
     const uni = vals[vals.length - 1] || '';
-    update('university', uni);
+    if (uni === 'Other (not in list)') {
+      onChange({ ...academic, [prefix]: { ...data, university: 'Other', university_other: '' } });
+    } else {
+      onChange({ ...academic, [prefix]: { ...data, university: uni, university_other: undefined } });
+    }
   };
 
   return (
@@ -260,12 +270,25 @@ function AcademicBlock({
             <div>
               <SubjectTagInput
                 label="University"
-                options={UNIVERSITIES_LIST}
-                selected={data.university ? [data.university] : []}
+                options={[...UNIVERSITIES_LIST, 'Other (not in list)']}
+                selected={data.university === 'Other' ? ['Other (not in list)'] : data.university ? [data.university] : []}
                 onChange={handleUniversityChange}
                 placeholder="Search university…"
-                allowCustom
+                allowCustom={false}
               />
+              {data.university === 'Other' && (
+                <div className="mt-2">
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                    Specify university name <span className="text-destructive">*</span>
+                  </label>
+                  <input
+                    value={data.university_other || ''}
+                    onChange={e => onChange({ ...academic, [prefix]: { ...data, university_other: e.target.value } })}
+                    placeholder="Enter full university name"
+                    className={inputCls}
+                  />
+                </div>
+              )}
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">College</label>
@@ -277,12 +300,25 @@ function AcademicBlock({
             <div>
               <SubjectTagInput
                 label="Board"
-                options={BOARDS_LIST}
-                selected={data.board ? [data.board] : []}
+                options={[...BOARDS_LIST, 'Other (not in list)']}
+                selected={data.board === 'Other' ? ['Other (not in list)'] : data.board ? [data.board] : []}
                 onChange={handleBoardChange}
                 placeholder="Search board…"
-                allowCustom
+                allowCustom={false}
               />
+              {data.board === 'Other' && (
+                <div className="mt-2">
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                    Specify board name <span className="text-destructive">*</span>
+                  </label>
+                  <input
+                    value={data.board_other || ''}
+                    onChange={e => onChange({ ...academic, [prefix]: { ...data, board_other: e.target.value } })}
+                    placeholder="Enter full board name"
+                    className={inputCls}
+                  />
+                </div>
+              )}
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">School</label>
@@ -764,6 +800,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
             validationErrors={firstCourseResults}
             yearError={yearErrorMap['class_12_year']}
             dobYear={dobYear}
+            maxYear={SESSION_YEAR}
           />
           <AcademicBlock
             title="Class 10"

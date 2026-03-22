@@ -3,8 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X
+import {
+  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X, KeyRound
 } from "lucide-react";
 import EligibilityConfigPanel from "@/components/admin/EligibilityConfigPanel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -12,8 +12,10 @@ import InviteUserDialog from "@/components/admin/InviteUserDialog";
 import BulkImportDialog from "@/components/admin/BulkImportDialog";
 import EditPhoneDialog from "@/components/admin/EditPhoneDialog";
 import EmployeeProfileDialog from "@/components/admin/EmployeeProfileDialog";
+import SetPasswordDialog from "@/components/admin/SetPasswordDialog";
 import TeamManagement from "@/components/admin/TeamManagement";
 import CourseCampusMaster from "@/components/admin/CourseCampusMaster";
+import FinancialGroupsPanel from "@/components/admin/FinancialGroupsPanel";
 import type { Database } from "@/integrations/supabase/types";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
@@ -56,6 +58,7 @@ const AdminPanel = () => {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [phoneEdit, setPhoneEdit] = useState<{ userId: string; name: string; phone: string | null } | null>(null);
   const [employeeProfile, setEmployeeProfile] = useState<{ userId: string; name: string } | null>(null);
+  const [setPasswordTarget, setSetPasswordTarget] = useState<{ userId: string; name: string } | null>(null);
   const { toast } = useToast();
 
   const fetchUsers = async () => {
@@ -193,6 +196,9 @@ const AdminPanel = () => {
           <TabsTrigger value="eligibility" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
             Eligibility Config
           </TabsTrigger>
+          <TabsTrigger value="financial-groups" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
+            Financial Groups
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="users" className="mt-6">
@@ -289,10 +295,17 @@ const AdminPanel = () => {
                                 <Eye className="h-3.5 w-3.5" />{user.role === "student" ? "Student" : "Profile"}
                               </button>
                               {!isEditing && (
-                                <button onClick={() => setEditingUser(user.user_id)}
-                                  className="rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors">
-                                  Change Role
-                                </button>
+                                <>
+                                  <button onClick={() => setSetPasswordTarget({ userId: user.user_id, name: user.display_name || "User" })}
+                                    className="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/80 transition-colors flex items-center gap-1"
+                                    title="Set password">
+                                    <KeyRound className="h-3.5 w-3.5" />Password
+                                  </button>
+                                  <button onClick={() => setEditingUser(user.user_id)}
+                                    className="rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors">
+                                    Change Role
+                                  </button>
+                                </>
                               )}
                             </div>
                           </td>
@@ -310,6 +323,8 @@ const AdminPanel = () => {
               userId={phoneEdit?.userId || ""} userName={phoneEdit?.name || ""} currentPhone={phoneEdit?.phone || null} />
             <EmployeeProfileDialog open={!!employeeProfile} onClose={() => setEmployeeProfile(null)}
               userId={employeeProfile?.userId || ""} userName={employeeProfile?.name || ""} />
+            <SetPasswordDialog open={!!setPasswordTarget} onClose={() => setSetPasswordTarget(null)}
+              userId={setPasswordTarget?.userId || ""} userName={setPasswordTarget?.name || ""} />
           </div>
         </TabsContent>
 
@@ -323,6 +338,10 @@ const AdminPanel = () => {
 
         <TabsContent value="eligibility" className="mt-6">
           <EligibilityConfigPanel />
+        </TabsContent>
+
+        <TabsContent value="financial-groups" className="mt-6">
+          <FinancialGroupsPanel />
         </TabsContent>
       </Tabs>
     </div>

@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Building2, GraduationCap, Pencil, Check, X, Plus, Loader2, ChevronDown, ChevronRight, Shield,
+  Building2, GraduationCap, Pencil, Check, X, Plus, Loader2,
+  ChevronDown, ChevronRight, Shield, MapPin,
 } from "lucide-react";
 import EligibilityRuleDialog, { EligibilityRuleRow } from "./EligibilityRuleDialog";
 
@@ -19,7 +20,7 @@ interface Department {
   id: string; name: string; code: string; institution_id: string;
 }
 interface Course {
-  id: string; name: string; code: string; department_id: string; duration_years: number; type: string;
+  id: string; name: string; code: string; department_id: string; duration_years: number; type: string; is_active?: boolean;
 }
 
 export default function CourseCampusMaster() {
@@ -30,19 +31,21 @@ export default function CourseCampusMaster() {
   const [courses, setCourses] = useState<Course[]>([]);
   const [eligibilityRules, setEligibilityRules] = useState<Record<string, EligibilityRuleRow>>({});
   const [loading, setLoading] = useState(true);
-  const [expandedCampus, setExpandedCampus] = useState<string | null>(null);
-  const [expandedDept, setExpandedDept] = useState<string | null>(null);
+
+  // Expand states — one at a time per level
+  const [expandedInstitution, setExpandedInstitution] = useState<Set<string>>(new Set());
+  const [expandedDept, setExpandedDept] = useState<Set<string>>(new Set());
 
   // Edit states
-  const [editingCampus, setEditingCampus] = useState<string | null>(null);
+  const [editingInstitution, setEditingInstitution] = useState<string | null>(null);
   const [editingCourse, setEditingCourse] = useState<string | null>(null);
-  const [campusDraft, setCampusDraft] = useState<Partial<Campus>>({});
+  const [institutionDraft, setInstitutionDraft] = useState<Partial<Institution>>({});
   const [courseDraft, setCourseDraft] = useState<Partial<Course>>({});
 
   // Add states
   const [addingCampus, setAddingCampus] = useState(false);
-  const [addingDept, setAddingDept] = useState<string | null>(null);
-  const [addingCourse, setAddingCourse] = useState<string | null>(null);
+  const [addingDept, setAddingDept] = useState<string | null>(null);   // institution id
+  const [addingCourse, setAddingCourse] = useState<string | null>(null); // dept id
   const [newCampus, setNewCampus] = useState({ name: "", code: "", city: "", state: "" });
   const [newDept, setNewDept] = useState({ name: "", code: "" });
   const [newCourse, setNewCourse] = useState({ name: "", code: "", duration_years: 3, type: "semester" });
@@ -68,23 +71,31 @@ export default function CourseCampusMaster() {
     if (co.data) setCourses(co.data);
     if (er.data) {
       const map: Record<string, EligibilityRuleRow> = {};
-      for (const row of er.data as unknown as EligibilityRuleRow[]) {
-        map[row.course_id] = row;
-      }
+      for (const row of er.data as unknown as EligibilityRuleRow[]) map[row.course_id] = row;
       setEligibilityRules(map);
     }
     setLoading(false);
   };
 
+  const toggleInstitution = (id: string) => {
+    setExpandedInstitution(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleDept = (id: string) => {
+    setExpandedDept(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
   const inputCls = "rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 
   // ── Campus CRUD ──
-  const saveCampus = async (id: string) => {
-    const { error } = await supabase.from("campuses").update(campusDraft).eq("id", id);
-    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
-    toast({ title: "Campus updated" }); setEditingCampus(null); fetchAll();
-  };
-
   const addCampus = async () => {
     if (!newCampus.name || !newCampus.code) return;
     const { data: campusData, error } = await supabase.from("campuses").insert({
@@ -95,6 +106,13 @@ export default function CourseCampusMaster() {
       name: newCampus.name, code: newCampus.code, campus_id: campusData.id, type: "college",
     });
     toast({ title: "Campus added" }); setAddingCampus(false); setNewCampus({ name: "", code: "", city: "", state: "" }); fetchAll();
+  };
+
+  // ── Institution CRUD ──
+  const saveInstitution = async (id: string) => {
+    const { error } = await supabase.from("institutions").update(institutionDraft).eq("id", id);
+    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+    toast({ title: "Institution updated" }); setEditingInstitution(null); fetchAll();
   };
 
   // ── Department CRUD ──
@@ -142,25 +160,222 @@ export default function CourseCampusMaster() {
     if (rule.subject_prerequisites?.length) badges.push(rule.subject_prerequisites.join("/"));
     if (!badges.length) return null;
     return (
-      <div className="flex items-center gap-1 flex-wrap">
+      <div className="flex items-center gap-1 flex-wrap mt-1 pl-6">
         {badges.map((b, i) => (
-          <Badge key={i} variant="outline" className="text-[9px] px-1.5 py-0 h-4 bg-muted/50">{b}</Badge>
+          <Badge key={i} variant="outline" className="text-[9px] px-1.5 py-0 h-4 bg-primary/5 text-primary border-primary/20">{b}</Badge>
         ))}
       </div>
     );
   };
 
-  if (loading) return <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (loading) return (
+    <div className="flex items-center justify-center py-16">
+      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+    </div>
+  );
+
+  // Group institutions by campus
+  const campusMap = new Map(campuses.map(c => [c.id, c]));
+  const institutionsByCampus = new Map<string, Institution[]>();
+  for (const inst of institutions) {
+    const arr = institutionsByCampus.get(inst.campus_id) || [];
+    arr.push(inst);
+    institutionsByCampus.set(inst.campus_id, arr);
+  }
+  // Also track "orphan" institutions (campus_id not in campuses list)
+  const knownCampusIds = new Set(campuses.map(c => c.id));
+  const orphanInstitutions = institutions.filter(i => !knownCampusIds.has(i.campus_id));
+
+  const renderDepartments = (inst: Institution) => {
+    const instDepts = departments.filter(d => d.institution_id === inst.id);
+    return (
+      <>
+        {instDepts.map(dept => {
+          const deptCourses = courses.filter(co => co.department_id === dept.id);
+          const isDeptExpanded = expandedDept.has(dept.id);
+          return (
+            <div key={dept.id} className="border-b border-border/40 last:border-0">
+              {/* Department row */}
+              <div
+                className="flex items-center gap-2.5 py-2.5 px-4 cursor-pointer hover:bg-muted/20 transition-colors"
+                onClick={() => toggleDept(dept.id)}
+              >
+                {isDeptExpanded
+                  ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                <span className="text-sm font-medium text-foreground">{dept.name}</span>
+                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{dept.code}</span>
+                <span className="text-xs text-muted-foreground ml-auto">{deptCourses.length} courses</span>
+              </div>
+
+              {/* Courses */}
+              {isDeptExpanded && (
+                <div className="pb-2 pl-8">
+                  {deptCourses.map(course => {
+                    const isCourseEditing = editingCourse === course.id;
+                    const hasRule = !!eligibilityRules[course.id];
+                    return (
+                      <div key={course.id} className="mb-1">
+                        <div className="flex items-center gap-2.5 py-1.5 px-3 rounded-lg hover:bg-muted/30 group">
+                          <GraduationCap className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          {isCourseEditing ? (
+                            <div className="flex items-center gap-2 flex-1" onClick={e => e.stopPropagation()}>
+                              <input value={courseDraft.name || ""} onChange={e => setCourseDraft({ ...courseDraft, name: e.target.value })} className={`${inputCls} flex-1`} />
+                              <input value={courseDraft.code || ""} onChange={e => setCourseDraft({ ...courseDraft, code: e.target.value })} className={`${inputCls} w-20`} placeholder="Code" />
+                              <input type="number" value={courseDraft.duration_years || 1} onChange={e => setCourseDraft({ ...courseDraft, duration_years: Number(e.target.value) })} className={`${inputCls} w-14`} min={1} />
+                              <button onClick={() => saveCourse(course.id)} className="text-primary p-0.5"><Check className="h-3.5 w-3.5" /></button>
+                              <button onClick={() => setEditingCourse(null)} className="text-muted-foreground p-0.5"><X className="h-3.5 w-3.5" /></button>
+                            </div>
+                          ) : (
+                            <>
+                              <span className="text-sm text-foreground flex-1 leading-snug">{course.name}</span>
+                              <span className="text-[10px] text-muted-foreground shrink-0 hidden sm:block">
+                                {course.code} · {course.duration_years}yr · {course.type}
+                              </span>
+                              <span className={`h-2 w-2 rounded-full shrink-0 ${course.is_active !== false ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} title={course.is_active !== false ? 'Active' : 'Inactive'} />
+                              <button
+                                onClick={e => { e.stopPropagation(); openRuleDialog(course); }}
+                                className={`p-0.5 transition-opacity ${hasRule ? 'text-primary' : 'text-muted-foreground opacity-0 group-hover:opacity-100'}`}
+                                title="Eligibility Rules"
+                              >
+                                <Shield className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                onClick={e => { e.stopPropagation(); setEditingCourse(course.id); setCourseDraft({ name: course.name, code: course.code, duration_years: course.duration_years }); }}
+                                className="text-muted-foreground hover:text-primary p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                        {renderRuleBadges(course.id)}
+                      </div>
+                    );
+                  })}
+
+                  {/* Add Course */}
+                  {addingCourse === dept.id ? (
+                    <div className="flex items-center gap-2 px-3 pt-1 flex-wrap">
+                      <input placeholder="Course name *" value={newCourse.name} onChange={e => setNewCourse({ ...newCourse, name: e.target.value })} className={`${inputCls} flex-1 min-w-32`} />
+                      <input placeholder="Code *" value={newCourse.code} onChange={e => setNewCourse({ ...newCourse, code: e.target.value })} className={`${inputCls} w-20`} />
+                      <input type="number" value={newCourse.duration_years} onChange={e => setNewCourse({ ...newCourse, duration_years: Number(e.target.value) })} className={`${inputCls} w-14`} min={1} />
+                      <select value={newCourse.type} onChange={e => setNewCourse({ ...newCourse, type: e.target.value })} className={`${inputCls} w-24`}>
+                        <option value="semester">Semester</option>
+                        <option value="annual">Annual</option>
+                        <option value="quarterly">Quarterly</option>
+                      </select>
+                      <button onClick={() => addCourse(dept.id)} className="text-primary p-0.5"><Check className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => setAddingCourse(null)} className="text-muted-foreground p-0.5"><X className="h-3.5 w-3.5" /></button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setAddingCourse(dept.id)}
+                      className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 px-3 pt-1 pb-0.5 transition-colors"
+                    >
+                      <Plus className="h-3 w-3" /> Add Course
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Add Department */}
+        {addingDept === inst.id ? (
+          <div className="flex items-center gap-2 px-4 py-3">
+            <input placeholder="Department name *" value={newDept.name} onChange={e => setNewDept({ ...newDept, name: e.target.value })} className={`${inputCls} flex-1`} />
+            <input placeholder="Code *" value={newDept.code} onChange={e => setNewDept({ ...newDept, code: e.target.value })} className={`${inputCls} w-24`} />
+            <button onClick={() => addDepartment(inst.id)} className="text-primary p-0.5"><Check className="h-3.5 w-3.5" /></button>
+            <button onClick={() => setAddingDept(null)} className="text-muted-foreground p-0.5"><X className="h-3.5 w-3.5" /></button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setAddingDept(inst.id)}
+            className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 px-4 py-3 transition-colors"
+          >
+            <Plus className="h-3 w-3" /> Add Department
+          </button>
+        )}
+      </>
+    );
+  };
+
+  const renderInstitutionCard = (inst: Institution, campus?: Campus) => {
+    const instDepts = departments.filter(d => d.institution_id === inst.id);
+    const courseCount = courses.filter(co => instDepts.some(d => d.id === co.department_id)).length;
+    const isExpanded = expandedInstitution.has(inst.id);
+    const isEditing = editingInstitution === inst.id;
+
+    return (
+      <Card key={inst.id} className="border-border/60 overflow-hidden">
+        {/* Institution header */}
+        <div
+          className="flex items-center gap-3 px-5 py-4 cursor-pointer hover:bg-muted/30 transition-colors"
+          onClick={() => !isEditing && toggleInstitution(inst.id)}
+        >
+          {isExpanded
+            ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+            : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />}
+          <Building2 className="h-5 w-5 text-primary shrink-0" />
+
+          <div className="flex-1 min-w-0">
+            {isEditing ? (
+              <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                <input value={institutionDraft.name || ""} onChange={e => setInstitutionDraft({ ...institutionDraft, name: e.target.value })} className={`${inputCls} flex-1`} placeholder="Name" />
+                <input value={institutionDraft.code || ""} onChange={e => setInstitutionDraft({ ...institutionDraft, code: e.target.value })} className={`${inputCls} w-28`} placeholder="Code" />
+                <button onClick={() => saveInstitution(inst.id)} className="text-primary p-1"><Check className="h-4 w-4" /></button>
+                <button onClick={() => setEditingInstitution(null)} className="text-muted-foreground p-1"><X className="h-4 w-4" /></button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-foreground text-sm leading-snug">{inst.name}</span>
+                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">{inst.code}</span>
+                {campus && (campus.city || campus.state) && (
+                  <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
+                    <MapPin className="h-3 w-3" />
+                    {[campus.city, campus.state].filter(Boolean).join(", ")}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
+          <span className="text-xs text-muted-foreground shrink-0 hidden sm:block">
+            {instDepts.length} depts · {courseCount} courses
+          </span>
+          {!isEditing && (
+            <button
+              onClick={e => { e.stopPropagation(); setEditingInstitution(inst.id); setInstitutionDraft({ name: inst.name, code: inst.code }); }}
+              className="text-muted-foreground hover:text-primary p-1 shrink-0 transition-colors"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Departments & Courses */}
+        {isExpanded && (
+          <div className="border-t border-border/60">
+            {renderDepartments(inst)}
+          </div>
+        )}
+      </Card>
+    );
+  };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">Manage your campus hierarchy: Campus → Department → Course</p>
+        <p className="text-sm text-muted-foreground">Manage your institution hierarchy: Institution → Department → Course</p>
         <Button onClick={() => setAddingCampus(true)} size="sm" className="gap-1.5 rounded-xl">
           <Plus className="h-3.5 w-3.5" /> Add Campus
         </Button>
       </div>
 
+      {/* Add Campus form */}
       {addingCampus && (
         <Card className="border-primary/30">
           <CardContent className="p-4 space-y-2">
@@ -172,156 +387,67 @@ export default function CourseCampusMaster() {
               <input placeholder="State" value={newCampus.state} onChange={e => setNewCampus({ ...newCampus, state: e.target.value })} className={inputCls} />
             </div>
             <div className="flex gap-2">
-              <Button onClick={addCampus} size="sm" disabled={!newCampus.name || !newCampus.code} className="gap-1 h-8 rounded-lg"><Check className="h-3.5 w-3.5" /> Add</Button>
-              <Button onClick={() => setAddingCampus(false)} size="sm" variant="ghost" className="h-8 rounded-lg"><X className="h-3.5 w-3.5" /></Button>
+              <Button onClick={addCampus} size="sm" disabled={!newCampus.name || !newCampus.code} className="gap-1 h-8 rounded-lg">
+                <Check className="h-3.5 w-3.5" /> Add
+              </Button>
+              <Button onClick={() => setAddingCampus(false)} size="sm" variant="ghost" className="h-8 rounded-lg">
+                <X className="h-3.5 w-3.5" />
+              </Button>
             </div>
           </CardContent>
         </Card>
       )}
 
+      {/* Campuses and their institutions */}
       {campuses.map(campus => {
-        const isExpanded = expandedCampus === campus.id;
-        const campusInstitutions = institutions.filter(i => i.campus_id === campus.id);
-        const campusDepts = departments.filter(d => campusInstitutions.some(i => i.id === d.institution_id));
-        const courseCount = courses.filter(co => campusDepts.some(d => d.id === co.department_id)).length;
-        const isEditing = editingCampus === campus.id;
-
-        return (
-          <Card key={campus.id} className="border-border/60 overflow-hidden">
-            <div
-              className="flex items-center gap-3 px-5 py-4 cursor-pointer hover:bg-muted/30 transition-colors"
-              onClick={() => setExpandedCampus(isExpanded ? null : campus.id)}
-            >
-              {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />}
-              <Building2 className="h-5 w-5 text-primary shrink-0" />
-              <div className="flex-1 min-w-0">
-                {isEditing ? (
-                  <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
-                    <input value={campusDraft.name || ""} onChange={e => setCampusDraft({ ...campusDraft, name: e.target.value })} className={`${inputCls} flex-1`} />
-                    <input value={campusDraft.city || ""} onChange={e => setCampusDraft({ ...campusDraft, city: e.target.value })} placeholder="City" className={`${inputCls} w-28`} />
-                    <input value={campusDraft.state || ""} onChange={e => setCampusDraft({ ...campusDraft, state: e.target.value })} placeholder="State" className={`${inputCls} w-28`} />
-                    <button onClick={() => saveCampus(campus.id)} className="text-primary p-1"><Check className="h-4 w-4" /></button>
-                    <button onClick={() => setEditingCampus(null)} className="text-muted-foreground p-1"><X className="h-4 w-4" /></button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-foreground">{campus.name}</span>
-                    <span className="text-xs text-muted-foreground">({campus.code})</span>
-                    {campus.city && <span className="text-xs text-muted-foreground">· {campus.city}{campus.state ? `, ${campus.state}` : ""}</span>}
-                  </div>
+        const campusInstitutions = institutionsByCampus.get(campus.id) || [];
+        if (campusInstitutions.length === 0) {
+          return (
+            <div key={campus.id}>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{campus.name}</span>
+                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{campus.code}</span>
+                {(campus.city || campus.state) && (
+                  <span className="text-xs text-muted-foreground">{[campus.city, campus.state].filter(Boolean).join(", ")}</span>
                 )}
+                <span className="text-xs text-muted-foreground">— no institutions</span>
               </div>
-              <span className="text-xs text-muted-foreground shrink-0">{campusDepts.length} depts · {courseCount} courses</span>
-              {!isEditing && (
-                <button onClick={e => { e.stopPropagation(); setEditingCampus(campus.id); setCampusDraft({ name: campus.name, city: campus.city, state: campus.state }); }}
-                  className="text-muted-foreground hover:text-primary p-1 shrink-0"><Pencil className="h-3.5 w-3.5" /></button>
+            </div>
+          );
+        }
+        return (
+          <div key={campus.id} className="space-y-2">
+            {/* Campus label */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{campus.name}</span>
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{campus.code}</span>
+              {(campus.city || campus.state) && (
+                <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
+                  <MapPin className="h-3 w-3" />
+                  {[campus.city, campus.state].filter(Boolean).join(", ")}
+                </span>
               )}
             </div>
-
-            {isExpanded && (
-              <div className="border-t border-border">
-                {campusInstitutions.map(inst => {
-                  const instDepts = departments.filter(d => d.institution_id === inst.id);
-                  return (
-                    <div key={inst.id} className="pl-12 pr-5">
-                      {instDepts.map(dept => {
-                        const deptCourses = courses.filter(co => co.department_id === dept.id);
-                        const isDeptExpanded = expandedDept === dept.id;
-                        return (
-                          <div key={dept.id} className="border-b border-border/50 last:border-0">
-                            <div
-                              className="flex items-center gap-3 py-3 cursor-pointer hover:bg-muted/20 transition-colors"
-                              onClick={() => setExpandedDept(isDeptExpanded ? null : dept.id)}
-                            >
-                              {isDeptExpanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
-                              <span className="text-sm font-medium text-foreground">{dept.name}</span>
-                              <span className="text-[11px] text-muted-foreground">({dept.code}) · {deptCourses.length} courses</span>
-                            </div>
-
-                            {isDeptExpanded && (
-                              <div className="pl-7 pb-3 space-y-1">
-                                {deptCourses.map(course => {
-                                  const isCourseEditing = editingCourse === course.id;
-                                  const hasRule = !!eligibilityRules[course.id];
-                                  return (
-                                    <div key={course.id} className="space-y-1">
-                                      <div className="flex items-center gap-3 py-1.5 px-3 rounded-lg hover:bg-muted/30 group">
-                                        <GraduationCap className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                                        {isCourseEditing ? (
-                                          <div className="flex items-center gap-2 flex-1" onClick={e => e.stopPropagation()}>
-                                            <input value={courseDraft.name || ""} onChange={e => setCourseDraft({ ...courseDraft, name: e.target.value })} className={`${inputCls} flex-1`} />
-                                            <input value={courseDraft.code || ""} onChange={e => setCourseDraft({ ...courseDraft, code: e.target.value })} className={`${inputCls} w-20`} placeholder="Code" />
-                                            <input type="number" value={courseDraft.duration_years || 1} onChange={e => setCourseDraft({ ...courseDraft, duration_years: Number(e.target.value) })} className={`${inputCls} w-16`} min={1} />
-                                            <button onClick={() => saveCourse(course.id)} className="text-primary p-0.5"><Check className="h-3.5 w-3.5" /></button>
-                                            <button onClick={() => setEditingCourse(null)} className="text-muted-foreground p-0.5"><X className="h-3.5 w-3.5" /></button>
-                                          </div>
-                                        ) : (
-                                          <>
-                                            <span className="text-sm text-foreground flex-1">{course.name}</span>
-                                            <span className="text-[11px] text-muted-foreground">{course.code} · {course.duration_years}yr · {course.type}</span>
-                                            <button onClick={e => { e.stopPropagation(); openRuleDialog(course); }}
-                                              className={`p-0.5 transition-opacity ${hasRule ? 'text-primary' : 'text-muted-foreground opacity-0 group-hover:opacity-100'}`}
-                                              title="Eligibility Rules">
-                                              <Shield className="h-3.5 w-3.5" />
-                                            </button>
-                                            <button onClick={e => { e.stopPropagation(); setEditingCourse(course.id); setCourseDraft({ name: course.name, code: course.code, duration_years: course.duration_years }); }}
-                                              className="text-muted-foreground hover:text-primary p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><Pencil className="h-3 w-3" /></button>
-                                          </>
-                                        )}
-                                      </div>
-                                      {renderRuleBadges(course.id) && (
-                                        <div className="px-3 pl-10">{renderRuleBadges(course.id)}</div>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-
-                                {addingCourse === dept.id ? (
-                                  <div className="flex items-center gap-2 px-3 pt-1">
-                                    <input placeholder="Course name *" value={newCourse.name} onChange={e => setNewCourse({ ...newCourse, name: e.target.value })} className={`${inputCls} flex-1`} />
-                                    <input placeholder="Code *" value={newCourse.code} onChange={e => setNewCourse({ ...newCourse, code: e.target.value })} className={`${inputCls} w-20`} />
-                                    <input type="number" value={newCourse.duration_years} onChange={e => setNewCourse({ ...newCourse, duration_years: Number(e.target.value) })} className={`${inputCls} w-16`} min={1} />
-                                    <select value={newCourse.type} onChange={e => setNewCourse({ ...newCourse, type: e.target.value })} className={`${inputCls} w-24`}>
-                                      <option value="semester">Semester</option>
-                                      <option value="annual">Annual</option>
-                                      <option value="quarterly">Quarterly</option>
-                                    </select>
-                                    <button onClick={() => addCourse(dept.id)} className="text-primary p-0.5"><Check className="h-3.5 w-3.5" /></button>
-                                    <button onClick={() => setAddingCourse(null)} className="text-muted-foreground p-0.5"><X className="h-3.5 w-3.5" /></button>
-                                  </div>
-                                ) : (
-                                  <button onClick={() => setAddingCourse(dept.id)}
-                                    className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 px-3 pt-1 transition-colors">
-                                    <Plus className="h-3 w-3" /> Add Course
-                                  </button>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-
-                      {addingDept === inst.id ? (
-                        <div className="flex items-center gap-2 py-3">
-                          <input placeholder="Department name *" value={newDept.name} onChange={e => setNewDept({ ...newDept, name: e.target.value })} className={`${inputCls} flex-1`} />
-                          <input placeholder="Code *" value={newDept.code} onChange={e => setNewDept({ ...newDept, code: e.target.value })} className={`${inputCls} w-20`} />
-                          <button onClick={() => addDepartment(inst.id)} className="text-primary p-0.5"><Check className="h-3.5 w-3.5" /></button>
-                          <button onClick={() => setAddingDept(null)} className="text-muted-foreground p-0.5"><X className="h-3.5 w-3.5" /></button>
-                        </div>
-                      ) : (
-                        <button onClick={() => setAddingDept(inst.id)}
-                          className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 py-3 transition-colors">
-                          <Plus className="h-3 w-3" /> Add Department
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </Card>
+            {/* Institution cards */}
+            {campusInstitutions.map(inst => renderInstitutionCard(inst, campus))}
+          </div>
         );
       })}
+
+      {/* Orphan institutions (campus deleted or not linked) */}
+      {orphanInstitutions.length > 0 && (
+        <div className="space-y-2">
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Other Institutions</span>
+          {orphanInstitutions.map(inst => renderInstitutionCard(inst))}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {campuses.length === 0 && institutions.length === 0 && (
+        <div className="text-center py-16 text-muted-foreground text-sm">
+          No campuses or institutions found. Click <strong>Add Campus</strong> to get started.
+        </div>
+      )}
 
       {/* Eligibility Rule Dialog */}
       {ruleDialogCourse && (

@@ -203,14 +203,35 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
               </>
             ) : (
               <>
-                {(academic as any).class_10?.board && <Row label="Class 10 Board" value={(academic as any).class_10.board} />}
-                {(academic as any).class_10?.year && <Row label="Class 10 Year" value={(academic as any).class_10.year} />}
-                {(academic as any).class_10?.marks && <Row label="Class 10 Marks" value={(academic as any).class_10.marks} />}
-                {(academic as any).class_12?.board && <Row label="Class 12 Board" value={(academic as any).class_12.board} />}
+                {/* Class 12 — shown first */}
+                {(academic as any).class_12?.board && (
+                  <Row label="Class 12 Board" value={
+                    (academic as any).class_12.board === 'Other'
+                      ? `Other (not in list) — ${(academic as any).class_12.board_other || 'not specified'}`
+                      : (academic as any).class_12.board
+                  } />
+                )}
                 {(academic as any).class_12?.year && <Row label="Class 12 Year" value={(academic as any).class_12.year} />}
                 {(academic as any).class_12?.marks && <Row label="Class 12 Marks" value={(academic as any).class_12.marks} />}
                 {(academic as any).class_12?.subjects && <Row label="Class 12 Subjects" value={(academic as any).class_12.subjects} />}
-                {(academic as any).graduation?.degree && <Row label="Graduation" value={`${(academic as any).graduation.degree} — ${(academic as any).graduation.university || ''}`} />}
+                {/* Class 10 — shown after Class 12 */}
+                {(academic as any).class_10?.board && (
+                  <Row label="Class 10 Board" value={
+                    (academic as any).class_10.board === 'Other'
+                      ? `Other (not in list) — ${(academic as any).class_10.board_other || 'not specified'}`
+                      : (academic as any).class_10.board
+                  } />
+                )}
+                {(academic as any).class_10?.year && <Row label="Class 10 Year" value={(academic as any).class_10.year} />}
+                {(academic as any).class_10?.marks && <Row label="Class 10 Marks" value={(academic as any).class_10.marks} />}
+                {/* Graduation */}
+                {(academic as any).graduation?.degree && (
+                  <Row label="Graduation" value={`${(academic as any).graduation.degree} — ${
+                    (academic as any).graduation.university === 'Other'
+                      ? `Other (not in list) — ${(academic as any).graduation.university_other || 'not specified'}`
+                      : (academic as any).graduation.university || ''
+                  }`} />
+                )}
                 {(academic as any).graduation?.marks && <Row label="Graduation Marks" value={(academic as any).graduation.marks} />}
               </>
             )}

@@ -66,7 +66,8 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
       }
       if (portal.campusKeywords && portal.campusKeywords.length > 0) {
         const campusName = (c.departments?.institutions?.campuses?.name || "").toLowerCase();
-        if (!portal.campusKeywords.some(kw => campusName.includes(kw))) return false;
+        const instName = (c.departments?.institutions?.name || "").toLowerCase();
+        if (!portal.campusKeywords.some(kw => campusName.includes(kw) || instName.includes(kw))) return false;
       }
       return true;
     });
