@@ -40,12 +40,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [role, setRole] = useState<AppRole | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchUserData = async (userId: string) => {
+  const fetchUserData = async (userId: string, userEmail?: string) => {
     const [profileRes, roleRes] = await Promise.all([
       supabase.from("profiles").select("display_name, phone, avatar_url, campus, department, institution").eq("user_id", userId).single(),
       supabase.rpc("get_user_role", { _user_id: userId }),
     ]);
-    if (profileRes.data) setProfile(profileRes.data);
+
+    if (profileRes.data) {
+      setProfile(profileRes.data);
+    } else {
+      // Profile missing (user created outside normal signup flow) — create it now
+      const { data: upserted } = await supabase
+        .from("profiles")
+        .upsert({ user_id: userId, display_name: userEmail ?? userId }, { onConflict: "user_id" })
+        .select("display_name, phone, avatar_url, campus, department, institution")
+        .single();
+      if (upserted) setProfile(upserted);
+    }
+
     if (roleRes.data) setRole(roleRes.data as AppRole);
   };
 
@@ -55,7 +67,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setSession(session);
         if (session?.user) {
           // Use setTimeout to avoid Supabase client deadlock
-          setTimeout(() => fetchUserData(session.user.id), 0);
+          setTimeout(() => fetchUserData(session.user.id, session.user.email), 0);
         } else {
           setProfile(null);
           setRole(null);
@@ -67,7 +79,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session?.user) {
-        fetchUserData(session.user.id);
+        fetchUserData(session.user.id, session.user.email);
       }
       setLoading(false);
     });
