@@ -103,7 +103,7 @@ export function AppSidebar() {
   const isAdmissionActive = admissionSubMenu.some(item => isActive(item.url));
 
   const linkClass = "gap-3 rounded-lg px-3 py-2 text-[13px] font-medium text-sidebar-foreground/70 transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
-  const activeClass = "!bg-primary/8 !text-primary font-semibold border-l-2 !border-primary";
+  const activeClass = "!bg-sidebar-accent !text-sidebar-accent-foreground font-semibold";
   const subLinkClass = "gap-2.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium text-sidebar-foreground/70 transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
 
   return (
@@ -112,13 +112,12 @@ export function AppSidebar() {
         {/* Logo */}
         <div className="px-4 pb-2">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary shadow-sm">
-              <GraduationCap className="h-4.5 w-4.5 text-primary-foreground" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-foreground shadow-sm">
+              <GraduationCap className="h-4 w-4 text-background" />
             </div>
             {!collapsed && (
               <div className="flex flex-col">
                 <span className="text-sm font-bold text-foreground tracking-tight">NIMT UniOs</span>
-                <span className="text-[10px] text-muted-foreground">Education Platform</span>
               </div>
             )}
           </div>
@@ -252,7 +251,7 @@ export function AppSidebar() {
           {!collapsed && (
             <div className="border-t border-sidebar-border px-4 py-3">
               <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-orange-400 text-xs font-bold text-white">
                   {initials}
                 </div>
                 <div className="flex flex-col flex-1 min-w-0">
