@@ -33,6 +33,7 @@ const InviteUserDialog = ({ open, onClose, onSuccess }: InviteUserDialogProps) =
   const [displayName, setDisplayName] = useState("");
   const [campus, setCampus] = useState("");
   const [role, setRole] = useState<AppRole>("student");
+  const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
 
@@ -50,6 +51,7 @@ const InviteUserDialog = ({ open, onClose, onSuccess }: InviteUserDialogProps) =
           display_name: displayName.trim() || undefined,
           role,
           campus: campus.trim() || undefined,
+          password: password.trim() || undefined,
         },
       });
 
@@ -57,14 +59,17 @@ const InviteUserDialog = ({ open, onClose, onSuccess }: InviteUserDialogProps) =
       if (data?.error) throw new Error(data.error);
 
       toast({
-        title: "User invited",
-        description: `Invite sent to ${email}. They'll receive an email to set up their account.`,
+        title: password ? "User created" : "User invited",
+        description: password
+          ? `Account created for ${email}. They can log in immediately.`
+          : `Invite sent to ${email}. They'll receive an email to set up their account.`,
       });
 
       setEmail("");
       setDisplayName("");
       setCampus("");
       setRole("student");
+      setPassword("");
       onSuccess();
       onClose();
     } catch (err: any) {
@@ -150,6 +155,19 @@ const InviteUserDialog = ({ open, onClose, onSuccess }: InviteUserDialogProps) =
             </select>
           </div>
 
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+              Password <span className="text-muted-foreground/60 font-normal">(optional — skips email invite)</span>
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Set a password to create account immediately"
+              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+            />
+          </div>
+
           <div className="flex gap-3 pt-2">
             <button
               type="button"
@@ -167,12 +185,12 @@ const InviteUserDialog = ({ open, onClose, onSuccess }: InviteUserDialogProps) =
               {submitting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Sending…
+                  {password ? "Creating…" : "Sending…"}
                 </>
               ) : (
                 <>
                   <UserPlus className="h-4 w-4" />
-                  Send Invite
+                  {password ? "Create User" : "Send Invite"}
                 </>
               )}
             </button>

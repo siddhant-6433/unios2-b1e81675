@@ -53,7 +53,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { email, display_name, role, campus } = await req.json();
+    const { email, display_name, role, campus, password } = await req.json();
 
     if (!email || !role) {
       return new Response(
@@ -65,20 +65,42 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Create user via invite (sends invite email automatically)
-    const { data: newUser, error: inviteError } =
-      await adminClient.auth.admin.inviteUserByEmail(email, {
-        data: {
+    let newUser: any;
+
+    if (password) {
+      // Create user with password immediately (no email invite)
+      const { data, error } = await adminClient.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: {
           display_name: display_name || email,
           full_name: display_name || email,
         },
       });
-
-    if (inviteError) {
-      return new Response(JSON.stringify({ error: inviteError.message }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      if (error) {
+        return new Response(JSON.stringify({ error: error.message }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      newUser = data;
+    } else {
+      // Send email invite
+      const { data, error: inviteError } =
+        await adminClient.auth.admin.inviteUserByEmail(email, {
+          data: {
+            display_name: display_name || email,
+            full_name: display_name || email,
+          },
+        });
+      if (inviteError) {
+        return new Response(JSON.stringify({ error: inviteError.message }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      newUser = data;
     }
 
     // Update profile with additional info
