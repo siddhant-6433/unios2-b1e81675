@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
@@ -21,9 +21,7 @@ const Students = () => {
   const [loading, setLoading] = useState(true);
   const { selectedCampusId } = useCampus();
 
-  useEffect(() => { fetchStudents(); }, [selectedCampusId]);
-
-  const fetchStudents = async () => {
+  const fetchStudents = useCallback(async () => {
     setLoading(true);
     let query = supabase
       .from("students")
@@ -32,7 +30,6 @@ const Students = () => {
       .limit(500);
     if (selectedCampusId !== "all") query = query.eq("campus_id", selectedCampusId);
     const { data } = await query;
-
     if (data) {
       setStudents(data.map((s: any) => ({
         ...s,
@@ -41,7 +38,9 @@ const Students = () => {
       })));
     }
     setLoading(false);
-  };
+  }, [selectedCampusId]);
+
+  useEffect(() => { fetchStudents(); }, [fetchStudents]);
 
   const filtered = students.filter(
     (s) =>
