@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
@@ -21,26 +21,26 @@ const Students = () => {
   const [loading, setLoading] = useState(true);
   const { selectedCampusId } = useCampus();
 
-  const fetchStudents = useCallback(async () => {
-    setLoading(true);
-    let query = supabase
-      .from("students")
-      .select("id, name, admission_no, pre_admission_no, status, phone, courses:course_id(name), campuses:campus_id(name)")
-      .order("created_at", { ascending: false })
-      .limit(500);
-    if (selectedCampusId !== "all") query = query.eq("campus_id", selectedCampusId);
-    const { data } = await query;
-    if (data) {
-      setStudents(data.map((s: any) => ({
-        ...s,
-        course_name: s.courses?.name || "—",
-        campus_name: s.campuses?.name || "—",
-      })));
-    }
-    setLoading(false);
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      let query = supabase
+        .from("students")
+        .select("id, name, admission_no, pre_admission_no, status, phone, courses:course_id(name), campuses:campus_id(name)")
+        .order("created_at", { ascending: false })
+        .limit(500);
+      if (selectedCampusId !== "all") query = query.eq("campus_id", selectedCampusId);
+      const { data } = await query;
+      if (data) {
+        setStudents(data.map((s: any) => ({
+          ...s,
+          course_name: s.courses?.name || "—",
+          campus_name: s.campuses?.name || "—",
+        })));
+      }
+      setLoading(false);
+    })();
   }, [selectedCampusId]);
-
-  useEffect(() => { fetchStudents(); }, [fetchStudents]);
 
   const filtered = students.filter(
     (s) =>

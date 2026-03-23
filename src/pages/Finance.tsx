@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useCampus } from "@/contexts/CampusContext";
 import {
   Search, Filter, IndianRupee, Download, Plus, CreditCard,
   FileText, BarChart3, AlertTriangle, CheckCircle, Clock,
@@ -37,14 +38,15 @@ const Finance = () => {
   const [structures, setStructures] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
+  const { selectedCampusId } = useCampus();
 
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => { fetchAll(); }, [selectedCampusId]);
 
   const fetchAll = async () => {
     setLoading(true);
     const [ledgerRes, paymentsRes, structRes] = await Promise.all([
-      supabase.from("fee_ledger").select("*, students:student_id(name, admission_no, pre_admission_no), fee_codes:fee_code_id(code, name, category)").order("due_date", { ascending: true }).limit(200),
-      supabase.from("payments").select("*, students:student_id(name, admission_no), profiles!recorded_by(display_name)").order("paid_at", { ascending: false }).limit(500),
+      supabase.from("fee_ledger").select("*, students:student_id(name, admission_no, pre_admission_no, campus_id), fee_codes:fee_code_id(code, name, category)").order("due_date", { ascending: true }).limit(200),
+      supabase.from("payments").select("*, students:student_id(name, admission_no, campus_id), profiles!recorded_by(display_name)").order("paid_at", { ascending: false }).limit(500),
       supabase.from("fee_structures").select("*, courses:course_id(name), admission_sessions:session_id(name), fee_structure_items(*, fee_codes:fee_code_id(code, name, category))").order("created_at", { ascending: false }),
     ]);
     if (ledgerRes.data) setLedger(ledgerRes.data);
@@ -53,16 +55,23 @@ const Finance = () => {
     setLoading(false);
   };
 
-  const filteredLedger = ledger.filter((f: any) => {
+  const filteredLedger = useMemo(() => ledger.filter((f: any) => {
+    if (selectedCampusId !== "all" && f.students?.campus_id !== selectedCampusId) return false;
     const name = f.students?.name || "";
     const admNo = f.students?.admission_no || f.students?.pre_admission_no || "";
     return name.toLowerCase().includes(search.toLowerCase()) || admNo.toLowerCase().includes(search.toLowerCase());
-  });
+  }), [ledger, search, selectedCampusId]);
 
-  const totalCollected = ledger.reduce((s: number, f: any) => s + Number(f.paid_amount || 0), 0);
-  const totalDue = ledger.reduce((s: number, f: any) => s + Number(f.balance || 0), 0);
-  const totalOverdue = ledger.filter((f: any) => f.status === "overdue").reduce((s: number, f: any) => s + Number(f.balance || 0), 0);
-  const paidCount = ledger.filter((f: any) => f.status === "paid").length;
+  const filteredPayments = useMemo(() =>
+    selectedCampusId === "all"
+      ? payments
+      : payments.filter((p: any) => p.students?.campus_id === selectedCampusId),
+  [payments, selectedCampusId]);
+
+  const totalCollected = filteredLedger.reduce((s: number, f: any) => s + Number(f.paid_amount || 0), 0);
+  const totalDue = filteredLedger.reduce((s: number, f: any) => s + Number(f.balance || 0), 0);
+  const totalOverdue = filteredLedger.filter((f: any) => f.status === "overdue").reduce((s: number, f: any) => s + Number(f.balance || 0), 0);
+  const paidCount = filteredLedger.filter((f: any) => f.status === "paid").length;
 
   const tabs = [
     { id: "ledger" as const,               label: "Fee Ledger",          icon: FileText },
@@ -94,7 +103,7 @@ const Finance = () => {
           { label: "Total Collected", value: `₹${(totalCollected / 100000).toFixed(1)}L`, sub: `${paidCount} items paid`, icon: IndianRupee, iconBg: "bg-pastel-green" },
           { label: "Total Due", value: `₹${(totalDue / 100000).toFixed(1)}L`, sub: "Pending balance", icon: Clock, iconBg: "bg-pastel-yellow" },
           { label: "Overdue", value: `₹${(totalOverdue / 100000).toFixed(1)}L`, sub: "Action required", icon: AlertTriangle, iconBg: "bg-pastel-red" },
-          { label: "Payments Today", value: String(payments.length), sub: "Transactions", icon: Receipt, iconBg: "bg-pastel-blue" },
+          { label: "Receipts", value: String(filteredPayments.length), sub: "Transactions", icon: Receipt, iconBg: "bg-pastel-blue" },
         ].map((stat) => (
           <Card key={stat.label} className="border-border/60 shadow-none hover:shadow-sm transition-shadow">
             <CardContent className="p-5">
@@ -186,7 +195,7 @@ const Finance = () => {
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base font-semibold">All Receipts</CardTitle>
-              <span className="text-xs text-muted-foreground">{payments.length} records</span>
+              <span className="text-xs text-muted-foreground">{filteredPayments.length} records</span>
             </div>
           </CardHeader>
           <CardContent className="p-0">
@@ -205,9 +214,9 @@ const Finance = () => {
                 </tr>
               </thead>
               <tbody>
-                {payments.length === 0 ? (
+                {filteredPayments.length === 0 ? (
                   <tr><td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">No receipts recorded</td></tr>
-                ) : payments.map((p: any) => (
+                ) : filteredPayments.map((p: any) => (
                   <tr key={p.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
                     <td className="px-4 py-3 font-mono text-xs text-primary font-semibold">{p.receipt_no || "—"}</td>
                     <td className="px-4 py-3">

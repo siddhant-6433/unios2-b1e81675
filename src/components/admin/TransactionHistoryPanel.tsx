@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useCampus } from "@/contexts/CampusContext";
 import {
   Search, RefreshCw, Download, Loader2, CheckCircle2, Clock,
   CreditCard, Banknote, Receipt, AlertCircle,
@@ -35,6 +36,7 @@ interface StudentPayment {
     pre_admission_no: string | null;
     phone: string | null;
     email: string | null;
+    campus_id: string | null;
   } | null;
   profiles: { display_name: string | null } | null;
 }
@@ -101,6 +103,8 @@ export default function TransactionHistoryPanel() {
   const [errorStudent, setErrorStudent]   = useState<string | null>(null);
   const [receipt, setReceipt]             = useState<ReceiptData | null>(null);
 
+  const { selectedCampusId } = useCampus();
+
   // Filters
   const [search, setSearch]           = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -136,7 +140,7 @@ export default function TransactionHistoryPanel() {
       .select(`
         id, amount, payment_mode, transaction_ref,
         receipt_no, paid_at, notes,
-        students ( name, admission_no, pre_admission_no, phone, email ),
+        students ( name, admission_no, pre_admission_no, phone, email, campus_id ),
         profiles!recorded_by ( display_name )
       `)
       .order("paid_at", { ascending: false })
@@ -175,6 +179,7 @@ export default function TransactionHistoryPanel() {
   const filteredStudents = useMemo(() => {
     const q = search.toLowerCase();
     return studentPmts.filter((p) => {
+      if (selectedCampusId !== "all" && p.students?.campus_id !== selectedCampusId) return false;
       if (modeFilter !== "all" && p.payment_mode !== modeFilter) return false;
       if (dateFrom && p.paid_at < dateFrom) return false;
       if (dateTo && p.paid_at > dateTo + "T23:59:59") return false;
@@ -194,7 +199,7 @@ export default function TransactionHistoryPanel() {
       }
       return true;
     });
-  }, [studentPmts, modeFilter, dateFrom, dateTo, search]);
+  }, [studentPmts, modeFilter, dateFrom, dateTo, search, selectedCampusId]);
 
   // ── Summary stats ──────────────────────────────────────────────────────────
 

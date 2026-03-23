@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -119,7 +119,7 @@ const Admissions = () => {
   const isSuperAdmin = role === "super_admin";
   const canTransfer = isSuperAdmin || isTeamLeader;
 
-  const fetchLeads = useCallback(async () => {
+  const fetchLeads = async () => {
     setLoading(true);
     let query = supabase
       .from("leads")
@@ -139,9 +139,9 @@ const Admissions = () => {
     }
     setSelectedIds(new Set());
     setLoading(false);
-  }, [selectedCampusId]);
+  };
 
-  useEffect(() => { fetchLeads(); }, [fetchLeads]);
+  useEffect(() => { fetchLeads(); }, [selectedCampusId]);
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {

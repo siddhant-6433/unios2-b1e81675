@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCampus } from "@/contexts/CampusContext";
@@ -47,7 +47,7 @@ const SuperAdminDashboard = () => {
   const [appInProgress, setAppInProgress] = useState(0);
   const [appSubmitted, setAppSubmitted] = useState(0);
 
-  const fetchDashboard = useCallback(async () => {
+  const fetchDashboard = async () => {
     setLoading(true);
     const today = new Date().toISOString().slice(0, 10);
     const byCampus = selectedCampusId !== "all";
@@ -106,9 +106,9 @@ const SuperAdminDashboard = () => {
       })));
     }
     setLoading(false);
-  }, [selectedCampusId]);
+  };
 
-  useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
+  useEffect(() => { fetchDashboard(); }, [selectedCampusId]);
 
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
 
