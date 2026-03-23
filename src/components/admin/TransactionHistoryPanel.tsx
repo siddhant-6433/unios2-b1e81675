@@ -19,7 +19,7 @@ interface AppTransaction {
   payment_ref: string | null;
   updated_at: string;
   created_at: string;
-  leads: { admission_no: string | null; pre_admission_no: string | null } | null;
+  leads: { admission_no: string | null; pre_admission_no: string | null; campus_id: string | null } | null;
 }
 
 interface StudentPayment {
@@ -123,7 +123,7 @@ export default function TransactionHistoryPanel() {
         application_id, full_name, phone, email,
         fee_amount, payment_status, payment_ref,
         updated_at, created_at,
-        leads ( admission_no, pre_admission_no )
+        leads ( admission_no, pre_admission_no, campus_id )
       `)
       .order("updated_at", { ascending: false })
       .limit(1000);
@@ -157,6 +157,7 @@ export default function TransactionHistoryPanel() {
   const filteredApps = useMemo(() => {
     const q = search.toLowerCase();
     return appTxns.filter((t) => {
+      if (selectedCampusId !== "all" && t.leads?.campus_id !== selectedCampusId) return false;
       if (statusFilter !== "all" && t.payment_status !== statusFilter) return false;
       if (dateFrom && t.updated_at < dateFrom) return false;
       if (dateTo && t.updated_at > dateTo + "T23:59:59") return false;
@@ -174,7 +175,7 @@ export default function TransactionHistoryPanel() {
       }
       return true;
     });
-  }, [appTxns, statusFilter, dateFrom, dateTo, search]);
+  }, [appTxns, statusFilter, dateFrom, dateTo, search, selectedCampusId]);
 
   const filteredStudents = useMemo(() => {
     const q = search.toLowerCase();
@@ -203,12 +204,18 @@ export default function TransactionHistoryPanel() {
 
   // ── Summary stats ──────────────────────────────────────────────────────────
 
+  const campusAppTxns = useMemo(() =>
+    selectedCampusId === "all"
+      ? appTxns
+      : appTxns.filter((t) => t.leads?.campus_id === selectedCampusId),
+  [appTxns, selectedCampusId]);
+
   const appStats = useMemo(() => {
-    const paid    = appTxns.filter((t) => t.payment_status === "paid");
-    const pending = appTxns.filter((t) => t.payment_status === "pending");
+    const paid    = campusAppTxns.filter((t) => t.payment_status === "paid");
+    const pending = campusAppTxns.filter((t) => t.payment_status === "pending");
     const total   = paid.reduce((s, t) => s + (t.fee_amount || 0), 0);
     return { total, paidCount: paid.length, pendingCount: pending.length };
-  }, [appTxns]);
+  }, [campusAppTxns]);
 
   const studentStats = useMemo(() => {
     const total = studentPmts.reduce((s, p) => s + (p.amount || 0), 0);
