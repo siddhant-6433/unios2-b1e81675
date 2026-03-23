@@ -3,8 +3,10 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   Search, Filter, IndianRupee, Download, Plus, CreditCard,
   FileText, BarChart3, AlertTriangle, CheckCircle, Clock,
-  ArrowUpRight, ChevronRight, MoreHorizontal, Receipt, Wallet, Loader2
+  ArrowUpRight, ChevronRight, MoreHorizontal, Receipt, Wallet, Loader2,
+  Globe,
 } from "lucide-react";
+import TransactionHistoryPanel from "@/components/admin/TransactionHistoryPanel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,7 +29,7 @@ const modeBadge: Record<string, string> = {
 };
 
 const Finance = () => {
-  const [tab, setTab] = useState<"ledger" | "payments" | "structures" | "reports">("ledger");
+  const [tab, setTab] = useState<"ledger" | "payments" | "online-transactions" | "structures" | "reports">("ledger");
   const [search, setSearch] = useState("");
   const [ledger, setLedger] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
@@ -61,10 +63,11 @@ const Finance = () => {
   const paidCount = ledger.filter((f: any) => f.status === "paid").length;
 
   const tabs = [
-    { id: "ledger" as const, label: "Fee Ledger", icon: FileText },
-    { id: "payments" as const, label: "Payments", icon: CreditCard },
-    { id: "structures" as const, label: "Fee Structures", icon: Wallet },
-    { id: "reports" as const, label: "Reports", icon: BarChart3 },
+    { id: "ledger" as const,               label: "Fee Ledger",          icon: FileText },
+    { id: "payments" as const,             label: "Payments",            icon: CreditCard },
+    { id: "online-transactions" as const,  label: "Online Transactions", icon: Globe },
+    { id: "structures" as const,           label: "Fee Structures",      icon: Wallet },
+    { id: "reports" as const,              label: "Reports",             icon: BarChart3 },
   ];
 
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
@@ -212,6 +215,8 @@ const Finance = () => {
           </CardContent>
         </Card>
       )}
+
+      {tab === "online-transactions" && <TransactionHistoryPanel />}
 
       {tab === "structures" && (
         <div className="space-y-4">
