@@ -11,6 +11,41 @@ async function sha512(message: string): Promise<string> {
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+function returnPage(title: string, message: string, isSuccess: boolean): Response {
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${title}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f8fafc; }
+    .card { background: white; border-radius: 16px; padding: 40px; text-align: center; max-width: 360px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
+    .icon { font-size: 48px; margin-bottom: 16px; }
+    h2 { margin: 0 0 8px; font-size: 18px; color: #0f172a; }
+    p { margin: 0 0 24px; font-size: 14px; color: #64748b; }
+    button { background: #6366f1; color: white; border: none; border-radius: 10px; padding: 10px 24px; font-size: 14px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">${isSuccess ? "✅" : "❌"}</div>
+    <h2>${title}</h2>
+    <p>${message}</p>
+    <button onclick="window.close()">Close</button>
+  </div>
+  <script>
+    // Notify parent window if same origin
+    try { window.opener && window.opener.postMessage({ eb_payment: "${isSuccess ? "success" : "failed"}" }, "*"); } catch(e) {}
+  </script>
+</body>
+</html>`;
+  return new Response(html, {
+    status: 200,
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -19,7 +54,9 @@ Deno.serve(async (req) => {
   try {
     const merchantKey  = Deno.env.get("EASEBUZZ_KEY");
     const merchantSalt = Deno.env.get("EASEBUZZ_SALT");
-    const ebEnv        = Deno.env.get("EASEBUZZ_ENV") || "production"; // 'test' | 'production'
+    const ebEnv        = Deno.env.get("EASEBUZZ_ENV") || "production";
+    const supabaseUrl  = Deno.env.get("SUPABASE_URL")!;
+    const serviceKey   = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
     if (!merchantKey || !merchantSalt) {
       return new Response(
@@ -28,18 +65,71 @@ Deno.serve(async (req) => {
       );
     }
 
-    const baseUrl =
-      ebEnv === "test"
-        ? "https://testpay.easebuzz.in"
-        : "https://pay.easebuzz.in";
+    const baseUrl = ebEnv === "test"
+      ? "https://testpay.easebuzz.in"
+      : "https://pay.easebuzz.in";
 
     const rawBody = await req.text();
-    const parsed  = rawBody ? JSON.parse(rawBody) : {};
+    const contentType = req.headers.get("content-type") || "";
+
+    // ── EaseBuzz Return POST (surl / furl) ─────────────────────────
+    // EaseBuzz posts form-encoded data back to our surl/furl
+    if (contentType.includes("application/x-www-form-urlencoded")) {
+      const params = new URLSearchParams(rawBody);
+      const status      = params.get("status") || "";
+      const txnid       = params.get("txnid") || "";
+      const applicationId = params.get("udf1") || "";
+      const easepayid   = params.get("easepayid") || "";
+      const email       = params.get("email") || "";
+      const firstname   = params.get("firstname") || "";
+      const productinfo = params.get("productinfo") || "";
+      const amount      = params.get("amount") || "";
+      const returnedHash = params.get("hash") || "";
+
+      // Verify reverse hash: SHA512(salt|status|udf10|udf9|...|udf1|email|firstname|productinfo|amount|txnid|key)
+      // With udf2-udf10 empty and udf1=applicationId
+      const reverseInput = `${merchantSalt}|${status}|||||||||${applicationId}|${email}|${firstname}|${productinfo}|${amount}|${txnid}|${merchantKey}`;
+      const expectedHash = await sha512(reverseInput);
+      const hashValid = expectedHash === returnedHash;
+
+      console.log("[easebuzz] return:", { status, txnid, applicationId, easepayid, hashValid });
+
+      if (status === "success" && hashValid && applicationId) {
+        // Update application in DB
+        await fetch(
+          `${supabaseUrl}/rest/v1/applications?application_id=eq.${encodeURIComponent(applicationId)}`,
+          {
+            method: "PATCH",
+            headers: {
+              "apikey": serviceKey,
+              "Authorization": `Bearer ${serviceKey}`,
+              "Content-Type": "application/json",
+              "Prefer": "return=minimal",
+            },
+            body: JSON.stringify({
+              payment_status: "paid",
+              payment_ref: easepayid || txnid,
+            }),
+          }
+        );
+        return returnPage("Payment Successful", "Your payment has been received. You may close this window.", true);
+      }
+
+      if (status === "failure" || status === "userCancelled") {
+        return returnPage("Payment Failed", "Your payment was not completed. Please go back and try again.", false);
+      }
+
+      // Unexpected status — still show a message
+      return returnPage("Payment Pending", "Your payment status is being verified. Please wait.", false);
+    }
+
+    // ── JSON actions (called from our frontend) ────────────────────
+    const parsed = rawBody ? JSON.parse(rawBody) : {};
     const { action, ...body } = parsed;
 
     // ── Initiate Payment ───────────────────────────────────────────
     if (action === "initiate") {
-      const { txnid, amount, productinfo, firstname, email, phone } = body;
+      const { application_id, txnid, amount, productinfo, firstname, email, phone } = body;
 
       if (!txnid || !amount || !firstname || !phone) {
         return new Response(
@@ -48,13 +138,17 @@ Deno.serve(async (req) => {
         );
       }
 
-      const amountStr   = parseFloat(amount).toFixed(2);
-      const emailStr    = email || "noreply@nimteducation.com";
-      const productStr  = productinfo || "Application Fee";
+      const amountStr  = parseFloat(amount).toFixed(2);
+      const emailStr   = email || "noreply@nimteducation.com";
+      const productStr = productinfo || "Application Fee";
+      const udf1       = application_id || "";
 
-      // EaseBuzz hash: SHA512(key|txnid|amount|productinfo|firstname|email|udf1|udf2|udf3|udf4|udf5||||||salt)
-      const hashInput = `${merchantKey}|${txnid}|${amountStr}|${productStr}|${firstname}|${emailStr}|||||||||||${merchantSalt}`;
+      // Hash: SHA512(key|txnid|amount|productinfo|firstname|email|udf1|udf2|udf3|udf4|udf5||||||salt)
+      // udf1 = application_id, udf2-udf5 empty, then 6 more empty slots before salt
+      const hashInput = `${merchantKey}|${txnid}|${amountStr}|${productStr}|${firstname}|${emailStr}|${udf1}||||||||||${merchantSalt}`;
       const hash = await sha512(hashInput);
+
+      const selfUrl = `${supabaseUrl}/functions/v1/easebuzz-payment`;
 
       const formData = new URLSearchParams({
         key:         merchantKey,
@@ -65,9 +159,10 @@ Deno.serve(async (req) => {
         email:       emailStr,
         phone:       phone.replace(/\D/g, "").slice(-10),
         hash:        hash,
-        udf1: "", udf2: "", udf3: "", udf4: "", udf5: "",
-        surl: `${Deno.env.get("SUPABASE_URL")}/functions/v1/easebuzz-payment?action=webhook`,
-        furl: `${Deno.env.get("SUPABASE_URL")}/functions/v1/easebuzz-payment?action=webhook`,
+        udf1:        udf1,
+        udf2: "", udf3: "", udf4: "", udf5: "",
+        surl:        selfUrl,
+        furl:        selfUrl,
       });
 
       const res = await fetch(`${baseUrl}/payment/initiateLink`, {
@@ -89,18 +184,15 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({
           txnid,
-          access_key:   data.data,
-          merchant_key: merchantKey,
-          env:          ebEnv,
+          pay_url: `${baseUrl}/pay/${data.data}`,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // ── Verify Payment ─────────────────────────────────────────────
+    // ── Verify Payment (fallback manual check) ─────────────────────
     if (action === "verify-payment") {
       const { txnid } = body;
-
       if (!txnid) {
         return new Response(
           JSON.stringify({ error: "txnid is required" }),
@@ -108,10 +200,8 @@ Deno.serve(async (req) => {
         );
       }
 
-      // Retrieve hash: SHA512(key|txnid|salt)
       const hashInput = `${merchantKey}|${txnid}|${merchantSalt}`;
       const hash = await sha512(hashInput);
-
       const formData = new URLSearchParams({ key: merchantKey, txnid, hash });
 
       const res = await fetch(`${baseUrl}/transaction/v2/retrieve`, {
@@ -121,7 +211,6 @@ Deno.serve(async (req) => {
       });
 
       const data = await res.json();
-
       if (!res.ok || data.status !== 1) {
         return new Response(
           JSON.stringify({ error: data.error_desc || "Failed to verify payment" }),
@@ -129,23 +218,11 @@ Deno.serve(async (req) => {
         );
       }
 
-      // EaseBuzz statuses: success | failed | pending | cancelled | bounced
       const txn = Array.isArray(data.data) ? data.data[0] : data.data;
       return new Response(
-        JSON.stringify({
-          txnid:   txn?.txnid,
-          status:  txn?.status,   // 'success' means paid
-          amount:  txn?.amount,
-          easepayid: txn?.easepayid,
-        }),
+        JSON.stringify({ txnid: txn?.txnid, status: txn?.status, amount: txn?.amount, easepayid: txn?.easepayid }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
-    }
-
-    // ── EaseBuzz Webhook (surl / furl) ─────────────────────────────
-    if (action === "webhook" || (action === undefined && req.method === "POST")) {
-      console.log("[easebuzz] webhook:", rawBody);
-      return new Response("ok", { status: 200, headers: corsHeaders });
     }
 
     return new Response(

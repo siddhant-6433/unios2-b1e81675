@@ -16,20 +16,21 @@ interface Props {
 declare global {
   interface Window {
     Cashfree: any;
-    EasebuzzCheckout: any;
   }
 }
 
 export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props) {
-  const isPaid = data.payment_status === "paid";
+  const isPaid   = data.payment_status === "paid";
   const isWaived = data.fee_amount === 0;
 
   const { portalGateways, loading: gwLoading } = usePaymentGateways();
   const [selectedGateway, setSelectedGateway] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState<string | null>(null);
   const [sdkReady, setSdkReady] = useState(false);
   const cashfreeRef = useRef<any>(null);
+  const popupRef    = useRef<Window | null>(null);
+  const pollRef     = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Auto-select single gateway
   useEffect(() => {
@@ -38,11 +39,9 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
     }
   }, [gwLoading, portalGateways]);
 
-  // Load Cashfree JS SDK
+  // Load Cashfree JS SDK only when cashfree is selected
   useEffect(() => {
-    if (isWaived || isPaid) return;
-    const needsCashfree = !selectedGateway || selectedGateway === "cashfree";
-    if (!needsCashfree) return;
+    if (isWaived || isPaid || selectedGateway !== "cashfree") return;
     if (document.getElementById("cashfree-sdk")) { setSdkReady(true); return; }
     const script = document.createElement("script");
     script.id = "cashfree-sdk";
@@ -51,28 +50,49 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
     document.body.appendChild(script);
   }, [isWaived, isPaid, selectedGateway]);
 
-  // Load EaseBuzz JS SDK
-  useEffect(() => {
-    if (isWaived || isPaid) return;
-    if (selectedGateway !== "easebuzz") return;
-    if (document.getElementById("easebuzz-sdk")) { setSdkReady(true); return; }
-    const script = document.createElement("script");
-    script.id = "easebuzz-sdk";
-    script.src = "https://ebz-static.s3.ap-south-1.amazonaws.com/easecheckout/easebuzz-checkout.js";
-    script.onload = () => setSdkReady(true);
-    document.body.appendChild(script);
-  }, [isWaived, isPaid, selectedGateway]);
-
-  // Reset sdkReady when gateway changes so we wait for the right SDK
+  // Reset sdkReady when gateway changes
   useEffect(() => {
     setSdkReady(false);
-    if (!selectedGateway || isWaived || isPaid) return;
-    const sdkId = selectedGateway === "cashfree" ? "cashfree-sdk" : "easebuzz-sdk";
-    if (document.getElementById(sdkId)) setSdkReady(true);
+    if (selectedGateway === "cashfree" && document.getElementById("cashfree-sdk")) setSdkReady(true);
+    if (selectedGateway === "easebuzz") setSdkReady(true); // No SDK needed for popup approach
   }, [selectedGateway]);
+
+  // Cleanup poll on unmount
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  // Listen for postMessage from EaseBuzz popup
+  useEffect(() => {
+    const handler = (e: MessageEvent) => {
+      if (e.data?.eb_payment === "success") {
+        stopPolling();
+        checkAndUpdatePayment();
+      }
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, [data.application_id]);
+
+  const stopPolling = () => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  };
+
+  const checkAndUpdatePayment = async () => {
+    const { data: row } = await supabase
+      .from("applications")
+      .select("payment_status, payment_ref")
+      .eq("application_id", data.application_id)
+      .single();
+
+    if (row?.payment_status === "paid") {
+      onChange({ payment_status: "paid", payment_ref: row.payment_ref ?? undefined });
+      setLoading(false);
+      if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
+    }
+  };
 
   const handleMarkPaid = () => onChange({ payment_status: "paid" });
 
+  // ── Cashfree ────────────────────────────────────────────────────
   const handlePayCashfree = async () => {
     setError(null);
     setLoading(true);
@@ -105,13 +125,10 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
             setLoading(false);
             return;
           }
-
           const { data: verifyData, error: verifyError } = await supabase.functions.invoke("cashfree-payment", {
             body: { action: "verify-payment", order_id },
           });
-
           if (verifyError) throw new Error(verifyError.message);
-
           if (verifyData?.order_status === "PAID") {
             onChange({ payment_status: "paid", payment_ref: order_id });
           } else {
@@ -129,21 +146,22 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
     }
   };
 
+  // ── EaseBuzz (popup + polling) ──────────────────────────────────
   const handlePayEasebuzz = async () => {
     setError(null);
     setLoading(true);
     try {
-      const txnid = `APP_${data.application_id.replace(/-/g, "_")}_${Date.now()}`;
       const nameParts = (data.full_name || "Applicant").trim().split(" ");
-      const firstname = nameParts[0];
+      const txnid = `EB${data.application_id.replace(/[^a-zA-Z0-9]/g, "")}${Date.now()}`.slice(0, 50);
 
       const { data: fnData, error: fnError } = await supabase.functions.invoke("easebuzz-payment", {
         body: {
           action: "initiate",
+          application_id: data.application_id,
           txnid,
           amount: data.fee_amount,
           productinfo: "Application Fee",
-          firstname,
+          firstname: nameParts[0],
           email: data.email || undefined,
           phone: data.phone,
         },
@@ -152,35 +170,41 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
       if (fnError) throw new Error(fnError.message);
       if (fnData?.error) throw new Error(fnData.error);
 
-      const { access_key, merchant_key, env } = fnData;
+      const { pay_url } = fnData;
 
-      const ebMode = env === "test" ? "test" : "prod";
-      const easebuzzCheckout = new window.EasebuzzCheckout(merchant_key, ebMode);
+      // Open EaseBuzz hosted payment page in popup
+      popupRef.current = window.open(
+        pay_url,
+        "easebuzz_payment",
+        "width=680,height=720,scrollbars=yes,resizable=yes"
+      );
 
-      easebuzzCheckout.initiatePayment({
-        accessKey: access_key,
-        onResponse: async (response: any) => {
-          if (response.status === "success" || response.txnStatus === "SUCCESS") {
-            // Verify server-side
-            const { data: verifyData, error: verifyError } = await supabase.functions.invoke("easebuzz-payment", {
-              body: { action: "verify-payment", txnid },
-            });
+      if (!popupRef.current) {
+        throw new Error("Popup was blocked. Please allow popups for this site and try again.");
+      }
 
-            if (verifyError) {
-              setError("Could not verify payment. If amount was deducted, contact support.");
-            } else if (verifyData?.status === "success") {
-              onChange({ payment_status: "paid", payment_ref: verifyData.easepayid || txnid });
-            } else {
-              setError("Payment could not be confirmed. If amount was deducted, contact support.");
-            }
-          } else if (response.status === "failed" || response.txnStatus === "FAILED") {
-            setError("Payment failed. Please try again.");
+      // Poll Supabase every 2s for payment confirmation
+      pollRef.current = setInterval(async () => {
+        // If popup closed without payment, stop polling and show error
+        if (popupRef.current?.closed) {
+          stopPolling();
+          const { data: row } = await supabase
+            .from("applications")
+            .select("payment_status, payment_ref")
+            .eq("application_id", data.application_id)
+            .single();
+
+          if (row?.payment_status === "paid") {
+            onChange({ payment_status: "paid", payment_ref: row.payment_ref ?? undefined });
           } else {
-            setError("Payment was cancelled or incomplete.");
+            setError("Payment window was closed. If you completed the payment please wait a moment, or try again.");
           }
           setLoading(false);
-        },
-      });
+          return;
+        }
+
+        await checkAndUpdatePayment();
+      }, 2000);
     } catch (err: any) {
       setError(err.message || "Something went wrong. Please try again.");
       setLoading(false);
@@ -236,7 +260,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
             </div>
           )}
 
-          {/* Gateway selector — only shown when multiple are enabled */}
+          {/* Gateway selector — only shown when multiple enabled */}
           {!gwLoading && portalGateways.length > 1 && (
             <div className="flex justify-center gap-3 flex-wrap">
               {portalGateways.map((gw) => (
@@ -279,19 +303,25 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
             <>
               <Button
                 onClick={handlePay}
-                disabled={loading || !sdkReady || saving || !selectedGateway}
+                disabled={loading || (!sdkReady && selectedGateway === "cashfree") || saving || !selectedGateway}
                 className="gap-2 px-8"
               >
                 {loading ? (
-                  <><Loader2 className="h-4 w-4 animate-spin" /> Processing...</>
+                  <><Loader2 className="h-4 w-4 animate-spin" />
+                    {selectedGateway === "easebuzz" ? "Opening payment window…" : "Processing…"}
+                  </>
                 ) : (
                   <><CreditCard className="h-4 w-4" /> Pay ₹{data.fee_amount.toLocaleString("en-IN")}</>
                 )}
               </Button>
 
-              <p className="text-xs text-muted-foreground">
-                Secured by {activeGatewayName}
-              </p>
+              {loading && selectedGateway === "easebuzz" && (
+                <p className="text-xs text-muted-foreground">
+                  Complete payment in the popup window. Do not close this page.
+                </p>
+              )}
+
+              <p className="text-xs text-muted-foreground">Secured by {activeGatewayName}</p>
             </>
           )}
 
