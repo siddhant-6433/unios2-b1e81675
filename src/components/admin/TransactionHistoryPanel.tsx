@@ -410,7 +410,7 @@ export default function TransactionHistoryPanel() {
                 <thead>
                   <tr className="border-b border-border bg-muted/30 text-left">
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Date</th>
-                    <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Application ID</th>
+                    <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Receipt / App ID</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground">Applicant</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground">Phone</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground text-right whitespace-nowrap">Amount</th>

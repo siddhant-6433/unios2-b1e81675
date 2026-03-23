@@ -30,7 +30,7 @@ const modeBadge: Record<string, string> = {
 };
 
 const Finance = () => {
-  const [tab, setTab] = useState<"ledger" | "payments" | "online-transactions" | "structures" | "reports">("ledger");
+  const [tab, setTab] = useState<"ledger" | "receipts" | "online-transactions" | "structures" | "reports">("ledger");
   const [search, setSearch] = useState("");
   const [ledger, setLedger] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
@@ -44,7 +44,7 @@ const Finance = () => {
     setLoading(true);
     const [ledgerRes, paymentsRes, structRes] = await Promise.all([
       supabase.from("fee_ledger").select("*, students:student_id(name, admission_no, pre_admission_no), fee_codes:fee_code_id(code, name, category)").order("due_date", { ascending: true }).limit(200),
-      supabase.from("payments").select("*, students:student_id(name, admission_no)").order("paid_at", { ascending: false }).limit(100),
+      supabase.from("payments").select("*, students:student_id(name, admission_no), profiles!recorded_by(display_name)").order("paid_at", { ascending: false }).limit(500),
       supabase.from("fee_structures").select("*, courses:course_id(name), admission_sessions:session_id(name), fee_structure_items(*, fee_codes:fee_code_id(code, name, category))").order("created_at", { ascending: false }),
     ]);
     if (ledgerRes.data) setLedger(ledgerRes.data);
@@ -66,7 +66,7 @@ const Finance = () => {
 
   const tabs = [
     { id: "ledger" as const,               label: "Fee Ledger",          icon: FileText },
-    { id: "payments" as const,             label: "Payments",            icon: CreditCard },
+    { id: "receipts" as const,             label: "Receipts",            icon: CreditCard },
     { id: "online-transactions" as const,  label: "Online Transactions", icon: Globe },
     { id: "structures" as const,           label: "Fee Structures",      icon: Wallet },
     { id: "reports" as const,              label: "Reports",             icon: BarChart3 },
@@ -181,25 +181,32 @@ const Finance = () => {
         </>
       )}
 
-      {tab === "payments" && (
+      {tab === "receipts" && (
         <Card className="border-border/60 shadow-none overflow-hidden">
-          <CardHeader className="pb-3"><CardTitle className="text-base font-semibold">Recent Payments</CardTitle></CardHeader>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base font-semibold">All Receipts</CardTitle>
+              <span className="text-xs text-muted-foreground">{payments.length} records</span>
+            </div>
+          </CardHeader>
           <CardContent className="p-0">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/50">
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Receipt</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Receipt No</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Student</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Fee Head</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">Amount</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Mode</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Ref</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Transaction Ref</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Recorded By</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Date</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Receipt</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Download</th>
                 </tr>
               </thead>
               <tbody>
                 {payments.length === 0 ? (
-                  <tr><td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">No payments recorded</td></tr>
+                  <tr><td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">No receipts recorded</td></tr>
                 ) : payments.map((p: any) => (
                   <tr key={p.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
                     <td className="px-4 py-3 font-mono text-xs text-primary font-semibold">{p.receipt_no || "—"}</td>
@@ -207,12 +214,14 @@ const Finance = () => {
                       <div className="font-medium text-foreground">{p.students?.name || "—"}</div>
                       <div className="text-xs text-muted-foreground font-mono">{p.students?.admission_no || "—"}</div>
                     </td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">{p.fee_description || "—"}</td>
                     <td className="px-4 py-3 text-right font-semibold text-foreground">₹{Number(p.amount).toLocaleString()}</td>
                     <td className="px-4 py-3">
                       <Badge className={`text-[10px] font-medium border-0 capitalize ${modeBadge[p.payment_mode] || "bg-muted"}`}>{p.payment_mode.replace("_", " ")}</Badge>
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{p.transaction_ref || "—"}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{new Date(p.paid_at).toLocaleDateString("en-IN")}</td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">{p.profiles?.display_name || "—"}</td>
+                    <td className="px-4 py-3 text-muted-foreground text-xs">{new Date(p.paid_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td>
                     <td className="px-4 py-3">
                       <button
                         onClick={() => setReceipt({
@@ -221,13 +230,15 @@ const Finance = () => {
                           student_name: p.students?.name || undefined,
                           admission_no: p.students?.admission_no || undefined,
                           payment_mode: p.payment_mode,
+                          fee_description: p.fee_description || undefined,
+                          recorded_by: p.profiles?.display_name || undefined,
                           amount: Number(p.amount),
                           payment_ref: p.transaction_ref,
                           payment_date: p.paid_at,
                         })}
                         className="flex items-center gap-1.5 rounded-lg border border-primary/30 px-2.5 py-1 text-[11px] font-medium text-primary hover:bg-primary/5 transition-colors"
                       >
-                        <Receipt className="h-3.5 w-3.5" /> Receipt
+                        <Receipt className="h-3.5 w-3.5" /> PDF
                       </button>
                     </td>
                   </tr>
