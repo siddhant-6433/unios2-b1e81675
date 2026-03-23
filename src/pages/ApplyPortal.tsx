@@ -339,7 +339,7 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
 }
 
 // ─── Step definitions ───
-import { User, Users, BookOpen, Trophy, CreditCard, Upload, FileSearch, Baby, MessageSquare } from "lucide-react";
+import { User, Users, BookOpen, Trophy, CreditCard, Upload, FileSearch, Baby, MessageSquare, Lock } from "lucide-react";
 
 const SCHOOL_STEPS = [
   { key: "personal", label: "Personal", icon: User },
@@ -362,31 +362,41 @@ const DEFAULT_STEPS = [
   { key: "review", label: "Review", icon: FileSearch },
 ] as const;
 
-function DynamicStepProgress({ steps, currentStep, completedSections, onStepClick }: {
+function DynamicStepProgress({ steps, currentStep, completedSections, onStepClick, isPaid }: {
   steps: readonly { key: string; label: string; icon: any }[];
   currentStep: number;
   completedSections: Record<string, boolean>;
   onStepClick: (step: number) => void;
+  isPaid: boolean;
 }) {
+  const paymentIdx = steps.findIndex(s => s.key === "payment");
+
   return (
     <div className="flex items-center gap-1 mb-8 overflow-x-auto pb-2">
       {steps.map((s, i) => {
-        const done = completedSections[s.key] === true;
-        const active = currentStep === i;
-        const Icon = s.icon;
+        const done    = completedSections[s.key] === true;
+        const active  = currentStep === i;
+        const locked  = isPaid && i < paymentIdx; // lock pre-payment steps after payment
+        const Icon    = s.icon;
         return (
           <button
             key={s.key}
-            onClick={() => onStepClick(i)}
+            onClick={() => !locked && onStepClick(i)}
+            disabled={locked}
+            title={locked ? "Locked after payment" : undefined}
             className={`flex-1 min-w-[44px] flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-xl text-xs font-medium transition-all ${
-              done
+              locked
+                ? "text-muted-foreground/40 cursor-not-allowed"
+                : done
                 ? "bg-primary/10 text-primary"
                 : active
                 ? "bg-card border border-border text-foreground shadow-sm"
                 : "text-muted-foreground hover:bg-muted"
             }`}
           >
-            {done ? (
+            {locked ? (
+              <Lock className="h-4 w-4 shrink-0" />
+            ) : done ? (
               <CheckCircle className="h-4 w-4 shrink-0" />
             ) : (
               <Icon className="h-4 w-4 shrink-0" />
@@ -400,7 +410,7 @@ function DynamicStepProgress({ steps, currentStep, completedSections, onStepClic
 }
 
 // ─── Course Summary Banner ───
-function CourseSummaryBanner({ app, leadName, onEdit }: { app: ApplicationData; leadName: string; onEdit: () => void }) {
+function CourseSummaryBanner({ app, leadName, onEdit }: { app: ApplicationData; leadName: string; onEdit: () => void | null }) {
   const [expanded, setExpanded] = useState(false);
   const selections = app.course_selections || [];
   const estimatedFee = calculateFee(selections);
@@ -451,9 +461,15 @@ function CourseSummaryBanner({ app, leadName, onEdit }: { app: ApplicationData; 
             )}
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1" onClick={(e) => { e.stopPropagation(); onEdit(); }}>
-              <Pencil className="h-3 w-3" /> Edit
-            </Button>
+            {app.payment_status !== "paid" ? (
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1" onClick={(e) => { e.stopPropagation(); onEdit(); }}>
+                <Pencil className="h-3 w-3" /> Edit
+              </Button>
+            ) : (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground/60 px-2">
+                <Lock className="h-3 w-3" /> Locked
+              </span>
+            )}
             {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
           </div>
         </button>
@@ -912,7 +928,7 @@ const ApplyPortal = () => {
         <CourseSummaryBanner
           app={app}
           leadName={leadName}
-          onEdit={() => setShowCourseSelector(true)}
+          onEdit={app.payment_status === "paid" ? () => null : () => setShowCourseSelector(true)}
         />
 
         <DynamicStepProgress
@@ -920,6 +936,7 @@ const ApplyPortal = () => {
           currentStep={step}
           completedSections={app.completed_sections as any}
           onStepClick={setStep}
+          isPaid={app.payment_status === "paid"}
         />
 
         <Card className="border-border/60 shadow-none">

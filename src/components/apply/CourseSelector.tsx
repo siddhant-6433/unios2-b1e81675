@@ -1,7 +1,10 @@
 import { useState, useEffect, useMemo } from "react";
-import { ArrowRight, Loader2, Calendar, MapPin, GripVertical, Plus, X, AlertTriangle, CheckCircle2, Info } from "lucide-react";
+import { ArrowRight, Loader2, CalendarIcon, MapPin, GripVertical, Plus, X, AlertTriangle, CheckCircle2, Info, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Calendar as CalendarPicker } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { format, isValid, parse } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { CourseSelection, determineProgramCategory, calculateFee } from "./types";
@@ -20,6 +23,94 @@ interface Props {
 }
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
+
+// ── DOB Calendar Picker ──────────────────────────────────────────
+function DobPicker({ value, onChange, inputCls }: { value: string; onChange: (iso: string) => void; inputCls: string }) {
+  const [open, setOpen] = useState(false);
+  const [monthYear, setMonthYear] = useState<Date>(
+    value && isValid(new Date(value)) ? new Date(value) : new Date(2015, 0, 1)
+  );
+  // Manual input state
+  const [typed, setTyped] = useState("");
+
+  const selected = value && isValid(new Date(value)) ? new Date(value) : undefined;
+
+  const handleSelect = (date: Date | undefined) => {
+    if (date) {
+      onChange(format(date, "yyyy-MM-dd"));
+      setOpen(false);
+    }
+  };
+
+  const handleTyped = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    setTyped(raw);
+    // Try parse dd/mm/yyyy or dd-mm-yyyy
+    const cleaned = raw.replace(/[-]/g, "/");
+    const parsed = parse(cleaned, "dd/MM/yyyy", new Date());
+    if (isValid(parsed)) {
+      onChange(format(parsed, "yyyy-MM-dd"));
+      setMonthYear(parsed);
+    }
+  };
+
+  const displayValue = selected ? format(selected, "dd / MM / yyyy") : "";
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={`${inputCls} flex items-center justify-between text-left ${!selected ? "text-muted-foreground" : ""}`}
+        >
+          <span>{displayValue || "Select date of birth"}</span>
+          <CalendarIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-0" align="start">
+        {/* Month/Year quick-nav */}
+        <div className="flex items-center gap-2 px-3 pt-3 pb-1">
+          <select
+            value={monthYear.getMonth()}
+            onChange={e => setMonthYear(new Date(monthYear.getFullYear(), parseInt(e.target.value), 1))}
+            className="flex-1 rounded-lg border border-input bg-card px-2 py-1 text-xs focus:outline-none"
+          >
+            {["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].map((m, i) => (
+              <option key={m} value={i}>{m}</option>
+            ))}
+          </select>
+          <select
+            value={monthYear.getFullYear()}
+            onChange={e => setMonthYear(new Date(parseInt(e.target.value), monthYear.getMonth(), 1))}
+            className="w-24 rounded-lg border border-input bg-card px-2 py-1 text-xs focus:outline-none"
+          >
+            {Array.from({ length: 30 }, (_, i) => new Date().getFullYear() - 3 - i).map(y => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+        </div>
+        <CalendarPicker
+          mode="single"
+          selected={selected}
+          onSelect={handleSelect}
+          month={monthYear}
+          onMonthChange={setMonthYear}
+          disabled={(d) => d > new Date()}
+          initialFocus
+        />
+        {/* Manual type fallback */}
+        <div className="px-3 pb-3">
+          <input
+            placeholder="or type  dd/mm/yyyy"
+            value={typed}
+            onChange={handleTyped}
+            className="w-full rounded-lg border border-input bg-muted/40 px-3 py-1.5 text-xs focus:outline-none"
+          />
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 export function CourseSelector({ phone, leadName, childDob, onDobChange, onComplete, existingSelections, existingSession, onCancel }: Props) {
   const { toast } = useToast();
@@ -192,34 +283,10 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
             Child's Date of Birth *
           </label>
-          <input
-            type="text"
-            placeholder="dd/mm/yy"
-            value={childDob ? (() => {
-              const d = new Date(childDob);
-              if (isNaN(d.getTime())) return childDob;
-              const dd = String(d.getDate()).padStart(2, '0');
-              const mm = String(d.getMonth() + 1).padStart(2, '0');
-              const yy = String(d.getFullYear()).slice(-2);
-              return `${dd}/${mm}/${yy}`;
-            })() : ''}
-            onChange={e => {
-              let val = e.target.value.replace(/[^\d/]/g, '');
-              const digits = val.replace(/\//g, '');
-              if (digits.length <= 2) val = digits;
-              else if (digits.length <= 4) val = digits.slice(0, 2) + '/' + digits.slice(2);
-              else val = digits.slice(0, 2) + '/' + digits.slice(2, 4) + '/' + digits.slice(4, 6);
-              const parts = val.split('/');
-              if (parts.length === 3 && parts[0].length === 2 && parts[1].length === 2 && parts[2].length === 2) {
-                const year = parseInt(parts[2], 10);
-                const fullYear = year <= 50 ? 2000 + year : 1900 + year;
-                onDobChange(`${fullYear}-${parts[1]}-${parts[0]}`);
-              } else {
-                onDobChange(val);
-              }
-            }}
-            maxLength={8}
-            className={inputCls}
+          <DobPicker
+            value={childDob}
+            onChange={onDobChange}
+            inputCls={inputCls}
           />
           {childDob && (
             <p className="text-xs text-muted-foreground mt-1">
