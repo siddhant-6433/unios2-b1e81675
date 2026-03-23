@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useCampus } from "@/contexts/CampusContext";
 import {
   Users, IndianRupee, AlertTriangle, GraduationCap, Building2,
   ClipboardCheck, BookOpen, CalendarDays, Bell, TrendingUp,
@@ -35,6 +36,7 @@ const stageBadgeClass: Record<string, string> = {
 };
 
 const SuperAdminDashboard = () => {
+  const { selectedCampusId } = useCampus();
   const [loading, setLoading] = useState(true);
   const [leadCount, setLeadCount] = useState(0);
   const [todayLeads, setTodayLeads] = useState(0);
@@ -45,19 +47,35 @@ const SuperAdminDashboard = () => {
   const [appInProgress, setAppInProgress] = useState(0);
   const [appSubmitted, setAppSubmitted] = useState(0);
 
-  useEffect(() => { fetchDashboard(); }, []);
+  useEffect(() => { fetchDashboard(); }, [selectedCampusId]);
 
   const fetchDashboard = async () => {
     setLoading(true);
     const today = new Date().toISOString().slice(0, 10);
+    const byCampus = selectedCampusId !== "all";
+
+    const baseLeads = () => {
+      let q = supabase.from("leads").select("id", { count: "exact", head: true });
+      if (byCampus) q = q.eq("campus_id", selectedCampusId);
+      return q;
+    };
+    const baseStudents = () => {
+      let q = supabase.from("students").select("id", { count: "exact", head: true });
+      if (byCampus) q = q.eq("campus_id", selectedCampusId);
+      return q;
+    };
 
     const [leadsRes, todayRes, admittedRes, studentsRes, recentRes, appInProgRes, appSubmRes] = await Promise.all([
-      supabase.from("leads").select("id", { count: "exact", head: true }),
-      supabase.from("leads").select("id", { count: "exact", head: true }).gte("created_at", today),
-      supabase.from("leads").select("id", { count: "exact", head: true }).eq("stage", "admitted"),
-      supabase.from("students").select("id", { count: "exact", head: true }),
-      supabase.from("leads").select("id, name, phone, stage, source, created_at, courses:course_id(name), campuses:campus_id(name)")
-        .order("created_at", { ascending: false }).limit(5),
+      baseLeads(),
+      baseLeads().gte("created_at", today),
+      baseLeads().eq("stage", "admitted"),
+      baseStudents(),
+      (() => {
+        let q = supabase.from("leads").select("id, name, phone, stage, source, created_at, courses:course_id(name), campuses:campus_id(name)")
+          .order("created_at", { ascending: false }).limit(5);
+        if (byCampus) q = q.eq("campus_id", selectedCampusId);
+        return q;
+      })(),
       supabase.from("applications").select("id", { count: "exact", head: true }).eq("status", "draft"),
       supabase.from("applications").select("id", { count: "exact", head: true }).eq("status", "submitted"),
     ]);
@@ -73,7 +91,9 @@ const SuperAdminDashboard = () => {
     const stages = Object.keys(STAGE_LABELS);
     const funnelCounts = await Promise.all(
       stages.map(async (stage) => {
-        const { count } = await supabase.from("leads").select("id", { count: "exact", head: true }).eq("stage", stage as any);
+        let q = supabase.from("leads").select("id", { count: "exact", head: true }).eq("stage", stage as any);
+        if (byCampus) q = q.eq("campus_id", selectedCampusId);
+        const { count } = await q;
         return { stage: STAGE_LABELS[stage], count: count || 0 };
       })
     );
@@ -84,7 +104,7 @@ const SuperAdminDashboard = () => {
         ...l,
         course_name: l.courses?.name || "—",
         campus_name: l.campuses?.name || "—",
-        initials: l.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase(),
+        initials: (l.name || "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase(),
       })));
     }
     setLoading(false);

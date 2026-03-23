@@ -4,6 +4,7 @@ import {
   Search, RefreshCw, Download, Loader2, CheckCircle2, Clock,
   CreditCard, Banknote, Receipt, AlertCircle,
 } from "lucide-react";
+import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -98,6 +99,7 @@ export default function TransactionHistoryPanel() {
   const [loadingStudent, setLoadingStudent] = useState(true);
   const [errorApp, setErrorApp]           = useState<string | null>(null);
   const [errorStudent, setErrorStudent]   = useState<string | null>(null);
+  const [receipt, setReceipt]             = useState<ReceiptData | null>(null);
 
   // Filters
   const [search, setSearch]           = useState("");
@@ -250,6 +252,8 @@ export default function TransactionHistoryPanel() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
+    <>
+    <ReceiptDialog data={receipt} onClose={() => setReceipt(null)} />
     <div className="space-y-6">
 
       {/* Header */}
@@ -414,6 +418,7 @@ export default function TransactionHistoryPanel() {
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Payment Ref</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Admission No</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Pre-Admission No</th>
+                    <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Receipt</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -456,6 +461,25 @@ export default function TransactionHistoryPanel() {
                         {t.leads?.pre_admission_no
                           ? <span className="font-mono text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded-md">{t.leads.pre_admission_no}</span>
                           : <span className="text-muted-foreground">—</span>}
+                      </td>
+                      <td className="px-4 py-3">
+                        {t.payment_status === "paid" && t.fee_amount > 0 ? (
+                          <button
+                            onClick={() => setReceipt({
+                              type: "application_fee",
+                              application_id: t.application_id,
+                              applicant_name: t.full_name,
+                              phone: t.phone,
+                              email: t.email || undefined,
+                              amount: t.fee_amount,
+                              payment_ref: t.payment_ref,
+                              payment_date: t.updated_at,
+                            })}
+                            className="flex items-center gap-1.5 rounded-lg border border-primary/30 px-2.5 py-1 text-[11px] font-medium text-primary hover:bg-primary/5 transition-colors"
+                          >
+                            <Receipt className="h-3.5 w-3.5" /> Receipt
+                          </button>
+                        ) : <span className="text-muted-foreground">—</span>}
                       </td>
                     </tr>
                   ))}
@@ -507,6 +531,7 @@ export default function TransactionHistoryPanel() {
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Transaction Ref</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Admission No</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Recorded By</th>
+                    <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Receipt</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -548,6 +573,24 @@ export default function TransactionHistoryPanel() {
                       <td className="px-4 py-3 text-xs text-muted-foreground">
                         {p.profiles?.display_name || "—"}
                       </td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => setReceipt({
+                            type: "student_fee",
+                            receipt_no: p.receipt_no || undefined,
+                            student_name: p.students?.name || undefined,
+                            admission_no: p.students?.admission_no || p.students?.pre_admission_no || undefined,
+                            payment_mode: p.payment_mode,
+                            recorded_by: p.profiles?.display_name || undefined,
+                            amount: p.amount,
+                            payment_ref: p.transaction_ref,
+                            payment_date: p.paid_at,
+                          })}
+                          className="flex items-center gap-1.5 rounded-lg border border-primary/30 px-2.5 py-1 text-[11px] font-medium text-primary hover:bg-primary/5 transition-colors"
+                        >
+                          <Receipt className="h-3.5 w-3.5" /> Receipt
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -565,5 +608,6 @@ export default function TransactionHistoryPanel() {
         </div>
       )}
     </div>
+    </>
   );
 }

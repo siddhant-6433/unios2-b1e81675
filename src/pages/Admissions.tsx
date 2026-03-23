@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useCampus } from "@/contexts/CampusContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -97,6 +98,7 @@ interface Lead {
 const Admissions = () => {
   const navigate = useNavigate();
   const { role } = useAuth();
+  const { selectedCampusId } = useCampus();
   const isTeamLeader = useIsTeamLeader();
   const { toast } = useToast();
   const [view, setView] = useState<"pipeline" | "list">("pipeline");
@@ -117,15 +119,17 @@ const Admissions = () => {
   const isSuperAdmin = role === "super_admin";
   const canTransfer = isSuperAdmin || isTeamLeader;
 
-  useEffect(() => { fetchLeads(); }, []);
+  useEffect(() => { fetchLeads(); }, [selectedCampusId]);
 
   const fetchLeads = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    let query = supabase
       .from("leads")
       .select(`*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`)
       .order("created_at", { ascending: false })
       .limit(500);
+    if (selectedCampusId !== "all") query = query.eq("campus_id", selectedCampusId);
+    const { data, error } = await query;
 
     if (data) {
       setLeads(data.map((l: any) => ({

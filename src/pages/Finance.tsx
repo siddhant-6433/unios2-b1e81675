@@ -7,6 +7,7 @@ import {
   Globe,
 } from "lucide-react";
 import TransactionHistoryPanel from "@/components/admin/TransactionHistoryPanel";
+import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -35,6 +36,7 @@ const Finance = () => {
   const [payments, setPayments] = useState<any[]>([]);
   const [structures, setStructures] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [receipt, setReceipt] = useState<ReceiptData | null>(null);
 
   useEffect(() => { fetchAll(); }, []);
 
@@ -73,6 +75,8 @@ const Finance = () => {
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
 
   return (
+    <>
+    <ReceiptDialog data={receipt} onClose={() => setReceipt(null)} />
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
@@ -190,11 +194,12 @@ const Finance = () => {
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Mode</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Ref</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Date</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Receipt</th>
                 </tr>
               </thead>
               <tbody>
                 {payments.length === 0 ? (
-                  <tr><td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">No payments recorded</td></tr>
+                  <tr><td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">No payments recorded</td></tr>
                 ) : payments.map((p: any) => (
                   <tr key={p.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
                     <td className="px-4 py-3 font-mono text-xs text-primary font-semibold">{p.receipt_no || "—"}</td>
@@ -208,6 +213,23 @@ const Finance = () => {
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{p.transaction_ref || "—"}</td>
                     <td className="px-4 py-3 text-muted-foreground">{new Date(p.paid_at).toLocaleDateString("en-IN")}</td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => setReceipt({
+                          type: "student_fee",
+                          receipt_no: p.receipt_no || undefined,
+                          student_name: p.students?.name || undefined,
+                          admission_no: p.students?.admission_no || undefined,
+                          payment_mode: p.payment_mode,
+                          amount: Number(p.amount),
+                          payment_ref: p.transaction_ref,
+                          payment_date: p.paid_at,
+                        })}
+                        className="flex items-center gap-1.5 rounded-lg border border-primary/30 px-2.5 py-1 text-[11px] font-medium text-primary hover:bg-primary/5 transition-colors"
+                      >
+                        <Receipt className="h-3.5 w-3.5" /> Receipt
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -290,6 +312,7 @@ const Finance = () => {
         </Card>
       )}
     </div>
+    </>
   );
 };
 

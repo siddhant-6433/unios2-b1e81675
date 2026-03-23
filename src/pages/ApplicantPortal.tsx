@@ -4,8 +4,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   GraduationCap, LogOut, Loader2, ArrowRight, CheckCircle2,
-  Clock, FileText, AlertCircle, Plus, RefreshCw,
+  Clock, FileText, AlertCircle, Plus, RefreshCw, Receipt,
 } from "lucide-react";
+import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
 
 interface CourseSelection {
   course_name?: string;
@@ -66,6 +67,7 @@ export default function ApplicantPortal() {
   const [applications, setApplications] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [receipt, setReceipt] = useState<ReceiptData | null>(null);
 
   const fetchApplications = async () => {
     setLoading(true);
@@ -121,6 +123,8 @@ export default function ApplicantPortal() {
   const submitted   = applications.filter((a) => a.status !== "draft" && a.status !== "in_progress");
 
   return (
+    <>
+    <ReceiptDialog data={receipt} onClose={() => setReceipt(null)} />
     <div className="min-h-screen bg-gray-50">
       {/* ── Header ── */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
@@ -239,12 +243,29 @@ export default function ApplicantPortal() {
                         </div>
                       </div>
 
-                      <button
-                        onClick={() => handleContinue(app)}
-                        className="shrink-0 flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary/90 transition-colors"
-                      >
-                        Continue <ArrowRight className="h-4 w-4" />
-                      </button>
+                      <div className="flex flex-col items-end gap-2">
+                        {app.payment_status === "paid" && app.fee_amount > 0 && (
+                          <button
+                            onClick={() => setReceipt({
+                              type: "application_fee",
+                              application_id: app.application_id,
+                              applicant_name: app.full_name,
+                              amount: app.fee_amount,
+                              payment_ref: app.payment_ref,
+                              payment_date: app.updated_at,
+                            })}
+                            className="shrink-0 flex items-center gap-1.5 rounded-xl border border-green-300 bg-green-50 px-3 py-2 text-xs font-semibold text-green-700 hover:bg-green-100 transition-colors"
+                          >
+                            <Receipt className="h-3.5 w-3.5" /> Receipt
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleContinue(app)}
+                          className="shrink-0 flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary/90 transition-colors"
+                        >
+                          Continue <ArrowRight className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -304,6 +325,22 @@ export default function ApplicantPortal() {
                           )}
                         </div>
                       </div>
+
+                      {app.payment_status === "paid" && app.fee_amount > 0 && (
+                        <button
+                          onClick={() => setReceipt({
+                            type: "application_fee",
+                            application_id: app.application_id,
+                            applicant_name: app.full_name,
+                            amount: app.fee_amount,
+                            payment_ref: app.payment_ref,
+                            payment_date: app.submitted_at || app.updated_at,
+                          })}
+                          className="shrink-0 flex items-center gap-1.5 rounded-xl border border-green-300 bg-green-50 px-3 py-2 text-xs font-semibold text-green-700 hover:bg-green-100 transition-colors"
+                        >
+                          <Receipt className="h-3.5 w-3.5" /> Receipt
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -332,5 +369,6 @@ export default function ApplicantPortal() {
         )}
       </main>
     </div>
+    </>
   );
 }

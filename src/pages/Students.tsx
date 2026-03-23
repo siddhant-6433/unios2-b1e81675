@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { useCampus } from "@/contexts/CampusContext";
 import { Users, Search, GraduationCap, MapPin, ChevronRight, Loader2 } from "lucide-react";
 
 interface StudentRow {
@@ -18,16 +19,19 @@ const Students = () => {
   const [search, setSearch] = useState("");
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const { selectedCampusId } = useCampus();
 
-  useEffect(() => { fetchStudents(); }, []);
+  useEffect(() => { fetchStudents(); }, [selectedCampusId]);
 
   const fetchStudents = async () => {
     setLoading(true);
-    const { data } = await supabase
+    let query = supabase
       .from("students")
       .select("id, name, admission_no, pre_admission_no, status, phone, courses:course_id(name), campuses:campus_id(name)")
       .order("created_at", { ascending: false })
       .limit(500);
+    if (selectedCampusId !== "all") query = query.eq("campus_id", selectedCampusId);
+    const { data } = await query;
 
     if (data) {
       setStudents(data.map((s: any) => ({
