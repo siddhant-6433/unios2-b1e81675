@@ -84,6 +84,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
       .single();
 
     if (row?.payment_status === "paid") {
+      stopPolling();
       onChange({ payment_status: "paid", payment_ref: row.payment_ref ?? undefined });
       setLoading(false);
       if (popupRef.current && !popupRef.current.closed) popupRef.current.close();

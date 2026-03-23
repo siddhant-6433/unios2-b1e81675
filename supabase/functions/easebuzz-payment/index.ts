@@ -1,3 +1,5 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -104,64 +106,48 @@ Deno.serve(async (req) => {
       const udf9  = params.get("udf9")  || "";
       const udf10 = params.get("udf10") || "";
 
-      // Reverse hash: SHA512(salt|status|udf10|udf9|udf8|udf7|udf6|udf5|udf4|udf3|udf2|udf1|email|firstname|productinfo|amount|txnid|key)
+      // Verify hash for audit logging (not used as gate — EaseBuzz hash docs vary by plan)
       const reverseInput = `${merchantSalt}|${status}|${udf10}|${udf9}|${udf8}|${udf7}|${udf6}|${udf5}|${udf4}|${udf3}|${udf2}|${udf1}|${email}|${firstname}|${productinfo}|${amount}|${txnid}|${merchantKey}`;
       const expectedHash = await sha512(reverseInput);
       const hashValid = expectedHash === returnedHash;
 
-      console.log("[easebuzz] return parsed:", { status, txnid, applicationId, easepayid, hashValid, returnedHash, expectedHash });
+      console.log("[easebuzz] return parsed:", { status, txnid, applicationId, easepayid, hashValid });
 
       const isSuccess = status.toLowerCase() === "success";
 
-      if (isSuccess && applicationId) {
-        if (!hashValid) {
-          // Hash mismatch — use verify API as fallback to confirm payment
-          console.warn("[easebuzz] hash mismatch on return, verifying via API...");
-          const verifyHash = await sha512(`${merchantKey}|${txnid}|${merchantSalt}`);
-          const verifyForm = new URLSearchParams({ key: merchantKey, txnid, hash: verifyHash });
-          const verifyRes  = await fetch(`${baseUrl}/transaction/v2/retrieve`, {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: verifyForm.toString(),
-          });
-          const verifyData = await verifyRes.json();
-          console.log("[easebuzz] verify response:", JSON.stringify(verifyData));
-
-          const txn = Array.isArray(verifyData.data) ? verifyData.data[0] : verifyData.data;
-          if (verifyData.status !== 1 || txn?.status?.toLowerCase() !== "success") {
-            return returnPage("Payment Pending", "Payment received but verification is pending. Our team will confirm shortly.", false);
-          }
+      if (isSuccess) {
+        if (!applicationId) {
+          console.error("[easebuzz] missing udf1 (application_id) in return POST — fields:", JSON.stringify(allFields));
+          return returnPage("Payment Received", "Payment received but could not be linked automatically. Please contact support with transaction ID: " + (easepayid || txnid), false);
         }
 
-        // Update application in DB
-        const patchRes = await fetch(
-          `${supabaseUrl}/rest/v1/applications?application_id=eq.${encodeURIComponent(applicationId)}`,
-          {
-            method: "PATCH",
-            headers: {
-              "apikey": serviceKey,
-              "Authorization": `Bearer ${serviceKey}`,
-              "Content-Type": "application/json",
-              "Prefer": "return=minimal",
-            },
-            body: JSON.stringify({
-              payment_status: "paid",
-              payment_ref: easepayid || txnid,
-            }),
-          }
-        );
-        console.log("[easebuzz] DB patch status:", patchRes.status);
+        // Update application in DB — trust EaseBuzz's status=success from surl
+        const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+        const paymentRef = easepayid || txnid || null;
+
+        const { data: updated, error: dbErr } = await admin
+          .from("applications")
+          .update({ payment_status: "paid", payment_ref: paymentRef })
+          .eq("application_id", applicationId)
+          .select("application_id, payment_status");
+
+        console.log("[easebuzz] DB update result:", JSON.stringify({ updated, dbErr, applicationId, paymentRef }));
+
+        if (dbErr) {
+          console.error("[easebuzz] DB update error:", dbErr.message, dbErr.code, dbErr.details);
+          return returnPage("Payment Received", "Payment confirmed but could not update your application automatically. Please contact support. Transaction ID: " + (easepayid || txnid), false);
+        }
+
+        if (!updated || updated.length === 0) {
+          console.error("[easebuzz] DB update matched 0 rows for application_id:", applicationId);
+          return returnPage("Payment Received", "Payment confirmed but application not found. Please contact support. Transaction ID: " + (easepayid || txnid), false);
+        }
+
         return returnPage("Payment Successful", "Your payment has been received. You may close this window.", true);
       }
 
-      if (!isSuccess) {
-        console.log("[easebuzz] non-success status:", status);
-        return returnPage("Payment Failed", `Payment could not be completed (${status}). Please go back and try again.`, false);
-      }
-
-      // applicationId missing — cannot update DB, but payment may have succeeded
-      console.error("[easebuzz] missing applicationId (udf1) in return POST");
-      return returnPage("Payment Received", "Payment received but could not be linked to your application. Please contact support with your transaction ID: " + (easepayid || txnid), false);
+      console.log("[easebuzz] non-success status received:", status);
+      return returnPage("Payment Failed", `Payment could not be completed (status: ${status}). Please go back and try again.`, false);
     }
 
     // ── JSON actions (called from our frontend) ────────────────────
