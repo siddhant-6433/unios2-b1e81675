@@ -185,9 +185,11 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
 
       // Poll Supabase every 2s for payment confirmation
       pollRef.current = setInterval(async () => {
-        // If popup closed without payment, stop polling and show error
+        // If popup closed, do a final DB + verify check
         if (popupRef.current?.closed) {
           stopPolling();
+
+          // Check DB first (surl handler may have already updated it)
           const { data: row } = await supabase
             .from("applications")
             .select("payment_status, payment_ref")
@@ -196,9 +198,23 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
 
           if (row?.payment_status === "paid") {
             onChange({ payment_status: "paid", payment_ref: row.payment_ref ?? undefined });
-          } else {
-            setError("Payment window was closed. If you completed the payment please wait a moment, or try again.");
+            setLoading(false);
+            return;
           }
+
+          // Fallback: verify via EaseBuzz transaction API
+          try {
+            const { data: verifyData } = await supabase.functions.invoke("easebuzz-payment", {
+              body: { action: "verify-payment", txnid },
+            });
+            if (verifyData?.status?.toLowerCase() === "success") {
+              onChange({ payment_status: "paid", payment_ref: verifyData.easepayid || txnid });
+              setLoading(false);
+              return;
+            }
+          } catch (_) { /* ignore */ }
+
+          setError("Payment window was closed. If your payment was deducted, it will be confirmed shortly — or contact support.");
           setLoading(false);
           return;
         }

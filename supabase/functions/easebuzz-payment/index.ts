@@ -76,27 +76,65 @@ Deno.serve(async (req) => {
     // EaseBuzz posts form-encoded data back to our surl/furl
     if (contentType.includes("application/x-www-form-urlencoded")) {
       const params = new URLSearchParams(rawBody);
-      const status      = params.get("status") || "";
-      const txnid       = params.get("txnid") || "";
+
+      // Log ALL fields EaseBuzz sends so we can debug
+      const allFields: Record<string, string> = {};
+      params.forEach((v, k) => { allFields[k] = v; });
+      console.log("[easebuzz] surl POST fields:", JSON.stringify(allFields));
+
+      const status       = params.get("status") || "";
+      const txnid        = params.get("txnid") || "";
       const applicationId = params.get("udf1") || "";
-      const easepayid   = params.get("easepayid") || "";
-      const email       = params.get("email") || "";
-      const firstname   = params.get("firstname") || "";
-      const productinfo = params.get("productinfo") || "";
-      const amount      = params.get("amount") || "";
+      const easepayid    = params.get("easepayid") || params.get("mihpayid") || "";
+      const email        = params.get("email") || "";
+      const firstname    = params.get("firstname") || "";
+      const productinfo  = params.get("productinfo") || "";
+      const amount       = params.get("amount") || "";
       const returnedHash = params.get("hash") || "";
 
-      // Verify reverse hash: SHA512(salt|status|udf10|udf9|...|udf1|email|firstname|productinfo|amount|txnid|key)
-      // With udf2-udf10 empty and udf1=applicationId
-      const reverseInput = `${merchantSalt}|${status}|||||||||${applicationId}|${email}|${firstname}|${productinfo}|${amount}|${txnid}|${merchantKey}`;
+      // Collect all udf values as EaseBuzz sends them (for accurate hash verification)
+      const udf1  = params.get("udf1")  || "";
+      const udf2  = params.get("udf2")  || "";
+      const udf3  = params.get("udf3")  || "";
+      const udf4  = params.get("udf4")  || "";
+      const udf5  = params.get("udf5")  || "";
+      const udf6  = params.get("udf6")  || "";
+      const udf7  = params.get("udf7")  || "";
+      const udf8  = params.get("udf8")  || "";
+      const udf9  = params.get("udf9")  || "";
+      const udf10 = params.get("udf10") || "";
+
+      // Reverse hash: SHA512(salt|status|udf10|udf9|udf8|udf7|udf6|udf5|udf4|udf3|udf2|udf1|email|firstname|productinfo|amount|txnid|key)
+      const reverseInput = `${merchantSalt}|${status}|${udf10}|${udf9}|${udf8}|${udf7}|${udf6}|${udf5}|${udf4}|${udf3}|${udf2}|${udf1}|${email}|${firstname}|${productinfo}|${amount}|${txnid}|${merchantKey}`;
       const expectedHash = await sha512(reverseInput);
       const hashValid = expectedHash === returnedHash;
 
-      console.log("[easebuzz] return:", { status, txnid, applicationId, easepayid, hashValid });
+      console.log("[easebuzz] return parsed:", { status, txnid, applicationId, easepayid, hashValid, returnedHash, expectedHash });
 
-      if (status === "success" && hashValid && applicationId) {
+      const isSuccess = status.toLowerCase() === "success";
+
+      if (isSuccess && applicationId) {
+        if (!hashValid) {
+          // Hash mismatch — use verify API as fallback to confirm payment
+          console.warn("[easebuzz] hash mismatch on return, verifying via API...");
+          const verifyHash = await sha512(`${merchantKey}|${txnid}|${merchantSalt}`);
+          const verifyForm = new URLSearchParams({ key: merchantKey, txnid, hash: verifyHash });
+          const verifyRes  = await fetch(`${baseUrl}/transaction/v2/retrieve`, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: verifyForm.toString(),
+          });
+          const verifyData = await verifyRes.json();
+          console.log("[easebuzz] verify response:", JSON.stringify(verifyData));
+
+          const txn = Array.isArray(verifyData.data) ? verifyData.data[0] : verifyData.data;
+          if (verifyData.status !== 1 || txn?.status?.toLowerCase() !== "success") {
+            return returnPage("Payment Pending", "Payment received but verification is pending. Our team will confirm shortly.", false);
+          }
+        }
+
         // Update application in DB
-        await fetch(
+        const patchRes = await fetch(
           `${supabaseUrl}/rest/v1/applications?application_id=eq.${encodeURIComponent(applicationId)}`,
           {
             method: "PATCH",
@@ -112,15 +150,18 @@ Deno.serve(async (req) => {
             }),
           }
         );
+        console.log("[easebuzz] DB patch status:", patchRes.status);
         return returnPage("Payment Successful", "Your payment has been received. You may close this window.", true);
       }
 
-      if (status === "failure" || status === "userCancelled") {
-        return returnPage("Payment Failed", "Your payment was not completed. Please go back and try again.", false);
+      if (!isSuccess) {
+        console.log("[easebuzz] non-success status:", status);
+        return returnPage("Payment Failed", `Payment could not be completed (${status}). Please go back and try again.`, false);
       }
 
-      // Unexpected status — still show a message
-      return returnPage("Payment Pending", "Your payment status is being verified. Please wait.", false);
+      // applicationId missing — cannot update DB, but payment may have succeeded
+      console.error("[easebuzz] missing applicationId (udf1) in return POST");
+      return returnPage("Payment Received", "Payment received but could not be linked to your application. Please contact support with your transaction ID: " + (easepayid || txnid), false);
     }
 
     // ── JSON actions (called from our frontend) ────────────────────
