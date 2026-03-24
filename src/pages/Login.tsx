@@ -79,7 +79,14 @@ const Login = () => {
       }
       if (data?.error) throw new Error(data.error);
       setOtpSent(true);
-      toast({ title: "OTP Sent", description: "Check your WhatsApp for the verification code." });
+      const waId = data?.wa_id;
+      toast({
+        title: waId ? "OTP Sent" : "Sent (number not on WhatsApp?)",
+        description: waId
+          ? `Delivered to WhatsApp number ${waId}`
+          : `No WhatsApp account found for this number. wamid: ${data?.wamid?.slice(-10) ?? "none"}`,
+        variant: waId ? "default" : "destructive",
+      });
     } catch (error: any) {
       toast({ title: "Error", description: error.message || "Failed to send OTP", variant: "destructive" });
     } finally {

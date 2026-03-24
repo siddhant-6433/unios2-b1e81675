@@ -4,8 +4,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X, KeyRound
+  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X, KeyRound, Trash2
 } from "lucide-react";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import EligibilityConfigPanel from "@/components/admin/EligibilityConfigPanel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import InviteUserDialog from "@/components/admin/InviteUserDialog";
@@ -60,6 +64,8 @@ const AdminPanel = () => {
   const [phoneEdit, setPhoneEdit] = useState<{ userId: string; name: string; phone: string | null } | null>(null);
   const [employeeProfile, setEmployeeProfile] = useState<{ userId: string; name: string } | null>(null);
   const [setPasswordTarget, setSetPasswordTarget] = useState<{ userId: string; name: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ userId: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const { toast } = useToast();
 
   const fetchUsers = async () => {
@@ -131,6 +137,31 @@ const AdminPanel = () => {
     } finally {
       setSavingUser(null);
       setEditingUser(null);
+    }
+  };
+
+  const handleDeleteUser = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("delete-user", {
+        body: { user_id: deleteTarget.userId },
+      });
+      if (error) {
+        const ctx = (error as any)?.context;
+        if (ctx && typeof ctx.json === "function") {
+          try { const body = await ctx.json(); throw new Error(body?.error || error.message); } catch (e: any) { if (e.message) throw e; }
+        }
+        throw error;
+      }
+      if (data?.error) throw new Error(data.error);
+      toast({ title: "User deleted", description: `${deleteTarget.name} has been permanently deleted.` });
+      setDeleteTarget(null);
+      await fetchUsers();
+    } catch (err: any) {
+      toast({ title: "Delete failed", description: err.message, variant: "destructive" });
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -309,6 +340,11 @@ const AdminPanel = () => {
                                     className="rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors">
                                     Change Role
                                   </button>
+                                  <button onClick={() => setDeleteTarget({ userId: user.user_id, name: user.display_name || "Unnamed" })}
+                                    className="rounded-lg bg-destructive/10 p-1.5 text-destructive hover:bg-destructive/20 transition-colors"
+                                    title="Delete user">
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
                                 </>
                               )}
                             </div>
@@ -329,6 +365,28 @@ const AdminPanel = () => {
               userId={employeeProfile?.userId || ""} userName={employeeProfile?.name || ""} />
             <SetPasswordDialog open={!!setPasswordTarget} onClose={() => setSetPasswordTarget(null)}
               userId={setPasswordTarget?.userId || ""} userName={setPasswordTarget?.name || ""} />
+
+            <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete "{deleteTarget?.name}"?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will permanently delete the user account and all associated data. This action cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleDeleteUser}
+                    disabled={deleting}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    {deleting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                    Delete User
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </TabsContent>
 

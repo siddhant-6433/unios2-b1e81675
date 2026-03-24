@@ -118,15 +118,24 @@ Deno.serve(async (req) => {
                   type: "body",
                   parameters: [{ type: "text", text: otpCode }],
                 },
+                {
+                  type: "button",
+                  sub_type: "url",
+                  index: "0",
+                  parameters: [{ type: "text", text: otpCode }],
+                },
               ],
             },
           }),
         }
       );
 
+      const waBody = await waResponse.text();
+      console.log("[whatsapp-otp] Meta API response:", waResponse.status, waBody);
+
       if (!waResponse.ok) {
-        const waErrorText = await waResponse.text();
-        console.error("[whatsapp-otp] Meta API error:", waResponse.status, waErrorText);
+        console.error("[whatsapp-otp] Meta API error:", waResponse.status, waBody);
+        const waErrorText = waBody;
 
         let parsedWaError: any = null;
         try {
@@ -149,8 +158,20 @@ Deno.serve(async (req) => {
         );
       }
 
+      // Parse success response to get message ID and contact resolution
+      let waResult: any = null;
+      try { waResult = JSON.parse(waBody); } catch { /* ignore */ }
+      const wamid = waResult?.messages?.[0]?.id;
+      const waContact = waResult?.contacts?.[0];
+      console.log("[whatsapp-otp] Message sent, wamid:", wamid, "contact:", JSON.stringify(waContact));
+
       return new Response(
-        JSON.stringify({ success: true }),
+        JSON.stringify({
+          success: true,
+          wamid,
+          wa_id: waContact?.wa_id,        // WhatsApp-resolved number (null if not on WA)
+          input: waContact?.input,         // What we sent
+        }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }

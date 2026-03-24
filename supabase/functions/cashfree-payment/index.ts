@@ -26,7 +26,9 @@ Deno.serve(async (req) => {
         ? "https://sandbox.cashfree.com/pg"
         : "https://api.cashfree.com/pg";
 
-    const { action, ...body } = await req.json();
+    const rawBody = await req.text();
+    const parsed = rawBody ? JSON.parse(rawBody) : {};
+    const { action, ...body } = parsed;
 
     // ── Create Order ──────────────────────────────────────────────
     if (action === "create-order") {
@@ -128,9 +130,7 @@ Deno.serve(async (req) => {
     // ── Cashfree Webhook ───────────────────────────────────────────
     // Cashfree POSTs payment notifications here (notify_url above)
     if (action === undefined && req.method === "POST") {
-      // Webhook payload — log for now, handled client-side via verify
-      const webhook = await req.text();
-      console.log("[cashfree] webhook:", webhook);
+      console.log("[cashfree] webhook:", rawBody);
       return new Response("ok", { status: 200, headers: corsHeaders });
     }
 
