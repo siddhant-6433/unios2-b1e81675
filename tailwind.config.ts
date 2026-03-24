@@ -15,6 +15,7 @@ export default {
     extend: {
       fontFamily: {
         sans: ["Inter", "system-ui", "sans-serif"],
+        display: ["Manrope", "Inter", "system-ui", "sans-serif"],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -60,6 +61,12 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        warm: {
+          DEFAULT: "hsl(var(--warm))",
+          foreground: "hsl(var(--warm-foreground))",
+          container: "hsl(var(--warm-container))",
+          "on-container": "hsl(var(--warm-on-container))",
+        },
         pastel: {
           purple: "hsl(var(--pastel-purple))",
           green: "hsl(var(--pastel-green))",
@@ -89,9 +96,9 @@ export default {
         },
       },
       borderRadius: {
-        lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
+        lg: "var(--radius)",             /* 8px — ROUND_EIGHT, containers */
+        md: "calc(var(--radius) - 2px)", /* 6px */
+        sm: "calc(var(--radius) - 4px)", /* 4px — ROUND_FOUR, components */
       },
       keyframes: {
         "accordion-down": {

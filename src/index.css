@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Manrope:wght@500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,77 +6,94 @@
 
 @layer base {
   :root {
-    --background: 220 20% 96%;
-    --foreground: 224 71% 4%;
+    /* ── Surface hierarchy ── */
+    /* Base surface: #faf9fb */
+    --background: 270 20% 98%;
+    --foreground: 224 47% 11%;
 
+    /* surface_container_lowest: #ffffff (cards, content areas) */
     --card: 0 0% 100%;
-    --card-foreground: 224 71% 4%;
+    --card-foreground: 224 47% 11%;
 
+    /* Popovers: glassmorphism handled via utility */
     --popover: 0 0% 100%;
-    --popover-foreground: 224 71% 4%;
+    --popover-foreground: 224 47% 11%;
 
-    --primary: 263 70% 50%;
+    /* ── Brand colors ── */
+    /* Primary: #0035C5 — authoritative academic blue */
+    --primary: 224 100% 39%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 14% 96%;
-    --secondary-foreground: 224 71% 4%;
+    /* Secondary: surface_container_high — for secondary buttons & chips */
+    --secondary: 270 9% 93%;
+    --secondary-foreground: 224 47% 11%;
 
-    --muted: 220 14% 96%;
-    --muted-foreground: 220 9% 46%;
+    /* Muted: surface_container_low — #f4f3f5 */
+    --muted: 270 9% 96%;
+    --muted-foreground: 220 13% 46%;
 
-    --accent: 220 14% 93%;
-    --accent-foreground: 224 71% 4%;
+    /* Accent: same as secondary for hover states */
+    --accent: 270 9% 91%;
+    --accent-foreground: 224 47% 11%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 13% 91%;
-    --input: 220 13% 91%;
-    --ring: 263 70% 50%;
+    /* Ghost border — outline_variant, very subtle */
+    --border: 270 9% 88%;
+    --input: 270 9% 96%;
+    --ring: 224 100% 39%;
 
-    --radius: 0.75rem;
+    /* ROUND_EIGHT = 8px max for containers */
+    --radius: 0.5rem;
 
-    /* Sidebar */
+    /* ── Warm secondary: #954919 — human accent (peach/orange) ── */
+    --warm: 23 71% 34%;
+    --warm-foreground: 0 0% 100%;
+    --warm-container: 23 80% 93%;
+    --warm-on-container: 23 71% 25%;
+
+    /* ── Sidebar ── */
     --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 220 9% 46%;
-    --sidebar-primary: 263 70% 50%;
+    --sidebar-foreground: 220 13% 46%;
+    --sidebar-primary: 224 100% 39%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 14% 94%;
-    --sidebar-accent-foreground: 224 71% 4%;
-    --sidebar-border: 220 13% 92%;
-    --sidebar-ring: 263 70% 50%;
+    --sidebar-accent: 270 9% 96%;
+    --sidebar-accent-foreground: 224 47% 11%;
+    --sidebar-border: 270 9% 93%;
+    --sidebar-ring: 224 100% 39%;
 
-    /* Pastel tokens */
-    --pastel-purple: 263 70% 95%;
+    /* ── Pastel tokens ── */
+    --pastel-purple: 224 85% 94%;
     --pastel-green: 142 50% 93%;
-    --pastel-blue: 215 80% 95%;
-    --pastel-orange: 30 90% 93%;
+    --pastel-blue: 215 80% 94%;
+    --pastel-orange: 23 80% 93%;
     --pastel-red: 0 80% 95%;
     --pastel-yellow: 45 90% 93%;
     --pastel-mint: 165 50% 93%;
     --pastel-pink: 330 70% 95%;
 
-    /* Stage colors */
-    --stage-new: 215 80% 94%;
-    --stage-called: 263 70% 94%;
+    /* ── Stage colors ── */
+    --stage-new: 224 80% 94%;
+    --stage-called: 270 50% 94%;
     --stage-visit: 45 90% 92%;
-    --stage-interview: 30 90% 92%;
+    --stage-interview: 23 80% 92%;
     --stage-offer: 142 50% 90%;
     --stage-paid: 142 60% 92%;
     --stage-admitted: 142 60% 40%;
     --stage-rejected: 0 80% 94%;
 
-    /* Chart colors */
-    --chart-1: 263 70% 50%;
-    --chart-2: 215 80% 55%;
+    /* ── Chart colors ── */
+    --chart-1: 224 100% 39%;
+    --chart-2: 23 71% 45%;
     --chart-3: 45 80% 55%;
-    --chart-4: 0 65% 55%;
-    --chart-5: 142 60% 45%;
+    --chart-4: 142 60% 45%;
+    --chart-5: 0 65% 55%;
 
-    /* Success / Warning / Info */
+    /* ── Semantic ── */
     --success: 142 60% 40%;
     --warning: 35 90% 55%;
-    --info: 215 70% 55%;
+    --info: 224 80% 55%;
   }
 
   * {
@@ -84,29 +101,42 @@
   }
 
   body {
-    @apply bg-background text-foreground font-sans antialiased;
-    font-family: 'Inter', sans-serif;
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Manrope', 'Inter', system-ui, sans-serif;
+    letter-spacing: -0.02em;
   }
 }
 
 @layer utilities {
+  /* Ambient shadow — no hard dark outlines */
   .card-neo {
-    @apply rounded-xl bg-card border border-border/60;
-    box-shadow: 0 1px 3px 0 hsl(220 14% 10% / 0.04), 0 1px 2px -1px hsl(220 14% 10% / 0.03);
+    @apply bg-card;
+    box-shadow: 0 8px 24px -4px hsl(224 47% 11% / 0.06), 0 2px 8px -2px hsl(224 47% 11% / 0.04);
   }
   .card-neo-hover {
     @apply card-neo transition-all duration-200;
   }
   .card-neo-hover:hover {
-    box-shadow: 0 4px 12px -2px hsl(220 14% 10% / 0.08), 0 2px 6px -2px hsl(220 14% 10% / 0.04);
+    box-shadow: 0 12px 32px -4px hsl(224 47% 11% / 0.10), 0 4px 12px -2px hsl(224 47% 11% / 0.06);
     transform: translateY(-1px);
   }
+
+  /* Glass — for modals and floating elements */
+  .glass {
+    background: hsl(0 0% 100% / 0.85);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+  }
+
   /* Legacy compat */
   .card-shadow {
-    @apply border border-border/60;
-    box-shadow: 0 1px 3px 0 hsl(220 14% 10% / 0.04), 0 1px 2px -1px hsl(220 14% 10% / 0.03);
+    box-shadow: 0 8px 24px -4px hsl(224 47% 11% / 0.06), 0 2px 8px -2px hsl(224 47% 11% / 0.04);
   }
   .card-shadow-md {
-    box-shadow: 0 4px 12px -2px hsl(220 14% 10% / 0.08), 0 2px 6px -2px hsl(220 14% 10% / 0.04);
+    box-shadow: 0 12px 32px -4px hsl(224 47% 11% / 0.10), 0 4px 12px -2px hsl(224 47% 11% / 0.06);
   }
 }

@@ -6,6 +6,18 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+function decodeJwt(token: string): Record<string, any> | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = payload + "=".repeat((4 - (payload.length % 4)) % 4);
+    return JSON.parse(atob(padded));
+  } catch {
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -21,33 +33,30 @@ Deno.serve(async (req) => {
     const authHeader = req.headers.get("authorization");
     if (!authHeader) return json({ error: "Missing authorization" }, 401);
 
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
+    const claims = decodeJwt(token);
+    console.log("[delete-user] JWT claims.sub:", claims?.sub, "role:", claims?.role);
+
+    if (!claims?.sub) return json({ error: "Invalid token" }, 401);
+    if (claims.exp && claims.exp < Date.now() / 1000) return json({ error: "Token expired" }, 401);
+
+    const callerId = claims.sub as string;
+
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-    // Verify caller using their JWT
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user }, error: authError } = await userClient.auth.getUser();
-    if (authError || !user) return json({ error: "Unauthorized" }, 401);
-
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-    // Check caller has super_admin role
-    const { data: roleRow } = await adminClient
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", user.id)
-      .single();
+    // Check caller has super_admin role via SECURITY DEFINER RPC (bypasses table permissions)
+    const { data: callerRole, error: roleError } = await adminClient.rpc("get_user_role", { _user_id: callerId });
+    console.log("[delete-user] callerId:", callerId, "callerRole:", callerRole, "roleError:", roleError?.message);
 
-    if (roleRow?.role !== "super_admin") {
+    if (callerRole !== "super_admin") {
       return json({ error: "Forbidden: super_admin only" }, 403);
     }
 
     const { user_id } = await req.json();
     if (!user_id) return json({ error: "user_id is required" }, 400);
-    if (user_id === user.id) return json({ error: "You cannot delete your own account." }, 400);
+    if (user_id === callerId) return json({ error: "You cannot delete your own account." }, 400);
 
     // Clean up public-schema records first (avoids FK constraint errors)
     await adminClient.from("user_roles").delete().eq("user_id", user_id);

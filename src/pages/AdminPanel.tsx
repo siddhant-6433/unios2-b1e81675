@@ -148,11 +148,15 @@ const AdminPanel = () => {
         body: { user_id: deleteTarget.userId },
       });
       if (error) {
-        const ctx = (error as any)?.context;
-        if (ctx && typeof ctx.json === "function") {
-          try { const body = await ctx.json(); throw new Error(body?.error || error.message); } catch (e: any) { if (e.message) throw e; }
-        }
-        throw error;
+        let message = error.message;
+        try {
+          const text = await (error as any)?.context?.text?.();
+          if (text) {
+            try { const body = JSON.parse(text); if (body?.error) message = body.error; }
+            catch { message = text.slice(0, 200); }
+          }
+        } catch {}
+        throw new Error(message);
       }
       if (data?.error) throw new Error(data.error);
       toast({ title: "User deleted", description: `${deleteTarget.name} has been permanently deleted.` });

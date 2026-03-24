@@ -27,6 +27,23 @@ const Login = () => {
   const [otp, setOtp] = useState("");
   const [otpSent, setOtpSent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [otpSentAt, setOtpSentAt] = useState<number | null>(null);
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    if (!otpSent || !otpSentAt) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [otpSent, otpSentAt]);
+
+  const elapsed = otpSentAt ? (now - otpSentAt) / 1000 : 0;
+  const otpTimeLeft = Math.max(0, 300 - elapsed);
+  const resendCountdown = Math.max(0, 60 - Math.floor(elapsed));
+  const isOtpExpired = otpTimeLeft <= 0;
+  const canResend = elapsed >= 60;
+
+  const formatTime = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
 
   const handleGoogleLogin = async () => {
     setSubmitting(true);
@@ -61,38 +78,41 @@ const Login = () => {
     }
   };
 
-  const handleWhatsAppSendOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!phone.trim()) return;
+  const sendWhatsAppOtp = async () => {
+    // Show OTP screen immediately — don't wait for API round-trip
+    const ts = Date.now();
+    setOtpSentAt(ts);
+    setNow(ts);
+    setOtpSent(true);
+    setOtp("");
     setSubmitting(true);
     try {
       const { data, error } = await supabase.functions.invoke("whatsapp-otp", {
         body: { action: "send", phone: phone.trim() },
       });
       if (error) {
-        // Extract message from FunctionsHttpError response body
-        const ctx = (error as any)?.context;
-        if (ctx && typeof ctx.json === "function") {
-          try { const body = await ctx.json(); throw new Error(body?.error || error.message); } catch (e: any) { if (e.message) throw e; }
-        }
-        throw error;
+        let msg = error.message;
+        try { const text = await (error as any)?.context?.text?.(); if (text) { try { msg = JSON.parse(text)?.error || msg; } catch { msg = text.slice(0, 200); } } } catch {}
+        throw new Error(msg);
       }
       if (data?.error) throw new Error(data.error);
-      setOtpSent(true);
       const waId = data?.wa_id;
-      toast({
-        title: waId ? "OTP Sent" : "Sent (number not on WhatsApp?)",
-        description: waId
-          ? `Delivered to WhatsApp number ${waId}`
-          : `No WhatsApp account found for this number. wamid: ${data?.wamid?.slice(-10) ?? "none"}`,
-        variant: waId ? "default" : "destructive",
+      if (!waId) toast({
+        title: "Sent (number not on WhatsApp?)",
+        description: `No WhatsApp account found for this number. wamid: ${data?.wamid?.slice(-10) ?? "none"}`,
+        variant: "destructive",
       });
     } catch (error: any) {
-      toast({ title: "Error", description: error.message || "Failed to send OTP", variant: "destructive" });
+      // Roll back to phone screen on failure
+      setOtpSent(false);
+      setOtpSentAt(null);
+      toast({ title: "Failed to send OTP", description: error.message, variant: "destructive" });
     } finally {
       setSubmitting(false);
     }
   };
+
+  const handleWhatsAppSendOtp = (e: React.FormEvent) => { e.preventDefault(); if (phone.trim()) sendWhatsAppOtp(); };
 
   const handleWhatsAppVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -146,6 +166,7 @@ const Login = () => {
     setOtp("");
     setEmail("");
     setPhone("");
+    setOtpSentAt(null);
   };
 
   const methods: { key: LoginMethod; label: string; icon: React.ReactNode }[] = [
@@ -321,10 +342,18 @@ const Login = () => {
             otpSent ? (
               <form onSubmit={handleWhatsAppVerifyOtp} className="space-y-4">
                 <div className="rounded-xl bg-primary/5 border border-primary/10 p-4 text-center">
-                  <ShieldCheck className="h-6 w-6 text-primary mx-auto mb-2" />
+                  {submitting
+                    ? <Loader2 className="h-6 w-6 text-primary mx-auto mb-2 animate-spin" />
+                    : <ShieldCheck className="h-6 w-6 text-primary mx-auto mb-2" />}
                   <p className="text-xs text-muted-foreground">
-                    OTP sent to <strong>{phone}</strong> via WhatsApp
+                    {submitting ? "Sending OTP to " : "OTP sent to "}
+                    <strong>{phone}</strong> via WhatsApp
                   </p>
+                  {!submitting && (
+                    <p className={`text-xs font-medium mt-1.5 ${isOtpExpired ? "text-destructive" : "text-muted-foreground"}`}>
+                      {isOtpExpired ? "OTP expired — request a new one" : `Expires in ${formatTime(otpTimeLeft)}`}
+                    </p>
+                  )}
                 </div>
                 <input
                   type="text"
@@ -333,19 +362,28 @@ const Login = () => {
                   placeholder="Enter 6-digit OTP"
                   value={otp}
                   onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                  className="w-full rounded-xl border border-input bg-card px-4 py-3 text-sm text-foreground text-center tracking-[0.3em] font-mono placeholder:text-muted-foreground placeholder:tracking-normal focus:outline-none focus:ring-2 focus:ring-ring/20"
+                  disabled={isOtpExpired}
+                  className="w-full rounded-xl border border-input bg-card px-4 py-3 text-sm text-foreground text-center tracking-[0.3em] font-mono placeholder:text-muted-foreground placeholder:tracking-normal focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:opacity-50"
                   required
                 />
                 <button
                   type="submit"
-                  disabled={submitting || otp.length !== 6}
+                  disabled={submitting || otp.length !== 6 || isOtpExpired}
                   className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify & Sign In"}
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setOtpSent(false); setOtp(""); }}
+                  onClick={() => sendWhatsAppOtp()}
+                  disabled={submitting || !canResend}
+                  className="w-full rounded-xl border border-input py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {canResend ? "Resend OTP" : `Resend in ${resendCountdown}s`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setOtpSent(false); setOtp(""); setOtpSentAt(null); }}
                   className="w-full text-xs text-primary hover:underline"
                 >
                   Use a different number
