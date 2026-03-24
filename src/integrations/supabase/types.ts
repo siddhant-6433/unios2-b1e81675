@@ -1,3 +1,4 @@
+Initialising login role...
 export type Json =
   | string
   | number
@@ -11,6 +12,31 @@ export type Database = {
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "14.4"
+  }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
   }
   public: {
     Tables: {
@@ -979,6 +1005,7 @@ export type Database = {
           created_at: string
           id: string
           is_active: boolean
+          metadata: Json | null
           session_id: string
           version: string
         }
@@ -987,6 +1014,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_active?: boolean
+          metadata?: Json | null
           session_id: string
           version: string
         }
@@ -995,6 +1023,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_active?: boolean
+          metadata?: Json | null
           session_id?: string
           version?: string
         }
@@ -1014,6 +1043,66 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      institution_group_members: {
+        Row: {
+          created_at: string
+          group_id: string
+          id: string
+          institution_id: string
+        }
+        Insert: {
+          created_at?: string
+          group_id: string
+          id?: string
+          institution_id: string
+        }
+        Update: {
+          created_at?: string
+          group_id?: string
+          id?: string
+          institution_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "institution_group_members_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "institution_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "institution_group_members_institution_id_fkey"
+            columns: ["institution_id"]
+            isOneToOne: false
+            referencedRelation: "institutions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      institution_groups: {
+        Row: {
+          code: string
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+        }
+        Relationships: []
       }
       institutions: {
         Row: {
@@ -1276,6 +1365,7 @@ export type Database = {
           name: string
           notes: string | null
           offer_amount: number | null
+          person_role: string
           phone: string
           pre_admission_no: string | null
           source: Database["public"]["Enums"]["lead_source"]
@@ -1301,6 +1391,7 @@ export type Database = {
           name: string
           notes?: string | null
           offer_amount?: number | null
+          person_role?: string
           phone: string
           pre_admission_no?: string | null
           source?: Database["public"]["Enums"]["lead_source"]
@@ -1326,6 +1417,7 @@ export type Database = {
           name?: string
           notes?: string | null
           offer_amount?: number | null
+          person_role?: string
           phone?: string
           pre_admission_no?: string | null
           source?: Database["public"]["Enums"]["lead_source"]
@@ -1424,6 +1516,30 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      payment_gateway_config: {
+        Row: {
+          display_name: string
+          gateway: string
+          is_enabled_fee_collection: boolean
+          is_enabled_portal_payment: boolean
+          updated_at: string
+        }
+        Insert: {
+          display_name: string
+          gateway: string
+          is_enabled_fee_collection?: boolean
+          is_enabled_portal_payment?: boolean
+          updated_at?: string
+        }
+        Update: {
+          display_name?: string
+          gateway?: string
+          is_enabled_fee_collection?: boolean
+          is_enabled_portal_payment?: boolean
+          updated_at?: string
+        }
+        Relationships: []
       }
       payments: {
         Row: {
@@ -1931,6 +2047,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       app_role: [

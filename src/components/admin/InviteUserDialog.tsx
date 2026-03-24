@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, UserPlus, X } from "lucide-react";
+import { Loader2, UserPlus, X, ChevronDown } from "lucide-react";
+import { PhoneInput } from "@/components/ui/phone-input";
 import type { Database } from "@/integrations/supabase/types";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
@@ -31,11 +32,26 @@ interface InviteUserDialogProps {
 const InviteUserDialog = ({ open, onClose, onSuccess }: InviteUserDialogProps) => {
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [campus, setCampus] = useState("");
+  const [phone, setPhone] = useState("");
+  const [selectedCampuses, setSelectedCampuses] = useState<string[]>([]);
+  const [campusDropdownOpen, setCampusDropdownOpen] = useState(false);
+  const [campuses, setCampuses] = useState<{ id: string; name: string }[]>([]);
   const [role, setRole] = useState<AppRole>("student");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
+
+  useEffect(() => {
+    supabase.from("campuses").select("id, name").order("name").then(({ data }) => {
+      if (data) setCampuses(data);
+    });
+  }, []);
+
+  const toggleCampus = (name: string) => {
+    setSelectedCampuses((prev) =>
+      prev.includes(name) ? prev.filter((c) => c !== name) : [...prev, name]
+    );
+  };
 
   if (!open) return null;
 
@@ -49,8 +65,9 @@ const InviteUserDialog = ({ open, onClose, onSuccess }: InviteUserDialogProps) =
         body: {
           email: email.trim(),
           display_name: displayName.trim() || undefined,
+          phone: phone.trim() || undefined,
           role,
-          campus: campus.trim() || undefined,
+          campus: selectedCampuses.length > 0 ? selectedCampuses.join(", ") : undefined,
           password: password.trim() || undefined,
         },
       });
@@ -67,7 +84,8 @@ const InviteUserDialog = ({ open, onClose, onSuccess }: InviteUserDialogProps) =
 
       setEmail("");
       setDisplayName("");
-      setCampus("");
+      setPhone("");
+      setSelectedCampuses([]);
       setRole("student");
       setPassword("");
       onSuccess();
@@ -127,15 +145,53 @@ const InviteUserDialog = ({ open, onClose, onSuccess }: InviteUserDialogProps) =
 
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+              Mobile Number <span className="text-muted-foreground/60 font-normal">(for WhatsApp OTP login)</span>
+            </label>
+            <PhoneInput value={phone} onChange={setPhone} />
+          </div>
+
+          <div className="relative">
+            <label className="block text-xs font-medium text-muted-foreground mb-1.5">
               Campus
             </label>
-            <input
-              type="text"
-              value={campus}
-              onChange={(e) => setCampus(e.target.value)}
-              placeholder="Main Campus"
-              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-            />
+            <button
+              type="button"
+              onClick={() => setCampusDropdownOpen((v) => !v)}
+              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-left flex items-center justify-between focus:outline-none focus:ring-2 focus:ring-ring/20"
+            >
+              <span className={selectedCampuses.length === 0 ? "text-muted-foreground" : "text-foreground"}>
+                {selectedCampuses.length === 0
+                  ? "Select campuses…"
+                  : selectedCampuses.join(", ")}
+              </span>
+              <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+            </button>
+            {campusDropdownOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setCampusDropdownOpen(false)} />
+                <div className="absolute z-20 mt-1 w-full rounded-xl border border-border bg-card shadow-lg overflow-hidden">
+                  <div className="max-h-44 overflow-y-auto py-1">
+                    {campuses.map((c) => (
+                      <label
+                        key={c.id}
+                        className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted/50 cursor-pointer text-sm"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedCampuses.includes(c.name)}
+                          onChange={() => toggleCampus(c.name)}
+                          className="h-3.5 w-3.5 rounded border-input accent-primary"
+                        />
+                        <span className="text-foreground">{c.name}</span>
+                      </label>
+                    ))}
+                    {campuses.length === 0 && (
+                      <p className="px-3 py-2 text-sm text-muted-foreground">No campuses found</p>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           <div>

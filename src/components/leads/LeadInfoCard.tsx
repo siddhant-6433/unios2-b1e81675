@@ -53,6 +53,35 @@ export function LeadInfoCard({
           </div>
         </div>
 
+        {/* Person Role Badge */}
+        {lead.person_role && (
+          <div className="px-5 pb-3 flex items-center justify-between">
+            <span className="text-[11px] font-medium text-muted-foreground">Person Role</span>
+            <div className="flex items-center gap-2">
+              <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold capitalize ${
+                lead.person_role === 'alumni' ? 'bg-pastel-purple text-foreground/80'
+                : lead.person_role === 'student' ? 'bg-pastel-green text-foreground/80'
+                : lead.person_role === 'applicant' ? 'bg-pastel-blue text-foreground/80'
+                : 'bg-pastel-yellow text-foreground/80'
+              }`}>
+                {lead.person_role}
+              </span>
+              {onFieldUpdate && (
+                <select
+                  value={lead.person_role}
+                  onChange={(e) => onFieldUpdate("person_role", e.target.value, "Person Role")}
+                  className="text-[11px] border border-input rounded-lg bg-background px-1.5 py-0.5 text-foreground focus:outline-none focus:ring-1 focus:ring-ring/20"
+                >
+                  <option value="lead">lead</option>
+                  <option value="applicant">applicant</option>
+                  <option value="student">student</option>
+                  <option value="alumni">alumni</option>
+                </select>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Current Stage */}
         <div className="px-5 pb-4">
           <label className="block text-[11px] font-medium text-muted-foreground mb-1.5">Current Stage</label>

@@ -76,6 +76,13 @@ const sourceBadgeColors: Record<string, string> = {
   justdial: "bg-pastel-mint", referral: "bg-pastel-red", education_fair: "bg-pastel-purple", other: "bg-muted",
 };
 
+const PERSON_ROLE_COLORS: Record<string, string> = {
+  lead: "bg-pastel-yellow text-foreground/80",
+  applicant: "bg-pastel-blue text-foreground/80",
+  student: "bg-pastel-green text-foreground/80",
+  alumni: "bg-pastel-purple text-foreground/80",
+};
+
 interface Lead {
   id: string;
   name: string;
@@ -83,6 +90,7 @@ interface Lead {
   email: string | null;
   stage: string;
   source: string;
+  person_role: string;
   created_at: string;
   application_id: string | null;
   pre_admission_no: string | null;
@@ -105,6 +113,7 @@ const Admissions = () => {
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const [roleFilter, setRoleFilter] = useState<string>("all");
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddLead, setShowAddLead] = useState(false);
@@ -179,7 +188,8 @@ const Admissions = () => {
       (l.campus_name || "").toLowerCase().includes(search.toLowerCase());
     const matchesStage = stageFilter === "all" || l.stage === stageFilter;
     const matchesSource = sourceFilter === "all" || l.source === sourceFilter;
-    return matchesSearch && matchesStage && matchesSource;
+    const matchesRole = roleFilter === "all" || l.person_role === roleFilter;
+    return matchesSearch && matchesStage && matchesSource && matchesRole;
   });
 
   const totalLeads = leads.length;
@@ -271,6 +281,14 @@ const Admissions = () => {
           <option value="all">All Sources</option>
           {SOURCES.map((s) => <option key={s} value={s}>{sourceLabels[s]}</option>)}
         </select>
+        <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}
+          className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
+          <option value="all">All Roles</option>
+          <option value="lead">Lead</option>
+          <option value="applicant">Applicant</option>
+          <option value="student">Student</option>
+          <option value="alumni">Alumni</option>
+        </select>
         <div className="flex rounded-xl border border-input bg-card p-0.5 ml-auto">
           <button onClick={() => setView("pipeline")}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${view === "pipeline" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
@@ -333,7 +351,10 @@ const Admissions = () => {
                           </div>
                         )}
                         <div className="flex items-center justify-between mt-3 pt-2 border-t border-border/40">
-                          <Badge className={`text-[10px] font-medium border-0 ${sourceBadgeColors[lead.source] || "bg-muted"}`}>{sourceLabels[lead.source] || lead.source}</Badge>
+                          <div className="flex items-center gap-1.5">
+                            <Badge className={`text-[10px] font-medium border-0 ${sourceBadgeColors[lead.source] || "bg-muted"}`}>{sourceLabels[lead.source] || lead.source}</Badge>
+                            <Badge className={`text-[10px] font-medium border-0 capitalize ${PERSON_ROLE_COLORS[lead.person_role] || "bg-muted"}`}>{lead.person_role}</Badge>
+                          </div>
                           <div className="flex items-center gap-1">
                             <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary"><Phone className="h-3.5 w-3.5" /></Button>
                             <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary"><MessageSquare className="h-3.5 w-3.5" /></Button>
@@ -369,6 +390,7 @@ const Admissions = () => {
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Lead</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Course / Campus</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Stage</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Role</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Source</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Counsellor</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">IDs</th>
@@ -399,6 +421,11 @@ const Admissions = () => {
                     <td className="px-4 py-3" onClick={() => navigate(`/admissions/${lead.id}`)}>
                       <Badge className={`text-[11px] font-medium border-0 ${stageColors[lead.stage] || "bg-muted"}`}>
                         {STAGE_LABELS[lead.stage] || lead.stage}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3" onClick={() => navigate(`/admissions/${lead.id}`)}>
+                      <Badge className={`text-[11px] font-medium border-0 capitalize ${PERSON_ROLE_COLORS[lead.person_role] || "bg-muted"}`}>
+                        {lead.person_role}
                       </Badge>
                     </td>
                     <td className="px-4 py-3" onClick={() => navigate(`/admissions/${lead.id}`)}>

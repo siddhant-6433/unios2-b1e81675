@@ -23,27 +23,23 @@ Deno.serve(async (req) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const anonKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
 
-    // Verify the caller is a super_admin using their JWT
-    const callerClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const {
-      data: { user: caller },
-    } = await callerClient.auth.getUser();
+    // JWT is already verified by Supabase gateway — decode sub claim directly
+    const jwt = authHeader.replace("Bearer ", "");
+    const [, payloadB64] = jwt.split(".");
+    const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
+    const callerId: string | undefined = payload?.sub;
 
-    if (!caller) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+    if (!callerId) {
+      return new Response(JSON.stringify({ error: "Invalid token" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Check caller role using service role client
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
     const { data: callerRole } = await adminClient.rpc("get_user_role", {
-      _user_id: caller.id,
+      _user_id: callerId,
     });
 
     if (callerRole !== "super_admin") {
@@ -53,7 +49,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { email, display_name, role, campus, password } = await req.json();
+    const { email, display_name, phone, role, campus, password } = await req.json();
 
     if (!email || !role) {
       return new Response(
@@ -103,15 +99,22 @@ Deno.serve(async (req) => {
       newUser = data;
     }
 
-    // Update profile with additional info
-    if (display_name || campus) {
+    // Normalise phone: ensure it starts with +
+    const normalizedPhone = phone
+      ? (phone.startsWith("+") ? phone : `+${phone}`)
+      : undefined;
+
+    // Upsert profile with additional info
+    // (profile may already exist from the handle_new_user trigger)
+    if (display_name || campus || normalizedPhone) {
+      const profileUpdate: Record<string, string> = { user_id: newUser.user.id };
+      if (display_name) profileUpdate.display_name = display_name;
+      if (campus) profileUpdate.campus = campus;
+      if (normalizedPhone) profileUpdate.phone = normalizedPhone;
+
       await adminClient
         .from("profiles")
-        .update({
-          ...(display_name && { display_name }),
-          ...(campus && { campus }),
-        })
-        .eq("user_id", newUser.user.id);
+        .upsert(profileUpdate, { onConflict: "user_id" });
     }
 
     // Assign role
