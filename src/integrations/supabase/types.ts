@@ -1,4 +1,3 @@
-Initialising login role...
 export type Json =
   | string
   | number
@@ -1907,6 +1906,7 @@ export type Database = {
         | "new_lead"
         | "application_in_progress"
         | "application_submitted"
+        | "application_fee_paid"
         | "ai_called"
         | "counsellor_call"
         | "visit_scheduled"
@@ -2083,6 +2083,7 @@ export const Constants = {
         "new_lead",
         "application_in_progress",
         "application_submitted",
+        "application_fee_paid",
         "ai_called",
         "counsellor_call",
         "visit_scheduled",
