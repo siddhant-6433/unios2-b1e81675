@@ -213,12 +213,9 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
     <div className="min-h-screen bg-background flex items-center justify-center p-6">
       <Card className="max-w-md w-full border-border/60 shadow-none">
         <CardContent className="p-8">
-          <div className="flex items-center gap-3 mb-6">
-            <img src={portal.logo} alt={portal.name} className="h-10 w-10 rounded-xl object-contain" />
-            <div>
-              <h2 className="text-lg font-bold text-foreground">{portal.name}</h2>
-              <p className="text-xs text-muted-foreground">{portal.tagline}</p>
-            </div>
+          <div className="mb-6">
+            <img src={portal.logo} alt={portal.name} className="h-10 w-auto object-contain" />
+            <p className="text-xs text-muted-foreground mt-1">{portal.tagline}</p>
           </div>
 
           {loginMode === "google_phone" ? (
@@ -511,6 +508,13 @@ const ApplyPortal = () => {
   const [leadName, setLeadName] = useState("");
   const [childDob, setChildDob] = useState("");
 
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setAuthed(false);
+    setApp(null);
+    setSubmitted(false);
+  };
+
   const [app, setApp] = useState<ApplicationData | null>(null);
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -636,16 +640,40 @@ const ApplyPortal = () => {
       return;
     }
 
-    if (leadId) {
+    // If no existing lead, auto-create one so the application appears in the CRM
+    let resolvedLeadId = leadId;
+    if (!resolvedLeadId) {
+      const { data: newLead } = await supabase
+        .from("leads")
+        .insert({
+          name: leadName,
+          phone,
+          source: "website",
+          stage: "application_in_progress" as any,
+          person_role: "applicant" as any,
+          application_id: appId,
+          course_id: selections[0]?.course_id ?? null,
+          campus_id: selections[0]?.campus_id ?? null,
+        })
+        .select("id")
+        .single();
+      resolvedLeadId = newLead?.id ?? null;
+
+      if (resolvedLeadId) {
+        await supabase.from("applications").update({ lead_id: resolvedLeadId }).eq("id", inserted.id);
+      }
+    } else {
       await supabase.from("leads").update({
         stage: "application_in_progress" as any,
         application_id: appId,
         course_id: selections[0]?.course_id,
         campus_id: selections[0]?.campus_id,
-      }).eq("id", leadId);
+      }).eq("id", resolvedLeadId);
+    }
 
+    if (resolvedLeadId) {
       await supabase.from("lead_activities").insert({
-        lead_id: leadId,
+        lead_id: resolvedLeadId,
         type: "application_started",
         description: `Application ${appId} started with ${selections.length} course(s)`,
         old_stage: "new_lead" as any,
@@ -767,7 +795,7 @@ const ApplyPortal = () => {
   if (showCourseSelector) {
     return (
       <div className="min-h-screen bg-background">
-        <Header appId={app?.application_id || null} completedCount={0} totalSteps={totalSteps} onLogout={() => { setAuthed(false); setApp(null); }} />
+        <Header appId={app?.application_id || null} completedCount={0} totalSteps={totalSteps} onLogout={handleLogout} />
         <div className="max-w-3xl mx-auto px-6 py-8">
           <CourseSelector
             phone={phone}
@@ -797,7 +825,7 @@ const ApplyPortal = () => {
             <p className="text-sm text-muted-foreground mt-2">Your application has been received.</p>
             <p className="text-lg font-mono font-bold text-primary mt-1">{app.application_id}</p>
             <p className="text-xs text-muted-foreground mt-4">Our admissions team will review your application and contact you shortly.</p>
-            <Button variant="outline" className="mt-6" onClick={() => { setAuthed(false); setApp(null); setSubmitted(false); }}>
+            <Button variant="outline" className="mt-6" onClick={handleLogout}>
               <LogOut className="h-4 w-4 mr-2" /> Logout
             </Button>
           </CardContent>
@@ -922,7 +950,7 @@ const ApplyPortal = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header appId={app.application_id} completedCount={completedCount} totalSteps={totalSteps} onLogout={() => { setAuthed(false); setApp(null); }} />
+      <Header appId={app.application_id} completedCount={completedCount} totalSteps={totalSteps} onLogout={handleLogout} />
 
       <div className="max-w-3xl mx-auto px-6 py-8">
         <CourseSummaryBanner
@@ -955,12 +983,8 @@ function Header({ appId, completedCount, totalSteps, onLogout }: { appId: string
   return (
     <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-30">
       <div className="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <img src={portal.logo} alt={portal.name} className="h-10 w-10 rounded-xl object-contain" />
-          <div>
-            <span className="text-sm font-bold text-foreground tracking-tight">{portal.name}</span>
-            <span className="text-[11px] text-muted-foreground block">{portal.tagline}</span>
-          </div>
+        <div className="flex items-center">
+          <img src={portal.logo} alt={portal.name} className="h-8 w-auto object-contain" />
         </div>
         <div className="flex items-center gap-3">
           {appId && (
