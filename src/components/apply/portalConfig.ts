@@ -1,5 +1,7 @@
 import miraiLogoGreen from "@/assets/mirai-logo-green.svg";
 import nimtBeaconLogo from "@/assets/nimt-beacon-logo.png";
+import nimtEduInstLogo from "@/assets/nimt-edu-inst-logo.svg";
+import nimtEduInstLogoWhite from "@/assets/nimt-edu-inst-logo-white.svg";
 
 export type PortalId = "nimt" | "beacon" | "mirai";
 
@@ -7,7 +9,8 @@ export interface PortalConfig {
   id: PortalId;
   name: string;
   tagline: string;
-  logo: string;
+  logo: string;         // for light backgrounds
+  logoWhite?: string;   // for dark/coloured backgrounds
   /** CSS custom-property overrides applied to :root when this portal loads */
   cssVars: Record<string, string>;
   /** Only show courses from these institution types (empty = all) */
@@ -20,14 +23,17 @@ export interface PortalConfig {
   programCategories: string[];
   /** Hostnames that auto-resolve to this portal */
   hostnames: string[];
+  /** Primary hex color for receipts and branded documents */
+  primaryColor: string;
 }
 
 export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
   nimt: {
     id: "nimt",
-    name: "NIMT University",
+    name: "NIMT Educational Institutions",
     tagline: "Application Portal",
-    logo: nimtBeaconLogo, // fallback — replace with dedicated NIMT University logo when available
+    logo: nimtEduInstLogo,
+    logoWhite: nimtEduInstLogoWhite,
     cssVars: {
       // Default teal theme — uses index.css defaults
     },
@@ -36,6 +42,7 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     campusKeywords: [],
     programCategories: ["undergraduate", "postgraduate", "mba_pgdm", "bed", "deled", "professional"],
     hostnames: [],
+    primaryColor: "#0035C5",
   },
   beacon: {
     id: "beacon",
@@ -61,6 +68,7 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     campusKeywords: ["avantika", "arthala", "beacon", "ghaziabad"],
     programCategories: ["school"],
     hostnames: ["nimtbeaconschool.com", "www.nimtbeaconschool.com"],
+    primaryColor: "#0044FF",
   },
   mirai: {
     id: "mirai",
@@ -82,6 +90,7 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     campusKeywords: ["mirai"],
     programCategories: ["school"],
     hostnames: ["miraischool.in", "www.miraischool.in", "apply.miraischool.in"],
+    primaryColor: "#77966D",
   },
 };
 

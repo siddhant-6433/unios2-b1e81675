@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, ArrowLeft, Loader2, CreditCard, CheckCircle, Shield, AlertCircle } from "lucide-react";
+import { ArrowRight, ArrowLeft, Loader2, CreditCard, CheckCircle, Shield, AlertCircle, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { usePaymentGateways } from "@/hooks/usePaymentGateways";
 import { ApplicationData } from "./types";
+import { usePortal } from "./PortalContext";
+import { ReceiptDialog, ReceiptData } from "@/components/receipts/ReceiptDialog";
 
 interface Props {
   data: ApplicationData;
@@ -22,6 +24,24 @@ declare global {
 export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props) {
   const isPaid   = data.payment_status === "paid";
   const isWaived = data.fee_amount === 0;
+  const portal   = usePortal();
+
+  const [showReceipt, setShowReceipt] = useState(false);
+
+  const receiptData: ReceiptData = {
+    type: "application_fee",
+    application_id: data.application_id,
+    applicant_name: data.full_name,
+    phone: data.phone,
+    email: data.email || undefined,
+    amount: data.fee_amount,
+    payment_ref: data.payment_ref,
+    payment_date: new Date().toISOString(),
+    institution_name: portal.name,
+    campus_name: data.course_selections[0]?.campus_name,
+    logo: portal.logo,
+    primaryColor: portal.primaryColor,
+  };
 
   const { portalGateways, loading: gwLoading } = usePaymentGateways();
   const [selectedGateway, setSelectedGateway] = useState<string | null>(null);
@@ -247,12 +267,15 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
           <p className="text-xs text-muted-foreground mt-1">This programme has zero application fee.</p>
         </div>
       ) : isPaid ? (
-        <div className="text-center py-8">
+        <div className="text-center py-8 space-y-3">
           <CheckCircle className="h-12 w-12 text-primary mx-auto mb-3" />
           <p className="text-sm font-medium text-foreground">Application fee paid</p>
-          <p className="text-xs text-muted-foreground mt-1">
+          <p className="text-xs text-muted-foreground">
             {data.payment_ref ? `Ref: ${data.payment_ref}` : "You can proceed to the next step."}
           </p>
+          <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowReceipt(true)}>
+            <Receipt className="h-4 w-4" /> View Receipt
+          </Button>
         </div>
       ) : (
         <div className="text-center py-8 space-y-4">
@@ -359,6 +382,10 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
           Continue <ArrowRight className="h-4 w-4" />
         </Button>
       </div>
+
+      {showReceipt && (
+        <ReceiptDialog data={receiptData} onClose={() => setShowReceipt(false)} />
+      )}
     </div>
   );
 }

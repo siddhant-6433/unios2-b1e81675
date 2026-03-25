@@ -24,14 +24,15 @@ import {
 } from "@/components/ui/alert-dialog";
 
 const STAGES = [
-  "new_lead", "application_in_progress", "application_submitted", "ai_called", "counsellor_call", "visit_scheduled",
+  "new_lead", "application_in_progress", "application_fee_paid", "application_submitted", "ai_called", "counsellor_call", "visit_scheduled",
   "interview", "offer_sent", "token_paid", "pre_admitted", "admitted", "rejected"
 ] as const;
 
 type Stage = typeof STAGES[number];
 
 const STAGE_LABELS: Record<string, string> = {
-  new_lead: "New Lead", application_in_progress: "Application In Progress", application_submitted: "Application Submitted",
+  new_lead: "New Lead", application_in_progress: "Application In Progress",
+  application_fee_paid: "Fee Paid", application_submitted: "Application Submitted",
   ai_called: "AI Called", counsellor_call: "Counsellor Call",
   visit_scheduled: "Visit Scheduled", interview: "Interview", offer_sent: "Offer Sent",
   token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", rejected: "Rejected",
@@ -40,6 +41,7 @@ const STAGE_LABELS: Record<string, string> = {
 const stageColors: Record<string, string> = {
   new_lead: "bg-pastel-blue text-foreground/70",
   application_in_progress: "bg-pastel-yellow text-foreground/70",
+  application_fee_paid: "bg-pastel-green text-foreground/70",
   application_submitted: "bg-pastel-mint text-foreground/70",
   ai_called: "bg-pastel-purple text-foreground/70",
   counsellor_call: "bg-pastel-orange text-foreground/70",
@@ -53,7 +55,7 @@ const stageColors: Record<string, string> = {
 };
 
 const stageIcons: Record<string, typeof Users> = {
-  new_lead: Users, application_in_progress: FileText, application_submitted: CheckCircle,
+  new_lead: Users, application_in_progress: FileText, application_fee_paid: CheckCircle, application_submitted: CheckCircle,
   ai_called: Bot, counsellor_call: Phone,
   visit_scheduled: MapPin, interview: UserCheck, offer_sent: FileText,
   token_paid: CheckCircle, pre_admitted: Clock, admitted: CheckCircle, rejected: XCircle,
@@ -195,14 +197,16 @@ const Admissions = () => {
   const totalLeads = leads.length;
   const today = new Date().toISOString().slice(0, 10);
   const todayLeads = leads.filter(l => l.created_at.slice(0, 10) === today).length;
-  const preAdmitted = leads.filter(l => ["pre_admitted", "token_paid"].includes(l.stage)).length;
+  const appStarted = leads.filter(l => ["application_in_progress", "application_fee_paid", "application_submitted"].includes(l.stage)).length;
+  const feePaid = leads.filter(l => ["application_fee_paid", "application_submitted"].includes(l.stage)).length;
+  const appSubmitted = leads.filter(l => l.stage === "application_submitted").length;
   const admitted = leads.filter(l => l.stage === "admitted").length;
 
   const stats = [
-    { label: "Total Leads", value: totalLeads, sub: `+${todayLeads} today`, icon: Users, iconBg: "bg-pastel-blue" },
-    { label: "Pre-Admitted", value: preAdmitted, sub: "Token paid", icon: Clock, iconBg: "bg-pastel-orange" },
-    { label: "Admitted", value: admitted, sub: "25%+ fee paid", icon: CheckCircle, iconBg: "bg-pastel-green" },
-    { label: "Conversion", value: totalLeads > 0 ? `${Math.round((admitted / totalLeads) * 100)}%` : "0%", sub: "Overall rate", icon: TrendingUp, iconBg: "bg-pastel-purple" },
+    { label: "Applications Started", value: appStarted, sub: "In progress or beyond", icon: FileText, iconBg: "bg-pastel-blue", filterStage: "application_in_progress" },
+    { label: "Fee Paid", value: feePaid, sub: "Application fee received", icon: CheckCircle, iconBg: "bg-pastel-green", filterStage: "application_fee_paid" },
+    { label: "Submitted", value: appSubmitted, sub: "Fully submitted", icon: TrendingUp, iconBg: "bg-pastel-mint", filterStage: "application_submitted" },
+    { label: "Admitted", value: admitted, sub: `+${todayLeads} new today`, icon: Users, iconBg: "bg-pastel-purple", filterStage: "admitted" },
   ];
 
   if (loading) {
@@ -246,15 +250,17 @@ const Admissions = () => {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((stat) => (
-          <Card key={stat.label} className="border-border/60 shadow-none hover:shadow-sm transition-shadow">
+          <Card
+            key={stat.label}
+            className={`border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer ${stageFilter === stat.filterStage ? "ring-2 ring-primary/40 bg-primary/5" : ""}`}
+            onClick={() => setStageFilter(prev => prev === stat.filterStage ? "all" : stat.filterStage)}
+          >
             <CardContent className="p-5">
               <div className="flex items-start justify-between">
                 <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${stat.iconBg}`}>
                   <stat.icon className="h-5 w-5 text-foreground/70" />
                 </div>
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground">
-                  <ArrowUpRight className="h-4 w-4" />
-                </Button>
+                <ArrowUpRight className={`h-4 w-4 mt-1 transition-colors ${stageFilter === stat.filterStage ? "text-primary" : "text-muted-foreground"}`} />
               </div>
               <p className="text-3xl font-bold text-foreground mt-4">{stat.value}</p>
               <p className="text-sm text-muted-foreground mt-0.5">{stat.label}</p>

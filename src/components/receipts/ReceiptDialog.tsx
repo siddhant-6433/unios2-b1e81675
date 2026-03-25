@@ -23,12 +23,16 @@ export interface ReceiptData {
   payment_date: string;
   institution_name?: string;
   campus_name?: string;
+  // Branding
+  logo?: string;
+  primaryColor?: string;
 }
 
 // ── Printable receipt content ─────────────────────────────────────────────────
 
 function ReceiptContent({ d }: { d: ReceiptData }) {
   const isApp = d.type === "application_fee";
+  const color = d.primaryColor || "#6366f1";
   const fmt = (n: number) =>
     n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtDate = (iso: string) =>
@@ -49,20 +53,27 @@ function ReceiptContent({ d }: { d: ReceiptData }) {
       }}
     >
       {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "2px solid #6366f1", paddingBottom: "20px", marginBottom: "24px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: `2px solid ${color}`, paddingBottom: "20px", marginBottom: "24px" }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
-            <div style={{ background: "#6366f1", borderRadius: "8px", width: "36px", height: "36px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <span style={{ color: "#fff", fontSize: "18px", fontWeight: "bold" }}>N</span>
-            </div>
-            <div>
-              <p style={{ margin: 0, fontWeight: 700, fontSize: "16px" }}>{d.institution_name || "NIMT Education"}</p>
-              {d.campus_name && <p style={{ margin: 0, fontSize: "11px", color: "#64748b" }}>{d.campus_name}</p>}
-            </div>
+            {d.logo ? (
+              <img src={d.logo} alt={d.institution_name || "Institution"} style={{ height: "36px", width: "auto", objectFit: "contain", maxWidth: "160px" }} />
+            ) : (
+              <>
+                <div style={{ background: color, borderRadius: "8px", width: "36px", height: "36px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <span style={{ color: "#fff", fontSize: "18px", fontWeight: "bold" }}>N</span>
+                </div>
+                <div>
+                  <p style={{ margin: 0, fontWeight: 700, fontSize: "16px" }}>{d.institution_name || "NIMT Education"}</p>
+                  {d.campus_name && <p style={{ margin: 0, fontSize: "11px", color: "#64748b" }}>{d.campus_name}</p>}
+                </div>
+              </>
+            )}
           </div>
+          {d.logo && d.campus_name && <p style={{ margin: "4px 0 0", fontSize: "11px", color: "#64748b" }}>{d.campus_name}</p>}
         </div>
         <div style={{ textAlign: "right" }}>
-          <p style={{ margin: 0, fontSize: "20px", fontWeight: 800, color: "#6366f1", textTransform: "uppercase", letterSpacing: "1px" }}>
+          <p style={{ margin: 0, fontSize: "20px", fontWeight: 800, color, textTransform: "uppercase", letterSpacing: "1px" }}>
             {isApp ? "Application Receipt" : "Payment Receipt"}
           </p>
           <p style={{ margin: "4px 0 0", fontSize: "11px", color: "#94a3b8" }}>
@@ -111,7 +122,7 @@ function ReceiptContent({ d }: { d: ReceiptData }) {
       </div>
 
       {/* Amount */}
-      <div style={{ background: "#6366f1", borderRadius: "10px", padding: "16px 20px", marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ background: color, borderRadius: "10px", padding: "16px 20px", marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ color: "#c7d2fe", fontSize: "13px", fontWeight: 600 }}>Amount Paid</span>
         <span style={{ color: "#fff", fontSize: "24px", fontWeight: 800 }}>₹{fmt(d.amount)}</span>
       </div>
@@ -129,7 +140,7 @@ function ReceiptContent({ d }: { d: ReceiptData }) {
         <p style={{ margin: 0, fontSize: "10px", color: "#94a3b8" }}>
           This is a computer-generated receipt and does not require a signature.
         </p>
-        <p style={{ margin: 0, fontSize: "10px", color: "#6366f1", fontWeight: 600 }}>unios.nimt.ac.in</p>
+        <p style={{ margin: 0, fontSize: "10px", color, fontWeight: 600 }}>unios.nimt.ac.in</p>
       </div>
     </div>
   );
