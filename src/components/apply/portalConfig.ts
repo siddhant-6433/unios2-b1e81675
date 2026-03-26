@@ -1,9 +1,26 @@
 import miraiLogoGreen from "@/assets/mirai-logo-green.svg";
+import miraiLogoWhite from "@/assets/mirai-logo-white.svg";
+import miraiMan from "@/assets/mirai-man.png";
 import nimtBeaconLogo from "@/assets/nimt-beacon-logo.png";
 import nimtEduInstLogo from "@/assets/nimt-edu-inst-logo.svg";
 import nimtEduInstLogoWhite from "@/assets/nimt-edu-inst-logo-white.svg";
+import loginBgNimt from "@/assets/login-bg-nimt.jpg";
+import loginBgBeacon from "@/assets/login-bg-beacon.jpg";
+import loginBgMirai from "@/assets/login-bg-mirai.png";
+import nirfLogo from "@/assets/nirf-logo.webp";
+import greatPlaceToStudy from "@/assets/great-place-to-study.svg";
 
 export type PortalId = "nimt" | "beacon" | "mirai";
+
+export interface LoginBadge {
+  src: string;
+  alt: string;
+}
+
+export interface LoginCourseGroup {
+  label: string;
+  courses: string[];
+}
 
 export interface PortalConfig {
   id: PortalId;
@@ -25,12 +42,20 @@ export interface PortalConfig {
   hostnames: string[];
   /** Primary hex color for receipts and branded documents */
   primaryColor: string;
-  /** CSS background value for the login page left panel (gradient or image url) */
+  /** CSS background value for the login page left panel */
   loginGradient: string;
+  /** Background photo for login left panel */
+  loginBgImage?: string;
   /** Bold headline shown on the login left panel */
   loginHeadline: string;
   /** Smaller sub-text below the headline */
   loginSubheadline?: string;
+  /** Award/accreditation badge logos shown at the bottom of login left panel */
+  loginBadges?: LoginBadge[];
+  /** Course groups listed at the bottom of login left panel */
+  loginCourses?: LoginCourseGroup[];
+  /** Decorative watermark image overlaid on the left panel */
+  loginWatermark?: string;
 }
 
 export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
@@ -49,9 +74,24 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     programCategories: ["undergraduate", "postgraduate", "mba_pgdm", "bed", "deled", "professional"],
     hostnames: [],
     primaryColor: "#0035C5",
-    loginGradient: "linear-gradient(145deg, #001266 0%, #0035C5 55%, #1A52D4 100%)",
+    loginGradient: "linear-gradient(160deg, #000D4D 0%, #0022A0 50%, #0035C5 100%)",
+    loginBgImage: loginBgNimt,
     loginHeadline: "UG / PG Admissions\n2026–27",
-    loginSubheadline: "Engineering · Management · Sciences · Healthcare",
+    loginSubheadline: "Computer Science · Allied Health · Nursing · Management · Law · Teacher Education",
+    loginBadges: [
+      { src: nirfLogo, alt: "NIRF Ranked" },
+      { src: greatPlaceToStudy, alt: "Great Place to Study" },
+    ],
+    loginCourses: [
+      {
+        label: "Undergraduate",
+        courses: ["B.Tech (CSE, ECE, ME, CE)", "BCA · BBA · B.Com", "B.Sc Nursing · B.Sc (Allied Health)", "LLB · BA LLB · BBA LLB", "B.Ed · D.El.Ed"],
+      },
+      {
+        label: "Postgraduate",
+        courses: ["MBA · MCA · M.Tech", "M.Sc · M.Com · MA", "LLM · M.Ed"],
+      },
+    ],
   },
   beacon: {
     id: "beacon",
@@ -59,7 +99,7 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     tagline: "Future Ready CBSE School",
     logo: nimtBeaconLogo,
     cssVars: {
-      "--primary": "227 100% 50%",            // #0044FF vivid blue
+      "--primary": "227 100% 50%",
       "--primary-foreground": "0 0% 100%",
       "--ring": "227 100% 50%",
       "--sidebar-primary": "227 100% 50%",
@@ -78,17 +118,19 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     programCategories: ["school"],
     hostnames: ["nimtbeaconschool.com", "www.nimtbeaconschool.com"],
     primaryColor: "#0044FF",
-    loginGradient: "linear-gradient(145deg, #001A99 0%, #0033E8 55%, #0044FF 100%)",
+    loginGradient: "linear-gradient(160deg, #00116B 0%, #0028CC 50%, #0044FF 100%)",
+    loginBgImage: loginBgBeacon,
     loginHeadline: "CBSE School\nAdmissions 2026–27",
-    loginSubheadline: "Classes Nursery to XII · Avantika · Arthala",
+    loginSubheadline: "Classes Nursery to XII · Avantika & Arthala Campus",
   },
   mirai: {
     id: "mirai",
     name: "Mirai School",
     tagline: "Future Ready IB School",
     logo: miraiLogoGreen,
+    logoWhite: miraiLogoWhite,
     cssVars: {
-      "--primary": "100 18% 53%",             // #77966D sage green
+      "--primary": "100 18% 53%",
       "--primary-foreground": "0 0% 100%",
       "--ring": "100 18% 53%",
       "--sidebar-primary": "100 18% 53%",
@@ -103,9 +145,11 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     programCategories: ["school"],
     hostnames: ["miraischool.in", "www.miraischool.in", "apply.miraischool.in"],
     primaryColor: "#77966D",
-    loginGradient: "linear-gradient(145deg, #1E3A18 0%, #4A7042 55%, #77966D 100%)",
+    loginGradient: "linear-gradient(160deg, #111E0F 0%, #2E4A28 50%, #4A7042 100%)",
+    loginBgImage: loginBgMirai,
     loginHeadline: "IB World School\nAdmissions 2026–27",
     loginSubheadline: "EYP · PYP · Nursery to Grade VIII",
+    loginWatermark: miraiMan,
   },
 };
 
@@ -113,7 +157,6 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
  * Detect portal from: 1) hostname, 2) query param, 3) path segment
  */
 export function detectPortal(search: string, pathname: string): PortalId {
-  // 1. Hostname detection (for custom domains)
   const hostname = window.location.hostname.toLowerCase();
   for (const config of Object.values(PORTAL_CONFIGS)) {
     if (config.hostnames.some(h => hostname === h || hostname.endsWith("." + h))) {
@@ -121,17 +164,15 @@ export function detectPortal(search: string, pathname: string): PortalId {
     }
   }
 
-  // 2. Query param: ?portal=mirai
   const params = new URLSearchParams(search);
   const fromQuery = params.get("portal")?.toLowerCase();
   if (fromQuery && fromQuery in PORTAL_CONFIGS) return fromQuery as PortalId;
 
-  // 3. Path segment: /apply/beacon
   const segments = pathname.split("/").filter(Boolean);
   const last = segments[segments.length - 1]?.toLowerCase();
   if (last && last in PORTAL_CONFIGS) return last as PortalId;
 
-  return "nimt"; // default
+  return "nimt";
 }
 
 /**

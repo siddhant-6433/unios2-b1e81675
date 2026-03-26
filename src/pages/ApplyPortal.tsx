@@ -214,19 +214,33 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
       {/* ── Left branded panel ── */}
       <div
         className="hidden lg:flex lg:w-[44%] xl:w-[42%] flex-col justify-between p-10 relative overflow-hidden"
-        style={{ background: portal.loginGradient }}
+        style={portal.loginBgImage ? {} : { background: portal.loginGradient }}
       >
-        {/* Decorative circles */}
-        <div className="absolute -top-24 -right-24 w-80 h-80 rounded-full pointer-events-none" style={{ background: "rgba(255,255,255,0.07)" }} />
-        <div className="absolute top-1/2 -left-20 w-56 h-56 rounded-full pointer-events-none" style={{ background: "rgba(255,255,255,0.05)" }} />
-        <div className="absolute -bottom-16 -right-12 w-64 h-64 rounded-full pointer-events-none" style={{ background: "rgba(255,255,255,0.06)" }} />
+        {/* Background photo with gradient overlay */}
+        {portal.loginBgImage && (
+          <>
+            <div className="absolute inset-0 z-0" style={{
+              backgroundImage: `url(${portal.loginBgImage})`,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+            }} />
+            <div className="absolute inset-0 z-0" style={{ background: portal.loginGradient, opacity: 0.88 }} />
+          </>
+        )}
+
+        {/* Mirai man watermark */}
+        {portal.loginWatermark && (
+          <div className="absolute -bottom-8 -right-8 w-72 h-72 z-0 pointer-events-none opacity-10">
+            <img src={portal.loginWatermark} alt="" className="w-full h-full object-contain brightness-0 invert" />
+          </div>
+        )}
 
         {/* Logo */}
         <div className="relative z-10">
           {portal.logoWhite ? (
-            <img src={portal.logoWhite} alt={portal.name} className="h-10 w-auto object-contain" />
+            <img src={portal.logoWhite} alt={portal.name} className="h-12 w-auto object-contain max-w-[200px]" />
           ) : (
-            <img src={portal.logo} alt={portal.name} className="h-10 w-auto object-contain brightness-0 invert" />
+            <img src={portal.logo} alt={portal.name} className="h-12 w-auto object-contain max-w-[200px] brightness-0 invert" />
           )}
         </div>
 
@@ -237,12 +251,39 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
             {portal.loginHeadline}
           </h1>
           {portal.loginSubheadline && (
-            <p className="text-sm text-white/60 leading-relaxed">{portal.loginSubheadline}</p>
+            <p className="text-sm text-white/65 leading-relaxed">{portal.loginSubheadline}</p>
           )}
         </div>
 
-        {/* Footer */}
-        <p className="relative z-10 text-xs text-white/30">© 2026 {portal.name}</p>
+        {/* Course list — NIMT only */}
+        {portal.loginCourses && (
+          <div className="relative z-10 space-y-3">
+            {portal.loginCourses.map((group) => (
+              <div key={group.label}>
+                <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest mb-1">{group.label}</p>
+                <div className="flex flex-wrap gap-1">
+                  {group.courses.map((c) => (
+                    <span key={c} className="text-[11px] text-white/70 bg-white/10 rounded-md px-2 py-0.5">{c}</span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Badges + footer */}
+        <div className="relative z-10 flex items-end justify-between">
+          {portal.loginBadges && portal.loginBadges.length > 0 ? (
+            <div className="flex items-center gap-3">
+              {portal.loginBadges.map((badge) => (
+                <img key={badge.alt} src={badge.src} alt={badge.alt} className="h-9 w-auto object-contain bg-white rounded-lg p-1.5" />
+              ))}
+            </div>
+          ) : (
+            <span />
+          )}
+          <p className="text-xs text-white/30">© 2026 {portal.name}</p>
+        </div>
       </div>
 
       {/* ── Right form panel ── */}
