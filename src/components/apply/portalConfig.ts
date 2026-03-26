@@ -25,6 +25,12 @@ export interface PortalConfig {
   hostnames: string[];
   /** Primary hex color for receipts and branded documents */
   primaryColor: string;
+  /** CSS background value for the login page left panel (gradient or image url) */
+  loginGradient: string;
+  /** Bold headline shown on the login left panel */
+  loginHeadline: string;
+  /** Smaller sub-text below the headline */
+  loginSubheadline?: string;
 }
 
 export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
@@ -43,6 +49,9 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     programCategories: ["undergraduate", "postgraduate", "mba_pgdm", "bed", "deled", "professional"],
     hostnames: [],
     primaryColor: "#0035C5",
+    loginGradient: "linear-gradient(145deg, #001266 0%, #0035C5 55%, #1A52D4 100%)",
+    loginHeadline: "UG / PG Admissions\n2026–27",
+    loginSubheadline: "Engineering · Management · Sciences · Healthcare",
   },
   beacon: {
     id: "beacon",
@@ -69,6 +78,9 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     programCategories: ["school"],
     hostnames: ["nimtbeaconschool.com", "www.nimtbeaconschool.com"],
     primaryColor: "#0044FF",
+    loginGradient: "linear-gradient(145deg, #001A99 0%, #0033E8 55%, #0044FF 100%)",
+    loginHeadline: "CBSE School\nAdmissions 2026–27",
+    loginSubheadline: "Classes Nursery to XII · Avantika · Arthala",
   },
   mirai: {
     id: "mirai",
@@ -91,6 +103,9 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     programCategories: ["school"],
     hostnames: ["miraischool.in", "www.miraischool.in", "apply.miraischool.in"],
     primaryColor: "#77966D",
+    loginGradient: "linear-gradient(145deg, #1E3A18 0%, #4A7042 55%, #77966D 100%)",
+    loginHeadline: "IB World School\nAdmissions 2026–27",
+    loginSubheadline: "EYP · PYP · Nursery to Grade VIII",
   },
 };
 

@@ -210,20 +210,73 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-6">
-      <Card className="max-w-md w-full border-border/60 shadow-none">
-        <CardContent className="p-8">
-          <div className="mb-6">
-            <img src={portal.logo} alt={portal.name} className="h-10 w-auto object-contain" />
+    <div className="min-h-screen flex">
+      {/* ── Left branded panel ── */}
+      <div
+        className="hidden lg:flex lg:w-[44%] xl:w-[42%] flex-col justify-between p-10 relative overflow-hidden"
+        style={{ background: portal.loginGradient }}
+      >
+        {/* Decorative circles */}
+        <div className="absolute -top-24 -right-24 w-80 h-80 rounded-full pointer-events-none" style={{ background: "rgba(255,255,255,0.07)" }} />
+        <div className="absolute top-1/2 -left-20 w-56 h-56 rounded-full pointer-events-none" style={{ background: "rgba(255,255,255,0.05)" }} />
+        <div className="absolute -bottom-16 -right-12 w-64 h-64 rounded-full pointer-events-none" style={{ background: "rgba(255,255,255,0.06)" }} />
+
+        {/* Logo */}
+        <div className="relative z-10">
+          {portal.logoWhite ? (
+            <img src={portal.logoWhite} alt={portal.name} className="h-10 w-auto object-contain" />
+          ) : (
+            <img src={portal.logo} alt={portal.name} className="h-10 w-auto object-contain brightness-0 invert" />
+          )}
+        </div>
+
+        {/* Headline */}
+        <div className="relative z-10 space-y-3">
+          <p className="text-xs font-semibold text-white/50 uppercase tracking-[0.2em]">{portal.tagline}</p>
+          <h1 className="text-3xl xl:text-4xl font-bold text-white leading-tight whitespace-pre-line">
+            {portal.loginHeadline}
+          </h1>
+          {portal.loginSubheadline && (
+            <p className="text-sm text-white/60 leading-relaxed">{portal.loginSubheadline}</p>
+          )}
+        </div>
+
+        {/* Footer */}
+        <p className="relative z-10 text-xs text-white/30">© 2026 {portal.name}</p>
+      </div>
+
+      {/* ── Right form panel ── */}
+      <div className="flex-1 flex items-center justify-center bg-background p-6 lg:p-12">
+        <div className="w-full max-w-sm">
+          {/* Mobile logo */}
+          <div className="mb-8 lg:hidden">
+            <img src={portal.logo} alt={portal.name} className="h-9 w-auto object-contain" />
             <p className="text-xs text-muted-foreground mt-1">{portal.tagline}</p>
+          </div>
+
+          <div className="mb-8">
+            <h2 className="text-2xl font-bold text-foreground">
+              {loginMode === "appid" ? "Find your application" : "Start your application"}
+            </h2>
+            <p className="text-sm text-muted-foreground mt-1.5">
+              {loginMode === "google_phone"
+                ? "Verify your WhatsApp number to continue"
+                : loginMode === "appid"
+                ? "Enter your application ID to resume"
+                : otpSent
+                ? `OTP sent to ${phone}`
+                : "Enter your WhatsApp number to get started"}
+            </p>
           </div>
 
           {loginMode === "google_phone" ? (
             <div className="space-y-4">
-              <div className="rounded-xl bg-primary/5 border border-primary/10 p-4 text-center">
-                <CheckCircle className="h-6 w-6 text-primary mx-auto mb-2" />
-                <p className="text-sm font-medium text-foreground">Signed in as {googleName}</p>
-                <p className="text-xs text-muted-foreground mt-1">Please verify your WhatsApp number to continue</p>
+              <div className="rounded-xl bg-primary/5 border border-primary/10 p-3.5 flex items-center gap-3">
+                <CheckCircle className="h-5 w-5 text-primary shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-foreground">{googleName}</p>
+                  <p className="text-xs text-muted-foreground">Verify your WhatsApp to continue</p>
+                </div>
               </div>
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">WhatsApp Number</label>
@@ -231,51 +284,67 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
               </div>
               {otpSent && (
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Enter OTP sent via WhatsApp</label>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">6-digit OTP</label>
                   <input
-                    type="text"
-                    maxLength={6}
-                    value={otp}
+                    type="text" maxLength={6} value={otp}
                     onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
-                    placeholder="Enter 6-digit OTP"
-                    className="w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground text-center tracking-[0.3em] font-mono placeholder:tracking-normal focus:outline-none focus:ring-2 focus:ring-ring/20"
+                    placeholder="· · · · · ·"
+                    className="w-full rounded-xl border border-input bg-card py-3 px-4 text-xl text-foreground text-center tracking-[0.6em] font-mono placeholder:tracking-normal placeholder:text-base focus:outline-none focus:ring-2 focus:ring-ring/20"
                   />
                 </div>
               )}
-              <Button className="w-full gap-2" disabled={loading} onClick={otpSent ? handleVerifyOtp : handleSendOtp}>
+              <Button className="w-full gap-2 h-11" disabled={loading} onClick={otpSent ? handleVerifyOtp : handleSendOtp}>
                 {loading && <Loader2 className="h-4 w-4 animate-spin" />}
                 {otpSent ? "Verify & Continue" : "Send OTP via WhatsApp"}
               </Button>
             </div>
           ) : loginMode === "phone" ? (
             <div className="space-y-4">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">WhatsApp Number</label>
-                <PhoneInput value={phone} onChange={setPhone} required />
-              </div>
-
-              {otpSent && (
+              {!otpSent ? (
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Enter OTP sent via WhatsApp</label>
-                  <input
-                    type="text"
-                    maxLength={6}
-                    value={otp}
-                    onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
-                    placeholder="Enter 6-digit OTP"
-                    className="w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground text-center tracking-[0.3em] font-mono placeholder:tracking-normal focus:outline-none focus:ring-2 focus:ring-ring/20"
-                  />
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">WhatsApp Number</label>
+                  <PhoneInput value={phone} onChange={setPhone} required />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="rounded-xl bg-primary/5 border border-primary/10 p-3.5 flex items-center gap-3">
+                    <CheckCircle className="h-5 w-5 text-primary shrink-0" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">OTP sent to</p>
+                      <p className="text-sm font-mono font-semibold text-foreground">{phone}</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="ml-auto text-xs text-primary hover:underline"
+                      onClick={() => { setOtpSent(false); setOtp(""); }}
+                    >
+                      Change
+                    </button>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">6-digit OTP</label>
+                    <input
+                      type="text" maxLength={6} value={otp}
+                      onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
+                      placeholder="· · · · · ·"
+                      className="w-full rounded-xl border border-input bg-card py-3 px-4 text-xl text-foreground text-center tracking-[0.6em] font-mono placeholder:tracking-normal placeholder:text-base focus:outline-none focus:ring-2 focus:ring-ring/20"
+                    />
+                  </div>
                 </div>
               )}
-
-              <Button className="w-full gap-2" disabled={loading} onClick={otpSent ? handleVerifyOtp : handleSendOtp}>
+              <Button className="w-full gap-2 h-11" disabled={loading} onClick={otpSent ? handleVerifyOtp : handleSendOtp}>
                 {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-                {otpSent ? "Verify & Continue" : "Send OTP via WhatsApp"}
+                {otpSent ? "Verify & Continue" : "Get OTP on WhatsApp"}
               </Button>
-
-              <button type="button" className="text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-center" onClick={() => setLoginMode("appid")}>
-                Login with Application ID instead
-              </button>
+              {!otpSent && (
+                <button
+                  type="button"
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-center"
+                  onClick={() => setLoginMode("appid")}
+                >
+                  Have an Application ID? Login instead
+                </button>
+              )}
             </div>
           ) : (
             <div className="space-y-4">
@@ -288,33 +357,28 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
                   className="w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground font-mono placeholder:font-sans focus:outline-none focus:ring-2 focus:ring-ring/20"
                 />
               </div>
-
-              <Button className="w-full gap-2" disabled={loading} onClick={handleAppIdLookup}>
+              <Button className="w-full gap-2 h-11" disabled={loading} onClick={handleAppIdLookup}>
                 {loading && <Loader2 className="h-4 w-4 animate-spin" />}
                 Find My Application
               </Button>
-
-              <button type="button" className="text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-center" onClick={() => setLoginMode("phone")}>
-                Login with phone number instead
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-center"
+                onClick={() => setLoginMode("phone")}
+              >
+                ← Back to phone login
               </button>
             </div>
           )}
 
-          {/* Divider - show when not in google_phone mode */}
-          {loginMode !== "google_phone" && (
+          {loginMode !== "google_phone" && !otpSent && (
             <>
-              <div className="flex items-center gap-3 my-4">
+              <div className="flex items-center gap-3 my-5">
                 <div className="flex-1 h-px bg-border" />
                 <span className="text-xs text-muted-foreground">or</span>
                 <div className="flex-1 h-px bg-border" />
               </div>
-
-              <Button
-                variant="outline"
-                className="w-full gap-2"
-                disabled={googleLoading}
-                onClick={handleGoogleSignIn}
-              >
+              <Button variant="outline" className="w-full gap-2 h-11" disabled={googleLoading} onClick={handleGoogleSignIn}>
                 {googleLoading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
@@ -329,8 +393,8 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
               </Button>
             </>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }
