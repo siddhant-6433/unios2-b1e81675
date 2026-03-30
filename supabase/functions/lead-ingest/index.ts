@@ -16,6 +16,7 @@ interface ParsedLead {
   guardian_name?: string;
   guardian_phone?: string;
   source: string;
+  source_lead_id?: string; // external lead ID from the originating platform
   notes?: string;
   course_name?: string;   // we'll try to match to course_id
   campus_name?: string;   // we'll try to match to campus_id
@@ -29,11 +30,11 @@ function parseJustDial(body: any): ParsedLead {
     phone: (body.phone || body.mobile || "").replace(/[\s\-]/g, ""),
     email: body.email || undefined,
     source: "justdial",
+    source_lead_id: body.leadid ? String(body.leadid) : undefined,
     city: body.city || body.area || undefined,
     notes: [
       body.category ? `Category: ${body.category}` : "",
       body.area ? `Area: ${body.area}` : "",
-      body.leadid ? `JD Lead #${body.leadid}` : "",
       body.date ? `Date: ${body.date}` : "",
     ].filter(Boolean).join(" | "),
   };
@@ -46,12 +47,12 @@ function parseShiksha(body: any): ParsedLead {
     phone: (body.mobile || body.phone || "").replace(/[\s\-]/g, ""),
     email: body.email_id || body.email || undefined,
     source: "shiksha",
+    source_lead_id: body.lead_id ? String(body.lead_id) : undefined,
     course_name: body.course_interested || body.course || undefined,
     city: body.city || undefined,
     notes: [
       body.state ? `State: ${body.state}` : "",
       body.qualification ? `Qualification: ${body.qualification}` : "",
-      body.lead_id ? `Shiksha Lead #${body.lead_id}` : "",
     ].filter(Boolean).join(" | "),
   };
 }
@@ -239,7 +240,7 @@ Deno.serve(async (req) => {
     // ── Insert lead ──
     const validSources = [
       "website", "meta_ads", "google_ads", "shiksha", "walk_in",
-      "consultant", "justdial", "referral", "education_fair", "other",
+      "consultant", "justdial", "referral", "education_fair", "collegedunia", "other",
     ];
     const leadSource = validSources.includes(parsed.source) ? parsed.source : "other";
 
@@ -255,6 +256,7 @@ Deno.serve(async (req) => {
         guardian_name: parsed.guardian_name?.trim().slice(0, 200) || null,
         guardian_phone: parsed.guardian_phone ? normalisePhone(parsed.guardian_phone) : null,
         source: leadSource,
+        source_lead_id: parsed.source_lead_id || null,
         course_id,
         campus_id,
         notes: parsed.notes?.slice(0, 1000) || null,

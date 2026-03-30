@@ -62,20 +62,21 @@ const stageIcons: Record<string, typeof Users> = {
 };
 
 const SOURCES = [
-  "website", "meta_ads", "google_ads", "shiksha", "walk_in",
+  "website", "meta_ads", "google_ads", "shiksha", "collegedunia", "walk_in",
   "consultant", "justdial", "referral", "education_fair", "other"
 ] as const;
 
 const sourceLabels: Record<string, string> = {
   website: "Website", meta_ads: "Meta Ads", google_ads: "Google Ads",
-  shiksha: "Shiksha", walk_in: "Walk-in", consultant: "Consultant",
+  shiksha: "Shiksha", collegedunia: "Collegedunia", walk_in: "Walk-in", consultant: "Consultant",
   justdial: "JustDial", referral: "Referral", education_fair: "Education Fair", other: "Other",
 };
 
 const sourceBadgeColors: Record<string, string> = {
   website: "bg-pastel-blue", meta_ads: "bg-pastel-purple", google_ads: "bg-pastel-green",
-  shiksha: "bg-pastel-orange", walk_in: "bg-pastel-yellow", consultant: "bg-pastel-pink",
-  justdial: "bg-pastel-mint", referral: "bg-pastel-red", education_fair: "bg-pastel-purple", other: "bg-muted",
+  shiksha: "bg-pastel-orange", collegedunia: "bg-pastel-mint", walk_in: "bg-pastel-yellow",
+  consultant: "bg-pastel-pink", justdial: "bg-pastel-mint", referral: "bg-pastel-red",
+  education_fair: "bg-pastel-purple", other: "bg-muted",
 };
 
 const PERSON_ROLE_COLORS: Record<string, string> = {
