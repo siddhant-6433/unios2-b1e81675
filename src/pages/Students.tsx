@@ -1,8 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
-import { Users, Search, GraduationCap, MapPin, ChevronRight, Loader2 } from "lucide-react";
+import { Users, Search, GraduationCap, MapPin, ChevronRight, Loader2, UserPlus, Upload } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { AddStudentDialog } from "@/components/admissions/AddStudentDialog";
+import { BulkStudentImportDialog } from "@/components/admissions/BulkStudentImportDialog";
 
 interface StudentRow {
   id: string;
@@ -19,28 +22,30 @@ const Students = () => {
   const [search, setSearch] = useState("");
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [addOpen, setAddOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const { selectedCampusId } = useCampus();
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      let query = supabase
-        .from("students")
-        .select("id, name, admission_no, pre_admission_no, status, phone, courses:course_id(name), campuses:campus_id(name)")
-        .order("created_at", { ascending: false })
-        .limit(500);
-      if (selectedCampusId !== "all") query = query.eq("campus_id", selectedCampusId);
-      const { data } = await query;
-      if (data) {
-        setStudents(data.map((s: any) => ({
-          ...s,
-          course_name: s.courses?.name || "—",
-          campus_name: s.campuses?.name || "—",
-        })));
-      }
-      setLoading(false);
-    })();
+  const fetchStudents = useCallback(async () => {
+    setLoading(true);
+    let query = supabase
+      .from("students")
+      .select("id, name, admission_no, pre_admission_no, status, phone, courses:course_id(name), campuses:campus_id(name)")
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (selectedCampusId !== "all") query = query.eq("campus_id", selectedCampusId);
+    const { data } = await query;
+    if (data) {
+      setStudents(data.map((s: any) => ({
+        ...s,
+        course_name: s.courses?.name || "—",
+        campus_name: s.campuses?.name || "—",
+      })));
+    }
+    setLoading(false);
   }, [selectedCampusId]);
+
+  useEffect(() => { fetchStudents(); }, [fetchStudents]);
 
   const filtered = students.filter(
     (s) =>
@@ -65,10 +70,18 @@ const Students = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Students</h1>
           <p className="text-sm text-muted-foreground mt-1">View and manage student records.</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setBulkOpen(true)} className="gap-1.5 text-sm">
+            <Upload className="h-4 w-4" /> Bulk Import
+          </Button>
+          <Button onClick={() => setAddOpen(true)} className="gap-1.5 text-sm">
+            <UserPlus className="h-4 w-4" /> Add Student
+          </Button>
         </div>
       </div>
 
@@ -110,6 +123,9 @@ const Students = () => {
           </div>
         )}
       </div>
+
+      <AddStudentDialog open={addOpen} onOpenChange={setAddOpen} onSuccess={fetchStudents} />
+      <BulkStudentImportDialog open={bulkOpen} onOpenChange={setBulkOpen} onSuccess={fetchStudents} />
     </div>
   );
 };
