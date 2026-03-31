@@ -21,6 +21,9 @@ verify_jwt = false
 [functions.collegehai-ingest]
 verify_jwt = false
 
+[functions.justdial-ingest]
+verify_jwt = false
+
 [functions.whatsapp-send]
 verify_jwt = false
 

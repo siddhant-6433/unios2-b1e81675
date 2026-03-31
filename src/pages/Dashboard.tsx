@@ -15,6 +15,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend, CartesianGrid,
 } from "recharts";
+import { JdCategoryMappingPanel } from "@/components/admissions/JdCategoryMappingPanel";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -90,7 +91,7 @@ function FeeTooltip({ active, payload, label }: any) {
 
 // ── SuperAdminDashboard ─────────────────────────────────────────────────────
 
-const SuperAdminDashboard = () => {
+const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
   const { selectedCampusId } = useCampus();
   const [loading, setLoading] = useState(true);
 
@@ -280,6 +281,9 @@ const SuperAdminDashboard = () => {
 
   return (
     <>
+      {/* ── JD Category Mapping Alert (super admin only) ── */}
+      {isSuperAdmin && <JdCategoryMappingPanel />}
+
       {/* ── Stat Cards ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map((stat) => (
@@ -611,11 +615,11 @@ const Dashboard = () => {
         <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
         <p className="text-sm text-muted-foreground mt-1">Welcome back. Here's your overview.</p>
       </div>
-      {isAdmin   && <SuperAdminDashboard />}
+      {isAdmin   && <SuperAdminDashboard isSuperAdmin={role === "super_admin"} />}
       {isFaculty && <FacultyDashboard />}
       {isStudent && <StudentDashboard />}
       {isParent  && <ParentDashboard />}
-      {!isAdmin && !isFaculty && !isStudent && !isParent && <SuperAdminDashboard />}
+      {!isAdmin && !isFaculty && !isStudent && !isParent && <SuperAdminDashboard isSuperAdmin={role === "super_admin"} />}
     </div>
   );
 };
