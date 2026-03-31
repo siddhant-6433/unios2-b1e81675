@@ -1,4 +1,4 @@
-project_id = "sctttxxgtsoeodulosdg"
+project_id = "deylhigsisuexszsmypq"
 
 [functions.invite-user]
 verify_jwt = false
@@ -13,6 +13,12 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.lead-ingest]
+verify_jwt = false
+
+[functions.collegedunia-ingest]
+verify_jwt = false
+
+[functions.collegehai-ingest]
 verify_jwt = false
 
 [functions.whatsapp-send]
