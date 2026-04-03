@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { LEAD_SOURCES } from "@/config/leadSources";
 import { Badge } from "@/components/ui/badge";
 import { Upload, FileText, Loader2, CheckCircle, XCircle, Download } from "lucide-react";
 
@@ -24,7 +25,7 @@ interface ParsedLead {
   error?: string;
 }
 
-const VALID_SOURCES = ["website", "meta_ads", "google_ads", "shiksha", "walk_in", "consultant", "justdial", "referral", "education_fair", "other"];
+const VALID_SOURCES = LEAD_SOURCES.map(s => s.value);
 
 export function BulkLeadImportDialog({ open, onOpenChange, onSuccess }: BulkLeadImportDialogProps) {
   const { toast } = useToast();

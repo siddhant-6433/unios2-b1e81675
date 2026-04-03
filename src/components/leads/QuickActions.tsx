@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
-  Phone, MessageSquare, Calendar, FileText, ArrowRight, Bot, UserCheck, Loader2, ChevronDown, UserPlus,
+  Phone, MessageSquare, Calendar, FileText, ArrowRight, Bot, UserCheck, Loader2, ChevronDown, UserPlus, IndianRupee, Mail,
 } from "lucide-react";
 
 interface QuickActionsProps {
@@ -16,10 +16,12 @@ interface QuickActionsProps {
   onAiCall: () => void;
   aiCalling: boolean;
   onAddSecondaryCounsellor?: () => void;
+  onRecordPayment?: () => void;
+  onSendEmail?: () => void;
 }
 
 export function QuickActions({
-  onCall, onWhatsApp, onScheduleVisit, onInterview, onOffer, onConvert, onAiCall, aiCalling, onAddSecondaryCounsellor,
+  onCall, onWhatsApp, onScheduleVisit, onInterview, onOffer, onConvert, onAiCall, aiCalling, onAddSecondaryCounsellor, onRecordPayment, onSendEmail,
 }: QuickActionsProps) {
   const [open, setOpen] = useState(false);
 
@@ -50,6 +52,16 @@ export function QuickActions({
       <Button onClick={onInterview} variant="outline" className="w-full justify-start gap-3 h-11 rounded-xl hover:bg-indigo-50 dark:hover:bg-indigo-950/20">
         <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-indigo-100 dark:bg-indigo-900/30"><UserCheck className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" /></div> Interview Score
       </Button>
+      {onSendEmail && (
+        <Button onClick={onSendEmail} variant="outline" className="w-full justify-start gap-3 h-11 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-950/20">
+          <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-900/30"><Mail className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" /></div> Send Email
+        </Button>
+      )}
+      {onRecordPayment && (
+        <Button onClick={onRecordPayment} variant="outline" className="w-full justify-start gap-3 h-11 rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-950/20">
+          <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-900/30"><IndianRupee className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" /></div> Record Payment
+        </Button>
+      )}
       <Button onClick={onConvert} variant="outline" className="w-full justify-start gap-3 h-11 rounded-xl border-primary/30 text-primary hover:bg-primary/5">
         <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-primary/10"><ArrowRight className="h-3.5 w-3.5 text-primary" /></div> Convert to Student
       </Button>

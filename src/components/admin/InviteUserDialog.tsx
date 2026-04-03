@@ -75,6 +75,20 @@ const InviteUserDialog = ({ open, onClose, onSuccess }: InviteUserDialogProps) =
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
 
+      // Auto-create consultant profile when inviting with consultant role
+      if (role === "consultant" && data?.user_id) {
+        const { data: existing } = await supabase.from("consultants").select("id").eq("user_id", data.user_id).maybeSingle();
+        if (!existing) {
+          await supabase.from("consultants").insert({
+            name: displayName.trim() || email.trim(),
+            email: email.trim(),
+            phone: phone.trim() || null,
+            user_id: data.user_id,
+            stage: "active",
+          });
+        }
+      }
+
       toast({
         title: password ? "User created" : "User invited",
         description: password

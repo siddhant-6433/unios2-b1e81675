@@ -115,9 +115,23 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Log activity if lead_id provided
+    // Log to whatsapp_messages + lead_activities
+    const adminClient = createClient(supabaseUrl, serviceRoleKey);
+
+    // Insert into whatsapp_messages for inbox visibility
+    await adminClient.from("whatsapp_messages").insert({
+      lead_id: lead_id || null,
+      wa_message_id: waResult?.messages?.[0]?.id || null,
+      direction: "outbound",
+      phone: waPhone,
+      message_type: "template",
+      content: `[Template: ${template_key.replace(/_/g, " ")}]`,
+      template_key,
+      status: "sent",
+      is_read: true,
+    });
+
     if (lead_id) {
-      const adminClient = createClient(supabaseUrl, serviceRoleKey);
       await adminClient.from("lead_activities").insert({
         lead_id,
         user_id: user.id,

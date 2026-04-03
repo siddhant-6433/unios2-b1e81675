@@ -10,7 +10,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend, CartesianGrid,
@@ -604,10 +604,14 @@ const ParentDashboard = () => (
 const Dashboard = () => {
   const { role } = useAuth();
 
+  // Redirect consultant to their portal
+  if (role === "consultant") return <Navigate to="/consultant-portal" replace />;
+
   const isAdmin   = ["super_admin", "campus_admin", "admission_head", "principal"].includes(role || "");
   const isFaculty = ["faculty", "teacher"].includes(role || "");
   const isStudent = role === "student";
   const isParent  = role === "parent";
+  const isCounsellor = role === "counsellor";
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -616,10 +620,11 @@ const Dashboard = () => {
         <p className="text-sm text-muted-foreground mt-1">Welcome back. Here's your overview.</p>
       </div>
       {isAdmin   && <SuperAdminDashboard isSuperAdmin={role === "super_admin"} />}
+      {isCounsellor && <SuperAdminDashboard isSuperAdmin={false} />}
       {isFaculty && <FacultyDashboard />}
       {isStudent && <StudentDashboard />}
       {isParent  && <ParentDashboard />}
-      {!isAdmin && !isFaculty && !isStudent && !isParent && <SuperAdminDashboard isSuperAdmin={role === "super_admin"} />}
+      {!isAdmin && !isCounsellor && !isFaculty && !isStudent && !isParent && <SuperAdminDashboard isSuperAdmin={false} />}
     </div>
   );
 };

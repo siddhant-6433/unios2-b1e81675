@@ -6,6 +6,8 @@ import {
   Send, Loader2, ArrowRight, Phone, StickyNote, Bot, MapPin, Clock, Plus, MessageSquare, Link2,
   CalendarCheck, FileText, UserCheck, GraduationCap, Mail, ClipboardList, Edit,
 } from "lucide-react";
+import { DocumentChecklist } from "@/components/leads/DocumentChecklist";
+import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
 
 interface LeadTimelineProps {
   activities: any[];
@@ -22,19 +24,22 @@ interface LeadTimelineProps {
   onScheduleVisit?: (data: { visit_date: string; campus_id: string }) => void;
   onUpdateVisitStatus?: (id: string, status: string) => void;
   campuses?: any[];
+  leadId?: string;
+  courseId?: string | null;
 }
 
 export function LeadTimeline({
   activities, notes, followups, visits, callLogs,
   newNote, setNewNote, onAddNote, savingNote,
   onCompleteFollowup, onAddFollowup, onScheduleVisit, onUpdateVisitStatus, campuses,
+  leadId, courseId,
 }: LeadTimelineProps) {
   return (
     <div className="space-y-3">
       {/* Tabs */}
       <Tabs defaultValue="timeline" className="w-full">
         <TabsList className="bg-transparent border-b border-border rounded-none p-0 h-auto gap-0 w-full justify-start">
-          {["Timeline", "Calls", "Notes", "Documents"].map((t) => (
+          {["Timeline", "Calls", "Notes", "Course Info", "Documents"].map((t) => (
             <TabsTrigger
               key={t}
               value={t.toLowerCase()}
@@ -79,8 +84,19 @@ export function LeadTimeline({
         <TabsContent value="notes" className="mt-3">
           <NotesList notes={notes} />
         </TabsContent>
+        <TabsContent value="course info" className="mt-3">
+          {courseId ? (
+            <CourseInfoPanel courseId={courseId} />
+          ) : (
+            <EmptyState text="No course assigned to this lead" />
+          )}
+        </TabsContent>
         <TabsContent value="documents" className="mt-3">
-          <EmptyState text="No documents uploaded yet" />
+          {leadId ? (
+            <DocumentChecklist leadId={leadId} courseId={courseId || null} />
+          ) : (
+            <EmptyState text="No documents uploaded yet" />
+          )}
         </TabsContent>
       </Tabs>
     </div>

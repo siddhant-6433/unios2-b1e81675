@@ -6,6 +6,7 @@ import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Loader2, Trash2, ArrowRightLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { TransferLeadDialog } from "@/components/admissions/TransferLeadDialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -21,6 +22,12 @@ import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
 import { ConvertToStudentDialog } from "@/components/admissions/ConvertToStudentDialog";
 import { SendWhatsAppDialog } from "@/components/leads/SendWhatsAppDialog";
 import { AddSecondaryCounsellorDialog } from "@/components/leads/AddSecondaryCounsellorDialog";
+import { ScheduleVisitDialog } from "@/components/admissions/ScheduleVisitDialog";
+import { RecordPaymentDialog } from "@/components/admissions/RecordPaymentDialog";
+import { LeadPaymentHistory } from "@/components/admissions/LeadPaymentHistory";
+import { FuzzyDuplicateAlert } from "@/components/admissions/FuzzyDuplicateAlert";
+import { FeeStructureViewer } from "@/components/finance/FeeStructureViewer";
+import { SendEmailDialog } from "@/components/leads/SendEmailDialog";
 import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
 
 const STAGE_LABELS: Record<string, string> = {
@@ -75,17 +82,23 @@ const LeadDetail = () => {
   const [showSecondaryCounsellor, setShowSecondaryCounsellor] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
+  const [showScheduleVisit, setShowScheduleVisit] = useState(false);
+  const [showRecordPayment, setShowRecordPayment] = useState(false);
+  const [showSendEmail, setShowSendEmail] = useState(false);
+  const [paymentRefreshKey, setPaymentRefreshKey] = useState(0);
   const [deletingLead, setDeletingLead] = useState(false);
   const [counsellorName, setCounsellorName] = useState<string | undefined>();
   const [courseName, setCourseName] = useState<string | undefined>();
+  const [courseDuration, setCourseDuration] = useState<number | undefined>();
+  const [courseType, setCourseType] = useState<string | undefined>();
   const [campusName, setCampusName] = useState<string | undefined>();
   const [campusCity, setCampusCity] = useState<string | undefined>();
   const [profileId, setProfileId] = useState<string | null>(null);
 
   useEffect(() => { if (id) fetchAll(); }, [id]);
 
-  const fetchAll = async () => {
-    setLoading(true);
+  const fetchAll = async (silent = false) => {
+    if (!silent) setLoading(true);
     const [leadRes, notesRes, followupsRes, visitsRes, activitiesRes, campusesRes, callLogsRes, coursesRes, profileRes] = await Promise.all([
       supabase.from("leads").select("*").eq("id", id).single(),
       supabase.from("lead_notes").select("*").eq("lead_id", id).order("created_at", { ascending: false }),
@@ -105,8 +118,10 @@ const LeadDetail = () => {
         setCounsellorName(data?.display_name || undefined);
       }
       if (leadRes.data.course_id) {
-        const { data } = await supabase.from("courses").select("name").eq("id", leadRes.data.course_id).single();
+        const { data } = await supabase.from("courses").select("name, duration_years, type").eq("id", leadRes.data.course_id).single();
         setCourseName(data?.name || undefined);
+        setCourseDuration(data?.duration_years || undefined);
+        setCourseType(data?.type || undefined);
       }
       if (leadRes.data.campus_id) {
         const { data } = await supabase.from("campuses").select("name, city, state").eq("id", leadRes.data.campus_id).single();
@@ -136,7 +151,7 @@ const LeadDetail = () => {
         lead_id: id, user_id: profileId, type: "note",
         description: newNote.trim(),
       });
-      setNewNote(""); await fetchAll();
+      setNewNote(""); await fetchAll(true);
     }
     setSavingNote(false);
   };
@@ -157,7 +172,7 @@ const LeadDetail = () => {
       if (data.type === "call" || data.type === "whatsapp") {
         await autoAdvanceStage("counsellor_call");
       }
-      await fetchAll();
+      await fetchAll(true);
     }
   };
 
@@ -167,7 +182,7 @@ const LeadDetail = () => {
       lead_id: id!, user_id: profileId, type: "followup",
       description: "Follow-up marked as completed",
     });
-    await fetchAll();
+    await fetchAll(true);
   };
 
   const scheduleVisit = async (data: { visit_date: string; campus_id: string }) => {
@@ -184,7 +199,7 @@ const LeadDetail = () => {
         description: `Campus visit scheduled for ${new Date(data.visit_date).toLocaleDateString("en-IN")}${campusLabel ? ` at ${campusLabel}` : ""}`,
       });
       await autoAdvanceStage("visit_scheduled");
-      await fetchAll();
+      await fetchAll(true);
     }
   };
 
@@ -202,7 +217,7 @@ const LeadDetail = () => {
       description: `Stage changed from ${STAGE_LABELS[lead.stage] || lead.stage} to ${STAGE_LABELS[newStage] || newStage}`,
       old_stage: lead.stage as any, new_stage: newStage as any,
     });
-    await fetchAll();
+    await fetchAll(true);
   };
 
   /** Auto-advance stage when an action implies progression */
@@ -247,7 +262,7 @@ const LeadDetail = () => {
       console.log("Activity logged:", actData);
     }
     toast({ title: `${label} updated` });
-    await fetchAll();
+    await fetchAll(true);
   };
 
   const triggerAiCall = async () => {
@@ -255,7 +270,7 @@ const LeadDetail = () => {
     const { error } = await supabase.functions.invoke("ai-first-call", { body: { lead_id: id } });
     setAiCalling(false);
     if (error) toast({ title: "AI Call Error", description: error.message, variant: "destructive" });
-    else { toast({ title: "AI Call Complete" }); fetchAll(); }
+    else { toast({ title: "AI Call Complete" }); fetchAll(true); }
   };
 
   const handleDeleteLead = async () => {
@@ -317,21 +332,21 @@ const LeadDetail = () => {
             onStageChange={updateStage}
             onFieldUpdate={updateField}
           />
+          <FuzzyDuplicateAlert leadId={lead.id} leadName={lead.name} />
           <QuickActions
             onCall={() => {
               if (lead.phone) window.open(`tel:${lead.phone}`);
             }}
             onWhatsApp={() => setShowWhatsApp(true)}
-            onScheduleVisit={() => scheduleVisit({
-              visit_date: new Date(Date.now() + 86400000).toISOString(),
-              campus_id: lead.campus_id || "",
-            })}
+            onScheduleVisit={() => setShowScheduleVisit(true)}
             onInterview={() => setShowInterview(true)}
             onOffer={() => setShowOfferLetter(true)}
             onConvert={() => setShowConvert(true)}
             onAiCall={triggerAiCall}
             aiCalling={aiCalling}
             onAddSecondaryCounsellor={() => setShowSecondaryCounsellor(true)}
+            onRecordPayment={() => setShowRecordPayment(true)}
+            onSendEmail={() => setShowSendEmail(true)}
           />
           <NextFollowup
             followups={followups}
@@ -339,6 +354,15 @@ const LeadDetail = () => {
             campuses={campuses}
             onScheduleVisit={scheduleVisit}
           />
+          <LeadPaymentHistory leadId={lead.id} refreshKey={paymentRefreshKey} />
+          {lead.course_id && (
+            <Card className="border-border/60">
+              <CardContent className="p-4">
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Fee Structure</h3>
+                <FeeStructureViewer courseId={lead.course_id} compact newAdmissionOnly />
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* Right Column */}
@@ -366,33 +390,61 @@ const LeadDetail = () => {
                 lead_id: id!, user_id: user?.id || null, type: "visit",
                 description: `Campus visit status updated to ${status}`,
               });
-              await fetchAll();
+              await fetchAll(true);
             }}
             campuses={campuses}
+            leadId={lead.id}
+            courseId={lead.course_id}
           />
         </div>
       </div>
 
       {/* Dialogs */}
       <InterviewScoringDialog open={showInterview} onOpenChange={setShowInterview}
-        leadId={lead.id} leadName={lead.name} currentScore={lead.interview_score} currentResult={lead.interview_result} onSuccess={fetchAll} />
+        leadId={lead.id} leadName={lead.name} currentScore={lead.interview_score} currentResult={lead.interview_result} onSuccess={() => fetchAll(true)} />
       <OfferLetterDialog open={showOfferLetter} onOpenChange={setShowOfferLetter}
-        leadId={lead.id} leadName={lead.name} courseId={lead.course_id} campusId={lead.campus_id} onSuccess={fetchAll} />
-      <ConvertToStudentDialog open={showConvert} onOpenChange={setShowConvert} lead={lead} onSuccess={fetchAll} />
+        leadId={lead.id} leadName={lead.name} courseId={lead.course_id} campusId={lead.campus_id} onSuccess={() => fetchAll(true)} />
+      <ConvertToStudentDialog open={showConvert} onOpenChange={setShowConvert} lead={lead} onSuccess={() => fetchAll(true)} />
       <SendWhatsAppDialog
         open={showWhatsApp}
         onOpenChange={setShowWhatsApp}
         lead={{ id: lead.id, name: lead.name, phone: lead.phone, application_id: lead.application_id }}
         courseName={courseName}
         campusName={campusName}
-        onSuccess={fetchAll}
+        onSuccess={() => fetchAll(true)}
       />
       <AddSecondaryCounsellorDialog
         open={showSecondaryCounsellor}
         onOpenChange={setShowSecondaryCounsellor}
         leadId={lead.id}
         leadName={lead.name}
-        onSuccess={fetchAll}
+        onSuccess={() => fetchAll(true)}
+      />
+
+      {/* Send Email Dialog */}
+      <SendEmailDialog
+        open={showSendEmail}
+        onOpenChange={setShowSendEmail}
+        lead={{ id: lead.id, name: lead.name, email: lead.email }}
+        onSuccess={() => fetchAll(true)}
+      />
+
+      {/* Record Payment Dialog */}
+      <RecordPaymentDialog
+        open={showRecordPayment}
+        onOpenChange={setShowRecordPayment}
+        leadId={lead.id}
+        leadName={lead.name}
+        onSuccess={() => { fetchAll(true); setPaymentRefreshKey(k => k + 1); }}
+      />
+
+      {/* Schedule Visit Dialog */}
+      <ScheduleVisitDialog
+        open={showScheduleVisit}
+        onOpenChange={setShowScheduleVisit}
+        campuses={campuses}
+        defaultCampusId={lead.campus_id || undefined}
+        onSchedule={scheduleVisit}
       />
 
       {/* Transfer Dialog */}
@@ -401,7 +453,7 @@ const LeadDetail = () => {
         onOpenChange={setShowTransfer}
         leadIds={id ? [id] : []}
         leadNames={[lead.name]}
-        onSuccess={fetchAll}
+        onSuccess={() => fetchAll(true)}
       />
 
       {/* Delete Confirmation */}

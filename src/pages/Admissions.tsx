@@ -9,7 +9,7 @@ import {
   Phone, MessageSquare, ChevronRight, Plus, Search, Filter, Upload,
   Eye, Calendar, MoreHorizontal, Users, TrendingUp, ArrowUpRight,
   Bot, UserCheck, MapPin, FileText, CheckCircle, XCircle, Clock, Loader2,
-  Trash2, ArrowRightLeft
+  Trash2, ArrowRightLeft, Send
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { AddLeadDialog } from "@/components/admissions/AddLeadDialog";
 import { BulkLeadImportDialog } from "@/components/admissions/BulkLeadImportDialog";
 import { TransferLeadDialog } from "@/components/admissions/TransferLeadDialog";
+import { BulkWhatsAppDialog } from "@/components/admissions/BulkWhatsAppDialog";
+import { LeadTemperatureBadge } from "@/components/admissions/LeadTemperatureBadge";
+import { SeatMatrix } from "@/components/admissions/SeatMatrix";
+import { PaymentReconciliation } from "@/components/admissions/PaymentReconciliation";
+import { InactivityAlertBanner } from "@/components/admissions/InactivityAlertBanner";
+import { LEAD_SOURCES, SOURCE_LABELS, SOURCE_BADGE_COLORS } from "@/config/leadSources";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -25,7 +31,7 @@ import {
 
 const STAGES = [
   "new_lead", "application_in_progress", "application_fee_paid", "application_submitted", "ai_called", "counsellor_call", "visit_scheduled",
-  "interview", "offer_sent", "token_paid", "pre_admitted", "admitted", "rejected"
+  "interview", "offer_sent", "token_paid", "pre_admitted", "admitted", "waitlisted", "rejected"
 ] as const;
 
 type Stage = typeof STAGES[number];
@@ -35,7 +41,7 @@ const STAGE_LABELS: Record<string, string> = {
   application_fee_paid: "Fee Paid", application_submitted: "Application Submitted",
   ai_called: "AI Called", counsellor_call: "Counsellor Call",
   visit_scheduled: "Visit Scheduled", interview: "Interview", offer_sent: "Offer Sent",
-  token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", rejected: "Rejected",
+  token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", waitlisted: "Waitlisted", rejected: "Rejected",
 };
 
 const stageColors: Record<string, string> = {
@@ -51,6 +57,7 @@ const stageColors: Record<string, string> = {
   token_paid: "bg-primary/15 text-primary",
   pre_admitted: "bg-primary/20 text-primary",
   admitted: "bg-primary text-primary-foreground",
+  waitlisted: "bg-pastel-orange text-foreground/70",
   rejected: "bg-pastel-red text-foreground/70",
 };
 
@@ -58,28 +65,10 @@ const stageIcons: Record<string, typeof Users> = {
   new_lead: Users, application_in_progress: FileText, application_fee_paid: CheckCircle, application_submitted: CheckCircle,
   ai_called: Bot, counsellor_call: Phone,
   visit_scheduled: MapPin, interview: UserCheck, offer_sent: FileText,
-  token_paid: CheckCircle, pre_admitted: Clock, admitted: CheckCircle, rejected: XCircle,
+  token_paid: CheckCircle, pre_admitted: Clock, admitted: CheckCircle, waitlisted: Clock, rejected: XCircle,
 };
 
-const SOURCES = [
-  "website", "meta_ads", "google_ads", "shiksha", "collegedunia", "collegehai", "walk_in",
-  "consultant", "justdial", "referral", "education_fair", "other"
-] as const;
-
-const sourceLabels: Record<string, string> = {
-  website: "Website", meta_ads: "Meta Ads", google_ads: "Google Ads",
-  shiksha: "Shiksha", collegedunia: "Collegedunia", collegehai: "CollegeHai",
-  walk_in: "Walk-in", consultant: "Consultant",
-  justdial: "JustDial", referral: "Referral", education_fair: "Education Fair", other: "Other",
-};
-
-const sourceBadgeColors: Record<string, string> = {
-  website: "bg-pastel-blue", meta_ads: "bg-pastel-purple", google_ads: "bg-pastel-green",
-  shiksha: "bg-pastel-orange", collegedunia: "bg-pastel-mint", collegehai: "bg-pastel-teal",
-  walk_in: "bg-pastel-yellow", consultant: "bg-pastel-pink",
-  justdial: "bg-pastel-mint", referral: "bg-pastel-red",
-  education_fair: "bg-pastel-purple", other: "bg-muted",
-};
+// Lead sources imported from @/config/leadSources
 
 const PERSON_ROLE_COLORS: Record<string, string> = {
   lead: "bg-pastel-yellow text-foreground/80",
@@ -103,6 +92,8 @@ interface Lead {
   course_id: string | null;
   campus_id: string | null;
   counsellor_id: string | null;
+  lead_score: number;
+  lead_temperature: "hot" | "warm" | "cold";
   course_name?: string;
   campus_name?: string;
   counsellor_name?: string;
@@ -114,11 +105,12 @@ const Admissions = () => {
   const { selectedCampusId } = useCampus();
   const isTeamLeader = useIsTeamLeader();
   const { toast } = useToast();
-  const [view, setView] = useState<"pipeline" | "list">("pipeline");
+  const [view, setView] = useState<"pipeline" | "list" | "seats" | "payments">("pipeline");
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [roleFilter, setRoleFilter] = useState<string>("all");
+  const [tempFilter, setTempFilter] = useState<string>("all");
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddLead, setShowAddLead] = useState(false);
@@ -128,6 +120,7 @@ const Admissions = () => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
+  const [showBulkWhatsApp, setShowBulkWhatsApp] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const isSuperAdmin = role === "super_admin";
@@ -194,7 +187,8 @@ const Admissions = () => {
     const matchesStage = stageFilter === "all" || l.stage === stageFilter;
     const matchesSource = sourceFilter === "all" || l.source === sourceFilter;
     const matchesRole = roleFilter === "all" || l.person_role === roleFilter;
-    return matchesSearch && matchesStage && matchesSource && matchesRole;
+    const matchesTemp = tempFilter === "all" || l.lead_temperature === tempFilter;
+    return matchesSearch && matchesStage && matchesSource && matchesRole && matchesTemp;
   });
 
   const totalLeads = leads.length;
@@ -236,6 +230,9 @@ const Admissions = () => {
         <div className="flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
           <span className="text-sm font-medium text-foreground">{selectedIds.size} lead{selectedIds.size > 1 ? "s" : ""} selected</span>
           <div className="ml-auto flex gap-2">
+            <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowBulkWhatsApp(true)}>
+              <Send className="h-4 w-4" /> WhatsApp
+            </Button>
             {canTransfer && (
               <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowTransfer(true)}>
                 <ArrowRightLeft className="h-4 w-4" /> Transfer
@@ -273,6 +270,11 @@ const Admissions = () => {
         ))}
       </div>
 
+      <InactivityAlertBanner
+        onViewInactive={() => { setStageFilter("all"); setTempFilter("all"); }}
+        onViewOverdue={() => navigate("/counsellor-dashboard")}
+      />
+
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -288,7 +290,7 @@ const Admissions = () => {
         <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}
           className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
           <option value="all">All Sources</option>
-          {SOURCES.map((s) => <option key={s} value={s}>{sourceLabels[s]}</option>)}
+          {LEAD_SOURCES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
         </select>
         <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}
           className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
@@ -298,19 +300,28 @@ const Admissions = () => {
           <option value="student">Student</option>
           <option value="alumni">Alumni</option>
         </select>
+        <select value={tempFilter} onChange={(e) => setTempFilter(e.target.value)}
+          className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
+          <option value="all">All Leads</option>
+          <option value="hot">Hot</option>
+          <option value="warm">Warm</option>
+          <option value="cold">Cold</option>
+        </select>
         <div className="flex rounded-xl border border-input bg-card p-0.5 ml-auto">
-          <button onClick={() => setView("pipeline")}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${view === "pipeline" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
-            Pipeline
-          </button>
-          <button onClick={() => setView("list")}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${view === "list" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
-            List
-          </button>
+          {(["pipeline", "list", "seats", "payments"] as const).map((v) => (
+            <button key={v} onClick={() => setView(v)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-colors ${view === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+              {v}
+            </button>
+          ))}
         </div>
       </div>
 
-      {view === "pipeline" ? (
+      {view === "seats" ? (
+        <SeatMatrix />
+      ) : view === "payments" ? (
+        <PaymentReconciliation />
+      ) : view === "pipeline" ? (
         <div className="flex gap-4 overflow-x-auto pb-4 -mx-6 px-6">
           {STAGES.map((stage) => {
             const stageLeads = filtered.filter((l) => l.stage === stage);
@@ -339,7 +350,10 @@ const Admissions = () => {
                       <CardContent className="p-4" onClick={() => navigate(`/admissions/${lead.id}`)}>
                         <div className="flex items-start justify-between">
                           <div className="pr-6">
-                            <h4 className="text-sm font-semibold text-foreground">{lead.name}</h4>
+                            <div className="flex items-center gap-1.5">
+                              <h4 className="text-sm font-semibold text-foreground">{lead.name}</h4>
+                              <LeadTemperatureBadge temperature={lead.lead_temperature} score={lead.lead_score} />
+                            </div>
                             <p className="text-xs text-primary font-medium mt-0.5">{lead.course_name}</p>
                           </div>
                           <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -361,7 +375,7 @@ const Admissions = () => {
                         )}
                         <div className="flex items-center justify-between mt-3 pt-2 border-t border-border/40">
                           <div className="flex items-center gap-1.5">
-                            <Badge className={`text-[10px] font-medium border-0 ${sourceBadgeColors[lead.source] || "bg-muted"}`}>{sourceLabels[lead.source] || lead.source}</Badge>
+                            <Badge className={`text-[10px] font-medium border-0 ${SOURCE_BADGE_COLORS[lead.source] || "bg-muted"}`}>{SOURCE_LABELS[lead.source] || lead.source}</Badge>
                             <Badge className={`text-[10px] font-medium border-0 capitalize ${PERSON_ROLE_COLORS[lead.person_role] || "bg-muted"}`}>{lead.person_role}</Badge>
                           </div>
                           <div className="flex items-center gap-1">
@@ -398,6 +412,7 @@ const Admissions = () => {
                   )}
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Lead</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Course / Campus</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Score</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Stage</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Role</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Source</th>
@@ -427,6 +442,9 @@ const Admissions = () => {
                       <div className="text-foreground">{lead.course_name}</div>
                       <div className="text-xs text-muted-foreground">{lead.campus_name}</div>
                     </td>
+                    <td className="px-4 py-3 text-center" onClick={() => navigate(`/admissions/${lead.id}`)}>
+                      <LeadTemperatureBadge temperature={lead.lead_temperature} score={lead.lead_score} />
+                    </td>
                     <td className="px-4 py-3" onClick={() => navigate(`/admissions/${lead.id}`)}>
                       <Badge className={`text-[11px] font-medium border-0 ${stageColors[lead.stage] || "bg-muted"}`}>
                         {STAGE_LABELS[lead.stage] || lead.stage}
@@ -438,8 +456,8 @@ const Admissions = () => {
                       </Badge>
                     </td>
                     <td className="px-4 py-3" onClick={() => navigate(`/admissions/${lead.id}`)}>
-                      <Badge className={`text-[11px] font-medium border-0 ${sourceBadgeColors[lead.source] || "bg-muted"}`}>
-                        {sourceLabels[lead.source] || lead.source}
+                      <Badge className={`text-[11px] font-medium border-0 ${SOURCE_BADGE_COLORS[lead.source] || "bg-muted"}`}>
+                        {SOURCE_LABELS[lead.source] || lead.source}
                       </Badge>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground text-sm" onClick={() => navigate(`/admissions/${lead.id}`)}>{lead.counsellor_name}</td>
@@ -466,6 +484,14 @@ const Admissions = () => {
 
       <AddLeadDialog open={showAddLead} onOpenChange={setShowAddLead} onSuccess={fetchLeads} />
       <BulkLeadImportDialog open={showBulkImport} onOpenChange={setShowBulkImport} onSuccess={fetchLeads} />
+
+      {/* Bulk WhatsApp */}
+      <BulkWhatsAppDialog
+        open={showBulkWhatsApp}
+        onOpenChange={setShowBulkWhatsApp}
+        leads={Array.from(selectedIds).map(id => leads.find(l => l.id === id)).filter(Boolean) as Lead[]}
+        onSuccess={() => { fetchLeads(); setSelectedIds(new Set()); }}
+      />
 
       {/* Bulk Transfer Dialog */}
       <TransferLeadDialog

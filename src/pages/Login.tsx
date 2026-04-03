@@ -2,9 +2,11 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { GraduationCap, Mail, MessageCircle, Loader2, ShieldCheck, ArrowLeft } from "lucide-react";
+import { Mail, MessageCircle, Loader2, ShieldCheck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PhoneInput } from "@/components/ui/phone-input";
+import uniosLogo from "@/assets/unios-logo.png";
+import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 
 type LoginMethod = "google" | "email_otp" | "whatsapp_otp" | "dev_password";
 
@@ -194,11 +196,13 @@ const Login = () => {
   return (
     <div className="min-h-screen flex bg-background">
       {/* Left panel */}
-      <div className="hidden lg:flex lg:w-1/2 bg-primary items-center justify-center p-12">
+      <div className="hidden lg:flex lg:w-1/2 bg-primary items-center justify-center p-12 relative">
+        {/* NIMT logo — top left */}
+        <div className="absolute top-6 left-6">
+          <img src={nimtLogo} alt="NIMT" className="h-8 w-auto brightness-0 invert opacity-80" />
+        </div>
         <div className="max-w-md text-center">
-          <div className="flex h-20 w-20 mx-auto items-center justify-center rounded-2xl bg-primary-foreground/10 mb-8">
-            <GraduationCap className="h-10 w-10 text-primary-foreground" />
-          </div>
+          <img src={uniosLogo} alt="UniOs" className="h-32 w-32 mx-auto mb-8 object-contain brightness-0 invert" />
           <h1 className="text-3xl font-bold text-primary-foreground mb-3">NIMT UniOs</h1>
           <p className="text-primary-foreground/70 text-base leading-relaxed">
             Multi-campus education management platform. Manage admissions, students, finance, and more — all in one place.
@@ -207,13 +211,16 @@ const Login = () => {
       </div>
 
       {/* Right panel */}
-      <div className="flex-1 flex items-center justify-center p-6">
+      <div className="flex-1 flex items-center justify-center p-6 relative">
+        {/* NIMT logo — top right on mobile, hidden on desktop (shown on left panel) */}
+        <div className="lg:hidden absolute top-5 right-5">
+          <img src={nimtLogo} alt="NIMT" className="h-7 w-auto opacity-60" />
+        </div>
+
         <div className="w-full max-w-sm space-y-6">
           {/* Mobile logo */}
-          <div className="lg:hidden flex items-center gap-2.5 justify-center mb-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
-              <GraduationCap className="h-5 w-5 text-primary-foreground" />
-            </div>
+          <div className="lg:hidden flex flex-col items-center gap-2 mb-4">
+            <img src={uniosLogo} alt="UniOs" className="h-16 w-16 object-contain" />
             <span className="text-lg font-bold text-foreground">NIMT UniOs</span>
           </div>
 

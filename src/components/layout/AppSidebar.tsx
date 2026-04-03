@@ -2,7 +2,7 @@ import {
   LayoutDashboard, Users, GraduationCap, IndianRupee,
   ClipboardCheck, Settings, LogOut,
   BookOpen, BarChart3, FileText, Search, Shuffle, Handshake, PieChart,
-  ChevronDown, Phone, Calendar, MessageSquare, Newspaper, Building2, School, ShieldCheck
+  ChevronDown, Phone, Calendar, MessageSquare, Newspaper, Building2, School, ShieldCheck, Zap
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -19,7 +19,7 @@ import { useCampus } from "@/contexts/CampusContext";
 type AppRole =
   | "super_admin" | "campus_admin" | "principal" | "admission_head"
   | "counsellor" | "accountant" | "faculty" | "teacher"
-  | "data_entry" | "office_assistant" | "hostel_warden" | "student" | "parent";
+  | "data_entry" | "office_assistant" | "hostel_warden" | "consultant" | "student" | "parent";
 
 type MenuItem = { title: string; url: string; icon: any; roles?: AppRole[]; badge?: number };
 
@@ -27,16 +27,16 @@ const allRolesExcept = (...excluded: AppRole[]): AppRole[] => {
   const all: AppRole[] = [
     "super_admin","campus_admin","principal","admission_head","counsellor",
     "accountant","faculty","teacher","data_entry","office_assistant",
-    "hostel_warden","student","parent",
+    "hostel_warden","consultant","student","parent",
   ];
   return all.filter(r => !excluded.includes(r));
 };
 
-const staffRoles = allRolesExcept("student", "parent");
+const staffRoles = allRolesExcept("student", "parent", "consultant");
 const adminRoles: AppRole[] = ["super_admin", "campus_admin", "principal"];
 
 const mainMenu: MenuItem[] = [
-  { title: "Overview", url: "/", icon: LayoutDashboard },
+  { title: "Overview", url: "/", icon: LayoutDashboard, roles: allRolesExcept("consultant") },
   { title: "Search", url: "/search", icon: Search, roles: staffRoles },
   { title: "Students", url: "/students", icon: Users, roles: staffRoles },
   { title: "Attendance", url: "/attendance", icon: ClipboardCheck, roles: [...staffRoles, "student", "parent"] },
@@ -47,14 +47,20 @@ const mainMenu: MenuItem[] = [
 
 const admissionSubMenu: MenuItem[] = [
   { title: "Leads", url: "/admissions", icon: GraduationCap, roles: [...adminRoles, "admission_head", "counsellor", "data_entry"] },
+  { title: "WhatsApp", url: "/whatsapp-inbox", icon: MessageSquare, roles: [...adminRoles, "admission_head", "counsellor"] },
+  { title: "Performance", url: "/counsellor-dashboard", icon: BarChart3, roles: [...adminRoles, "admission_head"] },
   { title: "Lead Allocation", url: "/lead-allocation", icon: Shuffle, roles: ["super_admin", "admission_head"] },
+  { title: "Automation", url: "/automation-rules", icon: Zap, roles: ["super_admin", "admission_head"] },
   { title: "Consultants", url: "/consultants", icon: Handshake, roles: [...adminRoles, "admission_head", "counsellor"] },
+  { title: "Templates", url: "/template-manager", icon: Newspaper, roles: ["super_admin", "admission_head"] },
+  { title: "Courses & Fees", url: "/fee-structures", icon: IndianRupee, roles: [...adminRoles, "admission_head", "counsellor", "consultant"] },
+  { title: "My Leads", url: "/consultant-portal", icon: Users, roles: ["consultant"] },
   { title: "Analytics", url: "/admission-analytics", icon: PieChart, roles: [...adminRoles, "admission_head"] },
 ];
 
 const managementMenu: MenuItem[] = [
   { title: "Campuses & Courses", url: "/admin?tab=course-campus", icon: Building2, roles: adminRoles },
-  { title: "Documents", url: "/documents", icon: FileText, roles: staffRoles },
+  { title: "Documents", url: "/documents", icon: FileText, roles: [...staffRoles] },
   { title: "User Management", url: "/admin", icon: ShieldCheck, roles: ["super_admin"] },
 ];
 

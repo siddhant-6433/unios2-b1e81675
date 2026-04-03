@@ -23,6 +23,12 @@ import AdminPanel from "./pages/AdminPanel";
 import ApplyPortal from "./pages/ApplyPortal";
 import Consultants from "./pages/Consultants";
 import AdmissionAnalytics from "./pages/AdmissionAnalytics";
+import CounsellorDashboard from "./pages/CounsellorDashboard";
+import WhatsAppInbox from "./pages/WhatsAppInbox";
+import AutomationRules from "./pages/AutomationRules";
+import ConsultantPortal from "./pages/ConsultantPortal";
+import TemplateManager from "./pages/TemplateManager";
+import FeeStructures from "./pages/FeeStructures";
 import EnquiryForm from "./pages/EnquiryForm";
 import Exams from "./pages/Exams";
 import Reports from "./pages/Reports";
@@ -79,6 +85,12 @@ const App = () => (
                       <Route path="/admin" element={<AdminPanel />} />
                       <Route path="/consultants" element={<Consultants />} />
                       <Route path="/admission-analytics" element={<AdmissionAnalytics />} />
+                      <Route path="/counsellor-dashboard" element={<CounsellorDashboard />} />
+                      <Route path="/whatsapp-inbox" element={<WhatsAppInbox />} />
+                      <Route path="/automation-rules" element={<AutomationRules />} />
+                      <Route path="/consultant-portal" element={<ConsultantPortal />} />
+                      <Route path="/template-manager" element={<TemplateManager />} />
+                      <Route path="/fee-structures" element={<FeeStructures />} />
                       <Route path="/exams" element={<Exams />} />
                       <Route path="/reports" element={<Reports />} />
                       <Route path="/documents" element={<Documents />} />

@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { LEAD_SOURCES } from "@/config/leadSources";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Plus, X, Loader2, Settings, ArrowUpDown, Check, Trash2 } from "lucide-react";
@@ -85,7 +86,7 @@ const LeadAllocation = () => {
 
   const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 
-  const SOURCES = ["website", "meta_ads", "google_ads", "shiksha", "walk_in", "consultant", "justdial", "referral", "education_fair", "other"];
+  // Lead sources from shared config
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -126,7 +127,7 @@ const LeadAllocation = () => {
               <div><label className="block text-[11px] font-medium text-muted-foreground mb-1">Source</label>
                 <select value={form.conditions.source} onChange={(e) => setForm(p => ({ ...p, conditions: { ...p.conditions, source: e.target.value } }))} className={inputCls}>
                   <option value="">Any</option>
-                  {SOURCES.map(s => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
+                  {LEAD_SOURCES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
                 </select></div>
             </div>
           </div>

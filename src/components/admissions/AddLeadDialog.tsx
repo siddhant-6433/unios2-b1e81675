@@ -7,14 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Loader2, Plus } from "lucide-react";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
-
-const SOURCES = [
-  { value: "website", label: "Website" }, { value: "meta_ads", label: "Meta Ads" },
-  { value: "google_ads", label: "Google Ads" }, { value: "shiksha", label: "Shiksha" },
-  { value: "walk_in", label: "Walk-in" }, { value: "consultant", label: "Consultant" },
-  { value: "justdial", label: "JustDial" }, { value: "referral", label: "Referral" },
-  { value: "education_fair", label: "Education Fair" }, { value: "other", label: "Other" },
-] as const;
+import { DuplicateLeadWarning } from "@/components/admissions/DuplicateLeadWarning";
+import { LEAD_SOURCES } from "@/config/leadSources";
 
 interface AddLeadDialogProps {
   open: boolean;
@@ -105,6 +99,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
               <PhoneInput value={form.phone} onChange={phone => setForm(p => ({ ...p, phone }))} required />
             </div>
           </div>
+          <DuplicateLeadWarning phone={form.phone} />
           <div>
             <label className="block text-[11px] font-medium text-muted-foreground mb-1">Email</label>
             <input type="email" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} placeholder="email@example.com" className={inputCls} />
@@ -123,7 +118,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Source</label>
               <select value={form.source} onChange={e => setForm(p => ({ ...p, source: e.target.value }))} className={inputCls}>
-                {SOURCES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                {LEAD_SOURCES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
               </select>
             </div>
             <div>

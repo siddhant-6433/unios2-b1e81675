@@ -1889,6 +1889,7 @@ export type Database = {
         | "data_entry"
         | "office_assistant"
         | "hostel_warden"
+        | "consultant"
         | "student"
         | "parent"
       lead_source:
@@ -2064,6 +2065,7 @@ export const Constants = {
         "data_entry",
         "office_assistant",
         "hostel_warden",
+        "consultant",
         "student",
         "parent",
       ],

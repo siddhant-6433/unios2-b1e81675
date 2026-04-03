@@ -10,6 +10,7 @@ import {
   IndianRupee, MapPin, MoreHorizontal, Edit, ChevronRight
 } from "lucide-react";
 import { PhoneInput } from "@/components/ui/phone-input";
+import { CourseCommissions } from "@/components/consultant/CourseCommissions";
 
 const STAGES = ["new", "contacted", "onboarded", "active", "inactive"] as const;
 const stageLabels: Record<string, string> = { new: "New", contacted: "Contacted", onboarded: "Onboarded", active: "Active", inactive: "Inactive" };
@@ -18,7 +19,7 @@ const stageColors: Record<string, string> = { new: "bg-pastel-blue", contacted: 
 interface Consultant {
   id: string; name: string; organization: string | null; phone: string | null; email: string | null;
   city: string | null; stage: string; commission_type: string | null; commission_value: number | null;
-  notes: string | null; created_at: string;
+  notes: string | null; created_at: string; user_id: string | null;
 }
 
 const Consultants = () => {
@@ -32,8 +33,9 @@ const Consultants = () => {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     name: "", organization: "", phone: "", email: "", city: "",
-    stage: "new", commission_type: "percentage", commission_value: "0", notes: "",
+    stage: "new", commission_type: "percentage", commission_value: "0", notes: "", user_id: "",
   });
+  const [consultantUsers, setConsultantUsers] = useState<{ user_id: string; display_name: string | null; email: string | null }[]>([]);
 
   const fetchConsultants = async () => {
     setLoading(true);
@@ -43,6 +45,15 @@ const Consultants = () => {
   };
 
   useEffect(() => { fetchConsultants(); }, []);
+
+  // Fetch users with consultant role (for linking)
+  const fetchConsultantUsers = async () => {
+    const { data: roles } = await supabase.from("user_roles").select("user_id").eq("role", "consultant");
+    if (!roles || roles.length === 0) { setConsultantUsers([]); return; }
+    const userIds = roles.map(r => r.user_id);
+    const { data: profiles } = await supabase.from("profiles").select("user_id, display_name, email").in("user_id", userIds);
+    setConsultantUsers(profiles || []);
+  };
 
   const filtered = consultants.filter(c => {
     const matchSearch = !search || c.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -55,7 +66,7 @@ const Consultants = () => {
   const handleSave = async () => {
     if (!form.name.trim()) { toast({ title: "Name is required", variant: "destructive" }); return; }
     setSaving(true);
-    const payload = {
+    const payload: any = {
       name: form.name.trim(),
       organization: form.organization.trim() || null,
       phone: form.phone.trim() || null,
@@ -65,6 +76,7 @@ const Consultants = () => {
       commission_type: form.commission_type,
       commission_value: Number(form.commission_value) || 0,
       notes: form.notes.trim() || null,
+      user_id: form.user_id || null,
     };
 
     const { error } = editingId
@@ -78,17 +90,18 @@ const Consultants = () => {
 
   const resetForm = () => {
     setShowForm(false); setEditingId(null);
-    setForm({ name: "", organization: "", phone: "", email: "", city: "", stage: "new", commission_type: "percentage", commission_value: "0", notes: "" });
+    setForm({ name: "", organization: "", phone: "", email: "", city: "", stage: "new", commission_type: "percentage", commission_value: "0", notes: "", user_id: "" });
   };
 
   const editConsultant = (c: Consultant) => {
     setForm({
       name: c.name, organization: c.organization || "", phone: c.phone || "", email: c.email || "",
       city: c.city || "", stage: c.stage, commission_type: c.commission_type || "percentage",
-      commission_value: String(c.commission_value || 0), notes: c.notes || "",
+      commission_value: String(c.commission_value || 0), notes: c.notes || "", user_id: c.user_id || "",
     });
     setEditingId(c.id);
     setShowForm(true);
+    fetchConsultantUsers();
   };
 
   const stats = [
@@ -148,7 +161,10 @@ const Consultants = () => {
                   <h3 className="text-sm font-semibold text-foreground">{c.name}</h3>
                   {c.organization && <p className="text-xs text-primary font-medium mt-0.5">{c.organization}</p>}
                 </div>
-                <Badge className={`text-[10px] border-0 ${stageColors[c.stage] || "bg-muted"}`}>{stageLabels[c.stage] || c.stage}</Badge>
+                <div className="flex items-center gap-1">
+                  {c.user_id && <Badge className="text-[9px] border-0 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">Linked</Badge>}
+                  <Badge className={`text-[10px] border-0 ${stageColors[c.stage] || "bg-muted"}`}>{stageLabels[c.stage] || c.stage}</Badge>
+                </div>
               </div>
               <div className="flex flex-col gap-1 mt-3 text-xs text-muted-foreground">
                 {c.city && <span className="flex items-center gap-1.5"><MapPin className="h-3 w-3" />{c.city}</span>}
@@ -221,6 +237,27 @@ const Consultants = () => {
                 <input type="number" value={form.commission_value} onChange={e => setForm(p => ({ ...p, commission_value: e.target.value }))} className={inputCls} />
               </div>
             </div>
+            {editingId && (
+              <div className="border-t border-border pt-4">
+                <CourseCommissions consultantId={editingId} />
+              </div>
+            )}
+            {editingId && (
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Linked User Account</label>
+                <select value={form.user_id} onChange={e => setForm(p => ({ ...p, user_id: e.target.value }))} className={inputCls}>
+                  <option value="">No account linked</option>
+                  {consultantUsers.map(u => (
+                    <option key={u.user_id} value={u.user_id}>
+                      {u.display_name || "Unnamed"} {u.email ? `(${u.email})` : ""}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Link a user with "Consultant" role to enable portal access. Create the user first in User Management.
+                </p>
+              </div>
+            )}
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Notes</label>
               <textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} rows={2} className={inputCls} />

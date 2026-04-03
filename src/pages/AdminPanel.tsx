@@ -37,6 +37,7 @@ const ALL_ROLES: { value: AppRole; label: string }[] = [
   { value: "data_entry", label: "Data Entry" },
   { value: "office_assistant", label: "Office Assistant" },
   { value: "hostel_warden", label: "Hostel Warden" },
+  { value: "consultant", label: "Consultant" },
   { value: "student", label: "Student" },
   { value: "parent", label: "Parent" },
 ];
@@ -44,6 +45,7 @@ const ALL_ROLES: { value: AppRole; label: string }[] = [
 interface UserWithRole {
   user_id: string;
   display_name: string | null;
+  email: string | null;
   phone: string | null;
   campus: string | null;
   role: AppRole | null;
@@ -72,7 +74,7 @@ const AdminPanel = () => {
     setLoading(true);
     const { data: profiles, error: profileError } = await supabase
       .from("profiles")
-      .select("user_id, display_name, phone, campus")
+      .select("user_id, display_name, email, phone, campus")
       .order("created_at", { ascending: false });
 
     if (profileError) {
@@ -96,6 +98,7 @@ const AdminPanel = () => {
       return {
         user_id: p.user_id,
         display_name: p.display_name,
+        email: p.email || null,
         phone: p.phone,
         campus: p.campus,
         role: userRole?.role ?? null,
@@ -128,6 +131,26 @@ const AdminPanel = () => {
       } else {
         const { error } = await supabase.from("user_roles").insert({ user_id: userId, role: newRole });
         if (error) throw error;
+      }
+
+      // Auto-create consultant profile when role is set to consultant
+      if (newRole === "consultant") {
+        const { data: existing } = await supabase.from("consultants").select("id").eq("user_id", userId).maybeSingle();
+        if (!existing) {
+          const { error: cErr } = await supabase.from("consultants").insert({
+            name: user.display_name || "Unnamed Consultant",
+            email: user.email || null,
+            phone: user.phone || null,
+            user_id: userId,
+            stage: "active",
+          });
+          if (cErr) console.error("Failed to create consultant profile:", cErr.message);
+        }
+      }
+
+      // Unlink consultant profile if role changed away from consultant
+      if (user.role === "consultant" && newRole !== "consultant") {
+        await supabase.from("consultants").update({ user_id: null }).eq("user_id", userId);
       }
 
       toast({ title: "Role updated", description: `Role ${newRole === "none" ? "removed" : `set to ${newRole.replace("_", " ")}`} successfully.` });
@@ -191,6 +214,7 @@ const AdminPanel = () => {
   const filtered = users.filter(
     (u) =>
       (u.display_name || "").toLowerCase().includes(search.toLowerCase()) ||
+      (u.email || "").toLowerCase().includes(search.toLowerCase()) ||
       (u.phone || "").toLowerCase().includes(search.toLowerCase()) ||
       (u.campus || "").toLowerCase().includes(search.toLowerCase()) ||
       (u.role || "").toLowerCase().includes(search.toLowerCase())
@@ -280,6 +304,7 @@ const AdminPanel = () => {
                   <thead>
                     <tr className="border-b border-border text-left">
                       <th className="px-4 py-3 font-medium text-muted-foreground">User</th>
+                      <th className="px-4 py-3 font-medium text-muted-foreground">Email</th>
                       <th className="px-4 py-3 font-medium text-muted-foreground">Phone (OTP)</th>
                       <th className="px-4 py-3 font-medium text-muted-foreground">Campus</th>
                       <th className="px-4 py-3 font-medium text-muted-foreground">Current Role</th>
@@ -298,6 +323,9 @@ const AdminPanel = () => {
                               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary shrink-0">{initials}</div>
                               <p className="font-medium text-foreground">{user.display_name || "Unnamed"}</p>
                             </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`text-sm ${user.email ? "text-foreground" : "text-muted-foreground italic"}`}>{user.email || "—"}</span>
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">

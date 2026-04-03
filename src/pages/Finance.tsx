@@ -12,6 +12,7 @@ import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDi
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { FeeStructureViewer } from "@/components/finance/FeeStructureViewer";
 
 const statusStyles: Record<string, string> = {
   paid: "bg-pastel-green text-foreground/80",
@@ -261,66 +262,7 @@ const Finance = () => {
       {tab === "online-transactions" && <TransactionHistoryPanel />}
 
       {tab === "structures" && (
-        <div className="space-y-4">
-          {structures.length === 0 ? (
-            <Card className="border-border/60"><CardContent className="py-16 text-center">
-              <Wallet className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
-              <p className="text-sm text-muted-foreground">No fee structures configured yet</p>
-            </CardContent></Card>
-          ) : structures.map((fs: any) => (
-            <Card key={fs.id} className="border-border/60 shadow-none">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle className="text-base font-semibold">{fs.courses?.name || "—"} — {fs.admission_sessions?.name || "—"}</CardTitle>
-                    <p className="text-xs text-muted-foreground mt-0.5 font-mono">{fs.version}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge className={`text-[11px] border-0 ${fs.is_active ? "bg-pastel-green text-foreground/70" : "bg-muted text-muted-foreground"}`}>
-                      {fs.is_active ? "Active" : "Inactive"}
-                    </Badge>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground"><MoreHorizontal className="h-4 w-4" /></Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="p-0">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-t border-border bg-muted/50">
-                      <th className="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Fee Code</th>
-                      <th className="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Name</th>
-                      <th className="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Category</th>
-                      <th className="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Term</th>
-                      <th className="px-4 py-2.5 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">Amount</th>
-                      <th className="px-4 py-2.5 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Due Day</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(fs.fee_structure_items || []).map((item: any, i: number) => (
-                      <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/20">
-                        <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">{item.fee_codes?.code || "—"}</td>
-                        <td className="px-4 py-2.5 text-foreground">{item.fee_codes?.name || "—"}</td>
-                        <td className="px-4 py-2.5">
-                          <Badge className={`text-[10px] font-medium border-0 capitalize ${categoryBadge[item.fee_codes?.category] || "bg-muted"}`}>
-                            {item.fee_codes?.category || "—"}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-2.5 text-muted-foreground">{item.term}</td>
-                        <td className="px-4 py-2.5 text-right font-semibold text-foreground">₹{Number(item.amount).toLocaleString()}</td>
-                        <td className="px-4 py-2.5 text-center text-muted-foreground">{item.due_day}th</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <div className="px-4 py-3 border-t border-border bg-muted/30 flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">
-                    {(fs.fee_structure_items || []).length} fee items · Total yearly: ₹{(fs.fee_structure_items || []).reduce((s: number, i: any) => s + Number(i.amount), 0).toLocaleString()}
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <FeeStructureViewer showFilter />
       )}
 
       {tab === "reports" && (
