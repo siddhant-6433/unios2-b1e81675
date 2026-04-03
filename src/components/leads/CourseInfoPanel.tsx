@@ -215,13 +215,22 @@ export function CourseInfoPanel({ courseId }: Props) {
             <GraduationCap className="h-3.5 w-3.5" /> Eligibility
           </h4>
           <div className="space-y-1.5 text-xs">
-            {eligibility.entrance_exam_name && (
-              <div className="flex items-start gap-2">
-                <span className="text-muted-foreground w-28 shrink-0">Entrance Exam</span>
-                <span className="text-foreground font-medium">{eligibility.entrance_exam_name}</span>
-                {eligibility.entrance_exam_required && <Badge className="text-[8px] bg-red-100 text-red-700 border-0">Mandatory</Badge>}
-              </div>
-            )}
+            <div className="flex items-start gap-2">
+              <span className="text-muted-foreground w-28 shrink-0">Entrance Exam</span>
+              {eligibility.entrance_exam_name ? (
+                <>
+                  <span className="text-foreground font-medium">{eligibility.entrance_exam_name}</span>
+                  {eligibility.entrance_exam_required
+                    ? <Badge className="text-[8px] bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border-0">Mandatory</Badge>
+                    : <Badge className="text-[8px] bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border-0">Optional</Badge>}
+                </>
+              ) : (
+                <span className="text-foreground font-medium">
+                  Not required
+                  <Badge className="text-[8px] bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border-0 ml-1.5">Direct Admission</Badge>
+                </span>
+              )}
+            </div>
             {eligibility.class_12_min_marks && (
               <div className="flex items-center gap-2">
                 <span className="text-muted-foreground w-28 shrink-0">12th Min Marks</span>

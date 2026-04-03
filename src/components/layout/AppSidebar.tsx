@@ -1,3 +1,4 @@
+import uniosLogo from "@/assets/unios-logo.png";
 import {
   LayoutDashboard, Users, GraduationCap, IndianRupee,
   ClipboardCheck, Settings, LogOut,
@@ -103,9 +104,7 @@ export function AppSidebar() {
         {/* Logo */}
         <div className="px-4 pb-2">
           <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-foreground shadow-sm">
-              <GraduationCap className="h-4 w-4 text-background" />
-            </div>
+            <img src={uniosLogo} alt="UniOs" className="h-8 w-8 object-contain" />
             {!collapsed && (
               <div className="flex flex-col">
                 <span className="text-sm font-bold text-foreground tracking-tight">NIMT UniOs</span>
