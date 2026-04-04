@@ -28,6 +28,19 @@ import { PortalProvider, usePortal } from "@/components/apply/PortalContext";
 function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: string) => void }) {
   const { toast } = useToast();
   const [phone, setPhone] = useState("");
+
+  // Pre-fill phone from URL query parameter (e.g. ?phone=9876543210)
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search).get("phone");
+    if (!p) return;
+    const digits = p.replace(/\D/g, "");
+    let formatted = "";
+    if (digits.length === 10) formatted = `+91${digits}`;
+    else if (digits.length === 12 && digits.startsWith("91")) formatted = `+${digits}`;
+    else if (p.startsWith("+")) formatted = p;
+    if (formatted) setPhone(formatted);
+  }, []);
+
   const [otpSent, setOtpSent] = useState(false);
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);

@@ -21,21 +21,28 @@ interface ParsedLead {
   course_name?: string;   // we'll try to match to course_id
   campus_name?: string;   // we'll try to match to campus_id
   city?: string;
+  state?: string;
+  area?: string;
+  jd_category?: string;
 }
 
 function parseJustDial(body: any): ParsedLead {
   // JustDial sends: leadid, name, phone, email, city, area, category, date
+  const prefix = body.prefix ? `${body.prefix} ` : "";
   return {
-    name: body.name || body.leadname || body.prefix + " " + (body.name || ""),
+    name: (prefix + (body.name || body.leadname || "")).trim(),
     phone: (body.phone || body.mobile || "").replace(/[\s\-]/g, ""),
     email: body.email || undefined,
     source: "justdial",
     source_lead_id: body.leadid ? String(body.leadid) : undefined,
-    city: body.city || body.area || undefined,
+    city: body.city || undefined,
+    area: body.area || undefined,
+    jd_category: body.category || undefined,
     notes: [
-      body.category ? `Category: ${body.category}` : "",
-      body.area ? `Area: ${body.area}` : "",
-      body.date ? `Date: ${body.date}` : "",
+      body.category ? `JD Category: ${body.category}` : "",
+      body.city     ? `City: ${body.city}`             : "",
+      body.area     ? `Area: ${body.area}`             : "",
+      body.date     ? `Date: ${body.date}`             : "",
     ].filter(Boolean).join(" | "),
   };
 }
@@ -50,10 +57,10 @@ function parseShiksha(body: any): ParsedLead {
     source_lead_id: body.lead_id ? String(body.lead_id) : undefined,
     course_name: body.course_interested || body.course || undefined,
     city: body.city || undefined,
+    state: body.state || undefined,
     notes: [
-      body.state ? `State: ${body.state}` : "",
       body.qualification ? `Qualification: ${body.qualification}` : "",
-    ].filter(Boolean).join(" | "),
+    ].filter(Boolean).join(" | ") || undefined,
   };
 }
 
@@ -112,6 +119,8 @@ function parseGeneric(body: any, source: string): ParsedLead {
     source: source || "other",
     course_name: body.course || body.course_name || body.program || undefined,
     campus_name: body.campus || body.campus_name || undefined,
+    city: body.city || undefined,
+    state: body.state || undefined,
     notes: body.notes || body.message || body.remarks || undefined,
   };
 }
@@ -259,6 +268,10 @@ Deno.serve(async (req) => {
         source_lead_id: parsed.source_lead_id || null,
         course_id,
         campus_id,
+        city:        parsed.city        || null,
+        state:       parsed.state       || null,
+        area:        parsed.area        || null,
+        jd_category: parsed.jd_category || null,
         notes: parsed.notes?.slice(0, 1000) || null,
         stage: "new_lead",
         application_id: appId,
