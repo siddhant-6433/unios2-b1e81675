@@ -193,6 +193,8 @@ Deno.serve(async (req) => {
         source_lead_id:   sourceLeadId || null,
         course_id,
         campus_id,
+        city:             city || null,
+        state:            body.state || null,
         notes:            notes?.slice(0, 1000) || null,
         stage:            "new_lead",
         application_id:   appId,
