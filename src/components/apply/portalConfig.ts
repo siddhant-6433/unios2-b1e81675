@@ -1,5 +1,4 @@
 import miraiLogoGreen from "@/assets/mirai-logo-green.svg";
-import miraiLogoWhite from "@/assets/mirai-logo-white.svg";
 import miraiMan from "@/assets/mirai-man.png";
 import nimtBeaconLogo from "@/assets/nimt-beacon-logo.png";
 import nimtEduInstLogo from "@/assets/nimt-edu-inst-logo.svg";
@@ -7,7 +6,7 @@ import nimtEduInstLogoWhite from "@/assets/nimt-edu-inst-logo-white.svg";
 import loginBgNimt from "@/assets/login-bg-nimt.jpg";
 import loginBgBeacon from "@/assets/login-bg-beacon.jpg";
 import loginBgMirai from "@/assets/login-bg-mirai.png";
-import nirfLogo from "@/assets/nirf-logo.webp";
+import nirfLogo from "@/assets/nirf-logo.png";
 import greatPlaceToStudy from "@/assets/great-place-to-study.svg";
 
 export type PortalId = "nimt" | "beacon" | "mirai";
@@ -56,6 +55,8 @@ export interface PortalConfig {
   loginCourses?: LoginCourseGroup[];
   /** Decorative watermark image overlaid on the left panel */
   loginWatermark?: string;
+  /** When true, logo on login left panel is shown inside a white pill (for logos with light/coloured backgrounds) */
+  loginLogoBg?: boolean;
 }
 
 export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
@@ -85,11 +86,11 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     loginCourses: [
       {
         label: "Undergraduate",
-        courses: ["B.Tech (CSE, ECE, ME, CE)", "BCA · BBA · B.Com", "B.Sc Nursing · B.Sc (Allied Health)", "LLB · BA LLB · BBA LLB", "B.Ed · D.El.Ed"],
+        courses: ["BCA · BBA", "B.Sc Nursing · GNM", "B.Sc BMRIT · BPT · DPT · OTT · D.Pharma", "B.Ed · D.El.Ed", "BA LLB · LLB"],
       },
       {
         label: "Postgraduate",
-        courses: ["MBA · MCA · M.Tech", "M.Sc · M.Com · MA", "LLM · M.Ed"],
+        courses: ["MBA · PGDM", "M.Sc MMRIT · MPT"],
       },
     ],
   },
@@ -98,6 +99,7 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     name: "NIMT Beacon School",
     tagline: "Future Ready CBSE School",
     logo: nimtBeaconLogo,
+    loginLogoBg: true,
     cssVars: {
       "--primary": "227 100% 50%",
       "--primary-foreground": "0 0% 100%",
@@ -114,7 +116,7 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
       "playgroup", "pre-primary", "pre nur", "kg", "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii",
       "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th", "11th", "12th"
     ],
-    campusKeywords: ["avantika", "arthala", "beacon", "ghaziabad"],
+    campusKeywords: ["avantika", "arthala", "beacon"],
     programCategories: ["school"],
     hostnames: ["nimtbeaconschool.com", "www.nimtbeaconschool.com"],
     primaryColor: "#0044FF",
@@ -128,7 +130,7 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
     name: "Mirai School",
     tagline: "Future Ready IB School",
     logo: miraiLogoGreen,
-    logoWhite: miraiLogoWhite,
+    loginLogoBg: true,
     cssVars: {
       "--primary": "100 18% 53%",
       "--primary-foreground": "0 0% 100%",
