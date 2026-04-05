@@ -21,6 +21,7 @@ import TeamManagement from "@/components/admin/TeamManagement";
 import CourseCampusMaster from "@/components/admin/CourseCampusMaster";
 import FinancialGroupsPanel from "@/components/admin/FinancialGroupsPanel";
 import PaymentGatewaysPanel from "@/components/admin/PaymentGatewaysPanel";
+import ApprovalLettersPanel from "@/components/admin/ApprovalLettersPanel";
 import type { Database } from "@/integrations/supabase/types";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
@@ -262,6 +263,9 @@ const AdminPanel = () => {
           <TabsTrigger value="payment-gateways" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
             Payment Gateways
           </TabsTrigger>
+          <TabsTrigger value="approval-letters" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
+            Approval Letters
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="users" className="mt-6">
@@ -440,6 +444,10 @@ const AdminPanel = () => {
 
         <TabsContent value="payment-gateways" className="mt-6">
           <PaymentGatewaysPanel />
+        </TabsContent>
+
+        <TabsContent value="approval-letters" className="mt-6">
+          <ApprovalLettersPanel />
         </TabsContent>
       </Tabs>
     </div>
