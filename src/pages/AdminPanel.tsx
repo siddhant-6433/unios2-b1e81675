@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X, KeyRound, Trash2
+  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X, KeyRound, Trash2, UserCheck
 } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -54,12 +54,13 @@ interface UserWithRole {
 }
 
 const AdminPanel = () => {
-  const { role, loading: authLoading } = useAuth();
+  const { role, realRole, isImpersonating, startImpersonating, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [users, setUsers] = useState<UserWithRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState<AppRole | "all" | "none">("all");
   const [editingUser, setEditingUser] = useState<string | null>(null);
   const [savingUser, setSavingUser] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -112,8 +113,8 @@ const AdminPanel = () => {
   };
 
   useEffect(() => {
-    if (role === "super_admin") fetchUsers();
-  }, [role]);
+    if (realRole === "super_admin") fetchUsers();
+  }, [realRole]);
 
   const handleRoleChange = async (userId: string, newRole: AppRole | "none") => {
     setSavingUser(userId);
@@ -210,16 +211,24 @@ const AdminPanel = () => {
     );
   }
 
-  if (role !== "super_admin") return <Navigate to="/" replace />;
+  // Allow access if the real user is super_admin (even while impersonating)
+  if (realRole !== "super_admin") return <Navigate to="/" replace />;
 
-  const filtered = users.filter(
-    (u) =>
+  const filtered = users.filter((u) => {
+    const matchesSearch =
+      !search ||
       (u.display_name || "").toLowerCase().includes(search.toLowerCase()) ||
       (u.email || "").toLowerCase().includes(search.toLowerCase()) ||
       (u.phone || "").toLowerCase().includes(search.toLowerCase()) ||
       (u.campus || "").toLowerCase().includes(search.toLowerCase()) ||
-      (u.role || "").toLowerCase().includes(search.toLowerCase())
-  );
+      (u.role || "").toLowerCase().includes(search.toLowerCase());
+
+    const matchesRole =
+      roleFilter === "all" ||
+      (roleFilter === "none" ? !u.role : u.role === roleFilter);
+
+    return matchesSearch && matchesRole;
+  });
 
   const getRoleBadgeClass = (r: AppRole | null) => {
     if (!r) return "bg-muted text-muted-foreground";
@@ -279,11 +288,24 @@ const AdminPanel = () => {
               </button>
             </div>
 
-            <div className="relative max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input type="text" placeholder="Search by name, phone, campus, or role..." value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full rounded-xl border border-input bg-card pl-9 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20" />
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="relative max-w-sm flex-1 min-w-[200px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <input type="text" placeholder="Search by name, phone, campus..." value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="w-full rounded-xl border border-input bg-card pl-9 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20" />
+              </div>
+              <select
+                value={roleFilter}
+                onChange={(e) => setRoleFilter(e.target.value as AppRole | "all" | "none")}
+                className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+              >
+                <option value="all">All Roles</option>
+                <option value="none">No Role</option>
+                {ALL_ROLES.map((r) => (
+                  <option key={r.value} value={r.value}>{r.label} ({users.filter((u) => u.role === r.value).length})</option>
+                ))}
+              </select>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -367,6 +389,11 @@ const AdminPanel = () => {
                               </button>
                               {!isEditing && (
                                 <>
+                                  <button onClick={async () => { await startImpersonating(user.user_id); navigate("/"); }}
+                                    className="rounded-lg bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-500/20 transition-colors flex items-center gap-1"
+                                    title="View as this user">
+                                    <UserCheck className="h-3.5 w-3.5" />Impersonate
+                                  </button>
                                   <button onClick={() => setSetPasswordTarget({ userId: user.user_id, name: user.display_name || "User" })}
                                     className="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/80 transition-colors flex items-center gap-1"
                                     title="Set password">

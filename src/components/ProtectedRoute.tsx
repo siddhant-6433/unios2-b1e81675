@@ -14,12 +14,14 @@ const Spinner = () => (
 // ── ProtectedRoute ─────────────────────────────────────────────────────────
 // Requires an active session AND a staff role.
 // Applicants (session exists but no role) are redirected to /my-applications.
+// When a super_admin is impersonating, always allow access (realRole check).
 export const ProtectedRoute = ({ children }: { children: ReactNode }) => {
-  const { session, role, loading, roleLoaded } = useAuth();
+  const { session, role, realRole, loading, roleLoaded } = useAuth();
 
   if (loading || !roleLoaded) return <Spinner />;
   if (!session) return <Navigate to="/login" replace />;
-  if (role === null) return <Navigate to="/my-applications" replace />;
+  // If the real user is super_admin (impersonating), don't redirect
+  if (role === null && realRole !== "super_admin") return <Navigate to="/my-applications" replace />;
 
   return <>{children}</>;
 };

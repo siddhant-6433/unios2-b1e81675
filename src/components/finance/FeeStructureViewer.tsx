@@ -176,6 +176,48 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
 
   const fmt = (n: number) => `₹${n.toLocaleString("en-IN")}`;
 
+  // Collect year-wise data from metadata (year_1, year_2, ... keys or years/year_wise array)
+  const getYearData = (meta: any): { year: number; fee: number; discount: number; discountCondition: string; installmentCount: number; paymentNote: string }[] => {
+    if (!meta) return [];
+    const result: typeof retType = [];
+    type retType = { year: number; fee: number; discount: number; discountCondition: string; installmentCount: number; paymentNote: string }[];
+
+    // Check year_1, year_2, ... keys
+    for (let i = 1; i <= 8; i++) {
+      const y = meta[`year_${i}`];
+      if (y && typeof y === "object") {
+        result.push({
+          year: i,
+          fee: Number(y.fee || y.amount || 0),
+          discount: Number(y.discount || 0),
+          discountCondition: y.discount_condition || "",
+          installmentCount: Number(y.installment_count || 0),
+          paymentNote: y.payment_note || "",
+        });
+      }
+    }
+
+    // Fallback: years/year_wise array
+    if (result.length === 0) {
+      const years = meta.years || meta.year_wise;
+      if (Array.isArray(years)) {
+        years.forEach((y: any, i: number) => {
+          if (y.fee || y.amount) {
+            result.push({
+              year: i + 1,
+              fee: Number(y.fee || y.amount || 0),
+              discount: Number(y.discount || 0),
+              discountCondition: y.discount_condition || "",
+              installmentCount: Number(y.installment_count || y.installments || 0),
+              paymentNote: y.payment_note || "",
+            });
+          }
+        });
+      }
+    }
+    return result;
+  };
+
   // Extract metadata highlights (boarding, discounts, etc.)
   const renderMetadata = (meta: any) => {
     if (!meta) return null;
@@ -188,35 +230,136 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
     if (meta.transport_fee) highlights.push({ label: "Transport", value: fmt(meta.transport_fee) });
     if (meta.total_fee) highlights.push({ label: "Total Package", value: fmt(meta.total_fee) });
 
-    // Discount info
+    // Top-level discount info
     if (meta.discount_conditions || meta.early_bird_discount) {
       const disc = meta.discount_conditions || meta.early_bird_discount;
       if (typeof disc === "string") highlights.push({ label: "Discount", value: disc });
     }
 
-    // Year-wise breakdown
-    const years = meta.years || meta.year_wise;
-    if (Array.isArray(years) && years.length > 0) {
-      years.forEach((y: any, i: number) => {
-        if (y.fee || y.amount) {
-          highlights.push({ label: `Year ${i + 1}`, value: `${fmt(y.fee || y.amount)}${y.installments ? ` (${y.installments} installments)` : ""}` });
-        }
-      });
-    }
+    const yearData = getYearData(meta);
+    const hasAnyDiscount = yearData.some(y => y.discount > 0);
 
-    if (highlights.length === 0) return null;
+    if (highlights.length === 0 && yearData.length === 0) return null;
 
     return (
-      <div className="px-3 py-2 bg-amber-50/50 dark:bg-amber-950/10 border-t border-amber-200/30">
-        <p className="text-[9px] font-semibold text-amber-800 dark:text-amber-400 uppercase mb-1">Fee Details</p>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
-          {highlights.map((h, i) => (
-            <div key={i} className="flex items-center justify-between gap-1">
-              <span className="text-[10px] text-muted-foreground">{h.label}</span>
-              <span className="text-[10px] font-medium text-foreground">{h.value}</span>
+      <div className="border-t border-amber-200/30">
+        {/* General highlights */}
+        {highlights.length > 0 && (
+          <div className="px-3 py-2 bg-amber-50/50 dark:bg-amber-950/10">
+            <p className="text-[9px] font-semibold text-amber-800 dark:text-amber-400 uppercase mb-1">Fee Details</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+              {highlights.map((h, i) => (
+                <div key={i} className="flex items-center justify-between gap-1">
+                  <span className="text-[10px] text-muted-foreground">{h.label}</span>
+                  <span className="text-[10px] font-medium text-foreground">{h.value}</span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          </div>
+        )}
+
+        {/* Year-wise breakdown with discount */}
+        {yearData.length > 0 && (() => {
+          // Derive installment label from data (e.g. "Payable in 2 Installments")
+          const commonInstCount = yearData[0]?.installmentCount;
+          const allSameInst = commonInstCount > 0 && yearData.every(y => y.installmentCount === commonInstCount);
+          const feeColLabel = allSameInst
+            ? `Annual Fee (Payable in ${commonInstCount} Installments)`
+            : "Annual Fee";
+
+          return (
+            <div className="px-3 py-2 bg-muted/20">
+              <p className="text-[9px] font-semibold text-muted-foreground uppercase mb-1.5">Year-wise Breakdown</p>
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr className="text-muted-foreground">
+                    <th className="text-left font-medium pb-1">Year</th>
+                    <th className="text-right font-medium pb-1">{feeColLabel}</th>
+                    {hasAnyDiscount && (
+                      <>
+                        <th className="text-right font-medium pb-1">Waiver</th>
+                        <th className="text-right font-medium pb-1">After Waiver</th>
+                      </>
+                    )}
+                    {!allSameInst && (
+                      <th className="text-right font-medium pb-1">Installments</th>
+                    )}
+                    {hasAnyDiscount && (
+                      <th className="text-left font-medium pb-1 pl-3">Waiver Condition</th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {yearData.map(y => {
+                    // Build waiver condition label
+                    let waiverLabel = "";
+                    if (y.discount > 0) {
+                      // Extract date from condition like "Full fee by 10 Jun 2026" or "Full fee on or before 10 Jul 2027"
+                      const dateMatch = y.discountCondition.match(/(?:by|before)\s+(.+)/i);
+                      const dateStr = dateMatch?.[1]?.trim();
+                      if (y.year === 1) {
+                        waiverLabel = dateStr
+                          ? `On Full Annual Fee Payment by ${dateStr} / At time of Admission`
+                          : "On Full Annual Fee Payment at time of Admission";
+                      } else {
+                        waiverLabel = dateStr
+                          ? `On Full Annual Fee Payment by ${dateStr}`
+                          : "On Full Annual Fee Payment";
+                      }
+                    }
+
+                    return (
+                      <tr key={y.year} className="border-t border-border/30">
+                        <td className="py-1.5 font-medium text-foreground">Year {y.year}</td>
+                        <td className="py-1.5 text-right text-foreground">{fmt(y.fee)}</td>
+                        {hasAnyDiscount && (
+                          <>
+                            <td className="py-1.5 text-right">
+                              {y.discount > 0 ? (
+                                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">-{fmt(y.discount)}</span>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </td>
+                            <td className="py-1.5 text-right font-semibold text-primary">
+                              {y.discount > 0 ? fmt(y.fee - y.discount) : fmt(y.fee)}
+                            </td>
+                          </>
+                        )}
+                        {!allSameInst && (
+                          <td className="py-1.5 text-right text-muted-foreground">
+                            {y.installmentCount > 0 ? `${y.installmentCount}x` : "—"}
+                          </td>
+                        )}
+                        {hasAnyDiscount && (
+                          <td className="py-1.5 text-left pl-3 text-[10px] text-muted-foreground">
+                            {waiverLabel || "—"}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                {hasAnyDiscount && (
+                  <tfoot>
+                    <tr className="border-t border-border/50">
+                      <td className="pt-1.5 font-semibold text-foreground">Total</td>
+                      <td className="pt-1.5 text-right text-foreground">{fmt(yearData.reduce((s, y) => s + y.fee, 0))}</td>
+                      <td className="pt-1.5 text-right text-emerald-600 dark:text-emerald-400 font-semibold">
+                        -{fmt(yearData.reduce((s, y) => s + y.discount, 0))}
+                      </td>
+                      <td className="pt-1.5 text-right font-bold text-primary">
+                        {fmt(yearData.reduce((s, y) => s + y.fee - y.discount, 0))}
+                      </td>
+                      {!allSameInst && <td></td>}
+                      <td></td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          );
+        })()}
       </div>
     );
   };
@@ -249,6 +392,11 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
 
       {filtered.map((fs) => {
         const isExpanded = expandedId === fs.id;
+        const yearData = getYearData(fs.metadata);
+        const totalDiscount = yearData.reduce((s, y) => s + y.discount, 0);
+        const totalAfterDiscount = totalDiscount > 0
+          ? yearData.reduce((s, y) => s + y.fee - y.discount, 0)
+          : 0;
 
         return (
           <div key={fs.id} className="rounded-xl border border-border/60 overflow-hidden">
@@ -268,7 +416,17 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                 </div>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
-                <span className="text-sm font-bold text-primary">{fmt(fs.total)}</span>
+                <div className="text-right">
+                  {totalDiscount > 0 ? (
+                    <>
+                      <span className="text-xs text-muted-foreground line-through mr-1.5">{fmt(fs.total)}</span>
+                      <span className="text-sm font-bold text-primary">{fmt(totalAfterDiscount)}</span>
+                      <span className="block text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">Save {fmt(totalDiscount)} on annual payment</span>
+                    </>
+                  ) : (
+                    <span className="text-sm font-bold text-primary">{fmt(fs.total)}</span>
+                  )}
+                </div>
                 {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
               </div>
             </button>

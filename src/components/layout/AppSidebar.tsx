@@ -80,14 +80,19 @@ export function AppSidebar() {
     if (path.includes("?")) return location.pathname + location.search === path;
     return location.pathname === path;
   };
-  const { profile, role, signOut } = useAuth();
+  const { profile, role, realRole, isImpersonating, signOut } = useAuth();
   const { campuses, selectedCampusId, setSelectedCampusId } = useCampus();
 
   const displayName = profile?.display_name || "User";
   const roleLabel = role ? (roleLabels[role] || role) : "User";
   const initials = displayName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
 
-  const canSee = (item: MenuItem) => !item.roles || (role && item.roles.includes(role));
+  const canSee = (item: MenuItem) => {
+    if (!item.roles) return true;
+    // When impersonating, always show the User Management link so admin can navigate back
+    if (isImpersonating && realRole === "super_admin" && item.url === "/admin") return true;
+    return role && item.roles.includes(role);
+  };
 
   const visibleMain = mainMenu.filter(canSee);
   const visibleAdmission = admissionSubMenu.filter(canSee);

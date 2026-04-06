@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
@@ -14,6 +14,13 @@ interface Profile {
   institution: string | null;
 }
 
+interface ImpersonationTarget {
+  userId: string;
+  displayName: string;
+  role: AppRole | null;
+  profile: Profile | null;
+}
+
 interface AuthContextType {
   session: Session | null;
   user: User | null;
@@ -22,6 +29,16 @@ interface AuthContextType {
   loading: boolean;
   roleLoaded: boolean;
   signOut: () => Promise<void>;
+  /** True role of the logged-in user (unaffected by impersonation) */
+  realRole: AppRole | null;
+  /** Whether superadmin is currently impersonating another user */
+  isImpersonating: boolean;
+  /** Name of the user being impersonated */
+  impersonatingName: string | null;
+  /** Start impersonating a user (super_admin only) */
+  startImpersonating: (userId: string) => Promise<void>;
+  /** Stop impersonating and revert to superadmin view */
+  stopImpersonating: () => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -32,9 +49,16 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
   roleLoaded: false,
   signOut: async () => {},
+  realRole: null,
+  isImpersonating: false,
+  impersonatingName: null,
+  startImpersonating: async () => {},
+  stopImpersonating: () => {},
 });
 
 export const useAuth = () => useContext(AuthContext);
+
+const IMPERSONATION_KEY = "unios_impersonation";
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [session, setSession] = useState<Session | null>(null);
@@ -42,6 +66,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [role, setRole] = useState<AppRole | null>(null);
   const [loading, setLoading] = useState(true);
   const [roleLoaded, setRoleLoaded] = useState(false);
+  const [impersonation, setImpersonation] = useState<ImpersonationTarget | null>(() => {
+    try {
+      const stored = sessionStorage.getItem(IMPERSONATION_KEY);
+      return stored ? JSON.parse(stored) : null;
+    } catch { return null; }
+  });
 
   const fetchUserData = async (userId: string, authUser?: User) => {
     const [profileRes, roleRes] = await Promise.all([
@@ -104,15 +134,61 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return () => subscription.unsubscribe();
   }, []);
 
+  const startImpersonating = useCallback(async (userId: string) => {
+    if (role !== "super_admin") return;
+
+    const [profileRes, roleRes] = await Promise.all([
+      supabase.from("profiles").select("display_name, phone, avatar_url, campus, department, institution").eq("user_id", userId).single(),
+      supabase.rpc("get_user_role", { _user_id: userId }),
+    ]);
+
+    const target: ImpersonationTarget = {
+      userId,
+      displayName: profileRes.data?.display_name || "Unknown User",
+      role: (roleRes.data as AppRole) || null,
+      profile: profileRes.data || null,
+    };
+
+    setImpersonation(target);
+    sessionStorage.setItem(IMPERSONATION_KEY, JSON.stringify(target));
+  }, [role]);
+
+  const stopImpersonating = useCallback(() => {
+    setImpersonation(null);
+    sessionStorage.removeItem(IMPERSONATION_KEY);
+  }, []);
+
   const signOut = async () => {
+    stopImpersonating();
     await supabase.auth.signOut();
     setSession(null);
     setProfile(null);
     setRole(null);
   };
 
+  // When impersonating, override role, profile, and user.id
+  const effectiveRole = impersonation ? impersonation.role : role;
+  const effectiveProfile = impersonation ? impersonation.profile : profile;
+  const realUser = session?.user ?? null;
+  const effectiveUser = impersonation && realUser
+    ? { ...realUser, id: impersonation.userId } as User
+    : realUser;
+
   return (
-    <AuthContext.Provider value={{ session, user: session?.user ?? null, profile, role, loading, roleLoaded, signOut }}>
+    <AuthContext.Provider value={{
+      session,
+      user: effectiveUser,
+      profile: effectiveProfile,
+      role: effectiveRole,
+      loading,
+      roleLoaded,
+      signOut,
+      realRole: role,
+      isImpersonating: !!impersonation,
+      impersonatingName: impersonation?.displayName ?? null,
+      startImpersonating,
+      stopImpersonating,
+    }}>
       {children}
     </AuthContext.Provider>
   );
