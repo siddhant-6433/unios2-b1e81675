@@ -254,7 +254,7 @@ const Admissions = () => {
         supabase.from("lead_followups").select("id", { count: "exact", head: true }).eq("status", "pending"),
         supabase.from("lead_followups").select("id", { count: "exact", head: true }).eq("status", "pending").gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd),
         supabase.from("overdue_followups" as any).select("id", { count: "exact", head: true }),
-        supabase.from("campus_visits").select("id", { count: "exact", head: true }).gte("scheduled_date", todayStart).in("status", ["scheduled", "confirmed"]),
+        supabase.from("campus_visits").select("id", { count: "exact", head: true }).gte("visit_date", todayStart).in("status", ["scheduled", "confirmed"]),
         supabase.from("campus_visits").select("id", { count: "exact", head: true }).eq("status", "completed"),
       ]);
       setPendingFollowups(pendingRes.count || 0);
