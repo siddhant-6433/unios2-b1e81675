@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
 import {
   Search, RefreshCw, Download, Loader2, CheckCircle2, Clock,
-  CreditCard, Banknote, Receipt, AlertCircle,
+  CreditCard, Banknote, Receipt, AlertCircle, UserCheck, UserPlus,
 } from "lucide-react";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
 
@@ -19,6 +19,9 @@ interface AppTransaction {
   payment_ref: string | null;
   updated_at: string;
   created_at: string;
+  flags: string[];
+  program_category: string | null;
+  applicant_type: string | null;
   leads: { admission_no: string | null; pre_admission_no: string | null; campus_id: string | null } | null;
 }
 
@@ -102,6 +105,7 @@ export default function TransactionHistoryPanel() {
   const [errorApp, setErrorApp]           = useState<string | null>(null);
   const [errorStudent, setErrorStudent]   = useState<string | null>(null);
   const [receipt, setReceipt]             = useState<ReceiptData | null>(null);
+  const [togglingId, setTogglingId]       = useState<string | null>(null);
 
   const { selectedCampusId } = useCampus();
 
@@ -123,6 +127,7 @@ export default function TransactionHistoryPanel() {
         application_id, full_name, phone, email,
         fee_amount, payment_status, payment_ref,
         updated_at, created_at,
+        flags, program_category, applicant_type,
         leads ( admission_no, pre_admission_no, campus_id )
       `)
       .order("updated_at", { ascending: false })
@@ -151,6 +156,26 @@ export default function TransactionHistoryPanel() {
   };
 
   useEffect(() => { fetchAppTxns(); fetchStudentPmts(); }, []);
+
+  // ── Applicant type toggle (BSAV only) ──────────────────────────────────────
+
+  const toggleApplicantType = async (appId: string, current: string | null) => {
+    const next = current === "existing" ? "new" : "existing";
+    setTogglingId(appId);
+    const { error } = await (supabase as any)
+      .from("applications")
+      .update({ applicant_type: next })
+      .eq("application_id", appId);
+    if (!error) {
+      setAppTxns((prev) =>
+        prev.map((t) => t.application_id === appId ? { ...t, applicant_type: next } : t)
+      );
+    }
+    setTogglingId(null);
+  };
+
+  const isBeaconSchool = (t: AppTransaction) =>
+    (t.flags || []).includes("portal:beacon") && t.program_category === "school";
 
   // ── Filtered data ──────────────────────────────────────────────────────────
 
@@ -430,6 +455,7 @@ export default function TransactionHistoryPanel() {
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Payment Ref</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Admission No</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Pre-Admission No</th>
+                    <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Student Type</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Receipt</th>
                   </tr>
                 </thead>
@@ -473,6 +499,30 @@ export default function TransactionHistoryPanel() {
                         {t.leads?.pre_admission_no
                           ? <span className="font-mono text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded-md">{t.leads.pre_admission_no}</span>
                           : <span className="text-muted-foreground">—</span>}
+                      </td>
+                      <td className="px-4 py-3">
+                        {isBeaconSchool(t) ? (
+                          <button
+                            onClick={() => toggleApplicantType(t.application_id, t.applicant_type)}
+                            disabled={togglingId === t.application_id}
+                            title={`Click to mark as ${t.applicant_type === "existing" ? "New" : "Existing"} parent`}
+                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold border transition-colors ${
+                              t.applicant_type === "existing"
+                                ? "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
+                                : "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                            }`}
+                          >
+                            {togglingId === t.application_id
+                              ? <Loader2 className="h-3 w-3 animate-spin" />
+                              : t.applicant_type === "existing"
+                              ? <UserCheck className="h-3 w-3" />
+                              : <UserPlus className="h-3 w-3" />
+                            }
+                            {t.applicant_type === "existing" ? "Existing" : "New"}
+                          </button>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         {t.payment_status === "paid" && t.fee_amount > 0 ? (

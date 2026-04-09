@@ -5,7 +5,7 @@ import {
   Search, Filter, IndianRupee, Download, Plus, CreditCard,
   FileText, BarChart3, AlertTriangle, CheckCircle, Clock,
   ArrowUpRight, ChevronRight, MoreHorizontal, Receipt, Wallet, Loader2,
-  Globe,
+  Globe, HandCoins,
 } from "lucide-react";
 import TransactionHistoryPanel from "@/components/admin/TransactionHistoryPanel";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FeeStructureViewer } from "@/components/finance/FeeStructureViewer";
+import { ConcessionApprovalPanel } from "@/components/finance/ConcessionApprovalPanel";
 
 const statusStyles: Record<string, string> = {
   paid: "bg-pastel-green text-foreground/80",
@@ -32,7 +33,7 @@ const modeBadge: Record<string, string> = {
 };
 
 const Finance = () => {
-  const [tab, setTab] = useState<"ledger" | "receipts" | "online-transactions" | "structures" | "reports">("ledger");
+  const [tab, setTab] = useState<"ledger" | "receipts" | "online-transactions" | "structures" | "concessions" | "reports">("ledger");
   const [search, setSearch] = useState("");
   const [ledger, setLedger] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
@@ -79,6 +80,7 @@ const Finance = () => {
     { id: "receipts" as const,             label: "Receipts",            icon: CreditCard },
     { id: "online-transactions" as const,  label: "Online Transactions", icon: Globe },
     { id: "structures" as const,           label: "Fee Structures",      icon: Wallet },
+    { id: "concessions" as const,         label: "Concessions",         icon: HandCoins },
     { id: "reports" as const,              label: "Reports",             icon: BarChart3 },
   ];
 
@@ -264,6 +266,8 @@ const Finance = () => {
       {tab === "structures" && (
         <FeeStructureViewer showFilter />
       )}
+
+      {tab === "concessions" && <ConcessionApprovalPanel />}
 
       {tab === "reports" && (
         <Card className="border-border/60 shadow-none">

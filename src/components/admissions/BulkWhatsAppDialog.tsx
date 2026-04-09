@@ -87,56 +87,21 @@ export function BulkWhatsAppDialog({ open, onOpenChange, leads, onSuccess }: Bul
     }));
     await supabase.from("whatsapp_campaign_recipients" as any).insert(recipients as any);
 
-    // Send messages one by one (in-browser for now; can move to edge function later)
-    let sent = 0;
-    let failed = 0;
+    // Fire-and-forget: send via background edge function
+    const { error: invokeErr } = await supabase.functions.invoke("whatsapp-campaign-send", {
+      body: { campaign_id: (campaign as any).id },
+    });
 
-    for (const lead of validLeads) {
-      try {
-        const params = [lead.name];
-        const { error } = await supabase.functions.invoke("whatsapp-send", {
-          body: {
-            template_key: selectedTemplate,
-            phone: lead.phone,
-            params,
-            lead_id: lead.id,
-          },
-        });
-
-        if (error) {
-          failed++;
-          await supabase
-            .from("whatsapp_campaign_recipients" as any)
-            .update({ status: "failed", error_message: error.message } as any)
-            .eq("campaign_id", (campaign as any).id)
-            .eq("lead_id", lead.id);
-        } else {
-          sent++;
-          await supabase
-            .from("whatsapp_campaign_recipients" as any)
-            .update({ status: "sent", sent_at: new Date().toISOString() } as any)
-            .eq("campaign_id", (campaign as any).id)
-            .eq("lead_id", lead.id);
-        }
-      } catch {
-        failed++;
-      }
+    if (invokeErr) {
+      toast({ title: "Failed to start campaign", description: invokeErr.message, variant: "destructive" });
+      setSending(false);
+      return;
     }
 
-    // Update campaign
-    await supabase
-      .from("whatsapp_campaigns" as any)
-      .update({
-        sent_count: sent,
-        failed_count: failed,
-        status: "completed",
-        completed_at: new Date().toISOString(),
-      } as any)
-      .eq("id", (campaign as any).id);
-
-    setResult({ sent, failed });
+    setResult({ sent: validLeads.length, failed: 0 });
     setSending(false);
-    if (sent > 0) onSuccess?.();
+    if (validLeads.length > 0) onSuccess?.();
+    toast({ title: "Campaign queued", description: `Sending to ${validLeads.length} recipients in the background` });
   };
 
   return (

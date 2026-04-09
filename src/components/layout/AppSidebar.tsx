@@ -10,6 +10,7 @@ import {
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePermissions } from "@/contexts/PermissionContext";
 import { supabase } from "@/integrations/supabase/client";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
@@ -26,60 +27,49 @@ type AppRole =
   | "data_entry" | "office_assistant" | "hostel_warden" | "consultant" | "student" | "parent"
   | "ib_coordinator";
 
-type MenuItem = { title: string; url: string; icon: any; roles?: AppRole[]; badge?: number };
-
-const allRolesExcept = (...excluded: AppRole[]): AppRole[] => {
-  const all: AppRole[] = [
-    "super_admin","campus_admin","principal","admission_head","counsellor",
-    "accountant","faculty","teacher","data_entry","office_assistant",
-    "hostel_warden","consultant","student","parent","ib_coordinator",
-  ];
-  return all.filter(r => !excluded.includes(r));
-};
-
-const staffRoles = allRolesExcept("student", "parent", "consultant");
-const adminRoles: AppRole[] = ["super_admin", "campus_admin", "principal"];
+type MenuItem = { title: string; url: string; icon: any; permission?: string; badge?: number };
 
 const mainMenu: MenuItem[] = [
-  { title: "Overview", url: "/", icon: LayoutDashboard, roles: allRolesExcept("consultant") },
-  { title: "Search", url: "/search", icon: Search, roles: staffRoles },
-  { title: "Students", url: "/students", icon: Users, roles: staffRoles },
-  { title: "Attendance", url: "/attendance", icon: ClipboardCheck, roles: [...staffRoles, "student", "parent"] },
-  { title: "Exams", url: "/exams", icon: BookOpen, roles: [...staffRoles, "student", "parent"] },
-  { title: "Finance", url: "/finance", icon: IndianRupee, roles: [...adminRoles, "accountant"] },
-  { title: "Reports", url: "/reports", icon: BarChart3, roles: adminRoles },
+  { title: "Overview", url: "/", icon: LayoutDashboard, permission: "dashboard:view" },
+  { title: "Search", url: "/search", icon: Search, permission: "search:view" },
+  { title: "Students", url: "/students", icon: Users, permission: "students:view" },
+  { title: "Attendance", url: "/attendance", icon: ClipboardCheck, permission: "attendance:view" },
+  { title: "Exams", url: "/exams", icon: BookOpen, permission: "exams:view" },
+  { title: "Finance", url: "/finance", icon: IndianRupee, permission: "finance:view" },
+  { title: "Reports", url: "/reports", icon: BarChart3, permission: "reports:view" },
 ];
 
 const admissionSubMenu: MenuItem[] = [
-  { title: "Leads", url: "/admissions", icon: GraduationCap, roles: [...adminRoles, "admission_head", "counsellor", "data_entry"] },
-  { title: "WhatsApp", url: "/whatsapp-inbox", icon: MessageSquare, roles: [...adminRoles, "admission_head", "counsellor"] },
-  { title: "Performance", url: "/counsellor-dashboard", icon: BarChart3, roles: [...adminRoles, "admission_head"] },
-  { title: "Lead Buckets", url: "/lead-buckets", icon: Inbox, roles: [...adminRoles, "admission_head", "counsellor"] },
-  { title: "Lead Allocation", url: "/lead-allocation", icon: Shuffle, roles: ["super_admin", "admission_head"] },
-  { title: "Automation", url: "/automation-rules", icon: Zap, roles: ["super_admin", "admission_head"] },
-  { title: "Consultants", url: "/consultants", icon: Handshake, roles: [...adminRoles, "admission_head", "counsellor"] },
-  { title: "Templates", url: "/template-manager", icon: Newspaper, roles: ["super_admin", "admission_head"] },
-  { title: "Courses & Fees", url: "/fee-structures", icon: IndianRupee, roles: [...adminRoles, "admission_head", "counsellor", "consultant"] },
-  { title: "My Leads", url: "/consultant-portal", icon: Users, roles: ["consultant"] },
-  { title: "Analytics", url: "/admission-analytics", icon: PieChart, roles: [...adminRoles, "admission_head"] },
+  { title: "Leads", url: "/admissions", icon: GraduationCap, permission: "leads:view" },
+  { title: "WhatsApp", url: "/whatsapp-inbox", icon: MessageSquare, permission: "whatsapp:view" },
+  { title: "Performance", url: "/counsellor-dashboard", icon: BarChart3, permission: "performance:view" },
+  { title: "Lead Buckets", url: "/lead-buckets", icon: Inbox, permission: "lead_buckets:view" },
+  { title: "Lead Allocation", url: "/lead-allocation", icon: Shuffle, permission: "lead_allocation:view" },
+  { title: "Automation", url: "/automation-rules", icon: Zap, permission: "automation:view" },
+  { title: "Consultants", url: "/consultants", icon: Handshake, permission: "consultants:view" },
+  { title: "Templates", url: "/template-manager", icon: Newspaper, permission: "templates:view" },
+  { title: "Courses & Fees", url: "/fee-structures", icon: IndianRupee, permission: "courses_fees:view" },
+  { title: "My Leads", url: "/consultant-portal", icon: Users, permission: "consultant_portal:view" },
+  { title: "Analytics", url: "/admission-analytics", icon: PieChart, permission: "analytics:view" },
 ];
 
 const ibAcademicsSubMenu: MenuItem[] = [
-  { title: "Programme of Inquiry", url: "/ib/poi",        icon: Globe,      roles: [...adminRoles, "ib_coordinator", "faculty", "teacher"] },
-  { title: "Unit Planner",         url: "/ib/units",      icon: BookOpen,   roles: [...adminRoles, "ib_coordinator", "faculty", "teacher"] },
-  { title: "Gradebook",            url: "/ib/gradebook",  icon: BarChart3,  roles: [...adminRoles, "ib_coordinator", "faculty", "teacher"] },
-  { title: "Portfolios",           url: "/ib/portfolios", icon: FolderOpen, roles: [...adminRoles, "ib_coordinator", "faculty", "teacher", "student", "parent"] },
-  { title: "Action & Service",     url: "/ib/action",     icon: Heart,      roles: [...adminRoles, "ib_coordinator", "faculty", "teacher", "student"] },
-  { title: "Report Cards",         url: "/ib/reports",    icon: FileText,   roles: [...adminRoles, "ib_coordinator", "faculty", "teacher", "student", "parent"] },
-  { title: "Exhibition",           url: "/ib/exhibition", icon: Award,      roles: [...adminRoles, "ib_coordinator", "faculty", "teacher"] },
-  { title: "MYP Projects",         url: "/ib/projects",   icon: Target,     roles: [...adminRoles, "ib_coordinator", "faculty", "teacher", "student"] },
-  { title: "IDU",                   url: "/ib/idu",       icon: GitMerge,   roles: [...adminRoles, "ib_coordinator", "faculty", "teacher"] },
+  { title: "Programme of Inquiry", url: "/ib/poi",        icon: Globe,      permission: "ib_poi:view" },
+  { title: "Unit Planner",         url: "/ib/units",      icon: BookOpen,   permission: "ib_units:view" },
+  { title: "Gradebook",            url: "/ib/gradebook",  icon: BarChart3,  permission: "ib_gradebook:view" },
+  { title: "Portfolios",           url: "/ib/portfolios", icon: FolderOpen, permission: "ib_portfolios:view" },
+  { title: "Action & Service",     url: "/ib/action",     icon: Heart,      permission: "ib_action:view" },
+  { title: "Report Cards",         url: "/ib/reports",    icon: FileText,   permission: "ib_reports:view" },
+  { title: "Exhibition",           url: "/ib/exhibition", icon: Award,      permission: "ib_exhibition:view" },
+  { title: "MYP Projects",         url: "/ib/projects",   icon: Target,     permission: "ib_projects:view" },
+  { title: "IDU",                   url: "/ib/idu",       icon: GitMerge,   permission: "ib_idu:view" },
 ];
 
 const managementMenu: MenuItem[] = [
-  { title: "Campuses & Courses", url: "/admin?tab=course-campus", icon: Building2, roles: adminRoles },
-  { title: "Documents", url: "/documents", icon: FileText, roles: [...staffRoles] },
-  { title: "User Management", url: "/admin", icon: ShieldCheck, roles: ["super_admin"] },
+  { title: "Campuses & Courses", url: "/admin?tab=course-campus", icon: Building2, permission: "campuses_courses:view" },
+  { title: "Documents", url: "/documents", icon: FileText, permission: "documents:view" },
+  { title: "User Management", url: "/admin", icon: ShieldCheck, permission: "user_management:view" },
+  { title: "Permissions", url: "/admin?tab=permissions", icon: ShieldCheck, permission: "permissions:view" },
 ];
 
 const roleLabels: Record<string, string> = {
@@ -105,11 +95,13 @@ export function AppSidebar() {
   const roleLabel = role ? (roleLabels[role] || role) : "User";
   const initials = displayName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
 
+  const { can } = usePermissions();
   const canSee = (item: MenuItem) => {
-    if (!item.roles) return true;
-    // When impersonating, always show the User Management link so admin can navigate back
+    if (!item.permission) return true;
+    // When impersonating, always show User Management so admin can navigate back
     if (isImpersonating && realRole === "super_admin" && item.url === "/admin") return true;
-    return role && item.roles.includes(role);
+    const [mod, act] = item.permission.split(":");
+    return can(mod, act);
   };
 
   // WhatsApp unread count

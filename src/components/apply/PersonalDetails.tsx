@@ -11,6 +11,7 @@ interface Props {
   onChange: (data: Partial<ApplicationData>) => void;
   onNext: () => void;
   saving: boolean;
+  readOnly?: boolean;
 }
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
@@ -51,7 +52,7 @@ function DobInput({ value, onChange, className }: { value: string; onChange: (v:
   );
 }
 
-export function PersonalDetails({ data, onChange, onNext, saving }: Props) {
+export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Props) {
   const address = data.address || {};
   const isSchool = data.program_category === 'school';
   const isIndian = isIndianNationality(data.nationality);
@@ -84,6 +85,7 @@ export function PersonalDetails({ data, onChange, onNext, saving }: Props) {
         {isSchool ? 'Child Details' : 'Personal Details'}
       </h2>
 
+      <fieldset disabled={readOnly} className={readOnly ? "pointer-events-none opacity-75" : ""}>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Full Name *</label>
@@ -211,6 +213,8 @@ export function PersonalDetails({ data, onChange, onNext, saving }: Props) {
           <input value={address.pin_code || ''} onChange={e => onChange({ address: { ...address, pin_code: e.target.value.replace(/\D/g, '').slice(0, 6) } })} className={inputCls} />
         </div>
       </div>
+
+      </fieldset>
 
       <div className="flex justify-end">
         <Button onClick={onNext} disabled={saving || !data.full_name.trim() || !!dobWarning} className="gap-2">

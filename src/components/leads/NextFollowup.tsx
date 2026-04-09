@@ -94,7 +94,22 @@ export function NextFollowup({ followups, onSchedule, campuses, onScheduleVisit 
             </div>
             {showVisitForm ? (
               <div className="space-y-2">
-                <input type="datetime-local" value={visitDate} onChange={e => setVisitDate(e.target.value)} className={inputCls} />
+                <div className="flex gap-2">
+                  <input type="date" value={visitDate.split("T")[0] || ""} onChange={e => {
+                    const time = visitDate.split("T")[1] || "10:00";
+                    setVisitDate(e.target.value ? `${e.target.value}T${time}` : "");
+                  }} className={inputCls} />
+                  <input type="time" value={visitDate.split("T")[1] || ""} onChange={e => {
+                    const date = visitDate.split("T")[0] || "";
+                    if (date) setVisitDate(`${date}T${e.target.value}`);
+                  }} className={`${inputCls} w-32 shrink-0`} />
+                </div>
+                {visitDate && (
+                  <p className="text-[11px] text-muted-foreground">
+                    {new Date(visitDate).toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "2-digit" })}{" "}
+                    {new Date(visitDate).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}
+                  </p>
+                )}
                 {campuses && campuses.length > 0 && (
                   <select value={visitCampus} onChange={e => setVisitCampus(e.target.value)} className={inputCls}>
                     <option value="">Select campus</option>

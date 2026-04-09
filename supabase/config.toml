@@ -41,3 +41,36 @@ verify_jwt = false
 
 [functions.visit-reminders]
 verify_jwt = false
+
+[functions.whatsapp-reply]
+verify_jwt = false
+
+[functions.whatsapp-webhook]
+verify_jwt = false
+
+[functions.whatsapp-campaign-send]
+verify_jwt = false
+
+[functions.automation-engine]
+verify_jwt = false
+
+[functions.send-email]
+verify_jwt = false
+
+[functions.callback-update]
+verify_jwt = false
+
+[functions.lead-velocity-cron]
+verify_jwt = false
+
+[functions.delete-user]
+verify_jwt = false
+
+[functions.whatsapp-templates]
+verify_jwt = false
+
+[functions.fix-student-accounts]
+verify_jwt = false
+
+[functions.provision-student-fees]
+verify_jwt = false

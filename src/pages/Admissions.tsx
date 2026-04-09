@@ -9,7 +9,7 @@ import {
   Phone, MessageSquare, ChevronRight, Plus, Search, Filter, Upload,
   Eye, Calendar, MoreHorizontal, Users, TrendingUp, ArrowUpRight,
   Bot, UserCheck, MapPin, FileText, CheckCircle, XCircle, Clock, Loader2,
-  Trash2, ArrowRightLeft, Send
+  Trash2, ArrowRightLeft, Send, Flag
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -23,15 +23,19 @@ import { LeadTemperatureBadge } from "@/components/admissions/LeadTemperatureBad
 import { SeatMatrix } from "@/components/admissions/SeatMatrix";
 import { PaymentReconciliation } from "@/components/admissions/PaymentReconciliation";
 import { InactivityAlertBanner } from "@/components/admissions/InactivityAlertBanner";
+import { CounsellorOnboarding } from "@/components/onboarding/CounsellorOnboarding";
 import { LEAD_SOURCES, SOURCE_LABELS, SOURCE_BADGE_COLORS } from "@/config/leadSources";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
 
 const STAGES = [
   "new_lead", "application_in_progress", "application_fee_paid", "application_submitted", "ai_called", "counsellor_call", "visit_scheduled",
-  "interview", "offer_sent", "token_paid", "pre_admitted", "admitted", "waitlisted", "rejected"
+  "interview", "offer_sent", "token_paid", "pre_admitted", "admitted", "waitlisted", "not_interested", "rejected"
 ] as const;
 
 type Stage = typeof STAGES[number];
@@ -41,7 +45,7 @@ const STAGE_LABELS: Record<string, string> = {
   application_fee_paid: "Fee Paid", application_submitted: "Application Submitted",
   ai_called: "AI Called", counsellor_call: "Counsellor Call",
   visit_scheduled: "Visit Scheduled", interview: "Interview", offer_sent: "Offer Sent",
-  token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", waitlisted: "Waitlisted", rejected: "Rejected",
+  token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", waitlisted: "Waitlisted", not_interested: "Not Interested", rejected: "Rejected",
 };
 
 const stageColors: Record<string, string> = {
@@ -58,6 +62,7 @@ const stageColors: Record<string, string> = {
   pre_admitted: "bg-primary/20 text-primary",
   admitted: "bg-primary text-primary-foreground",
   waitlisted: "bg-pastel-orange text-foreground/70",
+  not_interested: "bg-muted text-foreground/60",
   rejected: "bg-pastel-red text-foreground/70",
 };
 
@@ -101,7 +106,7 @@ interface Lead {
 
 const Admissions = () => {
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { role, profile } = useAuth();
   const { selectedCampusId } = useCampus();
   const isTeamLeader = useIsTeamLeader();
   const { toast } = useToast();
@@ -115,6 +120,8 @@ const Admissions = () => {
   const [loading, setLoading] = useState(true);
   const [showAddLead, setShowAddLead] = useState(false);
   const [showBulkImport, setShowBulkImport] = useState(false);
+  const [inactiveIds, setInactiveIds] = useState<Set<string> | null>(null);
+  const [followupLeadIds, setFollowupLeadIds] = useState<Set<string> | null>(null);
 
   // Selection & bulk actions
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -122,6 +129,10 @@ const Admissions = () => {
   const [showTransfer, setShowTransfer] = useState(false);
   const [showBulkWhatsApp, setShowBulkWhatsApp] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [showDeleteRequest, setShowDeleteRequest] = useState(false);
+  const [deleteReason, setDeleteReason] = useState<string>("duplicate");
+  const [deleteCustomMsg, setDeleteCustomMsg] = useState("");
+  const [submittingRequest, setSubmittingRequest] = useState(false);
 
   const isSuperAdmin = role === "super_admin";
   const canTransfer = isSuperAdmin || isTeamLeader;
@@ -134,6 +145,8 @@ const Admissions = () => {
       .order("created_at", { ascending: false })
       .limit(500);
     if (selectedCampusId !== "all") query = query.eq("campus_id", selectedCampusId);
+    // Counsellors only see their own assigned leads
+    if (role === "counsellor" && profile?.id) query = query.eq("counsellor_id", profile.id);
     const { data, error } = await query;
 
     if (data) {
@@ -180,6 +193,28 @@ const Admissions = () => {
     await fetchLeads();
   };
 
+  const handleRequestDeletion = async () => {
+    setSubmittingRequest(true);
+    const ids = Array.from(selectedIds);
+    const rows = ids.map((lead_id) => ({
+      lead_id,
+      requested_by: user?.id,
+      reason: deleteReason,
+      custom_message: deleteReason === "other" ? deleteCustomMsg : null,
+    }));
+    const { error } = await supabase.from("lead_deletion_requests" as any).insert(rows);
+    if (error) {
+      toast({ title: "Request failed", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Deletion requested", description: `${ids.length} lead(s) flagged for review by admin.` });
+    }
+    setSubmittingRequest(false);
+    setShowDeleteRequest(false);
+    setDeleteReason("duplicate");
+    setDeleteCustomMsg("");
+    setSelectedIds(new Set());
+  };
+
   const filtered = leads.filter((l) => {
     const matchesSearch = !search || l.name.toLowerCase().includes(search.toLowerCase()) ||
       (l.course_name || "").toLowerCase().includes(search.toLowerCase()) ||
@@ -188,22 +223,62 @@ const Admissions = () => {
     const matchesSource = sourceFilter === "all" || l.source === sourceFilter;
     const matchesRole = roleFilter === "all" || l.person_role === roleFilter;
     const matchesTemp = tempFilter === "all" || l.lead_temperature === tempFilter;
-    return matchesSearch && matchesStage && matchesSource && matchesRole && matchesTemp;
+    const matchesInactive = !inactiveIds || inactiveIds.has(l.id);
+    const matchesFollowup = !followupLeadIds || followupLeadIds.has(l.id);
+    return matchesSearch && matchesStage && matchesSource && matchesRole && matchesTemp && matchesInactive && matchesFollowup;
   });
 
   const totalLeads = leads.length;
   const today = new Date().toISOString().slice(0, 10);
   const todayLeads = leads.filter(l => l.created_at.slice(0, 10) === today).length;
+  const newLeads = leads.filter(l => l.stage === "new_lead").length;
   const appStarted = leads.filter(l => ["application_in_progress", "application_fee_paid", "application_submitted"].includes(l.stage)).length;
   const feePaid = leads.filter(l => ["application_fee_paid", "application_submitted"].includes(l.stage)).length;
   const appSubmitted = leads.filter(l => l.stage === "application_submitted").length;
   const admitted = leads.filter(l => l.stage === "admitted").length;
 
-  const stats = [
+  // Followup & visit counts fetched from DB
+  const [pendingFollowups, setPendingFollowups] = useState(0);
+  const [todayFollowups, setTodayFollowups] = useState(0);
+  const [overdueFollowups, setOverdueFollowups] = useState(0);
+  const [upcomingVisits, setUpcomingVisits] = useState(0);
+  const [completedVisits, setCompletedVisits] = useState(0);
+
+  useEffect(() => {
+    (async () => {
+      const now = new Date();
+      const todayStart = now.toISOString().slice(0, 10);
+      const todayEnd = todayStart + "T23:59:59";
+
+      const [pendingRes, todayRes, overdueRes, upVisitRes, compVisitRes] = await Promise.all([
+        supabase.from("lead_followups").select("id", { count: "exact", head: true }).eq("status", "pending"),
+        supabase.from("lead_followups").select("id", { count: "exact", head: true }).eq("status", "pending").gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd),
+        supabase.from("overdue_followups" as any).select("id", { count: "exact", head: true }),
+        supabase.from("campus_visits").select("id", { count: "exact", head: true }).gte("scheduled_date", todayStart).in("status", ["scheduled", "confirmed"]),
+        supabase.from("campus_visits").select("id", { count: "exact", head: true }).eq("status", "completed"),
+      ]);
+      setPendingFollowups(pendingRes.count || 0);
+      setTodayFollowups(todayRes.count || 0);
+      setOverdueFollowups(overdueRes.count || 0);
+      setUpcomingVisits(upVisitRes.count || 0);
+      setCompletedVisits(compVisitRes.count || 0);
+    })();
+  }, [selectedCampusId]);
+
+  // Row 1: Lead data
+  const leadStats = [
+    { label: "New Leads", value: newLeads, sub: `+${todayLeads} today`, icon: Users, iconBg: "bg-pastel-blue", filterStage: "new_lead", link: "" },
+    { label: "Pending Follow-ups", value: pendingFollowups, sub: `${overdueFollowups} overdue · ${todayFollowups} today`, icon: Clock, iconBg: "bg-pastel-orange", filterStage: "", link: "", action: "followups" },
+    { label: "Upcoming Visits", value: upcomingVisits, sub: "Scheduled & confirmed", icon: MapPin, iconBg: "bg-pastel-yellow", filterStage: "visit_scheduled", link: "" },
+    { label: "Completed Visits", value: completedVisits, sub: "Campus visits done", icon: CheckCircle, iconBg: "bg-pastel-green", filterStage: "", link: "" },
+  ];
+
+  // Row 2: Application stages
+  const appStats = [
     { label: "Applications Started", value: appStarted, sub: "In progress or beyond", icon: FileText, iconBg: "bg-pastel-blue", filterStage: "application_in_progress" },
     { label: "Fee Paid", value: feePaid, sub: "Application fee received", icon: CheckCircle, iconBg: "bg-pastel-green", filterStage: "application_fee_paid" },
-    { label: "Submitted", value: appSubmitted, sub: "Fully submitted", icon: TrendingUp, iconBg: "bg-pastel-mint", filterStage: "application_submitted" },
-    { label: "Admitted", value: admitted, sub: `+${todayLeads} new today`, icon: Users, iconBg: "bg-pastel-purple", filterStage: "admitted" },
+    { label: "Waiting for Offer", value: appSubmitted, sub: "Fully submitted", icon: TrendingUp, iconBg: "bg-pastel-mint", filterStage: "application_submitted" },
+    { label: "Admitted", value: admitted, sub: "Fully admitted students", icon: UserCheck, iconBg: "bg-pastel-purple", filterStage: "admitted" },
   ];
 
   if (loading) {
@@ -214,6 +289,8 @@ const Admissions = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* First-time onboarding for counsellors */}
+      {role === "counsellor" && <CounsellorOnboarding />}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Admissions CRM</h1>
@@ -238,9 +315,13 @@ const Admissions = () => {
                 <ArrowRightLeft className="h-4 w-4" /> Transfer
               </Button>
             )}
-            {isSuperAdmin && (
+            {isSuperAdmin ? (
               <Button variant="destructive" size="sm" className="gap-2" onClick={() => setShowDeleteConfirm(true)}>
                 <Trash2 className="h-4 w-4" /> Delete
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" className="gap-2 text-destructive border-destructive/30 hover:bg-destructive/5" onClick={() => setShowDeleteRequest(true)}>
+                <Flag className="h-4 w-4" /> Request Deletion
               </Button>
             )}
             <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>Clear</Button>
@@ -248,32 +329,121 @@ const Admissions = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map((stat) => (
-          <Card
-            key={stat.label}
-            className={`border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer ${stageFilter === stat.filterStage ? "ring-2 ring-primary/40 bg-primary/5" : ""}`}
-            onClick={() => setStageFilter(prev => prev === stat.filterStage ? "all" : stat.filterStage)}
-          >
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between">
-                <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${stat.iconBg}`}>
-                  <stat.icon className="h-5 w-5 text-foreground/70" />
+      {/* Row 1: Lead Data */}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Leads</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {leadStats.map((stat) => (
+            <Card
+              key={stat.label}
+              className={`border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer ${
+                (stat.filterStage && stageFilter === stat.filterStage) || (stat.action === "followups" && followupLeadIds) ? "ring-2 ring-primary/40 bg-primary/5" : ""
+              }`}
+              onClick={async () => {
+                if (stat.action === "followups") {
+                  if (followupLeadIds) { setFollowupLeadIds(null); return; }
+                  const { data } = await supabase.from("lead_followups").select("lead_id").eq("status", "pending");
+                  const ids = new Set<string>((data || []).map((r: any) => r.lead_id));
+                  setFollowupLeadIds(ids);
+                  setInactiveIds(null);
+                  setStageFilter("all");
+                  setSourceFilter("all");
+                  setRoleFilter("all");
+                  setTempFilter("all");
+                  setSearch("");
+                  return;
+                }
+                if (stat.link) { navigate(stat.link); return; }
+                if (stat.filterStage) setStageFilter(prev => prev === stat.filterStage ? "all" : stat.filterStage);
+              }}
+            >
+              <CardContent className="p-5">
+                <div className="flex items-start justify-between">
+                  <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${stat.iconBg}`}>
+                    <stat.icon className="h-5 w-5 text-foreground/70" />
+                  </div>
+                  <ArrowUpRight className={`h-4 w-4 mt-1 transition-colors ${
+                    (stat.filterStage && stageFilter === stat.filterStage) || (stat.action === "followups" && followupLeadIds) ? "text-primary" : "text-muted-foreground"
+                  }`} />
                 </div>
-                <ArrowUpRight className={`h-4 w-4 mt-1 transition-colors ${stageFilter === stat.filterStage ? "text-primary" : "text-muted-foreground"}`} />
-              </div>
-              <p className="text-3xl font-bold text-foreground mt-4">{stat.value}</p>
-              <p className="text-sm text-muted-foreground mt-0.5">{stat.label}</p>
-              <p className="text-xs font-medium mt-1 text-primary">{stat.sub}</p>
-            </CardContent>
-          </Card>
-        ))}
+                <p className="text-3xl font-bold text-foreground mt-4">{stat.value}</p>
+                <p className="text-sm text-muted-foreground mt-0.5">{stat.label}</p>
+                <p className="text-xs font-medium mt-1 text-primary">{stat.sub}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+
+      {/* Row 2: Application Stages */}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Applications</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {appStats.map((stat) => (
+            <Card
+              key={stat.label}
+              className={`border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer ${stageFilter === stat.filterStage ? "ring-2 ring-primary/40 bg-primary/5" : ""}`}
+              onClick={() => setStageFilter(prev => prev === stat.filterStage ? "all" : stat.filterStage)}
+            >
+              <CardContent className="p-5">
+                <div className="flex items-start justify-between">
+                  <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${stat.iconBg}`}>
+                    <stat.icon className="h-5 w-5 text-foreground/70" />
+                  </div>
+                  <ArrowUpRight className={`h-4 w-4 mt-1 transition-colors ${stageFilter === stat.filterStage ? "text-primary" : "text-muted-foreground"}`} />
+                </div>
+                <p className="text-3xl font-bold text-foreground mt-4">{stat.value}</p>
+                <p className="text-sm text-muted-foreground mt-0.5">{stat.label}</p>
+                <p className="text-xs font-medium mt-1 text-primary">{stat.sub}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </div>
 
       <InactivityAlertBanner
-        onViewInactive={() => { setStageFilter("all"); setTempFilter("all"); }}
+        onViewInactive={(ids) => {
+          setInactiveIds(ids);
+          setFollowupLeadIds(null);
+          setStageFilter("all");
+          setSourceFilter("all");
+          setRoleFilter("all");
+          setTempFilter("all");
+          setSearch("");
+        }}
         onViewOverdue={() => navigate("/counsellor-dashboard")}
+        campusId={selectedCampusId}
       />
+
+      {inactiveIds && (
+        <div className="flex items-center gap-2 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40 px-3 py-2 text-sm">
+          <Clock className="h-3.5 w-3.5 text-amber-600" />
+          <span className="font-medium text-amber-800 dark:text-amber-300">
+            Showing {inactiveIds.size} inactive lead{inactiveIds.size !== 1 ? "s" : ""} past threshold
+          </span>
+          <button
+            onClick={() => setInactiveIds(null)}
+            className="ml-2 rounded-md bg-amber-200 dark:bg-amber-800 px-2 py-0.5 text-xs font-medium text-amber-800 dark:text-amber-200 hover:bg-amber-300 dark:hover:bg-amber-700"
+          >
+            Clear filter
+          </button>
+        </div>
+      )}
+
+      {followupLeadIds && (
+        <div className="flex items-center gap-2 rounded-lg bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800/40 px-3 py-2 text-sm">
+          <Clock className="h-3.5 w-3.5 text-orange-600" />
+          <span className="font-medium text-orange-800 dark:text-orange-300">
+            Showing {followupLeadIds.size} lead{followupLeadIds.size !== 1 ? "s" : ""} with pending follow-ups
+          </span>
+          <button
+            onClick={() => setFollowupLeadIds(null)}
+            className="ml-2 rounded-md bg-orange-200 dark:bg-orange-800 px-2 py-0.5 text-xs font-medium text-orange-800 dark:text-orange-200 hover:bg-orange-300 dark:hover:bg-orange-700"
+          >
+            Clear filter
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
@@ -501,6 +671,56 @@ const Admissions = () => {
         leadNames={selectedLeadNames}
         onSuccess={fetchLeads}
       />
+
+      {/* Request Deletion Dialog (non-admin) */}
+      <Dialog open={showDeleteRequest} onOpenChange={setShowDeleteRequest}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Request Deletion</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              {selectedIds.size} lead{selectedIds.size > 1 ? "s" : ""} will be flagged for deletion. A super admin will review your request.
+            </p>
+            <div>
+              <label className="text-sm font-medium text-foreground">Reason</label>
+              <select
+                value={deleteReason}
+                onChange={(e) => setDeleteReason(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+              >
+                <option value="duplicate">Duplicate lead</option>
+                <option value="incorrect">Incorrect / invalid data</option>
+                <option value="spam">Spam</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            {deleteReason === "other" && (
+              <div>
+                <label className="text-sm font-medium text-foreground">Details</label>
+                <textarea
+                  value={deleteCustomMsg}
+                  onChange={(e) => setDeleteCustomMsg(e.target.value)}
+                  placeholder="Explain why this lead should be deleted..."
+                  className="mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20 min-h-[80px]"
+                />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDeleteRequest(false)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={handleRequestDeletion}
+              disabled={submittingRequest || (deleteReason === "other" && !deleteCustomMsg.trim())}
+              className="gap-2"
+            >
+              {submittingRequest && <Loader2 className="h-4 w-4 animate-spin" />}
+              Submit Request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Bulk Delete Confirmation */}
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>

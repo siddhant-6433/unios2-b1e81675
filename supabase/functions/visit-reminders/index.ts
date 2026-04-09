@@ -48,8 +48,8 @@ Deno.serve(async (req) => {
       id,
       visit_date,
       lead_id,
-      leads ( id, name, phone ),
-      campuses ( id, name, city )
+      leads ( id, name, phone, course_id, courses:course_id ( department_id, departments:department_id ( institution_id, institutions:institution_id ( google_maps_url ) ) ) ),
+      campuses ( id, name, city, google_maps_url )
     `)
     .eq("status", "scheduled")
     .gte("visit_date", todayStart.toISOString())
@@ -94,13 +94,63 @@ Deno.serve(async (req) => {
       ? (campus.city ? `${campus.name}, ${campus.city}` : campus.name)
       : "our campus";
 
-    // Send WhatsApp via the send-whatsapp edge function
-    const { error: waError } = await supabase.functions.invoke("send-whatsapp", {
-      body: {
-        to: lead.phone,
-        message: `Hi ${lead.name}, this is a reminder that your campus visit at ${campusLabel} is scheduled for today — ${visitTime}. We look forward to seeing you! Reply STOP to opt out.`,
+    // Extract CID from google_maps_url — prefer institution-level over campus-level
+    const instMapUrl = lead?.courses?.departments?.institutions?.google_maps_url;
+    const mapsUrl = instMapUrl || campus?.google_maps_url || "";
+    const cidMatch = mapsUrl.match(/cid=(\d+)/);
+    const mapCid = cidMatch ? cidMatch[1] : "";
+
+    // Send WhatsApp template with map button
+    const whatsappToken = Deno.env.get("WHATSAPP_API_TOKEN");
+    const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+    const waPhone = lead.phone.replace(/[^0-9]/g, "");
+
+    const waPayload: any = {
+      messaging_product: "whatsapp",
+      to: waPhone,
+      type: "template",
+      template: {
+        name: "visit_reminder",
+        language: { code: "en" },
+        components: [
+          {
+            type: "body",
+            parameters: [
+              { type: "text", text: lead.name },
+              { type: "text", text: visitTime },
+              { type: "text", text: campusLabel },
+            ],
+          },
+          ...(mapCid ? [{
+            type: "button",
+            sub_type: "url",
+            index: 0,
+            parameters: [{ type: "text", text: mapCid }],
+          }] : []),
+        ],
       },
-    });
+    };
+
+    let waError: any = null;
+    try {
+      const waRes = await fetch(
+        `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${whatsappToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(waPayload),
+        }
+      );
+      if (!waRes.ok) {
+        const errBody = await waRes.json();
+        waError = { message: errBody?.error?.message || "WhatsApp send failed" };
+      }
+    } catch (e: any) {
+      waError = { message: e.message };
+    }
 
     if (waError) {
       console.error(`WhatsApp failed for ${lead.name} (${lead.phone}):`, waError.message);

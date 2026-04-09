@@ -48,11 +48,19 @@ interface Props {
   newAdmissionOnly?: boolean;
 }
 
+type StudentTypeFilter = "day_scholar" | "day_boarder" | "boarder";
+
+/** Beacon school codes have boarding/transport options */
+const isSchoolCourse = (code: string) => /^(BSAV|BSA|MIR)-/.test(code);
+
 export function FeeStructureViewer({ courseId, compact = false, showFilter = false, newAdmissionOnly = false }: Props) {
   const [structures, setStructures] = useState<FeeStructure[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterCourse, setFilterCourse] = useState(courseId || "all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [studentType, setStudentType] = useState<StudentTypeFilter>("day_scholar");
+  const [transportZone, setTransportZone] = useState<"none" | "zone_1" | "zone_2" | "zone_3">("none");
+  const [boardingType, setBoardingType] = useState<"none" | "non_ac" | "ac_central" | "ac_individual">("none");
 
   useEffect(() => {
     (async () => {
@@ -167,6 +175,68 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
     if (!showFilter || filterCourse === "all") return structures;
     return structures.filter(s => s.course_id === filterCourse);
   }, [structures, filterCourse, showFilter]);
+
+  /** Whether any visible structure is a school course (needs student type filter) */
+  const hasSchoolCourse = useMemo(() =>
+    filtered.some(s => isSchoolCourse(s.course_code)),
+  [filtered]);
+
+  /** Split fee items into sections for school courses */
+  const splitSchoolFeeItems = (items: FeeItem[], courseCode: string): {
+    oneTime: FeeItem[]; tuition: FeeItem[]; boarding: FeeItem[]; transport: FeeItem[]; other: FeeItem[];
+  } => {
+    if (!isSchoolCourse(courseCode)) return { oneTime: [], tuition: [], boarding: [], transport: [], other: items };
+
+    const oneTime: FeeItem[] = [];
+    const tuition: FeeItem[] = [];
+    const boarding: FeeItem[] = [];
+    const transport: FeeItem[] = [];
+    const other: FeeItem[] = [];
+
+    for (const item of items) {
+      // Transport → separate section
+      if (item.category === "transport") {
+        transport.push(item);
+        continue;
+      }
+
+      // Enrollment (one-time): registration, admission, security deposit
+      if (item.category === "enrollment") {
+        // Security deposit is boarder-only
+        if (item.code === "NB-SEC" || item.code === "MR-SEC") {
+          if (studentType === "boarder") oneTime.push(item);
+          continue;
+        }
+        oneTime.push(item);
+        continue;
+      }
+
+      // Hostel / boarding
+      if (item.category === "hostel") {
+        if (studentType === "day_scholar") continue;
+        if (studentType === "day_boarder") {
+          if (item.code === "NB-DBA") boarding.push(item);
+          continue;
+        }
+        if (studentType === "boarder") {
+          if (item.code === "NB-DBA") continue;
+          boarding.push(item);
+          continue;
+        }
+        continue;
+      }
+
+      // Tuition
+      if (item.category === "tuition") {
+        tuition.push(item);
+        continue;
+      }
+
+      // Everything else (lab, library, other, etc.)
+      other.push(item);
+    }
+    return { oneTime, tuition, boarding, transport, other };
+  };
 
   if (loading) return <div className="flex h-16 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>;
 
@@ -390,6 +460,25 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
         </select>
       )}
 
+      {/* Student type filter for school courses */}
+      {hasSchoolCourse && (
+        <div className="flex items-center gap-1 rounded-lg border border-input p-0.5 w-fit">
+          {([
+            { value: "day_scholar" as const, label: "Day Scholar" },
+            { value: "day_boarder" as const, label: "Day Boarder" },
+            { value: "boarder" as const, label: "Boarder" },
+          ]).map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => setStudentType(opt.value)}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${studentType === opt.value ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {filtered.map((fs) => {
         const isExpanded = expandedId === fs.id;
         const yearData = getYearData(fs.metadata);
@@ -397,6 +486,15 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
         const totalAfterDiscount = totalDiscount > 0
           ? yearData.reduce((s, y) => s + y.fee - y.discount, 0)
           : 0;
+
+        // For school courses, compute filtered total for the header (oneTime + tuition + other)
+        const isSchool = isSchoolCourse(fs.course_code);
+        const headerTotal = isSchool
+          ? (() => {
+              const s = splitSchoolFeeItems(fs.items, fs.course_code);
+              return [...s.oneTime, ...s.tuition, ...s.other].reduce((sum, i) => sum + i.amount, 0);
+            })()
+          : fs.total;
 
         return (
           <div key={fs.id} className="rounded-xl border border-border/60 overflow-hidden">
@@ -424,7 +522,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                       <span className="block text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">Save {fmt(totalDiscount)} on annual payment</span>
                     </>
                   ) : (
-                    <span className="text-sm font-bold text-primary">{fmt(fs.total)}</span>
+                    <span className="text-sm font-bold text-primary">{fmt(headerTotal)}</span>
                   )}
                 </div>
                 {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
@@ -432,47 +530,206 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
             </button>
 
             {/* Expanded */}
-            {isExpanded && (
-              <div className="border-t border-border">
-                {/* Metadata highlights (boarding, discounts, year-wise) */}
-                {renderMetadata(fs.metadata)}
+            {isExpanded && (() => {
+              const isSchool = isSchoolCourse(fs.course_code);
+              const sections = isSchool
+                ? splitSchoolFeeItems(fs.items, fs.course_code)
+                : { oneTime: [] as FeeItem[], tuition: [] as FeeItem[], boarding: [] as FeeItem[], transport: [] as FeeItem[], other: fs.items };
 
-                {/* Fee items table */}
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="bg-muted/50">
-                      <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase">Fee</th>
-                      {!compact && <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase">Category</th>}
-                      <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase">Term</th>
-                      <th className="px-3 py-2 text-right font-semibold text-muted-foreground uppercase">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {fs.items.map((item, i) => (
-                      <tr key={i} className="border-b border-border/40 last:border-0">
-                        <td className="px-3 py-2 text-foreground">
-                          {item.name}
-                          {compact && <span className="text-muted-foreground ml-1">({item.category})</span>}
-                        </td>
-                        {!compact && (
-                          <td className="px-3 py-2">
-                            <Badge className={`text-[9px] font-medium border-0 capitalize ${categoryBadge[item.category] || "bg-muted"}`}>
-                              {item.category}
-                            </Badge>
-                          </td>
+              const renderItemRows = (items: FeeItem[]) =>
+                items.map((item, i) => (
+                  <tr key={i} className="border-b border-border/40 last:border-0">
+                    <td className="px-3 py-2 text-foreground">{item.name}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{item.term}</td>
+                    <td className="px-3 py-2 text-right font-semibold text-foreground">{fmt(item.amount)}</td>
+                  </tr>
+                ));
+
+              const renderSection = (label: string, items: FeeItem[], bgClass: string) => {
+                if (items.length === 0) return null;
+                const total = items.reduce((s, i) => s + i.amount, 0);
+                return (
+                  <div className="border-t border-border">
+                    <div className={`px-3 py-1.5 ${bgClass}`}>
+                      <p className="text-[10px] font-semibold text-foreground uppercase tracking-wide">{label}</p>
+                    </div>
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-muted/30">
+                          <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Fee</th>
+                          <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Term</th>
+                          <th className="px-3 py-1.5 text-right font-medium text-muted-foreground">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>{renderItemRows(items)}</tbody>
+                    </table>
+                    <div className="px-3 py-1.5 bg-muted/20 border-t border-border/40 flex items-center justify-end">
+                      <span className="text-[11px] font-semibold text-foreground">{fmt(total)}</span>
+                    </div>
+                  </div>
+                );
+              };
+
+              return (
+                <div className="border-t border-border">
+                  {/* Metadata highlights (boarding, discounts, year-wise) */}
+                  {renderMetadata(fs.metadata)}
+
+                  {isSchool ? (
+                    <>
+                      {/* 1. One-Time Fees */}
+                      {renderSection("One-Time Fees", sections.oneTime, "bg-pastel-green/30")}
+
+                      {/* 2. Tuition Fee */}
+                      {renderSection("Tuition Fee", sections.tuition, "bg-pastel-blue/30")}
+
+                      {/* 3. Boarding Fee */}
+                      {/* Day boarder: NB-DBA shown directly */}
+                      {studentType === "day_boarder" && sections.boarding.length > 0 &&
+                        renderSection("Day Boarding Fee", sections.boarding, "bg-pastel-mint/30")
+                      }
+                      {/* Boarder: selector for Non-AC / AC C Block / AC B Block */}
+                      {studentType === "boarder" && sections.boarding.length > 0 && (() => {
+                        const boardingMap: Record<string, { label: string; key: "non_ac" | "ac_central" | "ac_individual"; items: FeeItem[] }> = {
+                          non_ac: { label: "Non-AC", key: "non_ac", items: [] },
+                          ac_central: { label: "AC C Block", key: "ac_central", items: [] },
+                          ac_individual: { label: "AC B Block", key: "ac_individual", items: [] },
+                        };
+                        for (const b of sections.boarding) {
+                          if (b.code.endsWith("NAC") || b.code === "NB-NAC") boardingMap.non_ac.items.push(b);
+                          else if (b.code.endsWith("CBA") || b.code === "NB-CBA") boardingMap.ac_central.items.push(b);
+                          else if (b.code.endsWith("IBA") || b.code === "NB-IBA") boardingMap.ac_individual.items.push(b);
+                          else if (b.code.endsWith("B5")) boardingMap.non_ac.items.push(b);
+                          else if (b.code.endsWith("B7")) boardingMap.ac_central.items.push(b);
+                        }
+                        const types = Object.values(boardingMap).filter(z => z.items.length > 0);
+                        const selectedItems = boardingType !== "none" ? (boardingMap[boardingType]?.items || []) : [];
+                        const selectedTotal = selectedItems.reduce((s, i) => s + i.amount, 0);
+
+                        return (
+                          <div className="border-t border-border">
+                            <div className="px-3 py-2 bg-pastel-mint/30 space-y-2">
+                              <p className="text-[10px] font-semibold text-foreground uppercase tracking-wide">Boarding Fee</p>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <button
+                                  onClick={() => setBoardingType("none")}
+                                  className={`px-3 py-1.5 rounded-lg text-[11px] font-medium border transition-colors ${boardingType === "none" ? "border-primary bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground hover:border-foreground/30 hover:text-foreground"}`}
+                                >Select type</button>
+                                {types.map(z => {
+                                  const perQ = z.items[0]?.amount || 0;
+                                  return (
+                                    <button
+                                      key={z.key}
+                                      onClick={() => setBoardingType(z.key)}
+                                      className={`px-3 py-1.5 rounded-lg text-[11px] font-medium border transition-colors ${boardingType === z.key ? "border-primary bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground hover:border-foreground/30 hover:text-foreground"}`}
+                                    >
+                                      {z.label} · {fmt(perQ)}/q
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                            {boardingType !== "none" && selectedItems.length > 0 && (
+                              <>
+                                <table className="w-full text-xs">
+                                  <thead><tr className="bg-muted/30">
+                                    <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Fee</th>
+                                    <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Term</th>
+                                    <th className="px-3 py-1.5 text-right font-medium text-muted-foreground">Amount</th>
+                                  </tr></thead>
+                                  <tbody>{renderItemRows(selectedItems)}</tbody>
+                                </table>
+                                <div className="px-3 py-1.5 bg-pastel-mint/20 border-t border-border/40 flex items-center justify-end">
+                                  <span className="text-[11px] font-semibold text-foreground">{fmt(selectedTotal)}/year</span>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })()}
+
+                      {/* Other items (if any) */}
+                      {sections.other.length > 0 && renderSection("Other Fees", sections.other, "bg-muted/30")}
+                    </>
+                  ) : (
+                    <>
+                      {/* Non-school: single table */}
+                      <table className="w-full text-xs">
+                        <thead><tr className="bg-muted/50">
+                          <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase">Fee</th>
+                          <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase">Term</th>
+                          <th className="px-3 py-2 text-right font-semibold text-muted-foreground uppercase">Amount</th>
+                        </tr></thead>
+                        <tbody>{renderItemRows(sections.other)}</tbody>
+                      </table>
+                      <div className="px-3 py-2 bg-muted/30 border-t border-border flex items-center justify-between">
+                        <span className="text-[10px] text-muted-foreground">{sections.other.length} fee items · {fs.session_name}</span>
+                        <span className="text-xs font-bold text-primary">{fmt(fs.total)}</span>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Transport section (separate with zone selector) */}
+                  {sections.transport.length > 0 && (() => {
+                    // Group transport items by zone code suffix (TR1, TR2, TR3)
+                    const zoneMap: Record<string, { label: string; key: "zone_1" | "zone_2" | "zone_3"; items: FeeItem[] }> = {
+                      zone_1: { label: "Zone 1", key: "zone_1", items: [] },
+                      zone_2: { label: "Zone 2", key: "zone_2", items: [] },
+                      zone_3: { label: "Zone 3", key: "zone_3", items: [] },
+                    };
+                    for (const t of sections.transport) {
+                      if (t.code.endsWith("TR1")) zoneMap.zone_1.items.push(t);
+                      else if (t.code.endsWith("TR2")) zoneMap.zone_2.items.push(t);
+                      else if (t.code.endsWith("TR3")) zoneMap.zone_3.items.push(t);
+                    }
+                    const zones = Object.values(zoneMap).filter(z => z.items.length > 0);
+                    const selectedZoneItems = transportZone !== "none" ? (zoneMap[transportZone]?.items || []) : [];
+                    const selectedZoneTotal = selectedZoneItems.reduce((s, i) => s + i.amount, 0);
+
+                    return (
+                      <div className="border-t-2 border-dashed border-border/60">
+                        <div className="px-3 py-2 bg-pastel-yellow/30 space-y-2">
+                          <p className="text-[10px] font-semibold text-foreground uppercase tracking-wide">Transport (optional)</p>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <button
+                              onClick={() => setTransportZone("none")}
+                              className={`px-3 py-1.5 rounded-lg text-[11px] font-medium border transition-colors ${transportZone === "none" ? "border-primary bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground hover:border-foreground/30 hover:text-foreground"}`}
+                            >Not Required</button>
+                            {zones.map(z => {
+                              const perQ = z.items[0]?.amount || 0;
+                              return (
+                                <button
+                                  key={z.key}
+                                  onClick={() => setTransportZone(z.key)}
+                                  className={`px-3 py-1.5 rounded-lg text-[11px] font-medium border transition-colors ${transportZone === z.key ? "border-primary bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground hover:border-foreground/30 hover:text-foreground"}`}
+                                >
+                                  {z.label} · {fmt(perQ)}/q
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        {transportZone !== "none" && selectedZoneItems.length > 0 && (
+                          <>
+                            <table className="w-full text-xs">
+                              <thead><tr className="bg-muted/30">
+                                <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Fee</th>
+                                <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Term</th>
+                                <th className="px-3 py-1.5 text-right font-medium text-muted-foreground">Amount</th>
+                              </tr></thead>
+                              <tbody>{renderItemRows(selectedZoneItems)}</tbody>
+                            </table>
+                            <div className="px-3 py-1.5 bg-pastel-yellow/20 border-t border-border/40 flex items-center justify-end">
+                              <span className="text-[11px] font-semibold text-foreground">{fmt(selectedZoneTotal)}/year</span>
+                            </div>
+                          </>
                         )}
-                        <td className="px-3 py-2 text-muted-foreground">{item.term}</td>
-                        <td className="px-3 py-2 text-right font-semibold text-foreground">{fmt(item.amount)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <div className="px-3 py-2 bg-muted/30 border-t border-border flex items-center justify-between">
-                  <span className="text-[10px] text-muted-foreground">{fs.items.length} fee items · {fs.session_name}</span>
-                  <span className="text-xs font-bold text-primary">{fmt(fs.total)}</span>
+                      </div>
+                    );
+                  })()}
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         );
       })}

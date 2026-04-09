@@ -222,7 +222,16 @@ export function BulkBeaconStudentImportDialog({ open, onOpenChange, onSuccess }:
 
       const { error, data } = await supabase.from("students").insert(batch as any).select("id");
       if (error) { failed += batch.length; console.error(error); }
-      else { success += (data?.length || 0); }
+      else {
+        success += (data?.length || 0);
+        // Auto-provision fees for inserted students
+        if (data && data.length > 0) {
+          const studentIds = data.map((s: any) => s.id);
+          supabase.functions.invoke("provision-student-fees", {
+            body: { student_ids: studentIds },
+          }).catch(err => console.error("Fee provisioning failed:", err));
+        }
+      }
     }
 
     setResult({ success, failed });

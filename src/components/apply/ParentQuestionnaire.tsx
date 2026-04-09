@@ -8,6 +8,7 @@ interface Props {
   onNext: () => void;
   onBack: () => void;
   saving: boolean;
+  readOnly?: boolean;
 }
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
@@ -22,7 +23,7 @@ const QUESTIONS = [
   { key: "previous_school_reason", label: "Reason for leaving previous school (if applicable)" },
 ];
 
-export function ParentQuestionnaire({ data, onChange, onNext, onBack, saving }: Props) {
+export function ParentQuestionnaire({ data, onChange, onNext, onBack, saving, readOnly }: Props) {
   const schoolDetails = (data.school_details || {}) as Record<string, any>;
   const questionnaire: Record<string, string> = schoolDetails.parent_questionnaire || {};
 
@@ -44,6 +45,7 @@ export function ParentQuestionnaire({ data, onChange, onNext, onBack, saving }: 
         </p>
       </div>
 
+      <fieldset disabled={readOnly} className={readOnly ? "pointer-events-none opacity-75" : ""}>
       <div className="space-y-4">
         {QUESTIONS.map(q => (
           <div key={q.key}>
@@ -88,6 +90,7 @@ export function ParentQuestionnaire({ data, onChange, onNext, onBack, saving }: 
           <option value="bilingual">Bilingual (English + Hindi)</option>
         </select>
       </div>
+      </fieldset>
 
       <div className="flex justify-between">
         <Button variant="outline" onClick={onBack} className="gap-2">

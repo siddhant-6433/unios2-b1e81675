@@ -11,6 +11,7 @@ interface Props {
   onNext: () => void;
   onBack: () => void;
   saving: boolean;
+  readOnly?: boolean;
 }
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
@@ -240,7 +241,7 @@ function SimpleParentBlock({
   );
 }
 
-export function ParentDetails({ data, onChange, onNext, onBack, saving }: Props) {
+export function ParentDetails({ data, onChange, onNext, onBack, saving, readOnly }: Props) {
   const portal = usePortal();
   const isSchool = portal.programCategories.includes("school");
 
@@ -248,21 +249,23 @@ export function ParentDetails({ data, onChange, onNext, onBack, saving }: Props)
     <div className="space-y-6">
       <h2 className="text-lg font-semibold text-foreground">Parent / Guardian Details</h2>
 
-      {isSchool ? (
-        <>
-          <SchoolParentBlock title="Parent Details - Father" value={data.father as any} onChange={v => onChange({ father: v })} />
-          <hr className="border-border" />
-          <SchoolParentBlock title="Parent Details - Mother" value={data.mother as any} onChange={v => onChange({ mother: v })} />
-          <hr className="border-border" />
-          <SimpleParentBlock title="Guardian (optional)" value={data.guardian as any} onChange={v => onChange({ guardian: v })} showRelationship />
-        </>
-      ) : (
-        <>
-          <SimpleParentBlock title="Father" value={data.father as any} onChange={v => onChange({ father: v })} />
-          <SimpleParentBlock title="Mother" value={data.mother as any} onChange={v => onChange({ mother: v })} />
-          <SimpleParentBlock title="Guardian (optional)" value={data.guardian as any} onChange={v => onChange({ guardian: v })} showRelationship />
-        </>
-      )}
+      <fieldset disabled={readOnly} className={readOnly ? "pointer-events-none opacity-75" : ""}>
+        {isSchool ? (
+          <>
+            <SchoolParentBlock title="Parent Details - Father" value={data.father as any} onChange={v => onChange({ father: v })} />
+            <hr className="border-border" />
+            <SchoolParentBlock title="Parent Details - Mother" value={data.mother as any} onChange={v => onChange({ mother: v })} />
+            <hr className="border-border" />
+            <SimpleParentBlock title="Guardian (optional)" value={data.guardian as any} onChange={v => onChange({ guardian: v })} showRelationship />
+          </>
+        ) : (
+          <>
+            <SimpleParentBlock title="Father" value={data.father as any} onChange={v => onChange({ father: v })} />
+            <SimpleParentBlock title="Mother" value={data.mother as any} onChange={v => onChange({ mother: v })} />
+            <SimpleParentBlock title="Guardian (optional)" value={data.guardian as any} onChange={v => onChange({ guardian: v })} showRelationship />
+          </>
+        )}
+      </fieldset>
 
       <div className="flex justify-between">
         <Button variant="outline" onClick={onBack} className="gap-2">

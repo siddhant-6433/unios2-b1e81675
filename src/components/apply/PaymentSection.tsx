@@ -28,12 +28,14 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
 
   const [showReceipt, setShowReceipt] = useState(false);
 
+  // If full_name was populated with an email (Google auth fallback), treat it as email
+  const nameIsEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.full_name || "");
   const receiptData: ReceiptData = {
     type: "application_fee",
     application_id: data.application_id,
-    applicant_name: data.full_name,
+    applicant_name: nameIsEmail ? undefined : data.full_name,
     phone: data.phone,
-    email: data.email || undefined,
+    email: data.email || (nameIsEmail ? data.full_name : undefined),
     amount: data.fee_amount,
     payment_ref: data.payment_ref,
     payment_date: new Date().toISOString(),

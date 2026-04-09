@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { CampusProvider } from "@/contexts/CampusContext";
+import { PermissionProvider } from "@/contexts/PermissionContext";
 import { ProtectedRoute, ApplicantRoute } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Dashboard from "./pages/Dashboard";
@@ -87,6 +88,7 @@ const App = () => (
               path="/*"
               element={
                 <ProtectedRoute>
+                  <PermissionProvider>
                   <CampusProvider>
                   <AppLayout>
                     <Routes>
@@ -133,6 +135,7 @@ const App = () => (
                     </Routes>
                   </AppLayout>
                   </CampusProvider>
+                  </PermissionProvider>
                 </ProtectedRoute>
               }
             />

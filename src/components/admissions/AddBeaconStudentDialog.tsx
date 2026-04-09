@@ -40,6 +40,7 @@ export function AddBeaconStudentDialog({ open, onOpenChange, onSuccess }: AddBea
     name: "", dob: "", gender: "", course_id: "", campus_id: "",
     section: "", class_roll_no: "", student_type: "day_scholar",
     school_admission_no: "",   // existing SchoolKnot admission no
+    transport_required: false, transport_zone: "", hostel_type: "",
     // Parents
     father_name: "", father_phone: "",
     mother_name: "", mother_phone: "",
@@ -52,7 +53,8 @@ export function AddBeaconStudentDialog({ open, onOpenChange, onSuccess }: AddBea
     if (!open) return;
     setStep(0);
     setForm(f => ({ ...f, name: "", dob: "", gender: "", course_id: "", section: "",
-      class_roll_no: "", school_admission_no: "", father_name: "", father_phone: "",
+      class_roll_no: "", school_admission_no: "", transport_required: false, transport_zone: "",
+      hostel_type: "", father_name: "", father_phone: "",
       mother_name: "", mother_phone: "", fee_version: "new_admission" }));
 
     Promise.all([
@@ -91,7 +93,7 @@ export function AddBeaconStudentDialog({ open, onOpenChange, onSuccess }: AddBea
       ? null
       : `BSAV-${Date.now().toString(36).toUpperCase()}`;
 
-    const { error } = await supabase.from("students").insert({
+    const { data: inserted, error } = await supabase.from("students").insert({
       name: form.name.trim(),
       dob: form.dob || null,
       gender: form.gender || null,
@@ -104,6 +106,9 @@ export function AddBeaconStudentDialog({ open, onOpenChange, onSuccess }: AddBea
       section: form.section || null,
       class_roll_no: form.class_roll_no || null,
       student_type: form.student_type,
+      transport_required: form.transport_required,
+      transport_zone: form.transport_zone || null,
+      hostel_type: form.hostel_type || null,
       school_admission_no: form.school_admission_no.trim() || null,
       father_name: form.father_name.trim() || null,
       father_phone: form.father_phone.trim() || null,
@@ -113,14 +118,24 @@ export function AddBeaconStudentDialog({ open, onOpenChange, onSuccess }: AddBea
       guardian_phone: form.father_phone.trim() || null,
       fee_structure_version: form.fee_version,
       status: "active" as any,
-    } as any);
+    } as any).select("id").single();
 
     setSaving(false);
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
       return;
     }
-    toast({ title: "Student added", description: `${form.name} has been added as an active student.` });
+
+    // Auto-provision fees
+    if (inserted?.id) {
+      supabase.functions.invoke("provision-student-fees", {
+        body: { student_id: inserted.id },
+      }).then(({ error: provErr }) => {
+        if (provErr) console.error("Fee provisioning failed:", provErr);
+      });
+    }
+
+    toast({ title: "Student added", description: `${form.name} has been added as an active student. Fees are being provisioned.` });
     onOpenChange(false);
     onSuccess();
   };
@@ -228,14 +243,53 @@ export function AddBeaconStudentDialog({ open, onOpenChange, onSuccess }: AddBea
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Student Type</label>
               <div className="flex gap-2">
-                {["day_scholar", "boarder"].map(t => (
-                  <button key={t} onClick={() => set("student_type", t)}
+                {["day_scholar", "day_boarder", "boarder"].map(t => (
+                  <button key={t} onClick={() => {
+                    set("student_type", t);
+                    if (t === "day_scholar") { set("hostel_type", ""); }
+                  }}
                     className={`flex-1 py-2 rounded-xl text-xs font-medium border transition-colors ${form.student_type === t ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground"}`}>
-                    {t === "day_scholar" ? "Day Scholar" : "Boarder"}
+                    {t === "day_scholar" ? "Day Scholar" : t === "day_boarder" ? "Day Boarder" : "Boarder"}
                   </button>
                 ))}
               </div>
             </div>
+
+            {/* Transport zone — shown when transport required */}
+            <div>
+              <label className="flex items-center gap-2 text-[11px] font-medium text-muted-foreground mb-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.transport_required}
+                  onChange={e => {
+                    setForm(f => ({ ...f, transport_required: e.target.checked, transport_zone: e.target.checked ? f.transport_zone : "" }));
+                  }}
+                  className="h-3.5 w-3.5 rounded border-input"
+                />
+                Transport Required
+              </label>
+              {form.transport_required && (
+                <select className={sel} value={form.transport_zone} onChange={e => set("transport_zone", e.target.value)}>
+                  <option value="">Select zone</option>
+                  <option value="zone_1">Zone 1 — Within 5 Kms</option>
+                  <option value="zone_2">Zone 2 — 5-10 Kms</option>
+                  <option value="zone_3">Zone 3 — Over 10 Kms</option>
+                </select>
+              )}
+            </div>
+
+            {/* Hostel type — shown when boarder or day_boarder */}
+            {(form.student_type === "boarder") && (
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Hostel Type</label>
+                <select className={sel} value={form.hostel_type} onChange={e => set("hostel_type", e.target.value)}>
+                  <option value="">Select hostel type</option>
+                  <option value="non_ac">Non-AC</option>
+                  <option value="ac_central">AC — C Block</option>
+                  <option value="ac_individual">AC — B Block</option>
+                </select>
+              </div>
+            )}
 
             <div className="flex justify-end pt-2">
               <Button onClick={() => setStep(1)} disabled={!step0Valid} className="gap-1.5">

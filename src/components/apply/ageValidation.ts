@@ -110,8 +110,8 @@ export function validateAge(
   const rule = rules.find(r => r.keywords.some(kw => nameAndCode.includes(kw)));
   if (!rule) return { eligible: true, enforcement: "guidance", message: "", ageAsOfJuly31: age, matchedGrade: null };
 
-  // For Mirai, everything is flexible (guidance) except Grade I
-  const isMandatory = portalId === "beacon" || (isMirai && (nameAndCode.includes("grade i") || nameAndCode.includes("pyp 1")));
+  // Age is always guidance for Beacon (school decides); strict only for Mirai Grade I
+  const isMandatory = isMirai && (nameAndCode.includes("grade i") || nameAndCode.includes("pyp 1"));
   const enforcement = isMandatory ? "strict" : "guidance";
 
   if (age < rule.minAge) {

@@ -123,6 +123,7 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
   const [selections, setSelections] = useState<CourseSelection[]>(existingSelections || []);
   const [addingCourse, setAddingCourse] = useState('');
   const [saving, setSaving] = useState(false);
+  const [selectedSchool, setSelectedSchool] = useState('');
 
   useEffect(() => {
     Promise.all([
@@ -170,14 +171,37 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
     return filterCoursesByAge(portalFilteredCourses, childDob, portal.id);
   }, [portalFilteredCourses, childDob, isSchoolPortal, portal.id]);
 
+  // For school portals: unique school (institution) options from filtered courses
+  const schoolOptions = useMemo(() => {
+    if (!isSchoolPortal) return [];
+    const seen = new Map<string, string>(); // id → name
+    filteredCourses.forEach((c: any) => {
+      const inst = c.departments?.institutions;
+      if (inst?.id && inst?.name) seen.set(inst.id, inst.name);
+    });
+    return Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
+  }, [filteredCourses, isSchoolPortal]);
+
+  // Auto-select school when only one option
+  useEffect(() => {
+    if (isSchoolPortal && schoolOptions.length === 1 && !selectedSchool) {
+      setSelectedSchool(schoolOptions[0].id);
+    }
+  }, [schoolOptions, isSchoolPortal, selectedSchool]);
+
   const coursesByGroup = useMemo(() => {
     const map = new Map<string, { label: string; courses: any[] }>();
-    filteredCourses.forEach((c: any) => {
-      const campusName = c.departments?.institutions?.campuses?.name || "Unknown";
-      const deptName = c.departments?.name || "Unknown";
-      const key = `${campusName} — ${deptName}`;
-      if (!map.has(key)) map.set(key, { label: key, courses: [] });
-      map.get(key)!.courses.push(c);
+    const sourceCourses = isSchoolPortal && selectedSchool
+      ? filteredCourses.filter((c: any) => c.departments?.institutions?.id === selectedSchool)
+      : filteredCourses;
+
+    sourceCourses.forEach((c: any) => {
+      // For school portals use institution name as group label; otherwise campus — dept
+      const label = isSchoolPortal
+        ? (c.departments?.institutions?.name || "Unknown School")
+        : `${c.departments?.institutions?.campuses?.name || "Unknown"} — ${c.departments?.name || "Unknown"}`;
+      if (!map.has(label)) map.set(label, { label, courses: [] });
+      map.get(label)!.courses.push(c);
     });
 
     return Array.from(map.values()).map(group => ({
@@ -189,7 +213,7 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
         return (a.name || "").localeCompare(b.name || "");
       }),
     }));
-  }, [filteredCourses, portal.id]);
+  }, [filteredCourses, portal.id, isSchoolPortal, selectedSchool]);
 
   const addCourse = () => {
     if (!addingCourse) return;
@@ -307,12 +331,30 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
         </select>
       </div>
 
+      {/* School selector — shown only for school portals with multiple schools */}
+      {isSchoolPortal && schoolOptions.length > 1 && (
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+            <MapPin className="h-3.5 w-3.5 inline mr-1" /> Select Campus *
+          </label>
+          <select value={selectedSchool} onChange={e => { setSelectedSchool(e.target.value); setAddingCourse(''); }} className={inputCls}>
+            <option value="">Select campus</option>
+            {schoolOptions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+      )}
+
       <div>
         <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
           {isSchoolPortal ? "Select Grade" : "Add Course"}
         </label>
         <div className="flex gap-2">
-          <select value={addingCourse} onChange={e => setAddingCourse(e.target.value)} className={`${inputCls} flex-1`}>
+          <select
+            value={addingCourse}
+            onChange={e => setAddingCourse(e.target.value)}
+            className={`${inputCls} flex-1`}
+            disabled={isSchoolPortal && schoolOptions.length > 1 && !selectedSchool}
+          >
             <option value="">{isSchoolPortal ? "Select grade to add" : "Select course to add"}</option>
             {coursesByGroup.map(g => (
               <optgroup key={g.label} label={g.label}>

@@ -1,9 +1,10 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { ArrowLeft, Loader2, Send, CheckCircle, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ApplicationData } from "./types";
-import nimtLogo from "@/assets/nimt-beacon-logo.png";
+import { usePortal } from "@/components/apply/PortalContext";
+import { supabase } from "@/integrations/supabase/client";
 
 interface Props {
   data: ApplicationData;
@@ -35,9 +36,20 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
   const [agreed, setAgreed] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
   const addr = data.address || {};
   const academic = data.academic_details || {};
+  const portal = usePortal();
+
+  useEffect(() => {
+    if (data.passport_photo_path) {
+      const { data: urlData } = supabase.storage
+        .from('application-documents')
+        .getPublicUrl(data.passport_photo_path);
+      setPhotoUrl(urlData.publicUrl);
+    }
+  }, [data.passport_photo_path]);
 
   const handleSubmit = async () => {
     await onSubmit();
@@ -106,15 +118,18 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
       {/* Printable content for PDF */}
       <div ref={printRef} className={submitted ? 'bg-white p-6 rounded-xl' : ''}>
         {submitted && (
-          <div className="flex items-center justify-between mb-6 pb-4 border-b border-border">
-            <img src={nimtLogo} alt="Logo" className="h-12" />
-            <div className="text-right">
-              <p className="text-sm font-bold text-foreground">Application Form</p>
+          <div className="flex items-start justify-between mb-6 pb-4 border-b border-border">
+            <div>
+              <img src={portal.logo} alt="Logo" className="h-12" />
+              <p className="text-sm font-bold text-foreground mt-2">Application Form</p>
               <p className="text-xs text-muted-foreground">ID: {data.application_id}</p>
               <p className="text-xs text-muted-foreground">
                 Submitted: {data.submitted_at ? new Date(data.submitted_at).toLocaleDateString('en-IN') : new Date().toLocaleDateString('en-IN')}
               </p>
             </div>
+            {photoUrl && (
+              <img src={photoUrl} alt="Applicant Photo" className="h-24 w-20 object-cover rounded border border-border" />
+            )}
           </div>
         )}
 
@@ -236,6 +251,13 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
               </>
             )}
           </Section>
+
+          {/* Other board alerts */}
+          {((academic as any).class_12?.board === 'Other' || (academic as any).class_10?.board === 'Other' || (academic as any).graduation?.university === 'Other') && (
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs">
+              ⚠️ <strong>Note:</strong> One or more boards/universities marked as "Other" — please verify eligibility with the admissions team.
+            </div>
+          )}
 
           {entranceExams.length > 0 && (
             <Section title="Entrance Exams">

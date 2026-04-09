@@ -140,3 +140,9 @@
     box-shadow: 0 12px 32px -4px hsl(224 47% 11% / 0.10), 0 4px 12px -2px hsl(224 47% 11% / 0.06);
   }
 }
+
+/* Toast auto-dismiss progress bar */
+@keyframes shrink {
+  from { width: 100%; }
+  to { width: 0%; }
+}

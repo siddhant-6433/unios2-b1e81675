@@ -40,6 +40,7 @@ interface Props {
   onNext: () => void;
   onBack: () => void;
   saving: boolean;
+  readOnly?: boolean;
 }
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
@@ -643,7 +644,7 @@ function SchoolAcademicBlock({
 }
 
 /* ── Main Component ─────────────────────────── */
-export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Props) {
+export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOnly }: Props) {
   const cat = data.program_category;
   const isSchool = cat === 'school';
   const needsGraduation = ['postgraduate', 'mba_pgdm', 'professional', 'bed', 'deled'].includes(cat);
@@ -782,6 +783,8 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
       {rulesLoaded && perCourseResults.length > 0 && (
         <EligibilityCards results={perCourseResults} />
       )}
+
+      <fieldset disabled={readOnly} className={readOnly ? "pointer-events-none opacity-75" : ""}>
 
       {isSchool ? (
         <SchoolAcademicBlock
@@ -937,6 +940,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving }: Prop
           </p>
         </div>
       )}
+      </fieldset>
 
       <div className="flex justify-between">
         <Button variant="outline" onClick={onBack} className="gap-2">

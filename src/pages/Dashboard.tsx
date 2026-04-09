@@ -567,37 +567,94 @@ const StudentDashboard = () => (
   </>
 );
 
-const ParentDashboard = () => (
-  <>
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      {[
-        { label: "Child Attendance", value: "—", icon: ClipboardCheck, iconBg: "bg-pastel-green" },
-        { label: "Fee Due",          value: "—", icon: IndianRupee,    iconBg: "bg-pastel-red" },
-        { label: "Announcements",    value: "—", icon: Bell,           iconBg: "bg-pastel-blue" },
-      ].map((stat) => (
-        <Card key={stat.label} className="border-border/60 shadow-none">
-          <CardContent className="p-5">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{stat.label}</p>
-                <p className="text-2xl font-bold text-foreground mt-1.5">{stat.value}</p>
-              </div>
-              <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${stat.iconBg}`}>
-                <stat.icon className="h-5 w-5 text-foreground/70" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      ))}
+const ParentDashboard = () => {
+  const { user } = useAuth();
+  const [children, setChildren] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const fetchChildren = async () => {
+      setLoading(true);
+      const { data } = await supabase
+        .from("students")
+        .select("id, name, admission_no, pre_admission_no, section, status, phone, grade, courses:course_id(name), campuses:campus_id(name)")
+        .or(`father_user_id.eq.${user.id},mother_user_id.eq.${user.id},guardian_user_id.eq.${user.id}`);
+      setChildren(data || []);
+      setLoading(false);
+    };
+    fetchChildren();
+  }, [user?.id]);
+
+  if (loading) return (
+    <div className="flex h-64 items-center justify-center">
+      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
     </div>
-    <Card className="border-border/60 shadow-none">
-      <CardContent className="p-8 text-center">
-        <Users className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
-        <p className="text-sm text-muted-foreground">Your child's academic information will appear here.</p>
-      </CardContent>
-    </Card>
-  </>
-);
+  );
+
+  const statusColor: Record<string, string> = {
+    active: "bg-green-100 text-green-700",
+    pre_admitted: "bg-blue-100 text-blue-700",
+    inactive: "bg-gray-100 text-gray-600",
+    alumni: "bg-purple-100 text-purple-700",
+  };
+
+  return (
+    <>
+      <Card className="border-border/60 shadow-none">
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <Users className="h-5 w-5 text-primary" />
+            <CardTitle className="text-base font-semibold">My Children</CardTitle>
+            <Badge variant="secondary" className="ml-auto text-xs">{children.length}</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {children.length === 0 ? (
+            <div className="text-center py-10">
+              <Users className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground">No students linked to your account yet.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {children.map((child: any) => {
+                const admNo = child.admission_no || child.pre_admission_no || "—";
+                const initials = (child.name || "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase();
+                return (
+                  <Link
+                    key={child.id}
+                    to={`/students/${child.admission_no || child.pre_admission_no}`}
+                    className="flex items-start gap-4 rounded-xl border border-border/60 p-4 hover:bg-muted/40 transition-colors"
+                  >
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-pastel-purple text-sm font-bold text-foreground/70">
+                      {initials}
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold text-foreground truncate">{child.name}</p>
+                        <Badge className={`text-[11px] font-medium border-0 shrink-0 ${statusColor[child.status] || "bg-muted text-foreground/70"}`}>
+                          {(child.status || "—").replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {(child.courses as any)?.name || "—"} {child.grade ? `· ${child.grade}` : ""} {child.section ? `· Sec ${child.section}` : ""}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Adm No: <span className="font-medium text-foreground/80">{admNo}</span>
+                        {(child.campuses as any)?.name ? ` · ${(child.campuses as any).name}` : ""}
+                      </p>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 mt-1" />
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </>
+  );
+};
 
 // ── Page ────────────────────────────────────────────────────────────────────
 
@@ -606,6 +663,8 @@ const Dashboard = () => {
 
   // Redirect consultant to their portal
   if (role === "consultant") return <Navigate to="/consultant-portal" replace />;
+  // Redirect counsellor to admissions dashboard
+  if (role === "counsellor") return <Navigate to="/admissions" replace />;
 
   const isAdmin   = ["super_admin", "campus_admin", "admission_head", "principal"].includes(role || "");
   const isFaculty = ["faculty", "teacher"].includes(role || "");

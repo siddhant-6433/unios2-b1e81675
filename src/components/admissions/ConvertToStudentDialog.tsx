@@ -16,10 +16,12 @@ interface ConvertToStudentDialogProps {
     course_id: string | null; campus_id: string | null;
     stage: string; pre_admission_no: string | null; admission_no: string | null;
   };
+  courseName?: string;
+  campusName?: string;
   onSuccess: () => void;
 }
 
-export function ConvertToStudentDialog({ open, onOpenChange, lead, onSuccess }: ConvertToStudentDialogProps) {
+export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, campusName, onSuccess }: ConvertToStudentDialogProps) {
   const { user } = useAuth();
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
@@ -92,6 +94,19 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, onSuccess }: 
         : `Admitted with AN: ${an} (PAN: ${pan})`,
       new_stage: isPreadmit ? "pre_admitted" as any : "admitted" as any,
     });
+
+    // Send student_welcome WhatsApp (fire-and-forget)
+    if (lead.phone) {
+      const admNo = an || pan;
+      supabase.functions.invoke("whatsapp-send", {
+        body: {
+          template_key: "student_welcome",
+          phone: lead.phone,
+          params: [lead.name, admNo, courseName || "your course", campusName || "NIMT Educational Institutions"],
+          lead_id: lead.id,
+        },
+      }).catch(() => {});
+    }
 
     toast({ title: isPreadmit ? "Pre-admission complete" : "Admission complete", description: isPreadmit ? `PAN: ${pan}` : `AN: ${an}` });
     setSaving(false);

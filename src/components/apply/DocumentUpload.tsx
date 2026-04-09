@@ -13,6 +13,7 @@ interface Props {
   onNext: () => void;
   onBack: () => void;
   saving: boolean;
+  readOnly?: boolean;
 }
 
 interface DocSpec {
@@ -106,7 +107,7 @@ function getRequiredDocs(
   return base;
 }
 
-export function DocumentUpload({ data, onChange, onNext, onBack, saving }: Props) {
+export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnly }: Props) {
   const { toast } = useToast();
   const [uploaded, setUploaded] = useState<Record<string, boolean>>({});
   const [uploading, setUploading] = useState<string | null>(null);
@@ -140,6 +141,7 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving }: Props
         <p className="text-sm text-muted-foreground">Upload required documents. Accepted: PDF, JPG, PNG (max 5MB).</p>
       </div>
 
+      <fieldset disabled={readOnly} className={readOnly ? "pointer-events-none opacity-75" : ""}>
       {/* Passport Photo */}
       {data.program_category !== 'school' && (
         <PhotoUpload
@@ -182,6 +184,7 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving }: Props
           </Card>
         ))}
       </div>
+      </fieldset>
 
       <div className="flex justify-between">
         <Button variant="outline" onClick={onBack} className="gap-2">

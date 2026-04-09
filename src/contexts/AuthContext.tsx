@@ -6,6 +6,7 @@ import type { Database } from "@/integrations/supabase/types";
 type AppRole = Database["public"]["Enums"]["app_role"];
 
 interface Profile {
+  id: string;
   display_name: string | null;
   phone: string | null;
   avatar_url: string | null;
@@ -75,7 +76,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const fetchUserData = async (userId: string, authUser?: User) => {
     const [profileRes, roleRes] = await Promise.all([
-      supabase.from("profiles").select("display_name, phone, avatar_url, campus, department, institution").eq("user_id", userId).single(),
+      supabase.from("profiles").select("id, display_name, phone, avatar_url, campus, department, institution").eq("user_id", userId).single(),
       supabase.rpc("get_user_role", { _user_id: userId }),
     ]);
 
@@ -96,7 +97,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const { data: upserted } = await supabase
         .from("profiles")
         .upsert({ user_id: userId, display_name: displayName, ...(phone && { phone }) }, { onConflict: "user_id" })
-        .select("display_name, phone, avatar_url, campus, department, institution")
+        .select("id, display_name, phone, avatar_url, campus, department, institution")
         .single();
       if (upserted) setProfile(upserted);
     }
@@ -138,7 +139,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (role !== "super_admin") return;
 
     const [profileRes, roleRes] = await Promise.all([
-      supabase.from("profiles").select("display_name, phone, avatar_url, campus, department, institution").eq("user_id", userId).single(),
+      supabase.from("profiles").select("id, display_name, phone, avatar_url, campus, department, institution").eq("user_id", userId).single(),
       supabase.rpc("get_user_role", { _user_id: userId }),
     ]);
 

@@ -129,6 +129,106 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Send WhatsApp staff_welcome if phone is provided
+    if (normalizedPhone) {
+      try {
+        const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
+        const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+        if (waToken && phoneNumberId) {
+          const roleLabel = role.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+          const waPhone = normalizedPhone.replace(/[^0-9]/g, "");
+          const waPayload = {
+            messaging_product: "whatsapp",
+            to: waPhone,
+            type: "template",
+            template: {
+              name: "nimt_new_staff",
+              language: { code: "en" },
+              components: [{
+                type: "body",
+                parameters: [
+                  { type: "text", text: display_name || email },
+                  { type: "text", text: roleLabel },
+                  { type: "text", text: campus || "NIMT Educational Institutions" },
+                ],
+              }],
+            },
+          };
+          const waRes = await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${waToken}`, "Content-Type": "application/json" },
+            body: JSON.stringify(waPayload),
+          });
+          const waResult = await waRes.json();
+          if (!waRes.ok) {
+            console.error("Staff WhatsApp failed:", waResult?.error?.message);
+          } else {
+            const roleLabel = role.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+            const campusLabel = campus || "NIMT Educational Institutions";
+            // Log the full rendered message text
+            await adminClient.from("whatsapp_messages").insert({
+              wa_message_id: waResult?.messages?.[0]?.id || null,
+              direction: "outbound",
+              phone: waPhone,
+              message_type: "template",
+              content: `Welcome to NIMT Educational Institutions, ${display_name || email}!\n\nYour account has been created.\nLogin: ${email}\nRole: ${roleLabel}\nCampus: ${campusLabel}\n\nPlease login at https://uni.nimt.ac.in to get started.\n\nFor any assistance, contact the admin office.`,
+              template_key: "staff_welcome",
+              status: "sent",
+              is_read: true,
+            });
+          }
+        }
+      } catch (e) {
+        console.error("Staff WhatsApp error:", e);
+      }
+    }
+
+    // Send welcome email with credentials (if password was set)
+    if (password) {
+      const resendApiKey = Deno.env.get("RESEND_API_KEY");
+      if (resendApiKey) {
+        try {
+          // Fetch template from DB
+          const { data: tpl } = await adminClient
+            .from("email_templates")
+            .select("subject, body_html")
+            .eq("slug", "new-user-welcome")
+            .eq("is_active", true)
+            .single();
+
+          if (tpl) {
+            const roleLabel = role.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+            const vars: Record<string, string> = {
+              display_name: display_name || email,
+              email,
+              password,
+              role: roleLabel,
+            };
+
+            let subject = tpl.subject;
+            let bodyHtml = tpl.body_html;
+            for (const [k, v] of Object.entries(vars)) {
+              const re = new RegExp(`\\{\\{${k}\\}\\}`, "g");
+              subject = subject.replace(re, v);
+              bodyHtml = bodyHtml.replace(re, v);
+            }
+
+            const emailFrom = Deno.env.get("EMAIL_FROM") || "admissions@nimt.ac.in";
+            await fetch("https://api.resend.com/emails", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${resendApiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ from: emailFrom, to: [email], subject, html: bodyHtml }),
+            });
+          }
+        } catch (e) {
+          console.error("Welcome email failed:", e);
+        }
+      }
+    }
+
     return new Response(
       JSON.stringify({ success: true, user_id: newUser.user.id }),
       {

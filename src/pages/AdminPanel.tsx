@@ -11,6 +11,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import EligibilityConfigPanel from "@/components/admin/EligibilityConfigPanel";
+import { PermissionMatrixPanel } from "@/components/admin/PermissionMatrixPanel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import InviteUserDialog from "@/components/admin/InviteUserDialog";
 import BulkImportDialog from "@/components/admin/BulkImportDialog";
@@ -60,6 +61,7 @@ const AdminPanel = () => {
   const [users, setUsers] = useState<UserWithRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [userSubTab, setUserSubTab] = useState<"employees" | "families" | "leads">("employees");
   const [roleFilter, setRoleFilter] = useState<AppRole | "all" | "none">("all");
   const [editingUser, setEditingUser] = useState<string | null>(null);
   const [savingUser, setSavingUser] = useState<string | null>(null);
@@ -275,6 +277,9 @@ const AdminPanel = () => {
           <TabsTrigger value="approval-letters" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
             Approval Letters
           </TabsTrigger>
+          <TabsTrigger value="permissions" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
+            Permissions
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="users" className="mt-6">
@@ -288,6 +293,26 @@ const AdminPanel = () => {
               </button>
             </div>
 
+            <div className="flex items-center gap-2">
+              {([
+                { key: "employees" as const, label: "Employees" },
+                { key: "families" as const, label: "Students & Families" },
+                { key: "leads" as const, label: "Leads & Applicants" },
+              ]).map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => { setUserSubTab(tab.key); setSearch(""); setRoleFilter("all"); }}
+                  className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
+                    userSubTab === tab.key
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-input bg-background text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
             <div className="flex items-center gap-3 flex-wrap">
               <div className="relative max-w-sm flex-1 min-w-[200px]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -295,24 +320,51 @@ const AdminPanel = () => {
                   onChange={(e) => setSearch(e.target.value)}
                   className="w-full rounded-xl border border-input bg-card pl-9 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20" />
               </div>
-              <select
-                value={roleFilter}
-                onChange={(e) => setRoleFilter(e.target.value as AppRole | "all" | "none")}
-                className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-              >
-                <option value="all">All Roles</option>
-                <option value="none">No Role</option>
-                {ALL_ROLES.map((r) => (
-                  <option key={r.value} value={r.value}>{r.label} ({users.filter((u) => u.role === r.value).length})</option>
-                ))}
-              </select>
+              {userSubTab === "employees" && (
+                <select
+                  value={roleFilter}
+                  onChange={(e) => setRoleFilter(e.target.value as AppRole | "all" | "none")}
+                  className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                >
+                  <option value="all">All Roles</option>
+                  {ALL_ROLES.filter((r) => !["student", "parent"].includes(r.value)).map((r) => (
+                    <option key={r.value} value={r.value}>{r.label} ({users.filter((u) => u.role === r.value).length})</option>
+                  ))}
+                </select>
+              )}
             </div>
 
+            {(() => {
+              const subFiltered = filtered.filter((u) => {
+                if (userSubTab === "employees") return u.role && !["student", "parent"].includes(u.role);
+                if (userSubTab === "families") return u.role === "student" || u.role === "parent";
+                return !u.role;
+              });
+              const allSubUsers = users.filter((u) => {
+                if (userSubTab === "employees") return u.role && !["student", "parent"].includes(u.role);
+                if (userSubTab === "families") return u.role === "student" || u.role === "parent";
+                return !u.role;
+              });
+              return (<>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <SummaryCard label="Total Users" value={users.length} bg="bg-pastel-blue" />
-              <SummaryCard label="With Roles" value={users.filter((u) => u.role).length} bg="bg-pastel-green" />
-              <SummaryCard label="No Role" value={users.filter((u) => !u.role).length} bg="bg-pastel-yellow" />
-              <SummaryCard label="Admins" value={users.filter((u) => u.role === "super_admin" || u.role === "campus_admin").length} bg="bg-pastel-purple" />
+              {userSubTab === "employees" && (<>
+                <SummaryCard label="Total Employees" value={allSubUsers.length} bg="bg-pastel-blue" />
+                <SummaryCard label="Admins" value={allSubUsers.filter((u) => u.role === "super_admin" || u.role === "campus_admin").length} bg="bg-pastel-purple" />
+                <SummaryCard label="Counsellors" value={allSubUsers.filter((u) => u.role === "counsellor").length} bg="bg-pastel-green" />
+                <SummaryCard label="Faculty" value={allSubUsers.filter((u) => u.role === "faculty" || u.role === "teacher").length} bg="bg-pastel-orange" />
+              </>)}
+              {userSubTab === "families" && (<>
+                <SummaryCard label="Total" value={allSubUsers.length} bg="bg-pastel-blue" />
+                <SummaryCard label="Students" value={allSubUsers.filter((u) => u.role === "student").length} bg="bg-pastel-green" />
+                <SummaryCard label="Parents" value={allSubUsers.filter((u) => u.role === "parent").length} bg="bg-pastel-mint" />
+                <SummaryCard label="Shown" value={subFiltered.length} bg="bg-pastel-yellow" />
+              </>)}
+              {userSubTab === "leads" && (<>
+                <SummaryCard label="Total Leads" value={allSubUsers.length} bg="bg-pastel-blue" />
+                <SummaryCard label="With Email" value={allSubUsers.filter((u) => u.email).length} bg="bg-pastel-green" />
+                <SummaryCard label="With Phone" value={allSubUsers.filter((u) => u.phone).length} bg="bg-pastel-orange" />
+                <SummaryCard label="Shown" value={subFiltered.length} bg="bg-pastel-yellow" />
+              </>)}
             </div>
 
             <div className="rounded-xl bg-card card-shadow overflow-hidden">
@@ -320,7 +372,7 @@ const AdminPanel = () => {
                 <div className="flex items-center justify-center py-16">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
-              ) : filtered.length === 0 ? (
+              ) : subFiltered.length === 0 ? (
                 <div className="py-16 text-center">
                   <Users className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
                   <p className="text-sm text-muted-foreground">No users found</p>
@@ -338,10 +390,11 @@ const AdminPanel = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.map((user) => {
+                    {subFiltered.map((user) => {
                       const initials = (user.display_name || "?").split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
                       const isEditing = editingUser === user.user_id;
                       const isSaving = savingUser === user.user_id;
+                      const isFamiliesTab = userSubTab === "families";
                       return (
                         <tr key={user.user_id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
                           <td className="px-4 py-3">
@@ -389,20 +442,24 @@ const AdminPanel = () => {
                               </button>
                               {!isEditing && (
                                 <>
-                                  <button onClick={async () => { await startImpersonating(user.user_id); navigate("/"); }}
-                                    className="rounded-lg bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-500/20 transition-colors flex items-center gap-1"
-                                    title="View as this user">
-                                    <UserCheck className="h-3.5 w-3.5" />Impersonate
-                                  </button>
+                                  {!isFamiliesTab && (
+                                    <button onClick={async () => { await startImpersonating(user.user_id); navigate("/"); }}
+                                      className="rounded-lg bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-500/20 transition-colors flex items-center gap-1"
+                                      title="View as this user">
+                                      <UserCheck className="h-3.5 w-3.5" />Impersonate
+                                    </button>
+                                  )}
                                   <button onClick={() => setSetPasswordTarget({ userId: user.user_id, name: user.display_name || "User" })}
                                     className="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/80 transition-colors flex items-center gap-1"
                                     title="Set password">
                                     <KeyRound className="h-3.5 w-3.5" />Password
                                   </button>
-                                  <button onClick={() => setEditingUser(user.user_id)}
-                                    className="rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors">
-                                    Change Role
-                                  </button>
+                                  {!isFamiliesTab && (
+                                    <button onClick={() => setEditingUser(user.user_id)}
+                                      className="rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors">
+                                      Change Role
+                                    </button>
+                                  )}
                                   <button onClick={() => setDeleteTarget({ userId: user.user_id, name: user.display_name || "Unnamed" })}
                                     className="rounded-lg bg-destructive/10 p-1.5 text-destructive hover:bg-destructive/20 transition-colors"
                                     title="Delete user">
@@ -419,6 +476,8 @@ const AdminPanel = () => {
                 </table>
               )}
             </div>
+              </>);
+            })()}
 
             <InviteUserDialog open={inviteOpen} onClose={() => setInviteOpen(false)} onSuccess={() => fetchUsers()} />
             <BulkImportDialog open={bulkOpen} onClose={() => setBulkOpen(false)} onSuccess={() => fetchUsers()} />
@@ -475,6 +534,10 @@ const AdminPanel = () => {
 
         <TabsContent value="approval-letters" className="mt-6">
           <ApprovalLettersPanel />
+        </TabsContent>
+
+        <TabsContent value="permissions" className="mt-6">
+          <PermissionMatrixPanel />
         </TabsContent>
       </Tabs>
     </div>

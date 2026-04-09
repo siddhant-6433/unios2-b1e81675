@@ -8,12 +8,13 @@ interface Props {
   onNext: () => void;
   onBack: () => void;
   saving: boolean;
+  readOnly?: boolean;
 }
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 const textareaCls = `${inputCls} resize-none`;
 
-export function ExtracurricularDetails({ data, onChange, onNext, onBack, saving }: Props) {
+export function ExtracurricularDetails({ data, onChange, onNext, onBack, saving, readOnly }: Props) {
   const ext = data.extracurricular || {};
   const update = (field: string, val: string) => {
     onChange({ extracurricular: { ...ext, [field]: val } });
@@ -26,6 +27,7 @@ export function ExtracurricularDetails({ data, onChange, onNext, onBack, saving 
         <p className="text-sm text-muted-foreground">Optional — share your achievements and interests.</p>
       </div>
 
+      <fieldset disabled={readOnly} className={readOnly ? "pointer-events-none opacity-75" : ""}>
       <div className="space-y-4">
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Achievements & Awards</label>
@@ -58,6 +60,7 @@ export function ExtracurricularDetails({ data, onChange, onNext, onBack, saving 
           </div>
         </div>
       </div>
+      </fieldset>
 
       <div className="flex justify-between">
         <Button variant="outline" onClick={onBack} className="gap-2">

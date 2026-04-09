@@ -8,6 +8,7 @@ interface Props {
   onNext: () => void;
   onBack: () => void;
   saving: boolean;
+  readOnly?: boolean;
 }
 
 interface Sibling {
@@ -20,7 +21,7 @@ interface Sibling {
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 
-export function SiblingDetails({ data, onChange, onNext, onBack, saving }: Props) {
+export function SiblingDetails({ data, onChange, onNext, onBack, saving, readOnly }: Props) {
   const schoolDetails = (data.school_details || {}) as Record<string, any>;
   const siblings: Sibling[] = schoolDetails.siblings || [];
 
@@ -50,6 +51,7 @@ export function SiblingDetails({ data, onChange, onNext, onBack, saving }: Props
         </p>
       </div>
 
+      <fieldset disabled={readOnly} className={readOnly ? "pointer-events-none opacity-75" : ""}>
       {siblings.map((sib, i) => (
         <div key={i} className="p-4 rounded-xl border border-border/60 bg-muted/30 space-y-3 relative">
           <div className="flex items-center justify-between">
@@ -91,6 +93,7 @@ export function SiblingDetails({ data, onChange, onNext, onBack, saving }: Props
       <Button variant="outline" size="sm" onClick={addSibling} className="gap-1.5 text-xs">
         <Plus className="h-3.5 w-3.5" /> Add Sibling
       </Button>
+      </fieldset>
 
       <div className="flex justify-between">
         <Button variant="outline" onClick={onBack} className="gap-2">
