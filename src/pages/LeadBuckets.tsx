@@ -52,7 +52,7 @@ function maskPhone(phone: string): string {
 }
 
 export default function LeadBuckets() {
-  const { user, role } = useAuth();
+  const { user, role, profile } = useAuth();
   const { selectedCampusId } = useCampus();
   const { toast } = useToast();
 
@@ -77,27 +77,23 @@ export default function LeadBuckets() {
   const [selectedCounsellor, setSelectedCounsellor] = useState<string>("");
 
   const fetchCounts = async () => {
-    const base = supabase.from("unassigned_leads_bucket" as any);
-    let schoolQ = base.select("id", { count: "exact", head: true }).eq("bucket", "school");
-    let collegeQ = supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true }).eq("bucket", "college");
-    if (selectedCampusId !== "all") {
-      schoolQ = schoolQ.eq("campus_id", selectedCampusId);
-      collegeQ = collegeQ.eq("campus_id", selectedCampusId);
-    }
-    const [sRes, cRes] = await Promise.all([schoolQ, collegeQ]);
+    // Show ALL unassigned leads — don't filter by campus since many leads have no campus
+    const [sRes, cRes] = await Promise.all([
+      supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true }).eq("bucket", "school"),
+      supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true }).eq("bucket", "college"),
+    ]);
     setSchoolCount(sRes.count ?? 0);
     setCollegeCount(cRes.count ?? 0);
   };
 
   const fetchLeads = async () => {
     setLoading(true);
-    let query = supabase
+    // Don't filter by campus — counsellors need to see all unassigned leads
+    const { data, error } = await supabase
       .from("unassigned_leads_bucket" as any)
       .select("*")
       .eq("bucket", activeBucket)
       .order("created_at", { ascending: false });
-    if (selectedCampusId !== "all") query = query.eq("campus_id", selectedCampusId);
-    const { data, error } = await query;
     if (error) console.error("Lead buckets fetch error:", error);
     setLeads((data || []) as any);
     setSelectedIds(new Set());
@@ -110,13 +106,14 @@ export default function LeadBuckets() {
   useEffect(() => {
     if (!isAdminRole) return;
     (async () => {
+      // counsellor_id FK → profiles.id, so we need profile IDs not user IDs
       const { data } = await supabase
         .from("user_roles")
-        .select("user_id, profiles:user_id(display_name)")
+        .select("user_id, profiles:user_id(id, display_name)")
         .in("role", ["counsellor", "admission_head"]);
       setCounsellors(
         (data || []).map((r: any) => ({
-          id: r.user_id,
+          id: r.profiles?.id || r.user_id, // profiles.id for counsellor_id FK
           display_name: r.profiles?.display_name || "Unknown",
         }))
       );
@@ -146,7 +143,9 @@ export default function LeadBuckets() {
   };
 
   const handleAssign = async () => {
-    const assignTo = isAdminRole ? selectedCounsellor : user?.id;
+    // counsellor_id FK references profiles.id, NOT auth.users.id
+    // For self-assign: use profile.id. For admin-assign: selectedCounsellor is already profile.id
+    const assignTo = isAdminRole ? selectedCounsellor : profile?.id;
     if (!assignTo) return;
 
     setAssigning(true);
