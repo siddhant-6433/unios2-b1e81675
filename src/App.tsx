@@ -12,6 +12,7 @@ import Dashboard from "./pages/Dashboard";
 import Admissions from "./pages/Admissions";
 import LeadDetail from "./pages/LeadDetail";
 import LeadAllocation from "./pages/LeadAllocation";
+import LeadBuckets from "./pages/LeadBuckets";
 import GlobalSearch from "./pages/GlobalSearch";
 import Students from "./pages/Students";
 import StudentProfile from "./pages/StudentProfile";
@@ -38,6 +39,22 @@ import NotFound from "./pages/NotFound";
 import ApplicantPortal from "./pages/ApplicantPortal";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
+// IB Academics pages
+import ProgrammeOfInquiry from "./pages/ib/ProgrammeOfInquiry";
+import UnitPlanner from "./pages/ib/UnitPlanner";
+import UnitDetail from "./pages/ib/UnitDetail";
+import Gradebook from "./pages/ib/Gradebook";
+import AssessmentDetail from "./pages/ib/AssessmentDetail";
+import Portfolios from "./pages/ib/Portfolios";
+import StudentPortfolio from "./pages/ib/StudentPortfolio";
+import ActionService from "./pages/ib/ActionService";
+import Exhibition from "./pages/ib/Exhibition";
+import ReportCards from "./pages/ib/ReportCards";
+import ReportCardView from "./pages/ib/ReportCardView";
+import ReportTemplates from "./pages/ib/ReportTemplates";
+import MYPProjects from "./pages/ib/MYPProjects";
+import ProjectDetail from "./pages/ib/ProjectDetail";
+import InterdisciplinaryUnits from "./pages/ib/InterdisciplinaryUnits";
 
 const queryClient = new QueryClient();
 
@@ -77,6 +94,7 @@ const App = () => (
                       <Route path="/admissions" element={<Admissions />} />
                       <Route path="/admissions/:id" element={<LeadDetail />} />
                       <Route path="/lead-allocation" element={<LeadAllocation />} />
+                      <Route path="/lead-buckets" element={<LeadBuckets />} />
                       <Route path="/search" element={<GlobalSearch />} />
                       <Route path="/students" element={<Students />} />
                       <Route path="/students/:admissionNo" element={<StudentProfile />} />
@@ -95,6 +113,22 @@ const App = () => (
                       <Route path="/reports" element={<Reports />} />
                       <Route path="/documents" element={<Documents />} />
                       <Route path="/settings" element={<Settings />} />
+                      {/* IB Academics routes */}
+                      <Route path="/ib/poi" element={<ProgrammeOfInquiry />} />
+                      <Route path="/ib/units" element={<UnitPlanner />} />
+                      <Route path="/ib/units/:id" element={<UnitDetail />} />
+                      <Route path="/ib/gradebook" element={<Gradebook />} />
+                      <Route path="/ib/assessments/:id" element={<AssessmentDetail />} />
+                      <Route path="/ib/portfolios" element={<Portfolios />} />
+                      <Route path="/ib/portfolios/:studentId" element={<StudentPortfolio />} />
+                      <Route path="/ib/action" element={<ActionService />} />
+                      <Route path="/ib/exhibition" element={<Exhibition />} />
+                      <Route path="/ib/reports" element={<ReportCards />} />
+                      <Route path="/ib/reports/templates" element={<ReportTemplates />} />
+                      <Route path="/ib/reports/:studentId/:term" element={<ReportCardView />} />
+                      <Route path="/ib/projects" element={<MYPProjects />} />
+                      <Route path="/ib/projects/:id" element={<ProjectDetail />} />
+                      <Route path="/ib/idu" element={<InterdisciplinaryUnits />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </AppLayout>

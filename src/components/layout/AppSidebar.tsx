@@ -1,13 +1,16 @@
+import { useState, useEffect } from "react";
 import uniosLogo from "@/assets/unios-logo.png";
 import {
   LayoutDashboard, Users, GraduationCap, IndianRupee,
   ClipboardCheck, Settings, LogOut,
   BookOpen, BarChart3, FileText, Search, Shuffle, Handshake, PieChart,
-  ChevronDown, Phone, Calendar, MessageSquare, Newspaper, Building2, School, ShieldCheck, Zap
+  ChevronDown, Phone, Calendar, MessageSquare, Newspaper, Building2, School, ShieldCheck, Zap, Inbox,
+  Globe, FolderOpen, Heart, Award, Target, GitMerge
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
   SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem,
@@ -20,7 +23,8 @@ import { useCampus } from "@/contexts/CampusContext";
 type AppRole =
   | "super_admin" | "campus_admin" | "principal" | "admission_head"
   | "counsellor" | "accountant" | "faculty" | "teacher"
-  | "data_entry" | "office_assistant" | "hostel_warden" | "consultant" | "student" | "parent";
+  | "data_entry" | "office_assistant" | "hostel_warden" | "consultant" | "student" | "parent"
+  | "ib_coordinator";
 
 type MenuItem = { title: string; url: string; icon: any; roles?: AppRole[]; badge?: number };
 
@@ -28,7 +32,7 @@ const allRolesExcept = (...excluded: AppRole[]): AppRole[] => {
   const all: AppRole[] = [
     "super_admin","campus_admin","principal","admission_head","counsellor",
     "accountant","faculty","teacher","data_entry","office_assistant",
-    "hostel_warden","consultant","student","parent",
+    "hostel_warden","consultant","student","parent","ib_coordinator",
   ];
   return all.filter(r => !excluded.includes(r));
 };
@@ -50,6 +54,7 @@ const admissionSubMenu: MenuItem[] = [
   { title: "Leads", url: "/admissions", icon: GraduationCap, roles: [...adminRoles, "admission_head", "counsellor", "data_entry"] },
   { title: "WhatsApp", url: "/whatsapp-inbox", icon: MessageSquare, roles: [...adminRoles, "admission_head", "counsellor"] },
   { title: "Performance", url: "/counsellor-dashboard", icon: BarChart3, roles: [...adminRoles, "admission_head"] },
+  { title: "Lead Buckets", url: "/lead-buckets", icon: Inbox, roles: [...adminRoles, "admission_head", "counsellor"] },
   { title: "Lead Allocation", url: "/lead-allocation", icon: Shuffle, roles: ["super_admin", "admission_head"] },
   { title: "Automation", url: "/automation-rules", icon: Zap, roles: ["super_admin", "admission_head"] },
   { title: "Consultants", url: "/consultants", icon: Handshake, roles: [...adminRoles, "admission_head", "counsellor"] },
@@ -57,6 +62,18 @@ const admissionSubMenu: MenuItem[] = [
   { title: "Courses & Fees", url: "/fee-structures", icon: IndianRupee, roles: [...adminRoles, "admission_head", "counsellor", "consultant"] },
   { title: "My Leads", url: "/consultant-portal", icon: Users, roles: ["consultant"] },
   { title: "Analytics", url: "/admission-analytics", icon: PieChart, roles: [...adminRoles, "admission_head"] },
+];
+
+const ibAcademicsSubMenu: MenuItem[] = [
+  { title: "Programme of Inquiry", url: "/ib/poi",        icon: Globe,      roles: [...adminRoles, "ib_coordinator", "faculty", "teacher"] },
+  { title: "Unit Planner",         url: "/ib/units",      icon: BookOpen,   roles: [...adminRoles, "ib_coordinator", "faculty", "teacher"] },
+  { title: "Gradebook",            url: "/ib/gradebook",  icon: BarChart3,  roles: [...adminRoles, "ib_coordinator", "faculty", "teacher"] },
+  { title: "Portfolios",           url: "/ib/portfolios", icon: FolderOpen, roles: [...adminRoles, "ib_coordinator", "faculty", "teacher", "student", "parent"] },
+  { title: "Action & Service",     url: "/ib/action",     icon: Heart,      roles: [...adminRoles, "ib_coordinator", "faculty", "teacher", "student"] },
+  { title: "Report Cards",         url: "/ib/reports",    icon: FileText,   roles: [...adminRoles, "ib_coordinator", "faculty", "teacher", "student", "parent"] },
+  { title: "Exhibition",           url: "/ib/exhibition", icon: Award,      roles: [...adminRoles, "ib_coordinator", "faculty", "teacher"] },
+  { title: "MYP Projects",         url: "/ib/projects",   icon: Target,     roles: [...adminRoles, "ib_coordinator", "faculty", "teacher", "student"] },
+  { title: "IDU",                   url: "/ib/idu",       icon: GitMerge,   roles: [...adminRoles, "ib_coordinator", "faculty", "teacher"] },
 ];
 
 const managementMenu: MenuItem[] = [
@@ -70,6 +87,7 @@ const roleLabels: Record<string, string> = {
   faculty: "Faculty", teacher: "Teacher", student: "Student", parent: "Parent",
   counsellor: "Counsellor", accountant: "Accountant", admission_head: "Admission Head",
   data_entry: "Data Entry", office_assistant: "Office Assistant", hostel_warden: "Hostel Warden",
+  ib_coordinator: "IB Coordinator",
 };
 
 export function AppSidebar() {
@@ -94,10 +112,53 @@ export function AppSidebar() {
     return role && item.roles.includes(role);
   };
 
+  // WhatsApp unread count
+  const [waUnread, setWaUnread] = useState(0);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from("whatsapp_conversations" as any)
+        .select("unread_count");
+      if (data) {
+        setWaUnread((data as any[]).reduce((sum: number, c: any) => sum + (c.unread_count || 0), 0));
+      }
+    })();
+
+    const channel = supabase
+      .channel("wa-unread-sidebar")
+      .on("postgres_changes" as any, {
+        event: "*",
+        schema: "public",
+        table: "whatsapp_messages",
+      }, () => {
+        // Refetch on any message change
+        supabase
+          .from("whatsapp_conversations" as any)
+          .select("unread_count")
+          .then(({ data }) => {
+            if (data) {
+              setWaUnread((data as any[]).reduce((sum: number, c: any) => sum + (c.unread_count || 0), 0));
+            }
+          });
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
   const visibleMain = mainMenu.filter(canSee);
-  const visibleAdmission = admissionSubMenu.filter(canSee);
+  const visibleAdmission = admissionSubMenu.filter(canSee).map(item =>
+    item.url === "/whatsapp-inbox" && waUnread > 0
+      ? { ...item, badge: waUnread }
+      : item
+  );
+  const visibleIB = ibAcademicsSubMenu.filter(canSee);
   const visibleMgmt = managementMenu.filter(canSee);
   const isAdmissionActive = admissionSubMenu.some(item => isActive(item.url));
+  const isIBActive = ibAcademicsSubMenu.some(item => isActive(item.url) || location.pathname.startsWith("/ib/"));
+
+  // IB Academics only shows when Mirai campus is selected (or "all" for super_admin)
+  const isMiraiContext = selectedCampusId === "all" || campuses.find(c => c.id === selectedCampusId)?.name?.toLowerCase().includes("mirai");
 
   const linkClass = "gap-3 rounded-lg px-3 py-2 text-[13px] font-medium text-sidebar-foreground/70 transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
   const activeClass = "!bg-sidebar-accent !text-sidebar-accent-foreground font-semibold";
@@ -176,6 +237,44 @@ export function AppSidebar() {
                     <CollapsibleContent>
                       <SidebarMenuSub>
                         {visibleAdmission.map((item) => (
+                          <SidebarMenuSubItem key={item.title}>
+                            <SidebarMenuSubButton asChild isActive={isActive(item.url)}>
+                              <NavLink to={item.url} className={subLinkClass} activeClassName={activeClass}>
+                                <item.icon className="h-3.5 w-3.5" />
+                                <span className="flex-1">{item.title}</span>
+                                {item.badge ? (
+                                  <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-green-500 text-[9px] font-bold text-white px-1">
+                                    {item.badge > 99 ? "99+" : item.badge}
+                                  </span>
+                                ) : null}
+                              </NavLink>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        ))}
+                      </SidebarMenuSub>
+                    </CollapsibleContent>
+                  </SidebarMenuItem>
+                </Collapsible>
+              )}
+
+              {/* Collapsible IB Academics — only when Mirai campus context */}
+              {isMiraiContext && visibleIB.length > 0 && (
+                <Collapsible defaultOpen={isIBActive} className="group/collapsible">
+                  <SidebarMenuItem>
+                    <CollapsibleTrigger asChild>
+                      <SidebarMenuButton className={`${linkClass} justify-between`} isActive={isIBActive}>
+                        <span className="flex items-center gap-3">
+                          <School className="h-[17px] w-[17px]" />
+                          {!collapsed && <span>IB Academics</span>}
+                        </span>
+                        {!collapsed && (
+                          <ChevronDown className="h-3.5 w-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                        )}
+                      </SidebarMenuButton>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <SidebarMenuSub>
+                        {visibleIB.map((item) => (
                           <SidebarMenuSubItem key={item.title}>
                             <SidebarMenuSubButton asChild isActive={isActive(item.url)}>
                               <NavLink to={item.url} className={subLinkClass} activeClassName={activeClass}>

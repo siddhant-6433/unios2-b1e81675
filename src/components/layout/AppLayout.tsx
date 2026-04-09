@@ -1,7 +1,8 @@
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { ImpersonationBanner } from "@/components/layout/ImpersonationBanner";
-import { Bell, MessageSquare, Search } from "lucide-react";
+import { NotificationPanel } from "@/components/layout/NotificationPanel";
+import { MessageSquare, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -19,6 +20,16 @@ const pageTitles: Record<string, string> = {
   "/documents": "Documents",
   "/settings": "Settings",
   "/admin": "User Management",
+  "/ib/poi": "Programme of Inquiry",
+  "/ib/units": "Unit Planner",
+  "/ib/gradebook": "Gradebook",
+  "/ib/portfolios": "Portfolios",
+  "/ib/action": "Action & Service",
+  "/ib/reports": "Report Cards",
+  "/ib/reports/templates": "Report Templates",
+  "/ib/exhibition": "Exhibition",
+  "/ib/projects": "MYP Projects",
+  "/ib/idu": "Interdisciplinary Units",
 };
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
@@ -43,10 +54,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 </div>
               </div>
               <div className="flex items-center gap-0.5">
-                <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-muted-foreground">
-                  <Bell className="h-[18px] w-[18px]" />
-                  <span className="absolute right-1.5 top-1.5 flex h-2 w-2 rounded-full bg-destructive ring-2 ring-card" />
-                </Button>
+                <NotificationPanel />
                 <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-muted-foreground">
                   <MessageSquare className="h-[18px] w-[18px]" />
                 </Button>
