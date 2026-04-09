@@ -80,6 +80,14 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Resolve counsellor's auth user_id from profiles.id
+    // (leads.counsellor_id → profiles.id, but notifications/followups need auth.users.id)
+    let counsellorAuthUserId: string | null = null;
+    if (lead.counsellor_id) {
+      const { data: cp } = await admin.from("profiles").select("user_id").eq("id", lead.counsellor_id).single();
+      counsellorAuthUserId = cp?.user_id || null;
+    }
+
     let executedCount = 0;
 
     for (const rule of rules) {
@@ -240,7 +248,7 @@ Deno.serve(async (req) => {
               const scheduledAt = new Date(Date.now() + delayHours * 60 * 60 * 1000).toISOString();
               await admin.from("lead_followups").insert({
                 lead_id: lead.id,
-                user_id: lead.counsellor_id || null,
+                user_id: counsellorAuthUserId || null,
                 scheduled_at: scheduledAt,
                 type: action.followup_type || "call",
                 notes: `Auto-scheduled by automation: ${rule.name}`,
@@ -252,7 +260,7 @@ Deno.serve(async (req) => {
 
             case "create_notification": {
               const targetUser = action.notify_counsellor
-                ? lead.counsellor_id
+                ? counsellorAuthUserId
                 : action.user_id;
               if (!targetUser) break;
               await admin.from("notifications").insert({

@@ -106,15 +106,22 @@ export default function LeadBuckets() {
   useEffect(() => {
     if (!isAdminRole) return;
     (async () => {
-      // counsellor_id FK → profiles.id, so we need profile IDs not user IDs
-      const { data } = await supabase
+      // Get counsellor user_ids, then fetch their profiles
+      // leads.counsellor_id FK → profiles.id, so dropdown values must be profiles.id
+      const { data: roles } = await supabase
         .from("user_roles")
-        .select("user_id, profiles:user_id(id, display_name)")
+        .select("user_id")
         .in("role", ["counsellor", "admission_head"]);
+      if (!roles || roles.length === 0) { setCounsellors([]); return; }
+      const userIds = roles.map((r: any) => r.user_id);
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("id, display_name")
+        .in("user_id", userIds);
       setCounsellors(
-        (data || []).map((r: any) => ({
-          id: r.profiles?.id || r.user_id, // profiles.id for counsellor_id FK
-          display_name: r.profiles?.display_name || "Unknown",
+        (profiles || []).map((p: any) => ({
+          id: p.id, // profiles.id — matches leads.counsellor_id FK
+          display_name: p.display_name || "Unknown",
         }))
       );
     })();
