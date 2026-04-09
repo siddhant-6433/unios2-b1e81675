@@ -70,7 +70,7 @@ const stageIcons: Record<string, typeof Users> = {
   new_lead: Users, application_in_progress: FileText, application_fee_paid: CheckCircle, application_submitted: CheckCircle,
   ai_called: Bot, counsellor_call: Phone,
   visit_scheduled: MapPin, interview: UserCheck, offer_sent: FileText,
-  token_paid: CheckCircle, pre_admitted: Clock, admitted: CheckCircle, waitlisted: Clock, rejected: XCircle,
+  token_paid: CheckCircle, pre_admitted: Clock, admitted: CheckCircle, waitlisted: Clock, not_interested: XCircle, rejected: XCircle,
 };
 
 // Lead sources imported from @/config/leadSources
@@ -495,7 +495,7 @@ const Admissions = () => {
         <div className="flex gap-4 overflow-x-auto pb-4 -mx-6 px-6">
           {STAGES.map((stage) => {
             const stageLeads = filtered.filter((l) => l.stage === stage);
-            const StageIcon = stageIcons[stage];
+            const StageIcon = stageIcons[stage] || FileText;
             return (
               <div key={stage} className="min-w-[280px] max-w-[280px] flex-shrink-0">
                 <div className="flex items-center gap-2 mb-3 px-1">
