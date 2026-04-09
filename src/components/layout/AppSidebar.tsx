@@ -110,11 +110,15 @@ export function AppSidebar() {
   const [newLeadCount, setNewLeadCount] = useState(0);
 
   const fetchNewLeadCount = () => {
-    supabase
+    let query = supabase
       .from("leads")
       .select("id", { count: "exact", head: true })
-      .eq("stage", "new_lead")
-      .then(({ count }) => setNewLeadCount(count || 0));
+      .eq("stage", "new_lead");
+    // Counsellors only see their assigned leads
+    if (role === "counsellor" && profile?.id) {
+      query = query.eq("counsellor_id", profile.id);
+    }
+    query.then(({ count }) => setNewLeadCount(count || 0));
   };
 
   useEffect(() => {

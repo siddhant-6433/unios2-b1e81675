@@ -144,9 +144,12 @@ const Admissions = () => {
       .select(`*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`)
       .order("created_at", { ascending: false })
       .limit(500);
-    if (selectedCampusId !== "all") query = query.eq("campus_id", selectedCampusId);
-    // Counsellors only see their own assigned leads
-    if (role === "counsellor" && profile?.id) query = query.eq("counsellor_id", profile.id);
+    // Counsellors see their assigned leads across all campuses
+    if (role === "counsellor" && profile?.id) {
+      query = query.eq("counsellor_id", profile.id);
+    } else if (selectedCampusId !== "all") {
+      query = query.eq("campus_id", selectedCampusId);
+    }
     const { data, error } = await query;
 
     if (data) {
