@@ -4,7 +4,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Loader2, Trash2, ArrowRightLeft } from "lucide-react";
+import {
+  ArrowLeft, Loader2, Trash2, ArrowRightLeft, Phone, MessageSquare,
+  Calendar, Clock, FileText, Bot, UserCheck, Mail, IndianRupee, MapPin, ThumbsDown,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { TransferLeadDialog } from "@/components/admissions/TransferLeadDialog";
@@ -14,8 +17,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { AiCallSummary } from "@/components/leads/AiCallSummary";
 import { LeadInfoCard } from "@/components/leads/LeadInfoCard";
-import { QuickActions } from "@/components/leads/QuickActions";
-import { NextFollowup } from "@/components/leads/NextFollowup";
 import { LeadTimeline } from "@/components/leads/LeadTimeline";
 import { InterviewScoringDialog } from "@/components/admissions/InterviewScoringDialog";
 import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
@@ -23,6 +24,7 @@ import { ConvertToStudentDialog } from "@/components/admissions/ConvertToStudent
 import { SendWhatsAppDialog } from "@/components/leads/SendWhatsAppDialog";
 import { AddSecondaryCounsellorDialog } from "@/components/leads/AddSecondaryCounsellorDialog";
 import { ScheduleVisitDialog } from "@/components/admissions/ScheduleVisitDialog";
+import { ScheduleFollowupDialog } from "@/components/admissions/ScheduleFollowupDialog";
 import { RecordPaymentDialog } from "@/components/admissions/RecordPaymentDialog";
 import { LeadPaymentHistory } from "@/components/admissions/LeadPaymentHistory";
 import { FuzzyDuplicateAlert } from "@/components/admissions/FuzzyDuplicateAlert";
@@ -34,7 +36,7 @@ const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", application_in_progress: "Application In Progress", application_submitted: "Application Submitted",
   ai_called: "AI Called", counsellor_call: "Counsellor Call",
   visit_scheduled: "Visit Scheduled", interview: "Interview", offer_sent: "Offer Sent",
-  token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", rejected: "Rejected",
+  token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", not_interested: "Not Interested", rejected: "Rejected",
 };
 
 const STAGE_ORDER = [
@@ -50,7 +52,7 @@ const stageIndex = (stage: string) => {
 
 /** Auto-advance lead stage only if newStage is ahead of current stage (forward-only). */
 const shouldAutoAdvance = (currentStage: string, newStage: string) => {
-  if (currentStage === "rejected") return false;
+  if (currentStage === "rejected" || currentStage === "not_interested") return false;
   return stageIndex(newStage) > stageIndex(currentStage);
 };
 
@@ -83,10 +85,14 @@ const LeadDetail = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
   const [showScheduleVisit, setShowScheduleVisit] = useState(false);
+  const [showFollowup, setShowFollowup] = useState(false);
   const [showRecordPayment, setShowRecordPayment] = useState(false);
   const [showSendEmail, setShowSendEmail] = useState(false);
   const [paymentRefreshKey, setPaymentRefreshKey] = useState(0);
   const [deletingLead, setDeletingLead] = useState(false);
+  const [showNotInterested, setShowNotInterested] = useState(false);
+  const [notInterestedReason, setNotInterestedReason] = useState("");
+  const [savingNotInterested, setSavingNotInterested] = useState(false);
   const [counsellorName, setCounsellorName] = useState<string | undefined>();
   const [courseName, setCourseName] = useState<string | undefined>();
   const [courseDuration, setCourseDuration] = useState<number | undefined>();
@@ -192,15 +198,55 @@ const LeadDetail = () => {
       lead_id: id, scheduled_by: user?.id,
       visit_date: data.visit_date, campus_id: data.campus_id || null,
     });
-    if (error) toast({ title: "Error", description: error.message, variant: "destructive" });
-    else {
-      await supabase.from("lead_activities").insert({
-        lead_id: id, user_id: profileId, type: "visit",
-        description: `Campus visit scheduled for ${new Date(data.visit_date).toLocaleDateString("en-IN")}${campusLabel ? ` at ${campusLabel}` : ""}`,
+    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+
+    const visitDateFormatted = new Date(data.visit_date).toLocaleDateString("en-GB", {
+      day: "2-digit", month: "2-digit", year: "2-digit",
+    }) + " " + new Date(data.visit_date).toLocaleTimeString("en-IN", {
+      hour: "2-digit", minute: "2-digit", hour12: true,
+    });
+
+    await supabase.from("lead_activities").insert({
+      lead_id: id, user_id: profileId, type: "visit",
+      description: `Campus visit scheduled for ${visitDateFormatted}${campusLabel ? ` at ${campusLabel}` : ""}`,
+    });
+    await autoAdvanceStage("visit_scheduled");
+
+    // Send WhatsApp visit_confirmation template
+    const sentChannels: string[] = [];
+    if (lead?.phone) {
+      const { error: waErr, data: waData } = await supabase.functions.invoke("whatsapp-send", {
+        body: {
+          template_key: "visit_confirmation",
+          phone: lead.phone,
+          params: [lead.name || "Student", visitDateFormatted, campusLabel || "NIMT Educational Institutions"],
+          lead_id: id,
+        },
       });
-      await autoAdvanceStage("visit_scheduled");
-      await fetchAll(true);
+      if (waErr) {
+        console.error("Visit WhatsApp failed:", waErr.message);
+        toast({ title: "WhatsApp failed", description: waErr.message, variant: "destructive" });
+      } else {
+        sentChannels.push("WhatsApp");
+      }
     }
+
+    // Send email visit confirmation
+    if (lead?.email) {
+      const { error: emErr } = await supabase.functions.invoke("send-email", {
+        body: {
+          to_email: lead.email,
+          lead_id: id,
+          custom_subject: `Campus Visit Confirmed — ${visitDateFormatted}${campusLabel ? ` at ${campusLabel}` : ""}`,
+          custom_body: `<div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:24px"><img src="https://uni.nimt.ac.in/unios-logo.png" alt="NIMT Educational Institutions" style="height:40px;margin-bottom:16px" /><h2 style="color:#1e293b;margin:0 0 8px">Campus Visit Confirmed!</h2><p style="color:#475569;line-height:1.6">Hi ${lead.name || "Student"},</p><p style="color:#475569;line-height:1.6">Your campus visit has been scheduled:</p><div style="background:#f1f5f9;border-radius:8px;padding:16px;margin:16px 0"><p style="color:#1e293b;margin:0"><strong>Date &amp; Time:</strong> ${visitDateFormatted}</p>${campusLabel ? `<p style="color:#1e293b;margin:4px 0 0"><strong>Campus:</strong> ${campusLabel}</p>` : ""}</div><p style="color:#475569;line-height:1.6">Please carry a valid photo ID. We look forward to welcoming you!</p><hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0" /><p style="color:#94a3b8;font-size:12px;margin:0">NIMT Educational Institutions — Admissions</p></div>`,
+        },
+      });
+      if (emErr) console.error("Visit email failed:", emErr.message);
+      else sentChannels.push("Email");
+    }
+
+    toast({ title: "Visit scheduled", description: sentChannels.length ? `Confirmation sent via ${sentChannels.join(" & ")}` : undefined });
+    await fetchAll(true);
   };
 
   const updateStage = async (newStage: string) => {
@@ -273,6 +319,45 @@ const LeadDetail = () => {
     else { toast({ title: "AI Call Complete" }); fetchAll(true); }
   };
 
+  const handleNotInterested = async () => {
+    const wordCount = notInterestedReason.trim().split(/\s+/).length;
+    if (wordCount < 5) {
+      toast({ title: "Reason too short", description: "Please enter at least 5 words", variant: "destructive" });
+      return;
+    }
+    if (!id) return;
+    setSavingNotInterested(true);
+
+    // Update lead stage to not_interested
+    const { error: stageErr } = await supabase.from("leads").update({ stage: "not_interested" } as any).eq("id", id);
+    if (stageErr) {
+      toast({ title: "Error", description: stageErr.message, variant: "destructive" });
+      setSavingNotInterested(false);
+      return;
+    }
+
+    // Add reason as a note
+    await supabase.from("lead_notes").insert({
+      lead_id: id,
+      content: `[Not Interested] ${notInterestedReason.trim()}`,
+      created_by: profileId,
+    } as any);
+
+    // Log activity
+    await supabase.from("lead_activities").insert({
+      lead_id: id,
+      type: "stage_change",
+      description: `Marked as Not Interested: ${notInterestedReason.trim()}`,
+      performed_by: profileId,
+    } as any);
+
+    toast({ title: "Marked as Not Interested" });
+    setShowNotInterested(false);
+    setNotInterestedReason("");
+    setSavingNotInterested(false);
+    fetchAll(true);
+  };
+
   const handleDeleteLead = async () => {
     if (!id) return;
     setDeletingLead(true);
@@ -317,6 +402,35 @@ const LeadDetail = () => {
         </div>
       </div>
 
+      {/* Quick action icon bar */}
+      <div className="flex items-center gap-1 overflow-x-auto pb-1">
+        {[
+          { icon: Phone, label: "Call", color: "text-blue-600 bg-blue-100 dark:bg-blue-900/30", action: () => { if (lead.phone) window.open(`tel:${lead.phone}`); } },
+          { icon: MessageSquare, label: "WhatsApp", color: "text-green-600 bg-green-100 dark:bg-green-900/30", action: () => setShowWhatsApp(true) },
+          { icon: Clock, label: "Follow Up", color: "text-orange-600 bg-orange-100 dark:bg-orange-900/30", action: () => setShowFollowup(true) },
+          { icon: MapPin, label: "Visit", color: "text-violet-600 bg-violet-100 dark:bg-violet-900/30", action: () => setShowScheduleVisit(true) },
+          { icon: Mail, label: "Email", color: "text-sky-600 bg-sky-100 dark:bg-sky-900/30", action: () => setShowSendEmail(true) },
+          { icon: Bot, label: "AI Call", color: "text-amber-600 bg-amber-100 dark:bg-amber-900/30", action: triggerAiCall, disabled: aiCalling },
+          { icon: UserCheck, label: "Interview", color: "text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30", action: () => setShowInterview(true) },
+          { icon: FileText, label: "Offer", color: "text-teal-600 bg-teal-100 dark:bg-teal-900/30", action: () => setShowOfferLetter(true) },
+          { icon: IndianRupee, label: "Payment", color: "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30", action: () => setShowRecordPayment(true) },
+          { icon: ThumbsDown, label: "Not Interested", color: "text-red-600 bg-red-100 dark:bg-red-900/30", action: () => setShowNotInterested(true) },
+        ].map(({ icon: Icon, label, color, action, disabled }) => (
+          <button
+            key={label}
+            onClick={action}
+            disabled={disabled}
+            className="flex flex-col items-center gap-1 px-3 py-2 rounded-xl hover:bg-muted/50 transition-colors shrink-0 disabled:opacity-50"
+            title={label}
+          >
+            <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${color}`}>
+              {disabled && label === "AI Call" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
+            </div>
+            <span className="text-[10px] font-medium text-muted-foreground">{label}</span>
+          </button>
+        ))}
+      </div>
+
       {/* Two-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-5">
         {/* Left Column */}
@@ -332,28 +446,7 @@ const LeadDetail = () => {
             onStageChange={updateStage}
             onFieldUpdate={updateField}
           />
-          <FuzzyDuplicateAlert leadId={lead.id} leadName={lead.name} />
-          <QuickActions
-            onCall={() => {
-              if (lead.phone) window.open(`tel:${lead.phone}`);
-            }}
-            onWhatsApp={() => setShowWhatsApp(true)}
-            onScheduleVisit={() => setShowScheduleVisit(true)}
-            onInterview={() => setShowInterview(true)}
-            onOffer={() => setShowOfferLetter(true)}
-            onConvert={() => setShowConvert(true)}
-            onAiCall={triggerAiCall}
-            aiCalling={aiCalling}
-            onAddSecondaryCounsellor={() => setShowSecondaryCounsellor(true)}
-            onRecordPayment={() => setShowRecordPayment(true)}
-            onSendEmail={() => setShowSendEmail(true)}
-          />
-          <NextFollowup
-            followups={followups}
-            onSchedule={addFollowup}
-            campuses={campuses}
-            onScheduleVisit={scheduleVisit}
-          />
+          <FuzzyDuplicateAlert leadId={lead.id} leadName={lead.name} leadPhone={lead.phone} leadEmail={lead.email} />
           <LeadPaymentHistory leadId={lead.id} refreshKey={paymentRefreshKey} />
           {lead.course_id && (
             <Card className="border-border/60">
@@ -404,13 +497,15 @@ const LeadDetail = () => {
         leadId={lead.id} leadName={lead.name} currentScore={lead.interview_score} currentResult={lead.interview_result} onSuccess={() => fetchAll(true)} />
       <OfferLetterDialog open={showOfferLetter} onOpenChange={setShowOfferLetter}
         leadId={lead.id} leadName={lead.name} courseId={lead.course_id} campusId={lead.campus_id} onSuccess={() => fetchAll(true)} />
-      <ConvertToStudentDialog open={showConvert} onOpenChange={setShowConvert} lead={lead} onSuccess={() => fetchAll(true)} />
+      <ConvertToStudentDialog open={showConvert} onOpenChange={setShowConvert} lead={lead} courseName={courseName} campusName={campusName} onSuccess={() => fetchAll(true)} />
       <SendWhatsAppDialog
         open={showWhatsApp}
         onOpenChange={setShowWhatsApp}
-        lead={{ id: lead.id, name: lead.name, phone: lead.phone, application_id: lead.application_id }}
+        lead={{ id: lead.id, name: lead.name, phone: lead.phone, application_id: lead.application_id, source: lead.source }}
         courseName={courseName}
         campusName={campusName}
+        courseDuration={courseDuration}
+        courseType={courseType}
         onSuccess={() => fetchAll(true)}
       />
       <AddSecondaryCounsellorDialog
@@ -447,6 +542,13 @@ const LeadDetail = () => {
         onSchedule={scheduleVisit}
       />
 
+      {/* Schedule Follow-up Dialog */}
+      <ScheduleFollowupDialog
+        open={showFollowup}
+        onOpenChange={setShowFollowup}
+        onSchedule={addFollowup}
+      />
+
       {/* Transfer Dialog */}
       <TransferLeadDialog
         open={showTransfer}
@@ -455,6 +557,42 @@ const LeadDetail = () => {
         leadNames={[lead.name]}
         onSuccess={() => fetchAll(true)}
       />
+
+      {/* Not Interested Dialog */}
+      <AlertDialog open={showNotInterested} onOpenChange={(o) => { if (!savingNotInterested) { setShowNotInterested(o); if (!o) setNotInterestedReason(""); } }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <ThumbsDown className="h-5 w-5 text-destructive" /> Mark as Not Interested
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This will move <strong>{lead.name}</strong> to <strong>Not Interested</strong>. Please provide a reason (minimum 5 words).
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="py-2">
+            <textarea
+              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 min-h-[90px] resize-none"
+              placeholder="e.g. Parent decided to go with another school due to distance"
+              value={notInterestedReason}
+              onChange={e => setNotInterestedReason(e.target.value)}
+            />
+            <p className={`text-[11px] mt-1 ${notInterestedReason.trim().split(/\s+/).filter(Boolean).length >= 5 ? "text-muted-foreground" : "text-destructive"}`}>
+              {notInterestedReason.trim().split(/\s+/).filter(Boolean).length}/5 words minimum
+            </p>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={savingNotInterested}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleNotInterested}
+              disabled={savingNotInterested || notInterestedReason.trim().split(/\s+/).filter(Boolean).length < 5}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {savingNotInterested && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Mark Not Interested
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete Confirmation */}
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
