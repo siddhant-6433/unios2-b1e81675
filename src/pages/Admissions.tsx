@@ -163,6 +163,21 @@ const Admissions = () => {
 
   useEffect(() => { fetchLeads(); }, [selectedCampusId]);
 
+  // Auto-refresh when leads change (new leads, stage changes, assignments)
+  useEffect(() => {
+    const channel = supabase
+      .channel("leads-realtime")
+      .on("postgres_changes" as any, {
+        event: "*",
+        schema: "public",
+        table: "leads",
+      }, () => {
+        fetchLeads();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [selectedCampusId]);
+
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev);

@@ -106,6 +106,17 @@ export function AppSidebar() {
 
   // WhatsApp unread count
   const [waUnread, setWaUnread] = useState(0);
+  // New leads count (stage = new_lead)
+  const [newLeadCount, setNewLeadCount] = useState(0);
+
+  const fetchNewLeadCount = () => {
+    supabase
+      .from("leads")
+      .select("id", { count: "exact", head: true })
+      .eq("stage", "new_lead")
+      .then(({ count }) => setNewLeadCount(count || 0));
+  };
+
   useEffect(() => {
     (async () => {
       const { data } = await supabase
@@ -115,15 +126,15 @@ export function AppSidebar() {
         setWaUnread((data as any[]).reduce((sum: number, c: any) => sum + (c.unread_count || 0), 0));
       }
     })();
+    fetchNewLeadCount();
 
-    const channel = supabase
+    const waChannel = supabase
       .channel("wa-unread-sidebar")
       .on("postgres_changes" as any, {
         event: "*",
         schema: "public",
         table: "whatsapp_messages",
       }, () => {
-        // Refetch on any message change
         supabase
           .from("whatsapp_conversations" as any)
           .select("unread_count")
@@ -135,14 +146,27 @@ export function AppSidebar() {
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    const leadsChannel = supabase
+      .channel("leads-count-sidebar")
+      .on("postgres_changes" as any, {
+        event: "*",
+        schema: "public",
+        table: "leads",
+      }, () => { fetchNewLeadCount(); })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(waChannel);
+      supabase.removeChannel(leadsChannel);
+    };
   }, []);
 
   const visibleMain = mainMenu.filter(canSee);
-  const visibleAdmission = admissionSubMenu.filter(canSee).map(item =>
-    item.url === "/whatsapp-inbox" && waUnread > 0
-      ? { ...item, badge: waUnread }
-      : item
+  const visibleAdmission = admissionSubMenu.filter(canSee).map(item => {
+    if (item.url === "/whatsapp-inbox" && waUnread > 0) return { ...item, badge: waUnread };
+    if (item.url === "/admissions" && newLeadCount > 0) return { ...item, badge: newLeadCount };
+    return item;
+  }
   );
   const visibleIB = ibAcademicsSubMenu.filter(canSee);
   const visibleMgmt = managementMenu.filter(canSee);
@@ -235,7 +259,9 @@ export function AppSidebar() {
                                 <item.icon className="h-3.5 w-3.5" />
                                 <span className="flex-1">{item.title}</span>
                                 {item.badge ? (
-                                  <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-green-500 text-[9px] font-bold text-white px-1">
+                                  <span className={`flex h-[18px] min-w-[18px] items-center justify-center rounded-full text-[9px] font-bold text-white px-1 ${
+                                    item.url === "/whatsapp-inbox" ? "bg-green-500" : "bg-primary"
+                                  }`}>
                                     {item.badge > 99 ? "99+" : item.badge}
                                   </span>
                                 ) : null}

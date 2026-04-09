@@ -61,7 +61,7 @@ const AdminPanel = () => {
   const [users, setUsers] = useState<UserWithRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [userSubTab, setUserSubTab] = useState<"employees" | "families" | "leads">("employees");
+  const [userSubTab, setUserSubTab] = useState<"employees" | "consultants" | "families" | "leads">("employees");
   const [roleFilter, setRoleFilter] = useState<AppRole | "all" | "none">("all");
   const [editingUser, setEditingUser] = useState<string | null>(null);
   const [savingUser, setSavingUser] = useState<string | null>(null);
@@ -296,6 +296,7 @@ const AdminPanel = () => {
             <div className="flex items-center gap-2">
               {([
                 { key: "employees" as const, label: "Employees" },
+                { key: "consultants" as const, label: "Consultants" },
                 { key: "families" as const, label: "Students & Families" },
                 { key: "leads" as const, label: "Leads & Applicants" },
               ]).map((tab) => (
@@ -327,7 +328,7 @@ const AdminPanel = () => {
                   className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
                 >
                   <option value="all">All Roles</option>
-                  {ALL_ROLES.filter((r) => !["student", "parent"].includes(r.value)).map((r) => (
+                  {ALL_ROLES.filter((r) => !["student", "parent", "consultant"].includes(r.value)).map((r) => (
                     <option key={r.value} value={r.value}>{r.label} ({users.filter((u) => u.role === r.value).length})</option>
                   ))}
                 </select>
@@ -336,12 +337,14 @@ const AdminPanel = () => {
 
             {(() => {
               const subFiltered = filtered.filter((u) => {
-                if (userSubTab === "employees") return u.role && !["student", "parent"].includes(u.role);
+                if (userSubTab === "employees") return u.role && !["student", "parent", "consultant"].includes(u.role);
+                if (userSubTab === "consultants") return u.role === "consultant";
                 if (userSubTab === "families") return u.role === "student" || u.role === "parent";
                 return !u.role;
               });
               const allSubUsers = users.filter((u) => {
-                if (userSubTab === "employees") return u.role && !["student", "parent"].includes(u.role);
+                if (userSubTab === "employees") return u.role && !["student", "parent", "consultant"].includes(u.role);
+                if (userSubTab === "consultants") return u.role === "consultant";
                 if (userSubTab === "families") return u.role === "student" || u.role === "parent";
                 return !u.role;
               });
@@ -352,6 +355,12 @@ const AdminPanel = () => {
                 <SummaryCard label="Admins" value={allSubUsers.filter((u) => u.role === "super_admin" || u.role === "campus_admin").length} bg="bg-pastel-purple" />
                 <SummaryCard label="Counsellors" value={allSubUsers.filter((u) => u.role === "counsellor").length} bg="bg-pastel-green" />
                 <SummaryCard label="Faculty" value={allSubUsers.filter((u) => u.role === "faculty" || u.role === "teacher").length} bg="bg-pastel-orange" />
+              </>)}
+              {userSubTab === "consultants" && (<>
+                <SummaryCard label="Total Consultants" value={allSubUsers.length} bg="bg-pastel-purple" />
+                <SummaryCard label="With Phone" value={allSubUsers.filter((u) => u.phone).length} bg="bg-pastel-green" />
+                <SummaryCard label="With Email" value={allSubUsers.filter((u) => u.email).length} bg="bg-pastel-blue" />
+                <SummaryCard label="Shown" value={subFiltered.length} bg="bg-pastel-yellow" />
               </>)}
               {userSubTab === "families" && (<>
                 <SummaryCard label="Total" value={allSubUsers.length} bg="bg-pastel-blue" />
