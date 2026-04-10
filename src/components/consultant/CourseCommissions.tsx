@@ -13,8 +13,7 @@ interface Commission {
   commission_value: number;
   course_name?: string;
   course_code?: string;
-  fee_per_year?: number;
-  fee_total?: number;
+  first_year_fee?: number;
 }
 
 interface Request {
@@ -46,19 +45,34 @@ export function CourseCommissions({ consultantId }: Props) {
   const canRequestEdit = ["counsellor", "principal", "admission_head", "campus_admin"].includes(role || "");
 
   const fetchCommissions = async () => {
-    const { data } = await supabase
+    // Fetch commissions
+    const { data: commData } = await supabase
       .from("consultant_commissions" as any)
-      .select("*, courses:course_id(name, code, fee_per_year, fee_total)")
+      .select("*")
       .eq("consultant_id", consultantId)
       .order("created_at");
-    if (data) {
-      const mapped = (data as any[]).map(c => ({
-        ...c,
-        course_name: (c.courses as any)?.name,
-        course_code: (c.courses as any)?.code,
-        fee_per_year: (c.courses as any)?.fee_per_year,
-        fee_total: (c.courses as any)?.fee_total,
-      })).sort((a, b) => (a.course_name || "").localeCompare(b.course_name || ""));
+
+    if (!commData || commData.length === 0) {
+      setCommissions([]);
+    } else {
+      // Fetch real first-year fees from the view
+      const courseIds = (commData as any[]).map(c => c.course_id);
+      const { data: feeData } = await supabase
+        .from("course_first_year_fee" as any)
+        .select("course_id, code, name, first_year_fee")
+        .in("course_id", courseIds);
+
+      const feeMap = new Map<string, any>((feeData || []).map((f: any) => [f.course_id, f]));
+
+      const mapped = (commData as any[]).map(c => {
+        const fee = feeMap.get(c.course_id);
+        return {
+          ...c,
+          course_name: fee?.name,
+          course_code: fee?.code,
+          first_year_fee: Number(fee?.first_year_fee || 0),
+        };
+      }).sort((a, b) => (a.course_name || "").localeCompare(b.course_name || ""));
       setCommissions(mapped);
     }
 
@@ -156,7 +170,7 @@ export function CourseCommissions({ consultantId }: Props) {
             </thead>
             <tbody>
               {commissions.map((c) => {
-                const annualFee = Number(c.fee_per_year || c.fee_total || 0);
+                const annualFee = Number(c.first_year_fee || 0);
                 const pct = annualFee > 0 ? ((Number(c.commission_value) / annualFee) * 100).toFixed(1) : "—";
                 const isEditing = editingId === c.id;
                 const pendingReq = pendingReqMap.get(c.course_id);
