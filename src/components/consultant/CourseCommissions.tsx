@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Plus, Loader2, Trash2, IndianRupee, Save } from "lucide-react";
+import { Loader2, Edit, Save, X, Clock } from "lucide-react";
 
 interface Commission {
   id: string;
@@ -12,6 +12,19 @@ interface Commission {
   commission_type: string;
   commission_value: number;
   course_name?: string;
+  course_code?: string;
+  fee_per_year?: number;
+  fee_total?: number;
+}
+
+interface Request {
+  id: string;
+  course_id: string;
+  current_amount: number;
+  requested_amount: number;
+  reason: string | null;
+  status: string;
+  created_at: string;
 }
 
 interface Props {
@@ -19,131 +32,203 @@ interface Props {
 }
 
 export function CourseCommissions({ consultantId }: Props) {
+  const { role } = useAuth();
   const { toast } = useToast();
-  const { coursesByDepartment } = useCourseCampusLink();
   const [commissions, setCommissions] = useState<Commission[]>([]);
+  const [requests, setRequests] = useState<Request[]>([]);
   const [loading, setLoading] = useState(true);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [editReason, setEditReason] = useState("");
   const [saving, setSaving] = useState(false);
-  const [newCourseId, setNewCourseId] = useState("");
-  const [newType, setNewType] = useState("percentage");
-  const [newValue, setNewValue] = useState("");
+
+  const isSuperAdmin = role === "super_admin";
+  const canRequestEdit = ["counsellor", "principal", "admission_head", "campus_admin"].includes(role || "");
 
   const fetchCommissions = async () => {
     const { data } = await supabase
       .from("consultant_commissions" as any)
-      .select("*, courses:course_id(name)")
+      .select("*, courses:course_id(name, code, fee_per_year, fee_total)")
       .eq("consultant_id", consultantId)
       .order("created_at");
     if (data) {
-      setCommissions((data as any[]).map(c => ({
+      const mapped = (data as any[]).map(c => ({
         ...c,
         course_name: (c.courses as any)?.name,
-      })));
+        course_code: (c.courses as any)?.code,
+        fee_per_year: (c.courses as any)?.fee_per_year,
+        fee_total: (c.courses as any)?.fee_total,
+      })).sort((a, b) => (a.course_name || "").localeCompare(b.course_name || ""));
+      setCommissions(mapped);
     }
+
+    // Fetch pending requests for this consultant
+    const { data: reqData } = await supabase
+      .from("commission_edit_requests" as any)
+      .select("*")
+      .eq("consultant_id", consultantId)
+      .eq("status", "pending");
+    if (reqData) setRequests(reqData as any);
+
     setLoading(false);
   };
 
   useEffect(() => { fetchCommissions(); }, [consultantId]);
 
-  const handleAdd = async () => {
-    if (!newCourseId || !newValue) return;
+  const startEdit = (c: Commission) => {
+    setEditingId(c.id);
+    setEditValue(String(c.commission_value));
+    setEditReason("");
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditValue("");
+    setEditReason("");
+  };
+
+  const handleSave = async (c: Commission) => {
+    const newAmount = parseFloat(editValue);
+    if (isNaN(newAmount) || newAmount < 0) return;
     setSaving(true);
-    const { error } = await supabase.from("consultant_commissions" as any).insert({
-      consultant_id: consultantId,
-      course_id: newCourseId,
-      commission_type: newType,
-      commission_value: parseFloat(newValue),
-    } as any);
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } else {
-      setNewCourseId(""); setNewValue("");
-      fetchCommissions();
+
+    if (isSuperAdmin) {
+      // Direct update
+      const { error } = await supabase
+        .from("consultant_commissions" as any)
+        .update({ commission_type: "fixed_annual", commission_value: newAmount } as any)
+        .eq("id", c.id);
+      if (error) {
+        toast({ title: "Update failed", description: error.message, variant: "destructive" });
+      } else {
+        toast({ title: "Commission updated" });
+        fetchCommissions();
+      }
+    } else if (canRequestEdit) {
+      // Submit edit request
+      const { data: profile } = await supabase.from("profiles").select("id").eq("user_id", (await supabase.auth.getUser()).data.user?.id).single();
+      const { error } = await supabase.from("commission_edit_requests" as any).insert({
+        consultant_id: consultantId,
+        course_id: c.course_id,
+        current_amount: c.commission_value,
+        requested_amount: newAmount,
+        reason: editReason.trim() || null,
+        requested_by: profile?.id,
+      } as any);
+      if (error) {
+        toast({ title: "Request failed", description: error.message, variant: "destructive" });
+      } else {
+        toast({ title: "Edit request submitted", description: "Awaiting super admin approval" });
+        fetchCommissions();
+      }
     }
+
     setSaving(false);
+    cancelEdit();
   };
 
-  const handleDelete = async (id: string) => {
-    await supabase.from("consultant_commissions" as any).delete().eq("id", id);
-    fetchCommissions();
-  };
-
-  const handleUpdate = async (id: string, type: string, value: number) => {
-    await supabase.from("consultant_commissions" as any)
-      .update({ commission_type: type, commission_value: value } as any)
-      .eq("id", id);
-    fetchCommissions();
-  };
-
-  // Courses not already assigned
-  const assignedCourseIds = new Set(commissions.map(c => c.course_id));
-  const inputCls = "rounded-lg border border-input bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring/20";
+  const pendingReqMap = new Map(requests.map(r => [r.course_id, r]));
 
   if (loading) return <div className="flex h-10 items-center justify-center"><Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /></div>;
 
   return (
     <div className="space-y-3">
-      <h4 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Course-wise Commissions</h4>
-
-      {commissions.length > 0 && (
-        <div className="space-y-1.5">
-          {commissions.map((c) => (
-            <div key={c.id} className="flex items-center gap-2 rounded-lg bg-muted/30 px-3 py-2">
-              <span className="text-xs font-medium text-foreground flex-1 truncate">{c.course_name || c.course_id}</span>
-              <select
-                value={c.commission_type}
-                onChange={(e) => handleUpdate(c.id, e.target.value, c.commission_value)}
-                className={`${inputCls} w-24`}
-              >
-                <option value="percentage">%</option>
-                <option value="fixed">Fixed ₹</option>
-              </select>
-              <input
-                type="number"
-                value={c.commission_value}
-                onChange={(e) => handleUpdate(c.id, c.commission_type, parseFloat(e.target.value) || 0)}
-                className={`${inputCls} w-20 text-right`}
-              />
-              <button onClick={() => handleDelete(c.id)} className="text-muted-foreground hover:text-red-600 p-1">
-                <Trash2 className="h-3 w-3" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Add new */}
-      <div className="flex items-end gap-2">
-        <div className="flex-1">
-          <select value={newCourseId} onChange={(e) => setNewCourseId(e.target.value)} className={`${inputCls} w-full`}>
-            <option value="">Add course...</option>
-            {coursesByDepartment.map(g => (
-              <optgroup key={g.department} label={g.department}>
-                {g.courses.filter(c => !assignedCourseIds.has(c.id)).map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-        </div>
-        <select value={newType} onChange={(e) => setNewType(e.target.value)} className={`${inputCls} w-20`}>
-          <option value="percentage">%</option>
-          <option value="fixed">Fixed ₹</option>
-        </select>
-        <input
-          type="number"
-          value={newValue}
-          onChange={(e) => setNewValue(e.target.value)}
-          placeholder="Value"
-          className={`${inputCls} w-20 text-right`}
-        />
-        <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleAdd} disabled={!newCourseId || !newValue || saving}>
-          {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />} Add
-        </Button>
+      <div className="flex items-center justify-between">
+        <h4 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Course-wise Commissions</h4>
+        {!isSuperAdmin && canRequestEdit && (
+          <Badge variant="outline" className="text-[9px]">Edit requests go to super admin</Badge>
+        )}
       </div>
 
-      {commissions.length === 0 && (
-        <p className="text-[10px] text-muted-foreground">No course-specific commissions set. The default commission rate from the consultant profile will be used.</p>
+      {commissions.length === 0 ? (
+        <p className="text-[10px] text-muted-foreground">No commissions set for this consultant yet.</p>
+      ) : (
+        <div className="rounded-lg border border-border overflow-hidden">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-muted/40 border-b border-border">
+                <th className="px-3 py-2 text-left font-medium text-muted-foreground">Course</th>
+                <th className="px-3 py-2 text-right font-medium text-muted-foreground">Annual Fee</th>
+                <th className="px-3 py-2 text-right font-medium text-muted-foreground">Commission ₹</th>
+                <th className="px-3 py-2 text-right font-medium text-muted-foreground">%</th>
+                <th className="px-3 py-2 text-right font-medium text-muted-foreground w-24">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {commissions.map((c) => {
+                const annualFee = Number(c.fee_per_year || c.fee_total || 0);
+                const pct = annualFee > 0 ? ((Number(c.commission_value) / annualFee) * 100).toFixed(1) : "—";
+                const isEditing = editingId === c.id;
+                const pendingReq = pendingReqMap.get(c.course_id);
+
+                return (
+                  <tr key={c.id} className="border-b border-border/40 last:border-0">
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium text-foreground text-xs">{c.course_name}</span>
+                        {c.course_code && <span className="text-[10px] text-muted-foreground">({c.course_code})</span>}
+                      </div>
+                      {pendingReq && (
+                        <div className="mt-1 flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400">
+                          <Clock className="h-2.5 w-2.5" />
+                          Pending: ₹{pendingReq.requested_amount}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right text-muted-foreground">
+                      ₹{annualFee.toLocaleString("en-IN")}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {isEditing ? (
+                        <div className="space-y-1">
+                          <input
+                            type="number"
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            className="w-24 rounded border border-input bg-background px-2 py-1 text-xs text-right"
+                            autoFocus
+                          />
+                          {!isSuperAdmin && (
+                            <input
+                              type="text"
+                              value={editReason}
+                              onChange={(e) => setEditReason(e.target.value)}
+                              placeholder="Reason (optional)"
+                              className="w-32 rounded border border-input bg-background px-2 py-1 text-[10px]"
+                            />
+                          )}
+                        </div>
+                      ) : (
+                        <span className="font-semibold text-foreground">₹{Number(c.commission_value).toLocaleString("en-IN")}</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <Badge variant="outline" className="text-[9px]">{pct}%</Badge>
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {isEditing ? (
+                        <div className="flex items-center gap-1 justify-end">
+                          <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => handleSave(c)} disabled={saving}>
+                            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3 text-emerald-600" />}
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={cancelEdit}>
+                            <X className="h-3 w-3 text-muted-foreground" />
+                          </Button>
+                        </div>
+                      ) : (
+                        (isSuperAdmin || canRequestEdit) && !pendingReq && (
+                          <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => startEdit(c)}>
+                            <Edit className="h-3 w-3 text-muted-foreground" />
+                          </Button>
+                        )
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

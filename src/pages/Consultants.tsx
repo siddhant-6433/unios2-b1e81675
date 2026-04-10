@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { CourseCommissions } from "@/components/consultant/CourseCommissions";
+import { CommissionApprovalPanel } from "@/components/consultant/CommissionApprovalPanel";
+import { useAuth } from "@/contexts/AuthContext";
 
 const STAGES = ["new", "contacted", "onboarded", "active", "inactive"] as const;
 const stageLabels: Record<string, string> = { new: "New", contacted: "Contacted", onboarded: "Onboarded", active: "Active", inactive: "Inactive" };
@@ -24,10 +26,13 @@ interface Consultant {
 
 const Consultants = () => {
   const { toast } = useToast();
+  const { role } = useAuth();
   const [consultants, setConsultants] = useState<Consultant[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState("all");
+  const [tab, setTab] = useState<"list" | "requests">("list");
+  const canSeeRequests = ["super_admin", "principal", "admission_head", "campus_admin"].includes(role || "");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -125,6 +130,30 @@ const Consultants = () => {
         <Button onClick={() => setShowForm(true)} className="gap-2"><Plus className="h-4 w-4" />Add Consultant</Button>
       </div>
 
+      {canSeeRequests && (
+        <div className="flex rounded-xl border border-input bg-card p-0.5 w-fit">
+          <button
+            onClick={() => setTab("list")}
+            className={`rounded-lg px-4 py-1.5 text-xs font-medium transition-colors ${
+              tab === "list" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Consultants
+          </button>
+          <button
+            onClick={() => setTab("requests")}
+            className={`rounded-lg px-4 py-1.5 text-xs font-medium transition-colors ${
+              tab === "requests" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Commission Edit Requests
+          </button>
+        </div>
+      )}
+
+      {tab === "requests" ? (
+        <CommissionApprovalPanel />
+      ) : (<>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {stats.map(s => (
           <Card key={s.label} className="border-border/60 shadow-none">
@@ -185,6 +214,7 @@ const Consultants = () => {
           <div className="col-span-full text-center py-12 text-sm text-muted-foreground">No consultants found</div>
         )}
       </div>
+      </>)}
 
       <Dialog open={showForm} onOpenChange={o => { if (!saving) resetForm(); }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">

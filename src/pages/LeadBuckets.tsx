@@ -157,18 +157,34 @@ export default function LeadBuckets() {
 
     setAssigning(true);
     const ids = Array.from(selectedIds);
-    const { error } = await supabase
-      .from("leads")
-      .update({ counsellor_id: assignTo })
-      .in("id", ids);
+
+    // Use claim_leads RPC — counsellors can't UPDATE via direct query due to RLS
+    // (can_view_lead returns false for unassigned leads). RPC uses SECURITY DEFINER.
+    const { data, error } = await supabase.rpc("claim_leads" as any, {
+      _lead_ids: ids,
+      _assign_to: assignTo,
+    });
 
     if (error) {
       toast({ title: "Assignment failed", description: error.message, variant: "destructive" });
     } else {
-      toast({
-        title: "Leads assigned",
-        description: `${ids.length} lead${ids.length > 1 ? "s" : ""} assigned successfully.`,
-      });
+      const result = Array.isArray(data) ? data[0] : data;
+      const assignedCount = result?.assigned_count ?? ids.length;
+      const failedCount = result?.failed_count ?? 0;
+      if (assignedCount === 0) {
+        toast({
+          title: "No leads assigned",
+          description: "These leads may already be assigned to another counsellor.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Leads assigned",
+          description: failedCount > 0
+            ? `${assignedCount} assigned, ${failedCount} already claimed.`
+            : `${assignedCount} lead${assignedCount > 1 ? "s" : ""} assigned successfully.`,
+        });
+      }
     }
     setAssigning(false);
     setShowAssign(false);

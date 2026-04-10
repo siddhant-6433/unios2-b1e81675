@@ -62,10 +62,12 @@ Deno.serve(async (req) => {
 
     const token = authHeader?.replace("Bearer ", "") || "";
     const isServiceRole = token === serviceRoleKey;
-    let user: { id: string } | null = null;
+    // user.id must be a valid UUID or null (lead_activities.user_id is uuid).
+    // For system/automation calls, use null so inserts don't fail.
+    let user: { id: string | null } | null = null;
 
     if (isCronAuth || isServiceRole) {
-      user = { id: "system" };
+      user = { id: null };
     } else {
       const userClient = createClient(supabaseUrl, supabaseAnonKey, {
         global: { headers: { Authorization: authHeader! } },
@@ -206,12 +208,16 @@ Deno.serve(async (req) => {
     });
 
     if (lead_id) {
-      await adminClient.from("lead_activities").insert({
+      const isSystem = user.id === null;
+      const { error: actErr } = await adminClient.from("lead_activities").insert({
         lead_id,
         user_id: user.id,
         type: "whatsapp",
-        description: `WhatsApp sent — Template: ${template_key.replace(/_/g, " ")}`,
+        description: isSystem
+          ? `Automated WhatsApp sent — ${template_key.replace(/_/g, " ")}`
+          : `WhatsApp sent — Template: ${template_key.replace(/_/g, " ")}`,
       });
+      if (actErr) console.error("lead_activities insert failed:", actErr.message);
     }
 
     return new Response(

@@ -116,6 +116,8 @@ const Admissions = () => {
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [tempFilter, setTempFilter] = useState<string>("all");
+  const [counsellorFilter, setCounsellorFilter] = useState<string>("all");
+  const [counsellorOptions, setCounsellorOptions] = useState<{ id: string; name: string }[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddLead, setShowAddLead] = useState(false);
@@ -136,6 +138,7 @@ const Admissions = () => {
 
   const isSuperAdmin = role === "super_admin";
   const canTransfer = isSuperAdmin || isTeamLeader;
+  const canFilterByCounsellor = role === "super_admin" || role === "admission_head" || role === "campus_admin" || isTeamLeader;
 
   const fetchLeads = async () => {
     setLoading(true);
@@ -165,6 +168,30 @@ const Admissions = () => {
   };
 
   useEffect(() => { fetchLeads(); }, [selectedCampusId]);
+
+  // Fetch counsellor list for filter (admin / admission_head / team leader only)
+  useEffect(() => {
+    if (!canFilterByCounsellor) return;
+    (async () => {
+      const { data: roleRows } = await supabase
+        .from("user_roles")
+        .select("user_id")
+        .eq("role", "counsellor");
+      if (!roleRows?.length) return;
+      const userIds = roleRows.map(r => r.user_id);
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, display_name, user_id")
+        .in("user_id", userIds);
+      if (profs) {
+        setCounsellorOptions(
+          profs
+            .map(p => ({ id: p.id, name: p.display_name || "Unnamed" }))
+            .sort((a, b) => a.name.localeCompare(b.name))
+        );
+      }
+    })();
+  }, [canFilterByCounsellor]);
 
   // Auto-refresh when leads change (new leads, stage changes, assignments)
   useEffect(() => {
@@ -243,7 +270,9 @@ const Admissions = () => {
     const matchesTemp = tempFilter === "all" || l.lead_temperature === tempFilter;
     const matchesInactive = !inactiveIds || inactiveIds.has(l.id);
     const matchesFollowup = !followupLeadIds || followupLeadIds.has(l.id);
-    return matchesSearch && matchesStage && matchesSource && matchesRole && matchesTemp && matchesInactive && matchesFollowup;
+    const matchesCounsellor = counsellorFilter === "all"
+      || (counsellorFilter === "unassigned" ? !l.counsellor_id : l.counsellor_id === counsellorFilter);
+    return matchesSearch && matchesStage && matchesSource && matchesRole && matchesTemp && matchesInactive && matchesFollowup && matchesCounsellor;
   });
 
   const totalLeads = leads.length;
@@ -495,6 +524,16 @@ const Admissions = () => {
           <option value="warm">Warm</option>
           <option value="cold">Cold</option>
         </select>
+        {canFilterByCounsellor && (
+          <select value={counsellorFilter} onChange={(e) => setCounsellorFilter(e.target.value)}
+            className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
+            <option value="all">All Counsellors</option>
+            <option value="unassigned">Unassigned</option>
+            {counsellorOptions.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        )}
         <div className="flex rounded-xl border border-input bg-card p-0.5 ml-auto">
           {(["pipeline", "list", "seats", "payments"] as const).map((v) => (
             <button key={v} onClick={() => setView(v)}
