@@ -66,56 +66,72 @@ const EmployeeProfileDialog = ({ open, onClose, userId, userName }: EmployeeProf
   useEffect(() => {
     if (!open) return;
     setLoading(true);
-    supabase
-      .from("employee_profiles")
-      .select("*")
-      .eq("user_id", userId)
-      .maybeSingle()
-      .then(({ data, error }) => {
-        if (error) {
-          toast({ title: "Error", description: error.message, variant: "destructive" });
-        }
-        if (data) {
-          setProfile({
-            id: data.id,
-            employee_number: data.employee_number || "",
-            first_name: data.first_name || "",
-            middle_name: data.middle_name || "",
-            last_name: data.last_name || "",
-            display_name: data.display_name || "",
-            gender: data.gender || "",
-            date_of_birth: data.date_of_birth || "",
-            marital_status: data.marital_status || "",
-            blood_group: data.blood_group || "",
-            nationality: data.nationality || "India",
-            physically_handicapped: data.physically_handicapped || false,
-            work_email: data.work_email || "",
-            personal_email: data.personal_email || "",
-            mobile_number: data.mobile_number || "",
-            work_number: data.work_number || "",
-            residence_number: data.residence_number || "",
-            current_address: (data.current_address as any) || {},
-            permanent_address: (data.permanent_address as any) || {},
-            date_of_joining: data.date_of_joining || "",
-            job_title: data.job_title || "",
-            job_title_secondary: data.job_title_secondary || "",
-            worker_type: data.worker_type || "Permanent",
-            time_type: data.time_type || "Full Time",
-            notice_period_days: data.notice_period_days || 90,
-            employment_status: data.employment_status || "Working",
-            pan_number: data.pan_number || "",
-            aadhaar_number: data.aadhaar_number || "",
-            education: (data.education as any) || [],
-            experience: (data.experience as any) || [],
-            professional_summary: data.professional_summary || "",
-          });
-          setIsNew(false);
-        } else {
-          setProfile({ ...emptyProfile, display_name: userName });
-          setIsNew(true);
-        }
-        setLoading(false);
-      });
+
+    (async () => {
+      // Fetch base profile (display_name, phone) — email not fetchable from frontend (auth.users is restricted)
+      const [profileRes, empRes] = await Promise.all([
+        supabase.from("profiles").select("display_name, phone, campus").eq("user_id", userId).maybeSingle(),
+        supabase.from("employee_profiles").select("*").eq("user_id", userId).maybeSingle(),
+      ]);
+
+      const baseProfile = profileRes.data;
+      const empData = empRes.data;
+      const authEmail = "";
+
+      if (empRes.error) {
+        toast({ title: "Error", description: empRes.error.message, variant: "destructive" });
+      }
+
+      if (empData) {
+        setProfile({
+          id: empData.id,
+          employee_number: empData.employee_number || "",
+          first_name: empData.first_name || "",
+          middle_name: empData.middle_name || "",
+          last_name: empData.last_name || "",
+          display_name: empData.display_name || baseProfile?.display_name || userName,
+          gender: empData.gender || "",
+          date_of_birth: empData.date_of_birth || "",
+          marital_status: empData.marital_status || "",
+          blood_group: empData.blood_group || "",
+          nationality: empData.nationality || "India",
+          physically_handicapped: empData.physically_handicapped || false,
+          work_email: empData.work_email || authEmail || "",
+          personal_email: empData.personal_email || "",
+          // Prefer employee_profiles.mobile_number, fall back to profiles.phone (OTP login number)
+          mobile_number: empData.mobile_number || baseProfile?.phone || "",
+          work_number: empData.work_number || "",
+          residence_number: empData.residence_number || "",
+          current_address: (empData.current_address as any) || {},
+          permanent_address: (empData.permanent_address as any) || {},
+          date_of_joining: empData.date_of_joining || "",
+          job_title: empData.job_title || "",
+          job_title_secondary: empData.job_title_secondary || "",
+          worker_type: empData.worker_type || "Permanent",
+          time_type: empData.time_type || "Full Time",
+          notice_period_days: empData.notice_period_days || 90,
+          employment_status: empData.employment_status || "Working",
+          pan_number: empData.pan_number || "",
+          aadhaar_number: empData.aadhaar_number || "",
+          education: (empData.education as any) || [],
+          experience: (empData.experience as any) || [],
+          professional_summary: empData.professional_summary || "",
+        });
+        setIsNew(false);
+      } else {
+        // No employee_profiles row yet — pre-fill from profiles + auth
+        setProfile({
+          ...emptyProfile,
+          display_name: baseProfile?.display_name || userName,
+          first_name: (baseProfile?.display_name || userName).split(" ")[0] || "",
+          last_name: (baseProfile?.display_name || userName).split(" ").slice(1).join(" ") || "",
+          mobile_number: baseProfile?.phone || "",
+          work_email: authEmail,
+        });
+        setIsNew(true);
+      }
+      setLoading(false);
+    })();
   }, [open, userId]);
 
   if (!open) return null;
@@ -169,6 +185,17 @@ const EmployeeProfileDialog = ({ open, onClose, userId, userName }: EmployeeProf
         const { error } = await supabase.from("employee_profiles").update(payload).eq("user_id", userId);
         if (error) throw error;
       }
+
+      // Also sync mobile_number → profiles.phone (used for OTP login and admin panel display)
+      if (profile.mobile_number) {
+        const normalizedPhone = profile.mobile_number.startsWith("+")
+          ? profile.mobile_number
+          : `+${profile.mobile_number.replace(/\D/g, "")}`;
+        const profileUpdate: Record<string, string> = { phone: normalizedPhone };
+        if (profile.display_name) profileUpdate.display_name = profile.display_name;
+        await supabase.from("profiles").upsert({ user_id: userId, ...profileUpdate }, { onConflict: "user_id" });
+      }
+
       toast({ title: "Saved", description: "Employee profile updated successfully." });
     } catch (err: any) {
       toast({ title: "Error", description: err.message, variant: "destructive" });
