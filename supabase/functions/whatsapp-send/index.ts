@@ -15,6 +15,8 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   fee_reminder: { name: "fee_reminder", params: ["student_name", "amount", "due_date"] },
   course_details: { name: "course_details", params: ["student_name", "course_name"] },
   course_info_video: { name: "course_info_video", params: ["student_name", "course_name", "duration", "eligibility", "campus_name"] },
+  // Counsellor utility — tap-to-call link sent to counsellor's own phone
+  counsellor_call_lead: { name: "lead_contact_details", params: ["counsellor_name", "lead_name", "lead_phone", "course"] },
   // User onboarding templates
   staff_welcome: { name: "nimt_new_staff", params: ["name", "role", "campus"] },
   student_welcome: { name: "nimt_student_admitted", params: ["name", "admission_no", "course", "campus"] },
@@ -182,6 +184,7 @@ Deno.serve(async (req) => {
       counsellor_lead_reclaimed: "Lead {{1}} ({{2}}) has been returned to the unassigned bucket due to SLA breach.",
       counsellor_visit_confirmation: "Action needed: Lead {{1}} has a campus visit scheduled for {{2}} at {{3}}. Please call to confirm.",
       counsellor_followup_overdue: "Alert: A follow-up for lead {{1}} was scheduled for {{2}} and is now overdue.",
+      counsellor_call_lead: "Hello {{1}}, here are the contact details of a lead from your assigned list.\n\nLead Name: {{2}}\nPhone Number: {{3}}\nCourse Interest: {{4}}\n\nYou can open the lead record from the button below to view more details and log the call outcome.",
       staff_welcome: "Welcome to NIMT Educational Institutions, {{1}}!\n\nYou have been added as {{2}} at {{3}}.\n\nPlease check your email for login details.\n\nFor any assistance, contact the admin office.",
       student_welcome: "Congratulations {{1}}!\n\nWelcome to NIMT Educational Institutions.\n\nAdmission No: {{2}}\nCourse: {{3}}\nCampus: {{4}}\n\nYou can access the student portal at https://uni.nimt.ac.in\n\nWe wish you a great academic journey ahead!",
       applicant_welcome: "Hi {{1}}, thank you for starting your application at NIMT Educational Institutions!\n\nYour Application ID: {{2}}\nCourse: {{3}}\n\nComplete your application at https://uni.nimt.ac.in/apply/nimt/\n\nOur admissions team is here to help. Feel free to reach out anytime!",

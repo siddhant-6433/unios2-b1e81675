@@ -61,7 +61,7 @@ const LeadDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { user, role } = useAuth();
+  const { user, role, profile } = useAuth();
   const isTeamLeader = useIsTeamLeader();
   const isSuperAdmin = role === "super_admin";
   const canTransfer = isSuperAdmin || isTeamLeader;
@@ -171,6 +171,7 @@ const LeadDetail = () => {
 
     const dispositionLabels: Record<string, string> = {
       interested: "Interested", not_interested: "Not Interested",
+      ineligible: "Ineligible",
       not_answered: "Not Answered", wrong_number: "Wrong Number",
       call_back: "Call Back Later", do_not_contact: "Do Not Contact",
       voicemail: "Voicemail", busy: "Busy",
@@ -204,6 +205,21 @@ const LeadDetail = () => {
       await supabase.from("lead_activities").insert({
         lead_id: id, user_id: profileId, type: "stage_change",
         description: `Stage changed to Rejected (${label})`,
+        old_stage: lead.stage as any, new_stage: "rejected" as any,
+      });
+    } else if (data.disposition === "ineligible") {
+      // Mark as rejected for current session, save future eligibility if provided
+      const updates: Record<string, any> = { stage: "rejected" as any };
+      if (data.future_eligible_session) {
+        updates.future_eligible_session = data.future_eligible_session;
+      }
+      await supabase.from("leads").update(updates).eq("id", id);
+      const futureNote = data.future_eligible_session
+        ? ` — eligible for ${data.future_eligible_session}`
+        : "";
+      await supabase.from("lead_activities").insert({
+        lead_id: id, user_id: profileId, type: "stage_change",
+        description: `Stage changed to Rejected (Ineligible${futureNote})`,
         old_stage: lead.stage as any, new_stage: "rejected" as any,
       });
     }
@@ -489,7 +505,6 @@ const LeadDetail = () => {
 
         const actions = [
           { icon: Phone, label: "Call", color: "text-blue-600 bg-blue-100 dark:bg-blue-900/30", action: () => {
-            if (lead.phone) window.open(`tel:${lead.phone}`);
             setShowCallDisposition(true);
           } },
           { icon: MessageSquare, label: "WhatsApp", color: "text-green-600 bg-green-100 dark:bg-green-900/30", action: () => setShowWhatsApp(true) },
@@ -661,6 +676,40 @@ const LeadDetail = () => {
         campuses={campuses}
         defaultCampusId={lead.campus_id || undefined}
         onSubmit={logCallDisposition}
+        onCallNow={async () => {
+          if (!profile?.phone || !lead.phone) return;
+          const leadPhoneFormatted = lead.phone.startsWith("+") ? lead.phone : `+91${lead.phone.replace(/^91/, "")}`;
+          const { data, error } = await supabase.functions.invoke("whatsapp-send", {
+            body: {
+              template_key: "counsellor_call_lead",
+              phone: profile.phone,
+              params: [
+                profile.display_name || "Counsellor",
+                lead.name,
+                leadPhoneFormatted,
+                courseName || "N/A",
+              ],
+              button_urls: [lead.id],
+            },
+          });
+          if (error) {
+            let detail = error.message;
+            try {
+              if ((error as any).context?.json) {
+                const body = await (error as any).context.json();
+                detail = body?.error || detail;
+              }
+            } catch {}
+            // Ignore "template not approved yet" errors silently
+            if (!detail?.includes("132001") && !detail?.includes("does not exist in the translation")) {
+              toast({ title: "Tap-to-call WA failed", description: detail, variant: "destructive" });
+            }
+          } else if (data?.error) {
+            if (!data.error.includes("132001") && !data.error.includes("does not exist in the translation")) {
+              toast({ title: "Tap-to-call WA failed", description: data.error, variant: "destructive" });
+            }
+          }
+        }}
       />
 
       {/* Transfer Dialog */}

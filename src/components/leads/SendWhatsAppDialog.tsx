@@ -112,20 +112,39 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
 
     const params = selectedTmpl.buildParams(lead, courseName, campusName, courseDuration, courseType);
 
-    const { error } = await supabase.functions.invoke("whatsapp-send", {
-      body: {
-        template_key: selectedTemplate,
-        phone: lead.phone,
-        params,
-        lead_id: lead.id,
-      },
-    });
+    try {
+      // Direct fetch to edge function so we can read the raw response body
+      // (supabase.functions.invoke hides the actual error from Meta)
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-    setSending(false);
+      const response = await fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken || anonKey}`,
+          apikey: anonKey,
+        },
+        body: JSON.stringify({
+          template_key: selectedTemplate,
+          phone: lead.phone,
+          params,
+          lead_id: lead.id,
+        }),
+      });
 
-    if (error) {
-      toast({ title: "Failed to send", description: error.message, variant: "destructive" });
-    } else {
+      const responseBody = await response.json().catch(() => ({ error: "Invalid response" }));
+      setSending(false);
+
+      if (!response.ok) {
+        const detail = responseBody?.error || responseBody?.meta_error || `HTTP ${response.status}`;
+        console.error("whatsapp-send failed:", { status: response.status, body: responseBody });
+        toast({ title: "Failed to send", description: detail, variant: "destructive" });
+        return;
+      }
+
       setSent(true);
       toast({ title: "WhatsApp sent successfully" });
       setTimeout(() => {
@@ -134,6 +153,10 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
         onOpenChange(false);
         onSuccess?.();
       }, 1200);
+    } catch (e: any) {
+      setSending(false);
+      console.error("whatsapp-send exception:", e);
+      toast({ title: "Failed to send", description: e.message, variant: "destructive" });
     }
   };
 

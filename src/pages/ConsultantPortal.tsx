@@ -17,10 +17,10 @@ import {
   Download, Clock, CheckCircle, CreditCard, Eye, X,
 } from "lucide-react";
 import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
+import { useNavigate } from "react-router-dom";
 import { ConsultantTour } from "@/components/consultant/ConsultantTour";
 import { VoiceMessageRecorder } from "@/components/consultant/VoiceMessageRecorder";
-import { generateConsultantGuidePDF } from "@/lib/consultant-guide-pdf";
-import { Download, HelpCircle } from "lucide-react";
+import { BookOpen } from "lucide-react";
 
 interface DashboardStats {
   consultant_id: string;
@@ -105,6 +105,7 @@ const PAYOUT_STATUS: Record<string, { label: string; cls: string }> = {
 const ConsultantPortal = () => {
   const { user } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const { coursesByDepartment, getCampusesForCourse } = useCourseCampusLink();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -252,7 +253,7 @@ const ConsultantPortal = () => {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* First-time tour overlay */}
-      <ConsultantTour onDownloadGuide={generateConsultantGuidePDF} />
+      <ConsultantTour onDownloadGuide={() => navigate("/consultant-guide")} />
 
       <div className="flex items-center justify-between">
         <div>
@@ -260,8 +261,8 @@ const ConsultantPortal = () => {
           <p className="text-sm text-muted-foreground mt-1">Welcome, {stats?.consultant_name || "Consultant"}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={generateConsultantGuidePDF}>
-            <Download className="h-3.5 w-3.5" /> Guide PDF
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => navigate("/consultant-guide")}>
+            <BookOpen className="h-3.5 w-3.5" /> View Guide
           </Button>
           <Button onClick={() => setShowAdd(true)} className="gap-2" data-tour="add-lead">
             <Plus className="h-4 w-4" /> Add Lead

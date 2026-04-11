@@ -4,11 +4,13 @@ import { Button } from "@/components/ui/button";
 import {
   Phone, CheckCircle, XCircle, PhoneMissed, PhoneOff, Clock3,
   BanIcon, Loader2, ArrowRight, MapPin, CalendarDays, ChevronDown, Clock,
+  AlertCircle,
 } from "lucide-react";
 
 export type CallDisposition =
   | "interested"
   | "not_interested"
+  | "ineligible"
   | "not_answered"
   | "wrong_number"
   | "call_back"
@@ -22,6 +24,8 @@ export interface CallDispositionData {
   notes: string;
   schedule_followup: boolean;
   visit?: { visit_date: string; campus_id: string };
+  /** Set when disposition is "ineligible" — lead eligible for future session */
+  future_eligible_session?: "2027-28" | "2028-29" | null;
 }
 
 interface CallDispositionDialogProps {
@@ -32,11 +36,14 @@ interface CallDispositionDialogProps {
   campuses: { id: string; name: string }[];
   defaultCampusId?: string;
   onSubmit: (data: CallDispositionData) => Promise<void>;
+  /** Called when counsellor clicks "Call Now" — e.g. to send tap-to-call WhatsApp */
+  onCallNow?: () => void | Promise<void>;
 }
 
 const DISPOSITIONS: { value: CallDisposition; label: string; icon: any; color: string; suggestsFollowup: boolean }[] = [
   { value: "interested", label: "Interested", icon: CheckCircle, color: "bg-emerald-100 text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-400", suggestsFollowup: true },
   { value: "not_interested", label: "Not Interested", icon: XCircle, color: "bg-red-100 text-red-700 border-red-300 hover:bg-red-50 dark:bg-red-900/30 dark:text-red-400", suggestsFollowup: false },
+  { value: "ineligible", label: "Ineligible", icon: AlertCircle, color: "bg-purple-100 text-purple-700 border-purple-300 hover:bg-purple-50 dark:bg-purple-900/30 dark:text-purple-400", suggestsFollowup: false },
   { value: "not_answered", label: "Not Answered", icon: PhoneMissed, color: "bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-50 dark:bg-amber-900/30 dark:text-amber-400", suggestsFollowup: true },
   { value: "call_back", label: "Call Back Later", icon: Clock3, color: "bg-blue-100 text-blue-700 border-blue-300 hover:bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400", suggestsFollowup: true },
   { value: "voicemail", label: "Voicemail", icon: PhoneOff, color: "bg-indigo-100 text-indigo-700 border-indigo-300 hover:bg-indigo-50 dark:bg-indigo-900/30 dark:text-indigo-400", suggestsFollowup: true },
@@ -75,7 +82,7 @@ const formatDisplayDate = (dateStr: string) => {
   return `${day}, ${d}/${m}/${y.slice(2)}`;
 };
 
-export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone, campuses, defaultCampusId, onSubmit }: CallDispositionDialogProps) {
+export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone, campuses, defaultCampusId, onSubmit, onCallNow }: CallDispositionDialogProps) {
   const [disposition, setDisposition] = useState<CallDisposition | null>(null);
   const [duration, setDuration] = useState(0);
   const [notes, setNotes] = useState("");
@@ -85,6 +92,8 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
   const [visitDate, setVisitDate] = useState(tomorrowStr());
   const [visitTime, setVisitTime] = useState("11:00");
   const [visitCampusId, setVisitCampusId] = useState(defaultCampusId || campuses[0]?.id || "");
+  // Ineligible → future eligibility state
+  const [futureSession, setFutureSession] = useState<"2027-28" | "2028-29" | null>(null);
   const dateInputRef = useRef<HTMLInputElement>(null);
 
   const selectedDisp = DISPOSITIONS.find(d => d.value === disposition);
@@ -96,6 +105,7 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
     setShowVisitForm(false);
     setVisitDate(tomorrowStr());
     setVisitTime("11:00");
+    setFutureSession(null);
   };
 
   const handleSubmit = async (opts: { scheduleFollowup?: boolean; scheduleVisit?: boolean } = {}) => {
@@ -110,6 +120,7 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
       notes,
       schedule_followup: opts.scheduleFollowup ?? false,
       visit,
+      future_eligible_session: disposition === "ineligible" ? futureSession : null,
     });
     setSaving(false);
     resetState();
@@ -137,10 +148,22 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
         </DialogHeader>
 
         <div className="space-y-4 pt-1">
-          {/* Lead info */}
-          <div className="rounded-lg bg-muted/40 px-3 py-2">
-            <p className="text-sm font-medium text-foreground">{leadName}</p>
-            <p className="text-[11px] text-muted-foreground font-mono">{leadPhone}</p>
+          {/* Lead info + Call Now button */}
+          <div className="flex items-center justify-between gap-3 rounded-xl bg-muted/40 px-3 py-2.5">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-foreground truncate">{leadName}</p>
+              <p className="text-[11px] text-muted-foreground font-mono">{leadPhone}</p>
+            </div>
+            <Button
+              size="sm"
+              className="shrink-0 gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
+              onClick={async () => {
+                if (leadPhone) window.open(`tel:${leadPhone}`);
+                if (onCallNow) await onCallNow();
+              }}
+            >
+              <Phone className="h-3.5 w-3.5" /> Call Now
+            </Button>
           </div>
 
           {/* Disposition pills */}
@@ -201,6 +224,48 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
               className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
             />
           </div>
+
+          {/* Future eligibility — only for "Ineligible" */}
+          {disposition === "ineligible" && (
+            <div className="rounded-xl border border-purple-200 dark:border-purple-800/40 bg-purple-50/50 dark:bg-purple-950/20 p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-3.5 w-3.5 text-purple-700 dark:text-purple-400" />
+                <span className="text-xs font-semibold text-purple-900 dark:text-purple-200">Eligible for future session?</span>
+              </div>
+              <div className="grid grid-cols-3 gap-1.5">
+                {(["2027-28", "2028-29"] as const).map((session) => (
+                  <button
+                    key={session}
+                    type="button"
+                    onClick={() => setFutureSession(futureSession === session ? null : session)}
+                    className={`rounded-lg border px-2 py-1.5 text-[11px] font-medium transition-colors ${
+                      futureSession === session
+                        ? "bg-purple-600 text-white border-purple-600"
+                        : "bg-background border-border text-foreground hover:bg-purple-50 dark:hover:bg-purple-950/40"
+                    }`}
+                  >
+                    {session}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setFutureSession(null)}
+                  className={`rounded-lg border px-2 py-1.5 text-[11px] font-medium transition-colors ${
+                    futureSession === null
+                      ? "bg-slate-600 text-white border-slate-600"
+                      : "bg-background border-border text-foreground hover:bg-muted"
+                  }`}
+                >
+                  None
+                </button>
+              </div>
+              {futureSession && (
+                <p className="text-[10px] text-purple-700 dark:text-purple-300">
+                  Lead will be marked ineligible for current session but re-contacted for {futureSession} admissions.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Visit scheduling — only for "Interested" */}
           {disposition === "interested" && (

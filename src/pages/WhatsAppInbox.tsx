@@ -281,7 +281,7 @@ const WhatsAppInbox = () => {
       case "course_details": params = [leadName, "your selected course"]; break;
     }
 
-    const { error } = await supabase.functions.invoke("whatsapp-send", {
+    const { data, error } = await supabase.functions.invoke("whatsapp-send", {
       body: {
         template_key: selectedTemplate,
         phone: selectedPhone,
@@ -291,7 +291,15 @@ const WhatsAppInbox = () => {
     });
 
     if (error) {
-      toast({ title: "Failed to send template", description: error.message, variant: "destructive" });
+      const errBody = (error as any).data;
+      let detail = error.message;
+      if (errBody) {
+        detail = typeof errBody === "string" ? errBody : errBody?.error || errBody?.meta_error || errBody?.message || JSON.stringify(errBody);
+      }
+      console.error("whatsapp-send template error:", { error, errBody, data });
+      toast({ title: "Failed to send template", description: detail, variant: "destructive" });
+    } else if (data?.error) {
+      toast({ title: "Failed to send template", description: data.error, variant: "destructive" });
     } else {
       toast({ title: "Template sent" });
       setSelectedTemplate(null);

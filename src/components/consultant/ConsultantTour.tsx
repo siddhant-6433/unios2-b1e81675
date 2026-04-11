@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
-import { X, ChevronLeft, ChevronRight, Sparkles, Users, IndianRupee, Mic, Download, BookOpen } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, Sparkles, Users, IndianRupee, Mic, BookOpen } from "lucide-react";
 
 interface TourStep {
   title: string;
@@ -47,9 +47,9 @@ const TOUR_STEPS: TourStep[] = [
     icon: BookOpen,
   },
   {
-    title: "Download Your Guide",
-    body: "Click below to download a PDF guide you can keep for reference. You're all set — let's get started!",
-    icon: Download,
+    title: "Open the Full Visual Guide",
+    body: "Click below to open the full illustrated guide. Every feature is explained with visuals — and you can download it as PDF for offline reading. You're all set — let's get started!",
+    icon: BookOpen,
   },
 ];
 
@@ -139,7 +139,7 @@ export function ConsultantTour({ onDownloadGuide }: { onDownloadGuide: () => voi
                 className="mt-4 w-full gap-2"
                 variant="outline"
               >
-                <Download className="h-4 w-4" /> Download PDF Guide
+                <BookOpen className="h-4 w-4" /> Open Visual Guide
               </Button>
             )}
           </div>
