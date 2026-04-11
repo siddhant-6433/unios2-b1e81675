@@ -189,6 +189,13 @@ const LeadDetail = () => {
       notes: data.notes || null,
     });
 
+    // 1b. Mark any pending follow-ups on this lead as completed — the call has been made
+    await supabase
+      .from("lead_followups")
+      .update({ status: "completed", completed_at: new Date().toISOString() } as any)
+      .eq("lead_id", id)
+      .eq("status", "pending");
+
     // 2. Log activity
     const durationStr = data.duration_seconds > 0
       ? ` (${Math.floor(data.duration_seconds / 60)}m${data.duration_seconds % 60 ? ` ${data.duration_seconds % 60}s` : ""})`
@@ -240,6 +247,14 @@ const LeadDetail = () => {
 
   const addFollowup = async (data: { scheduled_at: string; type: string; notes: string }) => {
     if (!data.scheduled_at || !id) return;
+    // Mark all existing pending follow-ups for this lead as completed
+    // (creating a new follow-up implies the previous ones have been acted on)
+    await supabase
+      .from("lead_followups")
+      .update({ status: "completed", completed_at: new Date().toISOString() } as any)
+      .eq("lead_id", id)
+      .eq("status", "pending");
+
     const { error } = await supabase.from("lead_followups").insert({
       lead_id: id, user_id: user?.id,
       scheduled_at: data.scheduled_at, type: data.type, notes: data.notes || null,
