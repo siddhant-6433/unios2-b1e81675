@@ -796,35 +796,27 @@ const ApplyPortal = () => {
       return;
     }
 
-    // If no existing lead, auto-create one so the application appears in the CRM
+    // Create/link lead via SECURITY DEFINER RPC (bypasses RLS restrictions on
+    // the authenticated applicant, who has no staff role)
     let resolvedLeadId = leadId;
-    if (!resolvedLeadId) {
-      const { data: newLead } = await supabase
-        .from("leads")
-        .insert({
-          name: leadName,
-          phone,
-          source: leadSource as any,
-          stage: "application_in_progress" as any,
-          person_role: "applicant" as any,
-          application_id: appId,
-          course_id: selections[0]?.course_id ?? null,
-          campus_id: selections[0]?.campus_id ?? null,
-        })
-        .select("id")
-        .single();
-      resolvedLeadId = newLead?.id ?? null;
-
-      if (resolvedLeadId) {
-        await supabase.from("applications").update({ lead_id: resolvedLeadId }).eq("id", inserted.id);
+    const { data: upsertedLeadId, error: leadErr } = await supabase.rpc(
+      "upsert_application_lead" as any,
+      {
+        _name: leadName,
+        _phone: phone,
+        _email: null,
+        _course_id: selections[0]?.course_id ?? null,
+        _campus_id: selections[0]?.campus_id ?? null,
+        _application_id: appId,
+        _source: leadSource,
       }
-    } else {
-      await supabase.from("leads").update({
-        stage: "application_in_progress" as any,
-        application_id: appId,
-        course_id: selections[0]?.course_id,
-        campus_id: selections[0]?.campus_id,
-      }).eq("id", resolvedLeadId);
+    );
+    if (leadErr) {
+      console.error("Failed to upsert lead for application:", leadErr);
+    } else if (upsertedLeadId) {
+      resolvedLeadId = upsertedLeadId as unknown as string;
+      // Link the application to the lead
+      await supabase.from("applications").update({ lead_id: resolvedLeadId }).eq("id", inserted.id);
     }
 
     if (resolvedLeadId) {
