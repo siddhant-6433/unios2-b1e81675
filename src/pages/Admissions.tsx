@@ -297,12 +297,32 @@ const Admissions = () => {
       const todayStart = now.toISOString().slice(0, 10);
       const todayEnd = todayStart + "T23:59:59";
 
+      // For counsellors, limit stats to their own assigned leads
+      let leadIds: string[] | null = null;
+      if (role === "counsellor" && profile?.id) {
+        const { data: myLeads } = await supabase
+          .from("leads")
+          .select("id")
+          .eq("counsellor_id", profile.id);
+        leadIds = (myLeads || []).map((l: any) => l.id);
+        if (leadIds.length === 0) {
+          setPendingFollowups(0); setTodayFollowups(0); setOverdueFollowups(0);
+          setUpcomingVisits(0); setCompletedVisits(0);
+          return;
+        }
+      }
+
+      const applyLeadFilter = <T extends any>(q: T): T => {
+        if (leadIds) return (q as any).in("lead_id", leadIds) as T;
+        return q;
+      };
+
       const [pendingRes, todayRes, overdueRes, upVisitRes, compVisitRes] = await Promise.all([
-        supabase.from("lead_followups").select("id", { count: "exact", head: true }).eq("status", "pending"),
-        supabase.from("lead_followups").select("id", { count: "exact", head: true }).eq("status", "pending").gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd),
-        supabase.from("overdue_followups" as any).select("id", { count: "exact", head: true }),
-        supabase.from("campus_visits").select("id", { count: "exact", head: true }).gte("visit_date", todayStart).in("status", ["scheduled", "confirmed"]),
-        supabase.from("campus_visits").select("id", { count: "exact", head: true }).eq("status", "completed"),
+        applyLeadFilter(supabase.from("lead_followups").select("id", { count: "exact", head: true }).eq("status", "pending")),
+        applyLeadFilter(supabase.from("lead_followups").select("id", { count: "exact", head: true }).eq("status", "pending").gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd)),
+        applyLeadFilter(supabase.from("overdue_followups" as any).select("id", { count: "exact", head: true })),
+        applyLeadFilter(supabase.from("campus_visits").select("id", { count: "exact", head: true }).gte("visit_date", todayStart).in("status", ["scheduled", "confirmed"])),
+        applyLeadFilter(supabase.from("campus_visits").select("id", { count: "exact", head: true }).eq("status", "completed")),
       ]);
       setPendingFollowups(pendingRes.count || 0);
       setTodayFollowups(todayRes.count || 0);
@@ -310,7 +330,7 @@ const Admissions = () => {
       setUpcomingVisits(upVisitRes.count || 0);
       setCompletedVisits(compVisitRes.count || 0);
     })();
-  }, [selectedCampusId]);
+  }, [selectedCampusId, role, profile?.id]);
 
   // Row 1: Lead data
   const leadStats = [
@@ -535,7 +555,7 @@ const Admissions = () => {
           </select>
         )}
         <div className="flex rounded-xl border border-input bg-card p-0.5 ml-auto">
-          {(["pipeline", "list", "seats", "payments"] as const).map((v) => (
+          {((role === "counsellor" ? ["pipeline", "list"] : ["pipeline", "list", "seats", "payments"]) as const).map((v) => (
             <button key={v} onClick={() => setView(v)}
               className={`rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-colors ${view === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
               {v}

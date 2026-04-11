@@ -12,7 +12,7 @@ interface Props {
 }
 
 export function InactivityAlertBanner({ onViewInactive, onViewOverdue, campusId }: Props) {
-  const { role, user } = useAuth();
+  const { role, user, profile } = useAuth();
   const [inactiveIds, setInactiveIds] = useState<Set<string>>(new Set());
   const [overdueCount, setOverdueCount] = useState(0);
   const [dismissed, setDismissed] = useState(false);
@@ -20,11 +20,12 @@ export function InactivityAlertBanner({ onViewInactive, onViewOverdue, campusId 
   useEffect(() => {
     (async () => {
       // Fetch inactive leads — scope to counsellor's own leads for non-admin roles
+      // counsellor_id FK references profiles.id, not auth.users.id
       let inactiveQuery = supabase.from("inactive_leads" as any).select("id, counsellor_id");
       if (campusId && campusId !== "all") inactiveQuery = inactiveQuery.eq("campus_id", campusId);
       const isCounsellorOnly = role === "counsellor" || role === "faculty" || role === "teacher";
-      if (isCounsellorOnly && user?.id) {
-        inactiveQuery = inactiveQuery.eq("counsellor_id", user.id);
+      if (isCounsellorOnly && profile?.id) {
+        inactiveQuery = inactiveQuery.eq("counsellor_id", profile.id);
       }
       const inactiveRes = await inactiveQuery;
       const ids = new Set<string>((inactiveRes.data || []).map((r: any) => r.id));
@@ -32,13 +33,13 @@ export function InactivityAlertBanner({ onViewInactive, onViewOverdue, campusId 
 
       // Fetch overdue follow-ups — scope similarly
       let overdueQuery = supabase.from("overdue_followups" as any).select("id", { count: "exact", head: true });
-      if (isCounsellorOnly && user?.id) {
-        overdueQuery = overdueQuery.eq("counsellor_id", user.id);
+      if (isCounsellorOnly && profile?.id) {
+        overdueQuery = overdueQuery.eq("counsellor_id", profile.id);
       }
       const overdueRes = await overdueQuery;
       setOverdueCount(overdueRes.count || 0);
     })();
-  }, [role, user?.id, campusId]);
+  }, [role, profile?.id, campusId]);
 
   const inactiveCount = inactiveIds.size;
 
