@@ -491,15 +491,17 @@ function DynamicStepProgress({ steps, currentStep, completedSections, onStepClic
       {steps.map((s, i) => {
         const done    = completedSections[s.key] === true;
         const active  = currentStep === i;
-        // Lock conditions:
-        // 1. Once payment is done, ALL pre-payment steps are permanently locked
-        // 2. Any completed step (done) is locked — user must not go back and edit validated steps
-        //    (except the currently active one, so they can finish it)
-        const locked  = (isPaid && i < paymentIdx) || (done && !active);
+        // Sequential navigation: a step is locked if any previous step is incomplete.
+        // User must complete steps in order. They CAN come back to edit completed ones.
+        // Exception: once payment is done, ALL pre-payment steps are permanently locked.
+        const allPrevDone = steps.slice(0, i).every(prev => completedSections[prev.key] === true);
+        const lockedByPayment = isPaid && i < paymentIdx;
+        const lockedBySequence = !allPrevDone && !active;
+        const locked  = lockedByPayment || lockedBySequence;
         const Icon    = s.icon;
-        const title = isPaid && i < paymentIdx
+        const title = lockedByPayment
           ? "Locked after payment"
-          : (done && !active) ? "Locked — step already completed" : undefined;
+          : lockedBySequence ? "Complete previous steps first" : undefined;
         return (
           <button
             key={s.key}
@@ -1012,14 +1014,14 @@ const ApplyPortal = () => {
   const paymentStepIdx = steps.findIndex(s => s.key === "payment");
   const cs = app.completed_sections as Record<string, boolean>;
 
-  // Determine if user can navigate back from current step
-  // Blocked if: previous step is already completed/locked, or we're past the payment step
+  // Determine if user can navigate back from current step.
+  // Users CAN freely go back to edit previously completed steps.
+  // Blocked only if:
+  //  - we're at the first step (nowhere to go)
+  //  - payment is done and the previous step would be a pre-payment (locked) step
   const canGoBack = (() => {
     if (step === 0) return false;
-    if (isPaid && step > paymentStepIdx) return false; // can't go back past payment once paid
-    const prevKey = steps[step - 1]?.key;
-    if (!prevKey) return false;
-    if (cs[prevKey] === true) return false; // prev step is completed → locked
+    if (isPaid && (step - 1) < paymentStepIdx) return false;
     return true;
   })();
 

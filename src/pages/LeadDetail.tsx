@@ -550,6 +550,16 @@ const LeadDetail = () => {
         );
       })()}
 
+      {/* Application Progress — top of page, full width, for applicants */}
+      {(lead.person_role === "applicant" || lead.application_id) && (
+        <ApplicationProgress
+          leadId={lead.id}
+          leadPhone={lead.phone}
+          applicationId={lead.application_id}
+          canImpersonate={role === "super_admin" || role === "principal" || role === "campus_admin" || role === "admission_head" || role === "counsellor"}
+        />
+      )}
+
       {/* Two-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-5">
         {/* Left Column */}
@@ -565,14 +575,6 @@ const LeadDetail = () => {
             onStageChange={updateStage}
             onFieldUpdate={updateField}
           />
-          {(lead.person_role === "applicant" || lead.application_id) && (
-            <ApplicationProgress
-              leadId={lead.id}
-              leadPhone={lead.phone}
-              applicationId={lead.application_id}
-              canImpersonate={role === "super_admin" || role === "principal" || role === "campus_admin" || role === "admission_head" || role === "counsellor"}
-            />
-          )}
           <FuzzyDuplicateAlert leadId={lead.id} leadName={lead.name} leadPhone={lead.phone} leadEmail={lead.email} />
           <LeadPaymentHistory leadId={lead.id} refreshKey={paymentRefreshKey} />
           {lead.course_id && (
