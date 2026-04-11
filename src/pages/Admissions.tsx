@@ -261,9 +261,16 @@ const Admissions = () => {
   };
 
   const filtered = leads.filter((l) => {
-    const matchesSearch = !search || l.name.toLowerCase().includes(search.toLowerCase()) ||
-      (l.course_name || "").toLowerCase().includes(search.toLowerCase()) ||
-      (l.campus_name || "").toLowerCase().includes(search.toLowerCase());
+    const q = search.toLowerCase().trim();
+    const digits = q.replace(/\D/g, "");
+    const phoneDigits = (l.phone || "").replace(/\D/g, "");
+    const matchesSearch = !q ||
+      l.name.toLowerCase().includes(q) ||
+      (l.course_name || "").toLowerCase().includes(q) ||
+      (l.campus_name || "").toLowerCase().includes(q) ||
+      (l.email || "").toLowerCase().includes(q) ||
+      (l.application_id || "").toLowerCase().includes(q) ||
+      (digits.length >= 3 && phoneDigits.includes(digits));
     const matchesStage = stageFilter === "all" || l.stage === stageFilter;
     const matchesSource = sourceFilter === "all" || l.source === sourceFilter;
     const matchesRole = roleFilter === "all" || l.person_role === roleFilter;
@@ -515,7 +522,7 @@ const Admissions = () => {
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input type="text" placeholder="Search leads by name, course, campus..." value={search}
+          <input type="text" placeholder="Search by name, phone, email, course, campus..." value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20" />
         </div>
