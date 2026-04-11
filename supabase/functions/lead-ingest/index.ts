@@ -137,7 +137,7 @@ function parseMirai(body: any): MiraiParsedLead {
     email: body.email?.trim() || undefined,
     guardian_name: body.parent_name?.trim() || undefined,
     guardian_phone: (body.mobile_number || body.mobile || body.phone || "").replace(/[\s\-]/g, "") || undefined,
-    source: "website",
+    source: "mirai_website",
     course_code: courseCode || undefined,
     course_name: gradeLabel || undefined,
     campus_name: "Mirai",
@@ -327,8 +327,8 @@ Deno.serve(async (req) => {
 
     // ── Insert lead ──
     const validSources = [
-      "website", "meta_ads", "google_ads", "shiksha", "walk_in",
-      "consultant", "justdial", "referral", "education_fair", "collegedunia", "other",
+      "website", "mirai_website", "meta_ads", "google_ads", "shiksha", "walk_in",
+      "consultant", "justdial", "referral", "education_fair", "collegedunia", "collegehai", "other",
     ];
     const leadSource = validSources.includes(parsed.source) ? parsed.source : "other";
 
