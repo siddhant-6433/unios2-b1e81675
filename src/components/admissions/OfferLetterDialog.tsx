@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, FileText, Plus, Gift } from "lucide-react";
+import { Loader2, FileText, Plus, Gift, CheckCircle, XCircle, ShieldCheck } from "lucide-react";
 
 interface OfferLetterDialogProps {
   open: boolean;
@@ -24,15 +24,21 @@ interface OfferLetter {
   scholarship_amount: number | null;
   net_fee: number;
   status: string;
+  approval_status?: string;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  rejection_reason?: string | null;
   acceptance_deadline: string | null;
   accepted_at: string | null;
   created_at: string;
 }
 
 export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, courseId, campusId, onSuccess }: OfferLetterDialogProps) {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const { toast } = useToast();
   const [offers, setOffers] = useState<OfferLetter[]>([]);
+  const isApprover = role === "super_admin" || role === "principal";
+  const isPrincipalOrAbove = isApprover;
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -53,6 +59,11 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     if (!totalFee || totalFee <= 0) { toast({ title: "Error", description: "Enter valid total fee", variant: "destructive" }); return; }
 
     setSaving(true);
+    // If super_admin or principal issues directly, it's auto-approved.
+    // Otherwise (counsellor, admission_head, campus_admin) it needs principal approval.
+    const autoApproved = isPrincipalOrAbove;
+    const approvalStatus = autoApproved ? "approved" : "pending_principal";
+
     const { error } = await supabase.from("offer_letters").insert({
       lead_id: leadId,
       total_fee: totalFee,
@@ -62,23 +73,70 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       course_id: courseId,
       campus_id: campusId,
       issued_by: user?.id || null,
-    });
+      approval_status: approvalStatus,
+      approved_by: autoApproved ? user?.id || null : null,
+      approved_at: autoApproved ? new Date().toISOString() : null,
+    } as any);
 
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); }
     else {
-      // Update lead stage and offer_amount
-      await supabase.from("leads").update({ stage: "offer_sent" as any, offer_amount: totalFee - scholarship }).eq("id", leadId);
+      // Only advance lead stage if the offer is approved (not pending)
+      if (autoApproved) {
+        await supabase.from("leads").update({ stage: "offer_sent" as any, offer_amount: totalFee - scholarship }).eq("id", leadId);
+      }
       await supabase.from("lead_activities").insert({
         lead_id: leadId, user_id: user?.id || null, type: "offer",
-        description: `Offer letter issued: ₹${(totalFee - scholarship).toLocaleString("en-IN")} (Scholarship: ₹${scholarship.toLocaleString("en-IN")})`,
+        description: autoApproved
+          ? `Offer letter issued: ₹${(totalFee - scholarship).toLocaleString("en-IN")} (Scholarship: ₹${scholarship.toLocaleString("en-IN")})`
+          : `Offer letter submitted for principal approval: ₹${(totalFee - scholarship).toLocaleString("en-IN")}`,
       });
-      toast({ title: "Offer letter created" });
+      toast({
+        title: autoApproved ? "Offer letter created" : "Offer submitted for approval",
+        description: autoApproved ? undefined : "Principal will review and approve this offer.",
+      });
       setShowForm(false);
       setForm({ total_fee: "", scholarship_amount: "0", acceptance_deadline: "" });
       fetchOffers();
       onSuccess();
     }
     setSaving(false);
+  };
+
+  const decideOffer = async (offerId: string, decision: "approved" | "rejected", reason?: string) => {
+    if (!isApprover) return;
+    const updates: any = {
+      approval_status: decision,
+      approved_by: user?.id || null,
+      approved_at: new Date().toISOString(),
+    };
+    if (decision === "rejected" && reason) updates.rejection_reason = reason;
+
+    const { error } = await supabase.from("offer_letters").update(updates).eq("id", offerId);
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    // If approved, advance the lead to offer_sent stage + set offer_amount
+    if (decision === "approved") {
+      const offer = offers.find(o => o.id === offerId);
+      if (offer) {
+        await supabase.from("leads").update({ stage: "offer_sent" as any, offer_amount: offer.net_fee }).eq("id", leadId);
+      }
+      await supabase.from("lead_activities").insert({
+        lead_id: leadId, user_id: user?.id || null, type: "offer",
+        description: `Offer letter approved by ${role === "principal" ? "principal" : "super admin"}`,
+      });
+    } else {
+      await supabase.from("lead_activities").insert({
+        lead_id: leadId, user_id: user?.id || null, type: "offer",
+        description: `Offer letter rejected${reason ? `: ${reason}` : ""}`,
+      });
+    }
+
+    toast({ title: decision === "approved" ? "Offer approved" : "Offer rejected" });
+    fetchOffers();
+    onSuccess();
   };
 
   const updateOfferStatus = async (offerId: string, status: string) => {
@@ -100,6 +158,11 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
   const statusColors: Record<string, string> = {
     issued: "bg-pastel-blue", accepted: "bg-pastel-green", rejected: "bg-pastel-red", expired: "bg-muted",
+  };
+  const approvalColors: Record<string, string> = {
+    pending_principal: "bg-amber-100 text-amber-700 border-amber-200",
+    approved: "bg-emerald-100 text-emerald-700 border-emerald-200",
+    rejected: "bg-red-100 text-red-700 border-red-200",
   };
 
   return (
@@ -153,30 +216,67 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
             <p className="text-sm text-muted-foreground text-center py-8">No offer letters yet</p>
           ) : (
             <div className="space-y-2">
-              {offers.map(offer => (
-                <Card key={offer.id} className="border-border/60">
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="text-lg font-bold text-foreground">₹{offer.net_fee.toLocaleString("en-IN")}</p>
-                        <p className="text-xs text-muted-foreground">Total: ₹{offer.total_fee.toLocaleString("en-IN")} · Scholarship: ₹{(offer.scholarship_amount || 0).toLocaleString("en-IN")}</p>
+              {offers.map(offer => {
+                const approvalStatus = offer.approval_status || "approved";
+                const isPending = approvalStatus === "pending_principal";
+                const isApprovedOffer = approvalStatus === "approved";
+                const isRejected = approvalStatus === "rejected";
+
+                return (
+                  <Card key={offer.id} className="border-border/60">
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-lg font-bold text-foreground">₹{offer.net_fee.toLocaleString("en-IN")}</p>
+                          <p className="text-xs text-muted-foreground">Total: ₹{offer.total_fee.toLocaleString("en-IN")} · Scholarship: ₹{(offer.scholarship_amount || 0).toLocaleString("en-IN")}</p>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          {approvalStatus !== "approved" && (
+                            <Badge className={`text-[10px] border ${approvalColors[approvalStatus] || ""}`}>
+                              {isPending && <><ShieldCheck className="h-2.5 w-2.5 mr-1 inline" /> Pending Principal</>}
+                              {isRejected && <><XCircle className="h-2.5 w-2.5 mr-1 inline" /> Rejected</>}
+                            </Badge>
+                          )}
+                          {isApprovedOffer && (
+                            <Badge className={`text-[10px] border-0 ${statusColors[offer.status] || "bg-muted"}`}>{offer.status}</Badge>
+                          )}
+                        </div>
                       </div>
-                      <Badge className={`text-[10px] border-0 ${statusColors[offer.status] || "bg-muted"}`}>{offer.status}</Badge>
-                    </div>
-                    <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                      <span>Issued: {new Date(offer.created_at).toLocaleDateString("en-IN")}</span>
-                      {offer.acceptance_deadline && <span>Deadline: {new Date(offer.acceptance_deadline).toLocaleDateString("en-IN")}</span>}
-                      {offer.accepted_at && <span>Accepted: {new Date(offer.accepted_at).toLocaleDateString("en-IN")}</span>}
-                    </div>
-                    {offer.status === "issued" && (
-                      <div className="flex gap-2 mt-3">
-                        <Button size="sm" variant="outline" className="text-xs" onClick={() => updateOfferStatus(offer.id, "accepted")}>Mark Accepted</Button>
-                        <Button size="sm" variant="outline" className="text-xs text-destructive" onClick={() => updateOfferStatus(offer.id, "rejected")}>Mark Rejected</Button>
+                      <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                        <span>Issued: {new Date(offer.created_at).toLocaleDateString("en-IN")}</span>
+                        {offer.acceptance_deadline && <span>Deadline: {new Date(offer.acceptance_deadline).toLocaleDateString("en-IN")}</span>}
+                        {offer.accepted_at && <span>Accepted: {new Date(offer.accepted_at).toLocaleDateString("en-IN")}</span>}
                       </div>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
+                      {offer.rejection_reason && (
+                        <p className="text-xs text-destructive mt-1">Rejection: {offer.rejection_reason}</p>
+                      )}
+
+                      {/* Principal / Super admin approve/reject buttons */}
+                      {isPending && isApprover && (
+                        <div className="flex gap-2 mt-3">
+                          <Button size="sm" className="text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700" onClick={() => decideOffer(offer.id, "approved")}>
+                            <CheckCircle className="h-3 w-3" /> Approve Offer
+                          </Button>
+                          <Button size="sm" variant="outline" className="text-xs gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => {
+                            const reason = window.prompt("Reason for rejection (optional):") || undefined;
+                            decideOffer(offer.id, "rejected", reason);
+                          }}>
+                            <XCircle className="h-3 w-3" /> Reject
+                          </Button>
+                        </div>
+                      )}
+
+                      {/* Mark as accepted/rejected by student (only for approved offers in "issued" state) */}
+                      {isApprovedOffer && offer.status === "issued" && (
+                        <div className="flex gap-2 mt-3">
+                          <Button size="sm" variant="outline" className="text-xs" onClick={() => updateOfferStatus(offer.id, "accepted")}>Mark Accepted</Button>
+                          <Button size="sm" variant="outline" className="text-xs text-destructive" onClick={() => updateOfferStatus(offer.id, "rejected")}>Mark Rejected</Button>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           )}
         </div>

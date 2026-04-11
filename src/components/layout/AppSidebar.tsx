@@ -108,6 +108,8 @@ export function AppSidebar() {
   const [waUnread, setWaUnread] = useState(0);
   // New leads count (stage = new_lead)
   const [newLeadCount, setNewLeadCount] = useState(0);
+  // Pending approvals for current user role
+  const [pendingApprovals, setPendingApprovals] = useState(0);
 
   const fetchNewLeadCount = () => {
     let query = supabase
@@ -121,6 +123,16 @@ export function AppSidebar() {
     query.then(({ count }) => setNewLeadCount(count || 0));
   };
 
+  const fetchPendingApprovals = async () => {
+    // Only approvers need this count
+    if (!["super_admin", "principal", "campus_admin", "admission_head"].includes(role || "")) {
+      setPendingApprovals(0);
+      return;
+    }
+    const { data } = await supabase.rpc("count_pending_approvals" as any);
+    setPendingApprovals(Number(data) || 0);
+  };
+
   useEffect(() => {
     (async () => {
       const { data } = await supabase
@@ -131,6 +143,7 @@ export function AppSidebar() {
       }
     })();
     fetchNewLeadCount();
+    fetchPendingApprovals();
 
     const waChannel = supabase
       .channel("wa-unread-sidebar")
@@ -159,13 +172,31 @@ export function AppSidebar() {
       }, () => { fetchNewLeadCount(); })
       .subscribe();
 
+    const approvalsChannel = supabase
+      .channel("approvals-count-sidebar")
+      .on("postgres_changes" as any, {
+        event: "*",
+        schema: "public",
+        table: "concessions",
+      }, () => { fetchPendingApprovals(); })
+      .on("postgres_changes" as any, {
+        event: "*",
+        schema: "public",
+        table: "offer_letters",
+      }, () => { fetchPendingApprovals(); })
+      .subscribe();
+
     return () => {
       supabase.removeChannel(waChannel);
       supabase.removeChannel(leadsChannel);
+      supabase.removeChannel(approvalsChannel);
     };
-  }, []);
+  }, [role]);
 
-  const visibleMain = mainMenu.filter(canSee);
+  const visibleMain = mainMenu.filter(canSee).map(item => {
+    if (item.url === "/" && pendingApprovals > 0) return { ...item, badge: pendingApprovals };
+    return item;
+  });
   const visibleAdmission = admissionSubMenu.filter(canSee).map(item => {
     if (item.url === "/whatsapp-inbox" && waUnread > 0) return { ...item, badge: waUnread };
     if (item.url === "/admissions" && newLeadCount > 0) return { ...item, badge: newLeadCount };

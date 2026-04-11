@@ -17,6 +17,10 @@ import {
   Download, Clock, CheckCircle, CreditCard, Eye, X,
 } from "lucide-react";
 import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
+import { ConsultantTour } from "@/components/consultant/ConsultantTour";
+import { VoiceMessageRecorder } from "@/components/consultant/VoiceMessageRecorder";
+import { generateConsultantGuidePDF } from "@/lib/consultant-guide-pdf";
+import { Download, HelpCircle } from "lucide-react";
 
 interface DashboardStats {
   consultant_id: string;
@@ -247,12 +251,22 @@ const ConsultantPortal = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* First-time tour overlay */}
+      <ConsultantTour onDownloadGuide={generateConsultantGuidePDF} />
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Consultant Dashboard</h1>
           <p className="text-sm text-muted-foreground mt-1">Welcome, {stats?.consultant_name || "Consultant"}</p>
         </div>
-        <Button onClick={() => setShowAdd(true)} className="gap-2"><Plus className="h-4 w-4" /> Add Lead</Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={generateConsultantGuidePDF}>
+            <Download className="h-3.5 w-3.5" /> Guide PDF
+          </Button>
+          <Button onClick={() => setShowAdd(true)} className="gap-2" data-tour="add-lead">
+            <Plus className="h-4 w-4" /> Add Lead
+          </Button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -277,10 +291,15 @@ const ConsultantPortal = () => {
         ))}
       </div>
 
+      {/* Voice message to admission team */}
+      <div data-tour="voice-message">
+        {consultantId && <VoiceMessageRecorder consultantId={consultantId} />}
+      </div>
+
       <Tabs defaultValue="leads" className="w-full">
         <TabsList className="bg-transparent border-b border-border rounded-none p-0 h-auto gap-0 w-full justify-start">
           {["Leads", "Payments", "Commissions"].map(t => (
-            <TabsTrigger key={t} value={t.toLowerCase()}
+            <TabsTrigger key={t} value={t.toLowerCase()} data-tour={`${t.toLowerCase()}-tab`}
               className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
               {t}
             </TabsTrigger>

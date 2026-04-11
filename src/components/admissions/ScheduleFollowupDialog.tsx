@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { CalendarDays, Clock, ChevronDown, Phone, MessageSquare, Mail, MapPin } from "lucide-react";
+import { CalendarDays, Clock, ChevronDown, Phone, MapPin } from "lucide-react";
 
 interface ScheduleFollowupDialogProps {
   open: boolean;
@@ -16,8 +16,6 @@ const TIME_SLOTS = [
 
 const FOLLOWUP_TYPES = [
   { value: "call", label: "Call", icon: Phone, color: "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" },
-  { value: "whatsapp", label: "WhatsApp", icon: MessageSquare, color: "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" },
-  { value: "email", label: "Email", icon: Mail, color: "bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400" },
   { value: "visit", label: "Visit", icon: MapPin, color: "bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400" },
 ];
 
@@ -76,7 +74,7 @@ export function ScheduleFollowupDialog({ open, onOpenChange, onSchedule }: Sched
           {/* Follow-up type */}
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Type</label>
-            <div className="grid grid-cols-4 gap-1.5">
+            <div className="grid grid-cols-2 gap-1.5">
               {FOLLOWUP_TYPES.map(ft => {
                 const Icon = ft.icon;
                 return (

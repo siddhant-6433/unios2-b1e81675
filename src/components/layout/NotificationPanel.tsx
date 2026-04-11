@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   Bell, UserPlus, AlertTriangle, RotateCcw, Calendar, Clock,
   MapPin, ArrowRightLeft, Trash2, Info, CheckCheck, Loader2,
-  MessageSquare, X,
+  MessageSquare, X, ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,6 +33,8 @@ const TYPE_ICONS: Record<string, typeof Bell> = {
   lead_transferred: ArrowRightLeft,
   deletion_request: Trash2,
   whatsapp_message: MessageSquare,
+  approval_pending: ShieldCheck,
+  approval_decided: CheckCheck,
   general: Info,
 };
 
@@ -47,6 +49,8 @@ const TYPE_COLORS: Record<string, string> = {
   lead_transferred: "text-blue-500 bg-blue-50 dark:bg-blue-950/30",
   deletion_request: "text-red-500 bg-red-50 dark:bg-red-950/30",
   whatsapp_message: "text-green-500 bg-green-50 dark:bg-green-950/30",
+  approval_pending: "text-amber-600 bg-amber-50 dark:bg-amber-950/30",
+  approval_decided: "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30",
   general: "text-gray-500 bg-gray-50 dark:bg-gray-900/30",
 };
 

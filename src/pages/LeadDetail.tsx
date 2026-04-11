@@ -25,6 +25,7 @@ import { SendWhatsAppDialog } from "@/components/leads/SendWhatsAppDialog";
 import { AddSecondaryCounsellorDialog } from "@/components/leads/AddSecondaryCounsellorDialog";
 import { ScheduleVisitDialog } from "@/components/admissions/ScheduleVisitDialog";
 import { ScheduleFollowupDialog } from "@/components/admissions/ScheduleFollowupDialog";
+import { CallDispositionDialog, type CallDispositionData } from "@/components/admissions/CallDispositionDialog";
 import { RecordPaymentDialog } from "@/components/admissions/RecordPaymentDialog";
 import { LeadPaymentHistory } from "@/components/admissions/LeadPaymentHistory";
 import { FuzzyDuplicateAlert } from "@/components/admissions/FuzzyDuplicateAlert";
@@ -36,7 +37,7 @@ const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", application_in_progress: "Application In Progress", application_submitted: "Application Submitted",
   ai_called: "AI Called", counsellor_call: "Counsellor Call",
   visit_scheduled: "Visit Scheduled", interview: "Interview", offer_sent: "Offer Sent",
-  token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", not_interested: "Not Interested", rejected: "Rejected",
+  token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", rejected: "Rejected",
 };
 
 const STAGE_ORDER = [
@@ -86,6 +87,7 @@ const LeadDetail = () => {
   const [showTransfer, setShowTransfer] = useState(false);
   const [showScheduleVisit, setShowScheduleVisit] = useState(false);
   const [showFollowup, setShowFollowup] = useState(false);
+  const [showCallDisposition, setShowCallDisposition] = useState(false);
   const [showRecordPayment, setShowRecordPayment] = useState(false);
   const [showSendEmail, setShowSendEmail] = useState(false);
   const [paymentRefreshKey, setPaymentRefreshKey] = useState(0);
@@ -122,6 +124,8 @@ const LeadDetail = () => {
       if (leadRes.data.counsellor_id) {
         const { data } = await supabase.from("profiles").select("display_name").eq("id", leadRes.data.counsellor_id).single();
         setCounsellorName(data?.display_name || undefined);
+      } else {
+        setCounsellorName(undefined);
       }
       if (leadRes.data.course_id) {
         const { data } = await supabase.from("courses").select("name, duration_years, type").eq("id", leadRes.data.course_id).single();
@@ -160,6 +164,61 @@ const LeadDetail = () => {
       setNewNote(""); await fetchAll(true);
     }
     setSavingNote(false);
+  };
+
+  const logCallDisposition = async (data: CallDispositionData) => {
+    if (!id || !lead) return;
+
+    const dispositionLabels: Record<string, string> = {
+      interested: "Interested", not_interested: "Not Interested",
+      not_answered: "Not Answered", wrong_number: "Wrong Number",
+      call_back: "Call Back Later", do_not_contact: "Do Not Contact",
+      voicemail: "Voicemail", busy: "Busy",
+    };
+    const label = dispositionLabels[data.disposition] || data.disposition;
+
+    // 1. Insert into call_logs
+    await supabase.from("call_logs").insert({
+      lead_id: id,
+      user_id: user?.id,
+      direction: "outbound",
+      duration_seconds: data.duration_seconds,
+      disposition: data.disposition,
+      notes: data.notes || null,
+    });
+
+    // 2. Log activity
+    const durationStr = data.duration_seconds > 0
+      ? ` (${Math.floor(data.duration_seconds / 60)}m${data.duration_seconds % 60 ? ` ${data.duration_seconds % 60}s` : ""})`
+      : "";
+    await supabase.from("lead_activities").insert({
+      lead_id: id, user_id: profileId, type: "call",
+      description: `Call: ${label}${durationStr}${data.notes ? ` — ${data.notes}` : ""}`,
+    });
+
+    // 3. Auto-advance stage based on disposition
+    if (data.disposition === "interested" || data.disposition === "call_back" || data.disposition === "not_answered") {
+      await autoAdvanceStage("counsellor_call");
+    } else if (data.disposition === "not_interested" || data.disposition === "do_not_contact") {
+      await supabase.from("leads").update({ stage: "rejected" as any }).eq("id", id);
+      await supabase.from("lead_activities").insert({
+        lead_id: id, user_id: profileId, type: "stage_change",
+        description: `Stage changed to Rejected (${label})`,
+        old_stage: lead.stage as any, new_stage: "rejected" as any,
+      });
+    }
+
+    toast({ title: "Call logged", description: label });
+    await fetchAll(true);
+
+    // 4. Chain to follow-up dialog if requested
+    if (data.schedule_followup) {
+      setShowFollowup(true);
+    }
+    // 5. Schedule visit inline if provided
+    if (data.visit) {
+      await scheduleVisit(data.visit);
+    }
   };
 
   const addFollowup = async (data: { scheduled_at: string; type: string; notes: string }) => {
@@ -387,8 +446,19 @@ const LeadDetail = () => {
         {lead.application_id && (
           <span className="text-xs font-mono text-muted-foreground ml-1 shrink-0">{lead.application_id}</span>
         )}
-        {/* Action buttons for super_admin / team leader */}
+        {/* Assigned counsellor badge */}
         <div className="ml-auto flex items-center gap-2 shrink-0">
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${
+              counsellorName
+                ? "bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400"
+                : "bg-muted text-muted-foreground"
+            }`}
+            title={counsellorName ? "Assigned counsellor" : "This lead is unassigned"}
+          >
+            <UserCheck className="h-3 w-3" />
+            {counsellorName || "Unassigned"}
+          </span>
           {canTransfer && (
             <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => setShowTransfer(true)}>
               <ArrowRightLeft className="h-3.5 w-3.5" /> Transfer
@@ -403,33 +473,66 @@ const LeadDetail = () => {
       </div>
 
       {/* Quick action icon bar */}
-      <div className="flex items-center gap-1 overflow-x-auto pb-1">
-        {[
-          { icon: Phone, label: "Call", color: "text-blue-600 bg-blue-100 dark:bg-blue-900/30", action: () => { if (lead.phone) window.open(`tel:${lead.phone}`); } },
+      {(() => {
+        // Payment is restricted to super_admin only
+        const canRecordPayment = role === "super_admin";
+        // Offer requires application to be submitted (or later stage). Pre-offer stages can't issue.
+        const appSubmittedOrLater = stageIndex(lead.stage) >= stageIndex("application_submitted");
+        const canIssueOffer = appSubmittedOrLater && (
+          role === "super_admin" || role === "principal" || role === "counsellor" || role === "admission_head" || role === "campus_admin"
+        );
+        const offerDisabledReason = !appSubmittedOrLater
+          ? "Offer can only be issued after application is submitted"
+          : !canIssueOffer
+          ? "You do not have permission to issue offers"
+          : undefined;
+
+        const actions = [
+          { icon: Phone, label: "Call", color: "text-blue-600 bg-blue-100 dark:bg-blue-900/30", action: () => {
+            if (lead.phone) window.open(`tel:${lead.phone}`);
+            setShowCallDisposition(true);
+          } },
           { icon: MessageSquare, label: "WhatsApp", color: "text-green-600 bg-green-100 dark:bg-green-900/30", action: () => setShowWhatsApp(true) },
           { icon: Clock, label: "Follow Up", color: "text-orange-600 bg-orange-100 dark:bg-orange-900/30", action: () => setShowFollowup(true) },
           { icon: MapPin, label: "Visit", color: "text-violet-600 bg-violet-100 dark:bg-violet-900/30", action: () => setShowScheduleVisit(true) },
           { icon: Mail, label: "Email", color: "text-sky-600 bg-sky-100 dark:bg-sky-900/30", action: () => setShowSendEmail(true) },
           { icon: Bot, label: "AI Call", color: "text-amber-600 bg-amber-100 dark:bg-amber-900/30", action: triggerAiCall, disabled: aiCalling },
           { icon: UserCheck, label: "Interview", color: "text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30", action: () => setShowInterview(true) },
-          { icon: FileText, label: "Offer", color: "text-teal-600 bg-teal-100 dark:bg-teal-900/30", action: () => setShowOfferLetter(true) },
-          { icon: IndianRupee, label: "Payment", color: "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30", action: () => setShowRecordPayment(true) },
+          {
+            icon: FileText, label: "Offer",
+            color: "text-teal-600 bg-teal-100 dark:bg-teal-900/30",
+            action: () => setShowOfferLetter(true),
+            disabled: !canIssueOffer,
+            tooltip: offerDisabledReason,
+          },
+          // Payment only visible for super_admin
+          ...(canRecordPayment ? [{
+            icon: IndianRupee, label: "Payment",
+            color: "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30",
+            action: () => setShowRecordPayment(true),
+          }] : []),
           { icon: ThumbsDown, label: "Not Interested", color: "text-red-600 bg-red-100 dark:bg-red-900/30", action: () => setShowNotInterested(true) },
-        ].map(({ icon: Icon, label, color, action, disabled }) => (
-          <button
-            key={label}
-            onClick={action}
-            disabled={disabled}
-            className="flex flex-col items-center gap-1 px-3 py-2 rounded-xl hover:bg-muted/50 transition-colors shrink-0 disabled:opacity-50"
-            title={label}
-          >
-            <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${color}`}>
-              {disabled && label === "AI Call" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
-            </div>
-            <span className="text-[10px] font-medium text-muted-foreground">{label}</span>
-          </button>
-        ))}
-      </div>
+        ];
+
+        return (
+          <div className="flex items-center gap-1 overflow-x-auto pb-1">
+            {actions.map(({ icon: Icon, label, color, action, disabled, tooltip }: any) => (
+              <button
+                key={label}
+                onClick={action}
+                disabled={disabled}
+                className="flex flex-col items-center gap-1 px-3 py-2 rounded-xl hover:bg-muted/50 transition-colors shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+                title={tooltip || label}
+              >
+                <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${color}`}>
+                  {disabled && label === "AI Call" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
+                </div>
+                <span className="text-[10px] font-medium text-muted-foreground">{label}</span>
+              </button>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* Two-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-5">
@@ -547,6 +650,17 @@ const LeadDetail = () => {
         open={showFollowup}
         onOpenChange={setShowFollowup}
         onSchedule={addFollowup}
+      />
+
+      {/* Call Disposition Dialog */}
+      <CallDispositionDialog
+        open={showCallDisposition}
+        onOpenChange={setShowCallDisposition}
+        leadName={lead.name}
+        leadPhone={lead.phone}
+        campuses={campuses}
+        defaultCampusId={lead.campus_id || undefined}
+        onSubmit={logCallDisposition}
       />
 
       {/* Transfer Dialog */}

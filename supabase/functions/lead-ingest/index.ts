@@ -95,6 +95,62 @@ function parseGoogleAds(body: any): ParsedLead {
   };
 }
 
+interface MiraiParsedLead extends ParsedLead {
+  course_code?: string; // internal: used for exact course code matching
+}
+
+function parseMirai(body: any): MiraiParsedLead {
+  // Mirai school waitlist form: parent_name, mobile_number, email, child_name, child_dob, looking_for
+  const childAge = body.child_dob
+    ? (Date.now() - new Date(body.child_dob).getTime()) / (365.25 * 24 * 3600 * 1000)
+    : null;
+
+  // Suggest course code from age (matches MES-* course codes)
+  let courseCode = "";
+  let gradeLabel = "";
+  if (childAge !== null) {
+    if (childAge < 2)        { courseCode = "MES-TOD";  gradeLabel = "Toddlers"; }
+    else if (childAge < 3)   { courseCode = "MES-MON";  gradeLabel = "Montessori"; }
+    else if (childAge < 4)   { courseCode = "MES-EYP1"; gradeLabel = "EYP 1 (Nursery)"; }
+    else if (childAge < 5)   { courseCode = "MES-EYP2"; gradeLabel = "EYP 2 (LKG)"; }
+    else if (childAge < 6)   { courseCode = "MES-EYP3"; gradeLabel = "EYP 3 (UKG)"; }
+    else if (childAge < 7)   { courseCode = "MES-PYP1"; gradeLabel = "PYP 1 (Grade I)"; }
+    else if (childAge < 8)   { courseCode = "MES-PYP2"; gradeLabel = "PYP 2 (Grade II)"; }
+    else if (childAge < 9)   { courseCode = "MES-PYP3"; gradeLabel = "PYP 3 (Grade III)"; }
+    else if (childAge < 10)  { courseCode = "MES-PYP4"; gradeLabel = "PYP 4 (Grade IV)"; }
+    else if (childAge < 11)  { courseCode = "MES-PYP5"; gradeLabel = "PYP 5 (Grade V)"; }
+    else if (childAge < 12)  { courseCode = "MES-MYP1"; gradeLabel = "MYP 1 (Grade VI)"; }
+    else if (childAge < 13)  { courseCode = "MES-MYP2"; gradeLabel = "MYP 2 (Grade VII)"; }
+    else                     { courseCode = "MES-MYP3"; gradeLabel = "MYP 3 (Grade VIII)"; }
+  }
+
+  const intentLabels: Record<string, string> = {
+    exploring: "Exploring options",
+    comparing: "Comparing schools",
+    immediate: "Looking for immediate admission",
+    next_year: "Planning for next academic year",
+  };
+
+  return {
+    name: (body.child_name || "").trim(),
+    phone: (body.mobile_number || body.mobile || body.phone || "").replace(/[\s\-]/g, ""),
+    email: body.email?.trim() || undefined,
+    guardian_name: body.parent_name?.trim() || undefined,
+    guardian_phone: (body.mobile_number || body.mobile || body.phone || "").replace(/[\s\-]/g, "") || undefined,
+    source: "website",
+    course_code: courseCode || undefined,
+    course_name: gradeLabel || undefined,
+    campus_name: "Mirai",
+    notes: [
+      "Source: Mirai waitlist form",
+      body.child_dob ? `Child DOB: ${body.child_dob}` : "",
+      childAge !== null ? `Age: ${childAge.toFixed(1)} years (suggested: ${gradeLabel})` : "",
+      body.looking_for ? `Looking for: ${intentLabels[body.looking_for] || body.looking_for}` : "",
+      body.whatsapp_consent === false ? "WhatsApp opt-out" : "WhatsApp consent: yes",
+    ].filter(Boolean).join(" | "),
+  };
+}
+
 function parseWebsite(body: any): ParsedLead {
   return {
     name: body.name || "",
@@ -132,6 +188,7 @@ const PARSERS: Record<string, (body: any) => ParsedLead> = {
   meta_ads: parseMetaAds,
   google_ads: parseGoogleAds,
   website: parseWebsite,
+  mirai: parseMirai,
 };
 
 // Normalise phone: ensure it has country code
@@ -225,17 +282,39 @@ Deno.serve(async (req) => {
     let course_id: string | null = null;
     let campus_id: string | null = null;
 
-    if (parsed.course_name) {
-      const { data: courses } = await supabase
+    // Mirai source: lock to Mirai institution courses + campus
+    const isMirai = source === "mirai";
+
+    // For Mirai, prefer exact course code match (e.g. MES-EYP3)
+    const parsedAny = parsed as any;
+    if (isMirai && parsedAny.course_code) {
+      const { data: course } = await supabase
         .from("courses")
-        .select("id, name")
+        .select("id")
+        .eq("code", parsedAny.course_code)
+        .maybeSingle();
+      if (course) course_id = course.id;
+    } else if (parsed.course_name) {
+      let courseQuery = supabase.from("courses").select("id, name, code");
+      if (isMirai) {
+        courseQuery = courseQuery.like("code", "MES-%");
+      }
+      const { data: courses } = await courseQuery
         .ilike("name", `%${parsed.course_name}%`)
         .limit(1)
         .maybeSingle();
       if (courses) course_id = courses.id;
     }
 
-    if (parsed.campus_name || parsed.city) {
+    if (isMirai) {
+      // Always assign to Mirai's campus (where institution GZ1-MES sits)
+      const { data: miraiInst } = await supabase
+        .from("institutions")
+        .select("campus_id")
+        .eq("code", "GZ1-MES")
+        .single();
+      if (miraiInst) campus_id = miraiInst.campus_id;
+    } else if (parsed.campus_name || parsed.city) {
       const searchTerm = parsed.campus_name || parsed.city || "";
       const { data: campus } = await supabase
         .from("campuses")
