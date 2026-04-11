@@ -616,6 +616,43 @@ function CourseSummaryBanner({ app, leadName, onEdit }: { app: ApplicationData; 
 }
 
 // ─── Main Portal ───
+// Valid lead sources in DB enum — UTM source will be mapped to these
+const VALID_LEAD_SOURCES = new Set([
+  "website", "meta_ads", "google_ads", "shiksha", "walk_in",
+  "consultant", "justdial", "referral", "education_fair",
+  "other", "collegedunia", "collegehai",
+]);
+
+// Capture UTM params on first load and persist to sessionStorage
+// so source survives OTP flow / page refreshes within the session
+function captureUtmSource(): string {
+  if (typeof window === "undefined") return "website";
+  try {
+    const existing = sessionStorage.getItem("unios_utm_source");
+    const params = new URLSearchParams(window.location.search);
+    const utmSource = (params.get("utm_source") || "").toLowerCase().trim();
+    if (utmSource && VALID_LEAD_SOURCES.has(utmSource)) {
+      sessionStorage.setItem("unios_utm_source", utmSource);
+      return utmSource;
+    }
+    // Map common aliases
+    const aliases: Record<string, string> = {
+      "college_hai": "collegehai", "college-hai": "collegehai",
+      "college_dunia": "collegedunia", "college-dunia": "collegedunia",
+      "facebook": "meta_ads", "fb": "meta_ads", "instagram": "meta_ads", "meta": "meta_ads",
+      "google": "google_ads", "adwords": "google_ads",
+      "jd": "justdial",
+    };
+    if (aliases[utmSource]) {
+      sessionStorage.setItem("unios_utm_source", aliases[utmSource]);
+      return aliases[utmSource];
+    }
+    return existing || "website";
+  } catch {
+    return "website";
+  }
+}
+
 const ApplyPortal = () => {
   const { toast } = useToast();
   const portal = usePortal();
@@ -625,6 +662,7 @@ const ApplyPortal = () => {
   const [phone, setPhone] = useState("");
   const [leadName, setLeadName] = useState("");
   const [childDob, setChildDob] = useState("");
+  const [leadSource] = useState<string>(() => captureUtmSource());
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -766,7 +804,7 @@ const ApplyPortal = () => {
         .insert({
           name: leadName,
           phone,
-          source: "website",
+          source: leadSource as any,
           stage: "application_in_progress" as any,
           person_role: "applicant" as any,
           application_id: appId,
