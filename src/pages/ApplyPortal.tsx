@@ -477,12 +477,14 @@ const DEFAULT_STEPS = [
   { key: "review", label: "Review", icon: FileSearch },
 ] as const;
 
-function DynamicStepProgress({ steps, currentStep, completedSections, onStepClick, isPaid }: {
+function DynamicStepProgress({ steps, currentStep, completedSections, onStepClick, isPaid, editUnlocked, unlockedSections }: {
   steps: readonly { key: string; label: string; icon: any }[];
   currentStep: number;
   completedSections: Record<string, boolean>;
   onStepClick: (step: number) => void;
   isPaid: boolean;
+  editUnlocked?: boolean;
+  unlockedSections?: string[] | null;
 }) {
   const paymentIdx = steps.findIndex(s => s.key === "payment");
 
@@ -494,8 +496,14 @@ function DynamicStepProgress({ steps, currentStep, completedSections, onStepClic
         // Sequential navigation: a step is locked if any previous step is incomplete.
         // User must complete steps in order. They CAN come back to edit completed ones.
         // Exception: once payment is done, ALL pre-payment steps are permanently locked.
+        // Override: if staff granted edit access, pre-payment steps become editable again
+        //   (either all, or only the sections in unlockedSections)
         const allPrevDone = steps.slice(0, i).every(prev => completedSections[prev.key] === true);
-        const lockedByPayment = isPaid && i < paymentIdx;
+        const basePaymentLock = isPaid && i < paymentIdx;
+        const inUnlockedScope = editUnlocked && i < paymentIdx && (
+          !unlockedSections || unlockedSections.length === 0 || unlockedSections.includes(s.key)
+        );
+        const lockedByPayment = basePaymentLock && !inUnlockedScope;
         const lockedBySequence = !allPrevDone && !active;
         const locked  = lockedByPayment || lockedBySequence;
         const Icon    = s.icon;
@@ -1013,15 +1021,28 @@ const ApplyPortal = () => {
   const isPaid = app.payment_status === "paid";
   const paymentStepIdx = steps.findIndex(s => s.key === "payment");
   const cs = app.completed_sections as Record<string, boolean>;
+  // Staff-granted edit access window
+  const editUnlockedUntil = (app as any).edit_unlocked_until as string | undefined;
+  const unlockedSections = (app as any).edit_unlocked_sections as string[] | null | undefined;
+  const editUnlocked = !!editUnlockedUntil && new Date(editUnlockedUntil).getTime() > Date.now();
 
   // Determine if user can navigate back from current step.
   // Users CAN freely go back to edit previously completed steps.
   // Blocked only if:
   //  - we're at the first step (nowhere to go)
   //  - payment is done and the previous step would be a pre-payment (locked) step
+  //    UNLESS staff granted edit access
   const canGoBack = (() => {
     if (step === 0) return false;
-    if (isPaid && (step - 1) < paymentStepIdx) return false;
+    const prevKey = steps[step - 1]?.key;
+    if (isPaid && (step - 1) < paymentStepIdx) {
+      if (!editUnlocked) return false;
+      // In scope: either no section filter (all) or this specific prev section is unlocked
+      if (!unlockedSections || unlockedSections.length === 0 || unlockedSections.includes(prevKey)) {
+        return true;
+      }
+      return false;
+    }
     return true;
   })();
 
@@ -1148,12 +1169,34 @@ const ApplyPortal = () => {
           onEdit={app.payment_status === "paid" ? () => null : () => setShowCourseSelector(true)}
         />
 
+        {editUnlocked && editUnlockedUntil && (
+          <div className="mb-6 rounded-xl border border-green-300 dark:border-green-800/40 bg-green-50 dark:bg-green-950/20 p-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-100 dark:bg-green-900/40 shrink-0">
+                <CheckCircle className="h-4 w-4 text-green-700 dark:text-green-400" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-green-900 dark:text-green-200">Edit access granted</p>
+                <p className="text-xs text-green-700 dark:text-green-400 mt-0.5">
+                  A counsellor has unlocked your application for editing.
+                  {unlockedSections && unlockedSections.length > 0 && (
+                    <> You can edit: <span className="font-medium">{unlockedSections.join(", ")}</span>.</>
+                  )}
+                  {" "}Access expires on <span className="font-medium">{new Date(editUnlockedUntil).toLocaleString("en-IN")}</span>.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         <DynamicStepProgress
           steps={steps}
           currentStep={step}
           completedSections={app.completed_sections as any}
           onStepClick={setStep}
           isPaid={app.payment_status === "paid"}
+          editUnlocked={editUnlocked}
+          unlockedSections={unlockedSections}
         />
 
         <Card className="border-border/60 shadow-none">
