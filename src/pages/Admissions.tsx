@@ -102,6 +102,41 @@ interface Lead {
   course_name?: string;
   campus_name?: string;
   counsellor_name?: string;
+  // Application completion computed after fetch
+  app_completion_pct?: number | null;   // 0-100 or null when no app
+  app_payment_status?: string | null;
+}
+
+// Application step counts for % calculation (matches apply portal)
+const STEPS_BY_CATEGORY: Record<string, string[]> = {
+  school: ["personal", "parents", "siblings", "questionnaire", "academic", "payment", "documents", "review"],
+  default: ["personal", "parents", "academic", "extracurricular", "payment", "documents", "review"],
+};
+
+function getCompletionPct(completed_sections: any, program_category: string | null): number {
+  if (!completed_sections) return 0;
+  const steps = STEPS_BY_CATEGORY[program_category || "default"] || STEPS_BY_CATEGORY.default;
+  const done = steps.filter(k => completed_sections[k] === true).length;
+  return Math.round((done / steps.length) * 100);
+}
+
+// Compact application progress badge
+function AppProgressBadge({ pct, paymentStatus }: { pct: number | null | undefined; paymentStatus?: string | null }) {
+  if (pct === null || pct === undefined) return null;
+  const color = pct === 100
+    ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+    : pct >= 50
+    ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+    : pct > 0
+    ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+    : "bg-muted text-muted-foreground";
+  const label = paymentStatus === "paid" && pct < 100 ? `${pct}% · 💳 Paid` : `${pct}%`;
+  return (
+    <span className={`inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[9px] font-semibold ${color}`}
+      title={`Application ${pct}% complete${paymentStatus === "paid" ? " · Payment done" : ""}`}>
+      {label}
+    </span>
+  );
 }
 
 const Admissions = () => {
@@ -156,12 +191,43 @@ const Admissions = () => {
     const { data, error } = await query;
 
     if (data) {
-      setLeads(data.map((l: any) => ({
+      const enriched = data.map((l: any) => ({
         ...l,
         course_name: l.courses?.name || "—",
         campus_name: l.campuses?.name || "—",
         counsellor_name: l.profiles?.display_name || "Unassigned",
-      })));
+        app_completion_pct: null as number | null,
+        app_payment_status: null as string | null,
+      }));
+
+      // Fetch applications for these leads (for completion %)
+      const leadIds = enriched.map(l => l.id);
+      if (leadIds.length > 0) {
+        const { data: apps } = await supabase
+          .from("applications")
+          .select("lead_id, completed_sections, program_category, payment_status, status")
+          .in("lead_id", leadIds);
+        if (apps && apps.length > 0) {
+          const byLead: Record<string, any> = {};
+          apps.forEach((a: any) => {
+            // Keep the most complete app per lead if duplicates
+            const existing = byLead[a.lead_id];
+            const pct = getCompletionPct(a.completed_sections, a.program_category);
+            if (!existing || pct > existing.pct) {
+              byLead[a.lead_id] = { pct, payment_status: a.payment_status, status: a.status };
+            }
+          });
+          enriched.forEach(l => {
+            const m = byLead[l.id];
+            if (m) {
+              l.app_completion_pct = m.pct;
+              l.app_payment_status = m.payment_status;
+            }
+          });
+        }
+      }
+
+      setLeads(enriched);
     }
     setSelectedIds(new Set());
     setLoading(false);
@@ -616,6 +682,7 @@ const Admissions = () => {
                         <div className="flex items-center gap-3 mt-3 text-[11px] text-muted-foreground">
                           <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{lead.phone.slice(-4)}</span>
                           {lead.application_id && <span className="font-mono text-primary/70">{lead.application_id}</span>}
+                          <AppProgressBadge pct={lead.app_completion_pct} paymentStatus={lead.app_payment_status} />
                         </div>
                         {(lead.pre_admission_no || lead.admission_no) && (
                           <div className="mt-2">
@@ -668,6 +735,7 @@ const Admissions = () => {
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Course / Campus</th>
                   <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Score</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Stage</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">App %</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Role</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Source</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Counsellor</th>
@@ -703,6 +771,13 @@ const Admissions = () => {
                       <Badge className={`text-[11px] font-medium border-0 ${stageColors[lead.stage] || "bg-muted"}`}>
                         {STAGE_LABELS[lead.stage] || lead.stage}
                       </Badge>
+                    </td>
+                    <td className="px-4 py-3 text-center" onClick={() => navigate(`/admissions/${lead.id}`)}>
+                      {lead.app_completion_pct !== null && lead.app_completion_pct !== undefined ? (
+                        <AppProgressBadge pct={lead.app_completion_pct} paymentStatus={lead.app_payment_status} />
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3" onClick={() => navigate(`/admissions/${lead.id}`)}>
                       <Badge className={`text-[11px] font-medium border-0 capitalize ${PERSON_ROLE_COLORS[lead.person_role] || "bg-muted"}`}>
