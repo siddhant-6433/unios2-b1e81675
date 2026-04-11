@@ -29,6 +29,7 @@ import { CallDispositionDialog, type CallDispositionData } from "@/components/ad
 import { RecordPaymentDialog } from "@/components/admissions/RecordPaymentDialog";
 import { LeadPaymentHistory } from "@/components/admissions/LeadPaymentHistory";
 import { FuzzyDuplicateAlert } from "@/components/admissions/FuzzyDuplicateAlert";
+import { ApplicationProgress } from "@/components/leads/ApplicationProgress";
 import { FeeStructureViewer } from "@/components/finance/FeeStructureViewer";
 import { SendEmailDialog } from "@/components/leads/SendEmailDialog";
 import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
@@ -564,6 +565,14 @@ const LeadDetail = () => {
             onStageChange={updateStage}
             onFieldUpdate={updateField}
           />
+          {(lead.person_role === "applicant" || lead.application_id) && (
+            <ApplicationProgress
+              leadId={lead.id}
+              leadPhone={lead.phone}
+              applicationId={lead.application_id}
+              canImpersonate={role === "super_admin" || role === "principal" || role === "campus_admin" || role === "admission_head" || role === "counsellor"}
+            />
+          )}
           <FuzzyDuplicateAlert leadId={lead.id} leadName={lead.name} leadPhone={lead.phone} leadEmail={lead.email} />
           <LeadPaymentHistory leadId={lead.id} refreshKey={paymentRefreshKey} />
           {lead.course_id && (

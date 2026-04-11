@@ -491,14 +491,21 @@ function DynamicStepProgress({ steps, currentStep, completedSections, onStepClic
       {steps.map((s, i) => {
         const done    = completedSections[s.key] === true;
         const active  = currentStep === i;
-        const locked  = isPaid && i < paymentIdx; // lock pre-payment steps after payment
+        // Lock conditions:
+        // 1. Once payment is done, ALL pre-payment steps are permanently locked
+        // 2. Any completed step (done) is locked — user must not go back and edit validated steps
+        //    (except the currently active one, so they can finish it)
+        const locked  = (isPaid && i < paymentIdx) || (done && !active);
         const Icon    = s.icon;
+        const title = isPaid && i < paymentIdx
+          ? "Locked after payment"
+          : (done && !active) ? "Locked — step already completed" : undefined;
         return (
           <button
             key={s.key}
             onClick={() => !locked && onStepClick(i)}
             disabled={locked}
-            title={locked ? "Locked after payment" : undefined}
+            title={title}
             className={`flex-1 min-w-[44px] flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-xl text-xs font-medium transition-all ${
               locked
                 ? "text-muted-foreground/40 cursor-not-allowed"
@@ -882,6 +889,15 @@ const ApplyPortal = () => {
       return;
     }
 
+    // Sync the linked lead's name when the candidate's full_name changes
+    // so the CRM shows the real name instead of "Applicant"
+    if (app.lead_id && updates.full_name && updates.full_name.trim() && updates.full_name !== leadName) {
+      await supabase
+        .from("leads")
+        .update({ name: updates.full_name.trim(), person_role: "applicant" as any })
+        .eq("id", app.lead_id);
+    }
+
     setApp(prev => prev ? { ...prev, ...updates, completed_sections: newSections, flags } : prev);
     setSaving(false);
   };
@@ -930,7 +946,14 @@ const ApplyPortal = () => {
   };
 
   const handleStepNext = async (sectionKey: string, nextStep: number) => {
-    await saveSection({}, sectionKey);
+    if (!app) return;
+    // Persist the entire current application state (strip read-only/meta fields)
+    const {
+      id: _id, lead_id: _lid, created_at: _ca, updated_at: _ua,
+      application_id: _aid, submitted_at: _sa,
+      ...saveable
+    } = app as any;
+    await saveSection(saveable, sectionKey);
     setStep(nextStep);
   };
 
@@ -985,6 +1008,22 @@ const ApplyPortal = () => {
   if (!app) return null;
 
   const completedCount = Object.values(app.completed_sections).filter(Boolean).length;
+  const isPaid = app.payment_status === "paid";
+  const paymentStepIdx = steps.findIndex(s => s.key === "payment");
+  const cs = app.completed_sections as Record<string, boolean>;
+
+  // Determine if user can navigate back from current step
+  // Blocked if: previous step is already completed/locked, or we're past the payment step
+  const canGoBack = (() => {
+    if (step === 0) return false;
+    if (isPaid && step > paymentStepIdx) return false; // can't go back past payment once paid
+    const prevKey = steps[step - 1]?.key;
+    if (!prevKey) return false;
+    if (cs[prevKey] === true) return false; // prev step is completed → locked
+    return true;
+  })();
+
+  const backHandler = canGoBack ? () => setStep(step - 1) : undefined;
 
   // Build step rendering based on portal type
   const renderStep = () => {
@@ -1006,7 +1045,7 @@ const ApplyPortal = () => {
           data={app}
           onChange={onChange}
           onNext={() => handleStepNext('parents', step + 1)}
-          onBack={() => setStep(step - 1)}
+          onBack={backHandler}
           saving={saving}
         />
       );
@@ -1017,7 +1056,7 @@ const ApplyPortal = () => {
           data={app}
           onChange={onChange}
           onNext={() => handleStepNext('siblings', step + 1)}
-          onBack={() => setStep(step - 1)}
+          onBack={backHandler}
           saving={saving}
         />
       );
@@ -1028,7 +1067,7 @@ const ApplyPortal = () => {
           data={app}
           onChange={onChange}
           onNext={() => handleStepNext('questionnaire', step + 1)}
-          onBack={() => setStep(step - 1)}
+          onBack={backHandler}
           saving={saving}
         />
       );
@@ -1039,7 +1078,7 @@ const ApplyPortal = () => {
           data={app}
           onChange={onChange}
           onNext={() => handleStepNext('academic', step + 1)}
-          onBack={() => setStep(step - 1)}
+          onBack={backHandler}
           saving={saving}
         />
       );
@@ -1050,7 +1089,7 @@ const ApplyPortal = () => {
           data={app}
           onChange={onChange}
           onNext={() => handleStepNext('extracurricular', step + 1)}
-          onBack={() => setStep(step - 1)}
+          onBack={backHandler}
           saving={saving}
         />
       );
@@ -1064,7 +1103,7 @@ const ApplyPortal = () => {
             await saveSection({ payment_status: app.payment_status }, 'payment');
             setStep(step + 1);
           }}
-          onBack={() => setStep(step - 1)}
+          onBack={backHandler}
           saving={saving}
         />
       );
@@ -1078,7 +1117,7 @@ const ApplyPortal = () => {
             await saveSection({}, 'documents');
             setStep(step + 1);
           }}
-          onBack={() => setStep(step - 1)}
+          onBack={backHandler}
           saving={saving}
         />
       );
@@ -1087,7 +1126,7 @@ const ApplyPortal = () => {
       return (
         <ReviewSubmit
           data={app}
-          onBack={() => setStep(step - 1)}
+          onBack={backHandler}
           onSubmit={handleSubmit}
           saving={saving}
         />

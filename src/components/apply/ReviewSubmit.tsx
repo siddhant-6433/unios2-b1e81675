@@ -8,7 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 interface Props {
   data: ApplicationData;
-  onBack: () => void;
+  onBack?: () => void;
   onSubmit: () => Promise<void>;
   saving: boolean;
 }
@@ -303,9 +303,11 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
           </div>
 
           <div className="flex justify-between">
-            <Button variant="outline" onClick={onBack} className="gap-2">
-              <ArrowLeft className="h-4 w-4" /> Back
-            </Button>
+            {onBack ? (
+              <Button variant="outline" onClick={onBack} className="gap-2">
+                <ArrowLeft className="h-4 w-4" /> Back
+              </Button>
+            ) : <div />}
             <Button onClick={handleSubmit} disabled={!agreed || saving} className="gap-2">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Submit Application

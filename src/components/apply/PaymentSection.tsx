@@ -11,7 +11,7 @@ interface Props {
   data: ApplicationData;
   onChange: (data: Partial<ApplicationData>) => void;
   onNext: () => void;
-  onBack: () => void;
+  onBack?: () => void;
   saving: boolean;
 }
 
@@ -377,9 +377,11 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
       )}
 
       <div className="flex justify-between">
-        <Button variant="outline" onClick={onBack} className="gap-2">
-          <ArrowLeft className="h-4 w-4" /> Back
-        </Button>
+        {onBack ? (
+          <Button variant="outline" onClick={onBack} className="gap-2">
+            <ArrowLeft className="h-4 w-4" /> Back
+          </Button>
+        ) : <div />}
         <Button onClick={onNext} disabled={!isPaid && !isWaived} className="gap-2">
           Continue <ArrowRight className="h-4 w-4" />
         </Button>

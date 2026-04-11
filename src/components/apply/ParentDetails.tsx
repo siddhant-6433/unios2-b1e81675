@@ -9,7 +9,7 @@ interface Props {
   data: ApplicationData;
   onChange: (data: Partial<ApplicationData>) => void;
   onNext: () => void;
-  onBack: () => void;
+  onBack?: () => void;
   saving: boolean;
   readOnly?: boolean;
 }
@@ -268,9 +268,11 @@ export function ParentDetails({ data, onChange, onNext, onBack, saving, readOnly
       </fieldset>
 
       <div className="flex justify-between">
-        <Button variant="outline" onClick={onBack} className="gap-2">
-          <ArrowLeft className="h-4 w-4" /> Back
-        </Button>
+        {onBack ? (
+          <Button variant="outline" onClick={onBack} className="gap-2">
+            <ArrowLeft className="h-4 w-4" /> Back
+          </Button>
+        ) : <div />}
         <Button onClick={onNext} disabled={saving} className="gap-2">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
           Save & Continue
