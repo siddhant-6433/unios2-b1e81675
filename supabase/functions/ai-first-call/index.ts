@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 serve(async (req) => {
@@ -81,8 +81,17 @@ Notes: ${lead.notes || "None"}`
     const aiData = await aiResponse.json();
     const qualification = aiData.choices?.[0]?.message?.content || "Unable to generate assessment";
 
-    // Update lead stage to ai_called
-    await supabase.from("leads").update({ stage: "ai_called" }).eq("id", lead_id);
+    // Extract conversion probability from AI response
+    const probMatch = qualification.match(/conversion probability[:\s]*(\d+)%/i);
+    const convProb = probMatch ? parseInt(probMatch[1]) : null;
+
+    // Tag lead as AI called (don't change stage — AI call is an activity, not a stage)
+    await supabase.from("leads").update({
+      ai_called: true,
+      ai_notes: qualification,
+      ai_called_at: new Date().toISOString(),
+      ai_conversion_probability: convProb,
+    }).eq("id", lead_id);
 
     // Log activity with AI assessment
     await supabase.from("lead_activities").insert({

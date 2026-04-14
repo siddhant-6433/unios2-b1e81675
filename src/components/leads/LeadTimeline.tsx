@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -76,10 +77,10 @@ export function LeadTimeline({
         </div>
 
         <TabsContent value="timeline" className="mt-3">
-          <TimelineList activities={activities} />
+          <TimelineList activities={activities} leadId={leadId} />
         </TabsContent>
         <TabsContent value="calls" className="mt-3">
-          <CallsList callLogs={callLogs} />
+          <CallsList callLogs={callLogs} leadId={leadId} />
         </TabsContent>
         <TabsContent value="notes" className="mt-3">
           <NotesList notes={notes} />
@@ -230,7 +231,28 @@ const DEFAULT_CONFIG: {
 
 // ── Timeline ────────────────────────────────────────────────
 
-function TimelineList({ activities }: { activities: any[] }) {
+function TimelineList({ activities, leadId }: { activities: any[]; leadId?: string }) {
+  // Fetch AI call records to match recordings to timeline entries
+  const [aiRecordings, setAiRecordings] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!leadId) return;
+    supabase.from("ai_call_records" as any).select("created_at, recording_url, duration_seconds")
+      .eq("lead_id", leadId).not("recording_url", "is", null)
+      .then(({ data }) => {
+        if (!data) return;
+        // Map by timestamp (round to minute for fuzzy matching)
+        const map: Record<string, string> = {};
+        for (const r of data as any[]) {
+          if (r.recording_url) {
+            // Key by minute-precision timestamp for matching with activities
+            const key = new Date(r.created_at).toISOString().slice(0, 16);
+            map[key] = r.recording_url;
+          }
+        }
+        setAiRecordings(map);
+      });
+  }, [leadId]);
+
   if (activities.length === 0) return <EmptyState text="No activity recorded yet" />;
 
   return (
@@ -242,6 +264,26 @@ function TimelineList({ activities }: { activities: any[] }) {
           const title = config.getTitle(a);
           const subtitle = config.getSub?.(a) ?? (a.type === "stage_change" ? a.description?.replace(/^Stage changed from /i, "") : null);
           const showBody = a.description && a.type !== "stage_change" && a.type !== "lead_created";
+
+          // Find recording for this AI call activity
+          let recordingUrl: string | null = null;
+          if (a.type === "ai_call") {
+            // Try exact minute match
+            const key = new Date(a.created_at).toISOString().slice(0, 16);
+            recordingUrl = aiRecordings[key] || null;
+            // Also check URL in description
+            if (!recordingUrl) {
+              const urlMatch = a.description?.match(/https?:\/\/\S+\.mp3/i);
+              if (urlMatch) recordingUrl = urlMatch[0];
+            }
+            // Fallback: try ±2 minutes
+            if (!recordingUrl) {
+              const ts = new Date(a.created_at).getTime();
+              for (const [k, url] of Object.entries(aiRecordings)) {
+                if (Math.abs(new Date(k).getTime() - ts) < 120000) { recordingUrl = url; break; }
+              }
+            }
+          }
 
           return (
             <div key={a.id} className="relative flex gap-3 py-2.5">
@@ -263,6 +305,14 @@ function TimelineList({ activities }: { activities: any[] }) {
                     <p className="text-xs text-foreground/80 leading-relaxed">{a.description}</p>
                   </div>
                 )}
+                {/* Recording link for AI calls */}
+                {recordingUrl && (
+                  <a href={recordingUrl} target="_blank" rel="noopener noreferrer"
+                    className="mt-1.5 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline">
+                    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                    Listen to recording
+                  </a>
+                )}
               </div>
             </div>
           );
@@ -274,18 +324,39 @@ function TimelineList({ activities }: { activities: any[] }) {
 
 // ── Calls ───────────────────────────────────────────────────
 
-function CallsList({ callLogs }: { callLogs: any[] }) {
-  if (callLogs.length === 0) return <EmptyState text="No call logs yet" />;
+function CallsList({ callLogs, leadId }: { callLogs: any[]; leadId?: string }) {
+  const [aiCalls, setAiCalls] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!leadId) return;
+    supabase
+      .from("ai_call_records" as any)
+      .select("*")
+      .eq("lead_id", leadId)
+      .order("created_at", { ascending: false })
+      .then(({ data }) => { if (data) setAiCalls(data as any); });
+  }, [leadId]);
+
+  // Merge manual calls + AI calls into one sorted list
+  const allCalls = [
+    ...callLogs.map((c: any) => ({ ...c, _type: "manual", _ts: c.called_at || c.created_at })),
+    ...aiCalls.map((c: any) => ({ ...c, _type: "ai", _ts: c.created_at })),
+  ].sort((a, b) => new Date(b._ts).getTime() - new Date(a._ts).getTime());
+
+  if (allCalls.length === 0) return <EmptyState text="No call logs yet" />;
 
   return (
     <div className="relative pl-5">
       <div className="absolute left-[13px] top-5 bottom-5 w-px bg-border" />
       <div className="space-y-0">
-        {callLogs.map((c) => {
-          const isAi = c.direction === "outbound" && !c.user_id;
+        {allCalls.map((c) => {
+          const isAi = c._type === "ai";
           const metaParts: string[] = [];
-          if (c.duration_seconds) metaParts.push(`Duration: ${Math.floor(c.duration_seconds / 60)}m ${c.duration_seconds % 60}s`);
-          if (c.disposition) metaParts.push(`Disposition: ${c.disposition}`);
+          const dur = c.duration_seconds;
+          if (dur) metaParts.push(`${Math.floor(dur / 60)}m ${dur % 60}s`);
+          if (c.disposition) metaParts.push(c.disposition.replace(/_/g, " "));
+          if (isAi && c.status) metaParts.push(c.status);
+          if (isAi && c.conversion_probability) metaParts.push(`${c.conversion_probability}% conversion`);
 
           return (
             <div key={c.id} className="relative flex gap-3 py-2.5">
@@ -295,19 +366,31 @@ function CallsList({ callLogs }: { callLogs: any[] }) {
               <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between gap-2">
                   <p className="text-[13px] font-semibold text-foreground capitalize leading-tight">
-                    {isAi ? "AI Outbound Call" : `${c.direction} call`}
+                    {isAi ? "AI Call" : `${c.direction || "outbound"} call`}
                   </p>
                   <span className="text-[10px] text-muted-foreground whitespace-nowrap shrink-0 pt-0.5">
-                    {formatTimestamp(c.called_at)}
+                    {formatTimestamp(c._ts)}
                   </span>
                 </div>
                 {metaParts.length > 0 && (
                   <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{metaParts.join(" · ")}</p>
                 )}
-                {c.notes && (
+                {(c.notes || c.summary) && (
                   <div className="mt-1.5 rounded-lg bg-muted/50 border border-border/30 px-3 py-2">
-                    <p className="text-xs text-foreground/80 leading-relaxed">{c.notes}</p>
+                    <p className="text-xs text-foreground/80 leading-relaxed">{c.summary || c.notes}</p>
                   </div>
+                )}
+                {/* Recording link */}
+                {(c.recording_url || c.recording_url_manual) && (
+                  <a
+                    href={c.recording_url || c.recording_url_manual}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-1.5 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+                  >
+                    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                    Listen to recording
+                  </a>
                 )}
               </div>
             </div>

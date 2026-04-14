@@ -8,18 +8,18 @@ const corsHeaders = {
 
 // Template definitions with their expected parameters
 const TEMPLATES: Record<string, { name: string; params: string[] }> = {
-  lead_welcome: { name: "lead_welcome", params: ["student_name", "course_name", "lead_source"] },
+  lead_welcome: { name: "admissions_lead_intro", params: ["student_name", "course_name", "lead_source"] },
   visit_confirmation: { name: "visit_confirmed", params: ["student_name", "visit_date", "campus_name"] },
   visit_reminder_24hr: { name: "visit_reminder", params: ["student_name", "visit_date", "campus_name"] },
   application_received: { name: "application_received", params: ["student_name", "application_id"] },
   fee_reminder: { name: "fee_reminder", params: ["student_name", "amount", "due_date"] },
-  course_details: { name: "course_details", params: ["student_name", "course_name"] },
+  course_details: { name: "admissions_course_info", params: ["student_name", "course_name"] },
   course_info_video: { name: "course_info_video", params: ["student_name", "course_name", "duration", "eligibility", "campus_name"] },
   // Counsellor utility — tap-to-call link sent to counsellor's own phone
   counsellor_call_lead: { name: "lead_queue_item", params: ["counsellor_name", "lead_name", "lead_phone", "course"] },
   // Call disposition auto-replies to leads
-  missed_call: { name: "nimt_missed_call", params: ["student_name", "course_name"] },
-  callback_scheduled: { name: "nimt_callback_scheduled", params: ["student_name", "course_name"] },
+  missed_call: { name: "admissions_call_attempt", params: ["student_name", "course_name"] },
+  callback_scheduled: { name: "admissions_followup_update", params: ["student_name", "course_name"] },
   // User onboarding templates
   staff_welcome: { name: "nimt_new_staff", params: ["name", "role", "campus"] },
   student_welcome: { name: "nimt_student_admitted", params: ["name", "admission_no", "course", "campus"] },
@@ -188,8 +188,8 @@ Deno.serve(async (req) => {
       counsellor_visit_confirmation: "Action needed: Lead {{1}} has a campus visit scheduled for {{2}} at {{3}}. Please call to confirm.",
       counsellor_followup_overdue: "Alert: A follow-up for lead {{1}} was scheduled for {{2}} and is now overdue.",
       counsellor_call_lead: "Hello {{1}}, a lead has been added to your queue.\n\nLead Name: {{2}}\nTap to Call: {{3}}\nCourse Interest: {{4}}\n\nTap the phone number above to dial the lead directly from your phone. Open the full lead record below to log the call outcome.",
-      missed_call: "Hi {{1}}, we tried reaching you from NIMT Educational Institutions regarding your interest in {{2}}. We were unable to connect with you on the call. If you have any questions about admissions or courses, feel free to reply to this message. Our counsellor will try reaching you again shortly.",
-      callback_scheduled: "Hi {{1}}, thank you for speaking with us about {{2}} at NIMT Educational Institutions. As discussed, our counsellor will call you back at your preferred time. If you'd like to schedule a campus visit or need any information before that, feel free to reply here. We look forward to helping you with your admission journey!",
+      missed_call: "Dear {{1}}, the admissions office at NIMT Educational Institutions attempted to reach you regarding {{2}}. We were unable to connect on the call. You may reach us by replying to this message or by calling the admissions office during working hours. A counsellor will attempt to contact you again.",
+      callback_scheduled: "Dear {{1}}, thank you for your time regarding {{2}} at NIMT Educational Institutions. As per your request, a counsellor from the admissions office will reach out to you at a suitable time. If you need to reschedule or have any queries, please reply to this message. We are happy to assist you.",
       staff_welcome: "Welcome to NIMT Educational Institutions, {{1}}!\n\nYou have been added as {{2}} at {{3}}.\n\nPlease check your email for login details.\n\nFor any assistance, contact the admin office.",
       student_welcome: "Congratulations {{1}}!\n\nWelcome to NIMT Educational Institutions.\n\nAdmission No: {{2}}\nCourse: {{3}}\nCampus: {{4}}\n\nYou can access the student portal at https://uni.nimt.ac.in\n\nWe wish you a great academic journey ahead!",
       applicant_welcome: "Hi {{1}}, thank you for starting your application at NIMT Educational Institutions!\n\nYour Application ID: {{2}}\nCourse: {{3}}\n\nComplete your application at https://uni.nimt.ac.in/apply/nimt/\n\nOur admissions team is here to help. Feel free to reach out anytime!",

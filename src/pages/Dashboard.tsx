@@ -18,6 +18,7 @@ import {
 import { JdCategoryMappingPanel } from "@/components/admissions/JdCategoryMappingPanel";
 import { PendingApprovalsPanel } from "@/components/dashboard/PendingApprovalsPanel";
 import { ConsultantVoiceMessagesPanel } from "@/components/dashboard/ConsultantVoiceMessagesPanel";
+import { AiCallLogsPanel } from "@/components/dashboard/AiCallLogsPanel";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -682,6 +683,7 @@ const Dashboard = () => {
       </div>
       {isAdmin && <PendingApprovalsPanel />}
       {isAdmin && <ConsultantVoiceMessagesPanel />}
+      {isAdmin && <AiCallLogsPanel />}
       {isAdmin   && <SuperAdminDashboard isSuperAdmin={role === "super_admin"} />}
       {isCounsellor && <SuperAdminDashboard isSuperAdmin={false} />}
       {isFaculty && <FacultyDashboard />}

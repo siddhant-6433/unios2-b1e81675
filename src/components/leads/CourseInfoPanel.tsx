@@ -59,6 +59,7 @@ interface CourseData {
   type: string;
   webflow_slug: string | null;
   curriculum_url: string | null;
+  affiliations: string[];
   department_name: string;
   institution_name: string;
   institution_code: string;
@@ -94,7 +95,7 @@ export function CourseInfoPanel({ courseId }: Props) {
         supabase
           .from("courses")
           .select(`
-            name, code, duration_years, type, webflow_slug, curriculum_url,
+            name, code, duration_years, type, webflow_slug, curriculum_url, affiliations,
             departments!inner(name,
               institutions!inner(name, code, type,
                 campuses!inner(name)
@@ -119,6 +120,7 @@ export function CourseInfoPanel({ courseId }: Props) {
           type: d.type,
           webflow_slug: d.webflow_slug,
           curriculum_url: d.curriculum_url,
+          affiliations: Array.isArray(d.affiliations) ? d.affiliations : [],
           department_name: d.departments?.name,
           institution_name: d.departments?.institutions?.name,
           institution_code: d.departments?.institutions?.code,
@@ -134,7 +136,12 @@ export function CourseInfoPanel({ courseId }: Props) {
   if (loading) return <div className="flex h-20 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>;
   if (!course) return <p className="text-xs text-muted-foreground text-center py-4">Course not found</p>;
 
-  const instInfo = INSTITUTION_INFO[course.institution_code] || { affiliations: [], approvals: [] };
+  // Prefer course-level affiliations from DB; fall back to hardcoded institution defaults
+  const instDefaults = INSTITUTION_INFO[course.institution_code] || { affiliations: [], approvals: [] };
+  const instInfo = {
+    affiliations: course.affiliations.length > 0 ? course.affiliations : instDefaults.affiliations,
+    approvals: instDefaults.approvals,
+  };
   const websiteUrl = course.webflow_slug ? `https://www.nimt.ac.in/${course.webflow_slug}` : null;
   const curriculumUrl = course.curriculum_url
     ? (course.curriculum_url.startsWith("http") ? course.curriculum_url : `https://www.nimt.ac.in${course.curriculum_url}`)

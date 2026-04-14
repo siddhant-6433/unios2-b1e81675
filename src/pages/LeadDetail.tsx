@@ -296,10 +296,23 @@ const LeadDetail = () => {
         lead_id: id, user_id: profileId, type: "followup",
         description: `Follow-up scheduled (${data.type}) for ${new Date(data.scheduled_at).toLocaleDateString("en-IN")}${data.notes ? `. ${data.notes}` : ""}`,
       });
-      // Auto-advance to counsellor_call when a call/whatsapp followup is scheduled
-      if (data.type === "call" || data.type === "whatsapp") {
+      // Auto-advance to counsellor_call when a call followup is scheduled
+      if (data.type === "call") {
         await autoAdvanceStage("counsellor_call");
       }
+
+      // Send WhatsApp to lead: "callback scheduled" notification
+      if (lead?.phone && data.type === "call") {
+        supabase.functions.invoke("whatsapp-send", {
+          body: {
+            template_key: "callback_scheduled",
+            phone: lead.phone,
+            params: [lead.name || "Student", courseName || "your selected course"],
+            lead_id: id,
+          },
+        }).catch(e => console.error("Follow-up WA failed:", e));
+      }
+
       await fetchAll(true);
     }
   };
@@ -651,9 +664,7 @@ const LeadDetail = () => {
         {/* Right Column */}
         <div className="space-y-4">
           {/* AI Call Summary - golden highlight card */}
-          <AiCallSummary
-            callLog={callLogs.find((c) => c.direction === "outbound" && c.notes) || callLogs[0] || null}
-          />
+          <AiCallSummary leadId={id!} />
           <LeadTimeline
             activities={activities}
             notes={notes}

@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/dialog";
 
 const STAGES = [
-  "new_lead", "application_in_progress", "application_fee_paid", "application_submitted", "ai_called", "counsellor_call", "visit_scheduled",
+  "new_lead", "application_in_progress", "application_fee_paid", "application_submitted", "counsellor_call", "visit_scheduled",
   "interview", "offer_sent", "token_paid", "pre_admitted", "admitted", "waitlisted", "not_interested", "rejected"
 ] as const;
 
@@ -43,7 +43,7 @@ type Stage = typeof STAGES[number];
 const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", application_in_progress: "Application In Progress",
   application_fee_paid: "Fee Paid", application_submitted: "Application Submitted",
-  ai_called: "AI Called", counsellor_call: "Counsellor Call",
+  counsellor_call: "Counsellor Call",
   visit_scheduled: "Visit Scheduled", interview: "Interview", offer_sent: "Offer Sent",
   token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", waitlisted: "Waitlisted", not_interested: "Not Interested", rejected: "Rejected",
 };
@@ -53,7 +53,6 @@ const stageColors: Record<string, string> = {
   application_in_progress: "bg-pastel-yellow text-foreground/70",
   application_fee_paid: "bg-pastel-green text-foreground/70",
   application_submitted: "bg-pastel-mint text-foreground/70",
-  ai_called: "bg-pastel-purple text-foreground/70",
   counsellor_call: "bg-pastel-orange text-foreground/70",
   visit_scheduled: "bg-pastel-yellow text-foreground/70",
   interview: "bg-pastel-mint text-foreground/70",
@@ -68,7 +67,7 @@ const stageColors: Record<string, string> = {
 
 const stageIcons: Record<string, typeof Users> = {
   new_lead: Users, application_in_progress: FileText, application_fee_paid: CheckCircle, application_submitted: CheckCircle,
-  ai_called: Bot, counsellor_call: Phone,
+  counsellor_call: Phone,
   visit_scheduled: MapPin, interview: UserCheck, offer_sent: FileText,
   token_paid: CheckCircle, pre_admitted: Clock, admitted: CheckCircle, waitlisted: Clock, not_interested: XCircle, rejected: XCircle,
 };
@@ -99,6 +98,7 @@ interface Lead {
   counsellor_id: string | null;
   lead_score: number;
   lead_temperature: "hot" | "warm" | "cold";
+  ai_called?: boolean;
   course_name?: string;
   campus_name?: string;
   counsellor_name?: string;
@@ -159,6 +159,9 @@ const Admissions = () => {
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [inactiveIds, setInactiveIds] = useState<Set<string> | null>(null);
   const [followupLeadIds, setFollowupLeadIds] = useState<Set<string> | null>(null);
+  const [visitLeadIds, setVisitLeadIds] = useState<Set<string> | null>(null);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
 
   // Selection & bulk actions
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -343,10 +346,18 @@ const Admissions = () => {
     const matchesTemp = tempFilter === "all" || l.lead_temperature === tempFilter;
     const matchesInactive = !inactiveIds || inactiveIds.has(l.id);
     const matchesFollowup = !followupLeadIds || followupLeadIds.has(l.id);
+    const matchesVisit = !visitLeadIds || visitLeadIds.has(l.id);
     const matchesCounsellor = counsellorFilter === "all"
       || (counsellorFilter === "unassigned" ? !l.counsellor_id : l.counsellor_id === counsellorFilter);
-    return matchesSearch && matchesStage && matchesSource && matchesRole && matchesTemp && matchesInactive && matchesFollowup && matchesCounsellor;
+    return matchesSearch && matchesStage && matchesSource && matchesRole && matchesTemp && matchesInactive && matchesFollowup && matchesVisit && matchesCounsellor;
   });
+
+  const filteredCount = filtered.length;
+  const totalPages = Math.ceil(filteredCount / PAGE_SIZE);
+  const paginatedLeads = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  // Reset page when filters change
+  useEffect(() => { setPage(1); }, [stageFilter, sourceFilter, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds]);
 
   const totalLeads = leads.length;
   const today = new Date().toISOString().slice(0, 10);
@@ -394,14 +405,15 @@ const Admissions = () => {
         applyLeadFilter(supabase.from("lead_followups").select("id", { count: "exact", head: true }).eq("status", "pending")),
         applyLeadFilter(supabase.from("lead_followups").select("id", { count: "exact", head: true }).eq("status", "pending").gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd)),
         applyLeadFilter(supabase.from("overdue_followups" as any).select("id", { count: "exact", head: true })),
-        applyLeadFilter(supabase.from("campus_visits").select("id", { count: "exact", head: true }).gte("visit_date", todayStart).in("status", ["scheduled", "confirmed"])),
-        applyLeadFilter(supabase.from("campus_visits").select("id", { count: "exact", head: true }).eq("status", "completed")),
+        applyLeadFilter(supabase.from("campus_visits").select("lead_id").gte("visit_date", todayStart).in("status", ["scheduled", "confirmed"])),
+        applyLeadFilter(supabase.from("campus_visits").select("lead_id").eq("status", "completed")),
       ]);
       setPendingFollowups(pendingRes.count || 0);
       setTodayFollowups(todayRes.count || 0);
       setOverdueFollowups(overdueRes.count || 0);
-      setUpcomingVisits(upVisitRes.count || 0);
-      setCompletedVisits(compVisitRes.count || 0);
+      // Count unique leads with visits (not visit count)
+      setUpcomingVisits(new Set((upVisitRes.data || []).map((r: any) => r.lead_id)).size);
+      setCompletedVisits(new Set((compVisitRes.data || []).map((r: any) => r.lead_id)).size);
     })();
   }, [selectedCampusId, role, profile?.id]);
 
@@ -409,7 +421,7 @@ const Admissions = () => {
   const leadStats = [
     { label: "New Leads", value: newLeads, sub: `+${todayLeads} today`, icon: Users, iconBg: "bg-pastel-blue", filterStage: "new_lead", link: "" },
     { label: "Pending Follow-ups", value: pendingFollowups, sub: `${overdueFollowups} overdue · ${todayFollowups} today`, icon: Clock, iconBg: "bg-pastel-orange", filterStage: "", link: "", action: "followups" },
-    { label: "Upcoming Visits", value: upcomingVisits, sub: "Scheduled & confirmed", icon: MapPin, iconBg: "bg-pastel-yellow", filterStage: "visit_scheduled", link: "" },
+    { label: "Upcoming Visits", value: upcomingVisits, sub: "Scheduled & confirmed", icon: MapPin, iconBg: "bg-pastel-yellow", filterStage: "", link: "", action: "visits" },
     { label: "Completed Visits", value: completedVisits, sub: "Campus visits done", icon: CheckCircle, iconBg: "bg-pastel-green", filterStage: "", link: "" },
   ];
 
@@ -481,20 +493,45 @@ const Admissions = () => {
               }`}
               onClick={async () => {
                 if (stat.action === "followups") {
-                  if (followupLeadIds) { setFollowupLeadIds(null); return; }
+                  if (followupLeadIds) { setFollowupLeadIds(null); setPage(1); return; }
                   const { data } = await supabase.from("lead_followups").select("lead_id").eq("status", "pending");
                   const ids = new Set<string>((data || []).map((r: any) => r.lead_id));
                   setFollowupLeadIds(ids);
+                  setVisitLeadIds(null);
                   setInactiveIds(null);
                   setStageFilter("all");
                   setSourceFilter("all");
                   setRoleFilter("all");
                   setTempFilter("all");
                   setSearch("");
+                  setView("list");
+                  return;
+                }
+                if (stat.action === "visits") {
+                  if (visitLeadIds) { setVisitLeadIds(null); setPage(1); return; }
+                  const todayStart = new Date().toISOString().slice(0, 10);
+                  const { data } = await supabase.from("campus_visits").select("lead_id").gte("visit_date", todayStart).in("status", ["scheduled", "confirmed"]);
+                  const ids = new Set<string>((data || []).map((r: any) => r.lead_id));
+                  setVisitLeadIds(ids);
+                  setFollowupLeadIds(null);
+                  setInactiveIds(null);
+                  setStageFilter("all");
+                  setSourceFilter("all");
+                  setRoleFilter("all");
+                  setTempFilter("all");
+                  setSearch("");
+                  setView("list");
                   return;
                 }
                 if (stat.link) { navigate(stat.link); return; }
-                if (stat.filterStage) setStageFilter(prev => prev === stat.filterStage ? "all" : stat.filterStage);
+                if (stat.filterStage) {
+                  setStageFilter(prev => prev === stat.filterStage ? "all" : stat.filterStage);
+                  setFollowupLeadIds(null);
+                  setVisitLeadIds(null);
+                  setInactiveIds(null);
+                  setView("list");
+                  setPage(1);
+                }
               }}
             >
               <CardContent className="p-5">
@@ -523,7 +560,7 @@ const Admissions = () => {
             <Card
               key={stat.label}
               className={`border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer ${stageFilter === stat.filterStage ? "ring-2 ring-primary/40 bg-primary/5" : ""}`}
-              onClick={() => setStageFilter(prev => prev === stat.filterStage ? "all" : stat.filterStage)}
+              onClick={() => { setStageFilter(prev => prev === stat.filterStage ? "all" : stat.filterStage); setFollowupLeadIds(null); setVisitLeadIds(null); setInactiveIds(null); setView("list"); setPage(1); }}
             >
               <CardContent className="p-5">
                 <div className="flex items-start justify-between">
@@ -579,6 +616,21 @@ const Admissions = () => {
           <button
             onClick={() => setFollowupLeadIds(null)}
             className="ml-2 rounded-md bg-orange-200 dark:bg-orange-800 px-2 py-0.5 text-xs font-medium text-orange-800 dark:text-orange-200 hover:bg-orange-300 dark:hover:bg-orange-700"
+          >
+            Clear filter
+          </button>
+        </div>
+      )}
+
+      {visitLeadIds && (
+        <div className="flex items-center gap-2 rounded-lg bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800/40 px-3 py-2 text-sm">
+          <MapPin className="h-3.5 w-3.5 text-violet-600" />
+          <span className="font-medium text-violet-800 dark:text-violet-300">
+            Showing {visitLeadIds.size} lead{visitLeadIds.size !== 1 ? "s" : ""} with upcoming visits
+          </span>
+          <button
+            onClick={() => setVisitLeadIds(null)}
+            className="ml-2 rounded-md bg-violet-200 dark:bg-violet-800 px-2 py-0.5 text-xs font-medium text-violet-800 dark:text-violet-200 hover:bg-violet-300 dark:hover:bg-violet-700"
           >
             Clear filter
           </button>
@@ -717,6 +769,27 @@ const Admissions = () => {
           })}
         </div>
       ) : (
+        <>
+        {/* Filtered count header */}
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-sm text-muted-foreground">
+            Showing <span className="font-semibold text-foreground">{paginatedLeads.length}</span> of <span className="font-semibold text-foreground">{filteredCount}</span> leads
+            {filteredCount !== totalLeads && <span> (filtered from {totalLeads})</span>}
+          </p>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}
+                className="rounded-lg border border-input bg-card px-2.5 py-1 text-xs font-medium text-foreground disabled:opacity-40 hover:bg-muted">
+                Prev
+              </button>
+              <span className="text-xs text-muted-foreground px-2">Page {page} of {totalPages}</span>
+              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}
+                className="rounded-lg border border-input bg-card px-2.5 py-1 text-xs font-medium text-foreground disabled:opacity-40 hover:bg-muted">
+                Next
+              </button>
+            </div>
+          )}
+        </div>
         <Card className="border-border/60 shadow-none overflow-hidden">
           <CardContent className="p-0">
             <table className="w-full text-sm">
@@ -725,8 +798,11 @@ const Admissions = () => {
                   {(isSuperAdmin || canTransfer) && (
                     <th className="px-3 py-3 w-10">
                       <Checkbox
-                        checked={selectedIds.size === filtered.length && filtered.length > 0}
-                        onCheckedChange={toggleSelectAll}
+                        checked={selectedIds.size === paginatedLeads.length && paginatedLeads.length > 0}
+                        onCheckedChange={() => {
+                          if (selectedIds.size === paginatedLeads.length) setSelectedIds(new Set());
+                          else setSelectedIds(new Set(paginatedLeads.map(l => l.id)));
+                        }}
                         className="h-4 w-4"
                       />
                     </th>
@@ -745,7 +821,7 @@ const Admissions = () => {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((lead) => (
+                {paginatedLeads.map((lead) => (
                   <tr key={lead.id} className="border-b border-border last:border-0 hover:bg-muted/30 cursor-pointer transition-colors">
                     {(isSuperAdmin || canTransfer) && (
                       <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
@@ -757,7 +833,14 @@ const Admissions = () => {
                       </td>
                     )}
                     <td className="px-4 py-3" onClick={() => navigate(`/admissions/${lead.id}`)}>
-                      <div className="font-medium text-foreground">{lead.name}</div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium text-foreground">{lead.name}</span>
+                        {lead.ai_called && (
+                          <span className="flex h-4 w-4 items-center justify-center rounded bg-violet-100 dark:bg-violet-900/30" title="AI Called">
+                            <Bot className="h-2.5 w-2.5 text-violet-600" />
+                          </span>
+                        )}
+                      </div>
                       <div className="text-xs text-muted-foreground">{lead.phone} · {lead.email || "—"}</div>
                     </td>
                     <td className="px-4 py-3" onClick={() => navigate(`/admissions/${lead.id}`)}>
@@ -809,6 +892,26 @@ const Admissions = () => {
             </table>
           </CardContent>
         </Card>
+        {/* Bottom pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between mt-3">
+            <p className="text-xs text-muted-foreground">
+              {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredCount)} of {filteredCount}
+            </p>
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => setPage(1)} disabled={page <= 1}
+                className="rounded-lg border border-input bg-card px-2 py-1 text-xs disabled:opacity-40 hover:bg-muted">First</button>
+              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}
+                className="rounded-lg border border-input bg-card px-2.5 py-1 text-xs font-medium disabled:opacity-40 hover:bg-muted">Prev</button>
+              <span className="text-xs text-muted-foreground px-2">{page} / {totalPages}</span>
+              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}
+                className="rounded-lg border border-input bg-card px-2.5 py-1 text-xs font-medium disabled:opacity-40 hover:bg-muted">Next</button>
+              <button onClick={() => setPage(totalPages)} disabled={page >= totalPages}
+                className="rounded-lg border border-input bg-card px-2 py-1 text-xs disabled:opacity-40 hover:bg-muted">Last</button>
+            </div>
+          </div>
+        )}
+        </>
       )}
 
       <AddLeadDialog open={showAddLead} onOpenChange={setShowAddLead} onSuccess={fetchLeads} />

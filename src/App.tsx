@@ -14,6 +14,9 @@ import Admissions from "./pages/Admissions";
 import LeadDetail from "./pages/LeadDetail";
 import LeadAllocation from "./pages/LeadAllocation";
 import LeadBuckets from "./pages/LeadBuckets";
+import CallLog from "./pages/CallLog";
+import AiCallLog from "./pages/AiCallLog";
+import StudentReferrals from "./pages/StudentReferrals";
 import GlobalSearch from "./pages/GlobalSearch";
 import Students from "./pages/Students";
 import StudentProfile from "./pages/StudentProfile";
@@ -98,6 +101,9 @@ const App = () => (
                       <Route path="/admissions/:id" element={<LeadDetail />} />
                       <Route path="/lead-allocation" element={<LeadAllocation />} />
                       <Route path="/lead-buckets" element={<LeadBuckets />} />
+                      <Route path="/call-log" element={<CallLog />} />
+                      <Route path="/ai-call-log" element={<AiCallLog />} />
+                      <Route path="/referrals" element={<StudentReferrals />} />
                       <Route path="/search" element={<GlobalSearch />} />
                       <Route path="/students" element={<Students />} />
                       <Route path="/students/:admissionNo" element={<StudentProfile />} />

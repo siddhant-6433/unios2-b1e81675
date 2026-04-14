@@ -5,7 +5,7 @@ import {
   ClipboardCheck, Settings, LogOut,
   BookOpen, BarChart3, FileText, Search, Shuffle, Handshake, PieChart,
   ChevronDown, Phone, Calendar, MessageSquare, Newspaper, Building2, School, ShieldCheck, Zap, Inbox,
-  Globe, FolderOpen, Heart, Award, Target, GitMerge
+  Globe, FolderOpen, Heart, Award, Target, GitMerge, Bot, Gift
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -36,6 +36,7 @@ const mainMenu: MenuItem[] = [
   { title: "Attendance", url: "/attendance", icon: ClipboardCheck, permission: "attendance:view" },
   { title: "Exams", url: "/exams", icon: BookOpen, permission: "exams:view" },
   { title: "Finance", url: "/finance", icon: IndianRupee, permission: "finance:view" },
+  { title: "Refer & Earn", url: "/referrals", icon: Gift, permission: "referrals:view" },
   { title: "Reports", url: "/reports", icon: BarChart3, permission: "reports:view" },
 ];
 
@@ -45,6 +46,8 @@ const admissionSubMenu: MenuItem[] = [
   { title: "Performance", url: "/counsellor-dashboard", icon: BarChart3, permission: "performance:view" },
   { title: "Lead Buckets", url: "/lead-buckets", icon: Inbox, permission: "lead_buckets:view" },
   { title: "Lead Allocation", url: "/lead-allocation", icon: Shuffle, permission: "lead_allocation:view" },
+  { title: "Call Log", url: "/call-log", icon: Phone, permission: "automation:view" },
+  { title: "AI Call Log", url: "/ai-call-log", icon: Bot, permission: "automation:view" },
   { title: "Automation", url: "/automation-rules", icon: Zap, permission: "automation:view" },
   { title: "Consultants", url: "/consultants", icon: Handshake, permission: "consultants:view" },
   { title: "Templates", url: "/template-manager", icon: Newspaper, permission: "templates:view" },
