@@ -160,19 +160,13 @@ Deno.serve(async (req) => {
 
     const waResult = await waResponse.json();
 
-    if (!waResponse.ok) {
-      console.error("WhatsApp send error:", JSON.stringify(waResult));
-      return new Response(
-        JSON.stringify({
-          error: waResult?.error?.message || "Failed to send WhatsApp message",
-          meta_error: waResult?.error?.message,
-        }),
-        { status: waResponse.status >= 400 && waResponse.status < 500 ? waResponse.status : 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Log to whatsapp_messages + lead_activities
+    // Log to whatsapp_messages + lead_activities (even if Meta rejected it)
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
+    const metaFailed = !waResponse.ok;
+
+    if (metaFailed) {
+      console.error("WhatsApp send error:", JSON.stringify(waResult));
+    }
 
     // Build readable content from template params
     const TEMPLATE_TEXTS: Record<string, string> = {
@@ -202,7 +196,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Insert into whatsapp_messages for inbox visibility
+    // Insert into whatsapp_messages for inbox visibility — log even if Meta rejected
     await adminClient.from("whatsapp_messages").insert({
       lead_id: lead_id || null,
       wa_message_id: waResult?.messages?.[0]?.id || null,
@@ -211,21 +205,32 @@ Deno.serve(async (req) => {
       message_type: "template",
       content: readableContent,
       template_key,
-      status: "sent",
+      status: metaFailed ? "failed" : "sent",
       is_read: true,
     });
 
     if (lead_id) {
       const isSystem = user.id === null;
+      const statusLabel = metaFailed ? "failed" : "sent";
       const { error: actErr } = await adminClient.from("lead_activities").insert({
         lead_id,
         user_id: user.id,
         type: "whatsapp",
         description: isSystem
-          ? `Automated WhatsApp sent — ${template_key.replace(/_/g, " ")}`
-          : `WhatsApp sent — Template: ${template_key.replace(/_/g, " ")}`,
+          ? `Automated WhatsApp ${statusLabel} — ${template_key.replace(/_/g, " ")}`
+          : `WhatsApp ${statusLabel} — Template: ${template_key.replace(/_/g, " ")}`,
       });
       if (actErr) console.error("lead_activities insert failed:", actErr.message);
+    }
+
+    if (metaFailed) {
+      return new Response(
+        JSON.stringify({
+          error: waResult?.error?.message || "Failed to send WhatsApp message",
+          meta_error: waResult?.error?.message,
+        }),
+        { status: waResponse.status >= 400 && waResponse.status < 500 ? waResponse.status : 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     return new Response(

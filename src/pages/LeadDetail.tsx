@@ -257,8 +257,12 @@ const LeadDetail = () => {
             params: autoParams,
             lead_id: id,
           },
-        }).then(({ error }) => {
-          if (error) console.error("Auto WA after disposition failed:", error.message);
+        }).then(({ error, data }) => {
+          if (error || data?.error) {
+            const detail = data?.error || data?.meta_error || error?.message || "Unknown error";
+            console.error("Auto WA after disposition failed:", detail);
+            toast({ title: "Auto WhatsApp failed", description: detail, variant: "destructive" });
+          }
         });
       }
     }
