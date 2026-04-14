@@ -69,7 +69,7 @@ verify_jwt = false
 [functions.whatsapp-templates]
 verify_jwt = false
 
-[functions.check-lcd]
+[functions.submit-call-auto-templates]
 verify_jwt = false
 
 [functions.provision-student-fees]

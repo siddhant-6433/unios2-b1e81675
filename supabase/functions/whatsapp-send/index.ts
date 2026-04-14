@@ -16,7 +16,10 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   course_details: { name: "course_details", params: ["student_name", "course_name"] },
   course_info_video: { name: "course_info_video", params: ["student_name", "course_name", "duration", "eligibility", "campus_name"] },
   // Counsellor utility — tap-to-call link sent to counsellor's own phone
-  counsellor_call_lead: { name: "lead_contact_details", params: ["counsellor_name", "lead_name", "lead_phone", "course"] },
+  counsellor_call_lead: { name: "lead_queue_item", params: ["counsellor_name", "lead_name", "lead_phone", "course"] },
+  // Call disposition auto-replies to leads
+  missed_call: { name: "nimt_missed_call", params: ["student_name", "course_name"] },
+  callback_scheduled: { name: "nimt_callback_scheduled", params: ["student_name", "course_name"] },
   // User onboarding templates
   staff_welcome: { name: "nimt_new_staff", params: ["name", "role", "campus"] },
   student_welcome: { name: "nimt_student_admitted", params: ["name", "admission_no", "course", "campus"] },
@@ -184,7 +187,9 @@ Deno.serve(async (req) => {
       counsellor_lead_reclaimed: "Lead {{1}} ({{2}}) has been returned to the unassigned bucket due to SLA breach.",
       counsellor_visit_confirmation: "Action needed: Lead {{1}} has a campus visit scheduled for {{2}} at {{3}}. Please call to confirm.",
       counsellor_followup_overdue: "Alert: A follow-up for lead {{1}} was scheduled for {{2}} and is now overdue.",
-      counsellor_call_lead: "Hello {{1}}, here are the contact details of a lead from your assigned list.\n\nLead Name: {{2}}\nPhone Number: {{3}}\nCourse Interest: {{4}}\n\nYou can open the lead record from the button below to view more details and log the call outcome.",
+      counsellor_call_lead: "Hello {{1}}, a lead has been added to your queue.\n\nLead Name: {{2}}\nTap to Call: {{3}}\nCourse Interest: {{4}}\n\nTap the phone number above to dial the lead directly from your phone. Open the full lead record below to log the call outcome.",
+      missed_call: "Hi {{1}}, we tried reaching you from NIMT Educational Institutions regarding your interest in {{2}}. We were unable to connect with you on the call. If you have any questions about admissions or courses, feel free to reply to this message. Our counsellor will try reaching you again shortly.",
+      callback_scheduled: "Hi {{1}}, thank you for speaking with us about {{2}} at NIMT Educational Institutions. As discussed, our counsellor will call you back at your preferred time. If you'd like to schedule a campus visit or need any information before that, feel free to reply here. We look forward to helping you with your admission journey!",
       staff_welcome: "Welcome to NIMT Educational Institutions, {{1}}!\n\nYou have been added as {{2}} at {{3}}.\n\nPlease check your email for login details.\n\nFor any assistance, contact the admin office.",
       student_welcome: "Congratulations {{1}}!\n\nWelcome to NIMT Educational Institutions.\n\nAdmission No: {{2}}\nCourse: {{3}}\nCampus: {{4}}\n\nYou can access the student portal at https://uni.nimt.ac.in\n\nWe wish you a great academic journey ahead!",
       applicant_welcome: "Hi {{1}}, thank you for starting your application at NIMT Educational Institutions!\n\nYour Application ID: {{2}}\nCourse: {{3}}\n\nComplete your application at https://uni.nimt.ac.in/apply/nimt/\n\nOur admissions team is here to help. Feel free to reach out anytime!",

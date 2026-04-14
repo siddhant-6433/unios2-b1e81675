@@ -232,14 +232,45 @@ const LeadDetail = () => {
       });
     }
 
+    // 4. Auto-send WhatsApp to lead based on disposition (fire-and-forget)
+    if (lead.phone) {
+      const course = courseName || "your selected course";
+      let autoTemplate: string | null = null;
+      let autoParams: string[] = [];
+
+      if (data.disposition === "interested") {
+        autoTemplate = "course_details";
+        autoParams = [lead.name, course];
+      } else if (data.disposition === "not_answered" || data.disposition === "busy" || data.disposition === "voicemail") {
+        autoTemplate = "missed_call";
+        autoParams = [lead.name, course];
+      } else if (data.disposition === "call_back") {
+        autoTemplate = "callback_scheduled";
+        autoParams = [lead.name, course];
+      }
+
+      if (autoTemplate) {
+        supabase.functions.invoke("whatsapp-send", {
+          body: {
+            template_key: autoTemplate,
+            phone: lead.phone,
+            params: autoParams,
+            lead_id: id,
+          },
+        }).then(({ error }) => {
+          if (error) console.error("Auto WA after disposition failed:", error.message);
+        });
+      }
+    }
+
     toast({ title: "Call logged", description: label });
     await fetchAll(true);
 
-    // 4. Chain to follow-up dialog if requested
+    // 5. Chain to follow-up dialog if requested
     if (data.schedule_followup) {
       setShowFollowup(true);
     }
-    // 5. Schedule visit inline if provided
+    // 6. Schedule visit inline if provided
     if (data.visit) {
       await scheduleVisit(data.visit);
     }
@@ -404,10 +435,25 @@ const LeadDetail = () => {
 
   const triggerAiCall = async () => {
     setAiCalling(true);
-    const { error } = await supabase.functions.invoke("ai-first-call", { body: { lead_id: id } });
+    try {
+      const { data, error } = await supabase.functions.invoke("voice-call", {
+        body: { action: "outbound", lead_id: id },
+      });
+
+      if (error) {
+        const errBody = (error as any).data;
+        const detail = errBody?.error || error.message;
+        toast({ title: "AI Call Error", description: detail, variant: "destructive" });
+      } else if (data?.error) {
+        toast({ title: "AI Call Error", description: data.error, variant: "destructive" });
+      } else {
+        toast({ title: "AI Call Started", description: data?.message || "Calling lead..." });
+        fetchAll(true);
+      }
+    } catch (e: any) {
+      toast({ title: "AI Call Error", description: e.message, variant: "destructive" });
+    }
     setAiCalling(false);
-    if (error) toast({ title: "AI Call Error", description: error.message, variant: "destructive" });
-    else { toast({ title: "AI Call Complete" }); fetchAll(true); }
   };
 
   const handleNotInterested = async () => {
