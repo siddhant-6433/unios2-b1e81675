@@ -360,6 +360,7 @@ const LeadDetail = () => {
           phone: lead.phone,
           params: [lead.name || "Student", visitDateFormatted, campusLabel || "NIMT Educational Institutions"],
           lead_id: id,
+          button_urls: ["1820424915210710582"], // Google Maps CID for campus location
         },
       });
       if (waErr) {

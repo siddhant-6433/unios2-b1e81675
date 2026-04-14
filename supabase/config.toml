@@ -69,7 +69,7 @@ verify_jwt = false
 [functions.whatsapp-templates]
 verify_jwt = false
 
-[functions.check-pending]
+[functions.test-dispositions]
 verify_jwt = false
 
 [functions.voice-call-callback]

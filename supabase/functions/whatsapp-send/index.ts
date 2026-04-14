@@ -13,12 +13,13 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   visit_reminder_24hr: { name: "visit_reminder", params: ["student_name", "visit_date", "campus_name"] },
   application_received: { name: "application_received", params: ["student_name", "application_id"] },
   fee_reminder: { name: "fee_reminder", params: ["student_name", "amount", "due_date"] },
-  course_details: { name: "admissions_course_info", params: ["student_name", "course_name"] },
+  course_details: { name: "inquiry_course_update", params: ["student_name", "course_name"] },
   course_info_video: { name: "course_info_video", params: ["student_name", "course_name", "duration", "eligibility", "campus_name"] },
   // Counsellor utility — tap-to-call link sent to counsellor's own phone
   counsellor_call_lead: { name: "lead_queue_item", params: ["counsellor_name", "lead_name", "lead_phone", "course"] },
   // Call disposition auto-replies to leads
-  missed_call: { name: "admissions_call_attempt", params: ["student_name", "course_name"] },
+  // admissions_call_attempt is MARKETING (won't deliver). Use followup_update as fallback.
+  missed_call: { name: "admissions_followup_update", params: ["student_name", "course_name"] },
   callback_scheduled: { name: "admissions_followup_update", params: ["student_name", "course_name"] },
   // User onboarding templates
   staff_welcome: { name: "nimt_new_staff", params: ["name", "role", "campus"] },
