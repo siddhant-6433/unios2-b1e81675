@@ -256,20 +256,63 @@ Deno.serve(async (req) => {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, serviceKey);
 
+    // Resolve lead source early (needed for duplicate tracking)
+    const validSources = [
+      "website", "mirai_website", "meta_ads", "google_ads", "shiksha", "walk_in",
+      "consultant", "justdial", "referral", "education_fair", "collegedunia", "collegehai", "other",
+    ];
+    const leadSource = validSources.includes(parsed.source) ? parsed.source : "other";
+
     // ── Duplicate detection by phone ──
     const { data: existing } = await supabase
       .from("leads")
-      .select("id, name, stage")
+      .select("id, name, stage, source, secondary_source, tertiary_source, source_history")
       .eq("phone", normPhone)
       .limit(1)
       .maybeSingle();
 
     if (existing) {
+      const newSource = leadSource;
+      const currentSource = existing.source;
+      const currentSecondary = existing.secondary_source;
+
+      // Only update if the new source is different from existing sources
+      if (newSource !== currentSource && newSource !== currentSecondary && newSource !== existing.tertiary_source) {
+        const updates: Record<string, any> = {};
+
+        // Add to source_history
+        const history = Array.isArray(existing.source_history) ? existing.source_history : [];
+        history.push({ source: newSource, timestamp: new Date().toISOString(), data: parsed.notes || null });
+        updates.source_history = history;
+
+        // Fill secondary, then tertiary
+        if (!currentSecondary) {
+          updates.secondary_source = newSource;
+        } else if (!existing.tertiary_source) {
+          updates.tertiary_source = newSource;
+        }
+        // else: already has 3 sources, just log to history
+
+        await supabase.from("leads").update(updates).eq("id", existing.id);
+
+        // Log activity
+        await supabase.from("lead_activities").insert({
+          lead_id: existing.id,
+          type: "system",
+          description: `Lead re-inquired from ${newSource}. Primary: ${currentSource}, Secondary: ${currentSecondary || newSource}${existing.tertiary_source || updates.tertiary_source ? ', Tertiary: ' + (existing.tertiary_source || updates.tertiary_source) : ''}`,
+        });
+      }
+
       return new Response(
         JSON.stringify({
           status: "duplicate",
-          message: `Lead already exists: ${existing.name} (${existing.stage})`,
+          message: `Lead already exists: ${existing.name} (${existing.stage}). Source ${newSource} tracked.`,
           lead_id: existing.id,
+          sources: {
+            primary: currentSource,
+            secondary: currentSecondary || (newSource !== currentSource ? newSource : null),
+            tertiary: existing.tertiary_source,
+          },
         }),
         {
           status: 200,
@@ -326,11 +369,6 @@ Deno.serve(async (req) => {
     }
 
     // ── Insert lead ──
-    const validSources = [
-      "website", "mirai_website", "meta_ads", "google_ads", "shiksha", "walk_in",
-      "consultant", "justdial", "referral", "education_fair", "collegedunia", "collegehai", "other",
-    ];
-    const leadSource = validSources.includes(parsed.source) ? parsed.source : "other";
 
     // Generate application ID
     const appId = `APP-${new Date().getFullYear().toString().slice(-2)}-${String(Math.floor(Math.random() * 9000) + 1000)}`;

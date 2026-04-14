@@ -139,15 +139,29 @@ Deno.serve(async (req) => {
     // ── Duplicate check by phone ─────────────────────────────────────────
     const { data: existing } = await supabase
       .from("leads")
-      .select("id, name, stage, source")
+      .select("id, name, stage, source, secondary_source, tertiary_source, source_history")
       .eq("phone", normPhone)
       .limit(1)
       .maybeSingle();
 
     if (existing) {
+      // Track collegehai as secondary/tertiary source
+      if (existing.source !== "collegehai") {
+        const updates: Record<string, any> = {};
+        const history = Array.isArray((existing as any).source_history) ? (existing as any).source_history : [];
+        history.push({ source: "collegehai", timestamp: new Date().toISOString() });
+        updates.source_history = history;
+        if (!(existing as any).secondary_source) updates.secondary_source = "collegehai";
+        else if (!(existing as any).tertiary_source) updates.tertiary_source = "collegehai";
+        await supabase.from("leads").update(updates).eq("id", existing.id);
+        await supabase.from("lead_activities").insert({
+          lead_id: existing.id, type: "system",
+          description: `Lead re-inquired from CollegeHai. Primary source: ${existing.source}`,
+        });
+      }
       return json({
         status: "duplicate",
-        message: `Lead already exists: ${existing.name} (${existing.stage})`,
+        message: `Lead already exists: ${existing.name} (${existing.stage}). CollegeHai source tracked.`,
         lead_id: existing.id,
       });
     }

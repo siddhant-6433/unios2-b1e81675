@@ -674,6 +674,78 @@ const LeadDetail = () => {
         <div className="space-y-4">
           {/* AI Call Summary - golden highlight card */}
           <AiCallSummary leadId={id!} />
+
+          {/* Upcoming Visits */}
+          {visits.filter((v: any) => v.status === "scheduled" || v.status === "confirmed").length > 0 && (
+            <div className="rounded-xl border border-violet-200 dark:border-violet-800/40 bg-violet-50/50 dark:bg-violet-950/20 p-4 space-y-3">
+              <h3 className="text-xs font-semibold text-violet-700 dark:text-violet-300 uppercase tracking-wide flex items-center gap-1.5">
+                <MapPin className="h-3.5 w-3.5" /> Scheduled Visits
+              </h3>
+              {visits.filter((v: any) => ["scheduled", "confirmed"].includes(v.status)).map((v: any) => {
+                const visitDate = new Date(v.visit_date);
+                const campusName = campuses.find((c: any) => c.id === v.campus_id)?.name || "Campus";
+                return (
+                  <div key={v.id} className="flex items-center justify-between gap-3 rounded-lg bg-white dark:bg-card border border-border/50 px-3 py-2.5">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">
+                        {visitDate.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })} at {visitDate.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}
+                      </p>
+                      <p className="text-xs text-muted-foreground">{campusName}</p>
+                    </div>
+                    <div className="flex gap-1.5 shrink-0">
+                      <button
+                        onClick={async () => {
+                          const newDateStr = prompt("Enter new visit date and time (YYYY-MM-DD HH:MM):", visitDate.toISOString().slice(0, 16));
+                          if (!newDateStr) return;
+                          const newDate = new Date(newDateStr);
+                          if (isNaN(newDate.getTime())) { toast({ title: "Invalid date", variant: "destructive" }); return; }
+                          await supabase.from("campus_visits").update({ visit_date: newDate.toISOString(), status: "scheduled" }).eq("id", v.id);
+                          await supabase.from("lead_activities").insert({
+                            lead_id: id!, user_id: user?.id || null, type: "visit",
+                            description: `Visit rescheduled to ${newDate.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`,
+                          });
+                          toast({ title: "Visit rescheduled" });
+                          fetchAll(true);
+                        }}
+                        className="rounded-lg border border-input bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted"
+                      >
+                        Reschedule
+                      </button>
+                      <button
+                        onClick={async () => {
+                          await supabase.from("campus_visits").update({ status: "completed" }).eq("id", v.id);
+                          await supabase.from("lead_activities").insert({
+                            lead_id: id!, user_id: user?.id || null, type: "visit",
+                            description: "Campus visit marked as completed",
+                          });
+                          toast({ title: "Visit completed" });
+                          fetchAll(true);
+                        }}
+                        className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-700"
+                      >
+                        Completed
+                      </button>
+                      <button
+                        onClick={async () => {
+                          await supabase.from("campus_visits").update({ status: "cancelled" }).eq("id", v.id);
+                          await supabase.from("lead_activities").insert({
+                            lead_id: id!, user_id: user?.id || null, type: "visit",
+                            description: "Campus visit cancelled",
+                          });
+                          toast({ title: "Visit cancelled" });
+                          fetchAll(true);
+                        }}
+                        className="rounded-lg border border-red-200 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           <LeadTimeline
             activities={activities}
             notes={notes}
@@ -687,11 +759,15 @@ const LeadDetail = () => {
             onCompleteFollowup={completeFollowup}
             onAddFollowup={addFollowup}
             onScheduleVisit={scheduleVisit}
-            onUpdateVisitStatus={async (vid, status) => {
-              await supabase.from("campus_visits").update({ status }).eq("id", vid);
+            onUpdateVisitStatus={async (vid, status, newDate) => {
+              const updates: Record<string, any> = { status };
+              if (newDate) updates.visit_date = newDate;
+              await supabase.from("campus_visits").update(updates).eq("id", vid);
               await supabase.from("lead_activities").insert({
                 lead_id: id!, user_id: user?.id || null, type: "visit",
-                description: `Campus visit status updated to ${status}`,
+                description: newDate
+                  ? `Campus visit rescheduled to ${new Date(newDate).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`
+                  : `Campus visit status updated to ${status}`,
               });
               await fetchAll(true);
             }}

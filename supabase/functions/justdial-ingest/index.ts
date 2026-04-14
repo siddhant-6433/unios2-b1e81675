@@ -179,13 +179,23 @@ Deno.serve(async (req) => {
     // ── Duplicate check ───────────────────────────────────────────────────
     const { data: existing } = await supabase
       .from("leads")
-      .select("id, name, stage")
+      .select("id, name, stage, source, secondary_source, tertiary_source, source_history")
       .eq("phone", normPhone)
       .limit(1)
       .maybeSingle();
 
     if (existing) {
       console.log(`Duplicate: ${existing.name} (${existing.stage})`);
+      // Track justdial as secondary/tertiary source
+      if ((existing as any).source !== "justdial") {
+        const updates: Record<string, any> = {};
+        const history = Array.isArray((existing as any).source_history) ? (existing as any).source_history : [];
+        history.push({ source: "justdial", timestamp: new Date().toISOString(), category });
+        updates.source_history = history;
+        if (!(existing as any).secondary_source) updates.secondary_source = "justdial";
+        else if (!(existing as any).tertiary_source) updates.tertiary_source = "justdial";
+        await supabase.from("leads").update(updates).eq("id", existing.id);
+      }
       return received();
     }
 

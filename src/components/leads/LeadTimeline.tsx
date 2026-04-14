@@ -23,7 +23,7 @@ interface LeadTimelineProps {
   onCompleteFollowup?: (id: string) => void;
   onAddFollowup?: (data: { scheduled_at: string; type: string; notes: string }) => void;
   onScheduleVisit?: (data: { visit_date: string; campus_id: string }) => void;
-  onUpdateVisitStatus?: (id: string, status: string) => void;
+  onUpdateVisitStatus?: (id: string, status: string, newDate?: string) => void;
   campuses?: any[];
   leadId?: string;
   courseId?: string | null;
