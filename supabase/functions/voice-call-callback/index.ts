@@ -17,10 +17,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
 };
 
-// ── Transcribe + Summarize recording using Gemini in ONE call ──
-// Gemini handles audio natively — no separate STT service needed.
-// Outputs: transcript, summary, conversion probability, disposition
-async function transcribeAndSummarize(recordingUrl: string, lovableKey: string): Promise<{
+// ── Transcribe + Summarize recording using Google Gemini directly ──
+// Uses generativelanguage.googleapis.com — native audio support, no gateway.
+async function transcribeAndSummarize(recordingUrl: string, googleApiKey: string): Promise<{
   transcript: string | null;
   summary: string | null;
   conversionProb: number | null;
@@ -31,53 +30,57 @@ async function transcribeAndSummarize(recordingUrl: string, lovableKey: string):
     const audioRes = await fetch(recordingUrl);
     if (!audioRes.ok) { console.error("Failed to download recording:", audioRes.status); return null; }
     const audioBuffer = await audioRes.arrayBuffer();
-    const base64Audio = btoa(String.fromCharCode(...new Uint8Array(audioBuffer)));
-    console.log(`Processing ${(audioBuffer.byteLength / 1024).toFixed(0)}KB audio via Gemini...`);
+    // Use standard base64 encoding (works in Deno)
+    const { encode } = await import("https://deno.land/std@0.208.0/encoding/base64.ts");
+    const base64Audio = encode(new Uint8Array(audioBuffer));
 
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${lovableKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.0-flash-001",
-        messages: [
-          {
-            role: "system",
-            content: `You are an admissions CRM assistant for NIMT Educational Institutions.
-You will receive an audio recording of a phone call between an AI voice agent and a prospective student/parent.
+    console.log(`Processing ${(audioBuffer.byteLength / 1024).toFixed(0)}KB audio via Gemini direct API...`);
 
-Provide:
-1. **transcript**: Full verbatim transcript of the call in the original language (Hindi/English/Hinglish as spoken). Include speaker labels [Agent] and [Lead].
-2. **summary**: Concise 2-4 sentence summary of the call outcome in English — what was discussed, lead's interest level, key objections or questions raised.
-3. **conversion_probability**: 0-100 integer — how likely this lead is to enroll based on the conversation.
-4. **disposition**: One of: interested, callback_requested, not_interested, no_answer, busy, wrong_number, voicemail, partial_conversation
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${googleApiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              {
+                text: `You are an admissions CRM assistant for NIMT Educational Institutions.
+This is a phone call recording between an AI voice agent and a prospective student/parent.
 
-Respond ONLY in JSON: {"transcript": "...", "summary": "...", "conversion_probability": N, "disposition": "..."}`
-          },
-          {
-            role: "user",
-            content: [
-              { type: "text", text: "Transcribe and analyse this admissions call recording:" },
-              { type: "image_url", image_url: { url: `data:audio/mp3;base64,${base64Audio}` } }
+Provide a JSON response with:
+1. "transcript": Full verbatim transcript in the original language (Hindi/English/Hinglish). Use [Agent] and [Lead] speaker labels.
+2. "summary": 2-4 sentence summary of the call outcome in English — what was discussed, interest level, key points.
+3. "conversion_probability": 0-100 integer — how likely this lead is to enroll.
+4. "disposition": One of: interested, callback_requested, not_interested, no_answer, busy, wrong_number, voicemail, partial_conversation
+
+Respond ONLY in valid JSON.`
+              },
+              {
+                inlineData: {
+                  mimeType: "audio/mp3",
+                  data: base64Audio,
+                }
+              }
             ]
-          }
-        ],
-      }),
-    });
+          }],
+          generationConfig: {
+            responseMimeType: "application/json",
+          },
+        }),
+      }
+    );
 
     if (!res.ok) {
       const errText = await res.text();
-      console.error("Gemini audio error:", res.status, errText);
+      console.error("Gemini API error:", res.status, errText);
       return null;
     }
 
     const data = await res.json();
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) { console.error("No content in Gemini response"); return null; }
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!content) { console.error("No content in Gemini response:", JSON.stringify(data).slice(0, 500)); return null; }
 
-    // Parse JSON (handle markdown code blocks that Gemini sometimes wraps)
     const jsonStr = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     const parsed = JSON.parse(jsonStr);
 
@@ -198,9 +201,9 @@ Deno.serve(async (req) => {
           });
 
           // Transcribe + summarize via Gemini in background (non-blocking)
-          const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY") || "";
-          if (LOVABLE_API_KEY && recordUrl) {
-            transcribeAndSummarize(recordUrl, LOVABLE_API_KEY).then(async (result) => {
+          const GOOGLE_AI_KEY = Deno.env.get("GOOGLE_AI_API_KEY") || "";
+          if (GOOGLE_AI_KEY && recordUrl) {
+            transcribeAndSummarize(recordUrl, GOOGLE_AI_KEY).then(async (result) => {
               if (!result) return;
               await db.from("ai_call_records").update({
                 transcript: result.transcript,
@@ -267,7 +270,7 @@ Deno.serve(async (req) => {
         .order("created_at", { ascending: false })
         .limit(10);
 
-      const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY") || "";
+      const GOOGLE_AI_KEY = Deno.env.get("GOOGLE_AI_API_KEY") || "";
 
       for (const call of pendingCalls || []) {
         const uuid = call.plivo_call_uuid || call.call_uuid;
@@ -314,8 +317,8 @@ Deno.serve(async (req) => {
           console.log(`Recording stored for call ${call.id}: ${recording.url}`);
 
           // Transcribe + summarize via Gemini
-          if (LOVABLE_API_KEY) {
-            const result = await transcribeAndSummarize(recording.url, LOVABLE_API_KEY);
+          if (GOOGLE_AI_KEY) {
+            const result = await transcribeAndSummarize(recording.url, GOOGLE_AI_KEY);
             if (result) {
               await db.from("ai_call_records").update({
                 transcript: result.transcript,
@@ -341,7 +344,8 @@ Deno.serve(async (req) => {
     }
 
     // ── TRANSCRIBE SCAN: records with recordings but no summary ──
-    if (LOVABLE_API_KEY) {
+    const GOOGLE_AI_KEY = Deno.env.get("GOOGLE_AI_API_KEY") || "";
+    if (GOOGLE_AI_KEY) {
       const { data: untranscribed } = await db
         .from("ai_call_records")
         .select("id, lead_id, recording_url")
@@ -354,7 +358,7 @@ Deno.serve(async (req) => {
       for (const call of untranscribed || []) {
         if (!call.recording_url) continue;
         console.log(`Transcribing call ${call.id} for lead ${call.lead_id}...`);
-        const result = await transcribeAndSummarize(call.recording_url, LOVABLE_API_KEY);
+        const result = await transcribeAndSummarize(call.recording_url, GOOGLE_AI_KEY);
         if (result) {
           await db.from("ai_call_records").update({
             transcript: result.transcript,
@@ -436,7 +440,9 @@ Deno.serve(async (req) => {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err: any) {
-    console.error("voice-call-callback error:", err);
-    return new Response("OK", { status: 200 });
+    console.error("voice-call-callback error:", err?.message, err?.stack);
+    return new Response(JSON.stringify({ error: err?.message || "Unknown error" }), {
+      status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 });
