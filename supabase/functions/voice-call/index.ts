@@ -40,15 +40,24 @@ Deno.serve(async (req) => {
       return json({ error: "Voice calling not configured. Set PLIVO_AUTH_ID, PLIVO_AUTH_TOKEN, PLIVO_PHONE_NUMBER, VOICE_AGENT_URL." }, 503);
     }
 
-    // Auth check — accept user JWT OR service role key (for DB triggers/cron)
+    // Auth check — accept user JWT OR service role JWT (for DB triggers/cron)
     const authHeader = req.headers.get("authorization") || "";
     const db = createClient(supabaseUrl, serviceRoleKey);
     const token = authHeader.replace(/^Bearer\s+/i, "");
-    const isServiceRole = token === serviceRoleKey;
+
+    // Check if token is a service_role JWT by decoding the payload
+    let isServiceRole = false;
+    try {
+      const [, payloadB64] = token.split(".");
+      if (payloadB64) {
+        const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
+        isServiceRole = payload?.role === "service_role";
+      }
+    } catch { /* not a valid JWT — will try getUser below */ }
 
     let user: { id: string } | null = null;
     if (isServiceRole) {
-      user = { id: "system" }; // system-initiated call (DB trigger, cron)
+      user = { id: "system" };
     } else {
       const { data: { user: authUser }, error: authErr } = await db.auth.getUser(token);
       if (authErr || !authUser) return json({ error: "Unauthorized" }, 401);
@@ -106,6 +115,9 @@ Deno.serve(async (req) => {
       if (phone.startsWith("+")) phone = phone.substring(1);
       if (phone.length === 10) phone = `91${phone}`; // Indian number
 
+      // Callback URL for recording — points to our voice-call-callback function
+      const recordingCallbackUrl = `${supabaseUrl}/functions/v1/voice-call-callback`;
+
       const plivoPayload = {
         from: PLIVO_PHONE_NUMBER,
         to: phone,
@@ -113,9 +125,16 @@ Deno.serve(async (req) => {
         answer_method: "POST",
         hangup_url: statusUrl,
         hangup_method: "POST",
+        // Enable recording at the call level so Plivo sends recording callback to us
+        record: true,
+        record_file_format: "mp3",
+        recording_callback_url: recordingCallbackUrl,
+        recording_callback_method: "POST",
         time_limit: 600, // 10 min max
         ring_timeout: 30,
       };
+
+      console.log("Plivo call payload:", JSON.stringify({ ...plivoPayload, from: "***", to: phone.slice(-4) }));
 
       const plivoRes = await fetch(plivoUrl, {
         method: "POST",
@@ -127,13 +146,16 @@ Deno.serve(async (req) => {
       });
 
       const plivoResult = await plivoRes.json();
+      console.log("Plivo response:", JSON.stringify(plivoResult));
 
       if (!plivoRes.ok) {
         console.error("Plivo call error:", plivoResult);
         return json({ error: plivoResult?.error || "Failed to initiate call" }, 502);
       }
 
-      const plivoUuid = plivoResult.request_uuid || "";
+      // Plivo returns request_uuid as string for single call, or array for bulk
+      const rawUuid = plivoResult.request_uuid;
+      const plivoUuid = Array.isArray(rawUuid) ? rawUuid[0] : (rawUuid || "");
 
       // Create AI call record
       await db.from("ai_call_records").insert({
