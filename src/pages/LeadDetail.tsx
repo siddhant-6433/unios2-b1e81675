@@ -89,6 +89,7 @@ const LeadDetail = () => {
   const [showScheduleVisit, setShowScheduleVisit] = useState(false);
   const [showFollowup, setShowFollowup] = useState(false);
   const [showCallDisposition, setShowCallDisposition] = useState(false);
+  const [dispositionWaSent, setDispositionWaSent] = useState(false);
   const [showRecordPayment, setShowRecordPayment] = useState(false);
   const [showSendEmail, setShowSendEmail] = useState(false);
   const [paymentRefreshKey, setPaymentRefreshKey] = useState(0);
@@ -250,6 +251,7 @@ const LeadDetail = () => {
       }
 
       if (autoTemplate) {
+        setDispositionWaSent(true);
         supabase.functions.invoke("whatsapp-send", {
           body: {
             template_key: autoTemplate,
@@ -306,7 +308,8 @@ const LeadDetail = () => {
       }
 
       // Send WhatsApp to lead: "callback scheduled" notification
-      if (lead?.phone && data.type === "call") {
+      // Skip if disposition already sent a WhatsApp (avoid duplicate messages)
+      if (lead?.phone && data.type === "call" && !dispositionWaSent) {
         supabase.functions.invoke("whatsapp-send", {
           body: {
             template_key: "callback_scheduled",
@@ -317,6 +320,7 @@ const LeadDetail = () => {
         }).catch(e => console.error("Follow-up WA failed:", e));
       }
 
+      setDispositionWaSent(false); // reset flag
       await fetchAll(true);
     }
   };

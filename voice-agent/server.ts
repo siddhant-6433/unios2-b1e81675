@@ -492,6 +492,10 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
         realtimeInputConfig: {
           automaticActivityDetection: {
             disabled: false,
+            startOfSpeechSensitivity: "START_OF_SPEECH_SENSITIVITY_HIGH",
+            endOfSpeechSensitivity: "END_OF_SPEECH_SENSITIVITY_HIGH",
+            prefillSilenceTimeout: 2,
+            silenceTimeout: 3,
           },
         },
         systemInstruction: {
@@ -570,8 +574,8 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
 
         // Send initial prompt — Gemini speaks the Step 1 English greeting
         const greetingPrompt = callCtx.direction === "outbound"
-          ? "The phone call just connected. Say ONLY your Step 1 greeting in English: 'Hi! Am I speaking with [first name]?' — nothing more. Then stop and wait for their response."
-          : "Someone just called. Say ONLY your Step 1 greeting in English — nothing more. Then stop and wait.";
+          ? "The phone call just connected. Say ONLY Step 1: 'Hi! Am I speaking with [first name]?' — then go completely SILENT. Do not say 'how are you' or introduce yourself yet. Wait for them to confirm."
+          : "Someone just called. Say ONLY Step 1 greeting — then go SILENT and wait for them to speak.";
         geminiWs.send(JSON.stringify({
           realtimeInput: { text: greetingPrompt },
         }));

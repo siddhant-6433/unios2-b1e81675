@@ -40,12 +40,20 @@ Deno.serve(async (req) => {
       return json({ error: "Voice calling not configured. Set PLIVO_AUTH_ID, PLIVO_AUTH_TOKEN, PLIVO_PHONE_NUMBER, VOICE_AGENT_URL." }, 503);
     }
 
-    // Auth check
+    // Auth check — accept user JWT OR service role key (for DB triggers/cron)
     const authHeader = req.headers.get("authorization") || "";
     const db = createClient(supabaseUrl, serviceRoleKey);
     const token = authHeader.replace(/^Bearer\s+/i, "");
-    const { data: { user }, error: authErr } = await db.auth.getUser(token);
-    if (authErr || !user) return json({ error: "Unauthorized" }, 401);
+    const isServiceRole = token === serviceRoleKey;
+
+    let user: { id: string } | null = null;
+    if (isServiceRole) {
+      user = { id: "system" }; // system-initiated call (DB trigger, cron)
+    } else {
+      const { data: { user: authUser }, error: authErr } = await db.auth.getUser(token);
+      if (authErr || !authUser) return json({ error: "Unauthorized" }, 401);
+      user = authUser;
+    }
 
     const { action, lead_id } = await req.json();
 
@@ -136,12 +144,12 @@ Deno.serve(async (req) => {
         status: "initiated",
       });
 
-      // Log activity
+      // Log activity (user_id null for system-initiated calls)
       await db.from("lead_activities").insert({
         lead_id,
         type: "ai_call",
-        user_id: user.id,
-        description: `AI voice call initiated to ${lead.name} (${lead.phone}). Call ID: ${callId}`,
+        user_id: isServiceRole ? null : user.id,
+        description: `AI voice call ${isServiceRole ? "auto-" : ""}initiated to ${lead.name} (${lead.phone}). Call ID: ${callId}`,
       });
 
       // Tag lead as AI called

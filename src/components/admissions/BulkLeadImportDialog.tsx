@@ -33,6 +33,7 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess }: BulkLead
   const [parsed, setParsed] = useState<ParsedLead[]>([]);
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<{ success: number; failed: number } | null>(null);
+  const [triggerAiCalls, setTriggerAiCalls] = useState(false);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -77,7 +78,8 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess }: BulkLead
     setImporting(true);
     let success = 0, failed = 0;
 
-    // Batch insert in chunks of 50
+    // Batch insert in chunks of 50 — skip_ai_call prevents auto-trigger
+    const insertedIds: string[] = [];
     for (let i = 0; i < validLeads.length; i += 50) {
       const batch = validLeads.slice(i, i + 50).map(l => ({
         name: l.name,
@@ -87,9 +89,23 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess }: BulkLead
         guardian_name: l.guardian_name || null,
         guardian_phone: l.guardian_phone || null,
         notes: l.notes || null,
-      }));
+        skip_ai_call: true, // prevent auto AI call trigger
+      } as any));
       const { error, data } = await supabase.from("leads").insert(batch).select("id");
-      if (error) { failed += batch.length; } else { success += (data?.length || 0); }
+      if (error) { failed += batch.length; } else {
+        success += (data?.length || 0);
+        if (data) insertedIds.push(...data.map((d: any) => d.id));
+      }
+    }
+
+    // Trigger batch AI calls if checkbox is checked
+    if (triggerAiCalls && insertedIds.length > 0) {
+      supabase.functions.invoke("ai-call-batch", {
+        body: { lead_ids: insertedIds, delay_seconds: 30 },
+      }).then(({ error: batchErr }) => {
+        if (batchErr) console.error("Batch AI call failed:", batchErr);
+        else toast({ title: "AI calls queued", description: `${insertedIds.length} calls will be made sequentially.` });
+      });
     }
 
     setResult({ success, failed });
@@ -167,11 +183,28 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess }: BulkLead
                 </tbody>
               </table>
             </div>
+            {/* AI Call option */}
+            <label className="flex items-start gap-3 p-3 rounded-xl border border-blue-200 bg-blue-50 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={triggerAiCalls}
+                onChange={e => setTriggerAiCalls(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-blue-300 text-blue-600"
+              />
+              <div>
+                <p className="text-xs font-semibold text-blue-800">Trigger AI calls after import</p>
+                <p className="text-[11px] text-blue-700 mt-0.5">
+                  Each lead will receive an AI voice call sequentially (30s gap between calls).
+                  Leads without phone numbers will be skipped.
+                </p>
+              </div>
+            </label>
+
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => { setParsed([]); setResult(null); }}>Back</Button>
               <Button onClick={handleImport} disabled={importing || !validCount} className="gap-1.5">
                 {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                Import {validCount} Leads
+                Import {validCount} Leads{triggerAiCalls ? " + AI Call" : ""}
               </Button>
             </div>
           </div>

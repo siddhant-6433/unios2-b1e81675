@@ -32,9 +32,14 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
 
   useEffect(() => {
     if (!open) return;
-    supabase.from("profiles").select("id, display_name").then(({ data }) => {
-      if (data) setCounsellors(data.filter((p: any) => p.display_name));
-    });
+    // Only fetch users with counsellor role
+    (async () => {
+      const { data: roles } = await supabase.from("user_roles").select("user_id").eq("role", "counsellor");
+      if (!roles || roles.length === 0) { setCounsellors([]); return; }
+      const userIds = roles.map((r: any) => r.user_id);
+      const { data: profiles } = await supabase.from("profiles").select("id, display_name").in("user_id", userIds);
+      if (profiles) setCounsellors(profiles.filter((p: any) => p.display_name));
+    })();
   }, [open]);
 
   // Auto-select campus when course changes
