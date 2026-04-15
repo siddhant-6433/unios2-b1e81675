@@ -592,13 +592,31 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
         }
       }
 
-      // Transcriptions for logging + accumulation
+      // Transcriptions for logging + accumulation + language detection
       if (msg.serverContent?.inputTranscription) {
         const t = msg.serverContent.inputTranscription;
         const text = typeof t === "string" ? t : t?.text || "";
         if (text.trim()) {
           callCtx.callerTranscript.push(text.trim());
           console.log(`[${callId}] Caller said: ${text.trim()}`);
+
+          // Language detection on the first 1-2 callee responses
+          if (callCtx.callerTranscript.length <= 2) {
+            const hasHindi = /[\u0900-\u097F]/.test(text) || /\b(haan|ji|nahi|kya|mujhe|batao|chahiye|kaise|hoga|hai|mein|aap|bhai|theek|accha|bol|raha|rahi|karo|karna|wala|wali|abhi|yeh|wo)\b/i.test(text);
+            const hasEnglish = /\b(yes|no|hello|hi|okay|sure|tell|what|how|which|please|thank|want|need|looking|interested|course|college|school)\b/i.test(text);
+
+            let langNudge = "";
+            if (hasHindi && !hasEnglish) {
+              langNudge = "[SYSTEM: The caller is speaking in HINDI. You MUST switch to fluent Hindi immediately. Use formal 'aap'. Respond in Hindi for the rest of this call. Do NOT continue in English.]";
+            } else if (hasHindi && hasEnglish) {
+              langNudge = "[SYSTEM: The caller is speaking in HINGLISH (mix of Hindi and English). Switch to natural Hinglish — mix Hindi and English the same way they do. Stay in Hinglish for the rest of this call.]";
+            }
+
+            if (langNudge) {
+              console.log(`[${callId}] Language nudge: ${langNudge.slice(0, 60)}...`);
+              geminiWs.send(JSON.stringify({ realtimeInput: { text: langNudge } }));
+            }
+          }
         }
       }
       if (msg.serverContent?.outputTranscription) {
