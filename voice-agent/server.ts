@@ -490,10 +490,6 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
         realtimeInputConfig: {
           automaticActivityDetection: {
             disabled: false,
-            startOfSpeechSensitivity: "START_OF_SPEECH_SENSITIVITY_HIGH",
-            endOfSpeechSensitivity: "END_OF_SPEECH_SENSITIVITY_HIGH",
-            prefillSilenceTimeout: 2,
-            silenceTimeout: 3,
           },
         },
         systemInstruction: {
