@@ -339,37 +339,63 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
           )}
 
           {/* Submit */}
-          <div className="flex flex-col gap-2 pt-1">
-            {disposition === "interested" && showVisitForm && (
-              <Button
-                onClick={() => handleSubmit({ scheduleVisit: true })}
-                disabled={!disposition || !visitCampusId || saving}
-                className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700"
-              >
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />}
-                Save & Schedule Visit
-              </Button>
-            )}
-            {selectedDisp?.suggestsFollowup && (
-              <Button
-                onClick={() => handleSubmit({ scheduleFollowup: true })}
-                disabled={!disposition || saving}
-                variant={disposition === "interested" && showVisitForm ? "outline" : "default"}
-                className="w-full gap-2"
-              >
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                Save & Schedule Follow-up
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              onClick={() => handleSubmit({})}
-              disabled={!disposition || saving}
-              className="w-full"
-            >
-              {saving ? "Saving..." : "Save Only"}
-            </Button>
-          </div>
+          {(() => {
+            // Dispositions that DON'T require follow-up or visit
+            const noFollowupRequired = ["not_interested", "ineligible", "wrong_number", "do_not_contact"];
+            const requiresAction = disposition && !noFollowupRequired.includes(disposition);
+
+            return (
+              <div className="flex flex-col gap-2 pt-1">
+                {disposition === "interested" && showVisitForm && (
+                  <Button
+                    onClick={() => handleSubmit({ scheduleVisit: true })}
+                    disabled={!disposition || !visitCampusId || saving}
+                    className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700"
+                  >
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />}
+                    Save & Schedule Visit
+                  </Button>
+                )}
+                {selectedDisp?.suggestsFollowup && (
+                  <Button
+                    onClick={() => handleSubmit({ scheduleFollowup: true })}
+                    disabled={!disposition || saving}
+                    variant={disposition === "interested" && showVisitForm ? "outline" : "default"}
+                    className="w-full gap-2"
+                  >
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock className="h-4 w-4" />}
+                    Save & Schedule Follow-up
+                  </Button>
+                )}
+                {/* "Save Only" only for dispositions that don't need follow-up */}
+                {!requiresAction && (
+                  <Button
+                    variant="outline"
+                    onClick={() => handleSubmit({})}
+                    disabled={!disposition || saving}
+                    className="w-full"
+                  >
+                    {saving ? "Saving..." : "Save Only"}
+                  </Button>
+                )}
+                {requiresAction && !selectedDisp?.suggestsFollowup && (
+                  <Button
+                    onClick={() => handleSubmit({ scheduleFollowup: true })}
+                    disabled={!disposition || saving}
+                    className="w-full gap-2"
+                  >
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock className="h-4 w-4" />}
+                    Save & Schedule Follow-up
+                  </Button>
+                )}
+                {requiresAction && (
+                  <p className="text-[10px] text-amber-600 dark:text-amber-400 text-center">
+                    A follow-up or visit must be scheduled for this disposition
+                  </p>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </DialogContent>
     </Dialog>
