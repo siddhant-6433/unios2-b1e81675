@@ -23,6 +23,7 @@ export interface CallDispositionData {
   duration_seconds: number;
   notes: string;
   schedule_followup: boolean;
+  followup_date?: string;
   visit?: { visit_date: string; campus_id: string };
   /** Set when disposition is "ineligible" — lead eligible for future session */
   future_eligible_session?: "2027-28" | "2028-29" | null;
@@ -87,8 +88,10 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
   const [duration, setDuration] = useState(0);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
-  // Visit scheduling state
+  // Follow-up / Visit scheduling state
   const [showVisitForm, setShowVisitForm] = useState(false);
+  const [followupDate, setFollowupDate] = useState(tomorrowStr());
+  const [followupTime, setFollowupTime] = useState("10:00");
   const [visitDate, setVisitDate] = useState(tomorrowStr());
   const [visitTime, setVisitTime] = useState("11:00");
   const [visitCampusId, setVisitCampusId] = useState(defaultCampusId || campuses[0]?.id || "");
@@ -103,6 +106,8 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
     setDuration(0);
     setNotes("");
     setShowVisitForm(false);
+    setFollowupDate(tomorrowStr());
+    setFollowupTime("10:00");
     setVisitDate(tomorrowStr());
     setVisitTime("11:00");
     setFutureSession(null);
@@ -114,11 +119,15 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
     const visit = opts.scheduleVisit && visitDate && visitTime
       ? { visit_date: new Date(`${visitDate}T${visitTime}:00`).toISOString(), campus_id: visitCampusId }
       : undefined;
+    const followupDatetime = opts.scheduleFollowup && followupDate && followupTime
+      ? new Date(`${followupDate}T${followupTime}:00`).toISOString()
+      : undefined;
     await onSubmit({
       disposition,
       duration_seconds: duration,
       notes,
       schedule_followup: opts.scheduleFollowup ?? false,
+      followup_date: followupDatetime,
       visit,
       future_eligible_session: disposition === "ineligible" ? futureSession : null,
     });
@@ -267,86 +276,94 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
             </div>
           )}
 
-          {/* Visit scheduling — only for "Interested" */}
-          {disposition === "interested" && (
-            <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/40 bg-emerald-50/50 dark:bg-emerald-950/20 p-3 space-y-2">
-              <button
-                type="button"
-                onClick={() => setShowVisitForm(!showVisitForm)}
-                className="flex items-center justify-between w-full text-left"
-              >
+          {/* Inline follow-up scheduling — mandatory for actionable dispositions */}
+          {(() => {
+            const noFollowupRequired = ["not_interested", "ineligible", "wrong_number", "do_not_contact"];
+            const requiresAction = disposition && !noFollowupRequired.includes(disposition);
+
+            if (!requiresAction || !disposition) return null;
+
+            return (
+              <div className="rounded-xl border border-blue-200 dark:border-blue-800/40 bg-blue-50/50 dark:bg-blue-950/20 p-3 space-y-3">
                 <div className="flex items-center gap-2">
-                  <MapPin className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-400" />
-                  <span className="text-xs font-semibold text-emerald-900 dark:text-emerald-200">Schedule Campus Visit</span>
+                  <Clock className="h-3.5 w-3.5 text-blue-700 dark:text-blue-400" />
+                  <span className="text-xs font-semibold text-blue-900 dark:text-blue-200">Schedule Next Action *</span>
                 </div>
-                <ChevronDown className={`h-3.5 w-3.5 text-emerald-700 transition-transform ${showVisitForm ? "rotate-180" : ""}`} />
-              </button>
 
-              {showVisitForm && (
-                <div className="space-y-2 pt-1">
-                  {/* Campus */}
-                  {campuses.length > 1 && (
-                    <select
-                      value={visitCampusId}
-                      onChange={e => setVisitCampusId(e.target.value)}
-                      className="w-full rounded-lg border border-input bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-300"
-                    >
-                      <option value="">— Select campus —</option>
-                      {campuses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
-                  )}
+                {/* Action type toggle */}
+                <div className="flex gap-1.5">
+                  <button type="button" onClick={() => setShowVisitForm(false)}
+                    className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium border transition-colors ${
+                      !showVisitForm ? "bg-blue-600 text-white border-blue-600" : "bg-background text-foreground border-border hover:bg-muted"
+                    }`}>
+                    <Phone className="h-3.5 w-3.5" /> Follow-up Call
+                  </button>
+                  <button type="button" onClick={() => setShowVisitForm(true)}
+                    className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium border transition-colors ${
+                      showVisitForm ? "bg-emerald-600 text-white border-emerald-600" : "bg-background text-foreground border-border hover:bg-muted"
+                    }`}>
+                    <MapPin className="h-3.5 w-3.5" /> Campus Visit
+                  </button>
+                </div>
 
-                  {/* Date */}
-                  <div
-                    className="relative w-full cursor-pointer rounded-lg border border-input bg-background px-2.5 py-1.5 flex items-center justify-between gap-2 hover:bg-muted/30 transition-colors"
-                    onClick={openDatePicker}
-                  >
-                    <div className="flex items-center gap-2">
-                      <CalendarDays className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                      <span className="text-xs font-medium">{formatDisplayDate(visitDate)}</span>
+                {/* Follow-up: date + time */}
+                {!showVisitForm && (
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <div className="relative flex-1 cursor-pointer rounded-lg border border-input bg-background px-2.5 py-1.5 flex items-center gap-2 hover:bg-muted/30"
+                        onClick={openDatePicker}>
+                        <CalendarDays className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <span className="text-xs font-medium">{formatDisplayDate(followupDate)}</span>
+                        <input ref={dateInputRef} type="date" min={todayStr()} value={followupDate}
+                          onChange={e => setFollowupDate(e.target.value)}
+                          className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" tabIndex={-1} />
+                      </div>
+                      <select value={followupTime} onChange={e => setFollowupTime(e.target.value)}
+                        className="rounded-lg border border-input bg-background px-2 py-1.5 text-xs">
+                        {VISIT_TIME_SLOTS.map(s => <option key={s} value={s}>{slotLabel(s)}</option>)}
+                      </select>
                     </div>
-                    <input
-                      ref={dateInputRef}
-                      type="date"
-                      min={todayStr()}
-                      value={visitDate}
-                      onChange={e => setVisitDate(e.target.value)}
-                      className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
-                      tabIndex={-1}
-                    />
                   </div>
+                )}
 
-                  {/* Time slot pills */}
-                  <div className="grid grid-cols-4 gap-1">
-                    {VISIT_TIME_SLOTS.map(slot => (
-                      <button
-                        key={slot}
-                        type="button"
-                        onClick={() => setVisitTime(slot)}
-                        className={`rounded-lg py-1 text-[10px] font-medium transition-colors border ${
-                          visitTime === slot
-                            ? "bg-emerald-600 text-white border-emerald-600"
-                            : "bg-background text-muted-foreground border-border hover:bg-muted"
-                        }`}
-                      >
-                        {slotLabel(slot)}
-                      </button>
-                    ))}
+                {/* Visit: campus + date + time */}
+                {showVisitForm && (
+                  <div className="space-y-2">
+                    {campuses.length > 1 && (
+                      <select value={visitCampusId} onChange={e => setVisitCampusId(e.target.value)}
+                        className="w-full rounded-lg border border-input bg-background px-2.5 py-1.5 text-xs">
+                        <option value="">— Select campus —</option>
+                        {campuses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                    )}
+                    <div className="flex gap-2">
+                      <div className="relative flex-1 cursor-pointer rounded-lg border border-input bg-background px-2.5 py-1.5 flex items-center gap-2 hover:bg-muted/30"
+                        onClick={openDatePicker}>
+                        <CalendarDays className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <span className="text-xs font-medium">{formatDisplayDate(visitDate)}</span>
+                        <input ref={dateInputRef} type="date" min={todayStr()} value={visitDate}
+                          onChange={e => setVisitDate(e.target.value)}
+                          className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" tabIndex={-1} />
+                      </div>
+                      <select value={visitTime} onChange={e => setVisitTime(e.target.value)}
+                        className="rounded-lg border border-input bg-background px-2 py-1.5 text-xs">
+                        {VISIT_TIME_SLOTS.map(s => <option key={s} value={s}>{slotLabel(s)}</option>)}
+                      </select>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            );
+          })()}
 
           {/* Submit */}
           {(() => {
-            // Dispositions that DON'T require follow-up or visit
             const noFollowupRequired = ["not_interested", "ineligible", "wrong_number", "do_not_contact"];
             const requiresAction = disposition && !noFollowupRequired.includes(disposition);
 
             return (
               <div className="flex flex-col gap-2 pt-1">
-                {disposition === "interested" && showVisitForm && (
+                {requiresAction && showVisitForm && (
                   <Button
                     onClick={() => handleSubmit({ scheduleVisit: true })}
                     disabled={!disposition || !visitCampusId || saving}
@@ -356,18 +373,16 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
                     Save & Schedule Visit
                   </Button>
                 )}
-                {selectedDisp?.suggestsFollowup && (
+                {requiresAction && !showVisitForm && (
                   <Button
                     onClick={() => handleSubmit({ scheduleFollowup: true })}
                     disabled={!disposition || saving}
-                    variant={disposition === "interested" && showVisitForm ? "outline" : "default"}
                     className="w-full gap-2"
                   >
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock className="h-4 w-4" />}
                     Save & Schedule Follow-up
                   </Button>
                 )}
-                {/* "Save Only" only for dispositions that don't need follow-up */}
                 {!requiresAction && (
                   <Button
                     variant="outline"
@@ -375,23 +390,8 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
                     disabled={!disposition || saving}
                     className="w-full"
                   >
-                    {saving ? "Saving..." : "Save Only"}
+                    {saving ? "Saving..." : "Save"}
                   </Button>
-                )}
-                {requiresAction && !selectedDisp?.suggestsFollowup && (
-                  <Button
-                    onClick={() => handleSubmit({ scheduleFollowup: true })}
-                    disabled={!disposition || saving}
-                    className="w-full gap-2"
-                  >
-                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock className="h-4 w-4" />}
-                    Save & Schedule Follow-up
-                  </Button>
-                )}
-                {requiresAction && (
-                  <p className="text-[10px] text-amber-600 dark:text-amber-400 text-center">
-                    A follow-up or visit must be scheduled for this disposition
-                  </p>
                 )}
               </div>
             );
