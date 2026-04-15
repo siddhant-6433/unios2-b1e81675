@@ -160,6 +160,7 @@ const Admissions = () => {
   const [inactiveIds, setInactiveIds] = useState<Set<string> | null>(null);
   const [followupLeadIds, setFollowupLeadIds] = useState<Set<string> | null>(null);
   const [visitLeadIds, setVisitLeadIds] = useState<Set<string> | null>(null);
+  const [visitLeadIds, setVisitLeadIds] = useState<Set<string> | null>(null);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
 
@@ -421,8 +422,8 @@ const Admissions = () => {
   const leadStats = [
     { label: "New Leads", value: newLeads, sub: `+${todayLeads} today`, icon: Users, iconBg: "bg-pastel-blue", filterStage: "new_lead", link: "" },
     { label: "Pending Follow-ups", value: pendingFollowups, sub: `${overdueFollowups} overdue · ${todayFollowups} today`, icon: Clock, iconBg: "bg-pastel-orange", filterStage: "", link: "", action: "followups" },
-    { label: "Upcoming Visits", value: upcomingVisits, sub: "Scheduled & confirmed", icon: MapPin, iconBg: "bg-pastel-yellow", filterStage: "", link: "", action: "visits" },
-    { label: "Completed Visits", value: completedVisits, sub: "Campus visits done", icon: CheckCircle, iconBg: "bg-pastel-green", filterStage: "", link: "" },
+    { label: "Upcoming Visits", value: upcomingVisits, sub: "Scheduled & confirmed", icon: MapPin, iconBg: "bg-pastel-yellow", filterStage: "", link: "", action: "upcoming_visits" },
+    { label: "Completed Visits", value: completedVisits, sub: "Campus visits done", icon: CheckCircle, iconBg: "bg-pastel-green", filterStage: "", link: "", action: "completed_visits" },
   ];
 
   // Row 2: Application stages
@@ -489,7 +490,7 @@ const Admissions = () => {
             <Card
               key={stat.label}
               className={`border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer ${
-                (stat.filterStage && stageFilter === stat.filterStage) || (stat.action === "followups" && followupLeadIds) ? "ring-2 ring-primary/40 bg-primary/5" : ""
+                (stat.filterStage && stageFilter === stat.filterStage) || (stat.action === "followups" && followupLeadIds) || ((stat.action === "upcoming_visits" || stat.action === "completed_visits") && visitLeadIds) ? "ring-2 ring-primary/40 bg-primary/5" : ""
               }`}
               onClick={async () => {
                 if (stat.action === "followups") {
@@ -507,7 +508,7 @@ const Admissions = () => {
                   setView("list");
                   return;
                 }
-                if (stat.action === "visits") {
+                if (stat.action === "upcoming_visits") {
                   if (visitLeadIds) { setVisitLeadIds(null); setPage(1); return; }
                   const todayStart = new Date().toISOString().slice(0, 10);
                   const { data } = await supabase.from("campus_visits").select("lead_id").gte("visit_date", todayStart).in("status", ["scheduled", "confirmed"]).limit(500);
@@ -521,6 +522,23 @@ const Admissions = () => {
                   setTempFilter("all");
                   setSearch("");
                   setView("list");
+                  setPage(1);
+                  return;
+                }
+                if (stat.action === "completed_visits") {
+                  if (visitLeadIds) { setVisitLeadIds(null); setPage(1); return; }
+                  const { data } = await supabase.from("campus_visits").select("lead_id").eq("status", "completed").limit(500);
+                  const ids = new Set<string>((data || []).map((r: any) => r.lead_id));
+                  setVisitLeadIds(ids);
+                  setFollowupLeadIds(null);
+                  setInactiveIds(null);
+                  setStageFilter("all");
+                  setSourceFilter("all");
+                  setRoleFilter("all");
+                  setTempFilter("all");
+                  setSearch("");
+                  setView("list");
+                  setPage(1);
                   return;
                 }
                 if (stat.link) { navigate(stat.link); return; }
@@ -626,7 +644,7 @@ const Admissions = () => {
         <div className="flex items-center gap-2 rounded-lg bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800/40 px-3 py-2 text-sm">
           <MapPin className="h-3.5 w-3.5 text-violet-600" />
           <span className="font-medium text-violet-800 dark:text-violet-300">
-            Showing {visitLeadIds.size} lead{visitLeadIds.size !== 1 ? "s" : ""} with upcoming visits
+            Showing {visitLeadIds.size} lead{visitLeadIds.size !== 1 ? "s" : ""} with campus visits
           </span>
           <button
             onClick={() => setVisitLeadIds(null)}
