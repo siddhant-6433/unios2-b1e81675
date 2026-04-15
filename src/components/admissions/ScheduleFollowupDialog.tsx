@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { CalendarDays, Clock, ChevronDown, Phone, MapPin } from "lucide-react";
@@ -36,13 +36,82 @@ const formatDisplayDate = (dateStr: string) => {
   return `${day}, ${d}/${m}/${y.slice(2)}`;
 };
 
+// Get next working day (Mon-Sat, skips Sunday)
+function getNextWorkingDay(from: Date): Date {
+  const d = new Date(from);
+  d.setDate(d.getDate() + 1);
+  while (d.getDay() === 0) d.setDate(d.getDate() + 1); // skip Sunday
+  return d;
+}
+
+// Smart default: Call = now+2h within 9-18 Mon-Sat, Visit = next working day 10AM
+function getSmartDefault(followupType: string): { date: string; time: string } {
+  const now = new Date();
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const ist = new Date(now.getTime() + istOffset);
+  const hour = ist.getUTCHours();
+  const day = ist.getUTCDay(); // 0=Sun
+
+  if (followupType === "visit") {
+    // Visit: next working day at 10:00 AM
+    const nextDay = getNextWorkingDay(now);
+    return { date: nextDay.toISOString().split("T")[0], time: "10:00" };
+  }
+
+  // Call: now + 2 hours, within 9AM-6PM, Mon-Sat
+  let targetHour = hour + 2;
+  let targetDate = new Date(now);
+
+  // If past 6PM or Sunday → move to next working day 9AM
+  if (targetHour >= 18 || day === 0) {
+    targetDate = day === 0 ? targetDate : getNextWorkingDay(targetDate);
+    if (day === 0) {
+      targetDate.setDate(targetDate.getDate() + 1); // Monday
+    }
+    // Find nearest time slot at or after 9AM
+    return { date: targetDate.toISOString().split("T")[0], time: "09:00" };
+  }
+
+  // If before 9AM → set to 9AM today (if working day)
+  if (targetHour < 9) {
+    if (day === 0) {
+      targetDate = getNextWorkingDay(targetDate);
+      return { date: targetDate.toISOString().split("T")[0], time: "09:00" };
+    }
+    return { date: targetDate.toISOString().split("T")[0], time: "09:00" };
+  }
+
+  // Round to nearest time slot
+  const nearestSlot = TIME_SLOTS.find(s => parseInt(s.split(":")[0]) >= targetHour) || "17:00";
+  return { date: targetDate.toISOString().split("T")[0], time: nearestSlot };
+}
+
 export function ScheduleFollowupDialog({ open, onOpenChange, onSchedule }: ScheduleFollowupDialogProps) {
-  const [date, setDate] = useState(todayStr());
-  const [time, setTime] = useState("10:00");
   const [type, setType] = useState("call");
+  const defaults = getSmartDefault("call");
+  const [date, setDate] = useState(defaults.date);
+  const [time, setTime] = useState(defaults.time);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const dateInputRef = useRef<HTMLInputElement>(null);
+
+  // Update defaults when type changes
+  useEffect(() => {
+    const d = getSmartDefault(type);
+    setDate(d.date);
+    setTime(d.time);
+  }, [type]);
+
+  // Reset when dialog opens
+  useEffect(() => {
+    if (open) {
+      const d = getSmartDefault("call");
+      setType("call");
+      setDate(d.date);
+      setTime(d.time);
+      setNotes("");
+    }
+  }, [open]);
 
   const handleSchedule = async () => {
     if (!date || !time) return;

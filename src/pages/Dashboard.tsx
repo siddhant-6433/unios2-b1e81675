@@ -683,7 +683,6 @@ const Dashboard = () => {
       </div>
       {isAdmin && <PendingApprovalsPanel />}
       {isAdmin && <ConsultantVoiceMessagesPanel />}
-      {isAdmin && <AiCallLogsPanel />}
       {isAdmin   && <SuperAdminDashboard isSuperAdmin={role === "super_admin"} />}
       {isCounsellor && <SuperAdminDashboard isSuperAdmin={false} />}
       {isFaculty && <FacultyDashboard />}
