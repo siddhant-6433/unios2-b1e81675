@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCampus } from "@/contexts/CampusContext";
 import { useToast } from "@/hooks/use-toast";
-import { School, GraduationCap, Search, Loader2, UserPlus, CheckCircle } from "lucide-react";
+import { School, GraduationCap, Search, Loader2, UserPlus, CheckCircle, AlertTriangle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,48 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+
+// ── Lead Freshness / Urgency Indicator ──────────────────────
+function getUrgency(createdAt: string) {
+  const ageMs = Date.now() - new Date(createdAt).getTime();
+  const mins = ageMs / 60000;
+  const hours = mins / 60;
+  const days = hours / 24;
+
+  if (mins < 30) return { level: "fresh", label: `${Math.floor(mins)}m`, color: "text-emerald-600", bg: "bg-emerald-500", barWidth: "100%", pulse: false };
+  if (hours < 2) return { level: "warm", label: `${Math.floor(mins)}m`, color: "text-amber-600", bg: "bg-amber-400", barWidth: "75%", pulse: false };
+  if (hours < 6) return { level: "cooling", label: `${Math.round(hours)}h`, color: "text-orange-600", bg: "bg-orange-500", barWidth: "50%", pulse: false };
+  if (hours < 24) return { level: "urgent", label: `${Math.round(hours)}h`, color: "text-red-600", bg: "bg-red-500", barWidth: "25%", pulse: true };
+  return { level: "critical", label: `${Math.round(days)}d`, color: "text-red-700", bg: "bg-red-700", barWidth: "10%", pulse: true };
+}
+
+function UrgencyBadge({ createdAt }: { createdAt: string }) {
+  const u = getUrgency(createdAt);
+  const labels: Record<string, string> = {
+    fresh: "Fresh", warm: "Warm", cooling: "Cooling", urgent: "Urgent", critical: "Critical",
+  };
+
+  return (
+    <div className="flex items-center gap-2 min-w-[90px]">
+      {/* Bar indicator */}
+      <div className="relative w-10 h-2 rounded-full bg-muted overflow-hidden">
+        <div
+          className={`absolute left-0 top-0 h-full rounded-full ${u.bg} ${u.pulse ? "animate-pulse" : ""}`}
+          style={{ width: u.barWidth }}
+        />
+      </div>
+      {/* Label */}
+      <div className="flex items-center gap-1">
+        {(u.level === "urgent" || u.level === "critical") && (
+          <AlertTriangle className={`h-3 w-3 ${u.color} ${u.pulse ? "animate-pulse" : ""}`} />
+        )}
+        <span className={`text-[10px] font-bold ${u.color}`}>
+          {labels[u.level]} · {u.label}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 interface BucketLead {
   id: string;
@@ -131,7 +173,7 @@ export default function LeadBuckets() {
     if (!search) return true;
     const q = search.toLowerCase();
     return l.name.toLowerCase().includes(q) || (l.course_name || "").toLowerCase().includes(q);
-  });
+  }).sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()); // Most urgent (oldest) first
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -300,6 +342,7 @@ export default function LeadBuckets() {
                     onCheckedChange={toggleSelectAll}
                   />
                 </th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Urgency</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Lead</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Phone</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Source</th>
@@ -310,16 +353,25 @@ export default function LeadBuckets() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((lead) => (
+              {filtered.map((lead) => {
+                const urgency = getUrgency(lead.created_at);
+                const rowBg = selectedIds.has(lead.id) ? "bg-primary/5"
+                  : urgency.level === "critical" ? "bg-red-50/60 dark:bg-red-950/10"
+                  : urgency.level === "urgent" ? "bg-red-50/30 dark:bg-red-950/5"
+                  : "";
+                return (
                 <tr
                   key={lead.id}
-                  className={`border-b border-border/50 hover:bg-muted/20 transition-colors ${selectedIds.has(lead.id) ? "bg-primary/5" : ""}`}
+                  className={`border-b border-border/50 hover:bg-muted/20 transition-colors ${rowBg}`}
                 >
                   <td className="px-4 py-3">
                     <Checkbox
                       checked={selectedIds.has(lead.id)}
                       onCheckedChange={() => toggleSelect(lead.id)}
                     />
+                  </td>
+                  <td className="px-4 py-3">
+                    <UrgencyBadge createdAt={lead.created_at} />
                   </td>
                   <td className="px-4 py-3">
                     <p className="font-medium text-foreground">{lead.name}</p>
@@ -347,7 +399,8 @@ export default function LeadBuckets() {
                     {new Date(lead.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

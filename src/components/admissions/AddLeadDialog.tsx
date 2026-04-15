@@ -54,25 +54,27 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
       return;
     }
     setSaving(true);
-    const { data, error } = await supabase.from("leads").insert({
-      name: form.name.trim(),
-      phone: form.phone.trim(),
-      email: form.email.trim() || null,
-      guardian_name: form.guardian_name.trim() || null,
-      guardian_phone: form.guardian_phone.trim() || null,
-      source: form.source as any,
-      course_id: form.course_id || null,
-      campus_id: form.campus_id || null,
-      counsellor_id: form.counsellor_id || null,
-      notes: form.notes.trim() || null,
-    }).select("id").single();
+    // Use RPC to bypass RLS on RETURNING (counsellor may not have SELECT on the new row)
+    const { data: newId, error } = await supabase.rpc("insert_lead" as any, {
+      _name: form.name.trim(),
+      _phone: form.phone.trim(),
+      _email: form.email.trim() || null,
+      _guardian_name: form.guardian_name.trim() || null,
+      _guardian_phone: form.guardian_phone.trim() || null,
+      _source: form.source || "website",
+      _course_id: form.course_id || null,
+      _campus_id: form.campus_id || null,
+      _counsellor_id: form.counsellor_id || null,
+      _notes: form.notes.trim() || null,
+    });
     setSaving(false);
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {
-      if (data) {
+      const leadId = newId as string;
+      if (leadId) {
         await supabase.from("lead_activities").insert({
-          lead_id: data.id,
+          lead_id: leadId,
           type: "lead_created",
           description: `Lead created via manual entry`,
           user_id: user?.id || null,
