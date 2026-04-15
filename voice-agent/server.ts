@@ -488,7 +488,7 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
           speechConfig: {
             voiceConfig: {
               prebuiltVoiceConfig: {
-                voiceName: "Aoede",
+                voiceName: "Leda",
               },
             },
           },
