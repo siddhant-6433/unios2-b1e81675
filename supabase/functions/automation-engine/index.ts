@@ -7,7 +7,7 @@
  *           followup_overdue, time_elapsed, visit_scheduled, visit_completed
  *
  * Actions: send_whatsapp, send_email, advance_stage, schedule_followup,
- *          assign_counsellor, create_notification, update_field, add_tag
+ *          assign_counsellor, create_notification, update_field, add_tag, ai_call
  *
  * Conditions: source, campus, course, temperature, stage (from/to), has_email, has_counsellor
  */
@@ -292,6 +292,28 @@ Deno.serve(async (req) => {
               if (!action.counsellor_id) break;
               await admin.from("leads").update({ counsellor_id: action.counsellor_id }).eq("id", lead.id);
               executedActions.push({ type: "assign_counsellor", to: action.counsellor_id });
+              break;
+            }
+
+            case "ai_call": {
+              // Trigger AI voice call via the voice-call function
+              const voiceCallUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/voice-call`;
+              const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+              const vcRes = await fetch(voiceCallUrl, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${serviceKey}`,
+                },
+                body: JSON.stringify({ action: "outbound", lead_id: lead.id }),
+              });
+              const vcData = await vcRes.json().catch(() => ({}));
+              if (vcData?.error) {
+                console.error("AI call error:", vcData.error);
+              } else {
+                console.log(`AI call triggered for ${lead.name}: ${vcData?.message || "OK"}`);
+              }
+              executedActions.push({ type: "ai_call", result: vcData?.success ? "initiated" : vcData?.error || "unknown" });
               break;
             }
           }

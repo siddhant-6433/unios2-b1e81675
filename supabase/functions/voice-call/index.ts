@@ -118,19 +118,14 @@ Deno.serve(async (req) => {
       // Callback URL for recording — points to our voice-call-callback function
       const recordingCallbackUrl = `${supabaseUrl}/functions/v1/voice-call-callback`;
 
-      const plivoPayload = {
+      const plivoPayload: Record<string, any> = {
         from: PLIVO_PHONE_NUMBER,
         to: phone,
         answer_url: answerUrl,
         answer_method: "POST",
         hangup_url: statusUrl,
         hangup_method: "POST",
-        // Enable recording at the call level so Plivo sends recording callback to us
-        record: true,
-        record_file_format: "mp3",
-        recording_callback_url: recordingCallbackUrl,
-        recording_callback_method: "POST",
-        time_limit: 600, // 10 min max
+        time_limit: 600,
         ring_timeout: 30,
       };
 
