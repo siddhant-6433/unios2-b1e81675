@@ -309,16 +309,14 @@ async function executeTool(
       case "set_call_disposition": {
         if (!callCtx.leadId) return { success: false, message: "No lead ID" };
 
-        // Update ai_call_logs with disposition
+        // Update ai_call_records with disposition
         if (callCtx.callLogId) {
-          await fetch(`${SUPABASE_URL}/rest/v1/ai_call_logs?id=eq.${callCtx.callLogId}`, {
+          await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?id=eq.${callCtx.callLogId}`, {
             method: "PATCH",
             headers: { ...headers, Prefer: "return=minimal" },
             body: JSON.stringify({
               disposition: args.disposition,
-              disposition_notes: args.notes,
-              followup_scheduled: args.schedule_followup || false,
-              visit_scheduled: false, // set separately by schedule_visit
+              summary: args.notes,
             }),
           });
         }
@@ -752,7 +750,7 @@ Deno.serve({ port: PORT }, async (req) => {
     // Create initial call log entry in Supabase
     if (ctx.leadId && SUPABASE_URL && SUPABASE_SERVICE_KEY) {
       try {
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/ai_call_logs`, {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -762,7 +760,7 @@ Deno.serve({ port: PORT }, async (req) => {
           },
           body: JSON.stringify({
             lead_id: ctx.leadId,
-            direction: ctx.direction || "outbound",
+            call_uuid: callId,
             status: "initiated",
           }),
         });
@@ -812,7 +810,26 @@ Deno.serve({ port: PORT }, async (req) => {
     console.log(`[${callId}] Status callback:`, params);
 
     const callCtx = activeCallContexts.get(callId);
-    if (callCtx?.callLogId && SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+    const dbHeaders = {
+      "Content-Type": "application/json",
+      apikey: SUPABASE_SERVICE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+    };
+
+    // Find the call record — try in-memory first, then DB lookup by call_uuid
+    let callLogId = callCtx?.callLogId;
+    if (!callLogId && SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+      // Look up by our internal callId stored as call_uuid
+      const lookupRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}&select=id&limit=1`,
+        { headers: dbHeaders },
+      );
+      const rows = await lookupRes.json();
+      if (rows?.[0]?.id) callLogId = rows[0].id;
+      console.log(`[${callId}] DB lookup for callLogId: ${callLogId || "not found"}`);
+    }
+
+    if (callLogId && SUPABASE_URL && SUPABASE_SERVICE_KEY) {
       try {
         // Auto-disposition for non-answered calls
         const plivoStatus = (params.CallStatus || "unknown").toLowerCase();
@@ -824,37 +841,48 @@ Deno.serve({ port: PORT }, async (req) => {
         };
         const autoDisposition = autoDispositions[plivoStatus] || null;
 
+        // Build transcript combining caller + AI
+        const fullTranscript = [
+          ...callCtx.callerTranscript.map(t => `Caller: ${t}`),
+          ...callCtx.aiTranscript.map(t => `AI: ${t}`),
+        ].join("\n") || null;
+
+        // Build summary from disposition notes or auto-generate
+        const summary = callCtx.toolCallsMade.length > 0
+          ? `AI call: ${callCtx.toolCallsMade.map(tc => tc.name).join(", ")}. ${autoDisposition ? `Auto: ${plivoStatus}` : ""}`
+          : autoDisposition ? `Auto: ${plivoStatus} (${params.HangupCause || ""})` : "AI voice call completed";
+
         const updates: Record<string, any> = {
           status: plivoStatus,
-          call_uuid: params.CallUUID || params.ALegUUID || null,
-          from_number: params.From || null,
-          to_number: params.To || null,
+          plivo_call_uuid: params.CallUUID || params.ALegUUID || null,
           duration_seconds: parseInt(params.Duration) || 0,
-          bill_duration: parseInt(params.BillDuration) || 0,
-          bill_cost: parseFloat(params.TotalCost) || 0,
-          hangup_cause: params.HangupCause || null,
           recording_url: params.RecordingUrl || null,
-          caller_transcript: callCtx.callerTranscript.join(" ") || null,
-          ai_transcript: callCtx.aiTranscript.join(" ") || null,
-          tool_calls_made: callCtx.toolCallsMade,
-          // Auto-disposition for non-answered calls (Gemini sets it for answered calls)
-          ...(autoDisposition ? { disposition: autoDisposition, disposition_notes: `Auto: ${plivoStatus} (${params.HangupCause || ""})` } : {}),
+          transcript: fullTranscript,
+          summary: summary,
+          completed_at: new Date().toISOString(),
+          ...(autoDisposition ? { disposition: autoDisposition } : {}),
         };
 
-        await fetch(`${SUPABASE_URL}/rest/v1/ai_call_logs?id=eq.${callCtx.callLogId}`, {
+        await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?id=eq.${callLogId}`, {
           method: "PATCH",
           headers: {
-            "Content-Type": "application/json",
-            apikey: SUPABASE_SERVICE_KEY,
-            Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+            ...dbHeaders,
             Prefer: "return=minimal",
           },
           body: JSON.stringify(updates),
         });
         console.log(`[${callId}] Call log updated with recording + transcripts`);
 
+        // Get lead_id from context or DB
+        let leadId = callCtx?.leadId;
+        if (!leadId && callLogId) {
+          const lRes = await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?id=eq.${callLogId}&select=lead_id`, { headers: dbHeaders });
+          const lRows = await lRes.json();
+          leadId = lRows?.[0]?.lead_id;
+        }
+
         // Auto-schedule follow-up for busy/not_answered (retry in 2 hours)
-        if (autoDisposition && callCtx.leadId && (autoDisposition === "busy" || autoDisposition === "not_answered")) {
+        if (autoDisposition && leadId && (autoDisposition === "busy" || autoDisposition === "not_answered")) {
           const retryAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
           await fetch(`${SUPABASE_URL}/rest/v1/lead_followups`, {
             method: "POST",
@@ -865,41 +893,30 @@ Deno.serve({ port: PORT }, async (req) => {
               Prefer: "return=minimal",
             },
             body: JSON.stringify({
-              lead_id: callCtx.leadId,
+              lead_id: leadId,
               scheduled_at: retryAt,
               type: "call",
               notes: `🤖 AI call auto-retry: previous call was ${autoDisposition.replace("_", " ")}`,
               status: "pending",
             }),
           });
-          // Add note
           await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              apikey: SUPABASE_SERVICE_KEY,
-              Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-              Prefer: "return=minimal",
-            },
+            headers: { ...dbHeaders, Prefer: "return=minimal" },
             body: JSON.stringify({
-              lead_id: callCtx.leadId,
+              lead_id: leadId,
               content: `🤖 AI Call: ${autoDisposition.replace("_", " ").toUpperCase()} — follow-up scheduled in 2 hours`,
             }),
           });
         }
 
         // Also add recording URL to lead notes
-        if (params.RecordingUrl && callCtx.leadId) {
+        if (params.RecordingUrl && leadId) {
           await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              apikey: SUPABASE_SERVICE_KEY,
-              Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-              Prefer: "return=minimal",
-            },
+            headers: { ...dbHeaders, Prefer: "return=minimal" },
             body: JSON.stringify({
-              lead_id: callCtx.leadId,
+              lead_id: leadId,
               content: `🤖 AI Call Recording (${params.Duration || 0}s): ${params.RecordingUrl}`,
             }),
           });
