@@ -179,14 +179,14 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
     // ── Chart data (parallel) ──
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    let campusStuQ = supabase.from("students").select("status, campuses:campus_id(name)").limit(5000);
+    let campusStuQ = supabase.from("students").select("status, campuses:campus_id(name)").limit(1000);
     if (byCampus) campusStuQ = campusStuQ.eq("campus_id", selectedCampusId);
 
     let feeQ = supabase.from("fee_ledger")
       .select("total_amount, paid_amount, balance, students:student_id(campus_id, campuses:campus_id(name))")
-      .limit(5000);
+      .limit(1000);
 
-    let srcQ = supabase.from("leads").select("source").limit(5000);
+    let srcQ = supabase.from("leads").select("source").limit(1000);
     if (byCampus) srcQ = srcQ.eq("campus_id", selectedCampusId);
 
     let weekQ = supabase.from("leads").select("created_at").gte("created_at", sevenDaysAgo);

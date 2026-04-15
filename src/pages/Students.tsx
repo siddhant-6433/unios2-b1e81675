@@ -32,7 +32,7 @@ const Students = () => {
       .from("students")
       .select("id, name, admission_no, pre_admission_no, status, phone, courses:course_id(name), campuses:campus_id(name)")
       .order("created_at", { ascending: false })
-      .limit(500);
+      .limit(100);
     if (selectedCampusId !== "all") query = query.eq("campus_id", selectedCampusId);
     const { data } = await query;
     if (data) {

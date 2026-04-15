@@ -184,7 +184,7 @@ const Admissions = () => {
       .from("leads")
       .select(`*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`)
       .order("created_at", { ascending: false })
-      .limit(500);
+      .limit(200);
     // Counsellors see their assigned leads across all campuses
     if (role === "counsellor" && profile?.id) {
       query = query.eq("counsellor_id", profile.id);
@@ -494,7 +494,7 @@ const Admissions = () => {
               onClick={async () => {
                 if (stat.action === "followups") {
                   if (followupLeadIds) { setFollowupLeadIds(null); setPage(1); return; }
-                  const { data } = await supabase.from("lead_followups").select("lead_id").eq("status", "pending");
+                  const { data } = await supabase.from("lead_followups").select("lead_id").eq("status", "pending").limit(500);
                   const ids = new Set<string>((data || []).map((r: any) => r.lead_id));
                   setFollowupLeadIds(ids);
                   setVisitLeadIds(null);
@@ -510,7 +510,7 @@ const Admissions = () => {
                 if (stat.action === "visits") {
                   if (visitLeadIds) { setVisitLeadIds(null); setPage(1); return; }
                   const todayStart = new Date().toISOString().slice(0, 10);
-                  const { data } = await supabase.from("campus_visits").select("lead_id").gte("visit_date", todayStart).in("status", ["scheduled", "confirmed"]);
+                  const { data } = await supabase.from("campus_visits").select("lead_id").gte("visit_date", todayStart).in("status", ["scheduled", "confirmed"]).limit(500);
                   const ids = new Set<string>((data || []).map((r: any) => r.lead_id));
                   setVisitLeadIds(ids);
                   setFollowupLeadIds(null);

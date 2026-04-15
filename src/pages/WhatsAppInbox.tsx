@@ -121,7 +121,8 @@ const WhatsAppInbox = () => {
       let convQuery = supabase
         .from("whatsapp_conversations" as any)
         .select("*")
-        .order("last_message_at", { ascending: false });
+        .order("last_message_at", { ascending: false })
+        .limit(50);
       // Counsellors only see conversations for their assigned leads
       if (role === "counsellor" && profile?.id) {
         convQuery = convQuery.eq("counsellor_id", profile.id);

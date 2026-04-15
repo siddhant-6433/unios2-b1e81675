@@ -49,7 +49,7 @@ const Finance = () => {
     const [ledgerRes, paymentsRes, structRes] = await Promise.all([
       supabase.from("fee_ledger").select("*, students:student_id(name, admission_no, pre_admission_no, campus_id), fee_codes:fee_code_id(code, name, category)").order("due_date", { ascending: true }).limit(200),
       supabase.from("payments").select("*, students:student_id(name, admission_no, campus_id), profiles!recorded_by(display_name)").order("paid_at", { ascending: false }).limit(500),
-      supabase.from("fee_structures").select("*, courses:course_id(name), admission_sessions:session_id(name), fee_structure_items(*, fee_codes:fee_code_id(code, name, category))").order("created_at", { ascending: false }),
+      supabase.from("fee_structures").select("*, courses:course_id(name), admission_sessions:session_id(name), fee_structure_items(*, fee_codes:fee_code_id(code, name, category))").order("created_at", { ascending: false }).limit(200),
     ]);
     if (ledgerRes.data) setLedger(ledgerRes.data);
     if (paymentsRes.data) setPayments(paymentsRes.data);

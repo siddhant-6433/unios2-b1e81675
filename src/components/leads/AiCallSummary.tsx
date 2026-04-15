@@ -27,6 +27,7 @@ export function AiCallSummary({ leadId }: AiCallSummaryProps) {
   const [calls, setCalls] = useState<AiCallRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -35,7 +36,7 @@ export function AiCallSummary({ leadId }: AiCallSummaryProps) {
         .select("*")
         .eq("lead_id", leadId)
         .order("created_at", { ascending: false })
-        .limit(10);
+        .limit(20);
       if (data) setCalls(data as any);
       setLoading(false);
     })();
@@ -43,9 +44,11 @@ export function AiCallSummary({ leadId }: AiCallSummaryProps) {
 
   if (loading || calls.length === 0) return null;
 
+  const visibleCalls = showAll ? calls : calls.slice(0, 3);
+
   return (
     <div className="space-y-2">
-      {calls.map((call, idx) => {
+      {visibleCalls.map((call, idx) => {
         const isExpanded = expandedId === call.id;
         const durationLabel = call.duration_seconds
           ? `${Math.floor(call.duration_seconds / 60)}:${(call.duration_seconds % 60).toString().padStart(2, "0")}`
@@ -126,6 +129,22 @@ export function AiCallSummary({ leadId }: AiCallSummaryProps) {
           </Card>
         );
       })}
+      {!showAll && calls.length > 3 && (
+        <button
+          onClick={() => setShowAll(true)}
+          className="w-full text-center py-2 text-xs font-medium text-primary hover:underline"
+        >
+          View {calls.length - 3} more call{calls.length - 3 > 1 ? "s" : ""}
+        </button>
+      )}
+      {showAll && calls.length > 3 && (
+        <button
+          onClick={() => setShowAll(false)}
+          className="w-full text-center py-2 text-xs font-medium text-muted-foreground hover:underline"
+        >
+          Show less
+        </button>
+      )}
     </div>
   );
 }

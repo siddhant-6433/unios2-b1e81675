@@ -6,9 +6,10 @@ import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeft, Loader2, Trash2, ArrowRightLeft, Phone, MessageSquare,
-  Calendar, Clock, FileText, Bot, UserCheck, Mail, IndianRupee, MapPin, ThumbsDown,
+  Calendar, Clock, FileText, Bot, UserCheck, Mail, IndianRupee, MapPin, ThumbsDown, CheckCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { TransferLeadDialog } from "@/components/admissions/TransferLeadDialog";
 import {
@@ -111,12 +112,12 @@ const LeadDetail = () => {
     if (!silent) setLoading(true);
     const [leadRes, notesRes, followupsRes, visitsRes, activitiesRes, campusesRes, callLogsRes, coursesRes, profileRes] = await Promise.all([
       supabase.from("leads").select("*").eq("id", id).single(),
-      supabase.from("lead_notes").select("*").eq("lead_id", id).order("created_at", { ascending: false }),
-      supabase.from("lead_followups").select("*").eq("lead_id", id).order("scheduled_at", { ascending: true }),
-      supabase.from("campus_visits").select("*").eq("lead_id", id).order("visit_date", { ascending: false }),
+      supabase.from("lead_notes").select("*").eq("lead_id", id).order("created_at", { ascending: false }).limit(50),
+      supabase.from("lead_followups").select("*").eq("lead_id", id).order("scheduled_at", { ascending: true }).limit(30),
+      supabase.from("campus_visits").select("*").eq("lead_id", id).order("visit_date", { ascending: false }).limit(20),
       supabase.from("lead_activities").select("*").eq("lead_id", id).order("created_at", { ascending: false }).limit(50),
       supabase.from("campuses").select("id, name"),
-      supabase.from("call_logs").select("*").eq("lead_id", id!).order("called_at", { ascending: false }),
+      supabase.from("call_logs").select("*").eq("lead_id", id!).order("called_at", { ascending: false }).limit(20),
       supabase.from("courses").select("id, name"),
       user?.id ? supabase.from("profiles").select("id").eq("user_id", user.id).single() : Promise.resolve({ data: null }),
     ]);
@@ -672,79 +673,81 @@ const LeadDetail = () => {
 
         {/* Right Column */}
         <div className="space-y-4">
-          {/* AI Call Summary - golden highlight card */}
+          {/* What's Next — upcoming followups + visits (TOP priority) */}
+          {(() => {
+            const pendingFollowups = followups.filter((f: any) => f.status === "pending").sort((a: any, b: any) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
+            const upcomingVisits = visits.filter((v: any) => ["scheduled", "confirmed"].includes(v.status)).sort((a: any, b: any) => new Date(a.visit_date).getTime() - new Date(b.visit_date).getTime());
+            if (pendingFollowups.length === 0 && upcomingVisits.length === 0) return null;
+
+            return (
+              <div className="rounded-xl border border-blue-200 dark:border-blue-800/40 bg-blue-50/50 dark:bg-blue-950/20 p-4 space-y-2.5">
+                <h3 className="text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase tracking-wide flex items-center gap-1.5">
+                  <Calendar className="h-3.5 w-3.5" /> What's Next
+                </h3>
+
+                {pendingFollowups.map((f: any) => {
+                  const dt = new Date(f.scheduled_at);
+                  const isOverdue = dt < new Date();
+                  const isToday = dt.toDateString() === new Date().toDateString();
+                  return (
+                    <div key={f.id} className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm ${isOverdue ? "bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800/40" : "bg-white dark:bg-card border border-border/50"}`}>
+                      <div className={`flex h-7 w-7 items-center justify-center rounded-full shrink-0 ${isOverdue ? "bg-red-500" : isToday ? "bg-amber-500" : "bg-blue-500"} text-white`}>
+                        <Phone className="h-3.5 w-3.5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-foreground">
+                          {f.type === "call" ? "Follow-up Call" : f.type === "visit" ? "Follow-up Visit" : `Follow-up (${f.type})`}
+                        </p>
+                        <p className={`text-[10px] ${isOverdue ? "text-red-600 font-semibold" : "text-muted-foreground"}`}>
+                          {isOverdue ? "⚠️ Overdue — " : isToday ? "Today — " : ""}
+                          {dt.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })}
+                          {f.notes && ` · ${f.notes}`}
+                        </p>
+                      </div>
+                      {f.status === "pending" && (
+                        <button
+                          onClick={() => setShowCallDisposition(true)}
+                          className="rounded-lg bg-primary px-2.5 py-1 text-[10px] font-medium text-white hover:bg-primary/90 shrink-0 flex items-center gap-1"
+                        ><Phone className="h-2.5 w-2.5" /> Log Call</button>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {upcomingVisits.slice(0, 2).map((v: any) => {
+                  const dt = new Date(v.visit_date);
+                  const isToday = dt.toDateString() === new Date().toDateString();
+                  const campusName = campuses.find((c: any) => c.id === v.campus_id)?.name || "Campus";
+                  return (
+                    <div key={v.id} className="flex items-center gap-3 rounded-lg bg-white dark:bg-card border border-border/50 px-3 py-2 text-sm">
+                      <div className={`flex h-7 w-7 items-center justify-center rounded-full shrink-0 ${isToday ? "bg-violet-500" : "bg-violet-400"} text-white`}>
+                        <MapPin className="h-3.5 w-3.5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-foreground">Campus Visit</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {isToday ? "Today — " : ""}
+                          {dt.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })} at {dt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })} · {campusName}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          {/* AI Call Summary */}
           <AiCallSummary leadId={id!} />
 
-          {/* Upcoming Visits */}
-          {visits.filter((v: any) => v.status === "scheduled" || v.status === "confirmed").length > 0 && (
-            <div className="rounded-xl border border-violet-200 dark:border-violet-800/40 bg-violet-50/50 dark:bg-violet-950/20 p-4 space-y-3">
-              <h3 className="text-xs font-semibold text-violet-700 dark:text-violet-300 uppercase tracking-wide flex items-center gap-1.5">
-                <MapPin className="h-3.5 w-3.5" /> Scheduled Visits
-              </h3>
-              {visits.filter((v: any) => ["scheduled", "confirmed"].includes(v.status)).map((v: any) => {
-                const visitDate = new Date(v.visit_date);
-                const campusName = campuses.find((c: any) => c.id === v.campus_id)?.name || "Campus";
-                return (
-                  <div key={v.id} className="flex items-center justify-between gap-3 rounded-lg bg-white dark:bg-card border border-border/50 px-3 py-2.5">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground">
-                        {visitDate.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })} at {visitDate.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}
-                      </p>
-                      <p className="text-xs text-muted-foreground">{campusName}</p>
-                    </div>
-                    <div className="flex gap-1.5 shrink-0">
-                      <button
-                        onClick={async () => {
-                          const newDateStr = prompt("Enter new visit date and time (YYYY-MM-DD HH:MM):", visitDate.toISOString().slice(0, 16));
-                          if (!newDateStr) return;
-                          const newDate = new Date(newDateStr);
-                          if (isNaN(newDate.getTime())) { toast({ title: "Invalid date", variant: "destructive" }); return; }
-                          await supabase.from("campus_visits").update({ visit_date: newDate.toISOString(), status: "scheduled" }).eq("id", v.id);
-                          await supabase.from("lead_activities").insert({
-                            lead_id: id!, user_id: user?.id || null, type: "visit",
-                            description: `Visit rescheduled to ${newDate.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`,
-                          });
-                          toast({ title: "Visit rescheduled" });
-                          fetchAll(true);
-                        }}
-                        className="rounded-lg border border-input bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted"
-                      >
-                        Reschedule
-                      </button>
-                      <button
-                        onClick={async () => {
-                          await supabase.from("campus_visits").update({ status: "completed" }).eq("id", v.id);
-                          await supabase.from("lead_activities").insert({
-                            lead_id: id!, user_id: user?.id || null, type: "visit",
-                            description: "Campus visit marked as completed",
-                          });
-                          toast({ title: "Visit completed" });
-                          fetchAll(true);
-                        }}
-                        className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-700"
-                      >
-                        Completed
-                      </button>
-                      <button
-                        onClick={async () => {
-                          await supabase.from("campus_visits").update({ status: "cancelled" }).eq("id", v.id);
-                          await supabase.from("lead_activities").insert({
-                            lead_id: id!, user_id: user?.id || null, type: "visit",
-                            description: "Campus visit cancelled",
-                          });
-                          toast({ title: "Visit cancelled" });
-                          fetchAll(true);
-                        }}
-                        className="rounded-lg border border-red-200 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          {/* Scheduled Visits with completion dialog */}
+          <ScheduledVisitsSection
+            visits={visits}
+            campuses={campuses}
+            leadId={id!}
+            userId={user?.id || null}
+            onRefresh={() => fetchAll(true)}
+          />
 
           <LeadTimeline
             activities={activities}
@@ -946,5 +949,201 @@ const LeadDetail = () => {
     </div>
   );
 };
+
+// ── Scheduled Visits Section with Completion Dialog ──────────────────
+function ScheduledVisitsSection({ visits, campuses, leadId, userId, onRefresh }: {
+  visits: any[]; campuses: any[]; leadId: string; userId: string | null; onRefresh: () => void;
+}) {
+  const { toast } = useToast();
+  const [completingVisitId, setCompletingVisitId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState("");
+  const [courseInterest, setCourseInterest] = useState("");
+  const [expectedAdmissionDate, setExpectedAdmissionDate] = useState("");
+  const [followupType, setFollowupType] = useState<"call" | "visit">("call");
+  const [followupDate, setFollowupDate] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const scheduled = visits.filter((v: any) => ["scheduled", "confirmed"].includes(v.status));
+  if (scheduled.length === 0) return null;
+
+  const completingVisit = visits.find((v: any) => v.id === completingVisitId);
+
+  // Max followup date: 3 days from visit date
+  const maxFollowupDate = completingVisit
+    ? new Date(new Date(completingVisit.visit_date).getTime() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    : "";
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  const handleComplete = async () => {
+    if (!completingVisitId || !followupDate) {
+      toast({ title: "Follow-up required", description: "Schedule a follow-up within 3 days of the visit.", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+
+    // 1. Mark visit as completed with feedback
+    await supabase.from("campus_visits").update({
+      status: "completed",
+      feedback: [
+        feedback ? `Feedback: ${feedback}` : "",
+        courseInterest ? `Course Interest: ${courseInterest}` : "",
+        expectedAdmissionDate ? `Expected Admission: ${expectedAdmissionDate}` : "",
+      ].filter(Boolean).join("\n") || null,
+    }).eq("id", completingVisitId);
+
+    // 2. Log activity
+    await supabase.from("lead_activities").insert({
+      lead_id: leadId, user_id: userId, type: "visit",
+      description: `Campus visit completed.${feedback ? ` Feedback: ${feedback}` : ""}${courseInterest ? ` Course interest: ${courseInterest}` : ""}${expectedAdmissionDate ? ` Expected admission: ${expectedAdmissionDate}` : ""}`,
+    });
+
+    // 3. Schedule mandatory follow-up
+    await supabase.from("lead_followups").insert({
+      lead_id: leadId,
+      user_id: userId,
+      scheduled_at: new Date(`${followupDate}T10:00:00`).toISOString(),
+      type: followupType,
+      notes: `Post-visit follow-up${feedback ? `. Visit feedback: ${feedback}` : ""}`,
+      status: "pending",
+    });
+
+    await supabase.from("lead_activities").insert({
+      lead_id: leadId, user_id: userId, type: "followup",
+      description: `Post-visit follow-up (${followupType}) scheduled for ${new Date(followupDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`,
+    });
+
+    toast({ title: "Visit completed", description: "Follow-up scheduled." });
+    setSaving(false);
+    setCompletingVisitId(null);
+    setFeedback(""); setCourseInterest(""); setExpectedAdmissionDate(""); setFollowupDate("");
+    onRefresh();
+  };
+
+  const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20";
+
+  return (
+    <>
+      <div className="rounded-xl border border-violet-200 dark:border-violet-800/40 bg-violet-50/50 dark:bg-violet-950/20 p-4 space-y-3">
+        <h3 className="text-xs font-semibold text-violet-700 dark:text-violet-300 uppercase tracking-wide flex items-center gap-1.5">
+          <MapPin className="h-3.5 w-3.5" /> Scheduled Visits
+        </h3>
+        {scheduled.map((v: any) => {
+          const visitDate = new Date(v.visit_date);
+          const campusName = campuses.find((c: any) => c.id === v.campus_id)?.name || "Campus";
+          return (
+            <div key={v.id} className="flex items-center justify-between gap-3 rounded-lg bg-white dark:bg-card border border-border/50 px-3 py-2.5">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground">
+                  {visitDate.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })} at {visitDate.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}
+                </p>
+                <p className="text-xs text-muted-foreground">{campusName}</p>
+              </div>
+              <div className="flex gap-1.5 shrink-0">
+                <button
+                  onClick={async () => {
+                    const newDateStr = prompt("Enter new date/time (YYYY-MM-DD HH:MM):", visitDate.toISOString().slice(0, 16));
+                    if (!newDateStr) return;
+                    const newDate = new Date(newDateStr);
+                    if (isNaN(newDate.getTime())) { toast({ title: "Invalid date", variant: "destructive" }); return; }
+                    await supabase.from("campus_visits").update({ visit_date: newDate.toISOString(), status: "scheduled" }).eq("id", v.id);
+                    await supabase.from("lead_activities").insert({
+                      lead_id: leadId, user_id: userId, type: "visit",
+                      description: `Visit rescheduled to ${newDate.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`,
+                    });
+                    toast({ title: "Visit rescheduled" });
+                    onRefresh();
+                  }}
+                  className="rounded-lg border border-input bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted"
+                >Reschedule</button>
+                <button
+                  onClick={() => {
+                    setCompletingVisitId(v.id);
+                    setFollowupDate("");
+                    setFeedback("");
+                    setCourseInterest("");
+                    setExpectedAdmissionDate("");
+                  }}
+                  className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-700"
+                >Completed</button>
+                <button
+                  onClick={async () => {
+                    await supabase.from("campus_visits").update({ status: "cancelled" }).eq("id", v.id);
+                    await supabase.from("lead_activities").insert({
+                      lead_id: leadId, user_id: userId, type: "visit", description: "Campus visit cancelled",
+                    });
+                    toast({ title: "Visit cancelled" });
+                    onRefresh();
+                  }}
+                  className="rounded-lg border border-red-200 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+                >Cancel</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Visit Completion Dialog */}
+      <Dialog open={!!completingVisitId} onOpenChange={(o) => { if (!o) setCompletingVisitId(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle className="h-4 w-4 text-emerald-600" />
+              Complete Visit
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Candidate Feedback *</label>
+              <textarea value={feedback} onChange={(e) => setFeedback(e.target.value)} rows={2}
+                placeholder="How was the visit? What was the candidate's impression?"
+                className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Course Interested In</label>
+              <input value={courseInterest} onChange={(e) => setCourseInterest(e.target.value)}
+                placeholder="e.g. BBA, B.Sc Nursing"
+                className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Expected Date of Admission</label>
+              <input type="date" value={expectedAdmissionDate} onChange={(e) => setExpectedAdmissionDate(e.target.value)}
+                min={todayStr} className={inputCls} />
+            </div>
+
+            <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/40 bg-emerald-50/50 dark:bg-emerald-950/20 p-3 space-y-3">
+              <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">
+                Mandatory Follow-up (within 3 days)
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] text-muted-foreground mb-1">Type</label>
+                  <select value={followupType} onChange={(e) => setFollowupType(e.target.value as any)} className={inputCls}>
+                    <option value="call">Call</option>
+                    <option value="visit">Visit</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] text-muted-foreground mb-1">Date *</label>
+                  <input type="date" value={followupDate} onChange={(e) => setFollowupDate(e.target.value)}
+                    min={todayStr} max={maxFollowupDate} className={inputCls} />
+                </div>
+              </div>
+              {maxFollowupDate && (
+                <p className="text-[10px] text-emerald-600">Follow-up must be by {new Date(maxFollowupDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCompletingVisitId(null)}>Cancel</Button>
+            <Button onClick={handleComplete} disabled={!followupDate || saving} className="gap-2 bg-emerald-600 hover:bg-emerald-700">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+              Complete & Schedule Follow-up
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
 
 export default LeadDetail;
