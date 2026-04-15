@@ -491,7 +491,7 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
                 voiceName: "Kore",
               },
             },
-            languageCode: "hi-IN",
+            languageCode: "en-IN",
           },
         },
         realtimeInputConfig: {
