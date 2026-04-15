@@ -133,7 +133,7 @@ const AiCallLog = () => {
                 <th className="px-4 py-2.5 text-center font-medium text-muted-foreground">Conversion</th>
                 <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Summary</th>
                 <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Counsellor</th>
-                <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Date</th>
+                <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Date & Time</th>
                 <th className="px-4 py-2.5 text-center font-medium text-muted-foreground">Recording</th>
               </tr>
             </thead>
@@ -169,7 +169,8 @@ const AiCallLog = () => {
                     </td>
                     <td className="px-4 py-2.5 text-xs text-muted-foreground">{r.counsellor_name}</td>
                     <td className="px-4 py-2.5 text-xs text-muted-foreground">
-                      {new Date(r.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                      <div>{new Date(r.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</div>
+                      <div className="text-[10px]">{new Date(r.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}</div>
                     </td>
                     <td className="px-4 py-2.5 text-center">
                       {r.recording_url ? (

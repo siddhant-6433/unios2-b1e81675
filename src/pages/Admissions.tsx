@@ -160,7 +160,6 @@ const Admissions = () => {
   const [inactiveIds, setInactiveIds] = useState<Set<string> | null>(null);
   const [followupLeadIds, setFollowupLeadIds] = useState<Set<string> | null>(null);
   const [visitLeadIds, setVisitLeadIds] = useState<Set<string> | null>(null);
-  const [visitLeadIds, setVisitLeadIds] = useState<Set<string> | null>(null);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
 
