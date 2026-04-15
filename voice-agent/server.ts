@@ -354,15 +354,20 @@ async function executeTool(
           }),
         });
 
-        // Schedule follow-up if requested
-        if (args.schedule_followup) {
+        // Always schedule a counsellor follow-up for actionable dispositions
+        const needsFollowup = args.schedule_followup ||
+          ["interested", "callback_requested", "call_back", "partial_conversation"].includes(args.disposition);
+
+        if (needsFollowup && callCtx.leadId) {
           let followupDate: string;
           if (args.followup_date) {
             followupDate = args.followup_date.includes("T") ? args.followup_date : `${args.followup_date}T10:00:00+05:30`;
           } else {
-            // Default: tomorrow 10 AM
-            const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
-            followupDate = tomorrow.toISOString();
+            // Interested/callback → 2 hours, partial → tomorrow
+            const delayMs = ["interested", "callback_requested", "call_back"].includes(args.disposition)
+              ? 2 * 60 * 60 * 1000  // 2 hours
+              : 24 * 60 * 60 * 1000; // 24 hours
+            followupDate = new Date(Date.now() + delayMs).toISOString();
           }
 
           await fetch(`${SUPABASE_URL}/rest/v1/lead_followups`, {
@@ -372,10 +377,11 @@ async function executeTool(
               lead_id: callCtx.leadId,
               scheduled_at: followupDate,
               type: "call",
-              notes: `🤖 Auto-scheduled by AI call: ${args.notes || args.disposition}`,
+              notes: `🤖 AI call outcome: ${args.disposition.replace(/_/g, " ")}. ${args.notes || "Counsellor follow-up required."}`,
               status: "pending",
             }),
           });
+          console.log(`[Followup] Scheduled for ${callCtx.leadId}: ${args.disposition} → ${followupDate}`);
         }
 
         // Mark do_not_contact
