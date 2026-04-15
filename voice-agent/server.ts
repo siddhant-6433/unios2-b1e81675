@@ -30,6 +30,14 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_KEY") || "";
 const GEMINI_MODEL = "gemini-3.1-flash-live-preview";
 
+/** Placeholder names that indicate the real name is unknown */
+const PLACEHOLDER_NAMES = new Set([
+  "callback request", "callback", "applicant", "justdial user",
+  "justdial lead", "website user", "student", "enquiry",
+  "collegedunia user", "collegehai user", "shiksha user",
+  "unknown", "test", "user", "lead",
+]);
+
 const GEMINI_WS_URL = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${GOOGLE_AI_API_KEY}`;
 
 // In-memory store for active call contexts (call_id → context)
@@ -431,6 +439,46 @@ async function executeTool(
         return { success: true, disposition: args.disposition };
       }
 
+      case "update_lead_info": {
+        if (!callCtx.leadId) return { success: false, message: "No lead ID" };
+        const updates: Record<string, any> = {};
+        if (args.name) updates.name = args.name;
+        if (args.course_interest) {
+          // Look up course by name to get course_id
+          const courseRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/courses?name=ilike.*${encodeURIComponent(args.course_interest)}*&select=id,name&limit=1`,
+            { headers },
+          );
+          const courses = await courseRes.json();
+          if (courses?.[0]?.id) {
+            updates.course_id = courses[0].id;
+          }
+        }
+        if (Object.keys(updates).length === 0) return { success: false, message: "No updates provided" };
+        await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${callCtx.leadId}`, {
+          method: "PATCH",
+          headers: { ...headers, Prefer: "return=minimal" },
+          body: JSON.stringify(updates),
+        });
+        // Add note about info update
+        const parts = [];
+        if (args.name) parts.push(`Name updated to: ${args.name}`);
+        if (args.course_interest) parts.push(`Course interest: ${args.course_interest}`);
+        await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, {
+          method: "POST",
+          headers: { ...headers, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            lead_id: callCtx.leadId,
+            content: `🤖 AI Call: Lead info updated — ${parts.join(", ")}`,
+          }),
+        });
+        // Update the in-memory context too
+        if (args.name) callCtx.leadName = args.name;
+        if (args.course_interest) callCtx.courseName = args.course_interest;
+        console.log(`[update_lead_info] ${callCtx.leadId}: ${parts.join(", ")}`);
+        return { success: true, updated: updates };
+      }
+
       case "request_human_callback": {
         // Create a notification for admission team
         const body = {
@@ -497,6 +545,10 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
         realtimeInputConfig: {
           automaticActivityDetection: {
             disabled: false,
+            startOfSpeechSensitivity: "START_OF_SPEECH_SENSITIVITY_LOW",
+            endOfSpeechSensitivity: "END_OF_SPEECH_SENSITIVITY_LOW",
+            prefixPaddingMs: 300,
+            silenceDurationMs: 1500,
           },
         },
         systemInstruction: {
@@ -750,31 +802,49 @@ Deno.serve({ port: PORT }, async (req) => {
     });
     console.log(`[${callId}] Context set:`, { direction: ctx.direction, leadId: ctx.leadId });
 
-    // Create initial call log entry in Supabase
+    // Look up the existing call log entry (created by voice-call function) — do NOT create a duplicate
     if (ctx.leadId && SUPABASE_URL && SUPABASE_SERVICE_KEY) {
       try {
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            apikey: SUPABASE_SERVICE_KEY,
-            Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-            Prefer: "return=representation",
+        const lookupRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}&select=id&limit=1`,
+          {
+            headers: {
+              "Content-Type": "application/json",
+              apikey: SUPABASE_SERVICE_KEY,
+              Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+            },
           },
-          body: JSON.stringify({
-            lead_id: ctx.leadId,
-            call_uuid: callId,
-            status: "initiated",
-          }),
-        });
-        const rows = await res.json();
+        );
+        const rows = await lookupRes.json();
         if (rows?.[0]?.id) {
           const stored = activeCallContexts.get(callId);
           if (stored) stored.callLogId = rows[0].id;
-          console.log(`[${callId}] Call log created: ${rows[0].id}`);
+          console.log(`[${callId}] Found existing call log: ${rows[0].id}`);
+        } else {
+          // Fallback: create if not found (edge case — direct calls without voice-call function)
+          const createRes = await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: SUPABASE_SERVICE_KEY,
+              Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              lead_id: ctx.leadId,
+              call_uuid: callId,
+              status: "initiated",
+            }),
+          });
+          const created = await createRes.json();
+          if (created?.[0]?.id) {
+            const stored = activeCallContexts.get(callId);
+            if (stored) stored.callLogId = created[0].id;
+            console.log(`[${callId}] Call log created (fallback): ${created[0].id}`);
+          }
         }
       } catch (e: any) {
-        console.error(`[${callId}] Failed to create call log:`, e.message);
+        console.error(`[${callId}] Failed to find/create call log:`, e.message);
       }
     }
 
@@ -790,9 +860,12 @@ Deno.serve({ port: PORT }, async (req) => {
     // Always use wss:// in production (Cloud Run terminates TLS at load balancer, so url.protocol is http)
     const wsProtocol = host.includes("localhost") ? "ws" : "wss";
 
+    const recordingCallbackUrl = SUPABASE_URL
+      ? `${SUPABASE_URL}/functions/v1/voice-call-callback`
+      : "";
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Record recordSession="true" redirect="false" maxLength="3600" />
+  <Record recordSession="true" redirect="false" maxLength="3600"${recordingCallbackUrl ? ` callbackUrl="${recordingCallbackUrl}" callbackMethod="POST"` : ""} />
   <Stream streamTimeout="600" keepCallAlive="true" bidirectional="true"
           contentType="audio/x-mulaw;rate=8000">
     ${wsProtocol}://${host}/ws/${callId}
@@ -830,6 +903,22 @@ Deno.serve({ port: PORT }, async (req) => {
       const rows = await lookupRes.json();
       if (rows?.[0]?.id) callLogId = rows[0].id;
       console.log(`[${callId}] DB lookup for callLogId: ${callLogId || "not found"}`);
+    }
+
+    // Also update any duplicate records with same call_uuid to prevent "initiated" ghosts
+    if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+      const plivoStatus = (params.CallStatus || "unknown").toLowerCase();
+      const plivoUuid = params.CallUUID || params.ALegUUID || "";
+      await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}&status=eq.initiated`, {
+        method: "PATCH",
+        headers: { ...dbHeaders, Prefer: "return=minimal" },
+        body: JSON.stringify({
+          status: plivoStatus || "completed",
+          plivo_call_uuid: plivoUuid || null,
+          duration_seconds: parseInt(params.Duration) || 0,
+          completed_at: new Date().toISOString(),
+        }),
+      }).catch(e => console.error(`[${callId}] Bulk status update failed:`, e.message));
     }
 
     if (callLogId && SUPABASE_URL && SUPABASE_SERVICE_KEY) {

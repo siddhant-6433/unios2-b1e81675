@@ -69,9 +69,42 @@ export function PhoneInput({ value, onChange, placeholder, required, className, 
   }, [dropdownOpen]);
 
   const handleNumberChange = (val: string) => {
-    const digits = val.replace(/\D/g, "").slice(0, selectedCountry.digits);
+    // Strip all non-digits
+    let digits = val.replace(/\D/g, "");
+    let resolvedCode = countryCode;
+
+    // Smart ISD code detection: if pasted value looks like it has a country code, strip it
+    // e.g. "919555192192" (12 digits starting with 91) → "9555192192"
+    if (digits.length > selectedCountry.digits) {
+      // Try to match the currently selected country code (without the +)
+      const codeDigits = resolvedCode.replace("+", "");
+      if (digits.startsWith(codeDigits)) {
+        digits = digits.slice(codeDigits.length);
+      } else {
+        // Try all country codes, longest first
+        const sorted = [...COUNTRIES].sort((a, b) => b.code.length - a.code.length);
+        for (const c of sorted) {
+          const cd = c.code.replace("+", "");
+          if (digits.startsWith(cd) && digits.length - cd.length >= 6) {
+            resolvedCode = c.code;
+            digits = digits.slice(cd.length);
+            break;
+          }
+        }
+      }
+    }
+
+    // Also strip leading 0 for Indian numbers (0-prefixed local format)
+    if (resolvedCode === "+91" && digits.startsWith("0") && digits.length > 10) {
+      digits = digits.slice(1);
+    }
+
+    const country = COUNTRIES.find(c => c.code === resolvedCode) || selectedCountry;
+    digits = digits.slice(0, country.digits);
+
+    if (resolvedCode !== countryCode) setCountryCode(resolvedCode);
     setNumber(digits);
-    onChange(formatFullPhone(countryCode, digits));
+    onChange(formatFullPhone(resolvedCode, digits));
   };
 
   const handleCountryChange = (code: string) => {

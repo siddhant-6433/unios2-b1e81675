@@ -79,6 +79,20 @@ Deno.serve(async (req) => {
       if (leadErr || !lead) return json({ error: "Lead not found" }, 404);
       if (!lead.phone) return json({ error: "Lead has no phone number" }, 400);
 
+      // Wait 2 minutes before calling — callback/website leads arrive in 2 steps
+      // (phone first, then name + course details come later)
+      const delayMs = 2 * 60 * 1000; // 2 minutes
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+
+      // Re-fetch lead after delay — name/course may have been updated in the interim
+      const { data: refreshedLead } = await db
+        .from("leads")
+        .select("*, courses:course_id(name, code), campuses:campus_id(name)")
+        .eq("id", lead_id)
+        .single();
+
+      const activeLead = refreshedLead || lead;
+
       // Generate a unique call ID
       const callId = crypto.randomUUID();
 
@@ -86,12 +100,12 @@ Deno.serve(async (req) => {
       const contextPayload = {
         direction: "outbound",
         leadId: lead_id,
-        leadName: lead.name,
-        courseName: (lead.courses as any)?.name || null,
-        courseCode: (lead.courses as any)?.code || null,
-        campusName: (lead.campuses as any)?.name || null,
-        leadSource: lead.source,
-        guardianName: lead.guardian_name,
+        leadName: activeLead.name,
+        courseName: (activeLead.courses as any)?.name || null,
+        courseCode: (activeLead.courses as any)?.code || null,
+        campusName: (activeLead.campuses as any)?.name || null,
+        leadSource: activeLead.source,
+        guardianName: activeLead.guardian_name,
       };
 
       const ctxRes = await fetch(`${VOICE_AGENT_URL}/context/${callId}`, {
@@ -180,7 +194,7 @@ Deno.serve(async (req) => {
         success: true,
         call_id: callId,
         plivo_request_uuid: plivoResult.request_uuid,
-        message: `Calling ${lead.name}...`,
+        message: `Calling ${activeLead.name}...`,
       });
     }
 

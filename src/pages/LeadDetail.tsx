@@ -6,7 +6,7 @@ import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeft, Loader2, Trash2, ArrowRightLeft, Phone, MessageSquare,
-  Calendar, Clock, FileText, Bot, UserCheck, Mail, IndianRupee, MapPin, ThumbsDown, CheckCircle,
+  Calendar, CalendarDays, Clock, FileText, Bot, UserCheck, Mail, IndianRupee, MapPin, ThumbsDown, CheckCircle, Footprints,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -92,6 +92,7 @@ const LeadDetail = () => {
   const [showCallDisposition, setShowCallDisposition] = useState(false);
   const [dispositionWaSent, setDispositionWaSent] = useState(false);
   const [showRecordPayment, setShowRecordPayment] = useState(false);
+  const [showWalkinCompletion, setShowWalkinCompletion] = useState(false);
   const [showSendEmail, setShowSendEmail] = useState(false);
   const [paymentRefreshKey, setPaymentRefreshKey] = useState(0);
   const [deletingLead, setDeletingLead] = useState(false);
@@ -595,6 +596,7 @@ const LeadDetail = () => {
           { icon: MessageSquare, label: "WhatsApp", color: "text-green-600 bg-green-100 dark:bg-green-900/30", action: () => setShowWhatsApp(true) },
           { icon: Clock, label: "Follow Up", color: "text-orange-600 bg-orange-100 dark:bg-orange-900/30", action: () => setShowFollowup(true) },
           { icon: MapPin, label: "Visit", color: "text-violet-600 bg-violet-100 dark:bg-violet-900/30", action: () => setShowScheduleVisit(true) },
+          { icon: Footprints, label: "Walk-in", color: "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30", action: () => setShowWalkinCompletion(true) },
           { icon: Mail, label: "Email", color: "text-sky-600 bg-sky-100 dark:bg-sky-900/30", action: () => setShowSendEmail(true) },
           { icon: Bot, label: "AI Call", color: "text-amber-600 bg-amber-100 dark:bg-amber-900/30", action: triggerAiCall, disabled: aiCalling },
           { icon: UserCheck, label: "Interview", color: "text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30", action: () => setShowInterview(true) },
@@ -744,9 +746,12 @@ const LeadDetail = () => {
           <ScheduledVisitsSection
             visits={visits}
             campuses={campuses}
+            courses={courses}
             leadId={id!}
             userId={user?.id || null}
             onRefresh={() => fetchAll(true)}
+            showWalkin={showWalkinCompletion}
+            onCloseWalkin={() => setShowWalkinCompletion(false)}
           />
 
           <LeadTimeline
@@ -951,11 +956,14 @@ const LeadDetail = () => {
 };
 
 // ── Scheduled Visits Section with Completion Dialog ──────────────────
-function ScheduledVisitsSection({ visits, campuses, leadId, userId, onRefresh }: {
-  visits: any[]; campuses: any[]; leadId: string; userId: string | null; onRefresh: () => void;
+function ScheduledVisitsSection({ visits, campuses, courses, leadId, userId, onRefresh, showWalkin, onCloseWalkin }: {
+  visits: any[]; campuses: any[]; courses: any[]; leadId: string; userId: string | null; onRefresh: () => void;
+  showWalkin?: boolean; onCloseWalkin?: () => void;
 }) {
   const { toast } = useToast();
   const [completingVisitId, setCompletingVisitId] = useState<string | null>(null);
+  const [isWalkin, setIsWalkin] = useState(false);
+  const [walkinCampusId, setWalkinCampusId] = useState(campuses[0]?.id || "");
   const [feedback, setFeedback] = useState("");
   const [courseInterest, setCourseInterest] = useState("");
   const [expectedAdmissionDate, setExpectedAdmissionDate] = useState("");
@@ -963,15 +971,26 @@ function ScheduledVisitsSection({ visits, campuses, leadId, userId, onRefresh }:
   const [followupDate, setFollowupDate] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const scheduled = visits.filter((v: any) => ["scheduled", "confirmed"].includes(v.status));
-  if (scheduled.length === 0) return null;
+  // Open walk-in dialog when triggered from parent
+  useEffect(() => {
+    if (showWalkin) {
+      setIsWalkin(true);
+      setCompletingVisitId("walkin");
+      setFeedback(""); setCourseInterest(""); setExpectedAdmissionDate(""); setFollowupDate("");
+      setWalkinCampusId(campuses[0]?.id || "");
+    }
+  }, [showWalkin]);
 
-  const completingVisit = visits.find((v: any) => v.id === completingVisitId);
+  const scheduled = visits.filter((v: any) => ["scheduled", "confirmed"].includes(v.status));
+
+  const completingVisit = completingVisitId && completingVisitId !== "walkin"
+    ? visits.find((v: any) => v.id === completingVisitId)
+    : null;
 
   // Max followup date: 3 days from visit date
-  const maxFollowupDate = completingVisit
-    ? new Date(new Date(completingVisit.visit_date).getTime() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-    : "";
+  // Max followup: 3 days from visit date (or today for walk-ins)
+  const visitDateForMax = completingVisit ? new Date(completingVisit.visit_date) : new Date();
+  const maxFollowupDate = new Date(visitDateForMax.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const todayStr = new Date().toISOString().slice(0, 10);
 
   const handleComplete = async () => {
@@ -981,23 +1000,39 @@ function ScheduledVisitsSection({ visits, campuses, leadId, userId, onRefresh }:
     }
     setSaving(true);
 
-    // 1. Mark visit as completed with feedback
-    await supabase.from("campus_visits").update({
-      status: "completed",
-      feedback: [
-        feedback ? `Feedback: ${feedback}` : "",
-        courseInterest ? `Course Interest: ${courseInterest}` : "",
-        expectedAdmissionDate ? `Expected Admission: ${expectedAdmissionDate}` : "",
-      ].filter(Boolean).join("\n") || null,
-    }).eq("id", completingVisitId);
+    const feedbackText = [
+      feedback ? `Feedback: ${feedback}` : "",
+      courseInterest ? `Course Interest: ${courseInterest}` : "",
+      expectedAdmissionDate ? `Expected Admission: ${expectedAdmissionDate}` : "",
+    ].filter(Boolean).join("\n") || null;
 
-    // 2. Log activity
-    await supabase.from("lead_activities").insert({
-      lead_id: leadId, user_id: userId, type: "visit",
-      description: `Campus visit completed.${feedback ? ` Feedback: ${feedback}` : ""}${courseInterest ? ` Course interest: ${courseInterest}` : ""}${expectedAdmissionDate ? ` Expected admission: ${expectedAdmissionDate}` : ""}`,
-    });
+    if (isWalkin) {
+      // Walk-in: create a new campus_visits record as completed
+      await supabase.from("campus_visits").insert({
+        lead_id: leadId,
+        campus_id: walkinCampusId || null,
+        scheduled_by: userId,
+        visit_date: new Date().toISOString(),
+        status: "completed",
+        feedback: feedbackText,
+      });
+      await supabase.from("lead_activities").insert({
+        lead_id: leadId, user_id: userId, type: "visit",
+        description: `Walk-in visit recorded.${feedback ? ` Feedback: ${feedback}` : ""}${courseInterest ? ` Course interest: ${courseInterest}` : ""}`,
+      });
+    } else {
+      // Scheduled visit: update existing record
+      await supabase.from("campus_visits").update({
+        status: "completed",
+        feedback: feedbackText,
+      }).eq("id", completingVisitId);
+      await supabase.from("lead_activities").insert({
+        lead_id: leadId, user_id: userId, type: "visit",
+        description: `Campus visit completed.${feedback ? ` Feedback: ${feedback}` : ""}${courseInterest ? ` Course interest: ${courseInterest}` : ""}`,
+      });
+    }
 
-    // 3. Schedule mandatory follow-up
+    // Schedule mandatory follow-up
     await supabase.from("lead_followups").insert({
       lead_id: leadId,
       user_id: userId,
@@ -1012,10 +1047,12 @@ function ScheduledVisitsSection({ visits, campuses, leadId, userId, onRefresh }:
       description: `Post-visit follow-up (${followupType}) scheduled for ${new Date(followupDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`,
     });
 
-    toast({ title: "Visit completed", description: "Follow-up scheduled." });
+    toast({ title: isWalkin ? "Walk-in visit recorded" : "Visit completed", description: "Follow-up scheduled." });
     setSaving(false);
     setCompletingVisitId(null);
+    setIsWalkin(false);
     setFeedback(""); setCourseInterest(""); setExpectedAdmissionDate(""); setFollowupDate("");
+    if (onCloseWalkin) onCloseWalkin();
     onRefresh();
   };
 
@@ -1083,15 +1120,24 @@ function ScheduledVisitsSection({ visits, campuses, leadId, userId, onRefresh }:
       </div>
 
       {/* Visit Completion Dialog */}
-      <Dialog open={!!completingVisitId} onOpenChange={(o) => { if (!o) setCompletingVisitId(null); }}>
+      <Dialog open={!!completingVisitId} onOpenChange={(o) => { if (!o) { setCompletingVisitId(null); setIsWalkin(false); if (onCloseWalkin) onCloseWalkin(); } }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <CheckCircle className="h-4 w-4 text-emerald-600" />
-              Complete Visit
+              {isWalkin ? <Footprints className="h-4 w-4 text-emerald-600" /> : <CheckCircle className="h-4 w-4 text-emerald-600" />}
+              {isWalkin ? "Log Walk-in Visit" : "Complete Visit"}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
+            {/* Campus selector for walk-ins */}
+            {isWalkin && campuses.length > 0 && (
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Campus *</label>
+                <select value={walkinCampusId} onChange={(e) => setWalkinCampusId(e.target.value)} className={inputCls}>
+                  {campuses.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+            )}
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Candidate Feedback *</label>
               <textarea value={feedback} onChange={(e) => setFeedback(e.target.value)} rows={2}
@@ -1100,14 +1146,27 @@ function ScheduledVisitsSection({ visits, campuses, leadId, userId, onRefresh }:
             </div>
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Course Interested In</label>
-              <input value={courseInterest} onChange={(e) => setCourseInterest(e.target.value)}
-                placeholder="e.g. BBA, B.Sc Nursing"
-                className={inputCls} />
+              <select value={courseInterest} onChange={(e) => setCourseInterest(e.target.value)} className={inputCls}>
+                <option value="">Select course</option>
+                {courses.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}
+              </select>
             </div>
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Expected Date of Admission</label>
-              <input type="date" value={expectedAdmissionDate} onChange={(e) => setExpectedAdmissionDate(e.target.value)}
-                min={todayStr} className={inputCls} />
+              <div
+                className={`${inputCls} relative flex items-center justify-between cursor-pointer`}
+                onClick={() => (document.getElementById("expected-admission-date") as HTMLInputElement)?.showPicker?.()}
+              >
+                <span className={expectedAdmissionDate ? "text-foreground" : "text-muted-foreground"}>
+                  {expectedAdmissionDate
+                    ? (() => { const [y,m,d] = expectedAdmissionDate.split("-"); return `${d}/${m}/${y.slice(2)}`; })()
+                    : "dd/mm/yy"}
+                </span>
+                <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
+                <input id="expected-admission-date" type="date" value={expectedAdmissionDate}
+                  onChange={(e) => setExpectedAdmissionDate(e.target.value)}
+                  min={todayStr} className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" tabIndex={-1} />
+              </div>
             </div>
 
             <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/40 bg-emerald-50/50 dark:bg-emerald-950/20 p-3 space-y-3">
@@ -1124,8 +1183,20 @@ function ScheduledVisitsSection({ visits, campuses, leadId, userId, onRefresh }:
                 </div>
                 <div>
                   <label className="block text-[10px] text-muted-foreground mb-1">Date *</label>
-                  <input type="date" value={followupDate} onChange={(e) => setFollowupDate(e.target.value)}
-                    min={todayStr} max={maxFollowupDate} className={inputCls} />
+                  <div
+                    className={`${inputCls} relative flex items-center justify-between cursor-pointer`}
+                    onClick={() => (document.getElementById("followup-date-picker") as HTMLInputElement)?.showPicker?.()}
+                  >
+                    <span className={followupDate ? "text-foreground" : "text-muted-foreground"}>
+                      {followupDate
+                        ? (() => { const [y,m,d] = followupDate.split("-"); return `${d}/${m}/${y.slice(2)}`; })()
+                        : "dd/mm/yy"}
+                    </span>
+                    <input id="followup-date-picker" type="date" value={followupDate}
+                      onChange={(e) => setFollowupDate(e.target.value)}
+                      min={todayStr} max={maxFollowupDate}
+                      className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" tabIndex={-1} />
+                  </div>
                 </div>
               </div>
               {maxFollowupDate && (
@@ -1137,7 +1208,7 @@ function ScheduledVisitsSection({ visits, campuses, leadId, userId, onRefresh }:
             <Button variant="outline" onClick={() => setCompletingVisitId(null)}>Cancel</Button>
             <Button onClick={handleComplete} disabled={!followupDate || saving} className="gap-2 bg-emerald-600 hover:bg-emerald-700">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-              Complete & Schedule Follow-up
+              {isWalkin ? "Save Walk-in & Schedule Follow-up" : "Complete & Schedule Follow-up"}
             </Button>
           </DialogFooter>
         </DialogContent>

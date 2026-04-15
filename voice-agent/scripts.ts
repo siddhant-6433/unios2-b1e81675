@@ -147,6 +147,7 @@ You have access to real functions. You MUST call them BEFORE giving any specific
 - get_course_info → MUST call before discussing ANY course detail (fees, duration, eligibility, placement, affiliation). EVERY TIME. Even if you think you know the answer.
 - schedule_visit → MUST call BEFORE confirming a visit. NEVER say "schedule kar diya" without calling first.
 - update_lead_stage → call to mark lead as not_interested or counsellor_call
+- update_lead_info → call when caller provides their real name (if current name is placeholder) or when they tell you which course they're interested in. This updates the CRM record.
 - set_call_disposition → call at end of conversation to record outcome
 - request_human_callback → call when caller wants a human or you don't have the answer
 
@@ -160,6 +161,17 @@ CRITICAL RULES:
 - NEVER deflect with "details bhej deti hoon" when you HAVE the information from the function call.
 Today's date is ${new Date().toISOString().slice(0, 10)}.`;
 
+  // Detect if the lead name is a placeholder
+  const PLACEHOLDER_NAMES = [
+    "callback request", "callback", "applicant", "justdial user",
+    "justdial lead", "website user", "student", "enquiry",
+    "collegedunia user", "collegehai user", "shiksha user",
+    "unknown", "test", "user", "lead",
+  ];
+  const isPlaceholderName = !ctx.leadName ||
+    PLACEHOLDER_NAMES.includes(ctx.leadName.toLowerCase().trim());
+  const hasCourse = !!ctx.courseName;
+
   if (isOutbound) {
     return `${baseRules}
 
@@ -168,22 +180,40 @@ Outbound call to: ${ctx.leadName || "a prospective student"}
 Course interest: ${ctx.courseName || "not specified"}
 Campus: ${ctx.campusName || "not specified"}
 Source: ${source}
+${isPlaceholderName ? `\n⚠️ IMPORTANT: The lead name "${ctx.leadName || "unknown"}" is a PLACEHOLDER — this is NOT the person's real name. You MUST ask for their real name politely during Step 1.` : ""}
+${!hasCourse ? `\n⚠️ IMPORTANT: No course interest is recorded for this lead. You MUST ask which course or programme they are interested in during Step 3. Once they tell you, call update_lead_info with the course name.` : ""}
 
 ## CONVERSATION FLOW
 Follow this flow ONE STEP AT A TIME. Complete each step before moving to the next.
 
-STEP 1 — Greeting (ALWAYS in English, exactly this, then STOP):
+${isPlaceholderName ? `STEP 1 — Greeting (ALWAYS in English, then STOP):
+"Hi! I'm calling from ${persona.org}. May I know who I'm speaking with?"
+→ STOP completely. Wait for them to say their name.
+→ Once they tell you their name, say "Nice to talk to you, [name]!" and immediately call update_lead_info with their name.
+→ Do NOT proceed until you have their name.` : `STEP 1 — Greeting (ALWAYS in English, exactly this, then STOP):
 "Hi! Am I speaking with ${firstName || "the student"}?"
 → STOP completely. Say NOTHING more. Wait for them to say "yes" or "haan" or confirm.
-→ Do NOT add "how are you" or anything else. Just the one question, then silence.
+→ Do NOT add "how are you" or anything else. Just the one question, then silence.`}
 
 STEP 2 — Introduction with source (ONLY after they confirm, in their language):
 "I'm ${persona.name}, calling from ${persona.org}. We received your enquiry for ${ctx.courseName || "our programmes"} through ${source}. How are you doing?"
 → Wait for their response.
 
-STEP 3 — Context question (after they respond):
+${!hasCourse ? `STEP 3 — Ask about course interest:
+"Which course or programme are you interested in?" or "Aap konsa course dekhna chahte hain?"
+→ Wait for their answer.
+→ Once they tell you, call update_lead_info with the course name, THEN call get_course_info with that course.
+→ If they say they were just browsing: "No problem! Let me tell you about some of our popular programmes." Then suggest 2-3 relevant ones and ask which interests them.` : `STEP 3 — Context question (after they respond):
 "So tell me, what are you currently studying?"
-→ Wait for answer, then call get_course_info.
+→ Wait for answer, then call get_course_info.`}
+
+## LISTENING RULES — CRITICAL
+- NEVER assume what the caller is saying. Wait for them to FINISH speaking before responding.
+- If audio is unclear, say: "Sorry, aapki awaaz thodi unclear aa rahi hai, kya aap dobara bol sakte hain?" — do NOT guess.
+- NEVER repeat the same sentence or paragraph twice. If you already said something, move on to the next point.
+- If you detect background noise, do NOT interpret it as speech. Only respond to clear human speech.
+- Keep track of what you have already said. Do NOT re-introduce yourself or repeat course details you already shared.
+- If there is a pause after your response, wait silently — do NOT fill the silence by repeating yourself.
 
 PACING: Respond quickly and naturally after the caller speaks — like a real phone conversation. Don't add artificial pauses or silence. But do NOT combine multiple steps into one turn.
 
@@ -348,6 +378,23 @@ export const VOICE_AGENT_TOOLS = [
         notes: { type: "string", description: "Brief summary of the inquiry" },
       },
       required: ["name"],
+    },
+  },
+  {
+    name: "update_lead_info",
+    description: "Update the lead's name or course interest when the caller provides their real name or specifies a course. Use this when: (1) the lead name is a placeholder like 'Callback Request' or 'Applicant' and the caller tells you their real name, or (2) the lead has no course and the caller mentions which course they're interested in.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "The caller's real full name (only provide if the current name is a placeholder or unknown)",
+        },
+        course_interest: {
+          type: "string",
+          description: "The course name the caller is interested in (e.g., 'B.Sc Nursing', 'MBA', 'BBA')",
+        },
+      },
     },
   },
   {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -7,7 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Loader2, Phone, MessageSquare, CalendarCheck, MapPin, UserCheck,
-  Trophy, AlertTriangle, Clock, TrendingUp,
+  Trophy, AlertTriangle, Clock, TrendingUp, ChevronDown, ChevronUp,
+  Users, PhoneOff, PhoneCall, BarChart3, ArrowUpDown, ArrowUp, ArrowDown,
+  ExternalLink, CalendarDays,
 } from "lucide-react";
 
 interface CounsellorStats {
@@ -35,13 +37,120 @@ interface OverdueFollowup {
   notes: string | null;
 }
 
+interface CounsellorBreakdown {
+  counsellor_id: string;
+  counsellor_name: string;
+  user_id: string;
+  total: number;
+  new_lead: number;
+  called: number;
+  not_called: number;
+  application_in_progress: number;
+  visit_scheduled: number;
+  admitted: number;
+  rejected: number;
+  other_stages: number;
+  dispositions: Record<string, number>;
+  avg_response_hrs: number | null;
+  call_rate: number;
+  conversion_rate: number;
+  visits_completed: number;
+}
+
+interface DispositionLead {
+  id: string;
+  name: string;
+  phone: string;
+  stage: string;
+  created_at: string;
+}
+
 const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", application_in_progress: "App In Progress",
   application_fee_paid: "Fee Paid", application_submitted: "Submitted",
   ai_called: "AI Called", counsellor_call: "Counsellor Call",
   visit_scheduled: "Visit Scheduled", interview: "Interview", offer_sent: "Offer Sent",
   token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", rejected: "Rejected",
+  not_interested: "Not Interested",
 };
+
+const DISPOSITION_LABELS: Record<string, string> = {
+  interested: "Interested",
+  not_interested: "Not Interested",
+  ineligible: "Ineligible",
+  not_answered: "Not Answered",
+  call_back: "Call Back",
+  wrong_number: "Wrong Number",
+  do_not_contact: "DNC",
+  voicemail: "Voicemail",
+  busy: "Busy",
+};
+
+const DISPOSITION_COLORS: Record<string, string> = {
+  interested: "bg-emerald-100 text-emerald-700",
+  not_interested: "bg-red-100 text-red-700",
+  ineligible: "bg-gray-100 text-gray-600",
+  not_answered: "bg-amber-100 text-amber-700",
+  call_back: "bg-blue-100 text-blue-700",
+  wrong_number: "bg-pink-100 text-pink-700",
+  do_not_contact: "bg-red-200 text-red-800",
+  voicemail: "bg-purple-100 text-purple-700",
+  busy: "bg-orange-100 text-orange-700",
+};
+
+type BreakdownSortCol = "counsellor_name" | "total" | "new_lead" | "called" | "not_called"
+  | "application_in_progress" | "visit_scheduled" | "visits_completed" | "admitted" | "rejected"
+  | "call_rate" | "conversion_rate" | "avg_response_hrs";
+
+type DatePreset = "today" | "yesterday" | "this_week" | "past_week" | "this_month" | "all";
+
+function getDateRange(preset: DatePreset): { from: string; to: string } {
+  const today = new Date();
+  const fmt = (d: Date) => d.toISOString().split("T")[0];
+  const todayStr = fmt(today);
+
+  switch (preset) {
+    case "today":
+      return { from: todayStr, to: todayStr };
+    case "yesterday": {
+      const y = new Date(today);
+      y.setDate(y.getDate() - 1);
+      return { from: fmt(y), to: fmt(y) };
+    }
+    case "this_week": {
+      const d = new Date(today);
+      const day = d.getDay();
+      const diff = day === 0 ? 6 : day - 1; // Monday start
+      d.setDate(d.getDate() - diff);
+      return { from: fmt(d), to: todayStr };
+    }
+    case "past_week": {
+      const end = new Date(today);
+      const day = end.getDay();
+      const diff = day === 0 ? 6 : day - 1;
+      end.setDate(end.getDate() - diff - 1); // last Sunday
+      const start = new Date(end);
+      start.setDate(start.getDate() - 6);
+      return { from: fmt(start), to: fmt(end) };
+    }
+    case "this_month": {
+      const d = new Date(today.getFullYear(), today.getMonth(), 1);
+      return { from: fmt(d), to: todayStr };
+    }
+    case "all":
+    default:
+      return { from: "", to: "" };
+  }
+}
+
+const PRESETS: { key: DatePreset; label: string }[] = [
+  { key: "today", label: "Today" },
+  { key: "yesterday", label: "Yesterday" },
+  { key: "this_week", label: "This Week" },
+  { key: "past_week", label: "Last Week" },
+  { key: "this_month", label: "This Month" },
+  { key: "all", label: "All Time" },
+];
 
 const CounsellorDashboard = () => {
   const navigate = useNavigate();
@@ -49,19 +158,252 @@ const CounsellorDashboard = () => {
   const [stats, setStats] = useState<CounsellorStats[]>([]);
   const [overdue, setOverdue] = useState<OverdueFollowup[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"leaderboard" | "overdue">("leaderboard");
+  const [tab, setTab] = useState<"leaderboard" | "overdue" | "tat-defaults" | "breakdown">("leaderboard");
+  const [tatDefaults, setTatDefaults] = useState<any[]>([]);
+  const [teamDefaults, setTeamDefaults] = useState<any[]>([]);
+  const [breakdownData, setBreakdownData] = useState<CounsellorBreakdown[]>([]);
+  const [expandedCounsellor, setExpandedCounsellor] = useState<string | null>(null);
+
+  // Sort state for breakdown table
+  const [sortCol, setSortCol] = useState<BreakdownSortCol>("total");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  // Date filter state
+  const [datePreset, setDatePreset] = useState<DatePreset>("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [breakdownLoading, setBreakdownLoading] = useState(false);
+
+  // Disposition drill-down
+  const [dispLeads, setDispLeads] = useState<DispositionLead[]>([]);
+  const [dispLoading, setDispLoading] = useState(false);
+  const [activeDisp, setActiveDisp] = useState<{ counsellorId: string; disposition: string } | null>(null);
 
   useEffect(() => {
     (async () => {
-      const [statsRes, overdueRes] = await Promise.all([
+      const [statsRes, overdueRes, tatRes, teamRes] = await Promise.all([
         supabase.from("counsellor_performance_stats" as any).select("*"),
         supabase.from("overdue_followups" as any).select("*").limit(100),
+        supabase.from("counsellor_tat_defaults" as any).select("*"),
+        supabase.from("team_leader_defaults_summary" as any).select("*"),
       ]);
       if (statsRes.data) setStats(statsRes.data as any);
       if (overdueRes.data) setOverdue(overdueRes.data as any);
+      if (tatRes.data) setTatDefaults(tatRes.data as any);
+      if (teamRes.data) setTeamDefaults(teamRes.data as any);
+
+      await fetchBreakdown("", "");
       setLoading(false);
     })();
   }, []);
+
+  const fetchBreakdown = useCallback(async (from: string, to: string) => {
+    setBreakdownLoading(true);
+
+    const { data: roleData } = await supabase
+      .from("user_roles" as any)
+      .select("user_id, role")
+      .in("role", ["counsellor", "admission_head"]);
+
+    if (!roleData) { setBreakdownLoading(false); return; }
+
+    const counsellorUserIds = (roleData as any[]).map((r: any) => r.user_id);
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, user_id, display_name")
+      .in("user_id", counsellorUserIds);
+
+    if (!profiles || profiles.length === 0) { setBreakdownLoading(false); return; }
+
+    // Fetch leads with optional date filter on created_at
+    let leadsQ = supabase
+      .from("leads")
+      .select("id, counsellor_id, stage, assigned_at, first_contact_at, created_at")
+      .not("counsellor_id", "is", null);
+    if (from) leadsQ = leadsQ.gte("created_at", `${from}T00:00:00`);
+    if (to) leadsQ = leadsQ.lte("created_at", `${to}T23:59:59`);
+    const { data: leads } = await leadsQ;
+
+    // Fetch call logs with optional date filter
+    let callQ = supabase
+      .from("call_logs" as any)
+      .select("id, lead_id, disposition, user_id, called_at")
+      .order("called_at", { ascending: false });
+    if (from) callQ = callQ.gte("called_at", `${from}T00:00:00`);
+    if (to) callQ = callQ.lte("called_at", `${to}T23:59:59`);
+    const { data: callLogs } = await callQ;
+
+    // Fetch completed visits with optional date filter
+    let visitsQ = supabase
+      .from("campus_visits" as any)
+      .select("id, lead_id, scheduled_by, status, visit_date")
+      .eq("status", "completed");
+    if (from) visitsQ = visitsQ.gte("visit_date", `${from}T00:00:00`);
+    if (to) visitsQ = visitsQ.lte("visit_date", `${to}T23:59:59`);
+    const { data: completedVisits } = await visitsQ;
+
+    const calledLeadIds = new Set<string>();
+    if (callLogs) {
+      for (const cl of callLogs as any[]) calledLeadIds.add(cl.lead_id);
+    }
+
+    const breakdownMap = new Map<string, CounsellorBreakdown>();
+    for (const p of profiles as any[]) {
+      breakdownMap.set(p.id, {
+        counsellor_id: p.id,
+        counsellor_name: p.display_name || "Unknown",
+        user_id: p.user_id,
+        total: 0, new_lead: 0, called: 0, not_called: 0,
+        application_in_progress: 0, visit_scheduled: 0, admitted: 0,
+        rejected: 0, other_stages: 0, dispositions: {},
+        avg_response_hrs: null, call_rate: 0, conversion_rate: 0, visits_completed: 0,
+      });
+    }
+
+    const responseTimes = new Map<string, number[]>();
+    if (leads) {
+      for (const l of leads as any[]) {
+        const bd = breakdownMap.get(l.counsellor_id);
+        if (!bd) continue;
+        bd.total++;
+        if (l.stage === "new_lead") bd.new_lead++;
+        else if (["application_in_progress", "application_fee_paid", "application_submitted"].includes(l.stage)) bd.application_in_progress++;
+        else if (l.stage === "visit_scheduled") bd.visit_scheduled++;
+        else if (l.stage === "admitted") bd.admitted++;
+        else if (["rejected", "not_interested"].includes(l.stage)) bd.rejected++;
+        else bd.other_stages++;
+        if (calledLeadIds.has(l.id)) bd.called++;
+        else bd.not_called++;
+        if (l.assigned_at && l.first_contact_at) {
+          const hrs = (new Date(l.first_contact_at).getTime() - new Date(l.assigned_at).getTime()) / (1000 * 60 * 60);
+          if (hrs >= 0 && hrs < 720) {
+            if (!responseTimes.has(l.counsellor_id)) responseTimes.set(l.counsellor_id, []);
+            responseTimes.get(l.counsellor_id)!.push(hrs);
+          }
+        }
+      }
+    }
+
+    const userIdToProfileId = new Map((profiles as any[]).map((p: any) => [p.user_id, p.id]));
+    if (callLogs) {
+      for (const cl of callLogs as any[]) {
+        if (!cl.disposition) continue;
+        const profileId = userIdToProfileId.get(cl.user_id);
+        if (!profileId) continue;
+        const bd = breakdownMap.get(profileId);
+        if (!bd) continue;
+        bd.dispositions[cl.disposition] = (bd.dispositions[cl.disposition] || 0) + 1;
+      }
+    }
+
+    if (completedVisits) {
+      for (const v of completedVisits as any[]) {
+        const bd = breakdownMap.get(v.scheduled_by);
+        if (bd) bd.visits_completed++;
+      }
+    }
+
+    for (const [cid, bd] of breakdownMap) {
+      bd.call_rate = bd.total > 0 ? Math.round((bd.called / bd.total) * 100) : 0;
+      bd.conversion_rate = bd.total > 0 ? Math.round((bd.admitted / bd.total) * 100) : 0;
+      const times = responseTimes.get(cid);
+      if (times && times.length > 0) {
+        bd.avg_response_hrs = Math.round((times.reduce((a, b) => a + b, 0) / times.length) * 10) / 10;
+      }
+    }
+
+    setBreakdownData(Array.from(breakdownMap.values()).filter(b => b.total > 0));
+    setBreakdownLoading(false);
+  }, []);
+
+  // Apply date preset
+  const applyPreset = useCallback((preset: DatePreset) => {
+    setDatePreset(preset);
+    const { from, to } = getDateRange(preset);
+    setDateFrom(from);
+    setDateTo(to);
+    setExpandedCounsellor(null);
+    setActiveDisp(null);
+    fetchBreakdown(from, to);
+  }, [fetchBreakdown]);
+
+  // Apply custom date range
+  const applyCustomDate = useCallback(() => {
+    setDatePreset("all"); // deselect presets
+    setExpandedCounsellor(null);
+    setActiveDisp(null);
+    fetchBreakdown(dateFrom, dateTo);
+  }, [dateFrom, dateTo, fetchBreakdown]);
+
+  // Sorted breakdown data
+  const sortedBreakdown = useMemo(() => {
+    const data = [...breakdownData];
+    data.sort((a, b) => {
+      let aVal: number | string = 0;
+      let bVal: number | string = 0;
+      if (sortCol === "counsellor_name") {
+        aVal = a.counsellor_name.toLowerCase();
+        bVal = b.counsellor_name.toLowerCase();
+      } else if (sortCol === "avg_response_hrs") {
+        aVal = a.avg_response_hrs ?? 9999;
+        bVal = b.avg_response_hrs ?? 9999;
+      } else {
+        aVal = a[sortCol] as number;
+        bVal = b[sortCol] as number;
+      }
+      if (aVal < bVal) return sortDir === "asc" ? -1 : 1;
+      if (aVal > bVal) return sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+    return data;
+  }, [breakdownData, sortCol, sortDir]);
+
+  const handleSort = (col: BreakdownSortCol) => {
+    if (sortCol === col) {
+      setSortDir(d => d === "asc" ? "desc" : "asc");
+    } else {
+      setSortCol(col);
+      setSortDir("desc");
+    }
+  };
+
+  // Fetch leads for a specific disposition + counsellor
+  const fetchDispositionLeads = useCallback(async (counsellorUserId: string, counsellorId: string, disposition: string) => {
+    // Toggle off if same disposition clicked again
+    if (activeDisp?.counsellorId === counsellorId && activeDisp?.disposition === disposition) {
+      setActiveDisp(null);
+      setDispLeads([]);
+      return;
+    }
+    setActiveDisp({ counsellorId, disposition });
+    setDispLoading(true);
+
+    // Get lead IDs with this disposition from this counsellor
+    let callQ = supabase
+      .from("call_logs" as any)
+      .select("lead_id")
+      .eq("user_id", counsellorUserId)
+      .eq("disposition", disposition);
+    if (dateFrom) callQ = callQ.gte("called_at", `${dateFrom}T00:00:00`);
+    if (dateTo) callQ = callQ.lte("called_at", `${dateTo}T23:59:59`);
+    const { data: callData } = await callQ;
+
+    if (!callData || callData.length === 0) {
+      setDispLeads([]);
+      setDispLoading(false);
+      return;
+    }
+
+    const leadIds = [...new Set((callData as any[]).map((c: any) => c.lead_id))];
+    const { data: leads } = await supabase
+      .from("leads")
+      .select("id, name, phone, stage, created_at")
+      .in("id", leadIds.slice(0, 100))
+      .order("created_at", { ascending: false });
+
+    setDispLeads((leads as DispositionLead[]) || []);
+    setDispLoading(false);
+  }, [activeDisp, dateFrom, dateTo]);
 
   // Aggregate totals
   const totals = useMemo(() => stats.reduce((acc, s) => ({
@@ -74,7 +416,6 @@ const CounsellorDashboard = () => {
     leads: acc.leads + Number(s.leads_assigned),
   }), { calls: 0, whatsapps: 0, followups: 0, visits: 0, conversions: 0, overdue: 0, leads: 0 }), [stats]);
 
-  // Rank counsellors by composite score
   const ranked = useMemo(() => {
     return [...stats]
       .map(s => ({
@@ -83,6 +424,14 @@ const CounsellorDashboard = () => {
       }))
       .sort((a, b) => b.score - a.score);
   }, [stats]);
+
+  const breakdownTotals = useMemo(() => breakdownData.reduce((acc, b) => ({
+    total: acc.total + b.total,
+    new_lead: acc.new_lead + b.new_lead,
+    called: acc.called + b.called,
+    not_called: acc.not_called + b.not_called,
+    admitted: acc.admitted + b.admitted,
+  }), { total: 0, new_lead: 0, called: 0, not_called: 0, admitted: 0 }), [breakdownData]);
 
   if (loading) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
@@ -96,6 +445,23 @@ const CounsellorDashboard = () => {
     { label: "Conversions", value: totals.conversions, icon: UserCheck, color: "bg-emerald-100 dark:bg-emerald-900/30", iconColor: "text-emerald-600" },
     { label: "Overdue Follow-ups", value: totals.overdue, icon: AlertTriangle, color: totals.overdue > 0 ? "bg-red-100 dark:bg-red-900/30" : "bg-muted", iconColor: totals.overdue > 0 ? "text-red-600" : "text-muted-foreground" },
   ];
+
+  // Sortable column header renderer
+  const SortHeader = ({ col, label, className }: { col: BreakdownSortCol; label: string; className?: string }) => (
+    <th
+      className={`px-3 py-3 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors ${className || "text-center"}`}
+      onClick={() => handleSort(col)}
+    >
+      <span className="inline-flex items-center gap-0.5">
+        {label}
+        {sortCol === col ? (
+          sortDir === "desc" ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />
+        ) : (
+          <ArrowUpDown className="h-2.5 w-2.5 opacity-40" />
+        )}
+      </span>
+    </th>
+  );
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -120,22 +486,39 @@ const CounsellorDashboard = () => {
       </div>
 
       {/* Tab toggle */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 overflow-x-auto">
         <div className="flex rounded-xl border border-input bg-card p-0.5">
           <button
             onClick={() => setTab("leaderboard")}
-            className={`rounded-lg px-4 py-1.5 text-xs font-medium transition-colors ${tab === "leaderboard" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+            className={`rounded-lg px-4 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${tab === "leaderboard" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
           >
             Leaderboard
           </button>
           <button
+            onClick={() => setTab("breakdown")}
+            className={`rounded-lg px-4 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${tab === "breakdown" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            Lead Breakdown
+          </button>
+          <button
             onClick={() => setTab("overdue")}
-            className={`rounded-lg px-4 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5 ${tab === "overdue" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+            className={`rounded-lg px-4 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${tab === "overdue" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
           >
             Overdue Follow-ups
             {overdue.length > 0 && (
               <span className={`flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-bold ${tab === "overdue" ? "bg-white/20 text-primary-foreground" : "bg-red-500 text-white"}`}>
                 {overdue.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setTab("tat-defaults")}
+            className={`rounded-lg px-4 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${tab === "tat-defaults" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            TAT Defaults
+            {tatDefaults.filter(d => d.total_defaults > 0).length > 0 && (
+              <span className={`flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-bold ${tab === "tat-defaults" ? "bg-white/20 text-primary-foreground" : "bg-red-500 text-white"}`}>
+                {tatDefaults.reduce((s: number, d: any) => s + d.total_defaults, 0)}
               </span>
             )}
           </button>
@@ -199,7 +582,298 @@ const CounsellorDashboard = () => {
             </table>
           </CardContent>
         </Card>
-      ) : (
+
+      ) : tab === "breakdown" ? (
+        <div className="space-y-4">
+          {/* Date filter bar */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Quick presets */}
+            <div className="flex rounded-lg border border-input bg-card p-0.5">
+              {PRESETS.map((p) => (
+                <button
+                  key={p.key}
+                  onClick={() => applyPreset(p.key)}
+                  className={`rounded-md px-3 py-1 text-[11px] font-medium transition-colors whitespace-nowrap ${
+                    datePreset === p.key && !((datePreset === "all" && (dateFrom || dateTo)))
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Custom date range */}
+            <div className="flex items-center gap-1.5 text-xs">
+              <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="rounded-lg border border-input bg-card px-2 py-1 text-xs text-foreground w-[120px]"
+              />
+              <span className="text-muted-foreground">to</span>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="rounded-lg border border-input bg-card px-2 py-1 text-xs text-foreground w-[120px]"
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2.5 text-[11px]"
+                onClick={applyCustomDate}
+              >
+                Apply
+              </Button>
+            </div>
+
+            {breakdownLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+          </div>
+
+          {/* Breakdown summary cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            {[
+              { label: "Total Assigned", value: breakdownTotals.total, icon: Users, color: "bg-blue-100 dark:bg-blue-900/30", iconColor: "text-blue-600" },
+              { label: "New / Untouched", value: breakdownTotals.new_lead, icon: Clock, color: "bg-amber-100 dark:bg-amber-900/30", iconColor: "text-amber-600" },
+              { label: "Called", value: breakdownTotals.called, icon: PhoneCall, color: "bg-emerald-100 dark:bg-emerald-900/30", iconColor: "text-emerald-600" },
+              { label: "Not Called", value: breakdownTotals.not_called, icon: PhoneOff, color: breakdownTotals.not_called > 0 ? "bg-red-100 dark:bg-red-900/30" : "bg-muted", iconColor: breakdownTotals.not_called > 0 ? "text-red-600" : "text-muted-foreground" },
+              { label: "Admitted", value: breakdownTotals.admitted, icon: UserCheck, color: "bg-emerald-100 dark:bg-emerald-900/30", iconColor: "text-emerald-600" },
+            ].map((c) => (
+              <Card key={c.label} className="border-border/60 shadow-none">
+                <CardContent className="p-3">
+                  <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${c.color} mb-1.5`}>
+                    <c.icon className={`h-3.5 w-3.5 ${c.iconColor}`} />
+                  </div>
+                  <p className="text-xl font-bold text-foreground">{c.value}</p>
+                  <p className="text-[10px] text-muted-foreground">{c.label}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Main breakdown table */}
+          <Card className="border-border/60 shadow-none overflow-hidden">
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/50">
+                      <SortHeader col="counsellor_name" label="Counsellor" className="text-left min-w-[140px]" />
+                      <SortHeader col="total" label="Assigned" />
+                      <SortHeader col="new_lead" label="New" />
+                      <SortHeader col="called" label="Called" />
+                      <SortHeader col="not_called" label="Not Called" />
+                      <SortHeader col="application_in_progress" label="In Progress" />
+                      <SortHeader col="visit_scheduled" label="Visit Sched." />
+                      <SortHeader col="visits_completed" label="Visits Done" />
+                      <SortHeader col="admitted" label="Admitted" />
+                      <SortHeader col="rejected" label="Rejected" />
+                      <SortHeader col="call_rate" label="Call Rate" />
+                      <SortHeader col="conversion_rate" label="Conv. Rate" />
+                      <SortHeader col="avg_response_hrs" label="Avg Response" />
+                      <th className="px-3 py-3 w-8"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedBreakdown.map((b) => {
+                      const isExpanded = expandedCounsellor === b.counsellor_id;
+                      const hasDispositions = Object.keys(b.dispositions).length > 0;
+                      const isDispActive = activeDisp?.counsellorId === b.counsellor_id;
+
+                      return (
+                        <>
+                          <tr
+                            key={b.counsellor_id}
+                            className={`border-b border-border/40 hover:bg-muted/20 transition-colors ${hasDispositions ? "cursor-pointer" : ""}`}
+                            onClick={() => {
+                              if (hasDispositions) {
+                                setExpandedCounsellor(isExpanded ? null : b.counsellor_id);
+                                if (isExpanded) { setActiveDisp(null); setDispLeads([]); }
+                              }
+                            }}
+                          >
+                            <td className="px-3 py-3 font-medium text-foreground">{b.counsellor_name}</td>
+                            <td className="px-3 py-3 text-center font-bold text-foreground">{b.total}</td>
+                            <td className="px-3 py-3 text-center">
+                              <span className={`text-xs font-semibold ${b.new_lead > 0 ? "text-amber-600" : "text-muted-foreground"}`}>{b.new_lead}</span>
+                            </td>
+                            <td className="px-3 py-3 text-center">
+                              <span className="text-xs font-semibold text-emerald-600">{b.called}</span>
+                            </td>
+                            <td className="px-3 py-3 text-center">
+                              {b.not_called > 0 ? (
+                                <Badge className="bg-red-100 text-red-700 border-0 text-[10px] font-bold">{b.not_called}</Badge>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">0</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-3 text-center text-xs text-muted-foreground">{b.application_in_progress}</td>
+                            <td className="px-3 py-3 text-center text-xs text-muted-foreground">{b.visit_scheduled}</td>
+                            <td className="px-3 py-3 text-center text-xs text-muted-foreground">{b.visits_completed}</td>
+                            <td className="px-3 py-3 text-center">
+                              <span className="text-xs font-bold text-primary">{b.admitted}</span>
+                            </td>
+                            <td className="px-3 py-3 text-center text-xs text-muted-foreground">{b.rejected}</td>
+                            <td className="px-3 py-3 text-center">
+                              <span className={`text-xs font-bold ${b.call_rate >= 80 ? "text-emerald-600" : b.call_rate >= 50 ? "text-amber-600" : "text-red-600"}`}>
+                                {b.call_rate}%
+                              </span>
+                            </td>
+                            <td className="px-3 py-3 text-center">
+                              <span className={`text-xs font-bold ${b.conversion_rate >= 10 ? "text-emerald-600" : b.conversion_rate >= 5 ? "text-amber-600" : "text-muted-foreground"}`}>
+                                {b.conversion_rate}%
+                              </span>
+                            </td>
+                            <td className="px-3 py-3 text-center">
+                              {b.avg_response_hrs !== null ? (
+                                <span className={`text-xs font-medium ${b.avg_response_hrs <= 2 ? "text-emerald-600" : b.avg_response_hrs <= 6 ? "text-amber-600" : "text-red-600"}`}>
+                                  {b.avg_response_hrs < 1 ? `${Math.round(b.avg_response_hrs * 60)}m` : `${b.avg_response_hrs}h`}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-muted-foreground">—</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-3 text-center">
+                              {hasDispositions && (
+                                isExpanded
+                                  ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground mx-auto" />
+                                  : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground mx-auto" />
+                              )}
+                            </td>
+                          </tr>
+                          {/* Expanded disposition row */}
+                          {isExpanded && hasDispositions && (
+                            <tr key={`${b.counsellor_id}-disp`} className="border-b border-border/40 bg-muted/20">
+                              <td colSpan={14} className="px-3 py-3">
+                                <div className="pl-2">
+                                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                                    Call Disposition Breakdown — click to view leads
+                                  </p>
+                                  <div className="flex flex-wrap gap-2">
+                                    {Object.entries(b.dispositions)
+                                      .sort(([, a], [, b]) => b - a)
+                                      .map(([disp, count]) => {
+                                        const isActive = activeDisp?.counsellorId === b.counsellor_id && activeDisp?.disposition === disp;
+                                        return (
+                                          <button
+                                            key={disp}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              fetchDispositionLeads(b.user_id, b.counsellor_id, disp);
+                                            }}
+                                            className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all ${
+                                              isActive
+                                                ? "ring-2 ring-primary ring-offset-1 shadow-sm"
+                                                : "hover:ring-1 hover:ring-border"
+                                            } ${DISPOSITION_COLORS[disp] || "bg-muted text-muted-foreground"}`}
+                                          >
+                                            <span className="capitalize">{DISPOSITION_LABELS[disp] || disp.replace(/_/g, " ")}</span>
+                                            <span className="font-bold">{count}</span>
+                                          </button>
+                                        );
+                                      })}
+                                  </div>
+                                  {/* Visual bar */}
+                                  <div className="mt-2 flex h-2 rounded-full overflow-hidden bg-muted">
+                                    {(() => {
+                                      const totalDisp = Object.values(b.dispositions).reduce((a, b) => a + b, 0);
+                                      const barColors: Record<string, string> = {
+                                        interested: "bg-emerald-500", not_interested: "bg-red-400",
+                                        ineligible: "bg-gray-400", not_answered: "bg-amber-400",
+                                        call_back: "bg-blue-400", wrong_number: "bg-pink-400",
+                                        do_not_contact: "bg-red-600", voicemail: "bg-purple-400",
+                                        busy: "bg-orange-400",
+                                      };
+                                      return Object.entries(b.dispositions)
+                                        .sort(([, a], [, b]) => b - a)
+                                        .map(([disp, count]) => (
+                                          <div
+                                            key={disp}
+                                            className={`${barColors[disp] || "bg-gray-300"} transition-all`}
+                                            style={{ width: `${(count / totalDisp) * 100}%` }}
+                                            title={`${DISPOSITION_LABELS[disp] || disp}: ${count}`}
+                                          />
+                                        ));
+                                    })()}
+                                  </div>
+
+                                  {/* Disposition leads list */}
+                                  {isDispActive && (
+                                    <div className="mt-3 rounded-lg border border-border bg-card overflow-hidden">
+                                      <div className="px-3 py-2 bg-muted/40 border-b border-border flex items-center justify-between">
+                                        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+                                          {DISPOSITION_LABELS[activeDisp!.disposition] || activeDisp!.disposition} leads — {b.counsellor_name}
+                                        </span>
+                                        <span className="text-[10px] text-muted-foreground">{dispLeads.length} leads</span>
+                                      </div>
+                                      {dispLoading ? (
+                                        <div className="flex items-center justify-center py-6">
+                                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                                        </div>
+                                      ) : dispLeads.length === 0 ? (
+                                        <div className="px-3 py-4 text-center text-xs text-muted-foreground">No leads found</div>
+                                      ) : (
+                                        <div className="max-h-[250px] overflow-y-auto">
+                                          <table className="w-full text-xs">
+                                            <thead>
+                                              <tr className="border-b border-border/50 bg-muted/20">
+                                                <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Name</th>
+                                                <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Phone</th>
+                                                <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Stage</th>
+                                                <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Created</th>
+                                                <th className="px-3 py-1.5 w-8"></th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {dispLeads.map((lead) => (
+                                                <tr
+                                                  key={lead.id}
+                                                  className="border-b border-border/30 hover:bg-muted/30 cursor-pointer"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    window.open(`/admissions/${lead.id}`, "_blank");
+                                                  }}
+                                                >
+                                                  <td className="px-3 py-2 font-medium text-foreground">{lead.name}</td>
+                                                  <td className="px-3 py-2 text-muted-foreground">{lead.phone}</td>
+                                                  <td className="px-3 py-2">
+                                                    <Badge variant="outline" className="text-[9px]">{STAGE_LABELS[lead.stage] || lead.stage}</Badge>
+                                                  </td>
+                                                  <td className="px-3 py-2 text-muted-foreground">
+                                                    {new Date(lead.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                                                  </td>
+                                                  <td className="px-3 py-2">
+                                                    <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                                                  </td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </>
+                      );
+                    })}
+                    {sortedBreakdown.length === 0 && (
+                      <tr><td colSpan={14} className="px-4 py-8 text-center text-sm text-muted-foreground">No lead data available</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+      ) : tab === "overdue" ? (
         <Card className="border-border/60 shadow-none overflow-hidden">
           <CardContent className="p-0">
             {overdue.length === 0 ? (
@@ -255,7 +929,61 @@ const CounsellorDashboard = () => {
             )}
           </CardContent>
         </Card>
-      )}
+      ) : tab === "tat-defaults" ? (
+        <Card className="border-border/60 shadow-none overflow-hidden">
+          <CardContent className="p-0">
+            {tatDefaults.filter(d => d.total_defaults > 0).length === 0 ? (
+              <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+                All counsellors are on track — no TAT defaults
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/50">
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Counsellor</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">New Leads Overdue</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Overdue Follow-ups</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">App Check-ins Due</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Total Defaults</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tatDefaults
+                    .filter(d => d.total_defaults > 0)
+                    .sort((a: any, b: any) => b.total_defaults - a.total_defaults)
+                    .map((d: any) => (
+                    <tr key={d.profile_id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                      <td className="px-4 py-3 font-medium text-foreground">{d.counsellor_name}</td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full text-xs font-bold ${d.new_leads_overdue > 0 ? "bg-red-100 text-red-700" : "text-muted-foreground"}`}>
+                          {d.new_leads_overdue}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full text-xs font-bold ${d.overdue_followups > 0 ? "bg-amber-100 text-amber-700" : "text-muted-foreground"}`}>
+                          {d.overdue_followups}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full text-xs font-bold ${d.app_checkins_overdue > 0 ? "bg-orange-100 text-orange-700" : "text-muted-foreground"}`}>
+                          {d.app_checkins_overdue}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full text-xs font-bold ${
+                          d.total_defaults > 5 ? "bg-red-500 text-white" : d.total_defaults > 0 ? "bg-red-100 text-red-700" : "text-muted-foreground"
+                        }`}>
+                          {d.total_defaults}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 };

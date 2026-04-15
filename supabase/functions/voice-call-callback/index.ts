@@ -263,7 +263,7 @@ Deno.serve(async (req) => {
       // Check ai_call_records table for calls without recordings
       const { data: pendingCalls } = await db
         .from("ai_call_records")
-        .select("id, lead_id, call_uuid, plivo_call_uuid")
+        .select("id, lead_id, call_uuid, plivo_call_uuid, status")
         .is("recording_url", null)
         .in("status", ["initiated", "completed", "in_progress"])
         .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
@@ -273,26 +273,58 @@ Deno.serve(async (req) => {
       const GOOGLE_AI_KEY = Deno.env.get("GOOGLE_AI_API_KEY") || "";
 
       for (const call of pendingCalls || []) {
-        const uuid = call.plivo_call_uuid || call.call_uuid;
+        let uuid = call.plivo_call_uuid || "";
         if (!uuid) {
-          // No UUID — try to find recording by lead's ai_call_uuid
+          // No plivo UUID — try to find it from the lead's ai_call_uuid
           const { data: lead } = await db.from("leads").select("ai_call_uuid").eq("id", call.lead_id).maybeSingle();
           if (lead?.ai_call_uuid) {
-            const recording = await fetchPlivoRecording(lead.ai_call_uuid, PLIVO_AUTH_ID, PLIVO_AUTH_TOKEN);
-            if (recording) {
-              await db.from("ai_call_records").update({
-                recording_url: recording.url,
-                duration_seconds: Math.round(recording.duration),
-                plivo_call_uuid: lead.ai_call_uuid,
-                status: "completed",
-                completed_at: new Date().toISOString(),
-              }).eq("id", call.id);
-              await db.from("leads").update({ ai_recording_url: recording.url, ai_call_duration_seconds: Math.round(recording.duration) } as any).eq("id", call.lead_id);
-              console.log(`Found recording via lead.ai_call_uuid for call ${call.id}`);
-            }
+            uuid = lead.ai_call_uuid;
+            // Update the record with the plivo UUID
+            await db.from("ai_call_records").update({ plivo_call_uuid: uuid }).eq("id", call.id);
+          }
+        }
+
+        if (!uuid) {
+          // Still no UUID — check if call is old enough to mark as failed
+          // (if initiated > 10 min ago with no plivo UUID, it likely never connected)
+          if (call.status === "initiated") {
+            await db.from("ai_call_records").update({
+              status: "no_answer",
+              completed_at: new Date().toISOString(),
+            }).eq("id", call.id);
+            console.log(`Marked stale call ${call.id} as no_answer (no plivo UUID found)`);
           }
           continue;
         }
+
+        // First check Plivo call status to update the record status
+        if (call.status === "initiated") {
+          try {
+            const statusRes = await fetch(
+              `https://api.plivo.com/v1/Account/${PLIVO_AUTH_ID}/Call/${uuid}/`,
+              { headers: { Authorization: "Basic " + btoa(`${PLIVO_AUTH_ID}:${PLIVO_AUTH_TOKEN}`) } }
+            );
+            if (statusRes.ok) {
+              const statusData = await statusRes.json();
+              const plivoStatus = (statusData.call_status || statusData.status || "").toLowerCase();
+              if (plivoStatus && plivoStatus !== "initiated" && plivoStatus !== "ringing") {
+                const statusMap: Record<string, string> = {
+                  completed: "completed", busy: "busy", "no-answer": "no_answer",
+                  failed: "failed", cancel: "no_answer",
+                };
+                await db.from("ai_call_records").update({
+                  status: statusMap[plivoStatus] || plivoStatus,
+                  duration_seconds: parseInt(statusData.bill_duration || statusData.duration || "0"),
+                  completed_at: new Date().toISOString(),
+                }).eq("id", call.id);
+                console.log(`Updated call ${call.id} status from initiated → ${plivoStatus}`);
+              }
+            }
+          } catch (e: any) {
+            console.error(`Plivo status check failed for ${uuid}:`, e.message);
+          }
+        }
+
         const recording = await fetchPlivoRecording(uuid, PLIVO_AUTH_ID, PLIVO_AUTH_TOKEN);
         if (recording) {
           // Update the specific call record
