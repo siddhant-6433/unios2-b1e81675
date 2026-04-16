@@ -29,6 +29,8 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   counsellor_lead_assigned: { name: "counsellor_lead_assigned", params: ["counsellor_name", "lead_name", "lead_phone_last4", "sla_hours"] },
   counsellor_sla_warning: { name: "counsellor_sla_warning", params: ["lead_name", "hours_remaining"] },
   counsellor_lead_reclaimed: { name: "counsellor_lead_reclaimed", params: ["lead_name", "course_name"] },
+  // Team leader TAT defaults
+  team_leader_defaults: { name: "team_leader_defaults_report", params: ["leader_name", "total_count", "summary"] },
   counsellor_visit_confirmation: { name: "counsellor_visit_confirmation", params: ["lead_name", "visit_date", "campus_name"] },
   counsellor_followup_overdue: { name: "counsellor_followup_overdue", params: ["lead_name", "followup_date"] },
 };

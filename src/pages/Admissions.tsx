@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState, useEffect, useRef } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCampus } from "@/contexts/CampusContext";
@@ -9,7 +9,7 @@ import {
   Phone, MessageSquare, ChevronRight, Plus, Search, Filter, Upload,
   Eye, Calendar, MoreHorizontal, Users, TrendingUp, ArrowUpRight,
   Bot, UserCheck, MapPin, FileText, CheckCircle, XCircle, Clock, Loader2,
-  Trash2, ArrowRightLeft, Send, Flag
+  Trash2, ArrowRightLeft, Send, Flag, Inbox
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -22,8 +22,10 @@ import { BulkWhatsAppDialog } from "@/components/admissions/BulkWhatsAppDialog";
 import { LeadTemperatureBadge } from "@/components/admissions/LeadTemperatureBadge";
 import { SeatMatrix } from "@/components/admissions/SeatMatrix";
 import { PaymentReconciliation } from "@/components/admissions/PaymentReconciliation";
+import { ActionCenterView } from "@/components/admissions/ActionCenterView";
 import { InactivityAlertBanner } from "@/components/admissions/InactivityAlertBanner";
 import { CounsellorOnboarding } from "@/components/onboarding/CounsellorOnboarding";
+import { useTatDefaults } from "@/hooks/useTatDefaults";
 import { LEAD_SOURCES, SOURCE_LABELS, SOURCE_BADGE_COLORS } from "@/config/leadSources";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -141,11 +143,15 @@ function AppProgressBadge({ pct, paymentStatus }: { pct: number | null | undefin
 
 const Admissions = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { role, profile } = useAuth();
   const { selectedCampusId } = useCampus();
   const isTeamLeader = useIsTeamLeader();
   const { toast } = useToast();
-  const [view, setView] = useState<"pipeline" | "list" | "seats" | "payments">("pipeline");
+  const [view, setView] = useState<"action_center" | "pipeline" | "list" | "seats" | "payments">(
+    role === "counsellor" ? "action_center" : "pipeline"
+  );
+  const [actionCounsellorFilter, setActionCounsellorFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
@@ -175,8 +181,79 @@ const Admissions = () => {
   const [submittingRequest, setSubmittingRequest] = useState(false);
 
   const isSuperAdmin = role === "super_admin";
+  const { myDefaults } = useTatDefaults();
   const canTransfer = isSuperAdmin || isTeamLeader;
   const canFilterByCounsellor = role === "super_admin" || role === "admission_head" || role === "campus_admin" || isTeamLeader;
+  const [notCalledIds, setNotCalledIds] = useState<Set<string> | null>(null);
+  const [pendingNotCalledFilter, setPendingNotCalledFilter] = useState<string | null>(null);
+
+  // Read URL params on mount — store in ref to survive re-renders
+  const urlParamsRead = useRef(false);
+  useEffect(() => {
+    if (urlParamsRead.current) return;
+    const counsellorParam = searchParams.get("counsellor");
+    const notCalledParam = searchParams.get("not_called");
+    if (!counsellorParam) return;
+    urlParamsRead.current = true;
+    setCounsellorFilter(counsellorParam);
+    setView("list");
+    if (notCalledParam === "true") {
+      setPendingNotCalledFilter(counsellorParam);
+    }
+  }, [searchParams]);
+
+  // Apply not-called filter AFTER leads finish loading
+  useEffect(() => {
+    if (!pendingNotCalledFilter || loading) return;
+
+    const cid = pendingNotCalledFilter;
+    setPendingNotCalledFilter(null);
+
+    (async () => {
+      // Get counsellor's active leads
+      const { data: counsellorLeads, error: clErr } = await supabase
+        .from("leads")
+        .select("id")
+        .eq("counsellor_id", cid);
+
+      console.log("Not-called filter: counsellor leads", counsellorLeads?.length, "error:", clErr?.message);
+      if (!counsellorLeads?.length) return;
+
+      // Filter out terminal stages client-side (avoids PostgREST syntax issues)
+      const activeIds = counsellorLeads
+        .map((l: any) => l.id);
+
+      // Find which have call logs
+      const { data: calledLeads } = await supabase
+        .from("call_logs" as any)
+        .select("lead_id")
+        .in("lead_id", activeIds);
+
+      const calledSet = new Set((calledLeads || []).map((c: any) => c.lead_id));
+      const notCalledArray = activeIds.filter((id: string) => !calledSet.has(id));
+      console.log("Not-called filter: total", activeIds.length, "called", calledSet.size, "not-called", notCalledArray.length);
+
+      if (notCalledArray.length === 0) return;
+
+      // Load missing leads
+      const existingIds = new Set(leads.map(l => l.id));
+      const missingIds = notCalledArray.filter((id: string) => !existingIds.has(id));
+      if (missingIds.length > 0) {
+        const { data: extraLeads } = await supabase
+          .from("leads")
+          .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)")
+          .in("id", missingIds);
+        if (extraLeads) {
+          setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({
+            ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—",
+            counsellor_name: l.profiles?.display_name || "Unassigned",
+          }))]);
+        }
+      }
+
+      setNotCalledIds(new Set(notCalledArray));
+    })();
+  }, [pendingNotCalledFilter, loading]);
 
   const fetchLeads = async () => {
     setLoading(true);
@@ -349,7 +426,8 @@ const Admissions = () => {
     const matchesVisit = !visitLeadIds || visitLeadIds.has(l.id);
     const matchesCounsellor = counsellorFilter === "all"
       || (counsellorFilter === "unassigned" ? !l.counsellor_id : l.counsellor_id === counsellorFilter);
-    return matchesSearch && matchesStage && matchesSource && matchesRole && matchesTemp && matchesInactive && matchesFollowup && matchesVisit && matchesCounsellor;
+    const matchesNotCalled = !notCalledIds || notCalledIds.has(l.id);
+    return matchesSearch && matchesStage && matchesSource && matchesRole && matchesTemp && matchesInactive && matchesFollowup && matchesVisit && matchesCounsellor && matchesNotCalled;
   });
 
   const filteredCount = filtered.length;
@@ -463,9 +541,27 @@ const Admissions = () => {
               <Send className="h-4 w-4" /> WhatsApp
             </Button>
             {canTransfer && (
-              <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowTransfer(true)}>
-                <ArrowRightLeft className="h-4 w-4" /> Transfer
-              </Button>
+              <>
+                <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowTransfer(true)}>
+                  <ArrowRightLeft className="h-4 w-4" /> Transfer
+                </Button>
+                <Button variant="outline" size="sm" className="gap-2" onClick={async () => {
+                  const ids = Array.from(selectedIds);
+                  const { error } = await supabase
+                    .from("leads")
+                    .update({ counsellor_id: null } as any)
+                    .in("id", ids);
+                  if (error) {
+                    toast({ title: "Error", description: error.message, variant: "destructive" });
+                  } else {
+                    toast({ title: "Moved to bucket", description: `${ids.length} lead${ids.length > 1 ? "s" : ""} unassigned and moved to lead buckets.` });
+                    setSelectedIds(new Set());
+                    fetchLeads();
+                  }
+                }}>
+                  <Inbox className="h-4 w-4" /> Move to Bucket
+                </Button>
+              </>
             )}
             {isSuperAdmin ? (
               <Button variant="destructive" size="sm" className="gap-2" onClick={() => setShowDeleteConfirm(true)}>
@@ -481,6 +577,8 @@ const Admissions = () => {
         </div>
       )}
 
+      {/* Stat cards & filter banners — hidden when Action Center is active */}
+      {view !== "action_center" && <>
       {/* Row 1: Lead Data */}
       <div>
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Leads</p>
@@ -511,14 +609,29 @@ const Admissions = () => {
                   if (visitLeadIds) { setVisitLeadIds(null); setPage(1); return; }
                   const todayStart = new Date().toISOString().slice(0, 10);
                   const { data } = await supabase.from("campus_visits").select("lead_id").gte("visit_date", todayStart).in("status", ["scheduled", "confirmed"]).limit(500);
-                  const ids = new Set<string>((data || []).map((r: any) => r.lead_id));
-                  setVisitLeadIds(ids);
+                  const ids = [...new Set<string>((data || []).map((r: any) => r.lead_id))];
+                  // Fetch these specific leads if not already loaded
+                  const missingIds = ids.filter(id => !leads.find(l => l.id === id));
+                  if (missingIds.length > 0) {
+                    const { data: extraLeads } = await supabase
+                      .from("leads")
+                      .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)")
+                      .in("id", missingIds);
+                    if (extraLeads) {
+                      setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({
+                        ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—",
+                        counsellor_name: l.profiles?.display_name || "Unassigned",
+                      }))]);
+                    }
+                  }
+                  setVisitLeadIds(new Set(ids));
                   setFollowupLeadIds(null);
                   setInactiveIds(null);
                   setStageFilter("all");
                   setSourceFilter("all");
                   setRoleFilter("all");
                   setTempFilter("all");
+                  setCounsellorFilter("all");
                   setSearch("");
                   setView("list");
                   setPage(1);
@@ -527,14 +640,28 @@ const Admissions = () => {
                 if (stat.action === "completed_visits") {
                   if (visitLeadIds) { setVisitLeadIds(null); setPage(1); return; }
                   const { data } = await supabase.from("campus_visits").select("lead_id").eq("status", "completed").limit(500);
-                  const ids = new Set<string>((data || []).map((r: any) => r.lead_id));
-                  setVisitLeadIds(ids);
+                  const ids = [...new Set<string>((data || []).map((r: any) => r.lead_id))];
+                  const missingIds = ids.filter(id => !leads.find(l => l.id === id));
+                  if (missingIds.length > 0) {
+                    const { data: extraLeads } = await supabase
+                      .from("leads")
+                      .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)")
+                      .in("id", missingIds);
+                    if (extraLeads) {
+                      setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({
+                        ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—",
+                        counsellor_name: l.profiles?.display_name || "Unassigned",
+                      }))]);
+                    }
+                  }
+                  setVisitLeadIds(new Set(ids));
                   setFollowupLeadIds(null);
                   setInactiveIds(null);
                   setStageFilter("all");
                   setSourceFilter("all");
                   setRoleFilter("all");
                   setTempFilter("all");
+                  setCounsellorFilter("all");
                   setSearch("");
                   setView("list");
                   setPage(1);
@@ -609,6 +736,30 @@ const Admissions = () => {
         campusId={selectedCampusId}
       />
 
+      {/* TAT Defaults Banner — visible to counsellors with pending tasks */}
+      {myDefaults && myDefaults.total_defaults > 0 && (
+        <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/10 dark:border-red-900/30 px-4 py-3">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-100 dark:bg-red-900/30">
+            <Clock className="h-4 w-4 text-red-600" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-red-800 dark:text-red-300">
+              You have {myDefaults.total_defaults} pending action{myDefaults.total_defaults > 1 ? "s" : ""}
+            </p>
+            <p className="text-xs text-red-600 dark:text-red-400">
+              {[
+                myDefaults.new_leads_overdue > 0 && `${myDefaults.new_leads_overdue} new leads to contact`,
+                myDefaults.overdue_followups > 0 && `${myDefaults.overdue_followups} overdue follow-ups`,
+                myDefaults.app_checkins_overdue > 0 && `${myDefaults.app_checkins_overdue} application check-ins`,
+              ].filter(Boolean).join(" · ")}
+            </p>
+          </div>
+          <Button size="sm" variant="outline" className="border-red-300 text-red-700 hover:bg-red-100 shrink-0" onClick={() => navigate("/counsellor-dashboard?tab=tat-defaults")}>
+            View Details
+          </Button>
+        </div>
+      )}
+
       {inactiveIds && (
         <div className="flex items-center gap-2 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40 px-3 py-2 text-sm">
           <Clock className="h-3.5 w-3.5 text-amber-600" />
@@ -654,59 +805,88 @@ const Admissions = () => {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[200px] max-w-sm">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input type="text" placeholder="Search by name, phone, email, course, campus..." value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20" />
+      {notCalledIds && (
+        <div className="flex items-center gap-2 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800/40 px-3 py-2 text-sm">
+          <Phone className="h-3.5 w-3.5 text-red-600" />
+          <span className="font-medium text-red-800 dark:text-red-300">
+            Showing {notCalledIds.size} not-called lead{notCalledIds.size !== 1 ? "s" : ""} — select and transfer to reassign
+          </span>
+          <button
+            onClick={() => { setNotCalledIds(null); setCounsellorFilter("all"); }}
+            className="ml-2 rounded-md bg-red-200 dark:bg-red-800 px-2 py-0.5 text-xs font-medium text-red-800 dark:text-red-200 hover:bg-red-300 dark:hover:bg-red-700"
+          >
+            Clear filter
+          </button>
         </div>
-        <select value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}
-          className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
-          <option value="all">All Stages</option>
-          {STAGES.map((s) => <option key={s} value={s}>{STAGE_LABELS[s]}</option>)}
-        </select>
-        <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}
-          className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
-          <option value="all">All Sources</option>
-          {LEAD_SOURCES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-        </select>
-        <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}
-          className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
-          <option value="all">All Roles</option>
-          <option value="lead">Lead</option>
-          <option value="applicant">Applicant</option>
-          <option value="student">Student</option>
-          <option value="alumni">Alumni</option>
-        </select>
-        <select value={tempFilter} onChange={(e) => setTempFilter(e.target.value)}
-          className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
-          <option value="all">All Leads</option>
-          <option value="hot">Hot</option>
-          <option value="warm">Warm</option>
-          <option value="cold">Cold</option>
-        </select>
-        {canFilterByCounsellor && (
-          <select value={counsellorFilter} onChange={(e) => setCounsellorFilter(e.target.value)}
-            className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
-            <option value="all">All Counsellors</option>
-            <option value="unassigned">Unassigned</option>
-            {counsellorOptions.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-        )}
-        <div className="flex rounded-xl border border-input bg-card p-0.5 ml-auto">
-          {((role === "counsellor" ? ["pipeline", "list"] : ["pipeline", "list", "seats", "payments"]) as const).map((v) => (
-            <button key={v} onClick={() => setView(v)}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-colors ${view === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
-              {v}
-            </button>
-          ))}
-        </div>
+      )}
+
+      </>}
+
+      {/* View tabs — always visible */}
+      <div className="flex rounded-xl border border-input bg-card p-0.5 w-fit">
+        {((role === "counsellor" ? ["action_center", "pipeline", "list"] : ["action_center", "pipeline", "list", "seats", "payments"]) as const).map((v) => (
+          <button key={v} onClick={() => setView(v)}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${view === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+            {v === "action_center" ? "Action Center" : v.charAt(0).toUpperCase() + v.slice(1)}
+          </button>
+        ))}
       </div>
 
-      {view === "seats" ? (
+      {/* Search & filters — hidden on Action Center view */}
+      {view !== "action_center" && (
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative flex-1 min-w-[200px] max-w-sm">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input type="text" placeholder="Search by name, phone, email, course, campus..." value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20" />
+          </div>
+          <select value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}
+            className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
+            <option value="all">All Stages</option>
+            {STAGES.map((s) => <option key={s} value={s}>{STAGE_LABELS[s]}</option>)}
+          </select>
+          <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}
+            className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
+            <option value="all">All Sources</option>
+            {LEAD_SOURCES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+          <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}
+            className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
+            <option value="all">All Roles</option>
+            <option value="lead">Lead</option>
+            <option value="applicant">Applicant</option>
+            <option value="student">Student</option>
+            <option value="alumni">Alumni</option>
+          </select>
+          <select value={tempFilter} onChange={(e) => setTempFilter(e.target.value)}
+            className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
+            <option value="all">All Leads</option>
+            <option value="hot">Hot</option>
+            <option value="warm">Warm</option>
+            <option value="cold">Cold</option>
+          </select>
+          {canFilterByCounsellor && (
+            <select value={counsellorFilter} onChange={(e) => setCounsellorFilter(e.target.value)}
+              className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
+              <option value="all">All Counsellors</option>
+              <option value="unassigned">Unassigned</option>
+              {counsellorOptions.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
+
+      {view === "action_center" ? (
+        <ActionCenterView
+          counsellorFilter={actionCounsellorFilter}
+          counsellorOptions={counsellorOptions}
+          canFilterByCounsellor={canFilterByCounsellor}
+          onCounsellorFilterChange={setActionCounsellorFilter}
+        />
+      ) : view === "seats" ? (
         <SeatMatrix />
       ) : view === "payments" ? (
         <PaymentReconciliation />

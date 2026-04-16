@@ -158,7 +158,13 @@ const CounsellorDashboard = () => {
   const [stats, setStats] = useState<CounsellorStats[]>([]);
   const [overdue, setOverdue] = useState<OverdueFollowup[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"leaderboard" | "overdue" | "tat-defaults" | "breakdown">("leaderboard");
+  const [tab, setTab] = useState<"leaderboard" | "overdue" | "tat-defaults" | "breakdown" | "activity" | "calling">("leaderboard");
+  const [activityData, setActivityData] = useState<any[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [callingData, setCallingData] = useState<any[]>([]);
+  const [callingLoading, setCallingLoading] = useState(false);
+  const [callingDatePreset, setCallingDatePreset] = useState<DatePreset>("today");
+  const [activityDatePreset, setActivityDatePreset] = useState<DatePreset>("today");
   const [tatDefaults, setTatDefaults] = useState<any[]>([]);
   const [teamDefaults, setTeamDefaults] = useState<any[]>([]);
   const [breakdownData, setBreakdownData] = useState<CounsellorBreakdown[]>([]);
@@ -315,6 +321,248 @@ const CounsellorDashboard = () => {
     setBreakdownData(Array.from(breakdownMap.values()).filter(b => b.total > 0));
     setBreakdownLoading(false);
   }, []);
+
+  // Fetch activity log per counsellor
+  const fetchActivity = useCallback(async (preset: DatePreset) => {
+    setActivityLoading(true);
+    setActivityDatePreset(preset);
+    const { from, to } = getDateRange(preset);
+
+    // Get counsellor profiles
+    const { data: roleData } = await supabase
+      .from("user_roles" as any).select("user_id, role").in("role", ["counsellor", "admission_head"]);
+    const counsellorUserIds = (roleData || []).map((r: any) => r.user_id);
+    const { data: profiles } = await supabase
+      .from("profiles").select("id, user_id, display_name").in("user_id", counsellorUserIds);
+
+    if (!profiles?.length) { setActivityLoading(false); return; }
+    const profileMap = new Map((profiles as any[]).map(p => [p.user_id, p]));
+    const profileIdMap = new Map((profiles as any[]).map(p => [p.id, p]));
+
+    // Fetch activities in date range
+    let actQ = supabase
+      .from("lead_activities" as any)
+      .select("id, lead_id, type, description, user_id, created_at")
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (from) actQ = actQ.gte("created_at", `${from}T00:00:00`);
+    if (to) actQ = actQ.lte("created_at", `${to}T23:59:59`);
+    const { data: activities } = await actQ;
+
+    // Fetch call logs in date range
+    let clQ = supabase
+      .from("call_logs" as any)
+      .select("id, lead_id, disposition, duration_seconds, user_id, called_at")
+      .order("called_at", { ascending: false })
+      .limit(500);
+    if (from) clQ = clQ.gte("called_at", `${from}T00:00:00`);
+    if (to) clQ = clQ.lte("called_at", `${to}T23:59:59`);
+    const { data: callLogs } = await clQ;
+
+    // Fetch leads per counsellor to compute not-called
+    const profileIds = (profiles as any[]).map(p => p.id);
+    const { data: counsellorLeads } = await supabase
+      .from("leads")
+      .select("id, counsellor_id")
+      .in("counsellor_id", profileIds)
+      .not("stage", "in", "(admitted,rejected,not_interested)");
+
+    // Build set of lead IDs that have call logs
+    const calledLeadIds = new Set<string>();
+    for (const cl of (callLogs || []) as any[]) calledLeadIds.add(cl.lead_id);
+
+    // Aggregate per counsellor
+    const agg = new Map<string, {
+      name: string; userId: string; profileId: string;
+      calls: number; whatsapps: number; notes: number; stageChanges: number; aiCalls: number;
+      dispositions: Record<string, number>; totalCallDuration: number;
+      totalLeads: number; notCalled: number;
+    }>();
+
+    for (const p of profiles as any[]) {
+      agg.set(p.user_id, {
+        name: p.display_name || "Unknown", userId: p.user_id, profileId: p.id,
+        calls: 0, whatsapps: 0, notes: 0, stageChanges: 0, aiCalls: 0,
+        dispositions: {}, totalCallDuration: 0,
+        totalLeads: 0, notCalled: 0,
+      });
+    }
+
+    // Count leads and not-called per counsellor
+    const profileIdToUserId = new Map((profiles as any[]).map(p => [p.id, p.user_id]));
+    for (const l of (counsellorLeads || []) as any[]) {
+      const userId = profileIdToUserId.get(l.counsellor_id);
+      if (!userId) continue;
+      const entry = agg.get(userId);
+      if (!entry) continue;
+      entry.totalLeads++;
+      if (!calledLeadIds.has(l.id)) entry.notCalled++;
+    }
+
+    for (const a of (activities || []) as any[]) {
+      const entry = agg.get(a.user_id);
+      if (!entry) continue;
+      if (a.type === "call") entry.calls++;
+      else if (a.type === "whatsapp") entry.whatsapps++;
+      else if (a.type === "note") entry.notes++;
+      else if (a.type === "stage_change") entry.stageChanges++;
+      else if (a.type === "ai_call") entry.aiCalls++;
+    }
+
+    for (const cl of (callLogs || []) as any[]) {
+      const entry = agg.get(cl.user_id);
+      if (!entry) continue;
+      entry.calls++;
+      entry.totalCallDuration += cl.duration_seconds || 0;
+      if (cl.disposition) {
+        entry.dispositions[cl.disposition] = (entry.dispositions[cl.disposition] || 0) + 1;
+      }
+    }
+
+    // Also count by counsellor_id (profiles.id) for activities that use profile-based user tracking
+    for (const a of (activities || []) as any[]) {
+      if (a.user_id) continue; // already counted above
+      // Some activities might have a lead's counsellor_id as the implicit actor
+    }
+
+    setActivityData(
+      Array.from(agg.values())
+        .filter(a => a.calls + a.whatsapps + a.notes + a.stageChanges + a.aiCalls > 0)
+        .sort((a, b) => (b.calls + b.whatsapps + b.notes) - (a.calls + a.whatsapps + a.notes))
+    );
+    setActivityLoading(false);
+  }, []);
+
+  // Fetch lead calling data per counsellor
+  const fetchCalling = useCallback(async (preset: DatePreset) => {
+    setCallingLoading(true);
+    setCallingDatePreset(preset);
+    const { from, to } = getDateRange(preset);
+
+    // Get counsellor profiles
+    const { data: roleData } = await supabase
+      .from("user_roles" as any).select("user_id, role").in("role", ["counsellor", "admission_head"]);
+    const counsellorUserIds = (roleData || []).map((r: any) => r.user_id);
+    const { data: profiles } = await supabase
+      .from("profiles").select("id, user_id, display_name").in("user_id", counsellorUserIds);
+
+    if (!profiles?.length) { setCallingLoading(false); return; }
+
+    const profileIdToUserId = new Map((profiles as any[]).map(p => [p.id, p.user_id]));
+    const userIdToProfileId = new Map((profiles as any[]).map(p => [p.user_id, p.id]));
+
+    // Active leads per counsellor (not in terminal stages)
+    const { data: activeLeads } = await supabase
+      .from("leads")
+      .select("id, counsellor_id, stage, first_contact_at, assigned_at, created_at")
+      .not("counsellor_id", "is", null)
+      .not("stage", "in", "(admitted,rejected,not_interested)");
+
+    // Call logs in date range
+    let callQ = supabase
+      .from("call_logs" as any)
+      .select("id, lead_id, disposition, duration_seconds, user_id, called_at")
+      .order("called_at", { ascending: false });
+    if (from) callQ = callQ.gte("called_at", `${from}T00:00:00`);
+    if (to) callQ = callQ.lte("called_at", `${to}T23:59:59`);
+    const { data: callLogs } = await callQ;
+
+    // ALL call logs (to determine never-called leads)
+    const { data: allCallLogs } = await supabase
+      .from("call_logs" as any)
+      .select("lead_id")
+      .limit(5000);
+
+    // Overdue followups per counsellor
+    const { data: overdueData } = await supabase
+      .from("overdue_followups" as any)
+      .select("id, counsellor_id");
+
+    // Build set of ever-called lead IDs
+    const everCalledLeadIds = new Set<string>();
+    for (const cl of (allCallLogs || []) as any[]) everCalledLeadIds.add(cl.lead_id);
+
+    // Build per-counsellor aggregation
+    const agg = new Map<string, {
+      name: string; profileId: string; userId: string;
+      activeLeads: number; notCalled: number; callsInPeriod: number;
+      callDuration: number; overdueFollowups: number;
+      avgResponseHrs: number | null;
+      dispositions: Record<string, number>;
+    }>();
+
+    for (const p of profiles as any[]) {
+      agg.set(p.id, {
+        name: p.display_name || "Unknown",
+        profileId: p.id,
+        userId: p.user_id,
+        activeLeads: 0, notCalled: 0, callsInPeriod: 0,
+        callDuration: 0, overdueFollowups: 0,
+        avgResponseHrs: null,
+        dispositions: {},
+      });
+    }
+
+    // Count active leads and not-called
+    const responseTimes: Record<string, number[]> = {};
+    for (const l of (activeLeads || []) as any[]) {
+      const entry = agg.get(l.counsellor_id);
+      if (!entry) continue;
+      entry.activeLeads++;
+      if (!everCalledLeadIds.has(l.id)) entry.notCalled++;
+      if (l.assigned_at && l.first_contact_at) {
+        const hrs = (new Date(l.first_contact_at).getTime() - new Date(l.assigned_at).getTime()) / 3600000;
+        if (hrs >= 0 && hrs < 720) {
+          if (!responseTimes[l.counsellor_id]) responseTimes[l.counsellor_id] = [];
+          responseTimes[l.counsellor_id].push(hrs);
+        }
+      }
+    }
+
+    // Count calls in period and dispositions
+    for (const cl of (callLogs || []) as any[]) {
+      const profileId = userIdToProfileId.get(cl.user_id);
+      if (!profileId) continue;
+      const entry = agg.get(profileId);
+      if (!entry) continue;
+      entry.callsInPeriod++;
+      entry.callDuration += cl.duration_seconds || 0;
+      if (cl.disposition) {
+        entry.dispositions[cl.disposition] = (entry.dispositions[cl.disposition] || 0) + 1;
+      }
+    }
+
+    // Count overdue followups
+    for (const o of (overdueData || []) as any[]) {
+      const entry = agg.get(o.counsellor_id);
+      if (entry) entry.overdueFollowups++;
+    }
+
+    // Compute avg response time
+    for (const [pid, entry] of agg) {
+      const times = responseTimes[pid];
+      if (times?.length) {
+        entry.avgResponseHrs = Math.round((times.reduce((a, b) => a + b, 0) / times.length) * 10) / 10;
+      }
+    }
+
+    setCallingData(
+      Array.from(agg.values())
+        .filter(a => a.activeLeads > 0)
+        .sort((a, b) => b.notCalled - a.notCalled) // worst performers first
+    );
+    setCallingLoading(false);
+  }, []);
+
+  // Auto-fetch activity when tab switches to it
+  useEffect(() => {
+    if (tab === "activity" && activityData.length === 0 && !activityLoading) {
+      fetchActivity(activityDatePreset);
+    }
+    if (tab === "calling" && callingData.length === 0 && !callingLoading) {
+      fetchCalling(callingDatePreset);
+    }
+  }, [tab]);
 
   // Apply date preset
   const applyPreset = useCallback((preset: DatePreset) => {
@@ -522,6 +770,18 @@ const CounsellorDashboard = () => {
               </span>
             )}
           </button>
+          <button
+            onClick={() => setTab("activity")}
+            className={`rounded-lg px-4 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${tab === "activity" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            Activity Log
+          </button>
+          <button
+            onClick={() => setTab("calling")}
+            className={`rounded-lg px-4 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${tab === "calling" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            Lead Calling
+          </button>
         </div>
       </div>
 
@@ -703,9 +963,16 @@ const CounsellorDashboard = () => {
                             <td className="px-3 py-3 text-center">
                               <span className="text-xs font-semibold text-emerald-600">{b.called}</span>
                             </td>
-                            <td className="px-3 py-3 text-center">
+                            <td className="px-3 py-3 text-center" onClick={e => e.stopPropagation()}>
                               {b.not_called > 0 ? (
-                                <Badge className="bg-red-100 text-red-700 border-0 text-[10px] font-bold">{b.not_called}</Badge>
+                                <button
+                                  onClick={() => navigate(`/admissions?counsellor=${b.counsellor_id}&not_called=true`)}
+                                  className="inline-flex items-center gap-1 rounded-full bg-red-100 text-red-700 border-0 text-[10px] font-bold px-2.5 py-0.5 hover:bg-red-200 transition-colors cursor-pointer"
+                                  title="View not-called leads — bulk transfer available"
+                                >
+                                  {b.not_called}
+                                  <ExternalLink className="h-2.5 w-2.5" />
+                                </button>
                               ) : (
                                 <span className="text-xs text-muted-foreground">0</span>
                               )}
@@ -983,6 +1250,366 @@ const CounsellorDashboard = () => {
             )}
           </CardContent>
         </Card>
+      ) : tab === "activity" ? (
+        <div className="space-y-4">
+          {/* Date filter */}
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg border border-input bg-card p-0.5">
+              {PRESETS.map(p => (
+                <button
+                  key={p.key}
+                  onClick={() => fetchActivity(p.key)}
+                  className={`rounded-md px-3 py-1 text-[11px] font-medium transition-colors whitespace-nowrap ${
+                    activityDatePreset === p.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            {activityLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+          </div>
+
+          <Card className="border-border/60 shadow-none overflow-hidden">
+            <CardContent className="p-0">
+              {activityData.length === 0 && !activityLoading ? (
+                <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+                  No activity recorded for this period
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/50">
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Counsellor</th>
+                        <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Leads</th>
+                        <th className="px-3 py-3 text-center text-xs font-semibold text-red-600 uppercase">Not Called</th>
+                        <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Calls</th>
+                        <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Call Time</th>
+                        <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">WhatsApp</th>
+                        <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Notes</th>
+                        <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Stage Changes</th>
+                        <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">AI Calls</th>
+                        <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Total Actions</th>
+                        {/* Disposition columns */}
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-emerald-600 uppercase">Interested</th>
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-red-600 uppercase">Not Int.</th>
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-amber-600 uppercase">No Ans.</th>
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-blue-600 uppercase">Call Back</th>
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-orange-600 uppercase">Busy</th>
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-gray-600 uppercase">Other</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activityData.map(a => {
+                        const totalActions = a.calls + a.whatsapps + a.notes + a.stageChanges + a.aiCalls;
+                        const otherDisp = Object.entries(a.dispositions)
+                          .filter(([k]) => !["interested", "not_interested", "not_answered", "call_back", "busy"].includes(k))
+                          .reduce((s, [, v]) => s + (v as number), 0);
+                        const callMins = Math.round(a.totalCallDuration / 60);
+
+                        return (
+                          <tr key={a.userId} className="border-b border-border/40 hover:bg-muted/20">
+                            <td className="px-4 py-3 font-medium text-foreground">{a.name}</td>
+                            <td className="px-3 py-3 text-center text-xs font-bold text-foreground">{a.totalLeads}</td>
+                            <td className="px-3 py-3 text-center">
+                              {a.notCalled > 0 ? (
+                                <button
+                                  onClick={() => navigate(`/admissions?counsellor=${a.profileId}&not_called=true`)}
+                                  className="inline-flex items-center gap-0.5 rounded-full bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 hover:bg-red-200 transition-colors"
+                                >
+                                  {a.notCalled}
+                                </button>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">0</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-3 text-center">
+                              <span className={`text-xs font-bold ${a.calls > 0 ? "text-blue-600" : "text-muted-foreground"}`}>{a.calls}</span>
+                            </td>
+                            <td className="px-3 py-3 text-center text-xs text-muted-foreground">
+                              {callMins > 0 ? `${callMins}m` : "—"}
+                            </td>
+                            <td className="px-3 py-3 text-center">
+                              <span className={`text-xs font-bold ${a.whatsapps > 0 ? "text-green-600" : "text-muted-foreground"}`}>{a.whatsapps}</span>
+                            </td>
+                            <td className="px-3 py-3 text-center text-xs text-muted-foreground">{a.notes || "—"}</td>
+                            <td className="px-3 py-3 text-center text-xs text-muted-foreground">{a.stageChanges || "—"}</td>
+                            <td className="px-3 py-3 text-center">
+                              <span className={`text-xs ${a.aiCalls > 0 ? "font-bold text-purple-600" : "text-muted-foreground"}`}>{a.aiCalls || "—"}</span>
+                            </td>
+                            <td className="px-3 py-3 text-center">
+                              <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full text-xs font-bold ${
+                                totalActions > 20 ? "bg-emerald-100 text-emerald-700" : totalActions > 5 ? "bg-blue-100 text-blue-700" : "bg-muted text-muted-foreground"
+                              }`}>
+                                {totalActions}
+                              </span>
+                            </td>
+                            {/* Dispositions */}
+                            <td className="px-2 py-3 text-center">
+                              {a.dispositions.interested ? (
+                                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 rounded-full px-1.5 py-0.5">{a.dispositions.interested}</span>
+                              ) : <span className="text-[10px] text-muted-foreground">—</span>}
+                            </td>
+                            <td className="px-2 py-3 text-center">
+                              {a.dispositions.not_interested ? (
+                                <span className="text-[10px] font-bold text-red-700 bg-red-100 rounded-full px-1.5 py-0.5">{a.dispositions.not_interested}</span>
+                              ) : <span className="text-[10px] text-muted-foreground">—</span>}
+                            </td>
+                            <td className="px-2 py-3 text-center">
+                              {a.dispositions.not_answered ? (
+                                <span className="text-[10px] font-bold text-amber-700 bg-amber-100 rounded-full px-1.5 py-0.5">{a.dispositions.not_answered}</span>
+                              ) : <span className="text-[10px] text-muted-foreground">—</span>}
+                            </td>
+                            <td className="px-2 py-3 text-center">
+                              {a.dispositions.call_back ? (
+                                <span className="text-[10px] font-bold text-blue-700 bg-blue-100 rounded-full px-1.5 py-0.5">{a.dispositions.call_back}</span>
+                              ) : <span className="text-[10px] text-muted-foreground">—</span>}
+                            </td>
+                            <td className="px-2 py-3 text-center">
+                              {a.dispositions.busy ? (
+                                <span className="text-[10px] font-bold text-orange-700 bg-orange-100 rounded-full px-1.5 py-0.5">{a.dispositions.busy}</span>
+                              ) : <span className="text-[10px] text-muted-foreground">—</span>}
+                            </td>
+                            <td className="px-2 py-3 text-center">
+                              {otherDisp > 0 ? (
+                                <span className="text-[10px] font-bold text-gray-700 bg-gray-100 rounded-full px-1.5 py-0.5">{otherDisp}</span>
+                              ) : <span className="text-[10px] text-muted-foreground">—</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      ) : tab === "calling" ? (
+        <div className="space-y-4">
+          {/* Date filter */}
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg border border-input bg-card p-0.5">
+              {PRESETS.map(p => (
+                <button
+                  key={p.key}
+                  onClick={() => fetchCalling(p.key)}
+                  className={`rounded-md px-3 py-1 text-[11px] font-medium transition-colors whitespace-nowrap ${
+                    callingDatePreset === p.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            {callingLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+          </div>
+
+          {/* Summary pills */}
+          {callingData.length > 0 && (
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
+              <span className="text-sm font-medium text-foreground">
+                {callingData.reduce((s: number, c: any) => s + c.activeLeads, 0)} active leads across {callingData.length} counsellors
+              </span>
+              {(() => {
+                const totalNotCalled = callingData.reduce((s: number, c: any) => s + c.notCalled, 0);
+                const totalCalls = callingData.reduce((s: number, c: any) => s + c.callsInPeriod, 0);
+                const totalOverdue = callingData.reduce((s: number, c: any) => s + c.overdueFollowups, 0);
+                return (
+                  <>
+                    {totalNotCalled > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-red-100 dark:bg-red-900/30 px-2.5 py-1 text-xs font-semibold text-red-700 dark:text-red-300">
+                        <PhoneOff className="h-3 w-3" /> {totalNotCalled} Not Called
+                      </span>
+                    )}
+                    <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 dark:bg-blue-900/30 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:text-blue-300">
+                      <PhoneCall className="h-3 w-3" /> {totalCalls} Calls
+                    </span>
+                    {totalOverdue > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-900/30 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                        <Clock className="h-3 w-3" /> {totalOverdue} Overdue
+                      </span>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          )}
+
+          <Card className="border-border/60 shadow-none overflow-hidden">
+            <CardContent className="p-0">
+              {callingData.length === 0 && !callingLoading ? (
+                <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+                  No counsellors with active leads found
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/50">
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Counsellor</th>
+                        <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Active Leads</th>
+                        <th className="px-3 py-3 text-center text-xs font-semibold text-red-600 uppercase">Not Called</th>
+                        <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Calls</th>
+                        <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Call Time</th>
+                        <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Call Rate</th>
+                        <th className="px-3 py-3 text-center text-xs font-semibold text-amber-600 uppercase">Overdue F/U</th>
+                        <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Avg Response</th>
+                        {/* Disposition columns */}
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-emerald-600 uppercase">Interested</th>
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-red-600 uppercase">Not Int.</th>
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-amber-600 uppercase">No Ans.</th>
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-blue-600 uppercase">Call Back</th>
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-orange-600 uppercase">Busy</th>
+                        <th className="px-2 py-3 text-center text-[9px] font-semibold text-gray-600 uppercase">Other</th>
+                        <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {callingData.map((c: any) => {
+                        const callRate = c.activeLeads > 0 ? Math.round(((c.activeLeads - c.notCalled) / c.activeLeads) * 100) : 0;
+                        const callMins = Math.round(c.callDuration / 60);
+                        const otherDisp = Object.entries(c.dispositions)
+                          .filter(([k]) => !["interested", "not_interested", "not_answered", "call_back", "busy"].includes(k))
+                          .reduce((s: number, [, v]) => s + (v as number), 0);
+
+                        return (
+                          <tr key={c.profileId} className="border-b border-border/40 hover:bg-muted/20">
+                            <td className="px-4 py-3 font-medium text-foreground">{c.name}</td>
+                            <td className="px-3 py-3 text-center text-xs font-bold text-foreground">{c.activeLeads}</td>
+                            <td className="px-3 py-3 text-center">
+                              {c.notCalled > 0 ? (
+                                <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full text-xs font-bold bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                                  {c.notCalled}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-green-600 font-medium">0</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-3 text-center">
+                              <span className={`text-xs font-bold ${c.callsInPeriod > 0 ? "text-blue-600" : "text-muted-foreground"}`}>{c.callsInPeriod}</span>
+                            </td>
+                            <td className="px-3 py-3 text-center text-xs text-muted-foreground">
+                              {callMins > 0 ? `${callMins}m` : "—"}
+                            </td>
+                            <td className="px-3 py-3 text-center">
+                              <span className={`inline-flex h-6 min-w-8 items-center justify-center rounded-full text-[10px] font-bold ${
+                                callRate >= 80 ? "bg-emerald-100 text-emerald-700" : callRate >= 50 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"
+                              }`}>
+                                {callRate}%
+                              </span>
+                            </td>
+                            <td className="px-3 py-3 text-center">
+                              {c.overdueFollowups > 0 ? (
+                                <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full text-xs font-bold bg-amber-100 text-amber-700">
+                                  {c.overdueFollowups}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">0</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-3 text-center text-xs text-muted-foreground">
+                              {c.avgResponseHrs != null ? (
+                                <span className={`font-medium ${c.avgResponseHrs <= 4 ? "text-emerald-600" : c.avgResponseHrs <= 12 ? "text-amber-600" : "text-red-600"}`}>
+                                  {c.avgResponseHrs}h
+                                </span>
+                              ) : "—"}
+                            </td>
+                            {/* Dispositions */}
+                            <td className="px-2 py-3 text-center">
+                              {c.dispositions.interested ? (
+                                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 rounded-full px-1.5 py-0.5">{c.dispositions.interested}</span>
+                              ) : <span className="text-[10px] text-muted-foreground">—</span>}
+                            </td>
+                            <td className="px-2 py-3 text-center">
+                              {c.dispositions.not_interested ? (
+                                <span className="text-[10px] font-bold text-red-700 bg-red-100 rounded-full px-1.5 py-0.5">{c.dispositions.not_interested}</span>
+                              ) : <span className="text-[10px] text-muted-foreground">—</span>}
+                            </td>
+                            <td className="px-2 py-3 text-center">
+                              {c.dispositions.not_answered ? (
+                                <span className="text-[10px] font-bold text-amber-700 bg-amber-100 rounded-full px-1.5 py-0.5">{c.dispositions.not_answered}</span>
+                              ) : <span className="text-[10px] text-muted-foreground">—</span>}
+                            </td>
+                            <td className="px-2 py-3 text-center">
+                              {c.dispositions.call_back ? (
+                                <span className="text-[10px] font-bold text-blue-700 bg-blue-100 rounded-full px-1.5 py-0.5">{c.dispositions.call_back}</span>
+                              ) : <span className="text-[10px] text-muted-foreground">—</span>}
+                            </td>
+                            <td className="px-2 py-3 text-center">
+                              {c.dispositions.busy ? (
+                                <span className="text-[10px] font-bold text-orange-700 bg-orange-100 rounded-full px-1.5 py-0.5">{c.dispositions.busy}</span>
+                              ) : <span className="text-[10px] text-muted-foreground">—</span>}
+                            </td>
+                            <td className="px-2 py-3 text-center">
+                              {otherDisp > 0 ? (
+                                <span className="text-[10px] font-bold text-gray-700 bg-gray-100 rounded-full px-1.5 py-0.5">{otherDisp}</span>
+                              ) : <span className="text-[10px] text-muted-foreground">—</span>}
+                            </td>
+                            <td className="px-3 py-3 text-center">
+                              {c.notCalled > 0 ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 text-[10px] gap-1 border-red-200 text-red-700 hover:bg-red-50"
+                                  onClick={() => navigate(`/admissions?counsellor=${c.profileId}&not_called=true`)}
+                                >
+                                  <ExternalLink className="h-3 w-3" />
+                                  View {c.notCalled}
+                                </Button>
+                              ) : (
+                                <span className="text-[10px] text-muted-foreground">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {/* Totals row */}
+                      {callingData.length > 1 && (
+                        <tr className="border-t-2 border-border bg-muted/30 font-semibold">
+                          <td className="px-4 py-3 text-foreground text-xs uppercase">Total</td>
+                          <td className="px-3 py-3 text-center text-xs">{callingData.reduce((s: number, c: any) => s + c.activeLeads, 0)}</td>
+                          <td className="px-3 py-3 text-center">
+                            <span className="text-xs font-bold text-red-700">{callingData.reduce((s: number, c: any) => s + c.notCalled, 0)}</span>
+                          </td>
+                          <td className="px-3 py-3 text-center text-xs text-blue-600">{callingData.reduce((s: number, c: any) => s + c.callsInPeriod, 0)}</td>
+                          <td className="px-3 py-3 text-center text-xs text-muted-foreground">
+                            {Math.round(callingData.reduce((s: number, c: any) => s + c.callDuration, 0) / 60)}m
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            {(() => {
+                              const tActive = callingData.reduce((s: number, c: any) => s + c.activeLeads, 0);
+                              const tNotCalled = callingData.reduce((s: number, c: any) => s + c.notCalled, 0);
+                              const rate = tActive > 0 ? Math.round(((tActive - tNotCalled) / tActive) * 100) : 0;
+                              return <span className="text-[10px] font-bold">{rate}%</span>;
+                            })()}
+                          </td>
+                          <td className="px-3 py-3 text-center text-xs text-amber-700">{callingData.reduce((s: number, c: any) => s + c.overdueFollowups, 0)}</td>
+                          <td className="px-3 py-3 text-center text-xs text-muted-foreground">—</td>
+                          <td className="px-2 py-3 text-center text-[10px] text-emerald-700">{callingData.reduce((s: number, c: any) => s + (c.dispositions.interested || 0), 0) || "—"}</td>
+                          <td className="px-2 py-3 text-center text-[10px] text-red-700">{callingData.reduce((s: number, c: any) => s + (c.dispositions.not_interested || 0), 0) || "—"}</td>
+                          <td className="px-2 py-3 text-center text-[10px] text-amber-700">{callingData.reduce((s: number, c: any) => s + (c.dispositions.not_answered || 0), 0) || "—"}</td>
+                          <td className="px-2 py-3 text-center text-[10px] text-blue-700">{callingData.reduce((s: number, c: any) => s + (c.dispositions.call_back || 0), 0) || "—"}</td>
+                          <td className="px-2 py-3 text-center text-[10px] text-orange-700">{callingData.reduce((s: number, c: any) => s + (c.dispositions.busy || 0), 0) || "—"}</td>
+                          <td className="px-2 py-3 text-center text-[10px] text-gray-700">
+                            {callingData.reduce((s: number, c: any) => {
+                              const other = Object.entries(c.dispositions)
+                                .filter(([k]) => !["interested", "not_interested", "not_answered", "call_back", "busy"].includes(k))
+                                .reduce((ss: number, [, v]) => ss + (v as number), 0);
+                              return s + other;
+                            }, 0) || "—"}
+                          </td>
+                          <td className="px-3 py-3"></td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       ) : null}
     </div>
   );

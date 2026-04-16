@@ -21,6 +21,7 @@ interface Profile {
   id: string;
   user_id: string;
   display_name: string | null;
+  role?: string;
 }
 
 export default function TeamManagement() {
@@ -45,13 +46,22 @@ export default function TeamManagement() {
 
   const fetchAll = async () => {
     setLoading(true);
-    const [teamsRes, membersRes, profilesRes] = await Promise.all([
+    const [teamsRes, membersRes, profilesRes, rolesRes] = await Promise.all([
       supabase.from("teams").select("*").order("created_at", { ascending: false }),
       supabase.from("team_members").select("*"),
       supabase.from("profiles").select("id, user_id, display_name"),
+      supabase.from("user_roles").select("user_id, role"),
     ]);
 
-    const allProfiles = profilesRes.data || [];
+    const roles = rolesRes.data || [];
+    const employeeRoles = ["super_admin", "campus_admin", "principal", "admission_head", "counsellor", "accountant", "faculty", "teacher", "data_entry", "office_assistant", "hostel_warden"];
+    const employeeUserIds = new Set(roles.filter((r: any) => employeeRoles.includes(r.role)).map((r: any) => r.user_id));
+
+    const roleMap = new Map(roles.map((r: any) => [r.user_id, r.role]));
+    const allProfiles = (profilesRes.data || [])
+      .filter(p => employeeUserIds.has(p.user_id))
+      .map(p => ({ ...p, role: roleMap.get(p.user_id) || "" }))
+      .sort((a, b) => (a.display_name || "").localeCompare(b.display_name || ""));
     setProfiles(allProfiles);
 
     const allMembers = membersRes.data || [];
@@ -213,7 +223,7 @@ export default function TeamManagement() {
               <select value={newLeader} onChange={e => setNewLeader(e.target.value)} className={inputCls}>
                 <option value="">Select a team leader...</option>
                 {profiles.map(p => (
-                  <option key={p.id} value={p.id}>{p.display_name || "Unnamed"}</option>
+                  <option key={p.id} value={p.id}>{p.display_name || "Unnamed"} ({p.role?.replace("_", " ")})</option>
                 ))}
               </select>
             </div>
@@ -237,7 +247,7 @@ export default function TeamManagement() {
               <select value={selectedMember} onChange={e => setSelectedMember(e.target.value)} className={inputCls}>
                 <option value="">Select a user...</option>
                 {profiles.map(p => (
-                  <option key={p.user_id} value={p.user_id}>{p.display_name || "Unnamed"}</option>
+                  <option key={p.user_id} value={p.user_id}>{p.display_name || "Unnamed"} ({p.role?.replace("_", " ")})</option>
                 ))}
               </select>
             </div>

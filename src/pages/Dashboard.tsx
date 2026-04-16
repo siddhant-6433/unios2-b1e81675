@@ -17,6 +17,7 @@ import {
 } from "recharts";
 import { JdCategoryMappingPanel } from "@/components/admissions/JdCategoryMappingPanel";
 import { PendingApprovalsPanel } from "@/components/dashboard/PendingApprovalsPanel";
+import { TatDefaultsCard } from "@/components/dashboard/TatDefaultsCard";
 import { ConsultantVoiceMessagesPanel } from "@/components/dashboard/ConsultantVoiceMessagesPanel";
 import { AiCallLogsPanel } from "@/components/dashboard/AiCallLogsPanel";
 
@@ -681,6 +682,7 @@ const Dashboard = () => {
         <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
         <p className="text-sm text-muted-foreground mt-1">Welcome back. Here's your overview.</p>
       </div>
+      <TatDefaultsCard />
       {isAdmin && <PendingApprovalsPanel />}
       {isAdmin && <ConsultantVoiceMessagesPanel />}
       {isAdmin   && <SuperAdminDashboard isSuperAdmin={role === "super_admin"} />}

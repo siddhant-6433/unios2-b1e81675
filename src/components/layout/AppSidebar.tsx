@@ -91,7 +91,7 @@ export function AppSidebar() {
     if (path.includes("?")) return location.pathname + location.search === path;
     return location.pathname === path;
   };
-  const { profile, role, realRole, isImpersonating, signOut } = useAuth();
+  const { user, profile, role, realRole, isImpersonating, signOut } = useAuth();
   const { campuses, selectedCampusId, setSelectedCampusId } = useCampus();
 
   const displayName = profile?.display_name || "User";
@@ -113,6 +113,8 @@ export function AppSidebar() {
   const [newLeadCount, setNewLeadCount] = useState(0);
   // Pending approvals for current user role
   const [pendingApprovals, setPendingApprovals] = useState(0);
+  // TAT defaults for current user
+  const [tatDefaults, setTatDefaults] = useState(0);
 
   const fetchNewLeadCount = () => {
     let query = supabase
@@ -147,6 +149,22 @@ export function AppSidebar() {
     })();
     fetchNewLeadCount();
     fetchPendingApprovals();
+
+    // Fetch TAT defaults for sidebar badge
+    (async () => {
+      const { data } = await supabase
+        .from("counsellor_tat_defaults" as any)
+        .select("total_defaults, user_id");
+      if (data) {
+        // For counsellors: show their own defaults. For admins: show team total.
+        if (role === "counsellor") {
+          const mine = (data as any[]).find(d => d.user_id === user?.id);
+          setTatDefaults(mine?.total_defaults || 0);
+        } else {
+          setTatDefaults((data as any[]).reduce((s: number, d: any) => s + (d.total_defaults || 0), 0));
+        }
+      }
+    })();
 
     const waChannel = supabase
       .channel("wa-unread-sidebar")
@@ -203,6 +221,7 @@ export function AppSidebar() {
   const visibleAdmission = admissionSubMenu.filter(canSee).map(item => {
     if (item.url === "/whatsapp-inbox" && waUnread > 0) return { ...item, badge: waUnread };
     if (item.url === "/admissions" && newLeadCount > 0) return { ...item, badge: newLeadCount };
+    if (item.url === "/counsellor-dashboard" && tatDefaults > 0) return { ...item, badge: tatDefaults };
     return item;
   }
   );
