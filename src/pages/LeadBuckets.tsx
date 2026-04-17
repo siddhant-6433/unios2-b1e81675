@@ -99,6 +99,7 @@ export default function LeadBuckets() {
   const { toast } = useToast();
 
   const [activeBucket, setActiveBucket] = useState<"school" | "college">("college");
+  const [schoolFilter, setSchoolFilter] = useState<"all" | "mirai" | "nimt">("all");
   const [leads, setLeads] = useState<BucketLead[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -106,7 +107,13 @@ export default function LeadBuckets() {
 
   // Bucket counts
   const [schoolCount, setSchoolCount] = useState(0);
+  const [miraiSchoolCount, setMiraiSchoolCount] = useState(0);
+  const [nimtSchoolCount, setNimtSchoolCount] = useState(0);
   const [collegeCount, setCollegeCount] = useState(0);
+
+  // Detect if user is Mirai counsellor
+  const MIRAI_CAMPUS_ID = "c0000002-0000-0000-0000-000000000001";
+  const isMiraiUser = profile?.campus?.toLowerCase().includes("mirai") || selectedCampusId === MIRAI_CAMPUS_ID;
 
   // Self-assign dialog
   const [showAssign, setShowAssign] = useState(false);
@@ -119,23 +126,34 @@ export default function LeadBuckets() {
   const [selectedCounsellor, setSelectedCounsellor] = useState<string>("");
 
   const fetchCounts = async () => {
-    // Show ALL unassigned leads — don't filter by campus since many leads have no campus
-    const [sRes, cRes] = await Promise.all([
+    const [sRes, mRes, nRes, cRes] = await Promise.all([
       supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true }).eq("bucket", "school"),
+      supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true }).eq("bucket", "school").eq("campus_id", MIRAI_CAMPUS_ID),
+      supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true }).eq("bucket", "school").neq("campus_id", MIRAI_CAMPUS_ID),
       supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true }).eq("bucket", "college"),
     ]);
     setSchoolCount(sRes.count ?? 0);
+    setMiraiSchoolCount(mRes.count ?? 0);
+    setNimtSchoolCount(nRes.count ?? 0);
     setCollegeCount(cRes.count ?? 0);
   };
 
   const fetchLeads = async () => {
     setLoading(true);
-    // Don't filter by campus — counsellors need to see all unassigned leads
-    const { data, error } = await supabase
+    let query = supabase
       .from("unassigned_leads_bucket" as any)
       .select("*")
       .eq("bucket", activeBucket)
       .order("created_at", { ascending: false });
+
+    // Apply school sub-filter
+    if (activeBucket === "school" && schoolFilter === "mirai") {
+      query = query.eq("campus_id", MIRAI_CAMPUS_ID);
+    } else if (activeBucket === "school" && schoolFilter === "nimt") {
+      query = query.or(`campus_id.neq.${MIRAI_CAMPUS_ID},campus_id.is.null`);
+    }
+
+    const { data, error } = await query;
     if (error) console.error("Lead buckets fetch error:", error);
     setLeads((data || []) as any);
     setSelectedIds(new Set());
@@ -143,7 +161,7 @@ export default function LeadBuckets() {
   };
 
   useEffect(() => { fetchCounts(); }, [selectedCampusId]);
-  useEffect(() => { fetchLeads(); }, [activeBucket, selectedCampusId]);
+  useEffect(() => { fetchLeads(); }, [activeBucket, schoolFilter, selectedCampusId]);
 
   useEffect(() => {
     if (!isAdminRole) return;
@@ -248,7 +266,7 @@ export default function LeadBuckets() {
           <Card
             key={bucket}
             className={`flex-1 cursor-pointer transition-all hover:shadow-sm ${activeBucket === bucket ? "ring-2 ring-primary/40 bg-primary/5" : "border-border/60"}`}
-            onClick={() => setActiveBucket(bucket)}
+            onClick={() => { setActiveBucket(bucket); if (bucket === "college") setSchoolFilter("all"); }}
           >
             <CardContent className="p-5 flex items-center gap-4">
               <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${bucket === "school" ? "bg-pastel-yellow" : "bg-pastel-blue"}`}>
@@ -263,6 +281,30 @@ export default function LeadBuckets() {
           </Card>
         ))}
       </div>
+
+      {/* School sub-filter: All / Mirai / NIMT */}
+      {activeBucket === "school" && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">Filter:</span>
+          {([
+            { key: "all" as const, label: "All Schools", count: schoolCount },
+            { key: "mirai" as const, label: "Mirai", count: miraiSchoolCount },
+            { key: "nimt" as const, label: "NIMT Schools", count: nimtSchoolCount },
+          ]).map(f => (
+            <button
+              key={f.key}
+              onClick={() => setSchoolFilter(f.key)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium border transition-colors ${
+                schoolFilter === f.key
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-card text-muted-foreground border-border hover:bg-muted"
+              }`}
+            >
+              {f.label} ({f.count})
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Quick pick batches */}
       {filtered.length > 0 && (
