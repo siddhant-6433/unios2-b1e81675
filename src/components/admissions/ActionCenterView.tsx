@@ -7,17 +7,21 @@ import { useActionCenter, type ActionLead } from "@/hooks/useActionCenter";
 import { ActionBucketSection } from "./ActionBucketSection";
 import { CallDispositionDialog } from "./CallDispositionDialog";
 
+export type ActionBucketKey = "overdue" | "new_leads" | "today_followups" | "today_visits" | "post_visit" | "stalled" | "upcoming";
+
 interface ActionCenterViewProps {
   counsellorFilter?: string;
   counsellorOptions?: { id: string; name: string }[];
   canFilterByCounsellor?: boolean;
   onCounsellorFilterChange?: (id: string) => void;
+  onViewAll?: (bucket: ActionBucketKey, leadIds: string[]) => void;
 }
 
 export function ActionCenterView({
   counsellorFilter,
   counsellorOptions = [],
   canFilterByCounsellor = false,
+  onViewAll,
   onCounsellorFilterChange,
 }: ActionCenterViewProps) {
   const { profile } = useAuth();
@@ -206,6 +210,7 @@ export function ActionCenterView({
         leads={data.overdueFollowups}
         storageKey="overdue"
         onCall={handleCall}
+        onViewAll={() => onViewAll?.("overdue", data.overdueFollowups.map(l => l.lead_id))}
       />
 
       <ActionBucketSection
@@ -217,6 +222,7 @@ export function ActionCenterView({
         leads={data.newLeads}
         storageKey="new_leads"
         onCall={handleCall}
+        onViewAll={() => onViewAll?.("new_leads", data.newLeads.map(l => l.lead_id))}
       />
 
       <ActionBucketSection
@@ -228,6 +234,7 @@ export function ActionCenterView({
         leads={data.todayFollowups}
         storageKey="today_followups"
         onCall={handleCall}
+        onViewAll={() => onViewAll?.("today_followups", data.todayFollowups.map(l => l.lead_id))}
       />
 
       <ActionBucketSection
@@ -240,6 +247,7 @@ export function ActionCenterView({
         storageKey="today_visits"
         onCall={handleCall}
         onCompleteVisit={handleCompleteVisit}
+        onViewAll={() => onViewAll?.("today_visits", data.todayVisits.map(l => l.lead_id))}
       />
 
       <ActionBucketSection
@@ -251,6 +259,7 @@ export function ActionCenterView({
         leads={data.postVisitPending}
         storageKey="post_visit"
         onCall={handleCall}
+        onViewAll={() => onViewAll?.("post_visit", data.postVisitPending.map(l => l.lead_id))}
       />
 
       <ActionBucketSection
@@ -262,6 +271,7 @@ export function ActionCenterView({
         leads={data.stalledApps}
         storageKey="stalled"
         onCall={handleCall}
+        onViewAll={() => onViewAll?.("stalled", data.stalledApps.map(l => l.lead_id))}
       />
 
       <ActionBucketSection
@@ -274,6 +284,7 @@ export function ActionCenterView({
         defaultCollapsed={true}
         storageKey="upcoming"
         onCall={handleCall}
+        onViewAll={() => onViewAll?.("upcoming", data.upcomingWeek.map(l => l.lead_id))}
       />
 
       {/* Call Disposition Dialog */}

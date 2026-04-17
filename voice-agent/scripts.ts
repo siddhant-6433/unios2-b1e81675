@@ -147,7 +147,8 @@ You have access to real functions. You MUST call them BEFORE giving any specific
 - get_course_info → MUST call before discussing ANY course detail (fees, duration, eligibility, placement, affiliation). EVERY TIME. Even if you think you know the answer.
 - schedule_visit → MUST call BEFORE confirming a visit. NEVER say "schedule kar diya" without calling first.
 - update_lead_stage → call to mark lead as not_interested or counsellor_call
-- update_lead_info → call when caller provides their real name (if current name is placeholder) or when they tell you which course they're interested in. This updates the CRM record.
+- update_lead_info → call when caller wants different course, different campus, provides email/name/guardian info. MUST call when they correct the course.
+- send_whatsapp_to_lead → MUST call when you promise to send details on WhatsApp. Types: course_info (course page + apply link), visit_confirmation, apply_link, callback_scheduled. NEVER say "WhatsApp par bhej deti hoon" without actually calling this function.
 - set_call_disposition → call at end of conversation to record outcome
 - request_human_callback → call when caller wants a human or you don't have the answer
 
@@ -382,24 +383,40 @@ export const VOICE_AGENT_TOOLS = [
   },
   {
     name: "update_lead_info",
-    description: "Update the lead's name or course interest when the caller provides their real name or specifies a course. Use this when: (1) the lead name is a placeholder like 'Callback Request' or 'Applicant' and the caller tells you their real name, or (2) the lead has no course and the caller mentions which course they're interested in.",
+    description: "Update lead information when the caller corrects or provides new details. MUST call when: (1) they want a different course, (2) different campus, (3) provide email/name/guardian info, (4) their name is a placeholder.",
     parameters: {
       type: "object",
       properties: {
-        name: {
-          type: "string",
-          description: "The caller's real full name (only provide if the current name is a placeholder or unknown)",
-        },
-        course_interest: {
-          type: "string",
-          description: "The course name the caller is interested in (e.g., 'B.Sc Nursing', 'MBA', 'BBA')",
-        },
+        name: { type: "string", description: "Caller's real name (if current name is placeholder)" },
+        course_name: { type: "string", description: "New course if caller wants different course (e.g. 'B.Ed', 'MBA')" },
+        campus_preference: { type: "string", description: "Preferred campus (e.g. 'Greater Noida', 'Ghaziabad')" },
+        email: { type: "string", description: "Email if provided" },
+        guardian_name: { type: "string", description: "Parent/guardian name if provided" },
+        notes: { type: "string", description: "Additional notes" },
       },
     },
   },
   {
+    name: "send_whatsapp_to_lead",
+    description: "Send a WhatsApp message to the lead. Call this when you say 'I will send details on WhatsApp' or after scheduling a visit. MUST actually call this — don't just promise to send.",
+    parameters: {
+      type: "object",
+      properties: {
+        message_type: {
+          type: "string",
+          enum: ["course_info", "visit_confirmation", "apply_link", "callback_scheduled"],
+          description: "Type: course_info (course details + link), visit_confirmation (visit details + map), apply_link (application link), callback_scheduled (confirm callback)",
+        },
+        course_name: { type: "string", description: "Course name (for course_info)" },
+        visit_date: { type: "string", description: "Visit date (for visit_confirmation)" },
+        campus_name: { type: "string", description: "Campus name" },
+      },
+      required: ["message_type"],
+    },
+  },
+  {
     name: "request_human_callback",
-    description: "Request a human counsellor to call back when the AI can't fully help or the caller asks for a person.",
+    description: "Request a human counsellor to call back. Use when the AI can't fully help or caller asks for a person.",
     parameters: {
       type: "object",
       properties: {

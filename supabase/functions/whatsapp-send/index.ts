@@ -29,6 +29,8 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   counsellor_lead_assigned: { name: "counsellor_lead_assigned", params: ["counsellor_name", "lead_name", "lead_phone_last4", "sla_hours"] },
   counsellor_sla_warning: { name: "counsellor_sla_warning", params: ["lead_name", "hours_remaining"] },
   counsellor_lead_reclaimed: { name: "counsellor_lead_reclaimed", params: ["lead_name", "course_name"] },
+  // AI call follow-up with course link + apply button
+  ai_call_course_info: { name: "ai_call_course_info", params: ["student_name", "course_name", "campus_name", "course_url", "apply_url"] },
   // Team leader TAT defaults
   team_leader_defaults: { name: "team_leader_defaults_report", params: ["leader_name", "total_count", "summary"] },
   counsellor_visit_confirmation: { name: "counsellor_visit_confirmation", params: ["lead_name", "visit_date", "campus_name"] },
@@ -190,6 +192,7 @@ Deno.serve(async (req) => {
       staff_welcome: "Welcome to NIMT Educational Institutions, {{1}}!\n\nYou have been added as {{2}} at {{3}}.\n\nPlease check your email for login details.\n\nFor any assistance, contact the admin office.",
       student_welcome: "Congratulations {{1}}!\n\nWelcome to NIMT Educational Institutions.\n\nAdmission No: {{2}}\nCourse: {{3}}\nCampus: {{4}}\n\nYou can access the student portal at https://uni.nimt.ac.in\n\nWe wish you a great academic journey ahead!",
       applicant_welcome: "Hi {{1}}, thank you for starting your application at NIMT Educational Institutions!\n\nYour Application ID: {{2}}\nCourse: {{3}}\n\nComplete your application at https://uni.nimt.ac.in/apply/nimt/\n\nOur admissions team is here to help. Feel free to reach out anytime!",
+      ai_call_course_info: "Hi {{1}}, thank you for speaking with us about {{2}} at NIMT Educational Institutions! 🎓\n\n🏫 Campus: {{3}}\n\n📄 Course Details: {{4}}\n📝 Apply Now: {{5}}\n\nFor questions, reply to this message or call our admissions team.\n\nWe look forward to welcoming you!",
     };
 
     let readableContent = TEMPLATE_TEXTS[template_key] || `[Template: ${template_key}]`;

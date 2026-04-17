@@ -52,6 +52,8 @@ interface UserWithRole {
   campus: string | null;
   role: AppRole | null;
   role_id: string | null;
+  last_sign_in_at: string | null;
+  profile_updated_at: string | null;
 }
 
 const AdminPanel = () => {
@@ -78,7 +80,7 @@ const AdminPanel = () => {
     setLoading(true);
     const { data: profiles, error: profileError } = await supabase
       .from("profiles")
-      .select("user_id, display_name, email, phone, campus")
+      .select("user_id, display_name, email, phone, campus, updated_at")
       .order("created_at", { ascending: false });
 
     if (profileError) {

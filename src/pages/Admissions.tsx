@@ -166,6 +166,8 @@ const Admissions = () => {
   const [inactiveIds, setInactiveIds] = useState<Set<string> | null>(null);
   const [followupLeadIds, setFollowupLeadIds] = useState<Set<string> | null>(null);
   const [visitLeadIds, setVisitLeadIds] = useState<Set<string> | null>(null);
+  const [actionLeadIds, setActionLeadIds] = useState<Set<string> | null>(null);
+  const [actionBucketLabel, setActionBucketLabel] = useState<string>("");
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
 
@@ -427,7 +429,8 @@ const Admissions = () => {
     const matchesCounsellor = counsellorFilter === "all"
       || (counsellorFilter === "unassigned" ? !l.counsellor_id : l.counsellor_id === counsellorFilter);
     const matchesNotCalled = !notCalledIds || notCalledIds.has(l.id);
-    return matchesSearch && matchesStage && matchesSource && matchesRole && matchesTemp && matchesInactive && matchesFollowup && matchesVisit && matchesCounsellor && matchesNotCalled;
+    const matchesAction = !actionLeadIds || actionLeadIds.has(l.id);
+    return matchesSearch && matchesStage && matchesSource && matchesRole && matchesTemp && matchesInactive && matchesFollowup && matchesVisit && matchesCounsellor && matchesNotCalled && matchesAction;
   });
 
   const filteredCount = filtered.length;
@@ -435,16 +438,17 @@ const Admissions = () => {
   const paginatedLeads = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // Reset page when filters change
-  useEffect(() => { setPage(1); }, [stageFilter, sourceFilter, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds]);
+  useEffect(() => { setPage(1); }, [stageFilter, sourceFilter, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds]);
 
   const totalLeads = leads.length;
-  const today = new Date().toISOString().slice(0, 10);
-  const todayLeads = leads.filter(l => l.created_at.slice(0, 10) === today).length;
-  const newLeads = leads.filter(l => l.stage === "new_lead").length;
-  const appStarted = leads.filter(l => ["application_in_progress", "application_fee_paid", "application_submitted"].includes(l.stage)).length;
-  const feePaid = leads.filter(l => ["application_fee_paid", "application_submitted"].includes(l.stage)).length;
-  const appSubmitted = leads.filter(l => l.stage === "application_submitted").length;
-  const admitted = leads.filter(l => l.stage === "admitted").length;
+
+  // Stage counts fetched from DB (not from limited local array)
+  const [newLeads, setNewLeads] = useState(0);
+  const [todayLeads, setTodayLeads] = useState(0);
+  const [appStarted, setAppStarted] = useState(0);
+  const [feePaid, setFeePaid] = useState(0);
+  const [appSubmitted, setAppSubmitted] = useState(0);
+  const [admitted, setAdmitted] = useState(0);
 
   // Followup & visit counts fetched from DB
   const [pendingFollowups, setPendingFollowups] = useState(0);
@@ -468,6 +472,8 @@ const Admissions = () => {
           .eq("counsellor_id", profile.id);
         leadIds = (myLeads || []).map((l: any) => l.id);
         if (leadIds.length === 0) {
+          setNewLeads(0); setTodayLeads(0); setAppStarted(0); setFeePaid(0);
+          setAppSubmitted(0); setAdmitted(0);
           setPendingFollowups(0); setTodayFollowups(0); setOverdueFollowups(0);
           setUpcomingVisits(0); setCompletedVisits(0);
           return;
@@ -479,19 +485,52 @@ const Admissions = () => {
         return q;
       };
 
-      const [pendingRes, todayRes, overdueRes, upVisitRes, compVisitRes] = await Promise.all([
+      // Stage count queries (scoped by counsellor or campus)
+      const buildStageQ = (stages: string[]) => {
+        let q = supabase.from("leads").select("id", { count: "exact", head: true }).in("stage", stages);
+        if (role === "counsellor" && profile?.id) q = q.eq("counsellor_id", profile.id);
+        else if (selectedCampusId !== "all") q = q.eq("campus_id", selectedCampusId);
+        return q;
+      };
+
+      const buildTodayQ = () => {
+        let q = supabase.from("leads").select("id", { count: "exact", head: true }).gte("created_at", todayStart + "T00:00:00").lte("created_at", todayEnd);
+        if (role === "counsellor" && profile?.id) q = q.eq("counsellor_id", profile.id);
+        else if (selectedCampusId !== "all") q = q.eq("campus_id", selectedCampusId);
+        return q;
+      };
+
+      const [
+        pendingRes, todayFuRes, overdueRes, upVisitRes, compVisitRes,
+        newLeadRes, todayLeadRes, appStartedRes, feePaidRes, appSubmittedRes, admittedRes,
+      ] = await Promise.all([
         applyLeadFilter(supabase.from("lead_followups").select("id", { count: "exact", head: true }).eq("status", "pending")),
         applyLeadFilter(supabase.from("lead_followups").select("id", { count: "exact", head: true }).eq("status", "pending").gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd)),
         applyLeadFilter(supabase.from("overdue_followups" as any).select("id", { count: "exact", head: true })),
         applyLeadFilter(supabase.from("campus_visits").select("lead_id").gte("visit_date", todayStart).in("status", ["scheduled", "confirmed"])),
         applyLeadFilter(supabase.from("campus_visits").select("lead_id").eq("status", "completed")),
+        // Stage counts
+        buildStageQ(["new_lead"]),
+        buildTodayQ(),
+        buildStageQ(["application_in_progress", "application_fee_paid", "application_submitted"]),
+        buildStageQ(["application_fee_paid", "application_submitted"]),
+        buildStageQ(["application_submitted"]),
+        buildStageQ(["admitted"]),
       ]);
+
       setPendingFollowups(pendingRes.count || 0);
-      setTodayFollowups(todayRes.count || 0);
+      setTodayFollowups(todayFuRes.count || 0);
       setOverdueFollowups(overdueRes.count || 0);
       // Count unique leads with visits (not visit count)
       setUpcomingVisits(new Set((upVisitRes.data || []).map((r: any) => r.lead_id)).size);
       setCompletedVisits(new Set((compVisitRes.data || []).map((r: any) => r.lead_id)).size);
+      // Stage counts
+      setNewLeads(newLeadRes.count || 0);
+      setTodayLeads(todayLeadRes.count || 0);
+      setAppStarted(appStartedRes.count || 0);
+      setFeePaid(feePaidRes.count || 0);
+      setAppSubmitted(appSubmittedRes.count || 0);
+      setAdmitted(admittedRes.count || 0);
     })();
   }, [selectedCampusId, role, profile?.id]);
 
@@ -820,6 +859,27 @@ const Admissions = () => {
         </div>
       )}
 
+      {actionLeadIds && (
+        <div className="flex items-center gap-2 rounded-lg bg-primary/5 border border-primary/20 px-3 py-2 text-sm">
+          <Filter className="h-3.5 w-3.5 text-primary" />
+          <span className="font-medium text-foreground">
+            Showing {actionLeadIds.size} lead{actionLeadIds.size !== 1 ? "s" : ""} from <span className="text-primary">{actionBucketLabel}</span>
+          </span>
+          <button
+            onClick={() => { setActionLeadIds(null); setActionBucketLabel(""); }}
+            className="ml-2 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary hover:bg-primary/20"
+          >
+            Clear filter
+          </button>
+          <button
+            onClick={() => { setActionLeadIds(null); setActionBucketLabel(""); setView("action_center"); }}
+            className="ml-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary hover:bg-primary/20"
+          >
+            Back to Action Center
+          </button>
+        </div>
+      )}
+
       </>}
 
       {/* View tabs — always visible */}
@@ -885,6 +945,47 @@ const Admissions = () => {
           counsellorOptions={counsellorOptions}
           canFilterByCounsellor={canFilterByCounsellor}
           onCounsellorFilterChange={setActionCounsellorFilter}
+          onViewAll={(bucket, leadIds) => {
+            const labels: Record<string, string> = {
+              overdue: "Overdue Follow-ups",
+              new_leads: "New Leads to Contact",
+              today_followups: "Today's Follow-ups",
+              today_visits: "Today's Visits",
+              post_visit: "Post-Visit Pending",
+              stalled: "Stalled Applications",
+              upcoming: "Upcoming This Week",
+            };
+            // Fetch leads that might not be loaded yet, then switch to list
+            (async () => {
+              const missingIds = leadIds.filter(id => !leads.find(l => l.id === id));
+              if (missingIds.length > 0) {
+                const { data: extraLeads } = await supabase
+                  .from("leads")
+                  .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)")
+                  .in("id", missingIds);
+                if (extraLeads) {
+                  setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({
+                    ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—",
+                    counsellor_name: l.profiles?.display_name || "Unassigned",
+                    app_completion_pct: null, app_payment_status: null,
+                  }))]);
+                }
+              }
+              setActionLeadIds(new Set(leadIds));
+              setActionBucketLabel(labels[bucket] || bucket);
+              setFollowupLeadIds(null);
+              setVisitLeadIds(null);
+              setInactiveIds(null);
+              setNotCalledIds(null);
+              setStageFilter("all");
+              setSourceFilter("all");
+              setRoleFilter("all");
+              setTempFilter("all");
+              setSearch("");
+              setView("list");
+              setPage(1);
+            })();
+          }}
         />
       ) : view === "seats" ? (
         <SeatMatrix />

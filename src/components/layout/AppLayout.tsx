@@ -2,7 +2,9 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { ImpersonationBanner } from "@/components/layout/ImpersonationBanner";
 import { NotificationPanel } from "@/components/layout/NotificationPanel";
-import { MessageSquare, Search } from "lucide-react";
+import { HeaderSearch } from "@/components/layout/HeaderSearch";
+import { HeaderProfile } from "@/components/layout/HeaderProfile";
+import { MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -53,14 +55,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                   <span className="font-medium text-muted-foreground">{title}</span>
                 </div>
               </div>
-              <div className="flex items-center gap-0.5">
+              <div className="flex items-center gap-1.5">
+                <HeaderSearch />
                 <NotificationPanel />
                 <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-muted-foreground">
                   <MessageSquare className="h-[18px] w-[18px]" />
                 </Button>
-                <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-muted-foreground">
-                  <Search className="h-[18px] w-[18px]" />
-                </Button>
+                <div className="w-px h-6 bg-border/60 mx-0.5" />
+                <HeaderProfile />
               </div>
             </header>
             <main className="flex-1 overflow-auto p-6">

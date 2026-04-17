@@ -410,20 +410,11 @@ export function AppSidebar() {
             </SidebarGroupContent>
           </SidebarGroup>
 
-          {/* Account */}
-          {!collapsed && (
-            <div className="border-t border-sidebar-border px-4 py-3">
-              <div className="flex items-center gap-3">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-orange-400 text-xs font-bold text-white">
-                  {initials}
-                </div>
-                <div className="flex flex-col flex-1 min-w-0">
-                  <span className="text-[13px] font-semibold text-foreground truncate">{displayName}</span>
-                  <span className="text-[11px] text-muted-foreground">{roleLabel}</span>
-                </div>
-                <button onClick={signOut} className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Sign out">
-                  <LogOut className="h-4 w-4" />
-                </button>
+          {/* Profile moved to header — only show initials when collapsed */}
+          {collapsed && (
+            <div className="flex justify-center py-3 border-t border-sidebar-border">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground" title={displayName}>
+                {initials}
               </div>
             </div>
           )}

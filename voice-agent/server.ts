@@ -439,44 +439,118 @@ async function executeTool(
         return { success: true, disposition: args.disposition };
       }
 
+      case "send_whatsapp_to_lead": {
+        if (!callCtx.leadId) return { success: false, message: "No lead ID" };
+
+        // Get lead phone and course info
+        const waLeadRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/leads?id=eq.${callCtx.leadId}&select=phone,name,course_id,courses:course_id(name,slug),campuses:campus_id(name)`,
+          { headers },
+        );
+        const waLead = (await waLeadRes.json())?.[0];
+        if (!waLead?.phone) return { success: false, message: "Lead has no phone" };
+
+        const waCourse = args.course_name || (waLead.courses as any)?.name || "our programmes";
+        const waSlug = (waLead.courses as any)?.slug || "";
+        const waCampus = args.campus_name || (waLead.campuses as any)?.name || "NIMT campus";
+        const courseUrl = waSlug ? `https://www.nimt.ac.in/courses/${waSlug}` : "https://www.nimt.ac.in/courses";
+        const applyUrl = "https://uni.nimt.ac.in/apply/nimt";
+
+        let waTemplateKey = "";
+        let waParams: string[] = [];
+
+        switch (args.message_type) {
+          case "course_info":
+          case "apply_link":
+            waTemplateKey = "ai_call_course_info";
+            waParams = [waLead.name, waCourse, waCampus, courseUrl, applyUrl];
+            break;
+          case "visit_confirmation":
+            waTemplateKey = "visit_confirmation";
+            waParams = [waLead.name, args.visit_date || "the scheduled date", waCampus];
+            break;
+          case "callback_scheduled":
+            waTemplateKey = "callback_scheduled";
+            waParams = [waLead.name, waCourse];
+            break;
+        }
+
+        if (waTemplateKey) {
+          try {
+            await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` },
+              body: JSON.stringify({ template_key: waTemplateKey, phone: waLead.phone, params: waParams, lead_id: callCtx.leadId }),
+            });
+            console.log(`[WhatsApp] Sent ${waTemplateKey} to ${waLead.phone}`);
+            return { success: true, type: args.message_type };
+          } catch (e: any) {
+            console.error(`[WhatsApp] Failed:`, e.message);
+            return { success: false, message: e.message };
+          }
+        }
+        return { success: false, message: "Unknown message type" };
+      }
+
       case "update_lead_info": {
         if (!callCtx.leadId) return { success: false, message: "No lead ID" };
         const updates: Record<string, any> = {};
-        if (args.name) updates.name = args.name;
-        if (args.course_interest) {
-          // Look up course by name to get course_id
+
+        // Update name if provided
+        if (args.name) {
+          updates.name = args.name;
+          callCtx.leadName = args.name;
+        }
+
+        // Look up course by name if provided
+        if (args.course_name) {
           const courseRes = await fetch(
-            `${SUPABASE_URL}/rest/v1/courses?name=ilike.*${encodeURIComponent(args.course_interest)}*&select=id,name&limit=1`,
+            `${SUPABASE_URL}/rest/v1/courses?name=ilike.*${encodeURIComponent(args.course_name)}*&select=id,name&limit=1`,
             { headers },
           );
           const courses = await courseRes.json();
           if (courses?.[0]?.id) {
             updates.course_id = courses[0].id;
+            console.log(`[update_lead_info] Course updated to: ${courses[0].name} (${courses[0].id})`);
           }
         }
-        if (Object.keys(updates).length === 0) return { success: false, message: "No updates provided" };
-        await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${callCtx.leadId}`, {
-          method: "PATCH",
-          headers: { ...headers, Prefer: "return=minimal" },
-          body: JSON.stringify(updates),
-        });
-        // Add note about info update
-        const parts = [];
-        if (args.name) parts.push(`Name updated to: ${args.name}`);
-        if (args.course_interest) parts.push(`Course interest: ${args.course_interest}`);
-        await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, {
-          method: "POST",
-          headers: { ...headers, Prefer: "return=minimal" },
-          body: JSON.stringify({
-            lead_id: callCtx.leadId,
-            content: `🤖 AI Call: Lead info updated — ${parts.join(", ")}`,
-          }),
-        });
-        // Update the in-memory context too
-        if (args.name) callCtx.leadName = args.name;
-        if (args.course_interest) callCtx.courseName = args.course_interest;
-        console.log(`[update_lead_info] ${callCtx.leadId}: ${parts.join(", ")}`);
-        return { success: true, updated: updates };
+
+        // Look up campus by name if provided
+        if (args.campus_preference) {
+          const campusRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/campuses?name=ilike.*${encodeURIComponent(args.campus_preference)}*&select=id,name&limit=1`,
+            { headers },
+          );
+          const campuses = await campusRes.json();
+          if (campuses?.[0]?.id) {
+            updates.campus_id = campuses[0].id;
+          }
+        }
+
+        if (args.email) updates.email = args.email;
+        if (args.guardian_name) updates.guardian_name = args.guardian_name;
+
+        if (Object.keys(updates).length > 0) {
+          await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${callCtx.leadId}`, {
+            method: "PATCH",
+            headers: { ...headers, Prefer: "return=minimal" },
+            body: JSON.stringify(updates),
+          });
+        }
+
+        // Add note about the update
+        if (args.notes || args.course_name) {
+          await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, {
+            method: "POST",
+            headers: { ...headers, Prefer: "return=minimal" },
+            body: JSON.stringify({
+              lead_id: callCtx.leadId,
+              content: `🤖 AI Call updated lead info: ${args.course_name ? `Course → ${args.course_name}` : ""} ${args.campus_preference ? `Campus → ${args.campus_preference}` : ""} ${args.notes || ""}`.trim(),
+            }),
+          });
+        }
+
+        return { success: true, updated_fields: Object.keys(updates) };
       }
 
       case "request_human_callback": {
@@ -933,15 +1007,18 @@ Deno.serve({ port: PORT }, async (req) => {
         };
         const autoDisposition = autoDispositions[plivoStatus] || null;
 
-        // Build transcript combining caller + AI
+        // Build transcript combining caller + AI (safe — callCtx may be null on cold-start)
+        const callerLines = callCtx?.callerTranscript || [];
+        const aiLines = callCtx?.aiTranscript || [];
+        const toolsMade = callCtx?.toolCallsMade || [];
         const fullTranscript = [
-          ...callCtx.callerTranscript.map(t => `Caller: ${t}`),
-          ...callCtx.aiTranscript.map(t => `AI: ${t}`),
+          ...callerLines.map(t => `Caller: ${t}`),
+          ...aiLines.map(t => `AI: ${t}`),
         ].join("\n") || null;
 
         // Build summary from disposition notes or auto-generate
-        const summary = callCtx.toolCallsMade.length > 0
-          ? `AI call: ${callCtx.toolCallsMade.map(tc => tc.name).join(", ")}. ${autoDisposition ? `Auto: ${plivoStatus}` : ""}`
+        const summary = toolsMade.length > 0
+          ? `AI call: ${toolsMade.map(tc => tc.name).join(", ")}. ${autoDisposition ? `Auto: ${plivoStatus}` : ""}`
           : autoDisposition ? `Auto: ${plivoStatus} (${params.HangupCause || ""})` : "AI voice call completed";
 
         const updates: Record<string, any> = {
@@ -1012,6 +1089,49 @@ Deno.serve({ port: PORT }, async (req) => {
               content: `🤖 AI Call Recording (${params.Duration || 0}s): ${params.RecordingUrl}`,
             }),
           });
+        }
+        // Post-call auto-WhatsApp based on disposition (for completed calls only)
+        if (plivoStatus === "completed" && leadId) {
+          try {
+            // Get lead info for WhatsApp
+            const waLeadInfo = await fetch(
+              `${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}&select=phone,name,courses:course_id(name,slug),campuses:campus_id(name)`,
+              { headers: dbHeaders },
+            );
+            const waLd = (await waLeadInfo.json())?.[0];
+            if (waLd?.phone) {
+              const cn = (waLd.courses as any)?.name || "our programmes";
+              const cs = (waLd.courses as any)?.slug || "";
+              const cm = (waLd.campuses as any)?.name || "NIMT campus";
+              const courseLink = cs ? `https://www.nimt.ac.in/courses/${cs}` : "https://www.nimt.ac.in/courses";
+              const applyLink = "https://uni.nimt.ac.in/apply/nimt";
+
+              // Determine which template based on call context
+              const disposition = callCtx?.toolCallsMade?.find(tc => tc.name === "set_call_disposition")?.args?.disposition;
+              let postCallTemplate = "";
+              let postCallParams: string[] = [];
+
+              if (disposition === "interested" || disposition === "call_back" || !disposition) {
+                // Send course info with apply link
+                postCallTemplate = "ai_call_course_info";
+                postCallParams = [waLd.name, cn, cm, courseLink, applyLink];
+              } else if (disposition === "not_answered") {
+                postCallTemplate = "missed_call";
+                postCallParams = [waLd.name, cn];
+              }
+
+              if (postCallTemplate) {
+                await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` },
+                  body: JSON.stringify({ template_key: postCallTemplate, phone: waLd.phone, params: postCallParams, lead_id: leadId }),
+                });
+                console.log(`[${callId}] Post-call WhatsApp sent: ${postCallTemplate}`);
+              }
+            }
+          } catch (waErr: any) {
+            console.error(`[${callId}] Post-call WhatsApp failed:`, waErr.message);
+          }
         }
       } catch (e: any) {
         console.error(`[${callId}] Failed to update call log:`, e.message);
