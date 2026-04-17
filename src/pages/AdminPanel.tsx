@@ -56,6 +56,19 @@ interface UserWithRole {
   profile_updated_at: string | null;
 }
 
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  if (days < 30) return `${Math.floor(days / 7)}w ago`;
+  return new Date(dateStr).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+}
+
 const AdminPanel = () => {
   const { role, realRole, isImpersonating, startImpersonating, loading: authLoading } = useAuth();
   const navigate = useNavigate();
@@ -89,9 +102,10 @@ const AdminPanel = () => {
       return;
     }
 
-    const { data: roles, error: roleError } = await supabase
-      .from("user_roles")
-      .select("id, user_id, role");
+    const [{ data: roles, error: roleError }, { data: authInfo }] = await Promise.all([
+      supabase.from("user_roles").select("id, user_id, role"),
+      supabase.from("user_auth_info" as any).select("user_id, last_sign_in_at"),
+    ]);
 
     if (roleError) {
       toast({ title: "Error", description: roleError.message, variant: "destructive" });
@@ -99,7 +113,10 @@ const AdminPanel = () => {
       return;
     }
 
-    const merged: UserWithRole[] = (profiles || []).map((p) => {
+    const authMap: Record<string, string | null> = {};
+    (authInfo || []).forEach((a: any) => { authMap[a.user_id] = a.last_sign_in_at; });
+
+    const merged: UserWithRole[] = (profiles || []).map((p: any) => {
       const userRole = (roles || []).find((r) => r.user_id === p.user_id);
       return {
         user_id: p.user_id,
@@ -109,6 +126,8 @@ const AdminPanel = () => {
         campus: p.campus,
         role: userRole?.role ?? null,
         role_id: userRole?.id ?? null,
+        last_sign_in_at: authMap[p.user_id] || null,
+        profile_updated_at: p.updated_at || null,
       };
     });
 
@@ -397,6 +416,8 @@ const AdminPanel = () => {
                       <th className="px-4 py-3 font-medium text-muted-foreground">Phone (OTP)</th>
                       <th className="px-4 py-3 font-medium text-muted-foreground">Campus</th>
                       <th className="px-4 py-3 font-medium text-muted-foreground">Current Role</th>
+                      <th className="px-4 py-3 font-medium text-muted-foreground">Last Login</th>
+                      <th className="px-4 py-3 font-medium text-muted-foreground">Last Active</th>
                       <th className="px-4 py-3 font-medium text-muted-foreground text-right">Actions</th>
                     </tr>
                   </thead>
@@ -442,6 +463,24 @@ const AdminPanel = () => {
                               <span className={`rounded-md px-2.5 py-0.5 text-[11px] font-semibold ${getRoleBadgeClass(user.role)}`}>
                                 {user.role ? ALL_ROLES.find((r) => r.value === user.role)?.label || user.role : "No Role"}
                               </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {user.last_sign_in_at ? (
+                              <span className="text-xs text-foreground" title={new Date(user.last_sign_in_at).toLocaleString("en-IN")}>
+                                {timeAgo(user.last_sign_in_at)}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground italic">Never</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {user.profile_updated_at ? (
+                              <span className="text-xs text-foreground" title={new Date(user.profile_updated_at).toLocaleString("en-IN")}>
+                                {timeAgo(user.profile_updated_at)}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground italic">—</span>
                             )}
                           </td>
                           <td className="px-4 py-3 text-right">
