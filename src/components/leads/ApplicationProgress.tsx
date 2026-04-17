@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -266,6 +267,7 @@ function ApplicationEditDialog({ app, steps, isSchool, onClose, onSaved }: {
   onSaved: () => void;
 }) {
   const { role } = useAuth();
+  const isTeamLeader = useIsTeamLeader();
   const { toast } = useToast();
   const [data, setData] = useState<ApplicationData>(() => appRowToData(app));
   const [initialData, setInitialData] = useState<ApplicationData>(() => appRowToData(app));
@@ -276,8 +278,8 @@ function ApplicationEditDialog({ app, steps, isSchool, onClose, onSaved }: {
   const [view, setView] = useState<"edit" | "audit" | "access">("edit");
   const [currentApp, setCurrentApp] = useState<ApplicationRow>(app);
 
-  const isAdmin = role === "super_admin" || role === "admission_head" || role === "principal";
-  const canRequest = isAdmin || role === "counsellor" || role === "campus_admin";
+  const isAdmin = role === "super_admin" || role === "admission_head" || role === "principal" || role === "campus_admin" || isTeamLeader;
+  const canRequest = isAdmin || role === "counsellor";
 
   const onChange = (updates: Partial<ApplicationData>) => {
     setData(prev => ({ ...prev, ...updates }));
