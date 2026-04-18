@@ -164,7 +164,8 @@ function FileUploadField({ label, file, onChange, multiple, files, onFilesChange
 export default function AlumniVerification() {
   const { toast } = useToast();
   const [verifiedPhone, setVerifiedPhone] = useState<string | null>(null);
-  const [step, setStep] = useState<"otp" | "select" | "form" | "payment" | "done">("otp");
+  const [step, setStep] = useState<"otp" | "dashboard" | "select" | "form" | "payment" | "done">("otp");
+  const [existingRequests, setExistingRequests] = useState<any[]>([]);
   const [requestType, setRequestType] = useState<RequestType>("verification");
   const [submitting, setSubmitting] = useState(false);
   const [requestId, setRequestId] = useState<string | null>(null);
@@ -192,6 +193,15 @@ export default function AlumniVerification() {
   const [marksheetFiles, setMarksheetFiles] = useState<File[]>([]);
   const [firFile, setFirFile] = useState<File | null>(null);
   const [originalDocFile, setOriginalDocFile] = useState<File | null>(null);
+
+  const fetchExistingRequests = async (phone: string) => {
+    const { data } = await supabase
+      .from("alumni_verification_requests" as any)
+      .select("*")
+      .eq("requestor_phone", phone)
+      .order("created_at", { ascending: false });
+    setExistingRequests(data || []);
+  };
 
   const companyRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -341,7 +351,9 @@ export default function AlumniVerification() {
         window.removeEventListener("message", msgHandler);
         if (pollRef.current) clearInterval(pollRef.current);
         setPaymentLoading(false);
-        setStep("done");
+        if (verifiedPhone) fetchExistingRequests(verifiedPhone);
+        setStep("dashboard");
+        toast({ title: "Payment successful!", description: `Request ${requestNumber} is now under review.` });
       }
     };
     window.addEventListener("message", msgHandler);
@@ -358,7 +370,9 @@ export default function AlumniVerification() {
         if (pollRef.current) clearInterval(pollRef.current);
         window.removeEventListener("message", msgHandler);
         setPaymentLoading(false);
-        setStep("done");
+        if (verifiedPhone) fetchExistingRequests(verifiedPhone);
+        setStep("dashboard");
+        toast({ title: "Payment successful!", description: `Request ${requestNumber} is now under review.` });
       }
     }, 3000);
 
@@ -374,7 +388,7 @@ export default function AlumniVerification() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 dark:from-gray-950 dark:to-gray-900">
       <header className="border-b border-border/40 bg-white/80 dark:bg-gray-950/80 backdrop-blur-sm">
         <div className="max-w-3xl mx-auto px-4 py-4 flex items-center gap-3">
-          <img src="/nimt-logo.png" alt="NIMT" className="h-10" onError={(e) => { (e.target as HTMLImageElement).src = "https://nimt.ac.in/images/nimt-logo.png"; }} />
+          <img src="https://pub-811305689b9049e6b317d47a98f724ae.r2.dev/web/images/nimt-beacon-logo.png" alt="NIMT" className="h-10" />
           <div>
             <h1 className="text-lg font-bold text-foreground">NIMT Educational Institutions</h1>
             <p className="text-xs text-muted-foreground">Alumni Services Portal</p>
@@ -385,8 +399,8 @@ export default function AlumniVerification() {
       <main className="max-w-2xl mx-auto px-4 py-8">
         {/* Progress */}
         <div className="flex items-center justify-center gap-2 mb-8">
-          {["Verify Identity", "Select Service", "Details", "Payment", "Confirmation"].map((label, i) => {
-            const stepIdx = ["otp", "select", "form", "payment", "done"].indexOf(step);
+          {(step === "dashboard" ? [] : ["Verify Identity", "Select Service", "Details", "Payment"]).map((label, i) => {
+            const stepIdx = ["otp", "select", "form", "payment"].indexOf(step);
             const isActive = i === stepIdx;
             const isDone = i < stepIdx;
             return (
@@ -408,9 +422,98 @@ export default function AlumniVerification() {
         <Card className="border-border/60 shadow-sm">
           <CardContent className="p-6 sm:p-8">
             {/* Step 1: OTP */}
-            {step === "otp" && <OtpLogin onVerified={(phone) => { setVerifiedPhone(phone); setStep("select"); }} />}
+            {step === "otp" && <OtpLogin onVerified={async (phone) => { setVerifiedPhone(phone); await fetchExistingRequests(phone); setStep("dashboard"); }} />}
 
             {/* Step 2: Service Selection */}
+            {/* Dashboard — shows existing requests + new request button */}
+            {step === "dashboard" && (
+              <div className="space-y-5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-lg font-bold text-foreground">Alumni Services Dashboard</h2>
+                    <p className="text-xs text-muted-foreground">Welcome! Your verified phone: {verifiedPhone}</p>
+                  </div>
+                  <Button size="sm" className="gap-1.5" onClick={() => setStep("select")}>
+                    + New Request
+                  </Button>
+                </div>
+
+                {existingRequests.length === 0 ? (
+                  <div className="rounded-xl border-2 border-dashed border-border p-8 text-center">
+                    <Shield className="h-8 w-8 text-muted-foreground/40 mx-auto mb-3" />
+                    <p className="text-sm font-medium text-muted-foreground">No requests yet</p>
+                    <p className="text-xs text-muted-foreground mt-1">Submit your first alumni service request</p>
+                    <Button size="sm" className="mt-4 gap-1.5" onClick={() => setStep("select")}>
+                      + Submit New Request
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {existingRequests.map((req: any) => {
+                      const svc = SERVICE_TYPES.find(s => s.key === (req.request_type || "verification"));
+                      const statusCfg: Record<string, { label: string; color: string }> = {
+                        pending_payment: { label: "Pending Payment", color: "bg-gray-100 text-gray-700" },
+                        paid: { label: "Under Review", color: "bg-blue-100 text-blue-700" },
+                        under_review: { label: "Under Review", color: "bg-amber-100 text-amber-700" },
+                        verified: { label: "Verified", color: "bg-emerald-100 text-emerald-700" },
+                        rejected: { label: "Rejected", color: "bg-red-100 text-red-700" },
+                      };
+                      const st = statusCfg[req.status] || statusCfg.pending_payment;
+                      const SvcIcon = svc?.icon || Shield;
+                      return (
+                        <div key={req.id} className="rounded-xl border border-border p-4 hover:border-primary/30 transition-colors">
+                          <div className="flex items-start gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 shrink-0">
+                              <SvcIcon className="h-5 w-5 text-primary" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono font-bold text-sm text-primary">{req.request_number}</span>
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${st.color}`}>{st.label}</span>
+                              </div>
+                              <p className="text-sm font-medium text-foreground mt-0.5">{req.alumni_name} — {req.course} ({req.year_of_passing})</p>
+                              <p className="text-xs text-muted-foreground">{svc?.label || "Verification"} · {req.employer_name !== "Self" ? req.employer_name : ""}</p>
+                              <p className="text-[10px] text-muted-foreground mt-1">
+                                Submitted {new Date(req.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                                {req.paid_at && ` · Paid ${new Date(req.paid_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`}
+                                {req.payment_ref && ` · Ref: ${req.payment_ref}`}
+                              </p>
+                            </div>
+                            <div className="shrink-0 text-right">
+                              <p className="text-sm font-bold text-foreground">&#8377;{req.fee_amount}</p>
+                              {req.status === "pending_payment" && (
+                                <Button size="sm" variant="outline" className="mt-1 text-[10px] h-7" onClick={() => {
+                                  setRequestId(req.id);
+                                  setRequestNumber(req.request_number);
+                                  setRequestType(req.request_type || "verification");
+                                  setAlumniName(req.alumni_name);
+                                  setContactEmail(req.contact_email || "");
+                                  setCourse(req.course);
+                                  setYearOfPassing(String(req.year_of_passing));
+                                  setContactName(req.contact_name);
+                                  setEmployerName(req.employer_name);
+                                  setStep("payment");
+                                }}>
+                                  Pay Now
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div className="rounded-xl border border-border bg-muted/30 p-4 text-xs text-muted-foreground space-y-1">
+                  <p className="font-semibold text-foreground text-sm">Need Help?</p>
+                  <p>Email: <a href="mailto:registrar@nimt.ac.in" className="text-primary hover:underline">registrar@nimt.ac.in</a></p>
+                  <p>Phone: <a href="tel:+911204167822" className="text-primary hover:underline">+91-120-4167822</a></p>
+                  <p>Office: NIMT Educational Institutions, Knowledge Park-1, Greater Noida, UP - 201310</p>
+                </div>
+              </div>
+            )}
+
             {step === "select" && (
               <div className="space-y-5">
                 <div className="text-center mb-2">
@@ -665,26 +768,13 @@ export default function AlumniVerification() {
               </div>
             )}
 
-            {/* Step 5: Done */}
-            {step === "done" && (
-              <div className="space-y-6 text-center">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-100 dark:bg-emerald-900/30 mx-auto">
-                  <CheckCircle className="h-7 w-7 text-emerald-600" />
-                </div>
-                <h2 className="text-lg font-bold text-foreground">Request Submitted Successfully</h2>
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 p-4 text-left space-y-2">
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Request #</span><span className="font-mono font-bold">{requestNumber}</span></div>
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Service</span><span className="font-medium">{currentService.label}</span></div>
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Alumni</span><span className="font-medium">{alumniName}</span></div>
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Course</span><span className="font-medium">{course} ({yearOfPassing})</span></div>
-                  {requestType === "verification" && (
-                    <div className="flex justify-between text-sm"><span className="text-muted-foreground">Employer</span><span className="font-medium">{employerName}</span></div>
-                  )}
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Status</span><span className="font-bold text-emerald-600">Paid — Under Review</span></div>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Result will be sent to <span className="font-medium">{contactEmail}</span> and via WhatsApp.
-                </p>
+            {/* Back to Dashboard link on sub-steps */}
+            {["select", "form"].includes(step) && verifiedPhone && (
+              <div className="mt-4 text-center">
+                <button onClick={async () => { await fetchExistingRequests(verifiedPhone); setStep("dashboard"); }}
+                  className="text-xs text-muted-foreground hover:text-primary">
+                  Back to Dashboard
+                </button>
               </div>
             )}
           </CardContent>
