@@ -153,8 +153,8 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
               if (isNaN(d.getTime())) return data.dob;
               const dd = String(d.getDate()).padStart(2, '0');
               const mm = String(d.getMonth() + 1).padStart(2, '0');
-              const yy = String(d.getFullYear()).slice(-2);
-              return `${dd}/${mm}/${yy}`;
+              const yyyy = String(d.getFullYear());
+              return `${dd}/${mm}/${yyyy}`;
             })() : undefined} />
             <Row label="Phone" value={data.phone} />
             <Row label="Email" value={data.email} />

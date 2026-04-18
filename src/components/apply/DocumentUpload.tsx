@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { ArrowRight, ArrowLeft, Loader2, Upload, CheckCircle, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -107,6 +107,57 @@ function getRequiredDocs(
   return base;
 }
 
+function DocCard({ doc, uploading, uploaded, onUpload, disabled }: {
+  doc: DocSpec;
+  uploading: string | null;
+  uploaded: Record<string, boolean>;
+  onUpload: (key: string, file: File) => void;
+  disabled?: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const isUploading = uploading === doc.key;
+  const isUploaded = uploaded[doc.key];
+
+  return (
+    <Card className={`border-border/60 shadow-none ${doc.required ? '' : 'border-dashed'}`}>
+      <CardContent className="p-5 text-center">
+        {isUploaded ? (
+          <CheckCircle className="h-6 w-6 text-primary mx-auto mb-2" />
+        ) : isUploading ? (
+          <Loader2 className="h-6 w-6 text-muted-foreground animate-spin mx-auto mb-2" />
+        ) : (
+          <FileText className="h-6 w-6 text-muted-foreground/40 mx-auto mb-2" />
+        )}
+        <h4 className="text-sm font-semibold text-foreground">
+          {doc.label} {doc.required && <span className="text-destructive">*</span>}
+        </h4>
+        <p className="text-xs text-muted-foreground mt-0.5">{doc.desc}</p>
+        <Button
+          variant="outline"
+          size="sm"
+          type="button"
+          className="mt-3 text-xs"
+          disabled={isUploading || disabled}
+          onClick={() => inputRef.current?.click()}
+        >
+          {isUploaded ? 'Re-upload' : 'Choose File'}
+        </Button>
+        <input
+          ref={inputRef}
+          type="file"
+          className="hidden"
+          accept=".pdf,.jpg,.jpeg,.png"
+          onChange={e => {
+            const file = e.target.files?.[0];
+            if (file) onUpload(doc.key, file);
+            e.target.value = '';
+          }}
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
 export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnly }: Props) {
   const { toast } = useToast();
   const [uploaded, setUploaded] = useState<Record<string, boolean>>({});
@@ -153,35 +204,14 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {docs.map(doc => (
-          <Card key={doc.key} className={`border-border/60 shadow-none ${doc.required ? '' : 'border-dashed'}`}>
-            <CardContent className="p-5 text-center">
-              {uploaded[doc.key] ? (
-                <CheckCircle className="h-6 w-6 text-primary mx-auto mb-2" />
-              ) : uploading === doc.key ? (
-                <Loader2 className="h-6 w-6 text-muted-foreground animate-spin mx-auto mb-2" />
-              ) : (
-                <FileText className="h-6 w-6 text-muted-foreground/40 mx-auto mb-2" />
-              )}
-              <h4 className="text-sm font-semibold text-foreground">
-                {doc.label} {doc.required && <span className="text-destructive">*</span>}
-              </h4>
-              <p className="text-xs text-muted-foreground mt-0.5">{doc.desc}</p>
-              <label className="cursor-pointer">
-                <Button variant="outline" size="sm" className="mt-3 text-xs pointer-events-none">
-                  {uploaded[doc.key] ? 'Re-upload' : 'Choose File'}
-                </Button>
-                <input
-                  type="file"
-                  className="hidden"
-                  accept=".pdf,.jpg,.jpeg,.png"
-                  onChange={e => {
-                    const file = e.target.files?.[0];
-                    if (file) handleUpload(doc.key, file);
-                  }}
-                />
-              </label>
-            </CardContent>
-          </Card>
+          <DocCard
+            key={doc.key}
+            doc={doc}
+            uploading={uploading}
+            uploaded={uploaded}
+            onUpload={handleUpload}
+            disabled={readOnly}
+          />
         ))}
       </div>
       </fieldset>

@@ -22,31 +22,34 @@ function DobInput({ value, onChange, className }: { value: string; onChange: (v:
   return (
     <input
       type="text"
-      placeholder="dd/mm/yy"
+      placeholder="dd/mm/yyyy"
       value={value ? (() => {
         const d = new Date(value);
         if (isNaN(d.getTime())) return value;
         const dd = String(d.getDate()).padStart(2, '0');
         const mm = String(d.getMonth() + 1).padStart(2, '0');
-        const yy = String(d.getFullYear()).slice(-2);
-        return `${dd}/${mm}/${yy}`;
+        const yyyy = String(d.getFullYear());
+        return `${dd}/${mm}/${yyyy}`;
       })() : ''}
       onChange={e => {
         let val = e.target.value.replace(/[^\d/]/g, '');
         const digits = val.replace(/\//g, '');
         if (digits.length <= 2) val = digits;
         else if (digits.length <= 4) val = digits.slice(0, 2) + '/' + digits.slice(2);
-        else val = digits.slice(0, 2) + '/' + digits.slice(2, 4) + '/' + digits.slice(4, 6);
+        else val = digits.slice(0, 2) + '/' + digits.slice(2, 4) + '/' + digits.slice(4, 8);
         const parts = val.split('/');
-        if (parts.length === 3 && parts[0].length === 2 && parts[1].length === 2 && parts[2].length === 2) {
-          const year = parseInt(parts[2], 10);
-          const fullYear = year <= 50 ? 2000 + year : 1900 + year;
-          onChange(`${fullYear}-${parts[1]}-${parts[0]}`);
+        if (parts.length === 3 && parts[0].length === 2 && parts[1].length === 2 && parts[2].length === 4) {
+          const fullYear = parseInt(parts[2], 10);
+          if (fullYear >= 1900 && fullYear <= new Date().getFullYear()) {
+            onChange(`${fullYear}-${parts[1]}-${parts[0]}`);
+          } else {
+            onChange(val);
+          }
         } else {
           onChange(val);
         }
       }}
-      maxLength={8}
+      maxLength={10}
       className={className || inputCls}
     />
   );

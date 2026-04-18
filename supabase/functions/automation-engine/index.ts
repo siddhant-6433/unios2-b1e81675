@@ -14,6 +14,21 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+/** Returns the next ISO timestamp within the 9AM–8PM IST calling window. */
+function nextPermittedCallTime(delayMs = 0): string {
+  const candidate = new Date(Date.now() + delayMs);
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // UTC+5:30
+  const istMs = candidate.getTime() + IST_OFFSET_MS;
+  const istDate = new Date(istMs);
+  const totalMins = istDate.getUTCHours() * 60 + istDate.getUTCMinutes();
+  // 9:00–19:59 IST (540–1199 minutes)
+  if (totalMins >= 540 && totalMins < 1200) return candidate.toISOString();
+  // 9AM IST = 03:30 UTC
+  const y = istDate.getUTCFullYear(), m = istDate.getUTCMonth(), d = istDate.getUTCDate();
+  const dayOffset = totalMins >= 1200 ? 1 : 0; // after 8PM → next day
+  return new Date(Date.UTC(y, m, d + dayOffset, 3, 30, 0)).toISOString();
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
@@ -80,12 +95,16 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Resolve counsellor's auth user_id from profiles.id
+    // Resolve counsellor's auth user_id and contact details from profiles.id
     // (leads.counsellor_id → profiles.id, but notifications/followups need auth.users.id)
     let counsellorAuthUserId: string | null = null;
+    let counsellorPhone: string | null = null;
+    let counsellorName: string | null = null;
     if (lead.counsellor_id) {
-      const { data: cp } = await admin.from("profiles").select("user_id").eq("id", lead.counsellor_id).single();
+      const { data: cp } = await admin.from("profiles").select("user_id, phone, display_name").eq("id", lead.counsellor_id).single();
       counsellorAuthUserId = cp?.user_id || null;
+      counsellorPhone = cp?.phone || null;
+      counsellorName = cp?.display_name || null;
     }
 
     let executedCount = 0;
@@ -165,7 +184,16 @@ Deno.serve(async (req) => {
         try {
           switch (action.type) {
             case "send_whatsapp": {
-              if (!lead.phone) break;
+              // Determine recipient: counsellor templates go to counsellor's phone, not lead's
+              const sendToCounsellor = action.send_to_counsellor === true;
+              const recipientPhone = sendToCounsellor ? counsellorPhone : lead.phone;
+              if (!recipientPhone) break;
+              if (sendToCounsellor && !counsellorPhone) {
+                console.warn(`counsellor_lead_assigned skipped — counsellor has no phone on file`);
+                break;
+              }
+
+              const phoneLastFour = lead.phone?.replace(/\D/g, "").slice(-4) || "XXXX";
               const params = action.params_template
                 ? action.params_template.map((p: string) =>
                     p.replace("{{name}}", lead.name)
@@ -173,6 +201,8 @@ Deno.serve(async (req) => {
                      .replace("{{campus}}", campusName)
                      .replace("{{source}}", lead.source || "")
                      .replace("{{app_id}}", lead.application_id || "N/A")
+                     .replace("{{counsellor_name}}", counsellorName || "Counsellor")
+                     .replace("{{phone_last4}}", phoneLastFour)
                   )
                 : [lead.name, courseName, lead.source || "website"];
 
@@ -184,12 +214,12 @@ Deno.serve(async (req) => {
                 },
                 body: JSON.stringify({
                   template_key: action.template_key,
-                  phone: lead.phone,
+                  phone: recipientPhone,
                   params,
                   lead_id: lead.id,
                 }),
               });
-              executedActions.push({ type: "send_whatsapp", template: action.template_key });
+              executedActions.push({ type: "send_whatsapp", template: action.template_key, recipient: sendToCounsellor ? "counsellor" : "lead" });
               break;
             }
 
@@ -296,24 +326,39 @@ Deno.serve(async (req) => {
             }
 
             case "ai_call": {
-              // Trigger AI voice call via the voice-call function
-              const voiceCallUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/voice-call`;
-              const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-              const vcRes = await fetch(voiceCallUrl, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${serviceKey}`,
-                },
-                body: JSON.stringify({ action: "outbound", lead_id: lead.id }),
-              });
-              const vcData = await vcRes.json().catch(() => ({}));
-              if (vcData?.error) {
-                console.error("AI call error:", vcData.error);
-              } else {
-                console.log(`AI call triggered for ${lead.name}: ${vcData?.message || "OK"}`);
+              // Determine delay based on lead bucket:
+              //   Mirai campus         → 1 hour  (IB school — parents need time to read the form)
+              //   CBSE / other school  → 2 min
+              //   College              → 2 min
+              const MIRAI_CAMPUS_ID = "c0000002-0000-0000-0000-000000000001";
+              let delayMs = 2 * 60 * 1000; // default
+
+              if (lead.campus_id === MIRAI_CAMPUS_ID) {
+                delayMs = 60 * 60 * 1000; // 1 hour for Mirai
+              } else if (lead.campus_id) {
+                const { data: campusInst } = await admin
+                  .from("campuses")
+                  .select("institutions:institution_id(type)")
+                  .eq("id", lead.campus_id)
+                  .single();
+                if ((campusInst?.institutions as any)?.type === "school") {
+                  delayMs = 2 * 60 * 1000; // CBSE school — same as default, adjust if needed
+                }
               }
-              executedActions.push({ type: "ai_call", result: vcData?.success ? "initiated" : vcData?.error || "unknown" });
+
+              const scheduledAt = nextPermittedCallTime(delayMs);
+              const { error: qErr } = await admin.from("ai_call_queue" as any).insert({
+                lead_id: lead.id,
+                status: "pending",
+                scheduled_at: scheduledAt,
+              });
+              if (qErr) {
+                console.error("AI call queue insert failed:", qErr.message);
+                executedActions.push({ type: "ai_call", result: `queue_error: ${qErr.message}` });
+              } else {
+                console.log(`AI call queued for ${lead.name} at ${scheduledAt} (delay: ${delayMs / 60000}min)`);
+                executedActions.push({ type: "ai_call", result: `queued_at:${scheduledAt}` });
+              }
               break;
             }
           }

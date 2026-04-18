@@ -259,7 +259,7 @@ Deno.serve(async (req) => {
     // Resolve lead source early (needed for duplicate tracking)
     const validSources = [
       "website", "mirai_website", "meta_ads", "google_ads", "shiksha", "walk_in",
-      "consultant", "justdial", "referral", "education_fair", "collegedunia", "collegehai", "other",
+      "consultant", "justdial", "referral", "education_fair", "collegedunia", "collegehai", "salahlo", "other",
     ];
     const leadSource = validSources.includes(parsed.source) ? parsed.source : "other";
 

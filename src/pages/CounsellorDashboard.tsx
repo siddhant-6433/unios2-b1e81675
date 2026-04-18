@@ -31,6 +31,7 @@ interface OverdueFollowup {
   lead_name: string;
   lead_phone: string;
   lead_stage: string;
+  counsellor_id: string | null;
   type: string;
   scheduled_at: string;
   days_overdue: number;
@@ -339,6 +340,9 @@ const CounsellorDashboard = () => {
   // Sort state for breakdown table
   const [sortCol, setSortCol] = useState<BreakdownSortCol>("total");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  // Overdue follow-ups counsellor filter
+  const [overdueFilter, setOverdueFilter] = useState("all");
 
   // Date filter state
   const [datePreset, setDatePreset] = useState<DatePreset>("all");
@@ -892,6 +896,29 @@ const CounsellorDashboard = () => {
     admitted: acc.admitted + b.admitted,
   }), { total: 0, new_lead: 0, called: 0, not_called: 0, admitted: 0 }), [breakdownData]);
 
+  // Counsellor name map for overdue filter — tatDefaults has full coverage, ranked as fallback
+  const overdueCounsellorNameMap: Record<string, string> = {};
+  for (const d of tatDefaults) {
+    if (d.profile_id) overdueCounsellorNameMap[d.profile_id] = d.counsellor_name;
+  }
+  for (const s of ranked) {
+    if (s.counsellor_id && !overdueCounsellorNameMap[s.counsellor_id]) {
+      overdueCounsellorNameMap[s.counsellor_id] = s.counsellor_name;
+    }
+  }
+  const overdueCouns = Array.from(
+    new Map(
+      overdue
+        .filter(f => f.counsellor_id)
+        .map(f => [f.counsellor_id, overdueCounsellorNameMap[f.counsellor_id!] || "Unknown"])
+    ).entries()
+  ).sort((a, b) => a[1].localeCompare(b[1]));
+  const filteredOverdue = overdueFilter === "all"
+    ? overdue
+    : overdueFilter === "unassigned"
+      ? overdue.filter(f => !f.counsellor_id)
+      : overdue.filter(f => f.counsellor_id === overdueFilter);
+
   if (loading) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
   }
@@ -1410,61 +1437,105 @@ const CounsellorDashboard = () => {
         </div>
 
       ) : tab === "overdue" ? (
-        <Card className="border-border/60 shadow-none overflow-hidden">
-          <CardContent className="p-0">
-            {overdue.length === 0 ? (
-              <div className="px-4 py-8 text-center">
-                <CalendarCheck className="h-8 w-8 text-emerald-500 mx-auto mb-2" />
-                <p className="text-sm font-medium text-foreground">All caught up!</p>
-                <p className="text-xs text-muted-foreground">No overdue follow-ups</p>
-              </div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted/50">
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Lead</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Stage</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Type</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Scheduled</th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Overdue</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {overdue.map((f) => (
-                    <tr
-                      key={f.id}
-                      className="border-b border-border last:border-0 hover:bg-muted/30 cursor-pointer transition-colors"
-                      onClick={() => navigate(`/admissions/${f.lead_id}`)}
+          <div className="space-y-3">
+            {/* Counsellor filter — always shown when there are overdue items */}
+            {overdue.length > 0 && (
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-muted-foreground font-medium shrink-0">Filter by counsellor:</span>
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    onClick={() => setOverdueFilter("all")}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${overdueFilter === "all" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}
+                  >
+                    All
+                    <span className="ml-1 opacity-70">({overdue.length})</span>
+                  </button>
+                  {overdueCouns.map(([id, name]) => {
+                    const count = overdue.filter(f => f.counsellor_id === id).length;
+                    return (
+                      <button
+                        key={id}
+                        onClick={() => setOverdueFilter(id)}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${overdueFilter === id ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}
+                      >
+                        {name}
+                        <span className={`ml-1 text-[10px] font-bold ${overdueFilter === id ? "opacity-70" : "text-red-500"}`}>({count})</span>
+                      </button>
+                    );
+                  })}
+                  {overdue.some(f => !f.counsellor_id) && (
+                    <button
+                      onClick={() => setOverdueFilter("unassigned")}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${overdueFilter === "unassigned" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}
                     >
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-foreground">{f.lead_name}</div>
-                        <div className="text-xs text-muted-foreground">{f.lead_phone}</div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge variant="outline" className="text-[10px]">{STAGE_LABELS[f.lead_stage] || f.lead_stage}</Badge>
-                      </td>
-                      <td className="px-4 py-3 capitalize text-muted-foreground">{f.type}</td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs">
-                        {new Date(f.scheduled_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <Badge className={`border-0 text-[10px] font-semibold ${
-                          f.days_overdue > 5 ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                            : f.days_overdue > 2 ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                              : "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400"
-                        }`}>
-                          {f.days_overdue}d
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground max-w-[200px] truncate">{f.notes || "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      Unassigned
+                      <span className={`ml-1 text-[10px] font-bold ${overdueFilter === "unassigned" ? "opacity-70" : "text-orange-500"}`}>({overdue.filter(f => !f.counsellor_id).length})</span>
+                    </button>
+                  )}
+                </div>
+              </div>
             )}
-          </CardContent>
-        </Card>
+
+            <Card className="border-border/60 shadow-none overflow-hidden">
+              <CardContent className="p-0">
+                {filteredOverdue.length === 0 ? (
+                  <div className="px-4 py-8 text-center">
+                    <CalendarCheck className="h-8 w-8 text-emerald-500 mx-auto mb-2" />
+                    <p className="text-sm font-medium text-foreground">All caught up!</p>
+                    <p className="text-xs text-muted-foreground">No overdue follow-ups</p>
+                  </div>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/50">
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Lead</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Counsellor</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Stage</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Type</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Scheduled</th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Overdue</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredOverdue.map((f) => (
+                        <tr
+                          key={f.id}
+                          className="border-b border-border last:border-0 hover:bg-muted/30 cursor-pointer transition-colors"
+                          onClick={() => navigate(`/admissions/${f.lead_id}`)}
+                        >
+                          <td className="px-4 py-3">
+                            <div className="font-medium text-foreground">{f.lead_name}</div>
+                            <div className="text-xs text-muted-foreground">{f.lead_phone}</div>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground">
+                            {f.counsellor_id ? (overdueCounsellorNameMap[f.counsellor_id] || "—") : <span className="text-orange-500">Unassigned</span>}
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge variant="outline" className="text-[10px]">{STAGE_LABELS[f.lead_stage] || f.lead_stage}</Badge>
+                          </td>
+                          <td className="px-4 py-3 capitalize text-muted-foreground">{f.type}</td>
+                          <td className="px-4 py-3 text-muted-foreground text-xs">
+                            {new Date(f.scheduled_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <Badge className={`border-0 text-[10px] font-semibold ${
+                              f.days_overdue > 5 ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                                : f.days_overdue > 2 ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                                  : "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400"
+                            }`}>
+                              {f.days_overdue}d
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground max-w-[200px] truncate">{f.notes || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </CardContent>
+            </Card>
+          </div>
       ) : tab === "tat-defaults" ? (
         <Card className="border-border/60 shadow-none overflow-hidden">
           <CardContent className="p-0">

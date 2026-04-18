@@ -260,51 +260,56 @@ export default function LeadBuckets() {
         <p className="text-sm text-muted-foreground mt-1">Pick up unassigned leads from school or college buckets</p>
       </div>
 
-      {/* Bucket toggle */}
-      <div className="flex gap-4">
-        {(["school", "college"] as const).map((bucket) => (
-          <Card
-            key={bucket}
-            className={`flex-1 cursor-pointer transition-all hover:shadow-sm ${activeBucket === bucket ? "ring-2 ring-primary/40 bg-primary/5" : "border-border/60"}`}
-            onClick={() => { setActiveBucket(bucket); if (bucket === "college") setSchoolFilter("all"); }}
-          >
-            <CardContent className="p-5 flex items-center gap-4">
-              <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${bucket === "school" ? "bg-pastel-yellow" : "bg-pastel-blue"}`}>
-                {bucket === "school" ? <School className="h-6 w-6 text-foreground/70" /> : <GraduationCap className="h-6 w-6 text-foreground/70" />}
-              </div>
-              <div className="flex-1">
-                <p className="text-lg font-bold text-foreground capitalize">{bucket} Leads</p>
-                <p className="text-sm text-muted-foreground">Unassigned {bucket} leads</p>
-              </div>
-              <span className="text-2xl font-bold text-foreground">{bucket === "school" ? schoolCount : collegeCount}</span>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {/* Bucket toggle — three buckets: College, CBSE Schools, Mirai */}
+      <div className="flex gap-3">
+        <Card
+          className={`flex-1 cursor-pointer transition-all hover:shadow-sm ${activeBucket === "college" ? "ring-2 ring-primary/40 bg-primary/5" : "border-border/60"}`}
+          onClick={() => { setActiveBucket("college"); setSchoolFilter("all"); }}
+        >
+          <CardContent className="p-4 flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-pastel-blue shrink-0">
+              <GraduationCap className="h-5 w-5 text-foreground/70" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-foreground">College Leads</p>
+              <p className="text-xs text-muted-foreground">Unassigned college leads</p>
+            </div>
+            <span className="text-xl font-bold text-foreground">{collegeCount}</span>
+          </CardContent>
+        </Card>
 
-      {/* School sub-filter: All / Mirai / NIMT */}
-      {activeBucket === "school" && (
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-muted-foreground">Filter:</span>
-          {([
-            { key: "all" as const, label: "All Schools", count: schoolCount },
-            { key: "mirai" as const, label: "Mirai", count: miraiSchoolCount },
-            { key: "nimt" as const, label: "NIMT Schools", count: nimtSchoolCount },
-          ]).map(f => (
-            <button
-              key={f.key}
-              onClick={() => setSchoolFilter(f.key)}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium border transition-colors ${
-                schoolFilter === f.key
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "bg-card text-muted-foreground border-border hover:bg-muted"
-              }`}
-            >
-              {f.label} ({f.count})
-            </button>
-          ))}
-        </div>
-      )}
+        <Card
+          className={`flex-1 cursor-pointer transition-all hover:shadow-sm ${activeBucket === "school" && schoolFilter !== "mirai" ? "ring-2 ring-primary/40 bg-primary/5" : "border-border/60"}`}
+          onClick={() => { setActiveBucket("school"); setSchoolFilter("nimt"); }}
+        >
+          <CardContent className="p-4 flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-pastel-yellow shrink-0">
+              <School className="h-5 w-5 text-foreground/70" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-foreground">CBSE School Leads</p>
+              <p className="text-xs text-muted-foreground">NIMT Arthala &amp; Avantika II</p>
+            </div>
+            <span className="text-xl font-bold text-foreground">{nimtSchoolCount}</span>
+          </CardContent>
+        </Card>
+
+        <Card
+          className={`flex-1 cursor-pointer transition-all hover:shadow-sm ${activeBucket === "school" && schoolFilter === "mirai" ? "ring-2 ring-violet-400/60 bg-violet-50/50 dark:bg-violet-950/10" : "border-border/60"}`}
+          onClick={() => { setActiveBucket("school"); setSchoolFilter("mirai"); }}
+        >
+          <CardContent className="p-4 flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 dark:bg-violet-900/30 shrink-0">
+              <School className="h-5 w-5 text-violet-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-foreground">Mirai IB Leads</p>
+              <p className="text-xs text-muted-foreground">Mirai Experiential School</p>
+            </div>
+            <span className="text-xl font-bold text-violet-600">{miraiSchoolCount}</span>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Quick pick batches */}
       {filtered.length > 0 && (

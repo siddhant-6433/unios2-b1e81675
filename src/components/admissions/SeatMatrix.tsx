@@ -10,6 +10,7 @@ interface SeatRow {
   course_code: string;
   department_name: string;
   campus_name: string;
+  institution_type: string;
   total_seats: number;
   admitted: number;
   available: number;
@@ -33,10 +34,14 @@ export function SeatMatrix() {
     })();
   }, []);
 
-  const campuses = [...new Set(rows.map((r) => r.campus_name))];
-  const filtered = campusFilter === "all" ? rows : rows.filter((r) => r.campus_name === campusFilter);
+  const collegeRows = rows.filter((r) => r.institution_type !== "school");
+  const schoolRows = rows.filter((r) => r.institution_type === "school");
 
-  const totals = filtered.reduce(
+  const campuses = [...new Set(collegeRows.map((r) => r.campus_name))];
+  const filteredCollege = campusFilter === "all" ? collegeRows : collegeRows.filter((r) => r.campus_name === campusFilter);
+  const filteredSchool = campusFilter === "all" ? schoolRows : schoolRows.filter((r) => r.campus_name === campusFilter);
+
+  const totals = filteredCollege.reduce(
     (acc, r) => ({
       seats: acc.seats + r.total_seats,
       admitted: acc.admitted + r.admitted,
@@ -64,20 +69,22 @@ export function SeatMatrix() {
         ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
         : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400";
 
+  const schoolAdmitted = schoolRows.reduce((s, r) => s + r.admitted, 0);
+
   return (
     <div className="space-y-4">
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {/* Summary cards — college seats only */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <Card className="border-border/60 shadow-none">
           <CardContent className="p-4 text-center">
             <p className="text-2xl font-bold text-foreground">{totals.seats}</p>
-            <p className="text-xs text-muted-foreground">Total Seats</p>
+            <p className="text-xs text-muted-foreground">College Seats</p>
           </CardContent>
         </Card>
         <Card className="border-border/60 shadow-none">
           <CardContent className="p-4 text-center">
             <p className="text-2xl font-bold text-primary">{totals.admitted}</p>
-            <p className="text-xs text-muted-foreground">Admitted</p>
+            <p className="text-xs text-muted-foreground">College Admitted</p>
           </CardContent>
         </Card>
         <Card className="border-border/60 shadow-none">
@@ -92,11 +99,19 @@ export function SeatMatrix() {
             <p className="text-xs text-muted-foreground">In Pipeline</p>
           </CardContent>
         </Card>
+        {schoolRows.length > 0 && (
+          <Card className="border-border/60 shadow-none border-violet-200 dark:border-violet-800">
+            <CardContent className="p-4 text-center">
+              <p className="text-2xl font-bold text-violet-600">{schoolAdmitted}</p>
+              <p className="text-xs text-muted-foreground">School Enrolled</p>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
-      {/* Campus filter */}
+      {/* Campus filter (college campuses only) */}
       {campuses.length > 1 && (
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => setCampusFilter("all")}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${campusFilter === "all" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}
@@ -115,7 +130,7 @@ export function SeatMatrix() {
         </div>
       )}
 
-      {/* Table */}
+      {/* College Seat Matrix */}
       <Card className="border-border/60 shadow-none overflow-hidden">
         <CardContent className="p-0">
           <table className="w-full text-sm">
@@ -131,7 +146,7 @@ export function SeatMatrix() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((row) => {
+              {filteredCollege.map((row) => {
                 const pct = fillPct(row.admitted, row.total_seats);
                 return (
                   <tr key={row.course_id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
@@ -166,16 +181,16 @@ export function SeatMatrix() {
                   </tr>
                 );
               })}
-              {filtered.length === 0 && (
+              {filteredCollege.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-muted-foreground">No courses found</td>
+                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-muted-foreground">No college courses found</td>
                 </tr>
               )}
             </tbody>
-            {filtered.length > 0 && (
+            {filteredCollege.length > 0 && (
               <tfoot>
                 <tr className="border-t-2 border-border bg-muted/30 font-semibold">
-                  <td className="px-4 py-3 text-foreground">Total ({filtered.length} courses)</td>
+                  <td className="px-4 py-3 text-foreground">Total ({filteredCollege.length} courses)</td>
                   <td className="px-4 py-3" />
                   <td className="px-4 py-3 text-center text-foreground">{totals.seats}</td>
                   <td className="px-4 py-3 text-center text-primary">{totals.admitted}</td>
@@ -192,6 +207,57 @@ export function SeatMatrix() {
           </table>
         </CardContent>
       </Card>
+
+      {/* School Admissions — separate section */}
+      {filteredSchool.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-foreground">School Admissions</h3>
+            <Badge className="bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300 border-0 text-[10px]">
+              {filteredSchool.reduce((s, r) => s + r.admitted, 0)} enrolled
+            </Badge>
+          </div>
+          <Card className="border-border/60 shadow-none overflow-hidden">
+            <CardContent className="p-0">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-violet-50/50 dark:bg-violet-950/10">
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Programme / Grade</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Campus</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Enrolled</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Pipeline</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredSchool.map((row) => (
+                    <tr key={row.course_id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-foreground">{row.course_name}</div>
+                        <div className="text-xs text-muted-foreground">{row.department_name}</div>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">{row.campus_name}</td>
+                      <td className="px-4 py-3 text-center font-semibold text-violet-600">{row.admitted}</td>
+                      <td className="px-4 py-3 text-center text-muted-foreground">{row.pipeline_leads}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-border bg-muted/30 font-semibold">
+                    <td className="px-4 py-3 text-foreground">Total ({filteredSchool.length} programmes)</td>
+                    <td className="px-4 py-3" />
+                    <td className="px-4 py-3 text-center text-violet-600">
+                      {filteredSchool.reduce((s, r) => s + r.admitted, 0)}
+                    </td>
+                    <td className="px-4 py-3 text-center text-muted-foreground">
+                      {filteredSchool.reduce((s, r) => s + r.pipeline_leads, 0)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

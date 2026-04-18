@@ -40,8 +40,8 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
   );
 
-  const whatsappToken = Deno.env.get("WHATSAPP_API_TOKEN");
-  const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const resendApiKey = Deno.env.get("RESEND_API_KEY");
   const emailFrom = Deno.env.get("EMAIL_FROM") || "admissions@nimt.ac.in";
 
@@ -56,33 +56,35 @@ Deno.serve(async (req) => {
     errors: 0,
   };
 
-  // Helper: send WhatsApp template message (service-level, no user auth)
-  async function sendWhatsApp(phone: string, templateName: string, params: string[]) {
-    if (!whatsappToken || !phoneNumberId) return;
-    const waPhone = phone.replace(/[^0-9]/g, "");
-    const bodyParams = params.map((p) => ({ type: "text", text: p }));
+  // Helper: send WhatsApp via whatsapp-send function (logs to whatsapp_messages + lead_activities)
+  async function sendWhatsApp(
+    phone: string,
+    templateKey: string,
+    params: string[],
+    leadId?: string,
+    buttonUrls?: string[]
+  ) {
     try {
-      await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+      const res = await fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${whatsappToken}`,
           "Content-Type": "application/json",
+          Authorization: `Bearer ${serviceRoleKey}`,
         },
         body: JSON.stringify({
-          messaging_product: "whatsapp",
-          to: waPhone,
-          type: "template",
-          template: {
-            name: templateName,
-            language: { code: "en" },
-            ...(bodyParams.length > 0
-              ? { components: [{ type: "body", parameters: bodyParams }] }
-              : {}),
-          },
+          template_key: templateKey,
+          phone,
+          params,
+          lead_id: leadId || null,
+          ...(buttonUrls ? { button_urls: buttonUrls } : {}),
         }),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        console.error(`WhatsApp send failed (${templateKey}):`, err);
+      }
     } catch (e) {
-      console.error(`WhatsApp send failed for ${waPhone}:`, e);
+      console.error(`WhatsApp send failed (${templateKey}):`, e);
     }
   }
 
@@ -133,19 +135,17 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Helper: get counsellor contact info from profiles + auth
+  // Helper: get counsellor contact info from profiles
   interface CounsellorInfo { phone: string | null; email: string | null; name: string | null; }
   async function getCounsellorInfo(counsellorId: string): Promise<CounsellorInfo> {
     const { data: profile } = await supabase
       .from("profiles")
-      .select("phone, display_name")
+      .select("phone, display_name, email")
       .eq("id", counsellorId)
       .single();
-    // Get email from auth.users
-    const { data: authUser } = await supabase.auth.admin.getUserById(counsellorId);
     return {
       phone: profile?.phone || null,
-      email: authUser?.user?.email || null,
+      email: profile?.email || null,
       name: profile?.display_name || null,
     };
   }
@@ -186,7 +186,7 @@ Deno.serve(async (req) => {
         await sendWhatsApp(c1.phone, "counsellor_sla_warning", [
           lead.name,
           String(hoursLeft),
-        ]);
+        ], lead.id);
       }
       if (c1.email) {
         await sendTemplateEmail(c1.email, "counsellor-sla-warning", {
@@ -245,7 +245,7 @@ Deno.serve(async (req) => {
         await sendWhatsApp(c2.phone, "counsellor_lead_reclaimed", [
           lead.name,
           "the assigned course",
-        ]);
+        ], lead.id);
       }
       if (c2.email) {
         await sendTemplateEmail(c2.email, "counsellor-lead-reclaimed", {
@@ -332,15 +332,20 @@ Deno.serve(async (req) => {
 
       const formerCounsellor = fu.counsellor_id;
 
+      // Fetch current count before nullifying counsellor
+      const { data: fuLead } = await supabase
+        .from("leads")
+        .select("auto_returned_count")
+        .eq("id", fu.lead_id)
+        .single();
+
       await supabase
         .from("leads")
-        .update({ counsellor_id: null, auto_returned_count: supabase.rpc ? 0 : 0 })
+        .update({
+          counsellor_id: null,
+          auto_returned_count: (fuLead?.auto_returned_count || 0) + 1,
+        })
         .eq("id", fu.lead_id);
-
-      // Increment auto_returned_count via raw update
-      await supabase.rpc("increment_auto_return", { lead_uuid: fu.lead_id }).catch(() => {
-        // Fallback: direct update
-      });
 
       await supabase.from("lead_activities").insert({
         lead_id: fu.lead_id,
@@ -417,8 +422,8 @@ Deno.serve(async (req) => {
         });
       }
 
-      // Also send WhatsApp reminder to the student (with map button)
-      if (visit.lead_phone && phoneNumberId) {
+      // Send WhatsApp visit reminder to the student (via whatsapp-send for logging)
+      if (visit.lead_phone) {
         const visitTime = new Date(visit.visit_date).toLocaleString("en-IN", {
           timeZone: "Asia/Kolkata",
           weekday: "long",
@@ -429,45 +434,15 @@ Deno.serve(async (req) => {
         });
         const mapsUrl = visit.google_maps_url || "";
         const cidMatch = mapsUrl.match(/cid=(\d+)/);
-        const mapCid = cidMatch ? cidMatch[1] : "";
-        const waPhone = visit.lead_phone.replace(/[^0-9]/g, "");
+        const mapCid = cidMatch ? cidMatch[1] : null;
 
-        try {
-          await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${whatsappToken}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              messaging_product: "whatsapp",
-              to: waPhone,
-              type: "template",
-              template: {
-                name: "visit_reminder",
-                language: { code: "en" },
-                components: [
-                  {
-                    type: "body",
-                    parameters: [
-                      { type: "text", text: visit.lead_name },
-                      { type: "text", text: visitTime },
-                      { type: "text", text: visit.campus_name || "our campus" },
-                    ],
-                  },
-                  ...(mapCid ? [{
-                    type: "button",
-                    sub_type: "url",
-                    index: 0,
-                    parameters: [{ type: "text", text: mapCid }],
-                  }] : []),
-                ],
-              },
-            }),
-          });
-        } catch (e) {
-          console.error("Visit reminder WA failed:", e);
-        }
+        await sendWhatsApp(
+          visit.lead_phone,
+          "visit_reminder_24hr",
+          [visit.lead_name, visitTime, visit.campus_name || "our campus"],
+          visit.lead_id,
+          mapCid ? [mapCid] : undefined
+        );
       }
 
       stats.visit_confirmations++;

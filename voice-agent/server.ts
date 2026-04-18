@@ -54,6 +54,94 @@ const activeCallContexts = new Map<string, ActiveCall>();
 /**
  * Execute a tool call from Gemini against Supabase.
  */
+const MIRAI_CAMPUS_ID = "c0000002-0000-0000-0000-000000000001";
+
+/**
+ * Assigns a lead to a counsellor via round-robin within the appropriate team:
+ *   Mirai campus  → "Mirai Admissions"
+ *   School campus → "NSAEII Admissions"
+ *   College       → "Grn Counselling"
+ *
+ * Skips if the lead already has a counsellor assigned.
+ * Returns the assigned profile id or null.
+ */
+async function assignLeadRoundRobin(leadId: string): Promise<string | null> {
+  const h = {
+    "Content-Type": "application/json",
+    apikey: SUPABASE_SERVICE_KEY,
+    Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+  };
+
+  // Fetch lead campus + institution type, and whether already assigned
+  const ldRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}&select=counsellor_id,campus_id,campuses:campus_id(institutions:institution_id(type))`,
+    { headers: h },
+  );
+  const ld = (await ldRes.json().catch(() => []))?.[0];
+  if (!ld) return null;
+  if (ld.counsellor_id) return ld.counsellor_id; // already assigned — skip
+
+  const instType = (ld.campuses as any)?.institutions?.type;
+  let teamName: string;
+  if (ld.campus_id === MIRAI_CAMPUS_ID) {
+    teamName = "Mirai Admissions";
+  } else if (instType === "school") {
+    teamName = "NSAEII Admissions";
+  } else {
+    teamName = "Grn Counselling";
+  }
+
+  // Fetch team members
+  const teamRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/teams?name=eq.${encodeURIComponent(teamName)}&select=id,team_members(user_id)&limit=1`,
+    { headers: h },
+  );
+  const team = (await teamRes.json().catch(() => []))?.[0];
+  const memberUserIds: string[] = (team?.team_members || []).map((m: any) => m.user_id);
+  if (memberUserIds.length === 0) {
+    console.warn(`[RoundRobin] No members in team "${teamName}" for lead ${leadId}`);
+    return null;
+  }
+
+  // Resolve user_ids → profile ids
+  const profRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/profiles?user_id=in.(${memberUserIds.join(",")})&select=id`,
+    { headers: h },
+  );
+  const profiles: { id: string }[] = await profRes.json().catch(() => []);
+  const profileIds = profiles.map(p => p.id);
+  if (profileIds.length === 0) return null;
+
+  // Round-robin: pick the counsellor with fewest active leads
+  const lcRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/leads?counsellor_id=in.(${profileIds.join(",")})&stage=not.in.(admitted,rejected,not_interested)&select=counsellor_id`,
+    { headers: h },
+  );
+  const activeLeads: { counsellor_id: string }[] = await lcRes.json().catch(() => []);
+  const countMap: Record<string, number> = {};
+  for (const pid of profileIds) countMap[pid] = 0;
+  for (const l of activeLeads) {
+    if (countMap[l.counsellor_id] !== undefined) countMap[l.counsellor_id]++;
+  }
+  const sorted = Object.entries(countMap).sort((a, b) => a[1] - b[1]);
+  const assignedProfileId = sorted[0]?.[0] ?? null;
+  if (!assignedProfileId) return null;
+
+  // Assign on lead
+  await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}`, {
+    method: "PATCH",
+    headers: { ...h, Prefer: "return=minimal" },
+    body: JSON.stringify({ counsellor_id: assignedProfileId }),
+  });
+
+  console.log(`[RoundRobin] Lead ${leadId} → team "${teamName}", counsellor ${assignedProfileId}`);
+
+  // Fire lead_assigned automation (async)
+  fireAutomation("lead_assigned", leadId).catch(() => {});
+
+  return assignedProfileId;
+}
+
 /** Fire the automation engine for a trigger event */
 async function fireAutomation(triggerType: string, leadId: string, extra: Record<string, any> = {}) {
   try {
@@ -256,6 +344,8 @@ async function executeTool(
               content: `🤖 AI Call: Campus visit scheduled for ${args.visit_date}${args.visit_time ? ` (${args.visit_time})` : ""}`,
             }),
           });
+          // Assign counsellor via round-robin so the visit has a responsible counsellor
+          await assignLeadRoundRobin(callCtx.leadId);
           // Fire automations for visit_scheduled and stage_change
           fireAutomation("visit_scheduled", callCtx.leadId);
           fireAutomation("stage_change", callCtx.leadId, { old_stage: "counsellor_call", new_stage: "visit_scheduled" });
@@ -361,6 +451,12 @@ async function executeTool(
             content: `🤖 AI Call Outcome: ${args.disposition.replace("_", " ").toUpperCase()}\n${args.notes || ""}`,
           }),
         });
+
+        // Assign counsellor via round-robin for actionable dispositions
+        const needsAssignment = ["interested", "callback_requested", "call_back", "partial_conversation"].includes(args.disposition);
+        if (needsAssignment) {
+          await assignLeadRoundRobin(callCtx.leadId);
+        }
 
         // Always schedule a counsellor follow-up for actionable dispositions
         const needsFollowup = args.schedule_followup ||
@@ -619,8 +715,9 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
         realtimeInputConfig: {
           automaticActivityDetection: {
             disabled: false,
-            startOfSpeechSensitivity: "START_OF_SPEECH_SENSITIVITY_LOW",
-            endOfSpeechSensitivity: "END_OF_SPEECH_SENSITIVITY_LOW",
+            // NOTE: startOfSpeechSensitivity and endOfSpeechSensitivity are DEPRECATED
+            // in Gemini Live API and must NOT be added here — they silently break audio output.
+            // This has caused the "no audio from Gemini" bug twice. Do not add them back.
             prefixPaddingMs: 300,
             silenceDurationMs: 1500,
           },
@@ -1050,33 +1147,78 @@ Deno.serve({ port: PORT }, async (req) => {
           leadId = lRows?.[0]?.lead_id;
         }
 
-        // Auto-schedule follow-up for busy/not_answered (retry in 2 hours)
+        // Auto-retry unanswered/busy via AI — re-queue with 4-hour delay, 9AM–8PM IST window
         if (autoDisposition && leadId && (autoDisposition === "busy" || autoDisposition === "not_answered")) {
-          const retryAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
-          await fetch(`${SUPABASE_URL}/rest/v1/lead_followups`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              apikey: SUPABASE_SERVICE_KEY,
-              Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-              Prefer: "return=minimal",
-            },
-            body: JSON.stringify({
-              lead_id: leadId,
-              scheduled_at: retryAt,
-              type: "call",
-              notes: `🤖 AI call auto-retry: previous call was ${autoDisposition.replace("_", " ")}`,
-              status: "pending",
-            }),
-          });
-          await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, {
-            method: "POST",
-            headers: { ...dbHeaders, Prefer: "return=minimal" },
-            body: JSON.stringify({
-              lead_id: leadId,
-              content: `🤖 AI Call: ${autoDisposition.replace("_", " ").toUpperCase()} — follow-up scheduled in 2 hours`,
-            }),
-          });
+          // Cap: check how many AI calls have already been made for this lead
+          const retryCountRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/ai_call_records?lead_id=eq.${leadId}&select=id`,
+            { headers: dbHeaders },
+          );
+          const retryRows = await retryCountRes.json().catch(() => []);
+          const attemptCount = Array.isArray(retryRows) ? retryRows.length : 0;
+
+          if (attemptCount < 3) {
+            // Compute next permitted call time: now + 4 hours, within 9AM–8PM IST
+            const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+            const candidate = new Date(Date.now() + 4 * 60 * 60 * 1000);
+            const istMs = candidate.getTime() + IST_OFFSET_MS;
+            const istDate = new Date(istMs);
+            const totalMins = istDate.getUTCHours() * 60 + istDate.getUTCMinutes();
+            let retryAt: string;
+            if (totalMins >= 540 && totalMins < 1200) {
+              retryAt = candidate.toISOString(); // within window
+            } else {
+              const y = istDate.getUTCFullYear(), mo = istDate.getUTCMonth(), d = istDate.getUTCDate();
+              const dayOffset = totalMins >= 1200 ? 1 : 0;
+              retryAt = new Date(Date.UTC(y, mo, d + dayOffset, 3, 30, 0)).toISOString();
+            }
+
+            await fetch(`${SUPABASE_URL}/rest/v1/ai_call_queue`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                apikey: SUPABASE_SERVICE_KEY,
+                Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+                Prefer: "return=minimal",
+              },
+              body: JSON.stringify({
+                lead_id: leadId,
+                status: "pending",
+                scheduled_at: retryAt,
+              }),
+            });
+            await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, {
+              method: "POST",
+              headers: { ...dbHeaders, Prefer: "return=minimal" },
+              body: JSON.stringify({
+                lead_id: leadId,
+                content: `🤖 AI Call: ${autoDisposition.replace("_", " ").toUpperCase()} — AI retry queued for ${new Date(retryAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} (attempt ${attemptCount + 1}/3)`,
+              }),
+            });
+          } else {
+            // Max retries (3) reached — assign via round-robin then create counsellor follow-up
+            const assignedId = await assignLeadRoundRobin(leadId);
+
+            await fetch(`${SUPABASE_URL}/rest/v1/lead_followups`, {
+              method: "POST",
+              headers: { ...dbHeaders, Prefer: "return=minimal" },
+              body: JSON.stringify({
+                lead_id: leadId,
+                scheduled_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+                type: "call",
+                notes: `🤖 AI reached max 3 call attempts (${autoDisposition.replace("_", " ")}) — counsellor follow-up required`,
+                status: "pending",
+              }),
+            });
+            await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, {
+              method: "POST",
+              headers: { ...dbHeaders, Prefer: "return=minimal" },
+              body: JSON.stringify({
+                lead_id: leadId,
+                content: `🤖 AI Call: Max retries (3) reached — lead assigned via round-robin${assignedId ? "" : " (no team members found — unassigned)"}`,
+              }),
+            });
+          }
         }
 
         // Also add recording URL to lead notes

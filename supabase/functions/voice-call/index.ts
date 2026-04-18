@@ -79,12 +79,10 @@ Deno.serve(async (req) => {
       if (leadErr || !lead) return json({ error: "Lead not found" }, 404);
       if (!lead.phone) return json({ error: "Lead has no phone number" }, 400);
 
-      // Wait 2 minutes before calling — callback/website leads arrive in 2 steps
-      // (phone first, then name + course details come later)
-      const delayMs = 2 * 60 * 1000; // 2 minutes
-      await new Promise(resolve => setTimeout(resolve, delayMs));
+      // Brief wait before calling — name/course details may arrive shortly after lead creation
+      await new Promise(resolve => setTimeout(resolve, 10000)); // 10 seconds
 
-      // Re-fetch lead after delay — name/course may have been updated in the interim
+      // Re-fetch lead — name/course may have been updated in the interim
       const { data: refreshedLead } = await db
         .from("leads")
         .select("*, courses:course_id(name, code), campuses:campus_id(name)")
