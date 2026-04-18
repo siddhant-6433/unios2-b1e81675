@@ -14,10 +14,15 @@ import {
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   pending_payment: { label: "Pending Payment", color: "bg-gray-100 text-gray-700" },
-  paid: { label: "Paid — Pending Review", color: "bg-blue-100 text-blue-700" },
+  paid: { label: "Pending Review", color: "bg-blue-100 text-blue-700" },
   under_review: { label: "Under Review", color: "bg-amber-100 text-amber-700" },
-  verified: { label: "Verified", color: "bg-emerald-100 text-emerald-700" },
-  rejected: { label: "Rejected", color: "bg-red-100 text-red-700" },
+  verified: { label: "Completed", color: "bg-emerald-100 text-emerald-700" },
+};
+
+const RESULT_LABELS: Record<string, { label: string; color: string }> = {
+  confirmed: { label: "Confirmed", color: "bg-emerald-100 text-emerald-700" },
+  discrepancy_marks: { label: "Discrepancy", color: "bg-amber-100 text-amber-700" },
+  not_found: { label: "Not Found", color: "bg-red-100 text-red-700" },
 };
 
 const RESULT_OPTIONS = [
@@ -242,16 +247,18 @@ registrar@nimt.ac.in`,
         .update({ employee_review_doc_url: path }).eq("id", selectedReq.id);
     }
 
+    const approvedAt = new Date().toISOString();
+
     // Update status
     await supabase.from("alumni_verification_requests" as any).update({
       status: finalStatus,
       verification_result: result,
-      review_notes: reviewNotes,
+      review_notes: `${reviewNotes}\n\n--- Email Sent ---\nSubject: ${emailSubject}\n\n${emailBody}`.trim(),
       reviewed_by: user?.id,
-      reviewed_at: new Date().toISOString(),
+      reviewed_at: approvedAt,
       admin_approved_by: user?.id,
       admin_approval_notes: reviewNotes,
-      admin_approved_at: new Date().toISOString(),
+      admin_approved_at: approvedAt,
     }).eq("id", selectedReq.id);
 
     // Send email
@@ -412,7 +419,8 @@ registrar@nimt.ac.in`,
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Alumni</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Course</th>
                     <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Status</th>
-                    <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Due Date</th>
+                    <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Result</th>
+                    <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Due / Completed</th>
                     <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">TAT</th>
                     <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Actions</th>
                   </tr>
@@ -435,10 +443,21 @@ registrar@nimt.ac.in`,
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">{req.course} ({req.year_of_passing})</td>
                         <td className="px-3 py-3 text-center">
-                          <Badge className={`border-0 text-[10px] font-semibold ${cfg.color}`}>{cfg.label.split(" —")[0]}</Badge>
+                          <Badge className={`border-0 text-[10px] font-semibold ${cfg.color}`}>{cfg.label}</Badge>
+                        </td>
+                        <td className="px-3 py-3 text-center">
+                          {req.verification_result ? (
+                            <Badge className={`border-0 text-[10px] font-semibold ${(RESULT_LABELS[req.verification_result] || {}).color || "bg-muted"}`}>
+                              {(RESULT_LABELS[req.verification_result] || {}).label || req.verification_result}
+                            </Badge>
+                          ) : <span className="text-[10px] text-muted-foreground">—</span>}
                         </td>
                         <td className="px-3 py-3 text-center text-xs">
-                          {req.due_date ? new Date(req.due_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "—"}
+                          {req.status === "verified" && req.reviewed_at ? (
+                            <span className="text-emerald-600 font-medium">{new Date(req.reviewed_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</span>
+                          ) : req.due_date ? (
+                            <span>{new Date(req.due_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</span>
+                          ) : "—"}
                         </td>
                         <td className="px-3 py-3 text-center">
                           {daysLeft !== null && ["paid", "under_review"].includes(req.status) ? (
@@ -551,6 +570,46 @@ registrar@nimt.ac.in`,
                   <p className="text-sm"><span className="font-medium capitalize">{(selectedReq.employee_review_result || "").replace("_", " ")}</span></p>
                   {selectedReq.employee_review_notes && <p className="text-xs text-muted-foreground">{selectedReq.employee_review_notes}</p>}
                   <p className="text-[10px] text-muted-foreground">Reviewed: {new Date(selectedReq.employee_reviewed_at).toLocaleDateString("en-IN")}</p>
+                </div>
+              )}
+
+              {/* Completed verification result */}
+              {selectedReq.status === "verified" && selectedReq.verification_result && (
+                <div className={`rounded-xl border p-3 space-y-2 ${
+                  selectedReq.verification_result === "confirmed" ? "border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20" :
+                  selectedReq.verification_result === "discrepancy_marks" ? "border-amber-200 bg-amber-50 dark:bg-amber-950/20" :
+                  "border-red-200 bg-red-50 dark:bg-red-950/20"
+                }`}>
+                  <p className="text-[10px] font-semibold uppercase text-foreground">Verification Result</p>
+                  <div className="flex items-center gap-2">
+                    <Badge className={`border-0 text-xs font-bold ${(RESULT_LABELS[selectedReq.verification_result] || {}).color || "bg-muted"}`}>
+                      {(RESULT_LABELS[selectedReq.verification_result] || {}).label || selectedReq.verification_result}
+                    </Badge>
+                  </div>
+                  {selectedReq.admin_approval_notes && (
+                    <div>
+                      <p className="text-[10px] text-muted-foreground font-medium">Review Notes:</p>
+                      <p className="text-xs text-foreground">{selectedReq.admin_approval_notes}</p>
+                    </div>
+                  )}
+                  {selectedReq.reviewed_at && (
+                    <p className="text-[10px] text-muted-foreground">
+                      Approved: {new Date(selectedReq.reviewed_at).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                    </p>
+                  )}
+                  {selectedReq.contact_email && selectedReq.status === "verified" && (
+                    <p className="text-[10px] text-muted-foreground">
+                      Email sent to: <span className="font-medium">{selectedReq.contact_email}</span> (CC: academics@nimt.ac.in)
+                    </p>
+                  )}
+                  {selectedReq.review_notes && selectedReq.review_notes.includes("--- Email Sent ---") && (
+                    <details className="mt-2">
+                      <summary className="text-[10px] text-primary cursor-pointer font-medium">View email sent</summary>
+                      <pre className="mt-1 text-[10px] text-muted-foreground bg-muted/50 rounded-lg p-2 whitespace-pre-wrap font-mono max-h-40 overflow-y-auto">
+                        {selectedReq.review_notes.split("--- Email Sent ---")[1]?.trim()}
+                      </pre>
+                    </details>
+                  )}
                 </div>
               )}
 
