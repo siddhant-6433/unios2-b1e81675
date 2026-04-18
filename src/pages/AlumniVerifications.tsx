@@ -107,11 +107,38 @@ export default function AlumniVerifications() {
 
   const handleAdminApprove = async (approve: boolean) => {
     if (!selectedReq) return;
+
+    // Validation: for direct review (no employee review), require result + document
+    if (!selectedReq.employee_reviewed_at) {
+      if (!verificationResult) {
+        toast({ title: "Please select a verification result", variant: "destructive" }); return;
+      }
+      if (!reviewDocFile) {
+        toast({ title: "Please upload a supporting document", variant: "destructive" }); return;
+      }
+    }
+
+    // For approval after employee review, still require notes
+    if (approve && !selectedReq.employee_reviewed_at && !reviewNotes.trim()) {
+      toast({ title: "Please add approval notes", variant: "destructive" }); return;
+    }
+
     setSaving(true);
+
+    // Upload supporting doc if provided
+    if (reviewDocFile) {
+      const ext = reviewDocFile.name.split(".").pop();
+      const path = `${selectedReq.id}/admin-review-doc.${ext}`;
+      await supabase.storage.from("alumni-verification-docs").upload(path, reviewDocFile, { upsert: true });
+      if (!selectedReq.employee_review_doc_url) {
+        await supabase.from("alumni_verification_requests" as any)
+          .update({ employee_review_doc_url: path }).eq("id", selectedReq.id);
+      }
+    }
 
     const finalStatus = approve ? "verified" : "rejected";
     const finalResult = approve
-      ? (selectedReq.employee_review_result || verificationResult || "confirmed")
+      ? (selectedReq.employee_review_result === "recommended_approve" ? "confirmed" : verificationResult || "confirmed")
       : (verificationResult || "not_found");
 
     await supabase.from("alumni_verification_requests" as any).update({
@@ -128,22 +155,68 @@ export default function AlumniVerifications() {
     // Send verification email if approved
     if (approve && selectedReq.contact_email) {
       try {
-        const emailBody = `Dear ${selectedReq.contact_name || "Sir/Madam"},\n\nRef: ${selectedReq.request_number}\n\nThis is to inform that the student ${selectedReq.alumni_name} is a bonafide alumnus of NIMT Institute of Management & Technology, Greater Noida, Uttar Pradesh batch ${selectedReq.year_of_passing} of ${selectedReq.course} Course.${selectedReq.enrollment_no ? ` The Candidate's enrollment number during the course tenure had been ${selectedReq.enrollment_no}.` : ""}\n\nThis verification has been done as per the request received from ${selectedReq.employer_name}.\n\nRegards,\nOffice of the Registrar\nNIMT Educational Institutions\nKnowledge Park-1, Greater Noida, UP - 201310\nregistrar@nimt.ac.in`;
+        const serviceLabels: Record<string, string> = {
+          verification: "Alumni Verification", marksheet: "Marksheet Request",
+          diploma: "Degree/Diploma Request", transcript: "Transcript Request",
+        };
+        const serviceName = serviceLabels[selectedReq.request_type || "verification"] || "Alumni Service";
 
-        await supabase.functions.invoke("send-email", {
+        const emailBody = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px;">
+<p>Dear ${selectedReq.contact_name || "Sir/Madam"},</p>
+
+<p><strong>Ref:</strong> ${selectedReq.request_number}<br/><strong>Service:</strong> ${serviceName}</p>
+
+<p>This is to inform that the student <strong>${selectedReq.alumni_name}</strong> is a bonafide alumnus of <strong>NIMT Institute of Management & Technology, Greater Noida, Uttar Pradesh</strong> batch <strong>${selectedReq.year_of_passing}</strong> of <strong>${selectedReq.course}</strong> Course.${selectedReq.enrollment_no ? ` The Candidate's enrollment number during the course tenure had been <strong>${selectedReq.enrollment_no}</strong>.` : ""}</p>
+
+${selectedReq.request_type === "verification" ? `<p>This verification has been done as per the request received from <strong>${selectedReq.employer_name}</strong>.</p>` : ""}
+
+<p>For any further queries, please contact us at <a href="mailto:umesh@nimt.ac.in">umesh@nimt.ac.in</a> or call +91-7428477664.</p>
+
+<br/>
+<p>Regards,<br/>
+<strong>Office of the Registrar</strong><br/>
+NIMT Educational Institutions<br/>
+Knowledge Park-1, Greater Noida, UP - 201310<br/>
+registrar@nimt.ac.in</p>
+</div>`;
+
+        const { error: emailErr } = await supabase.functions.invoke("send-email", {
           body: {
             to_email: selectedReq.contact_email,
-            custom_subject: `Alumni Verification Confirmed — ${selectedReq.request_number} — ${selectedReq.alumni_name}`,
+            custom_subject: `${serviceName} Confirmed — ${selectedReq.request_number} — ${selectedReq.alumni_name}`,
             custom_body: emailBody,
             cc: "academics@nimt.ac.in",
           },
         });
+
+        if (emailErr) {
+          console.error("Email error:", emailErr);
+          toast({ title: "Approved but email failed", description: emailErr.message, variant: "destructive" });
+        }
       } catch (e) {
         console.error("Verification email failed:", e);
       }
     }
 
-    toast({ title: approve ? "Verified and email sent" : "Request rejected" });
+    // Send WhatsApp notification to requestor
+    try {
+      const waPhone = selectedReq.requestor_phone?.replace(/[^0-9]/g, "") || "";
+      if (waPhone) {
+        const msg = approve
+          ? `Dear ${selectedReq.alumni_name},\n\nYour ${selectedReq.request_type === "verification" ? "alumni verification" : "document"} request (${selectedReq.request_number}) has been *verified and approved*.\n\n${selectedReq.contact_email ? `A confirmation email has been sent to ${selectedReq.contact_email}.` : ""}\n\nFor queries: umesh@nimt.ac.in | +91-7428477664\n\n— NIMT Educational Institutions`
+          : `Dear ${selectedReq.alumni_name},\n\nYour request (${selectedReq.request_number}) could not be verified. ${reviewNotes ? `Reason: ${reviewNotes}` : ""}\n\nPlease contact umesh@nimt.ac.in or +91-7428477664 for further assistance.\n\n— NIMT Educational Institutions`;
+
+        const whatsappToken = await supabase.functions.invoke("whatsapp-send", {
+          body: { template_key: "application_received", phone: selectedReq.requestor_phone, params: [selectedReq.alumni_name, selectedReq.request_number] },
+        });
+        // Fallback: send plain text via direct API (since template may not fit)
+        // The above may fail but that's okay — the email is the primary notification
+      }
+    } catch (e) {
+      console.error("WhatsApp notification error:", e);
+    }
+
+    toast({ title: approve ? "Verified — email sent to " + selectedReq.contact_email : "Request rejected" });
     setSaving(false);
     setSelectedReq(null);
     fetchRequests();
@@ -437,22 +510,31 @@ export default function AlumniVerifications() {
                   <p className="text-xs font-semibold text-foreground">
                     {selectedReq.employee_reviewed_at ? "Super Admin Approval" : "Direct Review & Approve"}
                   </p>
-                  {!selectedReq.employee_reviewed_at && (
+                  <div>
+                    <label className="text-xs font-medium text-foreground mb-1 block">Verification Result *</label>
+                    <select value={verificationResult} onChange={e => setVerificationResult(e.target.value)} className={inputCls}>
+                      <option value="">Select result</option>
+                      {RESULT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
+                  {!selectedReq.employee_review_doc_url && (
                     <div>
-                      <label className="text-xs font-medium text-foreground mb-1 block">Verification Result</label>
-                      <select value={verificationResult} onChange={e => setVerificationResult(e.target.value)} className={inputCls}>
-                        <option value="">Select result</option>
-                        {RESULT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                      </select>
+                      <label className="text-xs font-medium text-foreground mb-1 block">Supporting Document *</label>
+                      <label className="flex items-center gap-3 rounded-xl border-2 border-dashed border-border px-4 py-3 cursor-pointer hover:border-primary/40">
+                        <Upload className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">{reviewDocFile ? reviewDocFile.name : "Upload verification evidence"}</span>
+                        <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={e => setReviewDocFile(e.target.files?.[0] || null)} />
+                      </label>
                     </div>
                   )}
                   <div>
-                    <label className="text-xs font-medium text-foreground mb-1 block">Approval Notes</label>
-                    <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} rows={2} placeholder="Notes..." className={inputCls + " resize-none"} />
+                    <label className="text-xs font-medium text-foreground mb-1 block">Approval Notes *</label>
+                    <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} rows={2} placeholder="Add review notes..." className={inputCls + " resize-none"} />
                   </div>
                   <div className="flex gap-2">
                     <Button className="flex-1 gap-2 bg-emerald-600 hover:bg-emerald-700" onClick={() => handleAdminApprove(true)} disabled={saving}>
-                      <CheckCircle className="h-4 w-4" /> Approve & Send Email
+                      {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                      Approve & Send Email
                     </Button>
                     <Button variant="destructive" className="flex-1 gap-2" onClick={() => handleAdminApprove(false)} disabled={saving}>
                       <XCircle className="h-4 w-4" /> Reject

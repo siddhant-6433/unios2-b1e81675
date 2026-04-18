@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { template_slug, to_email, variables, lead_id, custom_subject, custom_body } = await req.json();
+    const { template_slug, to_email, variables, lead_id, custom_subject, custom_body, cc } = await req.json();
 
     if (!to_email) {
       return new Response(JSON.stringify({ error: "to_email is required" }), {
@@ -101,6 +101,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         from: fromEmail,
         to: [to_email],
+        ...(cc ? { cc: Array.isArray(cc) ? cc : [cc] } : {}),
         subject,
         html: bodyHtml,
       }),
