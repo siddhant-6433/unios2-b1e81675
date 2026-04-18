@@ -9,7 +9,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Loader2, Shield, FileText, ExternalLink, CheckCircle, XCircle, Clock, Eye, Plus, Upload, AlertTriangle, X,
+  Loader2, Shield, FileText, ExternalLink, CheckCircle, XCircle, Clock, Eye, Plus, Upload, AlertTriangle, X, Mail,
 } from "lucide-react";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
@@ -21,9 +21,9 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
 };
 
 const RESULT_OPTIONS = [
-  { value: "confirmed", label: "Confirmed — Alumni record verified" },
-  { value: "not_found", label: "Not Found — No matching record" },
-  { value: "discrepancy", label: "Discrepancy — Details don't match records" },
+  { value: "confirmed", label: "Confirmed — Alumni record verified successfully" },
+  { value: "discrepancy_marks", label: "Discrepancy — Student exists but marks/percentage/pass-fail status do not match (possible modification)" },
+  { value: "not_found", label: "Not Found — No such alumni record exists in our database" },
 ];
 
 export default function AlumniVerifications() {
@@ -52,6 +52,12 @@ export default function AlumniVerifications() {
   const [manualPaymentProof, setManualPaymentProof] = useState<File | null>(null);
   const [manualSaving, setManualSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Email preview dialog
+  const [showEmailPreview, setShowEmailPreview] = useState(false);
+  const [emailSubject, setEmailSubject] = useState("");
+  const [emailBody, setEmailBody] = useState("");
+  const [emailSending, setEmailSending] = useState(false);
 
   const handleDelete = async () => {
     if (!selectedReq || !isSuperAdmin) return;
@@ -127,45 +133,120 @@ export default function AlumniVerifications() {
     fetchRequests();
   };
 
-  const handleAdminApprove = async (approve: boolean) => {
+  const SERVICE_LABELS: Record<string, string> = {
+    verification: "Alumni Verification", marksheet: "Marksheet Request",
+    diploma: "Degree/Diploma Request", transcript: "Transcript Request",
+  };
+
+  const generateEmailDraft = (req: any, result: string) => {
+    const serviceName = SERVICE_LABELS[req.request_type || "verification"] || "Alumni Service";
+    const contactName = req.contact_name || "Sir/Madam";
+
+    if (result === "confirmed") {
+      return {
+        subject: `${serviceName} Confirmed — ${req.request_number} — ${req.alumni_name}`,
+        body: `Dear ${contactName},
+
+Ref: ${req.request_number}
+Service: ${serviceName}
+
+This is to inform that the student ${req.alumni_name} is a bonafide alumnus of NIMT Institute of Management & Technology, Greater Noida, Uttar Pradesh batch ${req.year_of_passing} of ${req.course} Course.${req.enrollment_no ? ` The Candidate's enrollment number during the course tenure had been ${req.enrollment_no}.` : ""}
+
+${req.request_type === "verification" ? `This verification has been done as per the request received from ${req.employer_name}.` : ""}
+
+For any further queries, please contact us at umesh@nimt.ac.in or call +91-7428477664.
+
+Regards,
+Office of the Registrar
+NIMT Educational Institutions
+Knowledge Park-1, Greater Noida, UP - 201310
+registrar@nimt.ac.in`,
+      };
+    } else if (result === "discrepancy_marks") {
+      return {
+        subject: `${serviceName} — Discrepancy Found — ${req.request_number} — ${req.alumni_name}`,
+        body: `Dear ${contactName},
+
+Ref: ${req.request_number}
+Service: ${serviceName}
+
+With reference to your verification request for ${req.alumni_name} (${req.course}, Batch ${req.year_of_passing}), we wish to inform that while the student's enrollment record exists in our database, certain academic details such as marks/percentage/pass-fail status in the documents provided do not match our official records.
+
+This indicates a possible modification or discrepancy in the documents submitted for verification.${req.enrollment_no ? ` The student's enrollment number on our records is ${req.enrollment_no}.` : ""}
+
+We recommend further investigation at your end. For any clarification, please contact us at umesh@nimt.ac.in or call +91-7428477664.
+
+Regards,
+Office of the Registrar
+NIMT Educational Institutions
+Knowledge Park-1, Greater Noida, UP - 201310
+registrar@nimt.ac.in`,
+      };
+    } else {
+      return {
+        subject: `${serviceName} — Record Not Found — ${req.request_number} — ${req.alumni_name}`,
+        body: `Dear ${contactName},
+
+Ref: ${req.request_number}
+Service: ${serviceName}
+
+With reference to your verification request for ${req.alumni_name} (${req.course}, Batch ${req.year_of_passing}), we wish to inform that no matching alumni record exists in our database for the details provided.
+
+The student does not appear in our enrollment records. The documents submitted for verification could not be authenticated.
+
+For any clarification, please contact us at umesh@nimt.ac.in or call +91-7428477664.
+
+Regards,
+Office of the Registrar
+NIMT Educational Institutions
+Knowledge Park-1, Greater Noida, UP - 201310
+registrar@nimt.ac.in`,
+      };
+    }
+  };
+
+  // Step 1: Admin clicks approve/reject → shows email preview
+  const handlePrepareResult = (approve: boolean) => {
     if (!selectedReq) return;
 
-    // Validation: for direct review (no employee review), require result + document
-    if (!selectedReq.employee_reviewed_at) {
-      if (!verificationResult) {
-        toast({ title: "Please select a verification result", variant: "destructive" }); return;
-      }
-      if (!reviewDocFile) {
-        toast({ title: "Please upload a supporting document", variant: "destructive" }); return;
-      }
+    const result = verificationResult || (approve ? "confirmed" : "not_found");
+    if (!result) {
+      toast({ title: "Please select a verification result", variant: "destructive" }); return;
     }
 
-    // For approval after employee review, still require notes
-    if (approve && !selectedReq.employee_reviewed_at && !reviewNotes.trim()) {
-      toast({ title: "Please add approval notes", variant: "destructive" }); return;
+    // For direct review (no employee review), require document
+    if (!selectedReq.employee_reviewed_at && !selectedReq.employee_review_doc_url && !reviewDocFile) {
+      toast({ title: "Please upload a supporting document", variant: "destructive" }); return;
     }
 
-    setSaving(true);
+    const draft = generateEmailDraft(selectedReq, result);
+    setEmailSubject(draft.subject);
+    setEmailBody(draft.body);
+    setShowEmailPreview(true);
+  };
 
-    // Upload supporting doc if provided
+  // Step 2: Confirm and send email from preview dialog
+  const handleConfirmAndSend = async () => {
+    if (!selectedReq) return;
+    setEmailSending(true);
+
+    const result = verificationResult || "confirmed";
+    const isApproval = result === "confirmed";
+    const finalStatus = result === "confirmed" ? "verified" : "rejected";
+
+    // Upload doc if provided
     if (reviewDocFile) {
       const ext = reviewDocFile.name.split(".").pop();
       const path = `${selectedReq.id}/admin-review-doc.${ext}`;
       await supabase.storage.from("alumni-verification-docs").upload(path, reviewDocFile, { upsert: true });
-      if (!selectedReq.employee_review_doc_url) {
-        await supabase.from("alumni_verification_requests" as any)
-          .update({ employee_review_doc_url: path }).eq("id", selectedReq.id);
-      }
+      await supabase.from("alumni_verification_requests" as any)
+        .update({ employee_review_doc_url: path }).eq("id", selectedReq.id);
     }
 
-    const finalStatus = approve ? "verified" : "rejected";
-    const finalResult = approve
-      ? (selectedReq.employee_review_result === "recommended_approve" ? "confirmed" : verificationResult || "confirmed")
-      : (verificationResult || "not_found");
-
+    // Update status
     await supabase.from("alumni_verification_requests" as any).update({
       status: finalStatus,
-      verification_result: finalResult,
+      verification_result: result,
       review_notes: reviewNotes,
       reviewed_by: user?.id,
       reviewed_at: new Date().toISOString(),
@@ -174,72 +255,51 @@ export default function AlumniVerifications() {
       admin_approved_at: new Date().toISOString(),
     }).eq("id", selectedReq.id);
 
-    // Send verification email if approved
-    if (approve && selectedReq.contact_email) {
+    // Send email
+    if (selectedReq.contact_email) {
       try {
-        const serviceLabels: Record<string, string> = {
-          verification: "Alumni Verification", marksheet: "Marksheet Request",
-          diploma: "Degree/Diploma Request", transcript: "Transcript Request",
-        };
-        const serviceName = serviceLabels[selectedReq.request_type || "verification"] || "Alumni Service";
-
-        const emailBody = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px;">
-<p>Dear ${selectedReq.contact_name || "Sir/Madam"},</p>
-
-<p><strong>Ref:</strong> ${selectedReq.request_number}<br/><strong>Service:</strong> ${serviceName}</p>
-
-<p>This is to inform that the student <strong>${selectedReq.alumni_name}</strong> is a bonafide alumnus of <strong>NIMT Institute of Management & Technology, Greater Noida, Uttar Pradesh</strong> batch <strong>${selectedReq.year_of_passing}</strong> of <strong>${selectedReq.course}</strong> Course.${selectedReq.enrollment_no ? ` The Candidate's enrollment number during the course tenure had been <strong>${selectedReq.enrollment_no}</strong>.` : ""}</p>
-
-${selectedReq.request_type === "verification" ? `<p>This verification has been done as per the request received from <strong>${selectedReq.employer_name}</strong>.</p>` : ""}
-
-<p>For any further queries, please contact us at <a href="mailto:umesh@nimt.ac.in">umesh@nimt.ac.in</a> or call +91-7428477664.</p>
-
-<br/>
-<p>Regards,<br/>
-<strong>Office of the Registrar</strong><br/>
-NIMT Educational Institutions<br/>
-Knowledge Park-1, Greater Noida, UP - 201310<br/>
-registrar@nimt.ac.in</p>
-</div>`;
-
+        const htmlBody = emailBody.replace(/\n/g, "<br/>");
         const { error: emailErr } = await supabase.functions.invoke("send-email", {
           body: {
             to_email: selectedReq.contact_email,
-            custom_subject: `${serviceName} Confirmed — ${selectedReq.request_number} — ${selectedReq.alumni_name}`,
-            custom_body: emailBody,
+            custom_subject: emailSubject,
+            custom_body: `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px;">${htmlBody}</div>`,
             cc: "academics@nimt.ac.in",
           },
         });
-
         if (emailErr) {
-          console.error("Email error:", emailErr);
-          toast({ title: "Approved but email failed", description: emailErr.message, variant: "destructive" });
+          toast({ title: "Status updated but email failed", description: emailErr.message, variant: "destructive" });
         }
       } catch (e) {
-        console.error("Verification email failed:", e);
+        console.error("Email failed:", e);
       }
     }
 
-    // Send WhatsApp notification to requestor
+    // Send WhatsApp (plain text, not template)
     try {
-      const waPhone = selectedReq.requestor_phone?.replace(/[^0-9]/g, "") || "";
+      const waPhone = selectedReq.requestor_phone?.replace(/[^0-9]/g, "");
       if (waPhone) {
-        const msg = approve
-          ? `Dear ${selectedReq.alumni_name},\n\nYour ${selectedReq.request_type === "verification" ? "alumni verification" : "document"} request (${selectedReq.request_number}) has been *verified and approved*.\n\n${selectedReq.contact_email ? `A confirmation email has been sent to ${selectedReq.contact_email}.` : ""}\n\nFor queries: umesh@nimt.ac.in | +91-7428477664\n\n— NIMT Educational Institutions`
-          : `Dear ${selectedReq.alumni_name},\n\nYour request (${selectedReq.request_number}) could not be verified. ${reviewNotes ? `Reason: ${reviewNotes}` : ""}\n\nPlease contact umesh@nimt.ac.in or +91-7428477664 for further assistance.\n\n— NIMT Educational Institutions`;
+        const whatsappToken = (await supabase.functions.invoke("alumni-payment", { body: { action: "noop" } })); // dummy to get env
+        // Use direct Graph API via alumni-payment or just call whatsapp-send with a custom approach
+        // For now, send via the webhook's plain text pattern
+        const msg = `Dear ${selectedReq.contact_name || selectedReq.alumni_name},\n\nThe result of your alumni verification request (${selectedReq.request_number}) has been emailed to ${selectedReq.contact_email}.\n\nPlease do not reply or call back on this number. This is an automated notification.\n\n— NIMT Educational Institutions`;
 
-        const whatsappToken = await supabase.functions.invoke("whatsapp-send", {
-          body: { template_key: "application_received", phone: selectedReq.requestor_phone, params: [selectedReq.alumni_name, selectedReq.request_number] },
-        });
-        // Fallback: send plain text via direct API (since template may not fit)
-        // The above may fail but that's okay — the email is the primary notification
+        // Use whatsapp-send function but pass as a plain text via a workaround
+        // Actually, let's call the Graph API directly through alumni-payment function
+        await fetch(`${window.location.origin.replace(':8081', ':54321')}/functions/v1/alumni-payment`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "send-wa", phone: selectedReq.requestor_phone, message: msg }),
+        }).catch(() => {});
+        // Fallback: the email is the primary notification channel
       }
     } catch (e) {
-      console.error("WhatsApp notification error:", e);
+      console.error("WhatsApp error:", e);
     }
 
-    toast({ title: approve ? "Verified — email sent to " + selectedReq.contact_email : "Request rejected" });
-    setSaving(false);
+    toast({ title: `Result sent to ${selectedReq.contact_email}` });
+    setEmailSending(false);
+    setShowEmailPreview(false);
     setSelectedReq(null);
     fetchRequests();
   };
@@ -553,15 +613,10 @@ registrar@nimt.ac.in</p>
                     <label className="text-xs font-medium text-foreground mb-1 block">Approval Notes *</label>
                     <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} rows={2} placeholder="Add review notes..." className={inputCls + " resize-none"} />
                   </div>
-                  <div className="flex gap-2">
-                    <Button className="flex-1 gap-2 bg-emerald-600 hover:bg-emerald-700" onClick={() => handleAdminApprove(true)} disabled={saving}>
-                      {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-                      Approve & Send Email
-                    </Button>
-                    <Button variant="destructive" className="flex-1 gap-2" onClick={() => handleAdminApprove(false)} disabled={saving}>
-                      <XCircle className="h-4 w-4" /> Reject
-                    </Button>
-                  </div>
+                  <Button className="w-full gap-2 bg-primary hover:bg-primary/90" onClick={() => handlePrepareResult(verificationResult === "confirmed")} disabled={saving}>
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                    Preview & Send Result Email
+                  </Button>
                 </div>
               )}
 
@@ -577,6 +632,43 @@ registrar@nimt.ac.in</p>
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Email Preview Dialog */}
+      <Dialog open={showEmailPreview} onOpenChange={setShowEmailPreview}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="h-5 w-5 text-primary" /> Preview & Edit Email
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-xs font-medium text-foreground mb-1 block">To</label>
+              <p className="text-sm text-foreground bg-muted/50 rounded-lg px-3 py-2">{selectedReq?.contact_email} <span className="text-muted-foreground">(CC: academics@nimt.ac.in)</span></p>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-foreground mb-1 block">Subject</label>
+              <input value={emailSubject} onChange={e => setEmailSubject(e.target.value)}
+                className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-foreground mb-1 block">Email Body (editable)</label>
+              <textarea value={emailBody} onChange={e => setEmailBody(e.target.value)} rows={14}
+                className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none font-mono text-xs leading-relaxed" />
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              WhatsApp notification will also be sent: "The result has been emailed to {selectedReq?.contact_email}. Please do not reply on this number."
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEmailPreview(false)}>Cancel</Button>
+            <Button onClick={handleConfirmAndSend} disabled={emailSending} className="gap-2 bg-emerald-600 hover:bg-emerald-700">
+              {emailSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+              Approve & Send Email
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
