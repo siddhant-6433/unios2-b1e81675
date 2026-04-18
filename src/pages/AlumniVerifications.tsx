@@ -51,6 +51,28 @@ export default function AlumniVerifications() {
   });
   const [manualPaymentProof, setManualPaymentProof] = useState<File | null>(null);
   const [manualSaving, setManualSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (!selectedReq || !isSuperAdmin) return;
+    if (!confirm(`Delete request ${selectedReq.request_number}? This cannot be undone.`)) return;
+    setDeleting(true);
+    // Delete storage files
+    const paths = [
+      selectedReq.diploma_certificate_url,
+      selectedReq.employee_review_doc_url,
+      ...(selectedReq.marksheet_urls || []),
+      ...(selectedReq.additional_doc_urls || []),
+    ].filter(Boolean);
+    if (paths.length > 0) {
+      await supabase.storage.from("alumni-verification-docs").remove(paths);
+    }
+    await supabase.from("alumni_verification_requests" as any).delete().eq("id", selectedReq.id);
+    toast({ title: "Request deleted" });
+    setDeleting(false);
+    setSelectedReq(null);
+    fetchRequests();
+  };
 
   const fetchRequests = async () => {
     const { data } = await supabase
@@ -540,6 +562,17 @@ registrar@nimt.ac.in</p>
                       <XCircle className="h-4 w-4" /> Reject
                     </Button>
                   </div>
+                </div>
+              )}
+
+              {/* Delete — super admin only */}
+              {isSuperAdmin && (
+                <div className="pt-3 border-t border-border">
+                  <Button variant="ghost" size="sm" className="gap-1.5 text-xs text-destructive hover:text-destructive hover:bg-destructive/10 w-full"
+                    onClick={handleDelete} disabled={deleting}>
+                    {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5" />}
+                    Delete Request
+                  </Button>
                 </div>
               )}
             </div>
