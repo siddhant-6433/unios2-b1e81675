@@ -190,6 +190,8 @@ export default function AlumniVerification() {
   // Documents
   const [diplomaFile, setDiplomaFile] = useState<File | null>(null);
   const [marksheetFiles, setMarksheetFiles] = useState<File[]>([]);
+  const [firFile, setFirFile] = useState<File | null>(null);
+  const [originalDocFile, setOriginalDocFile] = useState<File | null>(null);
 
   const companyRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -221,8 +223,14 @@ export default function AlumniVerification() {
     if (requestType === "diploma" && marksheetFiles.length === 0) {
       toast({ title: "Please upload marksheet copies for diploma request", variant: "destructive" }); return false;
     }
-    if (requestType === "transcript" && (marksheetFiles.length === 0 || !diplomaFile)) {
-      toast({ title: "Please upload both marksheets and diploma for transcript request", variant: "destructive" }); return false;
+    if (requestType === "diploma" && copyType === "duplicate" && !firFile) {
+      toast({ title: "Please upload FIR copy for duplicate diploma request", variant: "destructive" }); return false;
+    }
+    if (requestType === "marksheet" && copyType === "duplicate" && !firFile) {
+      toast({ title: "Please upload FIR copy for duplicate marksheet request", variant: "destructive" }); return false;
+    }
+    if (requestType === "transcript" && marksheetFiles.length === 0) {
+      toast({ title: "Please upload marksheet copies for transcript request", variant: "destructive" }); return false;
     }
     return true;
   };
@@ -262,6 +270,8 @@ export default function AlumniVerification() {
     setRequestNumber((req as any).request_number);
 
     // Upload documents
+    const additionalPaths: string[] = [];
+
     if (diplomaFile) {
       const ext = diplomaFile.name.split(".").pop();
       await supabase.storage.from("alumni-verification-docs").upload(`${id}/diploma.${ext}`, diplomaFile, { upsert: true });
@@ -276,6 +286,21 @@ export default function AlumniVerification() {
         paths.push(path);
       }
       await supabase.from("alumni_verification_requests" as any).update({ marksheet_urls: paths }).eq("id", id);
+    }
+    if (firFile) {
+      const ext = firFile.name.split(".").pop();
+      const path = `${id}/fir-report.${ext}`;
+      await supabase.storage.from("alumni-verification-docs").upload(path, firFile, { upsert: true });
+      additionalPaths.push(path);
+    }
+    if (originalDocFile) {
+      const ext = originalDocFile.name.split(".").pop();
+      const path = `${id}/original-doc-copy.${ext}`;
+      await supabase.storage.from("alumni-verification-docs").upload(path, originalDocFile, { upsert: true });
+      additionalPaths.push(path);
+    }
+    if (additionalPaths.length > 0) {
+      await supabase.from("alumni_verification_requests" as any).update({ additional_doc_urls: additionalPaths }).eq("id", id);
     }
 
     setSubmitting(false);
@@ -508,21 +533,35 @@ export default function AlumniVerification() {
                     </>
                   )}
 
-                  {/* Marksheet request: no documents needed */}
-                  {requestType === "marksheet" && (
-                    <p className="text-xs text-muted-foreground bg-muted/50 rounded-lg px-3 py-2">No documents required for marksheet request. Your enrollment details will be verified from our records.</p>
+                  {/* Marksheet request */}
+                  {requestType === "marksheet" && copyType === "original" && (
+                    <p className="text-xs text-muted-foreground bg-muted/50 rounded-lg px-3 py-2">No documents required for original marksheet request. Your enrollment details will be verified from our records.</p>
+                  )}
+                  {requestType === "marksheet" && copyType === "duplicate" && (
+                    <>
+                      <FileUploadField label="FIR / Police Report (for lost marksheet) *" file={firFile} onChange={setFirFile} />
+                      <FileUploadField label="Scan of Original Marksheet (if available)" file={originalDocFile} onChange={setOriginalDocFile} />
+                    </>
                   )}
 
-                  {/* Diploma request: marksheets required */}
+                  {/* Diploma request */}
                   {requestType === "diploma" && (
-                    <FileUploadField label="Marksheets (scan/copy) *" multiple files={marksheetFiles} onFilesChange={setMarksheetFiles} />
+                    <>
+                      <FileUploadField label="Marksheets (scan/copy) *" multiple files={marksheetFiles} onFilesChange={setMarksheetFiles} />
+                      {copyType === "duplicate" && (
+                        <>
+                          <FileUploadField label="FIR / Police Report (for lost diploma) *" file={firFile} onChange={setFirFile} />
+                          <FileUploadField label="Scan of Original Diploma (if available)" file={originalDocFile} onChange={setOriginalDocFile} />
+                        </>
+                      )}
+                    </>
                   )}
 
-                  {/* Transcript: both marksheets + diploma required */}
+                  {/* Transcript */}
                   {requestType === "transcript" && (
                     <>
                       <FileUploadField label="Marksheets (scan/copy) *" multiple files={marksheetFiles} onFilesChange={setMarksheetFiles} />
-                      <FileUploadField label="Diploma / Degree Certificate (scan/copy) *" file={diplomaFile} onChange={setDiplomaFile} />
+                      <FileUploadField label="Diploma / Degree Certificate (if available)" file={diplomaFile} onChange={setDiplomaFile} />
                     </>
                   )}
                 </div>
