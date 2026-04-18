@@ -32,10 +32,10 @@ const POPULAR_COMPANIES = [
 type RequestType = "verification" | "marksheet" | "diploma" | "transcript";
 
 const SERVICE_TYPES: { key: RequestType; label: string; icon: any; desc: string; fee: number }[] = [
-  { key: "verification", label: "Alumni Verification", icon: Shield, desc: "For employers / background check agencies to verify alumni records", fee: 500 },
-  { key: "marksheet", label: "Marksheet Request", icon: ScrollText, desc: "Request original or duplicate marksheets", fee: 300 },
-  { key: "diploma", label: "Degree / Diploma Request", icon: Award, desc: "Request original or duplicate degree certificate", fee: 500 },
-  { key: "transcript", label: "Transcript Request", icon: BookOpen, desc: "Request official academic transcript", fee: 400 },
+  { key: "verification", label: "Alumni Verification", icon: Shield, desc: "For employers / background check agencies to verify alumni records", fee: 1500 },
+  { key: "marksheet", label: "Marksheet Request", icon: ScrollText, desc: "Request original or duplicate marksheets", fee: 2500 },
+  { key: "diploma", label: "Degree / Diploma Request", icon: Award, desc: "Request original or duplicate degree certificate", fee: 2500 },
+  { key: "transcript", label: "Transcript Request", icon: BookOpen, desc: "Request official academic transcript", fee: 2500 },
 ];
 
 // ---- Phone Input ----
