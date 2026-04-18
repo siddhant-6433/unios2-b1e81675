@@ -22,12 +22,13 @@
 
 import { mulawToGeminiPcm, geminiPcmToMulaw } from "./audio-utils.ts";
 import { buildSystemInstruction, VOICE_AGENT_TOOLS, type CallContext } from "./scripts.ts";
-import { getCourseKnowledge, NIMT_OVERVIEW } from "./knowledge.ts";
 
 const PORT = parseInt(Deno.env.get("PORT") || "8000");
 const GOOGLE_AI_API_KEY = Deno.env.get("GOOGLE_AI_API_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_KEY") || "";
+// Key for calling Supabase Edge Functions — VOICE_AGENT_KEY is a dedicated shared secret
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("VOICE_AGENT_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || SUPABASE_SERVICE_KEY;
 const GEMINI_MODEL = "gemini-3.1-flash-live-preview";
 
 /** Placeholder names that indicate the real name is unknown */
@@ -159,10 +160,218 @@ async function fireAutomation(triggerType: string, leadId: string, extra: Record
   }
 }
 
+// ── Post-call reconciliation helpers ─────────────────────────────────
+
+/** Extract a visit date from the AI transcript lines. Returns YYYY-MM-DD or null. */
+function extractVisitDateFromTranscript(aiLines: string[]): string | null {
+  const text = aiLines.join(" ").toLowerCase();
+
+  // 1) ISO date YYYY-MM-DD
+  const isoMatch = text.match(/(\d{4}-\d{2}-\d{2})/);
+  if (isoMatch) return isoMatch[1];
+
+  // 2) DD/MM/YYYY or DD-MM-YYYY
+  const ddmm = text.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (ddmm) return `${ddmm[3]}-${ddmm[2].padStart(2, "0")}-${ddmm[1].padStart(2, "0")}`;
+
+  // 3) Relative: kal/tomorrow → +1, parso/day after → +2
+  const now = new Date();
+  if (/\b(kal|tomorrow)\b/.test(text)) {
+    const d = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    return d.toISOString().slice(0, 10);
+  }
+  if (/\b(parso|parson|day after)\b/.test(text)) {
+    const d = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+    return d.toISOString().slice(0, 10);
+  }
+
+  // 4) Day names (English + Hindi)
+  const dayMap: Record<string, number> = {
+    sunday: 0, somvar: 1, monday: 1, mangalvar: 2, tuesday: 2,
+    budhvar: 3, wednesday: 3, guruvar: 4, thursday: 4,
+    shukravar: 5, friday: 5, shanivar: 6, saturday: 6,
+  };
+  for (const [word, target] of Object.entries(dayMap)) {
+    if (text.includes(word)) {
+      const today = now.getDay();
+      let diff = target - today;
+      if (diff <= 0) diff += 7;
+      const d = new Date(now.getTime() + diff * 24 * 60 * 60 * 1000);
+      return d.toISOString().slice(0, 10);
+    }
+  }
+
+  return null;
+}
+
+/** Detect promises made in the AI transcript and cross-reference with tools actually called. */
+interface ReconcileResult {
+  templateKey: string;
+  templateParams: string[];
+  buttonUrls?: string[];
+  phone?: string;
+  actions: string[]; // what reconciliation did, for logging
+}
+
+async function reconcilePostCall(
+  callCtx: ActiveCall | null,
+  leadId: string,
+  dbDisposition: string | null,
+  dbHeaders: Record<string, string>,
+): Promise<ReconcileResult | null> {
+  const aiLines = callCtx?.aiTranscript || [];
+  const callerLines = callCtx?.callerTranscript || [];
+  const toolsMade = callCtx?.toolCallsMade || [];
+  const aiText = aiLines.join(" ").toLowerCase();
+  const callerText = callerLines.join(" ").toLowerCase();
+  const actions: string[] = [];
+
+  // Determine disposition from tools or DB
+  const disposition = toolsMade.find(tc => tc.name === "set_call_disposition")?.args?.disposition
+    || dbDisposition;
+
+  // Check which tools succeeded
+  const visitDone = toolsMade.some(tc => tc.name === "schedule_visit" && tc.result?.success === true);
+  const callbackDone = toolsMade.some(tc => tc.name === "request_human_callback" && tc.result?.success === true);
+  const waSent = toolsMade.some(tc => tc.name === "send_whatsapp_to_lead" && tc.result?.success === true);
+
+  // Detect promises from AI transcript
+  const visitPromised = /visit\s*(schedule|book|confirm|kar)|campus\s*(visit|dekhne)|aap\s*aa\s*sakte|aapka\s*visit|appointment\s*(book|schedule)/.test(aiText);
+  const callbackPromised = /senior\s*counsel|human\s*counsel|callback|call\s*back|koi\s*aapko\s*call|team\s*se\s*baat|expert\s*se\s*connect/.test(aiText);
+  const waPromised = /whatsapp\s*(par|pe)?\s*(bhej|send)|bhej\s*deti|link\s*bhej|send\s*you.*whatsapp|aapko\s*bhej|details\s*bhej|message\s*bhej/.test(aiText);
+
+  // Check for caller affirmation near visit promise (to avoid false positives)
+  const callerAffirmed = /\b(haan|ha+n|yes|ok|okay|theek|thik|sure|bilkul|zaroor|done|chalega)\b/.test(callerText);
+
+  // ── Reconcile unfulfilled promises ──
+
+  // 1. Visit promised + caller affirmed but schedule_visit not called → create visit
+  if (visitPromised && callerAffirmed && !visitDone) {
+    const visitDate = extractVisitDateFromTranscript(aiLines) || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const visitTime = /\bmorning|subah\b/.test(aiText) ? "morning" : /\bafternoon|dopahar\b/.test(aiText) ? "afternoon" : /\bevening|shaam\b/.test(aiText) ? "evening" : "morning";
+    const timeMap: Record<string, string> = { morning: "10:00", afternoon: "14:00", evening: "16:00" };
+    const visitTimestamp = `${visitDate}T${timeMap[visitTime]}:00+05:30`;
+
+    // Get campus_id from lead
+    const ldRes = await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}&select=campus_id`, { headers: dbHeaders });
+    const ldData = await ldRes.json();
+    const campusId = ldData?.[0]?.campus_id || null;
+
+    // Dedup: check recent visits
+    const dedupRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/campus_visits?lead_id=eq.${leadId}&status=eq.scheduled&created_at=gte.${new Date(Date.now() - 300000).toISOString()}&select=id&limit=1`,
+      { headers: dbHeaders },
+    );
+    const dedupRows = await dedupRes.json().catch(() => []);
+    if (!dedupRows?.length) {
+      const visitBody: Record<string, any> = { lead_id: leadId, visit_date: visitTimestamp, status: "scheduled" };
+      if (campusId) visitBody.campus_id = campusId;
+      const vRes = await fetch(`${SUPABASE_URL}/rest/v1/campus_visits`, {
+        method: "POST", headers: { ...dbHeaders, Prefer: "return=minimal" }, body: JSON.stringify(visitBody),
+      });
+      if (vRes.ok) {
+        actions.push(`visit_created:${visitDate}`);
+        // Update lead stage
+        await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}`, {
+          method: "PATCH", headers: { ...dbHeaders, Prefer: "return=minimal" },
+          body: JSON.stringify({ stage: "visit_scheduled" }),
+        });
+        await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, {
+          method: "POST", headers: { ...dbHeaders, Prefer: "return=minimal" },
+          body: JSON.stringify({ lead_id: leadId, content: `🤖 Post-call reconciliation: Campus visit created for ${visitDate} (${visitTime}). AI promised but didn't call schedule_visit.` }),
+        });
+        await assignLeadRoundRobin(leadId);
+        fireAutomation("visit_scheduled", leadId);
+      }
+    }
+  }
+
+  // 2. Callback promised but request_human_callback not called → create followup
+  if (callbackPromised && !callbackDone) {
+    await fetch(`${SUPABASE_URL}/rest/v1/lead_followups`, {
+      method: "POST", headers: { ...dbHeaders, Prefer: "return=minimal" },
+      body: JSON.stringify({
+        lead_id: leadId, scheduled_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+        type: "call", notes: "🤖 Post-call reconciliation: AI promised human callback but didn't call the tool.", status: "pending",
+      }),
+    });
+    await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, {
+      method: "POST", headers: { ...dbHeaders, Prefer: "return=minimal" },
+      body: JSON.stringify({ lead_id: leadId, content: "🤖 Post-call reconciliation: Human callback followup created — AI promised but didn't call request_human_callback." }),
+    });
+    await assignLeadRoundRobin(leadId);
+    actions.push("callback_followup_created");
+  }
+
+  // ── Determine WhatsApp template (priority: visit > callback > course_info) ──
+  if (waSent) {
+    // AI already sent a WhatsApp during the call — only log reconciliation actions
+    if (actions.length > 0) {
+      return { templateKey: "", templateParams: [], actions };
+    }
+    return null;
+  }
+
+  // Fetch lead info for WA params
+  const waLeadRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}&select=phone,name,courses:course_id(name,slug),campuses:campus_id(name)`,
+    { headers: dbHeaders },
+  );
+  const waLd = (await waLeadRes.json())?.[0];
+  if (!waLd?.phone) {
+    return actions.length > 0 ? { templateKey: "", templateParams: [], actions } : null;
+  }
+
+  const cn = (waLd.courses as any)?.name || "our programmes";
+  const cs = (waLd.courses as any)?.slug || "";
+  const cm = (waLd.campuses as any)?.name || "NIMT campus";
+  const courseLink = cs ? `https://www.nimt.ac.in/courses/${cs}` : "https://www.nimt.ac.in/courses";
+  const applyLink = "https://uni.nimt.ac.in/apply/nimt";
+
+  // Priority-based template selection
+  const isVisitAction = actions.some(a => a.startsWith("visit_created")) || visitDone || disposition === "visit_scheduled";
+  const isCallbackAction = actions.includes("callback_followup_created") || disposition === "call_back";
+
+  if (isVisitAction) {
+    // Get visit date
+    let visitDate = "the scheduled date";
+    const visitCall = toolsMade.find(tc => tc.name === "schedule_visit");
+    if (visitCall?.args?.visit_date) {
+      visitDate = visitCall.args.visit_date;
+    } else {
+      const vRes = await fetch(`${SUPABASE_URL}/rest/v1/campus_visits?lead_id=eq.${leadId}&select=visit_date&order=created_at.desc&limit=1`, { headers: dbHeaders });
+      const vRows = await vRes.json().catch(() => []);
+      if (vRows?.[0]?.visit_date) visitDate = vRows[0].visit_date;
+    }
+    actions.push("wa:visit_confirmation");
+    return { templateKey: "visit_confirmation", templateParams: [waLd.name, visitDate, cm], buttonUrls: ["1820424915210710582"], phone: waLd.phone, actions };
+  }
+
+  if (isCallbackAction) {
+    actions.push("wa:callback_scheduled");
+    return { templateKey: "callback_scheduled", templateParams: [waLd.name, cn], phone: waLd.phone, actions };
+  }
+
+  if (disposition === "not_answered") {
+    actions.push("wa:missed_call");
+    return { templateKey: "missed_call", templateParams: [waLd.name, cn], phone: waLd.phone, actions };
+  }
+
+  if (disposition === "not_interested" || disposition === "do_not_contact" || disposition === "wrong_number") {
+    return actions.length > 0 ? { templateKey: "", templateParams: [], actions } : null;
+  }
+
+  // Default for interested / no disposition / partial conversation: send course info
+  actions.push("wa:ai_call_course_info");
+  return { templateKey: "ai_call_course_info", templateParams: [waLd.name, cn, cm, courseLink, applyLink], phone: waLd.phone, actions };
+}
+
+// ── End post-call reconciliation ─────────────────────────────────────
+
 async function executeTool(
   toolName: string,
   args: Record<string, any>,
-  callCtx: CallContext & { leadId?: string },
+  callCtx: ActiveCall,
 ): Promise<Record<string, any>> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -257,29 +466,15 @@ async function executeTool(
         const instCode = course.code?.split("-").slice(0, 2).join("-") || "";
         const affiliations = KNOWN_AFFILIATIONS[instCode] || inst?.name || "";
 
-        // Get rich knowledge base data for this course
-        const knowledge = getCourseKnowledge(course.name) || getCourseKnowledge(course.code || "");
-
         return {
           found: true,
           name: course.name,
-          code: course.code,
           duration: course.duration_years ? `${course.duration_years} years` : "not specified",
-          type: course.type || "not specified",
-          eligibility: course.eligibility || "Please check our website for eligibility details",
-          entrance_exam: course.entrance_exam || (course.entrance_mandatory ? "Entrance exam required — details on website" : "No entrance exam required. Admission based on merit and interview."),
-          entrance_mandatory: course.entrance_mandatory || false,
+          eligibility: course.eligibility || "Check website for eligibility",
+          entrance_exam: course.entrance_exam || (course.entrance_mandatory ? "Entrance exam required" : "No entrance exam. Merit and interview based."),
           fees: feeSummary,
           campus: campus ? `${campus.name}${campus.city ? `, ${campus.city}` : ""}` : "NIMT campus",
-          institution: inst?.name || "",
-          affiliations_approvals: `VERIFIED: ${affiliations}. USE ONLY THIS — do not substitute from your training data.`,
-          department: dept?.name || "",
-          // Rich knowledge for conversational depth
-          key_highlights: knowledge?.highlights?.join(". ") || "",
-          practical_exposure: knowledge?.practicalExposure || "",
-          career_options: knowledge?.careers || "",
-          why_nimt: knowledge?.whyNimt || "",
-          nimt_legacy: "Established in 1987, almost 40 years of excellence, 6 campuses, 50+ programmes, 40,000+ alumni, approved by UGC/AICTE/BCI/INC/NCTE.",
+          affiliations: `VERIFIED: ${affiliations}`,
         };
       }
 
@@ -407,6 +602,14 @@ async function executeTool(
       case "set_call_disposition": {
         if (!callCtx.leadId) return { success: false, message: "No lead ID" };
 
+        // Guard: if disposition is visit_scheduled but schedule_visit was never called, reject
+        if (args.disposition === "visit_scheduled") {
+          const visitWasCalled = callCtx.toolCallsMade.some(tc => tc.name === "schedule_visit" && tc.result?.success === true);
+          if (!visitWasCalled) {
+            return { success: false, message: "Cannot set visit_scheduled — call schedule_visit first to book the visit, then call send_whatsapp_to_lead(visit_confirmation), then set_call_disposition." };
+          }
+        }
+
         // Update ai_call_records with disposition
         if (callCtx.callLogId) {
           await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?id=eq.${callCtx.callLogId}`, {
@@ -497,40 +700,6 @@ async function executeTool(
           });
         }
 
-        // Send WhatsApp to lead based on disposition
-        const leadRes = await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${callCtx.leadId}&select=name,phone,course_id,courses:course_id(name)`, { headers });
-        const leadData = (await leadRes.json())?.[0];
-        if (leadData?.phone) {
-          const leadName = leadData.name || "Student";
-          const courseName = leadData.courses?.name || "your selected course";
-          let templateKey: string | null = null;
-          let templateParams: string[] = [];
-
-          if (args.disposition === "interested") {
-            templateKey = "course_details";
-            templateParams = [leadName, courseName];
-          } else if (["not_answered", "busy", "voicemail"].includes(args.disposition)) {
-            templateKey = "missed_call";
-            templateParams = [leadName, courseName];
-          } else if (args.disposition === "call_back") {
-            templateKey = "callback_scheduled";
-            templateParams = [leadName, courseName];
-          }
-
-          if (templateKey) {
-            fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` },
-              body: JSON.stringify({
-                template_key: templateKey,
-                phone: leadData.phone,
-                params: templateParams,
-                lead_id: callCtx.leadId,
-              }),
-            }).catch(e => console.error("AI call auto-WA failed:", e));
-          }
-        }
-
         console.log(`[Disposition] ${callCtx.leadId}: ${args.disposition} — ${args.notes}`);
         return { success: true, disposition: args.disposition };
       }
@@ -554,6 +723,7 @@ async function executeTool(
 
         let waTemplateKey = "";
         let waParams: string[] = [];
+        let waButtonUrls: string[] | undefined;
 
         switch (args.message_type) {
           case "course_info":
@@ -564,6 +734,7 @@ async function executeTool(
           case "visit_confirmation":
             waTemplateKey = "visit_confirmation";
             waParams = [waLead.name, args.visit_date || "the scheduled date", waCampus];
+            waButtonUrls = ["1820424915210710582"];
             break;
           case "callback_scheduled":
             waTemplateKey = "callback_scheduled";
@@ -575,8 +746,8 @@ async function executeTool(
           try {
             await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
               method: "POST",
-              headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` },
-              body: JSON.stringify({ template_key: waTemplateKey, phone: waLead.phone, params: waParams, lead_id: callCtx.leadId }),
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+              body: JSON.stringify({ template_key: waTemplateKey, phone: waLead.phone, params: waParams, lead_id: callCtx.leadId, ...(waButtonUrls ? { button_urls: waButtonUrls } : {}) }),
             });
             console.log(`[WhatsApp] Sent ${waTemplateKey} to ${waLead.phone}`);
             return { success: true, type: args.message_type };
@@ -706,20 +877,14 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
           speechConfig: {
             voiceConfig: {
               prebuiltVoiceConfig: {
-                // NOTE: do NOT add languageCode inside speechConfig — it is not a valid
-                // SpeechConfig field in the Gemini Live API and causes a silent setup failure
-                // where setupComplete is never received, leaving geminiReady=false and no audio.
                 voiceName: "Kore",
               },
             },
+            languageCode: "en-IN",
           },
         },
         realtimeInputConfig: {
           automaticActivityDetection: {
-            disabled: false,
-            // NOTE: startOfSpeechSensitivity and endOfSpeechSensitivity are DEPRECATED
-            // in Gemini Live API and must NOT be added here — they silently break audio output.
-            // This has caused the "no audio from Gemini" bug twice. Do not add them back.
             prefixPaddingMs: 300,
             silenceDurationMs: 1500,
           },
@@ -753,6 +918,8 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
   geminiWs.onmessage = async (event) => {
     try {
       let data = event.data;
+      const dataType = data instanceof Blob ? `Blob(${data.size})` : data instanceof ArrayBuffer ? `ArrayBuffer(${(data as ArrayBuffer).byteLength})` : `string(${String(data).length})`;
+      console.log(`[${callId}] Gemini msg received: type=${dataType}`);
 
       // Convert Blob/ArrayBuffer to string first — Gemini may deliver JSON as Blob
       if (data instanceof Blob) {
@@ -760,12 +927,12 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
         // Try to parse as JSON first (setupComplete, serverContent, toolCall etc.)
         try {
           data = JSON.parse(text);
+          console.log(`[${callId}] Gemini Blob parsed as JSON, keys: ${Object.keys(data as object).join(",")}`);
         } catch {
           // Not JSON — treat as raw binary audio (PCM 24kHz)
-          const arrayBuf = await new Blob([text]).arrayBuffer();
-          // Actually re-read from the original blob as binary
           const origBuf = await (event.data as Blob).arrayBuffer();
           const bytes = new Uint8Array(origBuf);
+          console.log(`[${callId}] Gemini binary audio blob: ${bytes.length} bytes → sending to Plivo`);
           let binary = "";
           for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
           sendAudioToPlivo(btoa(binary));
@@ -779,7 +946,9 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
         const text = decoder.decode(bytes);
         try {
           data = JSON.parse(text);
+          console.log(`[${callId}] Gemini ArrayBuffer parsed as JSON, keys: ${Object.keys(data as object).join(",")}`);
         } catch {
+          console.log(`[${callId}] Gemini binary audio ArrayBuffer: ${bytes.length} bytes → sending to Plivo`);
           let binary = "";
           for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
           sendAudioToPlivo(btoa(binary));
@@ -787,6 +956,7 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
         }
       } else if (typeof data === "string") {
         data = JSON.parse(data);
+        console.log(`[${callId}] Gemini string JSON, keys: ${Object.keys(data as object).join(",")}`);
       }
 
       // data is now a parsed JSON object
@@ -797,21 +967,7 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
         console.log(`[${callId}] Gemini setup complete — ready for audio`);
         configAcked = true;
         geminiReady = true;
-
-        // Send initial prompt — Gemini speaks the Step 1 English greeting.
-        // IMPORTANT: Must use clientContent (not realtimeInput.text) to trigger
-        // an audio response. realtimeInput is only for streaming user media;
-        // text sent there is silently ignored and Gemini never speaks.
-        const greetingPrompt = callCtx.direction === "outbound"
-          ? "The phone call just connected. Say ONLY Step 1: 'Hi! Am I speaking with [first name]?' — then go completely SILENT. Do not say 'how are you' or introduce yourself yet. Wait for them to confirm."
-          : "Someone just called. Say ONLY Step 1 greeting — then go SILENT and wait for them to speak.";
-        geminiWs.send(JSON.stringify({
-          clientContent: {
-            turns: [{ role: "user", parts: [{ text: greetingPrompt }] }],
-            turnComplete: true,
-          },
-        }));
-        console.log(`[${callId}] Sent greeting prompt (${callCtx.direction})`);
+        console.log(`[${callId}] Gemini ready — caller audio now flowing`);
         return;
       }
 
@@ -861,9 +1017,13 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
         });
       }
 
-      // Log any unrecognized JSON messages for debugging
-      if (!msg.setupComplete && !msg.serverContent && !msg.toolCall) {
-        console.log(`[${callId}] Gemini other msg:`, JSON.stringify(msg).substring(0, 500));
+      // Log any unrecognized or partial JSON messages for debugging
+      if (!msg.setupComplete && !msg.toolCall) {
+        if (msg.serverContent && !msg.serverContent.modelTurn?.parts?.length) {
+          console.log(`[${callId}] Gemini serverContent (no parts):`, JSON.stringify(msg.serverContent).substring(0, 300));
+        } else if (!msg.serverContent) {
+          console.log(`[${callId}] Gemini other msg:`, JSON.stringify(msg).substring(0, 500));
+        }
       }
     } catch (e: any) {
       console.error(`[${callId}] Gemini message error:`, e.message, typeof event.data);
@@ -876,6 +1036,12 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
   geminiWs.onclose = (e: any) => {
     console.log(`[${callId}] Gemini disconnected — code: ${e.code}, reason: ${e.reason || "none"}`);
     geminiReady = false;
+    // If Gemini crashes mid-call (1011 internal error), close the Plivo connection
+    // so the caller hears a hangup rather than indefinite silence.
+    if (e.code !== 1000 && plivoWs.readyState === WebSocket.OPEN) {
+      console.log(`[${callId}] Gemini crashed (${e.code}) — closing Plivo connection`);
+      plivoWs.close();
+    }
   };
 
   // Handle Plivo WebSocket messages
@@ -891,14 +1057,12 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
           break;
 
         case "media":
-          // Forward audio to Gemini (convert mulaw 8k → PCM 16k)
-          // Use mediaChunks — the correct BidiGenerateContent format for streaming audio.
-          // Do NOT use realtimeInput.audio — that is for native audio dialog models only.
+          // Forward caller audio to Gemini (convert mulaw 8k → PCM 16k)
           if (geminiReady && geminiWs.readyState === WebSocket.OPEN && msg.media?.payload) {
             const pcmBase64 = mulawToGeminiPcm(msg.media.payload);
             geminiWs.send(JSON.stringify({
               realtimeInput: {
-                mediaChunks: [{ mimeType: "audio/pcm;rate=16000", data: pcmBase64 }],
+                audio: { data: pcmBase64, mimeType: "audio/pcm;rate=16000" },
               },
             }));
           }
@@ -1146,12 +1310,16 @@ Deno.serve({ port: PORT }, async (req) => {
         });
         console.log(`[${callId}] Call log updated with recording + transcripts`);
 
-        // Get lead_id from context or DB
+        // Get lead_id + disposition from context or DB
         let leadId = callCtx?.leadId;
+        let dbDisposition: string | null = null;
+        let dbVisitDate: string | null = null;
         if (!leadId && callLogId) {
-          const lRes = await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?id=eq.${callLogId}&select=lead_id`, { headers: dbHeaders });
+          const lRes = await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?id=eq.${callLogId}&select=lead_id,disposition`, { headers: dbHeaders });
           const lRows = await lRes.json();
           leadId = lRows?.[0]?.lead_id;
+          dbDisposition = lRows?.[0]?.disposition || null;
+          console.log(`[${callId}] From DB: leadId=${leadId || "not found"} disposition=${dbDisposition || "none"}`);
         }
 
         // Auto-retry unanswered/busy via AI — re-queue with 4-hour delay, 9AM–8PM IST window
@@ -1239,47 +1407,45 @@ Deno.serve({ port: PORT }, async (req) => {
             }),
           });
         }
-        // Post-call auto-WhatsApp based on disposition (for completed calls only)
+        // Post-call reconciliation: detect unfulfilled promises + send WhatsApp
+        console.log(`[${callId}] Post-call reconciliation: plivoStatus=${plivoStatus} leadId=${leadId || "null"}`);
         if (plivoStatus === "completed" && leadId) {
           try {
-            // Get lead info for WhatsApp
-            const waLeadInfo = await fetch(
-              `${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}&select=phone,name,courses:course_id(name,slug),campuses:campus_id(name)`,
-              { headers: dbHeaders },
-            );
-            const waLd = (await waLeadInfo.json())?.[0];
-            if (waLd?.phone) {
-              const cn = (waLd.courses as any)?.name || "our programmes";
-              const cs = (waLd.courses as any)?.slug || "";
-              const cm = (waLd.campuses as any)?.name || "NIMT campus";
-              const courseLink = cs ? `https://www.nimt.ac.in/courses/${cs}` : "https://www.nimt.ac.in/courses";
-              const applyLink = "https://uni.nimt.ac.in/apply/nimt";
+            const reconciliation = await reconcilePostCall(callCtx || null, leadId, dbDisposition, dbHeaders);
 
-              // Determine which template based on call context
-              const disposition = callCtx?.toolCallsMade?.find(tc => tc.name === "set_call_disposition")?.args?.disposition;
-              let postCallTemplate = "";
-              let postCallParams: string[] = [];
+            if (reconciliation) {
+              console.log(`[${callId}] Reconciled: actions=[${reconciliation.actions.join(",")}]`);
 
-              if (disposition === "interested" || disposition === "call_back" || !disposition) {
-                // Send course info with apply link
-                postCallTemplate = "ai_call_course_info";
-                postCallParams = [waLd.name, cn, cm, courseLink, applyLink];
-              } else if (disposition === "not_answered") {
-                postCallTemplate = "missed_call";
-                postCallParams = [waLd.name, cn];
-              }
-
-              if (postCallTemplate) {
+              // Send WhatsApp if template was determined
+              if (reconciliation.templateKey && reconciliation.phone) {
                 await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
                   method: "POST",
-                  headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` },
-                  body: JSON.stringify({ template_key: postCallTemplate, phone: waLd.phone, params: postCallParams, lead_id: leadId }),
+                  headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+                  body: JSON.stringify({
+                    template_key: reconciliation.templateKey,
+                    phone: reconciliation.phone,
+                    params: reconciliation.templateParams,
+                    lead_id: leadId,
+                    ...(reconciliation.buttonUrls ? { button_urls: reconciliation.buttonUrls } : {}),
+                  }),
                 });
-                console.log(`[${callId}] Post-call WhatsApp sent: ${postCallTemplate}`);
+                console.log(`[${callId}] Post-call WhatsApp: ${reconciliation.templateKey}`);
+              }
+
+              // Append reconciliation actions to call record summary
+              if (reconciliation.actions.length > 0 && callLogId) {
+                const recNote = ` | Reconciled: ${reconciliation.actions.join(", ")}`;
+                const curSumRes = await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?id=eq.${callLogId}&select=summary`, { headers: dbHeaders });
+                const curSum = (await curSumRes.json().catch(() => []))?.[0]?.summary || "";
+                await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?id=eq.${callLogId}`, {
+                  method: "PATCH",
+                  headers: { ...dbHeaders, Prefer: "return=minimal" },
+                  body: JSON.stringify({ summary: curSum + recNote }),
+                });
               }
             }
           } catch (waErr: any) {
-            console.error(`[${callId}] Post-call WhatsApp failed:`, waErr.message);
+            console.error(`[${callId}] Post-call reconciliation failed:`, waErr.message);
           }
         }
       } catch (e: any) {

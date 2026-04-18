@@ -56,11 +56,12 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Validate auth — accept user JWT, service role key, or cron secret
+    // Validate auth — accept user JWT, service role key, cron secret, or voice agent key
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const cronSecret = Deno.env.get("CRON_SECRET");
+    const voiceAgentKey = Deno.env.get("VOICE_AGENT_KEY");
 
     const authHeader = req.headers.get("Authorization");
     const reqCronSecret = req.headers.get("x-cron-secret");
@@ -74,7 +75,7 @@ Deno.serve(async (req) => {
     }
 
     const token = authHeader?.replace("Bearer ", "") || "";
-    const isServiceRole = token === serviceRoleKey;
+    const isServiceRole = token === serviceRoleKey || (voiceAgentKey && token === voiceAgentKey);
     // user.id must be a valid UUID or null (lead_activities.user_id is uuid).
     // For system/automation calls, use null so inserts don't fail.
     let user: { id: string | null } | null = null;
