@@ -123,6 +123,11 @@ export default function AlumniVerifications() {
     await supabase.storage.from("alumni-verification-docs").upload(path, reviewDocFile, { upsert: true });
     docUrl = path;
 
+    // Generate draft email for super admin to review
+    const resultForDraft = verificationResult === "recommended_approve" ? "confirmed" : "not_found";
+    const draft = generateEmailDraft(selectedReq, resultForDraft);
+    const draftText = `Subject: ${draft.subject}\n\n${draft.body}`;
+
     await supabase.from("alumni_verification_requests" as any).update({
       status: "under_review",
       employee_reviewed_by: user?.id,
@@ -130,6 +135,7 @@ export default function AlumniVerifications() {
       employee_review_result: verificationResult,
       employee_review_doc_url: docUrl,
       employee_reviewed_at: new Date().toISOString(),
+      employee_draft_email: draftText,
     }).eq("id", selectedReq.id);
 
     toast({ title: "Review submitted — pending super admin approval" });
@@ -249,16 +255,18 @@ registrar@nimt.ac.in`,
 
     const approvedAt = new Date().toISOString();
 
-    // Update status
+    // Update status + store sent email for audit
     await supabase.from("alumni_verification_requests" as any).update({
       status: finalStatus,
       verification_result: result,
-      review_notes: `${reviewNotes}\n\n--- Email Sent ---\nSubject: ${emailSubject}\n\n${emailBody}`.trim(),
+      review_notes: reviewNotes,
       reviewed_by: user?.id,
       reviewed_at: approvedAt,
       admin_approved_by: user?.id,
       admin_approval_notes: reviewNotes,
       admin_approved_at: approvedAt,
+      sent_email_subject: emailSubject,
+      sent_email_body: emailBody,
     }).eq("id", selectedReq.id);
 
     // Send email
@@ -588,7 +596,7 @@ registrar@nimt.ac.in`,
                   </div>
                   {selectedReq.admin_approval_notes && (
                     <div>
-                      <p className="text-[10px] text-muted-foreground font-medium">Review Notes:</p>
+                      <p className="text-[10px] text-muted-foreground font-medium">Approval Notes:</p>
                       <p className="text-xs text-foreground">{selectedReq.admin_approval_notes}</p>
                     </div>
                   )}
@@ -597,20 +605,39 @@ registrar@nimt.ac.in`,
                       Approved: {new Date(selectedReq.reviewed_at).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                     </p>
                   )}
-                  {selectedReq.contact_email && selectedReq.status === "verified" && (
+                  {selectedReq.contact_email && (
                     <p className="text-[10px] text-muted-foreground">
                       Email sent to: <span className="font-medium">{selectedReq.contact_email}</span> (CC: academics@nimt.ac.in)
                     </p>
                   )}
-                  {selectedReq.review_notes && selectedReq.review_notes.includes("--- Email Sent ---") && (
-                    <details className="mt-2">
-                      <summary className="text-[10px] text-primary cursor-pointer font-medium">View email sent</summary>
-                      <pre className="mt-1 text-[10px] text-muted-foreground bg-muted/50 rounded-lg p-2 whitespace-pre-wrap font-mono max-h-40 overflow-y-auto">
-                        {selectedReq.review_notes.split("--- Email Sent ---")[1]?.trim()}
-                      </pre>
-                    </details>
-                  )}
                 </div>
+              )}
+
+              {/* Employee draft email (submitted for approval) */}
+              {selectedReq.employee_draft_email && (
+                <details className="rounded-xl border border-border overflow-hidden">
+                  <summary className="px-3 py-2 text-[10px] font-semibold text-muted-foreground uppercase cursor-pointer hover:bg-muted/30 flex items-center gap-1.5">
+                    <Mail className="h-3 w-3" /> Employee Draft Email
+                  </summary>
+                  <pre className="px-3 py-2 text-[10px] text-foreground bg-muted/20 whitespace-pre-wrap font-mono leading-relaxed max-h-48 overflow-y-auto border-t border-border">
+                    {selectedReq.employee_draft_email}
+                  </pre>
+                </details>
+              )}
+
+              {/* Final sent email (approved by super admin) */}
+              {selectedReq.sent_email_body && (
+                <details className="rounded-xl border border-emerald-200 dark:border-emerald-800/40 overflow-hidden">
+                  <summary className="px-3 py-2 text-[10px] font-semibold text-emerald-700 uppercase cursor-pointer hover:bg-emerald-50/50 flex items-center gap-1.5">
+                    <Mail className="h-3 w-3" /> Final Email Sent
+                  </summary>
+                  <div className="px-3 py-2 bg-emerald-50/30 dark:bg-emerald-950/10 border-t border-emerald-200 dark:border-emerald-800/40">
+                    <p className="text-[10px] text-muted-foreground mb-1">Subject: <span className="font-medium text-foreground">{selectedReq.sent_email_subject}</span></p>
+                    <pre className="text-[10px] text-foreground whitespace-pre-wrap font-mono leading-relaxed max-h-48 overflow-y-auto">
+                      {selectedReq.sent_email_body}
+                    </pre>
+                  </div>
+                </details>
               )}
 
               {/* Review Section — Employee (if not yet reviewed) */}
