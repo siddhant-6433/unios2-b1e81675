@@ -4,7 +4,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Loader2, Phone, Upload, FileText, CheckCircle, Shield, Building2, GraduationCap, User, X,
+  Loader2, Phone, Upload, FileText, CheckCircle, Shield, Building2, GraduationCap, Mail, X, Users,
 } from "lucide-react";
 
 const COURSES = [
@@ -23,7 +23,35 @@ const POPULAR_COMPANIES = [
   "BYJU'S", "Zomato", "Swiggy", "Paytm", "PhonePe",
 ];
 
-// ---- OTP Login Component ----
+// ---- Phone Input with Country Code ----
+function PhoneInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  return (
+    <div className="flex rounded-xl border border-input bg-background overflow-hidden focus-within:ring-2 focus-within:ring-primary/20">
+      <div className="flex items-center gap-1.5 px-3 bg-muted/50 border-r border-input shrink-0">
+        <span className="text-base">🇮🇳</span>
+        <span className="text-sm font-medium text-muted-foreground">+91</span>
+      </div>
+      <input
+        type="tel"
+        value={value}
+        onChange={(e) => {
+          const digits = e.target.value.replace(/\D/g, "").slice(0, 10);
+          onChange(digits);
+        }}
+        placeholder={placeholder || "98765 43210"}
+        maxLength={10}
+        className="flex-1 px-3 py-3 text-sm bg-transparent focus:outline-none"
+      />
+      {value.length > 0 && (
+        <span className={`flex items-center px-3 text-[10px] font-medium ${value.length === 10 ? "text-emerald-600" : "text-muted-foreground"}`}>
+          {value.length}/10
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ---- OTP Login ----
 function OtpLogin({ onVerified }: { onVerified: (phone: string) => void }) {
   const { toast } = useToast();
   const [phone, setPhone] = useState("");
@@ -32,14 +60,12 @@ function OtpLogin({ onVerified }: { onVerified: (phone: string) => void }) {
   const [loading, setLoading] = useState(false);
 
   const handleSendOtp = async () => {
-    if (!phone || phone.replace(/\D/g, "").length < 10) {
-      toast({ title: "Enter valid phone number", variant: "destructive" });
+    if (phone.length !== 10) {
+      toast({ title: "Enter a valid 10-digit phone number", variant: "destructive" });
       return;
     }
     setLoading(true);
-    const digits = phone.replace(/\D/g, "");
-    const formatted = digits.length === 10 ? `+91${digits}` : digits.startsWith("91") ? `+${digits}` : phone;
-
+    const formatted = `+91${phone}`;
     const { data, error } = await supabase.functions.invoke("whatsapp-otp", {
       body: { phone: formatted, action: "send" },
     });
@@ -48,7 +74,6 @@ function OtpLogin({ onVerified }: { onVerified: (phone: string) => void }) {
       toast({ title: "Failed to send OTP", description: data?.error || error?.message, variant: "destructive" });
     } else {
       setOtpSent(true);
-      setPhone(formatted);
       toast({ title: "OTP sent via WhatsApp" });
     }
   };
@@ -56,13 +81,13 @@ function OtpLogin({ onVerified }: { onVerified: (phone: string) => void }) {
   const handleVerifyOtp = async () => {
     setLoading(true);
     const { data, error } = await supabase.functions.invoke("whatsapp-otp", {
-      body: { phone, otp, action: "verify" },
+      body: { phone: `+91${phone}`, otp, action: "verify" },
     });
     setLoading(false);
     if (error || data?.error || !data?.verified) {
       toast({ title: "Invalid OTP", description: "Please check and try again", variant: "destructive" });
     } else {
-      onVerified(phone);
+      onVerified(`+91${phone}`);
     }
   };
 
@@ -78,21 +103,15 @@ function OtpLogin({ onVerified }: { onVerified: (phone: string) => void }) {
       {!otpSent ? (
         <div className="space-y-3">
           <label className="text-sm font-medium text-foreground">Your WhatsApp Number</label>
-          <input
-            type="tel"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="+91 98765 43210"
-            className="w-full rounded-xl border border-input bg-background px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-          />
-          <Button className="w-full gap-2" onClick={handleSendOtp} disabled={loading}>
+          <PhoneInput value={phone} onChange={setPhone} />
+          <Button className="w-full gap-2" onClick={handleSendOtp} disabled={loading || phone.length !== 10}>
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Phone className="h-4 w-4" />}
             Send OTP via WhatsApp
           </Button>
         </div>
       ) : (
         <div className="space-y-3">
-          <label className="text-sm font-medium text-foreground">Enter OTP sent to {phone}</label>
+          <label className="text-sm font-medium text-foreground">Enter OTP sent to +91 {phone}</label>
           <input
             type="text"
             value={otp}
@@ -123,12 +142,18 @@ export default function AlumniVerification() {
   const [requestId, setRequestId] = useState<string | null>(null);
   const [requestNumber, setRequestNumber] = useState<string>("");
 
-  // Form state
+  // Requestor (third-party company submitting verification)
   const [contactName, setContactName] = useState("");
   const [contactPhone, setContactPhone] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [thirdPartyCompany, setThirdPartyCompany] = useState("");
+
+  // Employer (for whom verification is sought)
   const [employerName, setEmployerName] = useState("");
   const [employerSearch, setEmployerSearch] = useState("");
   const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
+
+  // Alumni
   const [alumniName, setAlumniName] = useState("");
   const [course, setCourse] = useState("");
   const [yearOfPassing, setYearOfPassing] = useState("");
@@ -137,12 +162,9 @@ export default function AlumniVerification() {
 
   const companyRef = useRef<HTMLDivElement>(null);
 
-  // Close company dropdown on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (companyRef.current && !companyRef.current.contains(e.target as Node)) {
-        setShowCompanyDropdown(false);
-      }
+      if (companyRef.current && !companyRef.current.contains(e.target as Node)) setShowCompanyDropdown(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -155,20 +177,25 @@ export default function AlumniVerification() {
   const inputCls = "w-full rounded-xl border border-input bg-background px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20";
 
   const handleSubmit = async () => {
-    if (!verifiedPhone || !contactName || !contactPhone || !employerName || !alumniName || !course || !yearOfPassing) {
+    if (!verifiedPhone || !contactName || !contactPhone || !contactEmail || !employerName || !alumniName || !course || !yearOfPassing) {
       toast({ title: "Please fill all required fields", variant: "destructive" });
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) {
+      toast({ title: "Enter a valid email address", variant: "destructive" });
       return;
     }
     setSubmitting(true);
 
-    // 1. Create the verification request
     const { data: req, error } = await supabase
       .from("alumni_verification_requests" as any)
       .insert({
         requestor_phone: verifiedPhone,
         contact_name: contactName,
-        contact_phone_spoc: contactPhone,
+        contact_phone_spoc: `+91${contactPhone}`,
+        contact_email: contactEmail,
         employer_name: employerName,
+        third_party_company: thirdPartyCompany || null,
         alumni_name: alumniName,
         course,
         year_of_passing: parseInt(yearOfPassing),
@@ -187,38 +214,22 @@ export default function AlumniVerification() {
     setRequestId(id);
     setRequestNumber((req as any).request_number);
 
-    // 2. Upload documents
+    // Upload documents
     if (diplomaFile) {
       const ext = diplomaFile.name.split(".").pop();
-      await supabase.storage
-        .from("alumni-verification-docs")
-        .upload(`${id}/diploma-certificate.${ext}`, diplomaFile, { upsert: true });
-
-      const { data: urlData } = supabase.storage
-        .from("alumni-verification-docs")
-        .getPublicUrl(`${id}/diploma-certificate.${ext}`);
-
-      await supabase
-        .from("alumni_verification_requests" as any)
-        .update({ diploma_certificate_url: `${id}/diploma-certificate.${ext}` })
-        .eq("id", id);
+      await supabase.storage.from("alumni-verification-docs").upload(`${id}/diploma-certificate.${ext}`, diplomaFile, { upsert: true });
+      await supabase.from("alumni_verification_requests" as any).update({ diploma_certificate_url: `${id}/diploma-certificate.${ext}` }).eq("id", id);
     }
-
     if (marksheetFiles.length > 0) {
       const paths: string[] = [];
       for (let i = 0; i < marksheetFiles.length; i++) {
         const f = marksheetFiles[i];
         const ext = f.name.split(".").pop();
         const path = `${id}/marksheet-${i + 1}.${ext}`;
-        await supabase.storage
-          .from("alumni-verification-docs")
-          .upload(path, f, { upsert: true });
+        await supabase.storage.from("alumni-verification-docs").upload(path, f, { upsert: true });
         paths.push(path);
       }
-      await supabase
-        .from("alumni_verification_requests" as any)
-        .update({ marksheet_urls: paths })
-        .eq("id", id);
+      await supabase.from("alumni_verification_requests" as any).update({ marksheet_urls: paths }).eq("id", id);
     }
 
     setSubmitting(false);
@@ -227,15 +238,9 @@ export default function AlumniVerification() {
 
   const handlePaymentDone = async () => {
     if (!requestId) return;
-    // Mark as paid (in production, this would be verified via webhook)
-    await supabase
-      .from("alumni_verification_requests" as any)
-      .update({
-        status: "paid",
-        payment_method: "razorpay_link",
-        paid_at: new Date().toISOString(),
-      })
-      .eq("id", requestId);
+    await supabase.from("alumni_verification_requests" as any).update({
+      status: "paid", payment_method: "razorpay_link", paid_at: new Date().toISOString(),
+    }).eq("id", requestId);
     setStep("done");
   };
 
@@ -244,7 +249,7 @@ export default function AlumniVerification() {
       {/* Header */}
       <header className="border-b border-border/40 bg-white/80 dark:bg-gray-950/80 backdrop-blur-sm">
         <div className="max-w-3xl mx-auto px-4 py-4 flex items-center gap-3">
-          <img src="https://pub-811305689b9049e6b317d47a98f724ae.r2.dev/web/images/nimt-beacon-logo.png" alt="NIMT" className="h-10" />
+          <img src="/nimt-logo.png" alt="NIMT" className="h-10" onError={(e) => { (e.target as HTMLImageElement).src = "https://nimt.ac.in/images/nimt-logo.png"; }} />
           <div>
             <h1 className="text-lg font-bold text-foreground">NIMT Educational Institutions</h1>
             <p className="text-xs text-muted-foreground">Alumni Verification Service</p>
@@ -287,26 +292,49 @@ export default function AlumniVerification() {
               <div className="space-y-6">
                 <div className="text-center mb-4">
                   <h2 className="text-lg font-bold text-foreground">Verification Request Details</h2>
-                  <p className="text-xs text-muted-foreground">Fill in the employer and alumni information</p>
+                  <p className="text-xs text-muted-foreground">Fill in the requestor, employer, and alumni information</p>
                 </div>
 
-                {/* Requestor / Employer Info */}
+                {/* Third-Party Company (submitting the request) */}
                 <div className="space-y-4">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
-                    <Building2 className="h-3.5 w-3.5" /> Requestor Information
+                    <Users className="h-3.5 w-3.5" /> Third-Party / Verification Agency
                   </p>
+                  <div>
+                    <label className="text-xs font-medium text-foreground mb-1 block">Company / Agency Name</label>
+                    <input value={thirdPartyCompany} onChange={e => setThirdPartyCompany(e.target.value)} placeholder="e.g. AuthBridge, HireRight (leave blank if direct employer)" className={inputCls} />
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs font-medium text-foreground mb-1 block">Contact Name *</label>
-                      <input value={contactName} onChange={e => setContactName(e.target.value)} placeholder="SPOC Name" className={inputCls} />
+                      <label className="text-xs font-medium text-foreground mb-1 block">SPOC Name *</label>
+                      <input value={contactName} onChange={e => setContactName(e.target.value)} placeholder="Contact person name" className={inputCls} />
                     </div>
                     <div>
-                      <label className="text-xs font-medium text-foreground mb-1 block">Contact Phone *</label>
-                      <input value={contactPhone} onChange={e => setContactPhone(e.target.value)} placeholder="+91 98765 43210" className={inputCls} />
+                      <label className="text-xs font-medium text-foreground mb-1 block">SPOC Phone *</label>
+                      <PhoneInput value={contactPhone} onChange={setContactPhone} />
                     </div>
                   </div>
+                  <div>
+                    <label className="text-xs font-medium text-foreground mb-1 block flex items-center gap-1">
+                      <Mail className="h-3 w-3" /> Email Address * <span className="text-[10px] text-muted-foreground font-normal">(verification result will be sent here)</span>
+                    </label>
+                    <input
+                      type="email"
+                      value={contactEmail}
+                      onChange={e => setContactEmail(e.target.value)}
+                      placeholder="spoc@company.com"
+                      className={inputCls}
+                    />
+                  </div>
+                </div>
+
+                {/* Employer (for whom verification is sought) */}
+                <div className="space-y-4">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                    <Building2 className="h-3.5 w-3.5" /> Employer (For Whom Verification is Sought)
+                  </p>
                   <div ref={companyRef} className="relative">
-                    <label className="text-xs font-medium text-foreground mb-1 block">Employer / Company Name *</label>
+                    <label className="text-xs font-medium text-foreground mb-1 block">Employer / University Name *</label>
                     <input
                       value={employerName || employerSearch}
                       onChange={e => {
@@ -314,35 +342,22 @@ export default function AlumniVerification() {
                         setEmployerName("");
                         setShowCompanyDropdown(true);
                       }}
-                      onFocus={() => setShowCompanyDropdown(true)}
+                      onFocus={() => { if (employerSearch || !employerName) setShowCompanyDropdown(true); }}
                       placeholder="Search company or type custom name"
                       className={inputCls}
                     />
-                    {showCompanyDropdown && employerSearch && (
+                    {showCompanyDropdown && (employerSearch || !employerName) && (
                       <div className="absolute z-10 mt-1 w-full rounded-xl border border-border bg-card shadow-lg max-h-48 overflow-y-auto">
                         {filteredCompanies.map(c => (
-                          <button
-                            key={c}
-                            className="w-full text-left px-4 py-2 text-sm hover:bg-muted/50 transition-colors"
-                            onClick={() => { setEmployerName(c); setEmployerSearch(""); setShowCompanyDropdown(false); }}
-                          >
+                          <button key={c} className="w-full text-left px-4 py-2 text-sm hover:bg-muted/50 transition-colors"
+                            onClick={() => { setEmployerName(c); setEmployerSearch(""); setShowCompanyDropdown(false); }}>
                             {c}
                           </button>
                         ))}
-                        {filteredCompanies.length === 0 && (
-                          <button
-                            className="w-full text-left px-4 py-2 text-sm text-primary hover:bg-muted/50"
-                            onClick={() => { setEmployerName(employerSearch); setShowCompanyDropdown(false); }}
-                          >
-                            Use "{employerSearch}"
-                          </button>
-                        )}
-                        {filteredCompanies.length > 0 && !filteredCompanies.includes(employerSearch) && employerSearch.length > 2 && (
-                          <button
-                            className="w-full text-left px-4 py-2 text-sm border-t border-border text-primary hover:bg-muted/50"
-                            onClick={() => { setEmployerName(employerSearch); setShowCompanyDropdown(false); }}
-                          >
-                            + Add "{employerSearch}"
+                        {employerSearch.length > 2 && !filteredCompanies.includes(employerSearch) && (
+                          <button className="w-full text-left px-4 py-2 text-sm border-t border-border text-primary hover:bg-muted/50"
+                            onClick={() => { setEmployerName(employerSearch); setEmployerSearch(""); setShowCompanyDropdown(false); }}>
+                            + Use "{employerSearch}"
                           </button>
                         )}
                       </div>
@@ -369,19 +384,13 @@ export default function AlumniVerification() {
                     </div>
                     <div>
                       <label className="text-xs font-medium text-foreground mb-1 block">Year of Passing *</label>
-                      <input
-                        type="number"
-                        value={yearOfPassing}
-                        onChange={e => setYearOfPassing(e.target.value)}
-                        placeholder="2020"
-                        min="1990" max="2030"
-                        className={inputCls}
-                      />
+                      <input type="number" value={yearOfPassing} onChange={e => setYearOfPassing(e.target.value)}
+                        placeholder="2020" min="1990" max="2030" className={inputCls} />
                     </div>
                   </div>
                 </div>
 
-                {/* Document Uploads */}
+                {/* Documents */}
                 <div className="space-y-4">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
                     <FileText className="h-3.5 w-3.5" /> Documents
@@ -390,35 +399,24 @@ export default function AlumniVerification() {
                     <label className="text-xs font-medium text-foreground mb-1 block">Diploma / Degree Certificate</label>
                     <label className="flex items-center gap-3 rounded-xl border-2 border-dashed border-border px-4 py-3 cursor-pointer hover:border-primary/40 transition-colors">
                       <Upload className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm text-muted-foreground">
-                        {diplomaFile ? diplomaFile.name : "Upload certificate (PDF/image)"}
-                      </span>
+                      <span className="text-sm text-muted-foreground">{diplomaFile ? diplomaFile.name : "Upload certificate (PDF/image)"}</span>
                       <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={e => setDiplomaFile(e.target.files?.[0] || null)} />
-                      {diplomaFile && (
-                        <button onClick={(e) => { e.preventDefault(); setDiplomaFile(null); }} className="ml-auto">
-                          <X className="h-4 w-4 text-muted-foreground hover:text-destructive" />
-                        </button>
-                      )}
+                      {diplomaFile && <button onClick={e => { e.preventDefault(); setDiplomaFile(null); }} className="ml-auto"><X className="h-4 w-4 text-muted-foreground hover:text-destructive" /></button>}
                     </label>
                   </div>
                   <div>
                     <label className="text-xs font-medium text-foreground mb-1 block">Marksheets</label>
                     <label className="flex items-center gap-3 rounded-xl border-2 border-dashed border-border px-4 py-3 cursor-pointer hover:border-primary/40 transition-colors">
                       <Upload className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm text-muted-foreground">
-                        {marksheetFiles.length > 0 ? `${marksheetFiles.length} file(s) selected` : "Upload marksheets (multiple allowed)"}
-                      </span>
-                      <input type="file" accept=".pdf,.jpg,.jpeg,.png" multiple className="hidden"
-                        onChange={e => setMarksheetFiles(Array.from(e.target.files || []))} />
+                      <span className="text-sm text-muted-foreground">{marksheetFiles.length > 0 ? `${marksheetFiles.length} file(s) selected` : "Upload marksheets (multiple allowed)"}</span>
+                      <input type="file" accept=".pdf,.jpg,.jpeg,.png" multiple className="hidden" onChange={e => setMarksheetFiles(Array.from(e.target.files || []))} />
                     </label>
                     {marksheetFiles.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 mt-2">
                         {marksheetFiles.map((f, i) => (
                           <span key={i} className="inline-flex items-center gap-1 rounded-lg bg-muted px-2 py-1 text-[10px]">
                             {f.name}
-                            <button onClick={() => setMarksheetFiles(prev => prev.filter((_, j) => j !== i))}>
-                              <X className="h-3 w-3 text-muted-foreground hover:text-destructive" />
-                            </button>
+                            <button onClick={() => setMarksheetFiles(prev => prev.filter((_, j) => j !== i))}><X className="h-3 w-3 text-muted-foreground hover:text-destructive" /></button>
                           </span>
                         ))}
                       </div>
@@ -444,35 +442,21 @@ export default function AlumniVerification() {
                   <p className="text-sm text-muted-foreground mt-1">
                     Request <span className="font-mono font-bold text-foreground">{requestNumber}</span> submitted successfully.
                   </p>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Please complete the verification fee payment to proceed.
-                  </p>
                 </div>
-
                 <div className="rounded-xl border border-border bg-muted/30 p-4">
                   <p className="text-2xl font-bold text-foreground">&#8377; 500</p>
                   <p className="text-xs text-muted-foreground">Alumni Verification Fee (inclusive of GST)</p>
                 </div>
-
-                <a
-                  href="https://pages.razorpay.com/pl_Qcbyq4u6RqZWtn/view"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-                >
+                <a href="https://pages.razorpay.com/pl_Qcbyq4u6RqZWtn/view" target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
                   Pay Now via Razorpay
                 </a>
-
                 <div className="pt-2">
                   <Button variant="outline" className="gap-2" onClick={handlePaymentDone}>
-                    <CheckCircle className="h-4 w-4" />
-                    I have completed the payment
+                    <CheckCircle className="h-4 w-4" /> I have completed the payment
                   </Button>
                 </div>
-
-                <p className="text-[10px] text-muted-foreground">
-                  After payment, click "I have completed the payment" to update your request status.
-                </p>
+                <p className="text-[10px] text-muted-foreground">After payment, click above to update your request status.</p>
               </div>
             )}
 
@@ -485,36 +469,18 @@ export default function AlumniVerification() {
                 <div>
                   <h2 className="text-lg font-bold text-foreground">Request Submitted Successfully</h2>
                   <p className="text-sm text-muted-foreground mt-2">
-                    Your alumni verification request <span className="font-mono font-bold text-foreground">{requestNumber}</span> has been received and payment confirmed.
+                    Your request <span className="font-mono font-bold text-foreground">{requestNumber}</span> has been received.
                   </p>
                 </div>
-
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 dark:border-emerald-800/40 p-4 text-left space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Request #</span>
-                    <span className="font-mono font-bold">{requestNumber}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Alumni Name</span>
-                    <span className="font-medium">{alumniName}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Course</span>
-                    <span className="font-medium">{course}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Year of Passing</span>
-                    <span className="font-medium">{yearOfPassing}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Status</span>
-                    <span className="font-bold text-emerald-600">Paid — Under Review</span>
-                  </div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Request #</span><span className="font-mono font-bold">{requestNumber}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Alumni</span><span className="font-medium">{alumniName}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Course</span><span className="font-medium">{course}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Employer</span><span className="font-medium">{employerName}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Status</span><span className="font-bold text-emerald-600">Paid — Under Review</span></div>
                 </div>
-
                 <p className="text-xs text-muted-foreground">
-                  Our team will review the documents and verify the alumni records.
-                  You will be notified via WhatsApp on <span className="font-medium">{verifiedPhone}</span> once verification is complete.
+                  Verification result will be sent to <span className="font-medium">{contactEmail}</span> and via WhatsApp on <span className="font-medium">{verifiedPhone}</span>.
                 </p>
               </div>
             )}
@@ -522,7 +488,7 @@ export default function AlumniVerification() {
         </Card>
 
         <p className="text-center text-[10px] text-muted-foreground mt-6">
-          NIMT Educational Institutions · Alumni Verification Service · For queries contact registrar@nimt.ac.in
+          NIMT Educational Institutions · Alumni Verification Service · registrar@nimt.ac.in
         </p>
       </main>
     </div>
