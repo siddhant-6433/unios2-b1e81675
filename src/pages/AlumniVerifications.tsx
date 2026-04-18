@@ -613,31 +613,40 @@ registrar@nimt.ac.in`,
                 </div>
               )}
 
-              {/* Employee draft email (submitted for approval) */}
+              {/* Employee draft email */}
               {selectedReq.employee_draft_email && (
-                <details className="rounded-xl border border-border overflow-hidden">
-                  <summary className="px-3 py-2 text-[10px] font-semibold text-muted-foreground uppercase cursor-pointer hover:bg-muted/30 flex items-center gap-1.5">
+                <div className="rounded-xl border border-border overflow-hidden">
+                  <div className="px-3 py-2 text-[10px] font-semibold text-muted-foreground uppercase bg-muted/30 flex items-center gap-1.5">
                     <Mail className="h-3 w-3" /> Employee Draft Email
-                  </summary>
-                  <pre className="px-3 py-2 text-[10px] text-foreground bg-muted/20 whitespace-pre-wrap font-mono leading-relaxed max-h-48 overflow-y-auto border-t border-border">
+                  </div>
+                  <pre className="px-3 py-2 text-[10px] text-foreground bg-muted/10 whitespace-pre-wrap font-mono leading-relaxed max-h-60 overflow-y-auto border-t border-border">
                     {selectedReq.employee_draft_email}
                   </pre>
-                </details>
+                </div>
               )}
 
-              {/* Final sent email (approved by super admin) */}
-              {selectedReq.sent_email_body && (
-                <details className="rounded-xl border border-emerald-200 dark:border-emerald-800/40 overflow-hidden">
-                  <summary className="px-3 py-2 text-[10px] font-semibold text-emerald-700 uppercase cursor-pointer hover:bg-emerald-50/50 flex items-center gap-1.5">
+              {/* Final sent email */}
+              {selectedReq.sent_email_body ? (
+                <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/40 overflow-hidden">
+                  <div className="px-3 py-2 text-[10px] font-semibold text-emerald-700 uppercase bg-emerald-50/50 dark:bg-emerald-950/20 flex items-center gap-1.5">
                     <Mail className="h-3 w-3" /> Final Email Sent
-                  </summary>
+                  </div>
                   <div className="px-3 py-2 bg-emerald-50/30 dark:bg-emerald-950/10 border-t border-emerald-200 dark:border-emerald-800/40">
                     <p className="text-[10px] text-muted-foreground mb-1">Subject: <span className="font-medium text-foreground">{selectedReq.sent_email_subject}</span></p>
-                    <pre className="text-[10px] text-foreground whitespace-pre-wrap font-mono leading-relaxed max-h-48 overflow-y-auto">
+                    <pre className="text-[10px] text-foreground whitespace-pre-wrap font-mono leading-relaxed max-h-60 overflow-y-auto">
                       {selectedReq.sent_email_body}
                     </pre>
                   </div>
-                </details>
+                </div>
+              ) : selectedReq.status === "verified" && selectedReq.review_notes && (
+                <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/40 overflow-hidden">
+                  <div className="px-3 py-2 text-[10px] font-semibold text-emerald-700 uppercase bg-emerald-50/50 dark:bg-emerald-950/20 flex items-center gap-1.5">
+                    <Mail className="h-3 w-3" /> Review Notes / Email Record
+                  </div>
+                  <pre className="px-3 py-2 text-[10px] text-foreground bg-emerald-50/30 dark:bg-emerald-950/10 whitespace-pre-wrap font-mono leading-relaxed max-h-60 overflow-y-auto border-t border-emerald-200">
+                    {selectedReq.review_notes}
+                  </pre>
+                </div>
               )}
 
               {/* Review Section — Employee (if not yet reviewed) */}
