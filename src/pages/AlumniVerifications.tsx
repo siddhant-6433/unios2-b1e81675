@@ -9,12 +9,12 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Loader2, Shield, FileText, ExternalLink, CheckCircle, XCircle, Clock, Eye, Download,
+  Loader2, Shield, FileText, ExternalLink, CheckCircle, XCircle, Clock, Eye, Plus, Upload, AlertTriangle, X,
 } from "lucide-react";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   pending_payment: { label: "Pending Payment", color: "bg-gray-100 text-gray-700" },
-  paid: { label: "Paid", color: "bg-blue-100 text-blue-700" },
+  paid: { label: "Paid — Pending Review", color: "bg-blue-100 text-blue-700" },
   under_review: { label: "Under Review", color: "bg-amber-100 text-amber-700" },
   verified: { label: "Verified", color: "bg-emerald-100 text-emerald-700" },
   rejected: { label: "Rejected", color: "bg-red-100 text-red-700" },
@@ -27,16 +27,30 @@ const RESULT_OPTIONS = [
 ];
 
 export default function AlumniVerifications() {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const { toast } = useToast();
+  const isSuperAdmin = role === "super_admin";
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+
+  // Detail dialog
   const [selectedReq, setSelectedReq] = useState<any | null>(null);
   const [reviewNotes, setReviewNotes] = useState("");
   const [verificationResult, setVerificationResult] = useState("");
   const [newStatus, setNewStatus] = useState("");
   const [saving, setSaving] = useState(false);
+  const [reviewDocFile, setReviewDocFile] = useState<File | null>(null);
+
+  // Manual entry dialog
+  const [showManualEntry, setShowManualEntry] = useState(false);
+  const [manualData, setManualData] = useState({
+    request_type: "verification", alumni_name: "", course: "", year_of_passing: "",
+    employer_name: "", contact_name: "", contact_email: "", contact_phone_spoc: "",
+    enrollment_no: "", campus: "", fee_amount: "1500", status: "paid",
+  });
+  const [manualPaymentProof, setManualPaymentProof] = useState<File | null>(null);
+  const [manualSaving, setManualSaving] = useState(false);
 
   const fetchRequests = async () => {
     const { data } = await supabase
@@ -49,90 +63,187 @@ export default function AlumniVerifications() {
 
   useEffect(() => { fetchRequests(); }, []);
 
-  const filtered = statusFilter === "all"
-    ? requests
-    : requests.filter(r => r.status === statusFilter);
-
-  const statusCounts = requests.reduce((acc: Record<string, number>, r: any) => {
-    acc[r.status] = (acc[r.status] || 0) + 1;
-    return acc;
-  }, {});
+  const filtered = statusFilter === "all" ? requests : requests.filter(r => r.status === statusFilter);
+  const paidPending = requests.filter(r => ["paid", "under_review"].includes(r.status)).length;
 
   const openDetail = (req: any) => {
     setSelectedReq(req);
-    setReviewNotes(req.review_notes || "");
-    setVerificationResult(req.verification_result || "");
+    setReviewNotes(req.employee_review_notes || req.review_notes || "");
+    setVerificationResult(req.employee_review_result || req.verification_result || "");
     setNewStatus(req.status);
+    setReviewDocFile(null);
   };
 
-  const handleUpdate = async () => {
+  const handleEmployeeReview = async () => {
+    if (!selectedReq || !verificationResult) {
+      toast({ title: "Please select a verification result", variant: "destructive" }); return;
+    }
+    if (!reviewDocFile) {
+      toast({ title: "Please upload supporting document", variant: "destructive" }); return;
+    }
+    setSaving(true);
+
+    // Upload review doc
+    let docUrl = "";
+    const ext = reviewDocFile.name.split(".").pop();
+    const path = `${selectedReq.id}/review-doc.${ext}`;
+    await supabase.storage.from("alumni-verification-docs").upload(path, reviewDocFile, { upsert: true });
+    docUrl = path;
+
+    await supabase.from("alumni_verification_requests" as any).update({
+      status: "under_review",
+      employee_reviewed_by: user?.id,
+      employee_review_notes: reviewNotes,
+      employee_review_result: verificationResult,
+      employee_review_doc_url: docUrl,
+      employee_reviewed_at: new Date().toISOString(),
+    }).eq("id", selectedReq.id);
+
+    toast({ title: "Review submitted — pending super admin approval" });
+    setSaving(false);
+    setSelectedReq(null);
+    fetchRequests();
+  };
+
+  const handleAdminApprove = async (approve: boolean) => {
     if (!selectedReq) return;
     setSaving(true);
-    const update: any = {
-      status: newStatus,
+
+    const finalStatus = approve ? "verified" : "rejected";
+    const finalResult = approve
+      ? (selectedReq.employee_review_result || verificationResult || "confirmed")
+      : (verificationResult || "not_found");
+
+    await supabase.from("alumni_verification_requests" as any).update({
+      status: finalStatus,
+      verification_result: finalResult,
       review_notes: reviewNotes,
-    };
-    if (["verified", "rejected"].includes(newStatus)) {
-      update.verification_result = verificationResult;
-      update.reviewed_by = user?.id;
-      update.reviewed_at = new Date().toISOString();
+      reviewed_by: user?.id,
+      reviewed_at: new Date().toISOString(),
+      admin_approved_by: user?.id,
+      admin_approval_notes: reviewNotes,
+      admin_approved_at: new Date().toISOString(),
+    }).eq("id", selectedReq.id);
+
+    // Send verification email if approved
+    if (approve && selectedReq.contact_email) {
+      try {
+        const emailBody = `Dear ${selectedReq.contact_name || "Sir/Madam"},\n\nRef: ${selectedReq.request_number}\n\nThis is to inform that the student ${selectedReq.alumni_name} is a bonafide alumnus of NIMT Institute of Management & Technology, Greater Noida, Uttar Pradesh batch ${selectedReq.year_of_passing} of ${selectedReq.course} Course.${selectedReq.enrollment_no ? ` The Candidate's enrollment number during the course tenure had been ${selectedReq.enrollment_no}.` : ""}\n\nThis verification has been done as per the request received from ${selectedReq.employer_name}.\n\nRegards,\nOffice of the Registrar\nNIMT Educational Institutions\nKnowledge Park-1, Greater Noida, UP - 201310\nregistrar@nimt.ac.in`;
+
+        await supabase.functions.invoke("send-email", {
+          body: {
+            to_email: selectedReq.contact_email,
+            custom_subject: `Alumni Verification Confirmed — ${selectedReq.request_number} — ${selectedReq.alumni_name}`,
+            custom_body: emailBody,
+            cc: "academics@nimt.ac.in",
+          },
+        });
+      } catch (e) {
+        console.error("Verification email failed:", e);
+      }
     }
-    const { error } = await supabase
+
+    toast({ title: approve ? "Verified and email sent" : "Request rejected" });
+    setSaving(false);
+    setSelectedReq(null);
+    fetchRequests();
+  };
+
+  const handleManualEntry = async () => {
+    if (!manualData.alumni_name || !manualData.course || !manualData.year_of_passing || !manualData.contact_name) {
+      toast({ title: "Fill required fields", variant: "destructive" }); return;
+    }
+    setManualSaving(true);
+
+    const { data: req, error } = await supabase
       .from("alumni_verification_requests" as any)
-      .update(update)
-      .eq("id", selectedReq.id);
+      .insert({
+        request_type: manualData.request_type,
+        requestor_phone: manualData.contact_phone_spoc || "+910000000000",
+        contact_name: manualData.contact_name,
+        contact_phone_spoc: manualData.contact_phone_spoc || "",
+        contact_email: manualData.contact_email || "",
+        employer_name: manualData.employer_name || "Manual Entry",
+        alumni_name: manualData.alumni_name,
+        course: manualData.course,
+        year_of_passing: parseInt(manualData.year_of_passing),
+        enrollment_no: manualData.enrollment_no || null,
+        campus: manualData.campus || null,
+        fee_amount: parseFloat(manualData.fee_amount),
+        status: manualData.status,
+        paid_at: manualData.status === "paid" ? new Date().toISOString() : null,
+        payment_method: manualData.status === "paid" ? "manual" : null,
+        batch_number: "BACKLOG",
+      })
+      .select("id, request_number")
+      .single();
 
     if (error) {
-      toast({ title: "Update failed", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "Request updated" });
-      setSelectedReq(null);
-      fetchRequests();
+      toast({ title: "Failed", description: error.message, variant: "destructive" });
+      setManualSaving(false); return;
     }
-    setSaving(false);
+
+    // Upload payment proof
+    if (manualPaymentProof && req) {
+      const ext = manualPaymentProof.name.split(".").pop();
+      const path = `${(req as any).id}/payment-proof.${ext}`;
+      await supabase.storage.from("alumni-verification-docs").upload(path, manualPaymentProof, { upsert: true });
+      await supabase.from("alumni_verification_requests" as any)
+        .update({ additional_doc_urls: [path] })
+        .eq("id", (req as any).id);
+    }
+
+    toast({ title: "Request created", description: `${(req as any).request_number}` });
+    setManualSaving(false);
+    setShowManualEntry(false);
+    setManualData({ request_type: "verification", alumni_name: "", course: "", year_of_passing: "",
+      employer_name: "", contact_name: "", contact_email: "", contact_phone_spoc: "",
+      enrollment_no: "", campus: "", fee_amount: "1500", status: "paid" });
+    setManualPaymentProof(null);
+    fetchRequests();
   };
 
   const getDocUrl = async (path: string) => {
-    const { data } = await supabase.storage
-      .from("alumni-verification-docs")
-      .createSignedUrl(path, 3600);
+    const { data } = await supabase.storage.from("alumni-verification-docs").createSignedUrl(path, 3600);
     if (data?.signedUrl) window.open(data.signedUrl, "_blank");
   };
 
-  if (loading) {
-    return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
-  }
+  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+
+  const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20";
 
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Alumni Verification</h1>
-          <p className="text-sm text-muted-foreground mt-1">Review and manage verification requests from employers</p>
+          <p className="text-sm text-muted-foreground mt-1">Review and manage verification requests</p>
         </div>
-        <Badge className="bg-primary/10 text-primary border-0 text-sm font-bold">{requests.length} total</Badge>
+        <div className="flex items-center gap-3">
+          {paidPending > 0 && (
+            <Badge className="bg-red-100 text-red-700 border-0 text-sm font-bold gap-1">
+              <Clock className="h-3.5 w-3.5" /> {paidPending} Pending
+            </Badge>
+          )}
+          <Button variant="outline" className="gap-1.5" onClick={() => setShowManualEntry(true)}>
+            <Plus className="h-4 w-4" /> Add Manual Request
+          </Button>
+        </div>
       </div>
 
-      {/* Status filter tabs */}
-      <div className="flex rounded-xl border border-input bg-card p-0.5 w-fit">
-        <button
-          onClick={() => setStatusFilter("all")}
-          className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${statusFilter === "all" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-        >
-          All ({requests.length})
-        </button>
-        {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
-          <button
-            key={key}
-            onClick={() => setStatusFilter(key)}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${statusFilter === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-          >
-            {cfg.label} ({statusCounts[key] || 0})
+      {/* Status filter */}
+      <div className="flex rounded-xl border border-input bg-card p-0.5 w-fit overflow-x-auto">
+        {[{ key: "all", label: `All (${requests.length})` }, ...Object.entries(STATUS_CONFIG).map(([k, v]) => ({
+          key: k, label: `${v.label.split(" —")[0]} (${requests.filter(r => r.status === k).length})`,
+        }))].map(t => (
+          <button key={t.key} onClick={() => setStatusFilter(t.key)}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${statusFilter === t.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+            {t.label}
           </button>
         ))}
       </div>
 
-      {/* Requests table */}
+      {/* Table */}
       <Card className="border-border/60 shadow-none overflow-hidden">
         <CardContent className="p-0">
           {filtered.length === 0 ? (
@@ -143,51 +254,49 @@ export default function AlumniVerifications() {
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Request #</th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Type</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Employer</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Alumni Name</th>
+                    <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Type</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Alumni</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Course</th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Year</th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Status</th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Result</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Submitted</th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Actions</th>
+                    <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Status</th>
+                    <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Due Date</th>
+                    <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">TAT</th>
+                    <th className="px-3 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map((req: any) => {
                     const cfg = STATUS_CONFIG[req.status] || STATUS_CONFIG.pending_payment;
+                    const isOverdue = req.due_date && new Date(req.due_date) < new Date() && ["paid", "under_review"].includes(req.status);
+                    const daysLeft = req.due_date ? Math.ceil((new Date(req.due_date).getTime() - Date.now()) / 86400000) : null;
                     return (
-                      <tr key={req.id} className="border-b border-border/40 hover:bg-muted/20 cursor-pointer" onClick={() => openDetail(req)}>
+                      <tr key={req.id} className={`border-b border-border/40 hover:bg-muted/20 cursor-pointer ${isOverdue ? "bg-red-50/50 dark:bg-red-950/10" : ""}`}
+                        onClick={() => openDetail(req)}>
                         <td className="px-4 py-3 font-mono font-bold text-primary text-xs">{req.request_number}</td>
-                        <td className="px-4 py-3 text-center">
+                        <td className="px-3 py-3 text-center">
                           <Badge className="border-0 text-[9px] font-semibold bg-muted text-foreground capitalize">{(req.request_type || "verification").replace("_", " ")}</Badge>
                         </td>
-                        <td className="px-4 py-3 font-medium text-foreground">{req.employer_name}</td>
-                        <td className="px-4 py-3">{req.alumni_name}</td>
-                        <td className="px-4 py-3 text-muted-foreground">{req.course}</td>
-                        <td className="px-4 py-3 text-center">{req.year_of_passing}</td>
-                        <td className="px-4 py-3 text-center">
-                          <Badge className={`border-0 text-[10px] font-semibold ${cfg.color}`}>{cfg.label}</Badge>
+                        <td className="px-4 py-3">
+                          <div className="font-medium text-foreground">{req.alumni_name}</div>
+                          <div className="text-[10px] text-muted-foreground">{req.employer_name !== "Self" ? req.employer_name : ""}</div>
                         </td>
-                        <td className="px-4 py-3 text-center">
-                          {req.verification_result ? (
-                            <Badge className={`border-0 text-[10px] font-semibold ${
-                              req.verification_result === "confirmed" ? "bg-emerald-100 text-emerald-700" :
-                              req.verification_result === "not_found" ? "bg-red-100 text-red-700" :
-                              "bg-amber-100 text-amber-700"
-                            }`}>
-                              {req.verification_result}
-                            </Badge>
-                          ) : <span className="text-[10px] text-muted-foreground">—</span>}
+                        <td className="px-4 py-3 text-muted-foreground">{req.course} ({req.year_of_passing})</td>
+                        <td className="px-3 py-3 text-center">
+                          <Badge className={`border-0 text-[10px] font-semibold ${cfg.color}`}>{cfg.label.split(" —")[0]}</Badge>
                         </td>
-                        <td className="px-4 py-3 text-xs text-muted-foreground">
-                          {new Date(req.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                        <td className="px-3 py-3 text-center text-xs">
+                          {req.due_date ? new Date(req.due_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "—"}
                         </td>
-                        <td className="px-4 py-3 text-center">
-                          <Button variant="ghost" size="sm" className="gap-1 text-xs">
-                            <Eye className="h-3 w-3" /> View
-                          </Button>
+                        <td className="px-3 py-3 text-center">
+                          {daysLeft !== null && ["paid", "under_review"].includes(req.status) ? (
+                            <span className={`text-[10px] font-bold ${isOverdue ? "text-red-600" : daysLeft <= 2 ? "text-amber-600" : "text-emerald-600"}`}>
+                              {isOverdue ? `${Math.abs(daysLeft)}d overdue` : `${daysLeft}d left`}
+                            </span>
+                          ) : req.status === "verified" ? (
+                            <span className="text-[10px] text-emerald-600 font-medium">Done</span>
+                          ) : "—"}
+                        </td>
+                        <td className="px-3 py-3 text-center">
+                          <Button variant="ghost" size="sm" className="gap-1 text-xs"><Eye className="h-3 w-3" /> View</Button>
                         </td>
                       </tr>
                     );
@@ -199,36 +308,48 @@ export default function AlumniVerifications() {
         </CardContent>
       </Card>
 
-      {/* Detail / Review Dialog */}
+      {/* Detail + Review Dialog */}
       <Dialog open={!!selectedReq} onOpenChange={(o) => { if (!o) setSelectedReq(null); }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Shield className="h-5 w-5 text-primary" />
-              {selectedReq?.request_number} — Verification Review
+              {selectedReq?.request_number}
+              {selectedReq?.due_date && ["paid", "under_review"].includes(selectedReq?.status) && (
+                <Badge className={`ml-2 border-0 text-[10px] ${
+                  new Date(selectedReq.due_date) < new Date() ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700"
+                }`}>
+                  Due: {new Date(selectedReq.due_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+                </Badge>
+              )}
             </DialogTitle>
           </DialogHeader>
 
           {selectedReq && (
-            <div className="space-y-4 max-h-[70vh] overflow-y-auto">
-              {/* Requestor Info */}
+            <div className="space-y-4">
+              {/* Requestor */}
               <div className="rounded-xl border border-border p-3 space-y-2">
                 <p className="text-[10px] font-semibold text-muted-foreground uppercase">Requestor</p>
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <div><span className="text-muted-foreground">Contact:</span> <span className="font-medium">{selectedReq.contact_name}</span></div>
                   <div><span className="text-muted-foreground">Phone:</span> <span className="font-medium">{selectedReq.contact_phone_spoc}</span></div>
-                  <div className="col-span-2"><span className="text-muted-foreground">Employer:</span> <span className="font-medium">{selectedReq.employer_name}</span></div>
-                  <div className="col-span-2"><span className="text-muted-foreground">Requestor Phone:</span> <span className="font-medium">{selectedReq.requestor_phone}</span></div>
+                  <div><span className="text-muted-foreground">Email:</span> <span className="font-medium">{selectedReq.contact_email || "—"}</span></div>
+                  <div><span className="text-muted-foreground">Employer:</span> <span className="font-medium">{selectedReq.employer_name}</span></div>
+                  {selectedReq.third_party_company && (
+                    <div className="col-span-2"><span className="text-muted-foreground">Agency:</span> <span className="font-medium">{selectedReq.third_party_company}</span></div>
+                  )}
                 </div>
               </div>
 
-              {/* Alumni Info */}
+              {/* Alumni */}
               <div className="rounded-xl border border-border p-3 space-y-2">
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase">Alumni Details</p>
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase">Alumni</p>
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <div className="col-span-2"><span className="text-muted-foreground">Name:</span> <span className="font-bold">{selectedReq.alumni_name}</span></div>
                   <div><span className="text-muted-foreground">Course:</span> <span className="font-medium">{selectedReq.course}</span></div>
                   <div><span className="text-muted-foreground">Year:</span> <span className="font-medium">{selectedReq.year_of_passing}</span></div>
+                  {selectedReq.enrollment_no && <div><span className="text-muted-foreground">Enrollment:</span> <span className="font-medium">{selectedReq.enrollment_no}</span></div>}
+                  {selectedReq.campus && <div><span className="text-muted-foreground">Campus:</span> <span className="font-medium">{selectedReq.campus}</span></div>}
                 </div>
               </div>
 
@@ -238,101 +359,164 @@ export default function AlumniVerifications() {
                 <div className="space-y-1.5">
                   {selectedReq.diploma_certificate_url && (
                     <button onClick={() => getDocUrl(selectedReq.diploma_certificate_url)} className="flex items-center gap-2 text-sm text-primary hover:underline">
-                      <FileText className="h-3.5 w-3.5" /> Diploma Certificate <ExternalLink className="h-3 w-3" />
+                      <FileText className="h-3.5 w-3.5" /> Diploma <ExternalLink className="h-3 w-3" />
                     </button>
                   )}
-                  {(selectedReq.marksheet_urls || []).map((url: string, i: number) => (
-                    <button key={i} onClick={() => getDocUrl(url)} className="flex items-center gap-2 text-sm text-primary hover:underline">
+                  {(selectedReq.marksheet_urls || []).map((u: string, i: number) => (
+                    <button key={i} onClick={() => getDocUrl(u)} className="flex items-center gap-2 text-sm text-primary hover:underline">
                       <FileText className="h-3.5 w-3.5" /> Marksheet {i + 1} <ExternalLink className="h-3 w-3" />
                     </button>
                   ))}
-                  {!selectedReq.diploma_certificate_url && !(selectedReq.marksheet_urls || []).length && (
-                    <p className="text-xs text-muted-foreground">No documents uploaded</p>
+                  {(selectedReq.additional_doc_urls || []).map((u: string, i: number) => (
+                    <button key={i} onClick={() => getDocUrl(u)} className="flex items-center gap-2 text-sm text-primary hover:underline">
+                      <FileText className="h-3.5 w-3.5" /> Additional Doc {i + 1} <ExternalLink className="h-3 w-3" />
+                    </button>
+                  ))}
+                  {selectedReq.employee_review_doc_url && (
+                    <button onClick={() => getDocUrl(selectedReq.employee_review_doc_url)} className="flex items-center gap-2 text-sm text-emerald-600 hover:underline">
+                      <FileText className="h-3.5 w-3.5" /> Review Document <ExternalLink className="h-3 w-3" />
+                    </button>
                   )}
                 </div>
               </div>
 
-              {/* Payment Info */}
-              <div className="rounded-xl border border-border p-3 space-y-2">
+              {/* Payment */}
+              <div className="rounded-xl border border-border p-3 space-y-1">
                 <p className="text-[10px] font-semibold text-muted-foreground uppercase">Payment</p>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div><span className="text-muted-foreground">Amount:</span> <span className="font-bold text-foreground">&#8377;{selectedReq.fee_amount}</span></div>
-                  <div className="text-right">
-                    {selectedReq.paid_at ? (
-                      <Badge className="bg-emerald-100 text-emerald-700 border-0 text-[10px]">Paid {new Date(selectedReq.paid_at).toLocaleDateString("en-IN")}</Badge>
-                    ) : (
-                      <Badge className="bg-gray-100 text-gray-600 border-0 text-[10px]">Unpaid</Badge>
-                    )}
-                  </div>
-                  {selectedReq.payment_ref && (
-                    <div className="col-span-2"><span className="text-muted-foreground">Txn Ref:</span> <span className="font-mono text-xs">{selectedReq.payment_ref}</span></div>
-                  )}
-                  {selectedReq.payment_method && (
-                    <div className="col-span-2"><span className="text-muted-foreground">Gateway:</span> <span className="capitalize">{selectedReq.payment_method}</span></div>
-                  )}
+                <div className="flex items-center justify-between text-sm">
+                  <span>&#8377;{selectedReq.fee_amount} · {selectedReq.payment_method || "—"}</span>
+                  {selectedReq.paid_at ? <Badge className="bg-emerald-100 text-emerald-700 border-0 text-[10px]">Paid</Badge> : <Badge className="bg-gray-100 text-gray-600 border-0 text-[10px]">Unpaid</Badge>}
                 </div>
+                {selectedReq.payment_ref && <p className="text-[10px] text-muted-foreground">Ref: {selectedReq.payment_ref}</p>}
               </div>
 
-              {/* Request Type & Copy Type */}
-              {selectedReq.request_type !== "verification" && (
-                <div className="rounded-xl border border-border p-3 space-y-1">
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase">Request Details</p>
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div><span className="text-muted-foreground">Type:</span> <span className="font-medium capitalize">{(selectedReq.request_type || "").replace("_", " ")}</span></div>
-                    {selectedReq.copy_type && <div><span className="text-muted-foreground">Copy:</span> <span className="font-medium capitalize">{selectedReq.copy_type}</span></div>}
-                    {selectedReq.enrollment_no && <div><span className="text-muted-foreground">Enrollment:</span> <span className="font-medium">{selectedReq.enrollment_no}</span></div>}
-                    {selectedReq.campus && <div><span className="text-muted-foreground">Campus:</span> <span className="font-medium">{selectedReq.campus}</span></div>}
-                  </div>
+              {/* Employee review status */}
+              {selectedReq.employee_reviewed_at && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 p-3 space-y-1">
+                  <p className="text-[10px] font-semibold text-emerald-700 uppercase">Employee Review</p>
+                  <p className="text-sm"><span className="font-medium capitalize">{(selectedReq.employee_review_result || "").replace("_", " ")}</span></p>
+                  {selectedReq.employee_review_notes && <p className="text-xs text-muted-foreground">{selectedReq.employee_review_notes}</p>}
+                  <p className="text-[10px] text-muted-foreground">Reviewed: {new Date(selectedReq.employee_reviewed_at).toLocaleDateString("en-IN")}</p>
                 </div>
               )}
 
-              {/* Review Section */}
-              <div className="space-y-3 pt-2 border-t border-border">
-                <p className="text-xs font-semibold text-foreground">Review & Decision</p>
-                <div>
-                  <label className="text-xs font-medium text-foreground mb-1 block">Status</label>
-                  <select
-                    value={newStatus}
-                    onChange={e => setNewStatus(e.target.value)}
-                    className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  >
-                    {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
-                      <option key={key} value={key}>{cfg.label}</option>
-                    ))}
-                  </select>
-                </div>
-                {["verified", "rejected"].includes(newStatus) && (
+              {/* Review Section — Employee (if not yet reviewed) */}
+              {["paid"].includes(selectedReq.status) && !isSuperAdmin && (
+                <div className="space-y-3 pt-2 border-t border-border">
+                  <p className="text-xs font-semibold text-foreground">Submit Review</p>
                   <div>
-                    <label className="text-xs font-medium text-foreground mb-1 block">Verification Result</label>
-                    <select
-                      value={verificationResult}
-                      onChange={e => setVerificationResult(e.target.value)}
-                      className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    >
+                    <label className="text-xs font-medium text-foreground mb-1 block">Verification Result *</label>
+                    <select value={verificationResult} onChange={e => setVerificationResult(e.target.value)} className={inputCls}>
                       <option value="">Select result</option>
-                      {RESULT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      <option value="recommended_approve">Recommend Approval</option>
+                      <option value="recommended_reject">Recommend Rejection</option>
                     </select>
                   </div>
-                )}
-                <div>
-                  <label className="text-xs font-medium text-foreground mb-1 block">Review Notes</label>
-                  <textarea
-                    value={reviewNotes}
-                    onChange={e => setReviewNotes(e.target.value)}
-                    placeholder="Internal notes about the verification..."
-                    rows={3}
-                    className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none"
-                  />
+                  <div>
+                    <label className="text-xs font-medium text-foreground mb-1 block">Supporting Document *</label>
+                    <label className="flex items-center gap-3 rounded-xl border-2 border-dashed border-border px-4 py-3 cursor-pointer hover:border-primary/40">
+                      <Upload className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm text-muted-foreground">{reviewDocFile ? reviewDocFile.name : "Upload verification evidence"}</span>
+                      <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={e => setReviewDocFile(e.target.files?.[0] || null)} />
+                    </label>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-foreground mb-1 block">Review Notes</label>
+                    <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} rows={2} placeholder="Notes..." className={inputCls + " resize-none"} />
+                  </div>
+                  <Button className="w-full gap-2" onClick={handleEmployeeReview} disabled={saving}>
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                    Submit Review for Approval
+                  </Button>
                 </div>
-              </div>
+              )}
+
+              {/* Super Admin Approval (after employee review, or direct for super admin) */}
+              {isSuperAdmin && ["paid", "under_review"].includes(selectedReq.status) && (
+                <div className="space-y-3 pt-2 border-t border-border">
+                  <p className="text-xs font-semibold text-foreground">
+                    {selectedReq.employee_reviewed_at ? "Super Admin Approval" : "Direct Review & Approve"}
+                  </p>
+                  {!selectedReq.employee_reviewed_at && (
+                    <div>
+                      <label className="text-xs font-medium text-foreground mb-1 block">Verification Result</label>
+                      <select value={verificationResult} onChange={e => setVerificationResult(e.target.value)} className={inputCls}>
+                        <option value="">Select result</option>
+                        {RESULT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  <div>
+                    <label className="text-xs font-medium text-foreground mb-1 block">Approval Notes</label>
+                    <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} rows={2} placeholder="Notes..." className={inputCls + " resize-none"} />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button className="flex-1 gap-2 bg-emerald-600 hover:bg-emerald-700" onClick={() => handleAdminApprove(true)} disabled={saving}>
+                      <CheckCircle className="h-4 w-4" /> Approve & Send Email
+                    </Button>
+                    <Button variant="destructive" className="flex-1 gap-2" onClick={() => handleAdminApprove(false)} disabled={saving}>
+                      <XCircle className="h-4 w-4" /> Reject
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
 
+      {/* Manual Entry Dialog */}
+      <Dialog open={showManualEntry} onOpenChange={setShowManualEntry}>
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Plus className="h-5 w-5" /> Add Manual Request</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium mb-1 block">Request Type</label>
+              <select value={manualData.request_type} onChange={e => setManualData(p => ({ ...p, request_type: e.target.value }))} className={inputCls}>
+                <option value="verification">Alumni Verification</option>
+                <option value="marksheet">Marksheet Request</option>
+                <option value="diploma">Diploma Request</option>
+                <option value="transcript">Transcript Request</option>
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="text-xs font-medium mb-1 block">Alumni Name *</label><input value={manualData.alumni_name} onChange={e => setManualData(p => ({ ...p, alumni_name: e.target.value }))} className={inputCls} /></div>
+              <div><label className="text-xs font-medium mb-1 block">Course *</label><input value={manualData.course} onChange={e => setManualData(p => ({ ...p, course: e.target.value }))} className={inputCls} /></div>
+              <div><label className="text-xs font-medium mb-1 block">Year *</label><input type="number" value={manualData.year_of_passing} onChange={e => setManualData(p => ({ ...p, year_of_passing: e.target.value }))} className={inputCls} /></div>
+              <div><label className="text-xs font-medium mb-1 block">Enrollment No</label><input value={manualData.enrollment_no} onChange={e => setManualData(p => ({ ...p, enrollment_no: e.target.value }))} className={inputCls} /></div>
+            </div>
+            <div><label className="text-xs font-medium mb-1 block">Contact Name *</label><input value={manualData.contact_name} onChange={e => setManualData(p => ({ ...p, contact_name: e.target.value }))} className={inputCls} /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="text-xs font-medium mb-1 block">Email</label><input value={manualData.contact_email} onChange={e => setManualData(p => ({ ...p, contact_email: e.target.value }))} className={inputCls} /></div>
+              <div><label className="text-xs font-medium mb-1 block">Phone</label><input value={manualData.contact_phone_spoc} onChange={e => setManualData(p => ({ ...p, contact_phone_spoc: e.target.value }))} className={inputCls} /></div>
+            </div>
+            <div><label className="text-xs font-medium mb-1 block">Employer</label><input value={manualData.employer_name} onChange={e => setManualData(p => ({ ...p, employer_name: e.target.value }))} className={inputCls} /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="text-xs font-medium mb-1 block">Fee Amount</label><input type="number" value={manualData.fee_amount} onChange={e => setManualData(p => ({ ...p, fee_amount: e.target.value }))} className={inputCls} /></div>
+              <div>
+                <label className="text-xs font-medium mb-1 block">Status</label>
+                <select value={manualData.status} onChange={e => setManualData(p => ({ ...p, status: e.target.value }))} className={inputCls}>
+                  <option value="paid">Paid</option>
+                  <option value="pending_payment">Pending Payment</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-medium mb-1 block">Payment Proof (if paid)</label>
+              <label className="flex items-center gap-3 rounded-xl border-2 border-dashed border-border px-4 py-3 cursor-pointer hover:border-primary/40">
+                <Upload className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">{manualPaymentProof ? manualPaymentProof.name : "Upload proof"}</span>
+                <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={e => setManualPaymentProof(e.target.files?.[0] || null)} />
+              </label>
+            </div>
+          </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSelectedReq(null)}>Cancel</Button>
-            <Button onClick={handleUpdate} disabled={saving} className="gap-2">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-              Update Request
+            <Button variant="outline" onClick={() => setShowManualEntry(false)}>Cancel</Button>
+            <Button onClick={handleManualEntry} disabled={manualSaving} className="gap-2">
+              {manualSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              Create Request
             </Button>
           </DialogFooter>
         </DialogContent>

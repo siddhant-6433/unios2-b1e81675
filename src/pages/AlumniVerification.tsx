@@ -7,6 +7,7 @@ import {
   Loader2, Phone, Upload, FileText, CheckCircle, Shield, Building2, GraduationCap, Mail, X, Users,
   ScrollText, Award, BookOpen,
 } from "lucide-react";
+import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 
 const COURSES = [
   "PGDM", "MBA", "BBA", "B.Tech", "M.Tech", "B.Sc Nursing", "GNM", "ANM",
@@ -388,7 +389,7 @@ export default function AlumniVerification() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 dark:from-gray-950 dark:to-gray-900">
       <header className="border-b border-border/40 bg-white/80 dark:bg-gray-950/80 backdrop-blur-sm">
         <div className="max-w-3xl mx-auto px-4 py-4 flex items-center gap-3">
-          <img src="https://pub-811305689b9049e6b317d47a98f724ae.r2.dev/web/images/nimt-beacon-logo.png" alt="NIMT" className="h-10" />
+          <img src={nimtLogo} alt="NIMT" className="h-10" />
           <div>
             <h1 className="text-lg font-bold text-foreground">NIMT Educational Institutions</h1>
             <p className="text-xs text-muted-foreground">Alumni Services Portal</p>
