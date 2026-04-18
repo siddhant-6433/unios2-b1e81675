@@ -44,6 +44,8 @@ import NotFound from "./pages/NotFound";
 import ApplicantPortal from "./pages/ApplicantPortal";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
+import AlumniVerification from "./pages/AlumniVerification";
+import AlumniVerifications from "./pages/AlumniVerifications";
 // IB Academics pages
 import ProgrammeOfInquiry from "./pages/ib/ProgrammeOfInquiry";
 import UnitPlanner from "./pages/ib/UnitPlanner";
@@ -80,6 +82,7 @@ const App = () => (
             <Route path="/enquiry" element={<EnquiryForm />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/terms" element={<TermsOfService />} />
+            <Route path="/alumni-verification" element={<AlumniVerification />} />
             <Route
               path="/my-applications"
               element={
@@ -123,6 +126,7 @@ const App = () => (
                       <Route path="/reports" element={<Reports />} />
                       <Route path="/documents" element={<Documents />} />
                       <Route path="/settings" element={<Settings />} />
+                      <Route path="/alumni-verifications" element={<AlumniVerifications />} />
                       {/* IB Academics routes */}
                       <Route path="/ib/poi" element={<ProgrammeOfInquiry />} />
                       <Route path="/ib/units" element={<UnitPlanner />} />

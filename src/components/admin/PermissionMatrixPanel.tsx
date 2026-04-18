@@ -48,8 +48,8 @@ const MODULE_LABELS: Record<string, string> = {
   analytics: "Analytics", ib_poi: "IB POI", ib_units: "IB Units", ib_gradebook: "IB Gradebook",
   ib_portfolios: "IB Portfolios", ib_action: "IB Action", ib_reports: "IB Reports",
   ib_exhibition: "IB Exhibition", ib_projects: "IB Projects", ib_idu: "IB IDU",
-  campuses_courses: "Campuses", documents: "Documents", user_management: "User Mgmt",
-  permissions: "Permissions",
+  campuses_courses: "Campuses", documents: "Documents", alumni_verification: "Alumni Verification",
+  user_management: "User Mgmt", permissions: "Permissions",
 };
 
 export function PermissionMatrixPanel() {
