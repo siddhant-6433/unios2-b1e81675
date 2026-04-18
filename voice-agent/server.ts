@@ -706,10 +706,12 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
           speechConfig: {
             voiceConfig: {
               prebuiltVoiceConfig: {
+                // NOTE: do NOT add languageCode inside speechConfig — it is not a valid
+                // SpeechConfig field in the Gemini Live API and causes a silent setup failure
+                // where setupComplete is never received, leaving geminiReady=false and no audio.
                 voiceName: "Kore",
               },
             },
-            languageCode: "en-IN",
           },
         },
         realtimeInputConfig: {
@@ -890,14 +892,13 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
 
         case "media":
           // Forward audio to Gemini (convert mulaw 8k → PCM 16k)
+          // Use mediaChunks — the correct BidiGenerateContent format for streaming audio.
+          // Do NOT use realtimeInput.audio — that is for native audio dialog models only.
           if (geminiReady && geminiWs.readyState === WebSocket.OPEN && msg.media?.payload) {
             const pcmBase64 = mulawToGeminiPcm(msg.media.payload);
             geminiWs.send(JSON.stringify({
               realtimeInput: {
-                audio: {
-                  data: pcmBase64,
-                  mimeType: "audio/pcm;rate=16000",
-                },
+                mediaChunks: [{ mimeType: "audio/pcm;rate=16000", data: pcmBase64 }],
               },
             }));
           }

@@ -79,8 +79,11 @@ Deno.serve(async (req) => {
       if (leadErr || !lead) return json({ error: "Lead not found" }, 404);
       if (!lead.phone) return json({ error: "Lead has no phone number" }, 400);
 
-      // Brief wait before calling — name/course details may arrive shortly after lead creation
-      await new Promise(resolve => setTimeout(resolve, 10000)); // 10 seconds
+      // For automated/queue calls (service role), wait briefly so lead data settles.
+      // For manual AI call button (user JWT), call immediately — no delay needed.
+      if (isServiceRole) {
+        await new Promise(resolve => setTimeout(resolve, 10000)); // 10 seconds
+      }
 
       // Re-fetch lead — name/course may have been updated in the interim
       const { data: refreshedLead } = await db
