@@ -508,8 +508,8 @@ export default function AlumniVerification() {
 
                 <div className="rounded-xl border border-border bg-muted/30 p-4 text-xs text-muted-foreground space-y-1">
                   <p className="font-semibold text-foreground text-sm">Need Help?</p>
-                  <p>Email: <a href="mailto:registrar@nimt.ac.in" className="text-primary hover:underline">registrar@nimt.ac.in</a></p>
-                  <p>Phone: <a href="tel:+911204167822" className="text-primary hover:underline">+91-120-4167822</a></p>
+                  <p>Email: <a href="mailto:umesh@nimt.ac.in" className="text-primary hover:underline">umesh@nimt.ac.in</a></p>
+                  <p>Phone: <a href="tel:+917428477664" className="text-primary hover:underline">+91-7428477664</a></p>
                   <p>Office: NIMT Educational Institutions, Knowledge Park-1, Greater Noida, UP - 201310</p>
                 </div>
               </div>
@@ -780,7 +780,7 @@ export default function AlumniVerification() {
             )}
           </CardContent>
         </Card>
-        <p className="text-center text-[10px] text-muted-foreground mt-6">NIMT Educational Institutions · Alumni Services Portal · registrar@nimt.ac.in</p>
+        <p className="text-center text-[10px] text-muted-foreground mt-6">NIMT Educational Institutions · Alumni Services Portal · umesh@nimt.ac.in · +91-7428477664</p>
       </main>
     </div>
   );
