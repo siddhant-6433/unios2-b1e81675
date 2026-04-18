@@ -8,6 +8,7 @@ import {
   ScrollText, Award, BookOpen,
 } from "lucide-react";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
+import alumniHero from "@/assets/alumni-hero.png";
 
 const COURSES = [
   "PGDM", "MBA", "BBA", "B.Tech", "M.Tech", "B.Sc Nursing", "GNM", "ANM",
@@ -385,6 +386,75 @@ export default function AlumniVerification() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
+  // ── Split-screen OTP login page ──
+  if (step === "otp") {
+    return (
+      <div className="min-h-screen flex">
+        {/* Left branded panel */}
+        <div className="hidden lg:flex lg:w-[44%] xl:w-[42%] flex-col justify-between p-10 relative overflow-hidden">
+          <div className="absolute inset-0 z-0" style={{
+            backgroundImage: `url(${alumniHero})`,
+            backgroundSize: "cover",
+            backgroundPosition: "center top",
+          }} />
+          <div className="absolute inset-0 z-0" style={{
+            background: "linear-gradient(135deg, rgba(6,95,70,0.92) 0%, rgba(4,60,45,0.95) 100%)",
+          }} />
+
+          {/* Logo */}
+          <div className="relative z-10">
+            <img src={nimtLogo} alt="NIMT" className="h-12 w-auto object-contain max-w-[200px] brightness-0 invert" />
+          </div>
+
+          {/* Headline */}
+          <div className="relative z-10 space-y-3">
+            <p className="text-xs font-semibold text-white/50 uppercase tracking-[0.2em]">Alumni Services</p>
+            <h1 className="text-3xl xl:text-4xl font-bold text-white leading-tight">
+              Verification,{"\n"}Transcripts &{"\n"}Document Requests
+            </h1>
+            <p className="text-sm text-white/65 leading-relaxed">
+              For employers, background check agencies, and alumni — request verification of academic records, transcripts, and degree certificates.
+            </p>
+          </div>
+
+          {/* Services list */}
+          <div className="relative z-10 space-y-2">
+            <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest mb-1">Available Services</p>
+            <div className="flex flex-wrap gap-1.5">
+              {["Alumni Verification", "Marksheet Request", "Degree / Diploma", "Transcript"].map(s => (
+                <span key={s} className="text-[11px] text-white/70 bg-white/10 rounded-md px-2.5 py-1">{s}</span>
+              ))}
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="relative z-10 flex items-end justify-between">
+            <div className="text-xs text-white/40">
+              <p>umesh@nimt.ac.in · +91-7428477664</p>
+            </div>
+            <p className="text-xs text-white/30">© 2026 NIMT Educational Institutions</p>
+          </div>
+        </div>
+
+        {/* Right form panel */}
+        <div className="flex-1 flex items-center justify-center bg-background p-6 lg:p-12">
+          <div className="w-full max-w-sm">
+            {/* Mobile logo */}
+            <div className="mb-8 lg:hidden">
+              <img src={nimtLogo} alt="NIMT" className="h-9 w-auto object-contain" />
+              <p className="text-xs text-muted-foreground mt-1">Alumni Services Portal</p>
+            </div>
+            <OtpLogin onVerified={async (phone) => { setVerifiedPhone(phone); await fetchExistingRequests(phone); setStep("dashboard"); }} />
+            <p className="text-center text-[10px] text-muted-foreground mt-6">
+              Need help? <a href="mailto:umesh@nimt.ac.in" className="text-primary hover:underline">umesh@nimt.ac.in</a> · +91-7428477664
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Post-login: dashboard / form / payment views ──
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 dark:from-gray-950 dark:to-gray-900">
       <header className="border-b border-border/40 bg-white/80 dark:bg-gray-950/80 backdrop-blur-sm">
@@ -398,32 +468,32 @@ export default function AlumniVerification() {
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-8">
-        {/* Progress */}
-        <div className="flex items-center justify-center gap-2 mb-8">
-          {(step === "dashboard" ? [] : ["Verify Identity", "Select Service", "Details", "Payment"]).map((label, i) => {
-            const stepIdx = ["otp", "select", "form", "payment"].indexOf(step);
-            const isActive = i === stepIdx;
-            const isDone = i < stepIdx;
-            return (
-              <div key={label} className="flex items-center gap-2">
-                {i > 0 && <div className={`h-px w-6 sm:w-8 ${isDone ? "bg-primary" : "bg-border"}`} />}
-                <div className="flex flex-col items-center gap-1">
-                  <div className={`flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold ${
-                    isDone ? "bg-primary text-primary-foreground" : isActive ? "bg-primary/10 text-primary border-2 border-primary" : "bg-muted text-muted-foreground"
-                  }`}>
-                    {isDone ? <CheckCircle className="h-3.5 w-3.5" /> : i + 1}
+        {/* Progress — hidden on dashboard */}
+        {!["dashboard"].includes(step) && (
+          <div className="flex items-center justify-center gap-2 mb-8">
+            {["Select Service", "Details", "Payment"].map((label, i) => {
+              const stepIdx = ["select", "form", "payment"].indexOf(step);
+              const isActive = i === stepIdx;
+              const isDone = i < stepIdx;
+              return (
+                <div key={label} className="flex items-center gap-2">
+                  {i > 0 && <div className={`h-px w-6 sm:w-8 ${isDone ? "bg-primary" : "bg-border"}`} />}
+                  <div className="flex flex-col items-center gap-1">
+                    <div className={`flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold ${
+                      isDone ? "bg-primary text-primary-foreground" : isActive ? "bg-primary/10 text-primary border-2 border-primary" : "bg-muted text-muted-foreground"
+                    }`}>
+                      {isDone ? <CheckCircle className="h-3.5 w-3.5" /> : i + 1}
+                    </div>
+                    <span className={`text-[9px] font-medium ${isActive ? "text-primary" : "text-muted-foreground"} hidden sm:block`}>{label}</span>
                   </div>
-                  <span className={`text-[9px] font-medium ${isActive ? "text-primary" : "text-muted-foreground"} hidden sm:block`}>{label}</span>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
 
         <Card className="border-border/60 shadow-sm">
           <CardContent className="p-6 sm:p-8">
-            {/* Step 1: OTP */}
-            {step === "otp" && <OtpLogin onVerified={async (phone) => { setVerifiedPhone(phone); await fetchExistingRequests(phone); setStep("dashboard"); }} />}
 
             {/* Step 2: Service Selection */}
             {/* Dashboard — shows existing requests + new request button */}
