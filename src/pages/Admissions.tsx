@@ -23,6 +23,7 @@ import { LeadTemperatureBadge } from "@/components/admissions/LeadTemperatureBad
 import { SeatMatrix } from "@/components/admissions/SeatMatrix";
 import { PaymentReconciliation } from "@/components/admissions/PaymentReconciliation";
 import { ActionCenterView } from "@/components/admissions/ActionCenterView";
+import { CounsellorScoreBadge } from "@/components/admissions/CounsellorScoreBadge";
 import { InactivityAlertBanner } from "@/components/admissions/InactivityAlertBanner";
 import { CounsellorOnboarding } from "@/components/onboarding/CounsellorOnboarding";
 import { useTatDefaults } from "@/hooks/useTatDefaults";
@@ -171,6 +172,8 @@ const Admissions = () => {
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
 
+  const [serverSearching, setServerSearching] = useState(false);
+
   // Selection & bulk actions
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -263,7 +266,7 @@ const Admissions = () => {
       .from("leads")
       .select(`*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`)
       .order("created_at", { ascending: false })
-      .limit(200);
+      .limit(500);
     // Counsellors see their assigned leads across all campuses
     if (role === "counsellor" && profile?.id) {
       query = query.eq("counsellor_id", profile.id);
@@ -316,6 +319,53 @@ const Admissions = () => {
   };
 
   useEffect(() => { fetchLeads(); }, [selectedCampusId]);
+
+  // Server-side search: when search has 3+ chars, query DB for leads beyond the loaded 200
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    const q = search.trim();
+    if (q.length < 3) return;
+
+    searchTimerRef.current = setTimeout(async () => {
+      setServerSearching(true);
+      const digits = q.replace(/\D/g, "");
+      // Build server-side search query
+      let query = supabase
+        .from("leads")
+        .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)")
+        .or(`name.ilike.%${q}%,phone.ilike.%${digits.length >= 3 ? digits : q}%,email.ilike.%${q}%,application_id.ilike.%${q}%`)
+        .order("created_at", { ascending: false })
+        .limit(50);
+
+      if (role === "counsellor" && profile?.id) {
+        query = query.eq("counsellor_id", profile.id);
+      } else if (selectedCampusId !== "all") {
+        query = query.eq("campus_id", selectedCampusId);
+      }
+
+      const { data } = await query;
+      if (data && data.length > 0) {
+        setLeads(prev => {
+          const existingIds = new Set(prev.map(l => l.id));
+          const newLeads = data
+            .filter((l: any) => !existingIds.has(l.id))
+            .map((l: any) => ({
+              ...l,
+              course_name: l.courses?.name || "—",
+              campus_name: l.campuses?.name || "—",
+              counsellor_name: l.profiles?.display_name || "Unassigned",
+              app_completion_pct: null,
+              app_payment_status: null,
+            }));
+          return newLeads.length > 0 ? [...prev, ...newLeads] : prev;
+        });
+      }
+      setServerSearching(false);
+    }, 400);
+
+    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+  }, [search, selectedCampusId, role, profile?.id]);
 
   // Fetch counsellor list for filter (admin / admission_head / team leader only)
   useEffect(() => {
@@ -419,7 +469,7 @@ const Admissions = () => {
       (l.email || "").toLowerCase().includes(q) ||
       (l.application_id || "").toLowerCase().includes(q) ||
       (digits.length >= 3 && phoneDigits.includes(digits));
-    const matchesStage = stageFilter === "all" || l.stage === stageFilter;
+    const matchesStage = stageFilter === "all" || stageFilter.split(",").includes(l.stage);
     const matchesSource = sourceFilter === "all" || l.source === sourceFilter;
     const matchesRole = roleFilter === "all" || l.person_role === roleFilter;
     const matchesTemp = tempFilter === "all" || l.lead_temperature === tempFilter;
@@ -485,37 +535,55 @@ const Admissions = () => {
         return q;
       };
 
-      // Stage count queries (scoped by counsellor or campus)
+      // Stage count queries — excludes mirror leads to avoid double-counting school leads
       const buildStageQ = (stages: string[]) => {
-        let q = supabase.from("leads").select("id", { count: "exact", head: true }).in("stage", stages);
+        let q = supabase.from("leads").select("id", { count: "exact", head: true })
+          .in("stage", stages)
+          .eq("is_mirror" as any, false);
         if (role === "counsellor" && profile?.id) q = q.eq("counsellor_id", profile.id);
         else if (selectedCampusId !== "all") q = q.eq("campus_id", selectedCampusId);
         return q;
       };
 
       const buildTodayQ = () => {
-        let q = supabase.from("leads").select("id", { count: "exact", head: true }).gte("created_at", todayStart + "T00:00:00").lte("created_at", todayEnd);
+        let q = supabase.from("leads").select("id", { count: "exact", head: true })
+          .gte("created_at", todayStart + "T00:00:00").lte("created_at", todayEnd)
+          .eq("is_mirror" as any, false);
         if (role === "counsellor" && profile?.id) q = q.eq("counsellor_id", profile.id);
         else if (selectedCampusId !== "all") q = q.eq("campus_id", selectedCampusId);
         return q;
       };
 
+      // Fee paid: combine lead stage + applications with payment_status='paid'
+      const buildFeePaidQ = async (): Promise<number> => {
+        // Leads in fee-paid stages (excludes mirrors)
+        const stageRes = await buildStageQ(["application_fee_paid", "application_submitted", "offer_sent", "token_paid", "pre_admitted", "admitted"]);
+        // Applications with payment received (catch portal payments not yet reflected in lead stage)
+        let appQ = supabase.from("applications").select("lead_id").eq("payment_status", "paid");
+        const { data: paidApps } = await appQ;
+        const paidLeadIds = new Set((paidApps || []).map((a: any) => a.lead_id));
+        // Union: stageRes count + paid apps whose lead is NOT in those stages
+        // Simpler: return max of the two since stage count includes most paid apps
+        return Math.max(stageRes.count || 0, paidLeadIds.size);
+      };
+
       const [
         pendingRes, todayFuRes, overdueRes, upVisitRes, compVisitRes,
-        newLeadRes, todayLeadRes, appStartedRes, feePaidRes, appSubmittedRes, admittedRes,
+        newLeadRes, todayLeadRes, appStartedRes, appSubmittedRes, admittedRes,
+        feePaidCount,
       ] = await Promise.all([
         applyLeadFilter(supabase.from("lead_followups").select("id", { count: "exact", head: true }).eq("status", "pending")),
         applyLeadFilter(supabase.from("lead_followups").select("id", { count: "exact", head: true }).eq("status", "pending").gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd)),
         applyLeadFilter(supabase.from("overdue_followups" as any).select("id", { count: "exact", head: true })),
         applyLeadFilter(supabase.from("campus_visits").select("lead_id").gte("visit_date", todayStart).in("status", ["scheduled", "confirmed"])),
         applyLeadFilter(supabase.from("campus_visits").select("lead_id").eq("status", "completed")),
-        // Stage counts
+        // Stage counts (mirror-excluded)
         buildStageQ(["new_lead"]),
         buildTodayQ(),
-        buildStageQ(["application_in_progress", "application_fee_paid", "application_submitted"]),
-        buildStageQ(["application_fee_paid", "application_submitted"]),
-        buildStageQ(["application_submitted"]),
+        buildStageQ(["application_in_progress", "application_fee_paid", "application_submitted", "offer_sent", "token_paid", "pre_admitted"]),
+        buildStageQ(["application_submitted", "offer_sent", "token_paid", "pre_admitted"]),
         buildStageQ(["admitted"]),
+        buildFeePaidQ(),
       ]);
 
       setPendingFollowups(pendingRes.count || 0);
@@ -528,7 +596,7 @@ const Admissions = () => {
       setNewLeads(newLeadRes.count || 0);
       setTodayLeads(todayLeadRes.count || 0);
       setAppStarted(appStartedRes.count || 0);
-      setFeePaid(feePaidRes.count || 0);
+      setFeePaid(feePaidCount);
       setAppSubmitted(appSubmittedRes.count || 0);
       setAdmitted(admittedRes.count || 0);
     })();
@@ -544,10 +612,10 @@ const Admissions = () => {
 
   // Row 2: Application stages
   const appStats = [
-    { label: "Applications Started", value: appStarted, sub: "In progress or beyond", icon: FileText, iconBg: "bg-pastel-blue", filterStage: "application_in_progress" },
-    { label: "Fee Paid", value: feePaid, sub: "Application fee received", icon: CheckCircle, iconBg: "bg-pastel-green", filterStage: "application_fee_paid" },
-    { label: "Waiting for Offer", value: appSubmitted, sub: "Fully submitted", icon: TrendingUp, iconBg: "bg-pastel-mint", filterStage: "application_submitted" },
-    { label: "Admitted", value: admitted, sub: "Fully admitted students", icon: UserCheck, iconBg: "bg-pastel-purple", filterStage: "admitted" },
+    { label: "Applications Started", value: appStarted, sub: "In progress or beyond", icon: FileText, iconBg: "bg-pastel-blue", filterStage: "application_in_progress,application_fee_paid,application_submitted,offer_sent,token_paid,pre_admitted", action: "" },
+    { label: "Fee Paid", value: feePaid, sub: "Application fee received", icon: CheckCircle, iconBg: "bg-pastel-green", filterStage: "", action: "fee_paid" },
+    { label: "Waiting for Offer", value: appSubmitted, sub: "Fully submitted", icon: TrendingUp, iconBg: "bg-pastel-mint", filterStage: "application_submitted,offer_sent,token_paid,pre_admitted", action: "" },
+    { label: "Admitted", value: admitted, sub: "Fully admitted students", icon: UserCheck, iconBg: "bg-pastel-purple", filterStage: "admitted", action: "" },
   ];
 
   if (loading) {
@@ -565,7 +633,8 @@ const Admissions = () => {
           <h1 className="text-2xl font-bold text-foreground">Admissions CRM</h1>
           <p className="text-sm text-muted-foreground mt-1">Manage leads, applications & admissions pipeline</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-3">
+          {role === "counsellor" && <CounsellorScoreBadge />}
           <Button variant="outline" onClick={() => setShowBulkImport(true)} className="gap-2"><Upload className="h-4 w-4" />Import CSV</Button>
           <Button onClick={() => setShowAddLead(true)} className="gap-2"><Plus className="h-4 w-4" />Add Lead</Button>
         </div>
@@ -618,63 +687,37 @@ const Admissions = () => {
 
       {/* Stat cards & filter banners — hidden when Action Center is active */}
       {view !== "action_center" && <>
-      {/* Row 1: Lead Data */}
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Leads</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {leadStats.map((stat) => (
+      {/* Compact stats: Leads + Applications in a single row */}
+      <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
+        {/* Lead stats */}
+        {leadStats.map((stat) => {
+          const isActive = (stat.filterStage && stageFilter === stat.filterStage) ||
+            (stat.action === "followups" && !!followupLeadIds) ||
+            ((stat.action === "upcoming_visits" || stat.action === "completed_visits") && !!visitLeadIds);
+          return (
             <Card
               key={stat.label}
-              className={`border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer ${
-                (stat.filterStage && stageFilter === stat.filterStage) || (stat.action === "followups" && followupLeadIds) || ((stat.action === "upcoming_visits" || stat.action === "completed_visits") && visitLeadIds) ? "ring-2 ring-primary/40 bg-primary/5" : ""
-              }`}
+              className={`border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer ${isActive ? "ring-2 ring-primary/40 bg-primary/5" : ""}`}
               onClick={async () => {
                 if (stat.action === "followups") {
                   if (followupLeadIds) { setFollowupLeadIds(null); setPage(1); return; }
                   const { data } = await supabase.from("lead_followups").select("lead_id").eq("status", "pending").limit(500);
                   const ids = new Set<string>((data || []).map((r: any) => r.lead_id));
-                  setFollowupLeadIds(ids);
-                  setVisitLeadIds(null);
-                  setInactiveIds(null);
-                  setStageFilter("all");
-                  setSourceFilter("all");
-                  setRoleFilter("all");
-                  setTempFilter("all");
-                  setSearch("");
-                  setView("list");
-                  return;
+                  setFollowupLeadIds(ids); setVisitLeadIds(null); setInactiveIds(null);
+                  setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setSearch(""); setView("list"); return;
                 }
                 if (stat.action === "upcoming_visits") {
                   if (visitLeadIds) { setVisitLeadIds(null); setPage(1); return; }
                   const todayStart = new Date().toISOString().slice(0, 10);
                   const { data } = await supabase.from("campus_visits").select("lead_id").gte("visit_date", todayStart).in("status", ["scheduled", "confirmed"]).limit(500);
                   const ids = [...new Set<string>((data || []).map((r: any) => r.lead_id))];
-                  // Fetch these specific leads if not already loaded
                   const missingIds = ids.filter(id => !leads.find(l => l.id === id));
                   if (missingIds.length > 0) {
-                    const { data: extraLeads } = await supabase
-                      .from("leads")
-                      .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)")
-                      .in("id", missingIds);
-                    if (extraLeads) {
-                      setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({
-                        ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—",
-                        counsellor_name: l.profiles?.display_name || "Unassigned",
-                      }))]);
-                    }
+                    const { data: extraLeads } = await supabase.from("leads").select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)").in("id", missingIds);
+                    if (extraLeads) setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({ ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—", counsellor_name: l.profiles?.display_name || "Unassigned" }))]);
                   }
-                  setVisitLeadIds(new Set(ids));
-                  setFollowupLeadIds(null);
-                  setInactiveIds(null);
-                  setStageFilter("all");
-                  setSourceFilter("all");
-                  setRoleFilter("all");
-                  setTempFilter("all");
-                  setCounsellorFilter("all");
-                  setSearch("");
-                  setView("list");
-                  setPage(1);
-                  return;
+                  setVisitLeadIds(new Set(ids)); setFollowupLeadIds(null); setInactiveIds(null);
+                  setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setCounsellorFilter("all"); setSearch(""); setView("list"); setPage(1); return;
                 }
                 if (stat.action === "completed_visits") {
                   if (visitLeadIds) { setVisitLeadIds(null); setPage(1); return; }
@@ -682,83 +725,148 @@ const Admissions = () => {
                   const ids = [...new Set<string>((data || []).map((r: any) => r.lead_id))];
                   const missingIds = ids.filter(id => !leads.find(l => l.id === id));
                   if (missingIds.length > 0) {
-                    const { data: extraLeads } = await supabase
-                      .from("leads")
-                      .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)")
-                      .in("id", missingIds);
-                    if (extraLeads) {
-                      setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({
-                        ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—",
-                        counsellor_name: l.profiles?.display_name || "Unassigned",
-                      }))]);
-                    }
+                    const { data: extraLeads } = await supabase.from("leads").select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)").in("id", missingIds);
+                    if (extraLeads) setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({ ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—", counsellor_name: l.profiles?.display_name || "Unassigned" }))]);
                   }
-                  setVisitLeadIds(new Set(ids));
-                  setFollowupLeadIds(null);
-                  setInactiveIds(null);
-                  setStageFilter("all");
-                  setSourceFilter("all");
-                  setRoleFilter("all");
-                  setTempFilter("all");
-                  setCounsellorFilter("all");
-                  setSearch("");
-                  setView("list");
-                  setPage(1);
-                  return;
+                  setVisitLeadIds(new Set(ids)); setFollowupLeadIds(null); setInactiveIds(null);
+                  setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setCounsellorFilter("all"); setSearch(""); setView("list"); setPage(1); return;
                 }
                 if (stat.link) { navigate(stat.link); return; }
                 if (stat.filterStage) {
-                  setStageFilter(prev => prev === stat.filterStage ? "all" : stat.filterStage);
-                  setFollowupLeadIds(null);
-                  setVisitLeadIds(null);
-                  setInactiveIds(null);
-                  setView("list");
-                  setPage(1);
+                  if (stageFilter === stat.filterStage) { setStageFilter("all"); setPage(1); return; }
+                  // Fetch leads at this stage from DB
+                  let sq = supabase.from("leads")
+                    .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)")
+                    .eq("stage", stat.filterStage).order("created_at", { ascending: false }).limit(100);
+                  if (role === "counsellor" && profile?.id) sq = sq.eq("counsellor_id", profile.id);
+                  else if (selectedCampusId !== "all") sq = sq.eq("campus_id", selectedCampusId);
+                  const { data: stageData } = await sq;
+                  if (stageData) {
+                    setLeads(prev => {
+                      const existingIds = new Set(prev.map(l => l.id));
+                      const nl = stageData.filter((l: any) => !existingIds.has(l.id)).map((l: any) => ({
+                        ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—",
+                        counsellor_name: l.profiles?.display_name || "Unassigned", app_completion_pct: null, app_payment_status: null,
+                      }));
+                      return nl.length > 0 ? [...prev, ...nl] : prev;
+                    });
+                  }
+                  setStageFilter(stat.filterStage);
+                  setFollowupLeadIds(null); setVisitLeadIds(null); setInactiveIds(null); setView("list"); setPage(1);
                 }
               }}
             >
-              <CardContent className="p-5">
-                <div className="flex items-start justify-between">
-                  <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${stat.iconBg}`}>
-                    <stat.icon className="h-5 w-5 text-foreground/70" />
+              <CardContent className="p-3">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <div className={`flex h-6 w-6 items-center justify-center rounded-md ${stat.iconBg} shrink-0`}>
+                    <stat.icon className="h-3.5 w-3.5 text-foreground/70" />
                   </div>
-                  <ArrowUpRight className={`h-4 w-4 mt-1 transition-colors ${
-                    (stat.filterStage && stageFilter === stat.filterStage) || (stat.action === "followups" && followupLeadIds) ? "text-primary" : "text-muted-foreground"
-                  }`} />
+                  <span className="text-[10px] font-semibold text-muted-foreground truncate leading-tight">{stat.label}</span>
                 </div>
-                <p className="text-3xl font-bold text-foreground mt-4">{stat.value}</p>
-                <p className="text-sm text-muted-foreground mt-0.5">{stat.label}</p>
-                <p className="text-xs font-medium mt-1 text-primary">{stat.sub}</p>
+                <p className="text-xl font-bold text-foreground">{stat.value}</p>
+                <p className="text-[10px] text-primary font-medium truncate">{stat.sub}</p>
               </CardContent>
             </Card>
-          ))}
-        </div>
-      </div>
+          );
+        })}
+        {/* Application stats */}
+        {appStats.map((stat) => (
+          <Card
+            key={stat.label}
+            className={`border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer ${
+              (stat.filterStage && stageFilter === stat.filterStage) || (stat.action === "fee_paid" && actionLeadIds && actionBucketLabel === "Fee Paid")
+                ? "ring-2 ring-primary/40 bg-primary/5" : ""
+            }`}
+            onClick={async () => {
+              // Fee Paid uses ID-based filter (count includes leads with paid applications regardless of stage)
+              if (stat.action === "fee_paid") {
+                if (actionLeadIds && actionBucketLabel === "Fee Paid") {
+                  setActionLeadIds(null); setActionBucketLabel(""); setPage(1); return;
+                }
+                // Get leads with fee-paid stages OR paid applications
+                const feeStages = ["application_fee_paid", "application_submitted", "offer_sent", "token_paid", "pre_admitted", "admitted"];
+                let stageQ = supabase.from("leads")
+                  .select("id")
+                  .in("stage", feeStages);
+                if (role === "counsellor" && profile?.id) stageQ = stageQ.eq("counsellor_id", profile.id);
+                else if (selectedCampusId !== "all") stageQ = stageQ.eq("campus_id", selectedCampusId);
+                const { data: stageIds } = await stageQ;
 
-      {/* Row 2: Application Stages */}
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Applications</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {appStats.map((stat) => (
-            <Card
-              key={stat.label}
-              className={`border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer ${stageFilter === stat.filterStage ? "ring-2 ring-primary/40 bg-primary/5" : ""}`}
-              onClick={() => { setStageFilter(prev => prev === stat.filterStage ? "all" : stat.filterStage); setFollowupLeadIds(null); setVisitLeadIds(null); setInactiveIds(null); setView("list"); setPage(1); }}
-            >
-              <CardContent className="p-5">
-                <div className="flex items-start justify-between">
-                  <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${stat.iconBg}`}>
-                    <stat.icon className="h-5 w-5 text-foreground/70" />
-                  </div>
-                  <ArrowUpRight className={`h-4 w-4 mt-1 transition-colors ${stageFilter === stat.filterStage ? "text-primary" : "text-muted-foreground"}`} />
+                const { data: paidApps } = await supabase.from("applications").select("lead_id").eq("payment_status", "paid");
+
+                const allIds = new Set<string>([
+                  ...((stageIds || []) as any[]).map((l: any) => l.id),
+                  ...((paidApps || []) as any[]).map((a: any) => a.lead_id),
+                ]);
+
+                // Fetch missing leads
+                const idsArr = Array.from(allIds);
+                const missingIds = idsArr.filter(id => !leads.find(l => l.id === id));
+                if (missingIds.length > 0) {
+                  const { data: extraLeads } = await supabase
+                    .from("leads")
+                    .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)")
+                    .in("id", missingIds);
+                  if (extraLeads) {
+                    setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({
+                      ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—",
+                      counsellor_name: l.profiles?.display_name || "Unassigned",
+                      app_completion_pct: null, app_payment_status: null,
+                    }))]);
+                  }
+                }
+                setActionLeadIds(allIds); setActionBucketLabel("Fee Paid");
+                setStageFilter("all"); setFollowupLeadIds(null); setVisitLeadIds(null); setInactiveIds(null);
+                setView("list"); setPage(1);
+                return;
+              }
+
+              if (stat.filterStage && stageFilter === stat.filterStage) {
+                setStageFilter("all"); setPage(1); return;
+              }
+              if (stat.filterStage) {
+                // Fetch leads at these stages from DB
+                const stages = stat.filterStage.split(",");
+                let q = supabase
+                  .from("leads")
+                  .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)")
+                  .in("stage", stages)
+                  .order("created_at", { ascending: false })
+                  .limit(100);
+                if (role === "counsellor" && profile?.id) q = q.eq("counsellor_id", profile.id);
+                else if (selectedCampusId !== "all") q = q.eq("campus_id", selectedCampusId);
+                const { data: stageLeads } = await q;
+                if (stageLeads) {
+                  setLeads(prev => {
+                    const existingIds = new Set(prev.map(l => l.id));
+                    const newLeads = stageLeads
+                      .filter((l: any) => !existingIds.has(l.id))
+                      .map((l: any) => ({
+                        ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—",
+                        counsellor_name: l.profiles?.display_name || "Unassigned",
+                        app_completion_pct: null, app_payment_status: null,
+                      }));
+                    return newLeads.length > 0 ? [...prev, ...newLeads] : prev;
+                  });
+                }
+                setStageFilter(stat.filterStage); setActionLeadIds(null); setActionBucketLabel("");
+                setFollowupLeadIds(null); setVisitLeadIds(null); setInactiveIds(null);
+                setView("list"); setPage(1);
+              }
+            }}
+          >
+            <CardContent className="p-3">
+              <div className="flex items-center gap-1.5 mb-1">
+                <div className={`flex h-6 w-6 items-center justify-center rounded-md ${stat.iconBg} shrink-0`}>
+                  <stat.icon className="h-3.5 w-3.5 text-foreground/70" />
                 </div>
-                <p className="text-3xl font-bold text-foreground mt-4">{stat.value}</p>
-                <p className="text-sm text-muted-foreground mt-0.5">{stat.label}</p>
-                <p className="text-xs font-medium mt-1 text-primary">{stat.sub}</p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+                <span className="text-[10px] font-semibold text-muted-foreground truncate leading-tight">{stat.label}</span>
+              </div>
+              <p className="text-xl font-bold text-foreground">{stat.value}</p>
+              <p className="text-[10px] text-primary font-medium truncate">{stat.sub}</p>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
       <InactivityAlertBanner
@@ -896,7 +1004,11 @@ const Admissions = () => {
       {view !== "action_center" && (
         <div className="flex flex-wrap items-center gap-3">
           <div className="relative flex-1 min-w-[200px] max-w-sm">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            {serverSearching ? (
+              <Loader2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-primary animate-spin" />
+            ) : (
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            )}
             <input type="text" placeholder="Search by name, phone, email, course, campus..." value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20" />

@@ -36,6 +36,8 @@ const TYPE_ICONS: Record<string, typeof Bell> = {
   approval_pending: ShieldCheck,
   approval_decided: CheckCheck,
   tat_defaults_report: AlertTriangle,
+  post_visit_nudge: MapPin,
+  score_penalty: AlertTriangle,
   general: Info,
 };
 
@@ -53,6 +55,8 @@ const TYPE_COLORS: Record<string, string> = {
   approval_pending: "text-amber-600 bg-amber-50 dark:bg-amber-950/30",
   approval_decided: "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30",
   tat_defaults_report: "text-red-600 bg-red-50 dark:bg-red-950/30",
+  post_visit_nudge: "text-violet-600 bg-violet-50 dark:bg-violet-950/30",
+  score_penalty: "text-red-600 bg-red-50 dark:bg-red-950/30",
   general: "text-gray-500 bg-gray-50 dark:bg-gray-900/30",
 };
 

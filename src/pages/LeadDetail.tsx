@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeft, Loader2, Trash2, ArrowRightLeft, Phone, MessageSquare,
   Calendar, CalendarDays, Clock, FileText, Bot, UserCheck, Mail, IndianRupee, MapPin, ThumbsDown, CheckCircle, Footprints,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -34,6 +35,20 @@ import { ApplicationProgress } from "@/components/leads/ApplicationProgress";
 import { FeeStructureViewer } from "@/components/finance/FeeStructureViewer";
 import { SendEmailDialog } from "@/components/leads/SendEmailDialog";
 import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
+import { useCallQueue } from "@/hooks/useCallQueue";
+import { ScorePopup } from "@/components/admissions/ScorePopup";
+
+// Score points for each disposition (mirrors DB trigger)
+const DISPOSITION_POINTS: Record<string, { points: number; label: string }> = {
+  interested: { points: 10, label: "Interested call" },
+  call_back: { points: 3, label: "Call back scheduled" },
+  not_answered: { points: 1, label: "Call attempted" },
+  busy: { points: 1, label: "Call attempted" },
+  voicemail: { points: 1, label: "Voicemail left" },
+  not_interested: { points: -3, label: "Not interested" },
+  do_not_contact: { points: -2, label: "Do not contact" },
+  wrong_number: { points: -2, label: "Wrong number" },
+};
 
 const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", application_in_progress: "Application In Progress", application_submitted: "Application Submitted",
@@ -62,6 +77,7 @@ const shouldAutoAdvance = (currentStage: string, newStage: string) => {
 const LeadDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
   const { user, role, profile } = useAuth();
   const isTeamLeader = useIsTeamLeader();
@@ -106,8 +122,20 @@ const LeadDetail = () => {
   const [campusName, setCampusName] = useState<string | undefined>();
   const [campusCity, setCampusCity] = useState<string | undefined>();
   const [profileId, setProfileId] = useState<string | null>(null);
+  const [showNextLeadPrompt, setShowNextLeadPrompt] = useState(false);
+  const [lastDisposition, setLastDisposition] = useState<string>("");
+  const [scorePopup, setScorePopup] = useState<{ points: number; label: string; visible: boolean }>({ points: 0, label: "", visible: false });
+  const { buckets, nextLead, refetch: refetchQueue } = useCallQueue(id);
 
   useEffect(() => { if (id) fetchAll(); }, [id]);
+
+  // Auto-open call dialog when navigated with ?action=call
+  useEffect(() => {
+    if (searchParams.get("action") === "call" && !loading && lead) {
+      setShowCallDisposition(true);
+      setSearchParams({}, { replace: true });
+    }
+  }, [loading, lead, searchParams]);
 
   const fetchAll = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -273,6 +301,19 @@ const LeadDetail = () => {
 
     toast({ title: "Call logged", description: label });
     await fetchAll(true);
+    refetchQueue();
+
+    // Show score animation
+    const scoreInfo = DISPOSITION_POINTS[data.disposition];
+    if (scoreInfo) {
+      // Check if first contact bonus applies
+      const isFirstContact = !lead.first_contact_at;
+      const totalPoints = scoreInfo.points + (isFirstContact && scoreInfo.points > 0 ? 5 : 0);
+      const totalLabel = isFirstContact && scoreInfo.points > 0
+        ? `${scoreInfo.label} + First contact bonus`
+        : scoreInfo.label;
+      setScorePopup({ points: totalPoints, label: totalLabel, visible: true });
+    }
 
     // 5. Chain to follow-up dialog if requested
     if (data.schedule_followup) {
@@ -281,6 +322,12 @@ const LeadDetail = () => {
     // 6. Schedule visit inline if provided
     if (data.visit) {
       await scheduleVisit(data.visit);
+    }
+
+    // 7. Show next lead prompt (if not chaining to followup)
+    if (!data.schedule_followup) {
+      setLastDisposition(label);
+      setShowNextLeadPrompt(true);
     }
   };
 
@@ -573,6 +620,41 @@ const LeadDetail = () => {
           )}
         </div>
       </div>
+
+      {/* Lead Queue Navigation Bar */}
+      {buckets.length > 0 && (
+        <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 overflow-x-auto">
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide shrink-0">Queue:</span>
+          {buckets.map(b => (
+            <button
+              key={b.key}
+              onClick={() => {
+                const next = b.leads.find(l => l.id !== id);
+                if (next) navigate(`/admissions/${next.id}?action=call`);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted/50 transition-colors shrink-0"
+              title={`${b.count} leads — click to go to next`}
+            >
+              <span className={`h-2 w-2 rounded-full ${b.color} shrink-0`} />
+              {b.label}
+              <span className="inline-flex h-4.5 min-w-[18px] items-center justify-center rounded-full bg-muted px-1 text-[10px] font-bold text-foreground">
+                {b.count}
+              </span>
+            </button>
+          ))}
+          {nextLead && (
+            <Button
+              size="sm"
+              className="ml-auto gap-1.5 text-xs shrink-0"
+              onClick={() => navigate(`/admissions/${nextLead.id}?action=call`)}
+            >
+              <Phone className="h-3 w-3" />
+              Call Next: {nextLead.name.split(" ")[0]}
+              <ChevronRight className="h-3 w-3" />
+            </Button>
+          )}
+        </div>
+      )}
 
       {/* Quick action icon bar */}
       {(() => {
@@ -888,6 +970,60 @@ const LeadDetail = () => {
         }}
       />
 
+      {/* Score animation popup */}
+      <ScorePopup
+        points={scorePopup.points}
+        label={scorePopup.label}
+        visible={scorePopup.visible}
+        onDone={() => setScorePopup(p => ({ ...p, visible: false }))}
+      />
+
+      {/* Next Lead Prompt — after call disposition */}
+      {showNextLeadPrompt && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[90%] max-w-lg animate-fade-in">
+          <div className="rounded-xl border border-primary/20 bg-card shadow-lg px-5 py-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30 shrink-0">
+                <CheckCircle className="h-5 w-5 text-green-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-foreground">Call logged: {lastDisposition}</p>
+                {nextLead ? (
+                  <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                    Next: <span className="font-medium text-foreground">{nextLead.name}</span> — {nextLead.bucketName}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground mt-0.5">No more leads in queue</p>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {nextLead && (
+                  <Button
+                    size="sm"
+                    className="gap-1.5 text-xs"
+                    onClick={() => {
+                      setShowNextLeadPrompt(false);
+                      navigate(`/admissions/${nextLead.id}?action=call`);
+                    }}
+                  >
+                    <Phone className="h-3.5 w-3.5" />
+                    Call Next
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs text-muted-foreground"
+                  onClick={() => setShowNextLeadPrompt(false)}
+                >
+                  Stay
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Transfer Dialog */}
       <TransferLeadDialog
         open={showTransfer}
@@ -1014,6 +1150,7 @@ function ScheduledVisitsSection({ visits, campuses, courses, leadId, userId, onR
         scheduled_by: userId,
         visit_date: new Date().toISOString(),
         status: "completed",
+        visit_type: "walk_in",
         feedback: feedbackText,
       });
       await supabase.from("lead_activities").insert({
@@ -1102,6 +1239,17 @@ function ScheduledVisitsSection({ visits, campuses, courses, leadId, userId, onR
                   }}
                   className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-700"
                 >Completed</button>
+                <button
+                  onClick={async () => {
+                    await supabase.from("campus_visits").update({ status: "no_show" }).eq("id", v.id);
+                    await supabase.from("lead_activities").insert({
+                      lead_id: leadId, user_id: userId, type: "visit", description: "Campus visit: student did not show up",
+                    });
+                    toast({ title: "Marked as no-show", description: "Schedule a follow-up to reschedule." });
+                    onRefresh();
+                  }}
+                  className="rounded-lg border border-amber-200 px-2.5 py-1 text-xs font-medium text-amber-600 hover:bg-amber-50"
+                >No Show</button>
                 <button
                   onClick={async () => {
                     await supabase.from("campus_visits").update({ status: "cancelled" }).eq("id", v.id);

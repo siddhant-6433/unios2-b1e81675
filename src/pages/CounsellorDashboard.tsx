@@ -152,6 +152,172 @@ const PRESETS: { key: DatePreset; label: string }[] = [
   { key: "all", label: "All Time" },
 ];
 
+// Student Feedback Summary sub-component
+function FeedbackSummary() {
+  const [feedback, setFeedback] = useState<any[]>([]);
+  const [fbLoading, setFbLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from("counsellor_feedback_summary" as any)
+        .select("*");
+      setFeedback((data || []).sort((a: any, b: any) => (b.avg_rating || 0) - (a.avg_rating || 0)));
+      setFbLoading(false);
+    })();
+  }, []);
+
+  if (fbLoading || feedback.length === 0) return null;
+
+  const totalResponses = feedback.reduce((s: number, f: any) => s + Number(f.total_responses || 0), 0);
+  const avgAll = totalResponses > 0
+    ? (feedback.reduce((s: number, f: any) => s + (Number(f.avg_rating || 0) * Number(f.total_responses || 0)), 0) / totalResponses).toFixed(1)
+    : "—";
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-foreground">Student Feedback (1:10 Sample)</h3>
+        <span className="text-xs text-muted-foreground">{totalResponses} responses · Avg {avgAll}/5</span>
+      </div>
+      <Card className="border-border/60 shadow-none overflow-hidden">
+        <CardContent className="p-0">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/50">
+                <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-muted-foreground uppercase">Counsellor</th>
+                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-muted-foreground uppercase">Avg Rating</th>
+                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-muted-foreground uppercase">Responses</th>
+                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-emerald-600 uppercase">5-Star</th>
+                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-blue-600 uppercase">4-Star</th>
+                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-red-600 uppercase">Low (1-2)</th>
+                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-muted-foreground uppercase">Pending</th>
+              </tr>
+            </thead>
+            <tbody>
+              {feedback.map((f: any) => (
+                <tr key={f.counsellor_id} className="border-b border-border/40 hover:bg-muted/20">
+                  <td className="px-4 py-2.5 font-medium text-foreground text-xs">{f.counsellor_name}</td>
+                  <td className="px-3 py-2.5 text-center">
+                    {f.avg_rating ? (
+                      <span className={`text-xs font-bold ${
+                        f.avg_rating >= 4 ? "text-emerald-600" : f.avg_rating >= 3 ? "text-amber-600" : "text-red-600"
+                      }`}>
+                        {f.avg_rating}/5
+                      </span>
+                    ) : <span className="text-xs text-muted-foreground">—</span>}
+                  </td>
+                  <td className="px-3 py-2.5 text-center text-xs">{f.total_responses}</td>
+                  <td className="px-3 py-2.5 text-center">
+                    {f.five_star > 0 ? (
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 rounded-full px-1.5 py-0.5">{f.five_star}</span>
+                    ) : <span className="text-[10px] text-muted-foreground">—</span>}
+                  </td>
+                  <td className="px-3 py-2.5 text-center">
+                    {f.four_star > 0 ? (
+                      <span className="text-[10px] font-bold text-blue-700 bg-blue-100 rounded-full px-1.5 py-0.5">{f.four_star}</span>
+                    ) : <span className="text-[10px] text-muted-foreground">—</span>}
+                  </td>
+                  <td className="px-3 py-2.5 text-center">
+                    {f.low_rating > 0 ? (
+                      <span className="text-[10px] font-bold text-red-700 bg-red-100 rounded-full px-1.5 py-0.5">{f.low_rating}</span>
+                    ) : <span className="text-[10px] text-muted-foreground">—</span>}
+                  </td>
+                  <td className="px-3 py-2.5 text-center text-xs text-muted-foreground">{f.pending || 0}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// Post-Visit Pipeline sub-component
+function PostVisitPipeline() {
+  const [pipeline, setPipeline] = useState<any[]>([]);
+  const [pipelineLoading, setPipelineLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from("post_visit_pipeline" as any)
+        .select("*");
+      setPipeline((data || []).sort((a: any, b: any) => b.pending_total - a.pending_total));
+      setPipelineLoading(false);
+    })();
+  }, []);
+
+  if (pipelineLoading) return null;
+  if (pipeline.length === 0) return null;
+
+  const totalVisited = pipeline.reduce((s: number, c: any) => s + Number(c.visited_7d || 0), 0);
+  const totalFollowed = pipeline.reduce((s: number, c: any) => s + Number(c.followed_up_7d || 0), 0);
+  const totalPending = pipeline.reduce((s: number, c: any) => s + Number(c.pending_total || 0), 0);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-foreground">Post-Visit Pipeline</h3>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>{totalPending} pending follow-ups</span>
+          {totalVisited > 0 && (
+            <span className={`font-medium ${totalFollowed / totalVisited >= 0.8 ? "text-emerald-600" : "text-amber-600"}`}>
+              {Math.round((totalFollowed / totalVisited) * 100)}% follow-up rate (7d)
+            </span>
+          )}
+        </div>
+      </div>
+      <Card className="border-border/60 shadow-none overflow-hidden">
+        <CardContent className="p-0">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/50">
+                <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-muted-foreground uppercase">Counsellor</th>
+                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-muted-foreground uppercase">Visited (7d)</th>
+                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-muted-foreground uppercase">Followed Up</th>
+                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-red-600 uppercase">Pending</th>
+                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-muted-foreground uppercase">F/U Rate</th>
+                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-muted-foreground uppercase">Avg Wait</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pipeline.map((c: any) => {
+                const rate = Number(c.visited_7d) > 0 ? Math.round((Number(c.followed_up_7d) / Number(c.visited_7d)) * 100) : 0;
+                return (
+                  <tr key={c.counsellor_id} className="border-b border-border/40 hover:bg-muted/20">
+                    <td className="px-4 py-2.5 font-medium text-foreground text-xs">{c.counsellor_name}</td>
+                    <td className="px-3 py-2.5 text-center text-xs">{c.visited_7d}</td>
+                    <td className="px-3 py-2.5 text-center text-xs text-emerald-600 font-medium">{c.followed_up_7d}</td>
+                    <td className="px-3 py-2.5 text-center">
+                      {Number(c.pending_total) > 0 ? (
+                        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold bg-red-100 text-red-700">
+                          {c.pending_total}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-green-600">0</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-center">
+                      <span className={`text-[10px] font-bold ${rate >= 80 ? "text-emerald-600" : rate >= 50 ? "text-amber-600" : "text-red-600"}`}>
+                        {rate}%
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 text-center text-xs text-muted-foreground">
+                      {c.avg_days_pending ? `${c.avg_days_pending}d` : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 const CounsellorDashboard = () => {
   const navigate = useNavigate();
   const { role } = useAuth();
@@ -664,14 +830,59 @@ const CounsellorDashboard = () => {
     leads: acc.leads + Number(s.leads_assigned),
   }), { calls: 0, whatsapps: 0, followups: 0, visits: 0, conversions: 0, overdue: 0, leads: 0 }), [stats]);
 
+  // DB-backed leaderboard
+  const [leaderboard, setLeaderboard] = useState<any[]>([]);
+  const [leaderboardPeriod, setLeaderboardPeriod] = useState<"weekly" | "monthly" | "all">("all");
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from("counsellor_leaderboard" as any)
+        .select("*");
+      if (data) setLeaderboard(data);
+    })();
+  }, []);
+
   const ranked = useMemo(() => {
-    return [...stats]
-      .map(s => ({
-        ...s,
-        score: Number(s.conversions) * 10 + Number(s.followups_completed) * 2 + Number(s.total_calls) + Number(s.visits_scheduled) * 3,
-      }))
+    // Build from leaderboard data (source of truth for scores); merge in stats for activity columns
+    const statsMap = new Map<string, any>();
+    for (const s of stats) statsMap.set(s.counsellor_id, s);
+
+    const base = leaderboard.length > 0 ? leaderboard : stats.map(s => ({
+      counsellor_id: s.counsellor_id,
+      counsellor_name: s.counsellor_name,
+      user_id: s.user_id,
+      total_score: 0, weekly_score: 0, monthly_score: 0, daily_score: 0,
+      positive_actions: 0, negative_actions: 0,
+    }));
+
+    return [...base]
+      .map(lb => {
+        const s = statsMap.get(lb.counsellor_id) || {};
+        const score = leaderboardPeriod === "weekly" ? lb.weekly_score
+          : leaderboardPeriod === "monthly" ? lb.monthly_score
+          : lb.total_score;
+        return {
+          counsellor_id: lb.counsellor_id,
+          counsellor_name: lb.counsellor_name || s.counsellor_name || "Unknown",
+          user_id: lb.user_id || s.user_id,
+          leads_assigned: s.leads_assigned || 0,
+          total_calls: s.total_calls || 0,
+          followups_completed: s.followups_completed || 0,
+          visits_scheduled: s.visits_scheduled || 0,
+          conversions: s.conversions || 0,
+          followups_overdue: s.followups_overdue || 0,
+          score,
+          weekly_score: lb.weekly_score || 0,
+          monthly_score: lb.monthly_score || 0,
+          total_score: lb.total_score || 0,
+          daily_score: lb.daily_score || 0,
+          positive_actions: lb.positive_actions || 0,
+          negative_actions: lb.negative_actions || 0,
+        };
+      })
       .sort((a, b) => b.score - a.score);
-  }, [stats]);
+  }, [stats, leaderboard, leaderboardPeriod]);
 
   const breakdownTotals = useMemo(() => breakdownData.reduce((acc, b) => ({
     total: acc.total + b.total,
@@ -786,62 +997,117 @@ const CounsellorDashboard = () => {
       </div>
 
       {tab === "leaderboard" ? (
-        <Card className="border-border/60 shadow-none overflow-hidden">
-          <CardContent className="p-0">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/50">
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide w-10">#</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Counsellor</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Leads</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Calls</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">WhatsApp</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Follow-ups</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Visits</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Conversions</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Overdue</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Score</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ranked.map((s, i) => (
-                  <tr key={s.counsellor_id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
-                    <td className="px-4 py-3 text-center">
-                      {i === 0 ? <Trophy className="h-4 w-4 text-amber-500 mx-auto" /> :
-                       i === 1 ? <Trophy className="h-4 w-4 text-gray-400 mx-auto" /> :
-                       i === 2 ? <Trophy className="h-4 w-4 text-amber-700 mx-auto" /> :
-                       <span className="text-muted-foreground text-xs">{i + 1}</span>}
-                    </td>
-                    <td className="px-4 py-3 font-medium text-foreground">{s.counsellor_name || "Unknown"}</td>
-                    <td className="px-4 py-3 text-center text-muted-foreground">{s.leads_assigned}</td>
-                    <td className="px-4 py-3 text-center font-medium text-foreground">{s.total_calls}</td>
-                    <td className="px-4 py-3 text-center font-medium text-foreground">{s.total_whatsapps}</td>
-                    <td className="px-4 py-3 text-center font-medium text-foreground">{s.followups_completed}</td>
-                    <td className="px-4 py-3 text-center font-medium text-foreground">{s.visits_scheduled}</td>
-                    <td className="px-4 py-3 text-center">
-                      <span className="font-bold text-primary">{s.conversions}</span>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {Number(s.followups_overdue) > 0 ? (
-                        <Badge className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border-0 text-[10px] font-semibold">
-                          {s.followups_overdue}
-                        </Badge>
-                      ) : (
-                        <span className="text-muted-foreground text-xs">0</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <Badge className="bg-primary/10 text-primary border-0 text-xs font-bold">{s.score}</Badge>
-                    </td>
+        <div className="space-y-4">
+          {/* Period toggle */}
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg border border-input bg-card p-0.5">
+              {([
+                { key: "weekly", label: "This Week" },
+                { key: "monthly", label: "This Month" },
+                { key: "all", label: "All Time" },
+              ] as const).map(p => (
+                <button
+                  key={p.key}
+                  onClick={() => setLeaderboardPeriod(p.key)}
+                  className={`rounded-md px-3 py-1 text-[11px] font-medium transition-colors whitespace-nowrap ${
+                    leaderboardPeriod === p.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <Card className="border-border/60 shadow-none overflow-hidden">
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/50">
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide w-10">#</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Counsellor</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Leads</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Calls</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Conversions</th>
+                    <th className="px-4 py-3 text-center text-[10px] font-semibold text-orange-600 uppercase tracking-wide" title="New leads not contacted within SLA">New Due</th>
+                    <th className="px-4 py-3 text-center text-[10px] font-semibold text-amber-600 uppercase tracking-wide" title="Overdue follow-ups">F/U Due</th>
+                    <th className="px-4 py-3 text-center text-[10px] font-semibold text-blue-600 uppercase tracking-wide" title="Application stage check-ins overdue">Check-ins</th>
+                    <th className="px-4 py-3 text-center text-[10px] font-semibold text-red-600 uppercase tracking-wide" title="Total TAT defaults">Defaults</th>
+                    <th className="px-3 py-3 text-center text-[10px] font-semibold text-emerald-600 uppercase">+</th>
+                    <th className="px-3 py-3 text-center text-[10px] font-semibold text-red-600 uppercase">-</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Score</th>
                   </tr>
-                ))}
-                {ranked.length === 0 && (
-                  <tr><td colSpan={10} className="px-4 py-8 text-center text-sm text-muted-foreground">No counsellor data available</td></tr>
-                )}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
+                </thead>
+                <tbody>
+                  {ranked.map((s, i) => {
+                    const tat = tatDefaults.find((d: any) => d.profile_id === s.counsellor_id);
+                    return (
+                    <tr key={s.counsellor_id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+                      <td className="px-4 py-3 text-center">
+                        {i === 0 ? <Trophy className="h-4 w-4 text-amber-500 mx-auto" /> :
+                         i === 1 ? <Trophy className="h-4 w-4 text-gray-400 mx-auto" /> :
+                         i === 2 ? <Trophy className="h-4 w-4 text-amber-700 mx-auto" /> :
+                         <span className="text-muted-foreground text-xs">{i + 1}</span>}
+                      </td>
+                      <td className="px-4 py-3 font-medium text-foreground">
+                        {s.counsellor_name || "Unknown"}
+                        {s.daily_score > 0 && (
+                          <span className="ml-1.5 text-[10px] font-bold text-emerald-600">+{s.daily_score} today</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-center text-muted-foreground">{s.leads_assigned}</td>
+                      <td className="px-4 py-3 text-center font-medium text-foreground">{s.total_calls}</td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="font-bold text-primary">{s.conversions}</span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {tat && tat.new_leads_overdue > 0 ? (
+                          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold bg-orange-100 text-orange-700">{tat.new_leads_overdue}</span>
+                        ) : <span className="text-[10px] text-muted-foreground">0</span>}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {tat && tat.overdue_followups > 0 ? (
+                          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">{tat.overdue_followups}</span>
+                        ) : <span className="text-[10px] text-muted-foreground">0</span>}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {tat && tat.app_checkins_overdue > 0 ? (
+                          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold bg-blue-100 text-blue-700">{tat.app_checkins_overdue}</span>
+                        ) : <span className="text-[10px] text-muted-foreground">0</span>}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {tat && tat.total_defaults > 0 ? (
+                          <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold ${tat.total_defaults > 5 ? "bg-red-500 text-white" : "bg-red-100 text-red-700"}`}>{tat.total_defaults}</span>
+                        ) : <span className="text-[10px] text-muted-foreground">0</span>}
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <span className="text-[10px] font-bold text-emerald-600">{s.positive_actions}</span>
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <span className={`text-[10px] font-bold ${s.negative_actions > 0 ? "text-red-600" : "text-muted-foreground"}`}>{s.negative_actions}</span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <Badge className={`border-0 text-xs font-bold ${
+                          s.score > 0 ? "bg-primary/10 text-primary" : s.score < 0 ? "bg-red-100 text-red-700" : "bg-muted text-muted-foreground"
+                        }`}>{s.score}</Badge>
+                      </td>
+                    </tr>
+                    );
+                  })}
+                  {ranked.length === 0 && (
+                    <tr><td colSpan={12} className="px-4 py-8 text-center text-sm text-muted-foreground">No counsellor data available</td></tr>
+                  )}
+                </tbody>
+              </table>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Post-Visit Pipeline */}
+          <PostVisitPipeline />
+          <FeedbackSummary />
+        </div>
 
       ) : tab === "breakdown" ? (
         <div className="space-y-4">

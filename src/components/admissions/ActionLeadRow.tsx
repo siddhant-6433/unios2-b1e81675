@@ -115,27 +115,21 @@ export function ActionLeadRow({ lead, variant, onCall, onCompleteVisit }: Action
 
   return (
     <div
-      className="flex items-center gap-3 px-4 py-3 hover:bg-muted/50 cursor-pointer transition-colors border-b border-border/40 last:border-0"
+      className="flex items-center gap-2 px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors border-b border-border/40 last:border-0"
       onClick={() => navigate(`/admissions/${lead.lead_id}`)}
     >
-      {/* Left: Name + phone, course + source */}
+      {/* Left: Name + context badge */}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-semibold text-foreground truncate">{lead.name}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs font-semibold text-foreground truncate">{lead.name}</span>
           <ContextBadge lead={lead} variant={variant} />
         </div>
-        <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
           <span>{lead.phone}</span>
           {lead.course_name && lead.course_name !== "—" && (
             <>
               <span className="text-border">·</span>
-              <span className="truncate">{lead.course_name}</span>
-            </>
-          )}
-          {lead.source && (
-            <>
-              <span className="text-border">·</span>
-              <span className="capitalize">{lead.source.replace(/_/g, " ")}</span>
+              <span className="truncate max-w-[120px]">{lead.course_name}</span>
             </>
           )}
         </div>
@@ -143,18 +137,18 @@ export function ActionLeadRow({ lead, variant, onCall, onCompleteVisit }: Action
 
       {/* Right: Actions */}
       <div className="flex items-center gap-1 shrink-0">
-        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-primary" onClick={handleCall} title="Log call">
-          <Phone className="h-4 w-4" />
+        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={handleCall} title="Log call">
+          <Phone className="h-3 w-3" />
         </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-green-600" onClick={handleWhatsApp} title="WhatsApp">
-          <MessageSquare className="h-4 w-4" />
+        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-green-600" onClick={handleWhatsApp} title="WhatsApp">
+          <MessageSquare className="h-3 w-3" />
         </Button>
         {variant === "today_visit" && onCompleteVisit && (
-          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-violet-600" onClick={handleCompleteVisit} title="Complete visit">
-            <CheckCircle className="h-4 w-4" />
+          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-violet-600" onClick={handleCompleteVisit} title="Complete visit">
+            <CheckCircle className="h-3 w-3" />
           </Button>
         )}
-        <ChevronRight className="h-4 w-4 text-muted-foreground/50" />
+        <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
       </div>
     </div>
   );

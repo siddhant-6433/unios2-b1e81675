@@ -22,7 +22,7 @@ const AUTO_REPLIES: { patterns: RegExp; reply: string }[] = [
   },
   {
     patterns: /^3$/,
-    reply: "Our fee structure varies by course and campus. A counsellor will share the detailed fee breakdown for your chosen course.\n\nPlease reply with the course name you're interested in.",
+    reply: "Our fee structure varies by course and campus. A counsellor will share the detailed fee breakdown for your chosen course.\n\nPlease reply with the course name you're interested in, and we'll have someone reach out to you.",
   },
   {
     patterns: /^4$/,
@@ -30,7 +30,7 @@ const AUTO_REPLIES: { patterns: RegExp; reply: string }[] = [
   },
   {
     patterns: /^5$/,
-    reply: "Our counsellor will connect with you shortly. If it's urgent, you can call us at 📞 1800-XXX-XXXX (toll free).",
+    reply: "Our counsellor will connect with you shortly. If it's urgent, you can call us at 📞 +91-120-4167822.",
   },
   {
     patterns: /\b(admission|apply|enroll|enrol)\b/i,
@@ -226,8 +226,97 @@ Deno.serve(async (req) => {
             }
           }
 
-          // Auto-reply bot: match inbound text against keyword patterns
+          // Feedback response detection — check BEFORE auto-replies
+          // If the user has an open feedback request and replies 1-5, record the rating
+          let feedbackHandled = false;
           if (msgType === "text" && content) {
+            const trimmed = content.trim();
+            const ratingMatch = trimmed.match(/^([1-5])$/);
+            if (ratingMatch) {
+              // Check for open feedback request for this phone
+              const normalizedForFeedback = phone.replace(/^91/, "+91");
+              const { data: openFeedback } = await admin
+                .from("feedback_responses")
+                .select("id, lead_id, counsellor_id, interaction_type")
+                .eq("status", "sent")
+                .order("sent_at", { ascending: false })
+                .limit(5);
+
+              if (openFeedback?.length) {
+                // Match feedback to this phone's lead
+                const { data: phoneLead } = await admin
+                  .from("leads")
+                  .select("id")
+                  .or(`phone.eq.${phone},phone.eq.${normalizedForFeedback},phone.eq.+${phone}`)
+                  .limit(1);
+
+                const leadId = phoneLead?.[0]?.id;
+                if (leadId) {
+                  const fb = openFeedback.find((f: any) => f.lead_id === leadId);
+                  if (fb) {
+                    const rating = parseInt(ratingMatch[1]);
+                    await admin
+                      .from("feedback_responses")
+                      .update({
+                        rating,
+                        status: "responded",
+                        responded_at: new Date().toISOString(),
+                      })
+                      .eq("id", fb.id);
+
+                    // Send thank-you reply
+                    const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
+                    const pnId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+                    const waPhone = phone.replace(/[^0-9]/g, "");
+                    const thankMsg = rating >= 4
+                      ? "Thank you for the wonderful feedback! We're glad you had a great experience. 😊"
+                      : rating >= 3
+                      ? "Thank you for your feedback! We appreciate your time and will strive to do better. 🙏"
+                      : "Thank you for sharing your feedback. We're sorry about your experience and will work to improve. Your input matters to us. 🙏";
+
+                    try {
+                      const thankRes = await fetch(
+                        `https://graph.facebook.com/v21.0/${pnId}/messages`,
+                        {
+                          method: "POST",
+                          headers: {
+                            Authorization: `Bearer ${waToken}`,
+                            "Content-Type": "application/json",
+                          },
+                          body: JSON.stringify({
+                            messaging_product: "whatsapp",
+                            to: waPhone,
+                            type: "text",
+                            text: { body: thankMsg },
+                          }),
+                        }
+                      );
+                      const thankResult = await thankRes.json();
+                      if (thankRes.ok) {
+                        await admin.from("whatsapp_messages").insert({
+                          lead_id: leadId,
+                          wa_message_id: thankResult?.messages?.[0]?.id || null,
+                          direction: "outbound",
+                          phone,
+                          message_type: "text",
+                          content: thankMsg,
+                          status: "sent",
+                          is_read: true,
+                        });
+                      }
+                    } catch (e) {
+                      console.error("Feedback thank-you error:", e);
+                    }
+
+                    feedbackHandled = true;
+                  }
+                }
+              }
+            }
+          }
+
+          // Auto-reply bot: match inbound text against keyword patterns
+          if (!feedbackHandled && msgType === "text" && content) {
             const matched = AUTO_REPLIES.find(r => r.patterns.test(content.trim()));
             if (matched) {
               try {
@@ -265,6 +354,29 @@ Deno.serve(async (req) => {
                     status: "sent",
                     is_read: true,
                   });
+                  // For options 3 (fee) and 5 (counsellor), create a follow-up task
+                  const trimmedContent = content.trim();
+                  if (lead?.id && lead?.counsellor_id && (trimmedContent === "3" || trimmedContent === "5")) {
+                    const followupType = trimmedContent === "3" ? "Fee structure request via WhatsApp" : "Student requested counsellor callback via WhatsApp";
+                    // Schedule follow-up in 1 hour
+                    const scheduledAt = new Date(Date.now() + 3600000).toISOString();
+                    await admin.from("lead_followups").insert({
+                      lead_id: lead.id,
+                      scheduled_at: scheduledAt,
+                      type: "call",
+                      status: "pending",
+                      notes: followupType,
+                    });
+                    // Notify the counsellor
+                    await admin.from("notifications").insert({
+                      user_id: lead.counsellor_id,
+                      type: "followup_due",
+                      title: trimmedContent === "5" ? `Callback requested: ${lead.name || phone}` : `Fee inquiry: ${lead.name || phone}`,
+                      body: followupType,
+                      link: `/admissions/${lead.id}`,
+                      lead_id: lead.id,
+                    });
+                  }
                 } else {
                   console.error("Auto-reply send failed:", autoResult?.error?.message);
                 }

@@ -34,6 +34,9 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   // Team leader TAT defaults
   team_leader_defaults: { name: "team_leader_defaults_report", params: ["leader_name", "total_count", "summary"] },
   counsellor_visit_confirmation: { name: "counsellor_visit_confirmation", params: ["lead_name", "visit_date", "campus_name"] },
+  // Student feedback (post-call / post-visit)
+  post_call_feedback: { name: "post_interaction_feedback", params: ["student_name", "interaction_text"] },
+  post_visit_feedback: { name: "post_interaction_feedback", params: ["student_name", "interaction_text"] },
   counsellor_followup_overdue: { name: "counsellor_followup_overdue", params: ["lead_name", "followup_date"] },
 };
 
