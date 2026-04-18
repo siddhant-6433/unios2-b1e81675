@@ -41,22 +41,46 @@ const SERVICE_TYPES: { key: RequestType; label: string; icon: any; desc: string;
 ];
 
 // ---- Phone Input ----
-function PhoneInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+const ISD_CODES = [
+  { code: "+91", flag: "🇮🇳", country: "India" },
+  { code: "+1", flag: "🇺🇸", country: "USA / Canada" },
+  { code: "+44", flag: "🇬🇧", country: "UK" },
+  { code: "+971", flag: "🇦🇪", country: "UAE" },
+  { code: "+65", flag: "🇸🇬", country: "Singapore" },
+  { code: "+61", flag: "🇦🇺", country: "Australia" },
+  { code: "+49", flag: "🇩🇪", country: "Germany" },
+  { code: "+966", flag: "🇸🇦", country: "Saudi Arabia" },
+  { code: "+974", flag: "🇶🇦", country: "Qatar" },
+  { code: "+968", flag: "🇴🇲", country: "Oman" },
+  { code: "+60", flag: "🇲🇾", country: "Malaysia" },
+  { code: "+977", flag: "🇳🇵", country: "Nepal" },
+  { code: "+880", flag: "🇧🇩", country: "Bangladesh" },
+  { code: "+81", flag: "🇯🇵", country: "Japan" },
+  { code: "+86", flag: "🇨🇳", country: "China" },
+];
+
+function PhoneInput({ value, onChange, isdCode, onIsdChange, placeholder }: {
+  value: string; onChange: (v: string) => void;
+  isdCode?: string; onIsdChange?: (code: string) => void;
+  placeholder?: string;
+}) {
+  const selected = ISD_CODES.find(c => c.code === (isdCode || "+91")) || ISD_CODES[0];
   return (
     <div className="flex rounded-xl border border-input bg-background overflow-hidden focus-within:ring-2 focus-within:ring-primary/20">
-      <div className="flex items-center gap-1.5 px-3 bg-muted/50 border-r border-input shrink-0">
-        <span className="text-base">🇮🇳</span>
-        <span className="text-sm font-medium text-muted-foreground">+91</span>
-      </div>
+      <select
+        value={selected.code}
+        onChange={(e) => onIsdChange?.(e.target.value)}
+        className="appearance-none bg-muted/50 border-r border-input px-2 py-3 text-sm font-medium text-muted-foreground cursor-pointer focus:outline-none"
+        style={{ minWidth: "5rem" }}
+      >
+        {ISD_CODES.map(c => (
+          <option key={c.code} value={c.code}>{c.flag} {c.code}</option>
+        ))}
+      </select>
       <input type="tel" value={value}
-        onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 10))}
-        placeholder={placeholder || "98765 43210"} maxLength={10}
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 15))}
+        placeholder={placeholder || "98765 43210"} maxLength={15}
         className="flex-1 px-3 py-3 text-sm bg-transparent focus:outline-none" />
-      {value.length > 0 && (
-        <span className={`flex items-center px-3 text-[10px] font-medium ${value.length === 10 ? "text-emerald-600" : "text-muted-foreground"}`}>
-          {value.length}/10
-        </span>
-      )}
     </div>
   );
 }
@@ -65,14 +89,17 @@ function PhoneInput({ value, onChange, placeholder }: { value: string; onChange:
 function OtpLogin({ onVerified }: { onVerified: (phone: string) => void }) {
   const { toast } = useToast();
   const [phone, setPhone] = useState("");
+  const [isdCode, setIsdCode] = useState("+91");
   const [otpSent, setOtpSent] = useState(false);
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const fullPhone = `${isdCode}${phone}`;
+
   const handleSendOtp = async () => {
-    if (phone.length !== 10) { toast({ title: "Enter a valid 10-digit phone number", variant: "destructive" }); return; }
+    if (phone.length < 7) { toast({ title: "Enter a valid phone number", variant: "destructive" }); return; }
     setLoading(true);
-    const { data, error } = await supabase.functions.invoke("whatsapp-otp", { body: { phone: `+91${phone}`, action: "send" } });
+    const { data, error } = await supabase.functions.invoke("whatsapp-otp", { body: { phone: fullPhone, action: "send" } });
     setLoading(false);
     if (error || data?.error) { toast({ title: "Failed to send OTP", description: data?.error || error?.message, variant: "destructive" }); }
     else { setOtpSent(true); toast({ title: "OTP sent via WhatsApp" }); }
@@ -80,10 +107,10 @@ function OtpLogin({ onVerified }: { onVerified: (phone: string) => void }) {
 
   const handleVerifyOtp = async () => {
     setLoading(true);
-    const { data, error } = await supabase.functions.invoke("whatsapp-otp", { body: { phone: `+91${phone}`, otp, action: "verify" } });
+    const { data, error } = await supabase.functions.invoke("whatsapp-otp", { body: { phone: fullPhone, otp, action: "verify" } });
     setLoading(false);
     if (error || data?.error || !data?.verified) { toast({ title: "Invalid OTP", variant: "destructive" }); }
-    else { onVerified(`+91${phone}`); }
+    else { onVerified(fullPhone); }
   };
 
   return (
@@ -98,15 +125,15 @@ function OtpLogin({ onVerified }: { onVerified: (phone: string) => void }) {
       {!otpSent ? (
         <div className="space-y-3">
           <label className="text-sm font-medium text-foreground">Your WhatsApp Number</label>
-          <PhoneInput value={phone} onChange={setPhone} />
-          <Button className="w-full gap-2" onClick={handleSendOtp} disabled={loading || phone.length !== 10}>
+          <PhoneInput value={phone} onChange={setPhone} isdCode={isdCode} onIsdChange={setIsdCode} />
+          <Button className="w-full gap-2" onClick={handleSendOtp} disabled={loading || phone.length < 7}>
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Phone className="h-4 w-4" />}
             Send OTP via WhatsApp
           </Button>
         </div>
       ) : (
         <div className="space-y-3">
-          <label className="text-sm font-medium text-foreground">Enter OTP sent to +91 {phone}</label>
+          <label className="text-sm font-medium text-foreground">Enter OTP sent to {isdCode} {phone}</label>
           <input type="text" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
             placeholder="Enter 6-digit OTP" maxLength={6}
             className="w-full rounded-xl border border-input bg-background px-4 py-3 text-center text-lg tracking-[0.5em] font-mono focus:outline-none focus:ring-2 focus:ring-primary/20" />
