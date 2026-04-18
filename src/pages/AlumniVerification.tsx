@@ -78,8 +78,8 @@ function PhoneInput({ value, onChange, isdCode, onIsdChange, placeholder }: {
         ))}
       </select>
       <input type="tel" value={value}
-        onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 15))}
-        placeholder={placeholder || "98765 43210"} maxLength={15}
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, selected.code === "+91" ? 10 : 15))}
+        placeholder={placeholder || (selected.code === "+91" ? "98765 43210" : "Phone number")} maxLength={selected.code === "+91" ? 10 : 15}
         className="flex-1 px-3 py-3 text-sm bg-transparent focus:outline-none" />
     </div>
   );
