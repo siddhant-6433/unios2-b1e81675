@@ -231,8 +231,7 @@ registrar@nimt.ac.in`,
     setEmailSending(true);
 
     const result = verificationResult || "confirmed";
-    const isApproval = result === "confirmed";
-    const finalStatus = result === "confirmed" ? "verified" : "rejected";
+    const finalStatus = "verified"; // Request is processed regardless of result (confirmed/discrepancy/not_found)
 
     // Upload doc if provided
     if (reviewDocFile) {
