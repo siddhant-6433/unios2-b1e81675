@@ -80,23 +80,34 @@ Deno.serve(async (req) => {
           })
           .eq("id", requestId);
 
-        // Send WhatsApp receipt notification
+        // Send WhatsApp receipt notification (plain text — not template)
         try {
           const { data: reqData } = await admin.from("alumni_verification_requests")
-            .select("request_number, alumni_name, course, requestor_phone, contact_email, fee_amount, request_type")
+            .select("request_number, alumni_name, course, year_of_passing, requestor_phone, contact_email, fee_amount, request_type")
             .eq("id", requestId).single();
 
           if (reqData) {
-            // WhatsApp to requestor
-            await fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-              body: JSON.stringify({
-                template_key: "application_received",
-                phone: reqData.requestor_phone,
-                params: [reqData.alumni_name || "Applicant", reqData.request_number],
-              }),
-            });
+            const serviceLabels: Record<string, string> = {
+              verification: "Alumni Verification", marksheet: "Marksheet Request",
+              diploma: "Degree/Diploma Request", transcript: "Transcript Request",
+            };
+            const serviceName = serviceLabels[reqData.request_type || "verification"] || "Alumni Service";
+            const waPhone = reqData.requestor_phone.replace(/[^0-9]/g, "");
+            const whatsappToken = Deno.env.get("WHATSAPP_API_TOKEN");
+            const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+
+            if (whatsappToken && phoneNumberId) {
+              const msg = `Dear ${reqData.alumni_name},\n\nThank you for your payment of ₹${reqData.fee_amount} for ${serviceName}.\n\n📋 *Request ID:* ${reqData.request_number}\n📚 *Service:* ${serviceName}\n🎓 *Course:* ${reqData.course} (${reqData.year_of_passing})\n💰 *Amount:* ₹${reqData.fee_amount}\n✅ *Status:* Payment Received — Under Review\n\nOur Alumni Services team will review your request and get back to you within 5 working days.\n\nFor any queries, please contact:\n📧 umesh@nimt.ac.in\n📞 +91-7428477664\n\n— NIMT Educational Institutions`;
+
+              await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${whatsappToken}`, "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  messaging_product: "whatsapp", to: waPhone,
+                  type: "text", text: { body: msg },
+                }),
+              });
+            }
           }
         } catch (e) {
           console.error("[alumni-payment] WhatsApp notification error:", e);
