@@ -97,7 +97,8 @@ function OtpLogin({ onVerified }: { onVerified: (phone: string) => void }) {
   const fullPhone = `${isdCode}${phone}`;
 
   const handleSendOtp = async () => {
-    if (phone.length < 7) { toast({ title: "Enter a valid phone number", variant: "destructive" }); return; }
+    if (isdCode === "+91" && phone.length !== 10) { toast({ title: "Enter a valid 10-digit phone number", variant: "destructive" }); return; }
+    if (isdCode !== "+91" && phone.length < 7) { toast({ title: "Enter a valid phone number", variant: "destructive" }); return; }
     setLoading(true);
     const { data, error } = await supabase.functions.invoke("whatsapp-otp", { body: { phone: fullPhone, action: "send" } });
     setLoading(false);
@@ -126,7 +127,7 @@ function OtpLogin({ onVerified }: { onVerified: (phone: string) => void }) {
         <div className="space-y-3">
           <label className="text-sm font-medium text-foreground">Your WhatsApp Number</label>
           <PhoneInput value={phone} onChange={setPhone} isdCode={isdCode} onIsdChange={setIsdCode} />
-          <Button className="w-full gap-2" onClick={handleSendOtp} disabled={loading || phone.length < 7}>
+          <Button className="w-full gap-2" onClick={handleSendOtp} disabled={loading || (isdCode === "+91" ? phone.length !== 10 : phone.length < 7)}>
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Phone className="h-4 w-4" />}
             Send OTP via WhatsApp
           </Button>
