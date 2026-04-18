@@ -307,13 +307,68 @@ export default function AlumniVerification() {
     setStep("payment");
   };
 
-  const handlePaymentDone = async () => {
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const handlePayNow = async () => {
     if (!requestId) return;
-    await supabase.from("alumni_verification_requests" as any).update({
-      status: "paid", payment_method: "razorpay_link", paid_at: new Date().toISOString(),
-    }).eq("id", requestId);
-    setStep("done");
+    setPaymentLoading(true);
+
+    const { data, error } = await supabase.functions.invoke("alumni-payment", {
+      body: {
+        action: "initiate",
+        request_id: requestId,
+        amount: currentService.fee,
+        firstname: requestType === "verification" ? contactName : alumniName,
+        email: contactEmail,
+        phone: verifiedPhone,
+        productinfo: `${currentService.label} - ${requestNumber}`,
+      },
+    });
+
+    if (error || data?.error || !data?.pay_url) {
+      toast({ title: "Payment initiation failed", description: data?.error || error?.message, variant: "destructive" });
+      setPaymentLoading(false);
+      return;
+    }
+
+    // Open EaseBuzz payment page in popup
+    const popup = window.open(data.pay_url, "alumni_payment", "width=600,height=700,scrollbars=yes");
+
+    // Listen for postMessage from return page
+    const msgHandler = (e: MessageEvent) => {
+      if (e.data?.alumni_payment === "success") {
+        window.removeEventListener("message", msgHandler);
+        if (pollRef.current) clearInterval(pollRef.current);
+        setPaymentLoading(false);
+        setStep("done");
+      }
+    };
+    window.addEventListener("message", msgHandler);
+
+    // Poll DB every 3 seconds as fallback
+    pollRef.current = setInterval(async () => {
+      const { data: req } = await supabase
+        .from("alumni_verification_requests" as any)
+        .select("status, payment_ref")
+        .eq("id", requestId)
+        .single();
+
+      if (req && (req as any).status === "paid") {
+        if (pollRef.current) clearInterval(pollRef.current);
+        window.removeEventListener("message", msgHandler);
+        setPaymentLoading(false);
+        setStep("done");
+      }
+    }, 3000);
+
+    setPaymentLoading(false);
   };
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 dark:from-gray-950 dark:to-gray-900">
@@ -586,17 +641,26 @@ export default function AlumniVerification() {
                   </p>
                 </div>
                 <div className="rounded-xl border border-border bg-muted/30 p-4">
-                  <p className="text-2xl font-bold text-foreground">&#8377; {currentService.fee}</p>
+                  <p className="text-2xl font-bold text-foreground">&#8377; {currentService.fee.toLocaleString("en-IN")}</p>
                   <p className="text-xs text-muted-foreground">{currentService.label} Fee (inclusive of GST)</p>
                 </div>
-                <a href="https://pages.razorpay.com/pl_Qcbyq4u6RqZWtn/view" target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
-                  Pay Now via Razorpay
-                </a>
-                <div className="pt-2">
-                  <Button variant="outline" className="gap-2" onClick={handlePaymentDone}>
-                    <CheckCircle className="h-4 w-4" /> I have completed the payment
+
+                <div className="space-y-3">
+                  <Button className="w-full gap-2 py-3 text-sm" onClick={handlePayNow} disabled={paymentLoading}>
+                    {paymentLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
+                    Pay &#8377; {currentService.fee.toLocaleString("en-IN")} via Secure Gateway
                   </Button>
+                  <p className="text-[10px] text-muted-foreground">
+                    Powered by EaseBuzz. Supports UPI, Credit/Debit Cards, Net Banking, Wallets.
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-border bg-muted/20 p-3 text-left space-y-1.5">
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase">Request Summary</p>
+                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">Service</span><span className="font-medium">{currentService.label}</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">Alumni</span><span className="font-medium">{alumniName}</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">Course</span><span className="font-medium">{course} ({yearOfPassing})</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">Receipt to</span><span className="font-medium">{contactEmail}</span></div>
                 </div>
               </div>
             )}

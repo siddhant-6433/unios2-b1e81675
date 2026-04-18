@@ -143,6 +143,7 @@ export default function AlumniVerifications() {
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Request #</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase">Type</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Employer</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Alumni Name</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Course</th>
@@ -159,6 +160,9 @@ export default function AlumniVerifications() {
                     return (
                       <tr key={req.id} className="border-b border-border/40 hover:bg-muted/20 cursor-pointer" onClick={() => openDetail(req)}>
                         <td className="px-4 py-3 font-mono font-bold text-primary text-xs">{req.request_number}</td>
+                        <td className="px-4 py-3 text-center">
+                          <Badge className="border-0 text-[9px] font-semibold bg-muted text-foreground capitalize">{(req.request_type || "verification").replace("_", " ")}</Badge>
+                        </td>
                         <td className="px-4 py-3 font-medium text-foreground">{req.employer_name}</td>
                         <td className="px-4 py-3">{req.alumni_name}</td>
                         <td className="px-4 py-3 text-muted-foreground">{req.course}</td>
@@ -249,17 +253,38 @@ export default function AlumniVerifications() {
               </div>
 
               {/* Payment Info */}
-              <div className="rounded-xl border border-border p-3 space-y-1">
+              <div className="rounded-xl border border-border p-3 space-y-2">
                 <p className="text-[10px] font-semibold text-muted-foreground uppercase">Payment</p>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Amount: <span className="font-medium text-foreground">&#8377;{selectedReq.fee_amount}</span></span>
-                  {selectedReq.paid_at ? (
-                    <Badge className="bg-emerald-100 text-emerald-700 border-0 text-[10px]">Paid {new Date(selectedReq.paid_at).toLocaleDateString("en-IN")}</Badge>
-                  ) : (
-                    <Badge className="bg-gray-100 text-gray-600 border-0 text-[10px]">Unpaid</Badge>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div><span className="text-muted-foreground">Amount:</span> <span className="font-bold text-foreground">&#8377;{selectedReq.fee_amount}</span></div>
+                  <div className="text-right">
+                    {selectedReq.paid_at ? (
+                      <Badge className="bg-emerald-100 text-emerald-700 border-0 text-[10px]">Paid {new Date(selectedReq.paid_at).toLocaleDateString("en-IN")}</Badge>
+                    ) : (
+                      <Badge className="bg-gray-100 text-gray-600 border-0 text-[10px]">Unpaid</Badge>
+                    )}
+                  </div>
+                  {selectedReq.payment_ref && (
+                    <div className="col-span-2"><span className="text-muted-foreground">Txn Ref:</span> <span className="font-mono text-xs">{selectedReq.payment_ref}</span></div>
+                  )}
+                  {selectedReq.payment_method && (
+                    <div className="col-span-2"><span className="text-muted-foreground">Gateway:</span> <span className="capitalize">{selectedReq.payment_method}</span></div>
                   )}
                 </div>
               </div>
+
+              {/* Request Type & Copy Type */}
+              {selectedReq.request_type !== "verification" && (
+                <div className="rounded-xl border border-border p-3 space-y-1">
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase">Request Details</p>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div><span className="text-muted-foreground">Type:</span> <span className="font-medium capitalize">{(selectedReq.request_type || "").replace("_", " ")}</span></div>
+                    {selectedReq.copy_type && <div><span className="text-muted-foreground">Copy:</span> <span className="font-medium capitalize">{selectedReq.copy_type}</span></div>}
+                    {selectedReq.enrollment_no && <div><span className="text-muted-foreground">Enrollment:</span> <span className="font-medium">{selectedReq.enrollment_no}</span></div>}
+                    {selectedReq.campus && <div><span className="text-muted-foreground">Campus:</span> <span className="font-medium">{selectedReq.campus}</span></div>}
+                  </div>
+                </div>
+              )}
 
               {/* Review Section */}
               <div className="space-y-3 pt-2 border-t border-border">
