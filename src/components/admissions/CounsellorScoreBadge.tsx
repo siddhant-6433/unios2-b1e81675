@@ -66,24 +66,21 @@ export function CounsellorScoreBadge() {
       </div>
       <div>
         <div className="flex items-center gap-2">
-          <span className="text-lg font-bold text-foreground">{score.weekly_score}</span>
-          <span className="text-[10px] font-medium text-muted-foreground uppercase">This Week</span>
-          {score.daily_score > 0 && (
-            <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300 animate-fade-in">
+          {score.daily_score !== 0 && (
+            <span className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+              score.daily_score > 0
+                ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
+                : "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300"
+            }`}>
               <TrendingUp className="h-2.5 w-2.5" />
-              +{score.daily_score} today
+              Today: {score.daily_score > 0 ? `+${score.daily_score}` : score.daily_score}
             </span>
           )}
-          {score.negative_actions > 0 && score.daily_score <= 0 && (
-            <span className="inline-flex items-center gap-0.5 rounded-full bg-red-100 dark:bg-red-900/30 px-1.5 py-0.5 text-[10px] font-bold text-red-700 dark:text-red-300">
-              <TrendingDown className="h-2.5 w-2.5" />
-              {score.negative_actions} penalties
-            </span>
-          )}
+          <span className="text-sm font-bold text-foreground">All-time: {score.total_score}</span>
         </div>
         <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+          <span>Weekly: <span className="font-semibold text-foreground">{score.weekly_score}</span></span>
           <span>Monthly: <span className="font-semibold text-foreground">{score.monthly_score}</span></span>
-          <span>All-time: <span className="font-semibold text-foreground">{score.total_score}</span></span>
           <span className="text-emerald-600">+{score.positive_actions}</span>
           {score.negative_actions > 0 && <span className="text-red-600">-{score.negative_actions}</span>}
         </div>

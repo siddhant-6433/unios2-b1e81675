@@ -1036,7 +1036,8 @@ const CounsellorDashboard = () => {
                     <th className="px-4 py-3 text-center text-[10px] font-semibold text-red-600 uppercase tracking-wide" title="Total TAT defaults">Defaults</th>
                     <th className="px-3 py-3 text-center text-[10px] font-semibold text-emerald-600 uppercase">+</th>
                     <th className="px-3 py-3 text-center text-[10px] font-semibold text-red-600 uppercase">-</th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Score</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-blue-600 uppercase tracking-wide">Today</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">All Time</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1052,9 +1053,6 @@ const CounsellorDashboard = () => {
                       </td>
                       <td className="px-4 py-3 font-medium text-foreground">
                         {s.counsellor_name || "Unknown"}
-                        {s.daily_score > 0 && (
-                          <span className="ml-1.5 text-[10px] font-bold text-emerald-600">+{s.daily_score} today</span>
-                        )}
                       </td>
                       <td className="px-4 py-3 text-center text-muted-foreground">{s.leads_assigned}</td>
                       <td className="px-4 py-3 text-center font-medium text-foreground">{s.total_calls}</td>
@@ -1089,14 +1087,19 @@ const CounsellorDashboard = () => {
                       </td>
                       <td className="px-4 py-3 text-center">
                         <Badge className={`border-0 text-xs font-bold ${
-                          s.score > 0 ? "bg-primary/10 text-primary" : s.score < 0 ? "bg-red-100 text-red-700" : "bg-muted text-muted-foreground"
-                        }`}>{s.score}</Badge>
+                          s.daily_score > 0 ? "bg-blue-100 text-blue-700" : s.daily_score < 0 ? "bg-red-100 text-red-700" : "bg-muted text-muted-foreground"
+                        }`}>{s.daily_score > 0 ? `+${s.daily_score}` : s.daily_score}</Badge>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <Badge className={`border-0 text-xs font-bold ${
+                          s.total_score > 0 ? "bg-primary/10 text-primary" : s.total_score < 0 ? "bg-red-100 text-red-700" : "bg-muted text-muted-foreground"
+                        }`}>{s.total_score}</Badge>
                       </td>
                     </tr>
                     );
                   })}
                   {ranked.length === 0 && (
-                    <tr><td colSpan={12} className="px-4 py-8 text-center text-sm text-muted-foreground">No counsellor data available</td></tr>
+                    <tr><td colSpan={13} className="px-4 py-8 text-center text-sm text-muted-foreground">No counsellor data available</td></tr>
                   )}
                 </tbody>
               </table>

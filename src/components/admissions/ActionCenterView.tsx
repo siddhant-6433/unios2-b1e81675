@@ -72,15 +72,16 @@ function LeaderboardWidget() {
             }`}>
               #{myRank}
             </span>
-            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary">
-              {myScore.weekly_score} pts
-            </span>
-            {myScore.daily_score > 0 && (
-              <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300 animate-fade-in">
-                <TrendingUp className="h-2.5 w-2.5" />
-                +{myScore.daily_score} today
+            {myScore.daily_score !== 0 && (
+              <span className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                myScore.daily_score > 0 ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300" : "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300"
+              }`}>
+                Today: {myScore.daily_score > 0 ? `+${myScore.daily_score}` : myScore.daily_score}
               </span>
             )}
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary">
+              All: {myScore.total_score}
+            </span>
           </div>
         )}
       </div>
@@ -99,14 +100,16 @@ function LeaderboardWidget() {
                 {s.counsellor_name || "Unknown"}
                 {isMe && <span className="text-[9px] text-primary ml-1">(You)</span>}
               </span>
-              <span className={`text-xs font-bold ${
-                s.weekly_score > 0 ? "text-primary" : s.weekly_score < 0 ? "text-red-600" : "text-muted-foreground"
-              }`}>
-                {s.weekly_score}
-              </span>
-              {s.daily_score > 0 && (
-                <span className="text-[9px] font-medium text-emerald-600">+{s.daily_score}</span>
+              {s.daily_score !== 0 && (
+                <span className={`text-[9px] font-bold ${s.daily_score > 0 ? "text-emerald-600" : "text-red-600"}`}>
+                  {s.daily_score > 0 ? `+${s.daily_score}` : s.daily_score}
+                </span>
               )}
+              <span className={`text-xs font-bold ${
+                s.total_score > 0 ? "text-primary" : s.total_score < 0 ? "text-red-600" : "text-muted-foreground"
+              }`}>
+                {s.total_score}
+              </span>
             </div>
           );
         })}
