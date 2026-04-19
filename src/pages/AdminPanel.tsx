@@ -142,7 +142,7 @@ const AdminPanel = () => {
     }
   };
 
-  const isSuperAdmin = realRole === "super_admin";
+  const isSuperAdmin = realRole === "super_admin" || role === "super_admin";
   const canManageUsers = isSuperAdmin || hasPermission("user_management:view");
 
   useEffect(() => {
