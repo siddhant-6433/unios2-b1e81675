@@ -54,7 +54,7 @@ export default function TeamManagement() {
     ]);
 
     const roles = rolesRes.data || [];
-    const employeeRoles = ["super_admin", "campus_admin", "principal", "admission_head", "counsellor", "accountant", "faculty", "teacher", "data_entry", "office_assistant", "hostel_warden"];
+    const employeeRoles = ["super_admin", "campus_admin", "principal", "admission_head", "counsellor", "accountant", "faculty", "teacher", "data_entry", "office_admin", "office_assistant", "hostel_warden"];
     const employeeUserIds = new Set(roles.filter((r: any) => employeeRoles.includes(r.role)).map((r: any) => r.user_id));
 
     const roleMap = new Map(roles.map((r: any) => [r.user_id, r.role]));

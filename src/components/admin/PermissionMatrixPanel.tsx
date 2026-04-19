@@ -27,14 +27,14 @@ interface UserOverride {
 
 const ROLES = [
   "campus_admin", "principal", "admission_head", "counsellor", "accountant",
-  "faculty", "teacher", "data_entry", "office_assistant", "hostel_warden",
+  "faculty", "teacher", "data_entry", "office_admin", "office_assistant", "hostel_warden",
   "ib_coordinator", "consultant", "student", "parent",
 ];
 
 const ROLE_LABELS: Record<string, string> = {
   campus_admin: "Campus Admin", principal: "Principal", admission_head: "Adm. Head",
   counsellor: "Counsellor", accountant: "Accountant", faculty: "Faculty",
-  teacher: "Teacher", data_entry: "Data Entry", office_assistant: "Office Asst.",
+  teacher: "Teacher", data_entry: "Data Entry", office_admin: "Office Admin", office_assistant: "Office Asst.",
   hostel_warden: "Hostel", ib_coordinator: "IB Coord.", consultant: "Consultant",
   student: "Student", parent: "Parent",
 };

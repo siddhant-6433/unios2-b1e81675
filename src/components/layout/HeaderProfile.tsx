@@ -7,7 +7,7 @@ const roleLabels: Record<string, string> = {
   super_admin: "Super Admin", campus_admin: "Campus Admin", principal: "Principal",
   faculty: "Faculty", teacher: "Teacher", student: "Student", parent: "Parent",
   counsellor: "Counsellor", accountant: "Accountant", admission_head: "Admission Head",
-  data_entry: "Data Entry", office_assistant: "Office Assistant", hostel_warden: "Hostel Warden",
+  data_entry: "Data Entry", office_admin: "Office Administrator", office_assistant: "Office Assistant", hostel_warden: "Hostel Warden",
   consultant: "Consultant", ib_coordinator: "IB Coordinator",
 };
 

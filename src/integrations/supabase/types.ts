@@ -6763,6 +6763,7 @@ export type Database = {
         | "faculty"
         | "teacher"
         | "data_entry"
+        | "office_admin"
         | "office_assistant"
         | "hostel_warden"
         | "student"
@@ -6941,6 +6942,7 @@ export const Constants = {
         "faculty",
         "teacher",
         "data_entry",
+        "office_admin",
         "office_assistant",
         "hostel_warden",
         "student",

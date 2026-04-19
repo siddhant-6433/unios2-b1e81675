@@ -9,7 +9,7 @@ type AppRole = Database["public"]["Enums"]["app_role"];
 const VALID_ROLES: AppRole[] = [
   "super_admin", "campus_admin", "principal", "admission_head",
   "counsellor", "accountant", "faculty", "teacher",
-  "data_entry", "office_assistant", "hostel_warden", "student", "parent",
+  "data_entry", "office_admin", "office_assistant", "hostel_warden", "student", "parent",
 ];
 
 interface ParsedUser {

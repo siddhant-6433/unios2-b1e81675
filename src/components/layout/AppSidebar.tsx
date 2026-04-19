@@ -24,7 +24,7 @@ import { useCampus } from "@/contexts/CampusContext";
 type AppRole =
   | "super_admin" | "campus_admin" | "principal" | "admission_head"
   | "counsellor" | "accountant" | "faculty" | "teacher"
-  | "data_entry" | "office_assistant" | "hostel_warden" | "consultant" | "student" | "parent"
+  | "data_entry" | "office_admin" | "office_assistant" | "hostel_warden" | "consultant" | "student" | "parent"
   | "ib_coordinator";
 
 type MenuItem = { title: string; url: string; icon: any; permission?: string; badge?: number };
@@ -80,7 +80,7 @@ const roleLabels: Record<string, string> = {
   super_admin: "Super Admin", campus_admin: "Campus Admin", principal: "Principal",
   faculty: "Faculty", teacher: "Teacher", student: "Student", parent: "Parent",
   counsellor: "Counsellor", accountant: "Accountant", admission_head: "Admission Head",
-  data_entry: "Data Entry", office_assistant: "Office Assistant", hostel_warden: "Hostel Warden",
+  data_entry: "Data Entry", office_admin: "Office Administrator", office_assistant: "Office Assistant", hostel_warden: "Hostel Warden",
   ib_coordinator: "IB Coordinator",
 };
 
