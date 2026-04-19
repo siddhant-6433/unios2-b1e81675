@@ -58,6 +58,12 @@ Deno.serve(async (req) => {
     if (!user_id) return json({ error: "user_id is required" }, 400);
     if (user_id === callerId) return json({ error: "You cannot delete your own account." }, 400);
 
+    // Prevent deletion of super_admin users
+    const { data: targetRole } = await adminClient.rpc("get_user_role", { _user_id: user_id });
+    if (targetRole === "super_admin") {
+      return json({ error: "Super Admin accounts cannot be deleted." }, 403);
+    }
+
     // Clean up public-schema records first (avoids FK constraint errors)
     await adminClient.from("user_roles").delete().eq("user_id", user_id);
     await adminClient.from("profiles").delete().eq("user_id", user_id);

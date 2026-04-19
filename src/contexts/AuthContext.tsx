@@ -27,6 +27,8 @@ interface AuthContextType {
   user: User | null;
   profile: Profile | null;
   role: AppRole | null;
+  permissions: string[];
+  hasPermission: (perm: string) => boolean;
   loading: boolean;
   roleLoaded: boolean;
   signOut: () => Promise<void>;
@@ -47,6 +49,8 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   profile: null,
   role: null,
+  permissions: [],
+  hasPermission: () => false,
   loading: true,
   roleLoaded: false,
   signOut: async () => {},
@@ -65,6 +69,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [role, setRole] = useState<AppRole | null>(null);
+  const [permissions, setPermissions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [roleLoaded, setRoleLoaded] = useState(false);
   const [impersonation, setImpersonation] = useState<ImpersonationTarget | null>(() => {
@@ -75,9 +80,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   });
 
   const fetchUserData = async (userId: string, authUser?: User) => {
-    const [profileRes, roleRes] = await Promise.all([
+    const [profileRes, roleRes, permsRes] = await Promise.all([
       supabase.from("profiles").select("id, display_name, phone, avatar_url, campus, department, institution").eq("user_id", userId).single(),
       supabase.rpc("get_user_role", { _user_id: userId }),
+      supabase.rpc("get_user_permissions", { _user_id: userId }),
     ]);
 
     if (profileRes.data) {
@@ -103,6 +109,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
 
     if (roleRes.data) setRole(roleRes.data as AppRole);
+    if (permsRes.data) setPermissions(permsRes.data as string[]);
     setRoleLoaded(true);
   };
 
@@ -167,6 +174,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setRole(null);
   };
 
+  const hasPermission = useCallback((perm: string) => {
+    // super_admin has all permissions
+    if (role === "super_admin") return true;
+    return permissions.includes(perm);
+  }, [role, permissions]);
+
   // When impersonating, override role, profile, and user.id
   const effectiveRole = impersonation ? impersonation.role : role;
   const effectiveProfile = impersonation ? impersonation.profile : profile;
@@ -181,6 +194,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       user: effectiveUser,
       profile: effectiveProfile,
       role: effectiveRole,
+      permissions,
+      hasPermission,
       loading,
       roleLoaded,
       signOut,

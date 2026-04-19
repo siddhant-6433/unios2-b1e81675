@@ -18,6 +18,7 @@ import BulkImportDialog from "@/components/admin/BulkImportDialog";
 import EditPhoneDialog from "@/components/admin/EditPhoneDialog";
 import EmployeeProfileDialog from "@/components/admin/EmployeeProfileDialog";
 import SetPasswordDialog from "@/components/admin/SetPasswordDialog";
+import UserPermissionsDialog from "@/components/admin/UserPermissionsDialog";
 import TeamManagement from "@/components/admin/TeamManagement";
 import CourseCampusMaster from "@/components/admin/CourseCampusMaster";
 import FinancialGroupsPanel from "@/components/admin/FinancialGroupsPanel";
@@ -71,7 +72,7 @@ function timeAgo(dateStr: string): string {
 }
 
 const AdminPanel = () => {
-  const { role, realRole, isImpersonating, startImpersonating, loading: authLoading } = useAuth();
+  const { role, realRole, isImpersonating, startImpersonating, hasPermission, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [users, setUsers] = useState<UserWithRole[]>([]);
@@ -87,6 +88,7 @@ const AdminPanel = () => {
   const [employeeProfile, setEmployeeProfile] = useState<{ userId: string; name: string } | null>(null);
   const [setPasswordTarget, setSetPasswordTarget] = useState<{ userId: string; name: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ userId: string; name: string } | null>(null);
+  const [permTarget, setPermTarget] = useState<{ userId: string; name: string; role: string | null } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const { toast } = useToast();
 
@@ -137,8 +139,8 @@ const AdminPanel = () => {
   };
 
   useEffect(() => {
-    if (realRole === "super_admin") fetchUsers();
-  }, [realRole]);
+    if (canManageUsers) fetchUsers();
+  }, [canManageUsers]);
 
   const handleRoleChange = async (userId: string, newRole: AppRole | "none") => {
     setSavingUser(userId);
@@ -235,8 +237,10 @@ const AdminPanel = () => {
     );
   }
 
-  // Allow access if the real user is super_admin (even while impersonating)
-  if (realRole !== "super_admin") return <Navigate to="/" replace />;
+  const isSuperAdmin = realRole === "super_admin";
+  const canManageUsers = isSuperAdmin || hasPermission("user_management:view");
+  // Allow access if super_admin or has user_management permission
+  if (!canManageUsers) return <Navigate to="/" replace />;
 
   const filtered = users.filter((u) => {
     const matchesSearch =
@@ -272,7 +276,7 @@ const AdminPanel = () => {
         </div>
         <div className="flex items-center gap-2 rounded-xl bg-pastel-purple px-3 py-1.5">
           <Shield className="h-4 w-4 text-foreground/70" />
-          <span className="text-xs font-semibold text-foreground/80">Super Admin Only</span>
+          <span className="text-xs font-semibold text-foreground/80">{isSuperAdmin ? "Super Admin" : "User Management"}</span>
         </div>
       </div>
 
@@ -306,14 +310,16 @@ const AdminPanel = () => {
 
         <TabsContent value="users" className="mt-6">
           <div className="space-y-6">
-            <div className="flex items-center gap-3">
-              <button onClick={() => setBulkOpen(true)} className="flex items-center gap-2 rounded-xl border border-input bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors">
-                <FileSpreadsheet className="h-4 w-4" /> Bulk Import
-              </button>
-              <button onClick={() => setInviteOpen(true)} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
-                <UserPlus className="h-4 w-4" /> Invite User
-              </button>
-            </div>
+            {isSuperAdmin && (
+              <div className="flex items-center gap-3">
+                <button onClick={() => setBulkOpen(true)} className="flex items-center gap-2 rounded-xl border border-input bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors">
+                  <FileSpreadsheet className="h-4 w-4" /> Bulk Import
+                </button>
+                <button onClick={() => setInviteOpen(true)} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
+                  <UserPlus className="h-4 w-4" /> Invite User
+                </button>
+              </div>
+            )}
 
             <div className="flex items-center gap-2">
               {([
@@ -493,29 +499,40 @@ const AdminPanel = () => {
                               </button>
                               {!isEditing && (
                                 <>
-                                  {!isFamiliesTab && (
+                                  {!isFamiliesTab && isSuperAdmin && (
                                     <button onClick={async () => { await startImpersonating(user.user_id); navigate("/"); }}
                                       className="rounded-lg bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-500/20 transition-colors flex items-center gap-1"
                                       title="View as this user">
                                       <UserCheck className="h-3.5 w-3.5" />Impersonate
                                     </button>
                                   )}
-                                  <button onClick={() => setSetPasswordTarget({ userId: user.user_id, name: user.display_name || "User" })}
-                                    className="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/80 transition-colors flex items-center gap-1"
-                                    title="Set password">
-                                    <KeyRound className="h-3.5 w-3.5" />Password
-                                  </button>
-                                  {!isFamiliesTab && (
+                                  {isSuperAdmin && (
+                                    <button onClick={() => setSetPasswordTarget({ userId: user.user_id, name: user.display_name || "User" })}
+                                      className="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/80 transition-colors flex items-center gap-1"
+                                      title="Set password">
+                                      <KeyRound className="h-3.5 w-3.5" />Password
+                                    </button>
+                                  )}
+                                  {!isFamiliesTab && isSuperAdmin && (
                                     <button onClick={() => setEditingUser(user.user_id)}
                                       className="rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors">
                                       Change Role
                                     </button>
                                   )}
-                                  <button onClick={() => setDeleteTarget({ userId: user.user_id, name: user.display_name || "Unnamed" })}
-                                    className="rounded-lg bg-destructive/10 p-1.5 text-destructive hover:bg-destructive/20 transition-colors"
-                                    title="Delete user">
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
+                                  {!isFamiliesTab && isSuperAdmin && (
+                                    <button onClick={() => setPermTarget({ userId: user.user_id, name: user.display_name || "User", role: user.role })}
+                                      className="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/80 transition-colors flex items-center gap-1"
+                                      title="Manage permissions">
+                                      <Shield className="h-3.5 w-3.5" />Permissions
+                                    </button>
+                                  )}
+                                  {isSuperAdmin && user.role !== "super_admin" && (
+                                    <button onClick={() => setDeleteTarget({ userId: user.user_id, name: user.display_name || "Unnamed" })}
+                                      className="rounded-lg bg-destructive/10 p-1.5 text-destructive hover:bg-destructive/20 transition-colors"
+                                      title="Delete user">
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
                                 </>
                               )}
                             </div>
@@ -538,6 +555,8 @@ const AdminPanel = () => {
               userId={employeeProfile?.userId || ""} userName={employeeProfile?.name || ""} />
             <SetPasswordDialog open={!!setPasswordTarget} onClose={() => setSetPasswordTarget(null)}
               userId={setPasswordTarget?.userId || ""} userName={setPasswordTarget?.name || ""} />
+            <UserPermissionsDialog open={!!permTarget} onClose={() => setPermTarget(null)}
+              userId={permTarget?.userId || ""} userName={permTarget?.name || ""} userRole={permTarget?.role || null} />
 
             <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
               <AlertDialogContent>
