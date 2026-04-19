@@ -409,7 +409,7 @@ const AdminPanel = () => {
               </>)}
             </div>
 
-            <div className="rounded-xl bg-card card-shadow overflow-hidden">
+            <div className="rounded-xl bg-card card-shadow overflow-x-auto">
               {loading ? (
                 <div className="flex items-center justify-center py-16">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -496,39 +496,39 @@ const AdminPanel = () => {
                             )}
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <div className="flex items-center justify-end gap-2">
+                            <div className="flex items-center justify-end gap-1.5 flex-nowrap">
                               <button onClick={() => handleViewProfile(user)}
-                                className="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/80 transition-colors flex items-center gap-1"
+                                className="rounded-lg bg-muted p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
                                 title={user.role === "student" ? "View Student Profile" : "View Employee Profile"}>
-                                <Eye className="h-3.5 w-3.5" />{user.role === "student" ? "Student" : "Profile"}
+                                <Eye className="h-3.5 w-3.5" />
                               </button>
                               {!isEditing && (
                                 <>
                                   {!isFamiliesTab && isSuperAdmin && (
                                     <button onClick={async () => { await startImpersonating(user.user_id); navigate("/"); }}
-                                      className="rounded-lg bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-500/20 transition-colors flex items-center gap-1"
-                                      title="View as this user">
-                                      <UserCheck className="h-3.5 w-3.5" />Impersonate
+                                      className="rounded-lg bg-amber-500/10 p-1.5 text-amber-700 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
+                                      title="Impersonate user">
+                                      <UserCheck className="h-3.5 w-3.5" />
                                     </button>
                                   )}
                                   {isSuperAdmin && (
                                     <button onClick={() => setSetPasswordTarget({ userId: user.user_id, name: user.display_name || "User" })}
-                                      className="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/80 transition-colors flex items-center gap-1"
+                                      className="rounded-lg bg-muted p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
                                       title="Set password">
-                                      <KeyRound className="h-3.5 w-3.5" />Password
+                                      <KeyRound className="h-3.5 w-3.5" />
                                     </button>
                                   )}
                                   {!isFamiliesTab && isSuperAdmin && (
                                     <button onClick={() => setEditingUser(user.user_id)}
-                                      className="rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors">
-                                      Change Role
+                                      className="rounded-lg bg-primary/10 px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors">
+                                      Role
                                     </button>
                                   )}
                                   {!isFamiliesTab && isSuperAdmin && (
                                     <button onClick={() => setPermTarget({ userId: user.user_id, name: user.display_name || "User", role: user.role })}
-                                      className="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/80 transition-colors flex items-center gap-1"
+                                      className="rounded-lg bg-muted p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
                                       title="Manage permissions">
-                                      <Shield className="h-3.5 w-3.5" />Permissions
+                                      <Shield className="h-3.5 w-3.5" />
                                     </button>
                                   )}
                                   {isSuperAdmin && user.role !== "super_admin" && (
