@@ -377,6 +377,15 @@ registrar@nimt.ac.in`,
     if (data?.signedUrl) window.open(data.signedUrl, "_blank");
   };
 
+  // Pagination
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 15;
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paginatedRequests = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  // Reset page on filter change
+  useEffect(() => { setPage(1); }, [statusFilter]);
+
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
 
   const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20";
@@ -419,6 +428,25 @@ registrar@nimt.ac.in`,
             <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">No requests found</div>
           ) : (
             <div className="overflow-x-auto">
+              {/* Count + pagination header */}
+              <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
+                <p className="text-xs text-muted-foreground">
+                  Showing <span className="font-semibold text-foreground">{(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)}</span> of <span className="font-semibold text-foreground">{filtered.length}</span>
+                </p>
+                {totalPages > 1 && (
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => setPage(1)} disabled={page <= 1}
+                      className="rounded-lg border border-input bg-card px-2 py-1 text-xs disabled:opacity-40 hover:bg-muted">First</button>
+                    <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}
+                      className="rounded-lg border border-input bg-card px-2.5 py-1 text-xs font-medium disabled:opacity-40 hover:bg-muted">Prev</button>
+                    <span className="text-xs text-muted-foreground px-2">{page} / {totalPages}</span>
+                    <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}
+                      className="rounded-lg border border-input bg-card px-2.5 py-1 text-xs font-medium disabled:opacity-40 hover:bg-muted">Next</button>
+                    <button onClick={() => setPage(totalPages)} disabled={page >= totalPages}
+                      className="rounded-lg border border-input bg-card px-2 py-1 text-xs disabled:opacity-40 hover:bg-muted">Last</button>
+                  </div>
+                )}
+              </div>
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
@@ -434,7 +462,7 @@ registrar@nimt.ac.in`,
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((req: any) => {
+                  {paginatedRequests.map((req: any) => {
                     const cfg = STATUS_CONFIG[req.status] || STATUS_CONFIG.pending_payment;
                     const isOverdue = req.due_date && new Date(req.due_date) < new Date() && ["paid", "under_review"].includes(req.status);
                     const daysLeft = req.due_date ? Math.ceil((new Date(req.due_date).getTime() - Date.now()) / 86400000) : null;
