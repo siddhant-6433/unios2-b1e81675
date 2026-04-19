@@ -80,37 +80,48 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   });
 
   const fetchUserData = async (userId: string, authUser?: User) => {
-    const [profileRes, roleRes, permsRes] = await Promise.all([
-      supabase.from("profiles").select("id, display_name, phone, avatar_url, campus, department, institution").eq("user_id", userId).single(),
-      supabase.rpc("get_user_role", { _user_id: userId }),
-      supabase.rpc("get_user_permissions", { _user_id: userId }).catch(() => ({ data: null, error: null })),
-    ]);
+    try {
+      const [profileRes, roleRes] = await Promise.all([
+        supabase.from("profiles").select("id, display_name, phone, avatar_url, campus, department, institution").eq("user_id", userId).single(),
+        supabase.rpc("get_user_role", { _user_id: userId }),
+      ]);
 
-    if (profileRes.data) {
-      // Sync phone from auth if profile phone is empty but auth user has one
-      const existingProfile = profileRes.data;
-      const authPhone = authUser?.phone || null;
-      if (!existingProfile.phone && authPhone) {
-        await supabase.from("profiles").update({ phone: authPhone }).eq("user_id", userId);
-        existingProfile.phone = authPhone;
+      if (profileRes.data) {
+        // Sync phone from auth if profile phone is empty but auth user has one
+        const existingProfile = profileRes.data;
+        const authPhone = authUser?.phone || null;
+        if (!existingProfile.phone && authPhone) {
+          await supabase.from("profiles").update({ phone: authPhone }).eq("user_id", userId);
+          existingProfile.phone = authPhone;
+        }
+        setProfile(existingProfile);
+      } else {
+        // Profile missing (user created outside normal signup flow) — create it now
+        const meta = authUser?.user_metadata ?? {};
+        const displayName = meta.display_name || meta.full_name || authUser?.email || userId;
+        const phone = authUser?.phone || null;
+        const { data: upserted } = await supabase
+          .from("profiles")
+          .upsert({ user_id: userId, display_name: displayName, ...(phone && { phone }) }, { onConflict: "user_id" })
+          .select("id, display_name, phone, avatar_url, campus, department, institution")
+          .single();
+        if (upserted) setProfile(upserted);
       }
-      setProfile(existingProfile);
-    } else {
-      // Profile missing (user created outside normal signup flow) — create it now
-      const meta = authUser?.user_metadata ?? {};
-      const displayName = meta.display_name || meta.full_name || authUser?.email || userId;
-      const phone = authUser?.phone || null;
-      const { data: upserted } = await supabase
-        .from("profiles")
-        .upsert({ user_id: userId, display_name: displayName, ...(phone && { phone }) }, { onConflict: "user_id" })
-        .select("id, display_name, phone, avatar_url, campus, department, institution")
-        .single();
-      if (upserted) setProfile(upserted);
-    }
 
-    if (roleRes.data) setRole(roleRes.data as AppRole);
-    if (Array.isArray(permsRes?.data)) setPermissions(permsRes.data as string[]);
-    setRoleLoaded(true);
+      if (roleRes.data) setRole(roleRes.data as AppRole);
+
+      // Fetch permissions separately — non-critical, must not block auth
+      try {
+        const permsRes = await supabase.rpc("get_user_permissions", { _user_id: userId });
+        if (Array.isArray(permsRes?.data)) setPermissions(permsRes.data as string[]);
+      } catch {
+        // Permissions fetch failed — default to empty (role-based access still works)
+      }
+    } catch (err) {
+      console.error("fetchUserData failed:", err);
+    } finally {
+      setRoleLoaded(true);
+    }
   };
 
   useEffect(() => {
