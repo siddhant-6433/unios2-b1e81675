@@ -72,7 +72,7 @@ function timeAgo(dateStr: string): string {
 }
 
 const AdminPanel = () => {
-  const { role, realRole, isImpersonating, startImpersonating, hasPermission, loading: authLoading } = useAuth();
+  const { role, realRole, isImpersonating, startImpersonating, hasPermission, loading: authLoading, roleLoaded } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [users, setUsers] = useState<UserWithRole[]>([]);
@@ -229,7 +229,10 @@ const AdminPanel = () => {
     }
   };
 
-  if (authLoading) {
+  const isSuperAdmin = realRole === "super_admin";
+  const canManageUsers = isSuperAdmin || hasPermission("user_management:view");
+
+  if (authLoading || !roleLoaded) {
     return (
       <div className="flex h-64 items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -237,8 +240,6 @@ const AdminPanel = () => {
     );
   }
 
-  const isSuperAdmin = realRole === "super_admin";
-  const canManageUsers = isSuperAdmin || hasPermission("user_management:view");
   // Allow access if super_admin or has user_management permission
   if (!canManageUsers) return <Navigate to="/" replace />;
 
