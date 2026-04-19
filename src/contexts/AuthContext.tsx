@@ -110,13 +110,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       if (roleRes.data) setRole(roleRes.data as AppRole);
 
-      // Fetch permissions separately — non-critical, must not block auth
-      try {
-        const permsRes = await supabase.rpc("get_user_permissions", { _user_id: userId });
-        if (Array.isArray(permsRes?.data)) setPermissions(permsRes.data as string[]);
-      } catch {
-        // Permissions fetch failed — default to empty (role-based access still works)
-      }
+      // Fetch permissions — non-critical, errors are safe to ignore
+      supabase.rpc("get_user_permissions" as any, { _user_id: userId })
+        .then((res: any) => { if (Array.isArray(res?.data)) setPermissions(res.data); })
+        .catch(() => {});
     } catch (err) {
       console.error("fetchUserData failed:", err);
     } finally {

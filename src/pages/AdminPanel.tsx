@@ -142,6 +142,9 @@ const AdminPanel = () => {
     }
   };
 
+  const isSuperAdmin = realRole === "super_admin";
+  const canManageUsers = isSuperAdmin || hasPermission("user_management:view");
+
   useEffect(() => {
     if (canManageUsers) fetchUsers();
   }, [canManageUsers]);
@@ -232,9 +235,6 @@ const AdminPanel = () => {
       setEmployeeProfile({ userId: user.user_id, name: user.display_name || "Unnamed" });
     }
   };
-
-  const isSuperAdmin = realRole === "super_admin";
-  const canManageUsers = isSuperAdmin || hasPermission("user_management:view");
 
   if (authLoading || !roleLoaded) {
     return (
