@@ -333,15 +333,53 @@ async function reconcilePostCall(
   const isCallbackAction = actions.includes("callback_followup_created") || disposition === "call_back";
 
   if (isVisitAction) {
-    // Get visit date
-    let visitDate = "the scheduled date";
-    const visitCall = toolsMade.find(tc => tc.name === "schedule_visit");
-    if (visitCall?.args?.visit_date) {
-      visitDate = visitCall.args.visit_date;
-    } else {
-      const vRes = await fetch(`${SUPABASE_URL}/rest/v1/campus_visits?lead_id=eq.${leadId}&select=visit_date&order=created_at.desc&limit=1`, { headers: dbHeaders });
-      const vRows = await vRes.json().catch(() => []);
-      if (vRows?.[0]?.visit_date) visitDate = vRows[0].visit_date;
+    // Check if a visit actually exists in DB — create one if not
+    const existingVisitRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/campus_visits?lead_id=eq.${leadId}&status=eq.scheduled&select=id,visit_date&order=created_at.desc&limit=1`,
+      { headers: dbHeaders },
+    );
+    const existingVisits = await existingVisitRes.json().catch(() => []);
+    let visitDate = existingVisits?.[0]?.visit_date || null;
+
+    // If disposition says visit_scheduled but no visit record exists → create one now
+    if (!existingVisits?.length) {
+      const visitCall = toolsMade.find(tc => tc.name === "schedule_visit");
+      const extractedDate = visitCall?.args?.visit_date
+        || extractVisitDateFromTranscript(aiLines)
+        || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const visitTime = /\bmorning|subah\b/.test(aiText) ? "morning" : /\bafternoon|dopahar\b/.test(aiText) ? "afternoon" : /\bevening|shaam\b/.test(aiText) ? "evening" : "morning";
+      const timeMap: Record<string, string> = { morning: "10:00", afternoon: "14:00", evening: "16:00" };
+      const visitTimestamp = `${extractedDate}T${timeMap[visitTime]}:00+05:30`;
+
+      const ldRes2 = await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}&select=campus_id`, { headers: dbHeaders });
+      const ldData2 = await ldRes2.json();
+      const campusId2 = ldData2?.[0]?.campus_id || null;
+
+      const visitBody2: Record<string, any> = { lead_id: leadId, visit_date: visitTimestamp, status: "scheduled" };
+      if (campusId2) visitBody2.campus_id = campusId2;
+      const createRes = await fetch(`${SUPABASE_URL}/rest/v1/campus_visits`, {
+        method: "POST", headers: { ...dbHeaders, Prefer: "return=minimal" }, body: JSON.stringify(visitBody2),
+      });
+      if (createRes.ok) {
+        visitDate = visitTimestamp;
+        actions.push(`visit_created_from_disposition:${extractedDate}`);
+        await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}`, {
+          method: "PATCH", headers: { ...dbHeaders, Prefer: "return=minimal" },
+          body: JSON.stringify({ stage: "visit_scheduled" }),
+        });
+        await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, {
+          method: "POST", headers: { ...dbHeaders, Prefer: "return=minimal" },
+          body: JSON.stringify({ lead_id: leadId, content: `🤖 Post-call reconciliation: Campus visit created for ${extractedDate} — disposition was visit_scheduled but no visit record existed.` }),
+        });
+        await assignLeadRoundRobin(leadId);
+        fireAutomation("visit_scheduled", leadId);
+      }
+    }
+
+    visitDate = visitDate || "the scheduled date";
+    // Format date for WhatsApp if it's a full timestamp
+    if (typeof visitDate === "string" && visitDate.includes("T")) {
+      visitDate = visitDate.slice(0, 10);
     }
     actions.push("wa:visit_confirmation");
     return { templateKey: "visit_confirmation", templateParams: [waLd.name, visitDate, cm], buttonUrls: ["1820424915210710582"], phone: waLd.phone, actions };
