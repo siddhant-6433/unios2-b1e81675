@@ -83,7 +83,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const [profileRes, roleRes, permsRes] = await Promise.all([
       supabase.from("profiles").select("id, display_name, phone, avatar_url, campus, department, institution").eq("user_id", userId).single(),
       supabase.rpc("get_user_role", { _user_id: userId }),
-      supabase.rpc("get_user_permissions", { _user_id: userId }),
+      supabase.rpc("get_user_permissions", { _user_id: userId }).catch(() => ({ data: null, error: null })),
     ]);
 
     if (profileRes.data) {
@@ -109,7 +109,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
 
     if (roleRes.data) setRole(roleRes.data as AppRole);
-    if (permsRes.data) setPermissions(permsRes.data as string[]);
+    if (Array.isArray(permsRes?.data)) setPermissions(permsRes.data as string[]);
     setRoleLoaded(true);
   };
 
