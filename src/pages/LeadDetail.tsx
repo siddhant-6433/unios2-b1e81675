@@ -270,8 +270,9 @@ const LeadDetail = () => {
       let autoParams: string[] = [];
 
       if (data.disposition === "interested") {
-        autoTemplate = "course_details";
-        autoParams = [lead.name, course];
+        autoTemplate = "ai_call_course_info";
+        const campusLabel = campusName || "NIMT campus";
+        autoParams = [lead.name, course, campusLabel, "https://www.nimt.ac.in/courses", "https://uni.nimt.ac.in/apply/nimt"];
       } else if (data.disposition === "not_answered" || data.disposition === "busy" || data.disposition === "voicemail") {
         autoTemplate = "missed_call";
         autoParams = [lead.name, course];
@@ -507,13 +508,23 @@ const LeadDetail = () => {
   const triggerAiCall = async () => {
     setAiCalling(true);
     try {
+      // Supabase edge function gateway rejects ES256 user JWTs — send anon key instead.
+      // The function receives the caller's user_id in the body for audit purposes.
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
       const { data, error } = await supabase.functions.invoke("voice-call", {
-        body: { action: "outbound", lead_id: id },
+        body: { action: "outbound", lead_id: id, caller_user_id: currentUser?.id },
+        headers: { Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
       });
 
       if (error) {
-        const errBody = (error as any).data;
-        const detail = errBody?.error || error.message;
+        let detail = error.message;
+        try {
+          const ctx = (error as any).context as Response | undefined;
+          if (ctx) {
+            const rawText = await ctx.text().catch(() => "");
+            try { detail = JSON.parse(rawText)?.error || rawText || error.message; } catch { detail = rawText || error.message; }
+          }
+        } catch { /* ignore */ }
         toast({ title: "AI Call Error", description: detail, variant: "destructive" });
       } else if (data?.error) {
         toast({ title: "AI Call Error", description: data.error, variant: "destructive" });

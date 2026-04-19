@@ -726,7 +726,18 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
 
   const allCoursesHaveErrors = perCourseResults.length > 0 && perCourseResults.every(cr => cr.hasErrors);
   const hasYearErrors = yearErrors.length > 0;
-  const hasBlockingErrors = allCoursesHaveErrors || hasYearErrors;
+
+  // Prerequisite validation: class 12 → class 10; graduation → class 12
+  const class10 = (academic as any)?.class_10 || {};
+  const class12 = (academic as any)?.class_12 || {};
+  const graduation = (academic as any)?.graduation || {};
+  const isClass10Filled = !!(class10.board || class10.year || class10.marks);
+  const isClass12Filled = !!(class12.board || class12.year || class12.marks);
+  const isGradFilled = !!(graduation.degree || graduation.university || graduation.year || graduation.marks);
+  const missingClass10 = !isSchool && isClass12Filled && !isClass10Filled;
+  const missingClass12 = !isSchool && isGradFilled && !isClass12Filled;
+
+  const hasBlockingErrors = allCoursesHaveErrors || hasYearErrors || missingClass10 || missingClass12;
 
   const showGraduation = needsGraduation || Object.values(courseRules).some(r => r.requiresGraduation);
 
@@ -793,6 +804,12 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
           courseSelections={data.course_selections || []}
         />) : (
         <>
+          {missingClass12 && (
+            <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20 flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+              <p className="text-xs text-destructive font-medium">Class 12 details are required since you have added Graduation details.</p>
+            </div>
+          )}
           <AcademicBlock
             title="Class 12"
             prefix="class_12"
@@ -805,6 +822,12 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
             dobYear={dobYear}
             maxYear={SESSION_YEAR}
           />
+          {missingClass10 && (
+            <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20 flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+              <p className="text-xs text-destructive font-medium">Class 10 details are required since you have added Class 12 details.</p>
+            </div>
+          )}
           <AcademicBlock
             title="Class 10"
             prefix="class_10"
@@ -928,7 +951,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
         </>
       )}
 
-      {hasBlockingErrors && (
+      {(allCoursesHaveErrors || hasYearErrors) && (
         <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20 flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
           <p className="text-xs text-destructive font-medium">

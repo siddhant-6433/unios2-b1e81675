@@ -205,13 +205,13 @@ export function ApplicationProgress({ leadId, leadPhone, applicationId, canImper
           <div
             key={s.key}
             title={locked ? "Locked after payment" : done ? "Completed" : "Not started"}
-            className={`flex-1 min-w-[44px] flex flex-col items-center gap-1 px-2 py-2 rounded-lg text-[10px] font-medium transition-all ${
-              done ? "bg-primary/10 text-primary"
+            className={`flex-1 min-w-[44px] flex flex-col items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-medium transition-all ${
+              done ? "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-400"
               : locked ? "text-muted-foreground/40"
               : "text-muted-foreground"
             }`}
           >
-            {done ? <CheckCircle className="h-4 w-4" /> : locked ? <Lock className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
+            {done ? <CheckCircle className="h-3.5 w-3.5" /> : locked ? <Lock className="h-3.5 w-3.5" /> : <Icon className="h-3.5 w-3.5" />}
             <span className="truncate">{s.label}</span>
           </div>
         );
@@ -222,24 +222,18 @@ export function ApplicationProgress({ leadId, leadPhone, applicationId, canImper
   return (
     <>
       <Card className="border-border/60">
-        <CardContent className="p-4 space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Application Progress</h3>
-                {statusBadge}
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-0.5 font-mono truncate">{app.application_id}</p>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="text-[10px] text-muted-foreground whitespace-nowrap">{completedCount}/{steps.length} complete</span>
-              {canImpersonate && (
-                <Button variant="outline" size="sm" className="h-7 gap-1.5" onClick={() => setShowPreview(true)}>
-                  <Eye className="h-3.5 w-3.5" />
-                  View / Edit
-                </Button>
-              )}
-            </div>
+        <CardContent className="px-4 py-2.5 space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide shrink-0">Application</span>
+            <span className="text-[10px] font-mono text-muted-foreground truncate">{app.application_id}</span>
+            {statusBadge}
+            <span className="text-[10px] text-muted-foreground whitespace-nowrap ml-auto">{completedCount}/{steps.length} done</span>
+            {canImpersonate && (
+              <Button variant="outline" size="sm" className="h-6 gap-1 text-[10px] px-2 shrink-0" onClick={() => setShowPreview(true)}>
+                <Eye className="h-3 w-3" />
+                View / Edit
+              </Button>
+            )}
           </div>
           {stepperRow}
         </CardContent>

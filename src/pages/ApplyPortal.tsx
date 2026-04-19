@@ -868,8 +868,8 @@ const ApplyPortal = () => {
     toast({ title: "Application created", description: `ID: ${appId}` });
   };
 
-  const saveSection = async (updates: Partial<ApplicationData>, sectionKey?: string) => {
-    if (!app) return;
+  const saveSection = async (updates: Partial<ApplicationData>, sectionKey?: string): Promise<boolean> => {
+    if (!app) return false;
     setSaving(true);
 
     const newSections = sectionKey
@@ -882,8 +882,11 @@ const ApplyPortal = () => {
       if (!flags.includes('result_awaited')) flags.push('result_awaited');
     }
 
+    // Strip fields that exist in the frontend type but have no DB column
+    const { passport_number: _pn, passport_photo_path: _ppp, ...cleanUpdates } = updates as any;
+
     const saveData: any = {
-      ...updates,
+      ...cleanUpdates,
       completed_sections: newSections,
       flags,
     };
@@ -896,7 +899,7 @@ const ApplyPortal = () => {
     if (error) {
       toast({ title: "Save failed", description: error.message, variant: "destructive" });
       setSaving(false);
-      return;
+      return false;
     }
 
     // Sync the linked lead's name when the candidate's full_name changes
@@ -910,6 +913,7 @@ const ApplyPortal = () => {
 
     setApp(prev => prev ? { ...prev, ...updates, completed_sections: newSections, flags } : prev);
     setSaving(false);
+    return true;
   };
 
   const handleSubmit = async () => {
@@ -963,8 +967,8 @@ const ApplyPortal = () => {
       application_id: _aid, submitted_at: _sa,
       ...saveable
     } = app as any;
-    await saveSection(saveable, sectionKey);
-    setStep(nextStep);
+    const ok = await saveSection(saveable, sectionKey);
+    if (ok) setStep(nextStep);
   };
 
   // ── Not logged in ──
@@ -1123,8 +1127,8 @@ const ApplyPortal = () => {
           data={app}
           onChange={onChange}
           onNext={async () => {
-            await saveSection({ payment_status: app.payment_status }, 'payment');
-            setStep(step + 1);
+            const ok = await saveSection({ payment_status: app.payment_status }, 'payment');
+            if (ok) setStep(step + 1);
           }}
           onBack={backHandler}
           saving={saving}
@@ -1137,8 +1141,8 @@ const ApplyPortal = () => {
           data={app}
           onChange={(partial) => setApp(prev => ({ ...prev, ...partial }))}
           onNext={async () => {
-            await saveSection({}, 'documents');
-            setStep(step + 1);
+            const ok = await saveSection({}, 'documents');
+            if (ok) setStep(step + 1);
           }}
           onBack={backHandler}
           saving={saving}

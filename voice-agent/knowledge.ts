@@ -34,7 +34,7 @@ export const COURSE_KNOWLEDGE: Record<string, {
   "B.Sc Nursing": {
     highlights: [
       "4-year degree + 6-month paid internship (stipend Rs 10,000/month)",
-      "Approved by Indian Nursing Council (INC) and PCI",
+      "Approved by Indian Nursing Council (INC)",
       "Affiliated to Atal Bihari Vajpayee Medical University (ABVMU)",
       "Clinical training at NIMT's own parent hospital on campus PLUS affiliated hospitals — GIMS (Greater Noida), Navin Hospital, Manipal Hospital",
       "Psychiatric training at VIMHANS Delhi and IHBAS Delhi",

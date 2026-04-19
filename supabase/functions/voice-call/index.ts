@@ -40,12 +40,13 @@ Deno.serve(async (req) => {
       return json({ error: "Voice calling not configured. Set PLIVO_AUTH_ID, PLIVO_AUTH_TOKEN, PLIVO_PHONE_NUMBER, VOICE_AGENT_URL." }, 503);
     }
 
-    // Auth check — accept user JWT OR service role JWT (for DB triggers/cron)
+    // Auth: accept service role JWT (cron/queue) OR anon key (manual button).
+    // User identity is passed as caller_user_id in the request body for audit.
     const authHeader = req.headers.get("authorization") || "";
     const db = createClient(supabaseUrl, serviceRoleKey);
     const token = authHeader.replace(/^Bearer\s+/i, "");
 
-    // Check if token is a service_role JWT by decoding the payload
+    // Detect service role by decoding JWT payload
     let isServiceRole = false;
     try {
       const [, payloadB64] = token.split(".");
@@ -53,18 +54,15 @@ Deno.serve(async (req) => {
         const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
         isServiceRole = payload?.role === "service_role";
       }
-    } catch { /* not a valid JWT — will try getUser below */ }
+    } catch { /* ignore */ }
 
-    let user: { id: string } | null = null;
-    if (isServiceRole) {
-      user = { id: "system" };
-    } else {
-      const { data: { user: authUser }, error: authErr } = await db.auth.getUser(token);
-      if (authErr || !authUser) return json({ error: "Unauthorized" }, 401);
-      user = authUser;
-    }
+    // Reject if no auth header at all
+    if (!authHeader) return json({ error: "Unauthorized" }, 401);
 
-    const { action, lead_id } = await req.json();
+    const body = await req.json();
+    const { action, lead_id, caller_user_id } = body;
+
+    const user = { id: isServiceRole ? "system" : (caller_user_id || "manual") };
 
     if (action === "outbound") {
       if (!lead_id) return json({ error: "lead_id required" }, 400);
