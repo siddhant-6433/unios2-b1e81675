@@ -94,48 +94,52 @@ const AdminPanel = () => {
 
   const fetchUsers = async () => {
     setLoading(true);
-    const { data: profiles, error: profileError } = await supabase
-      .from("profiles")
-      .select("user_id, display_name, email, phone, campus, updated_at")
-      .order("created_at", { ascending: false });
+    try {
+      const { data: profiles, error: profileError } = await supabase
+        .from("profiles")
+        .select("user_id, display_name, email, phone, campus, updated_at")
+        .order("created_at", { ascending: false });
 
-    if (profileError) {
-      toast({ title: "Error", description: profileError.message, variant: "destructive" });
+      if (profileError) {
+        toast({ title: "Error loading profiles", description: profileError.message, variant: "destructive" });
+        return;
+      }
+
+      const [{ data: roles, error: roleError }, { data: authInfo }] = await Promise.all([
+        supabase.from("user_roles").select("id, user_id, role"),
+        supabase.from("user_auth_info" as any).select("user_id, last_sign_in_at").then(r => r).catch(() => ({ data: [], error: null })),
+      ]);
+
+      if (roleError) {
+        toast({ title: "Error loading roles", description: roleError.message, variant: "destructive" });
+        return;
+      }
+
+      const authMap: Record<string, string | null> = {};
+      (authInfo || []).forEach((a: any) => { authMap[a.user_id] = a.last_sign_in_at; });
+
+      const merged: UserWithRole[] = (profiles || []).map((p: any) => {
+        const userRole = (roles || []).find((r) => r.user_id === p.user_id);
+        return {
+          user_id: p.user_id,
+          display_name: p.display_name,
+          email: p.email || null,
+          phone: p.phone,
+          campus: p.campus,
+          role: userRole?.role ?? null,
+          role_id: userRole?.id ?? null,
+          last_sign_in_at: authMap[p.user_id] || null,
+          profile_updated_at: p.updated_at || null,
+        };
+      });
+
+      setUsers(merged);
+    } catch (err: any) {
+      console.error("fetchUsers crashed:", err);
+      toast({ title: "Error", description: err.message || "Failed to load users", variant: "destructive" });
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const [{ data: roles, error: roleError }, { data: authInfo }] = await Promise.all([
-      supabase.from("user_roles").select("id, user_id, role"),
-      supabase.from("user_auth_info" as any).select("user_id, last_sign_in_at"),
-    ]);
-
-    if (roleError) {
-      toast({ title: "Error", description: roleError.message, variant: "destructive" });
-      setLoading(false);
-      return;
-    }
-
-    const authMap: Record<string, string | null> = {};
-    (authInfo || []).forEach((a: any) => { authMap[a.user_id] = a.last_sign_in_at; });
-
-    const merged: UserWithRole[] = (profiles || []).map((p: any) => {
-      const userRole = (roles || []).find((r) => r.user_id === p.user_id);
-      return {
-        user_id: p.user_id,
-        display_name: p.display_name,
-        email: p.email || null,
-        phone: p.phone,
-        campus: p.campus,
-        role: userRole?.role ?? null,
-        role_id: userRole?.id ?? null,
-        last_sign_in_at: authMap[p.user_id] || null,
-        profile_updated_at: p.updated_at || null,
-      };
-    });
-
-    setUsers(merged);
-    setLoading(false);
   };
 
   useEffect(() => {
