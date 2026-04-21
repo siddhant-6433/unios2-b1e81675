@@ -145,8 +145,18 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
         if (byCampus) q = q.eq("campus_id", selectedCampusId);
         return q;
       })(),
-      supabase.from("applications").select("id", { count: "exact", head: true }).eq("status", "draft"),
-      supabase.from("applications").select("id", { count: "exact", head: true }).eq("status", "submitted"),
+      (() => {
+        let q = supabase.from("leads").select("id", { count: "exact", head: true })
+          .in("stage", ["application_in_progress", "application_fee_paid", "application_submitted", "offer_sent", "token_paid", "pre_admitted"] as any);
+        if (byCampus) q = q.eq("campus_id", selectedCampusId);
+        return q;
+      })(),
+      (() => {
+        let q = supabase.from("leads").select("id", { count: "exact", head: true })
+          .in("stage", ["application_submitted", "offer_sent", "token_paid", "pre_admitted"] as any);
+        if (byCampus) q = q.eq("campus_id", selectedCampusId);
+        return q;
+      })(),
     ]);
 
     setLeadCount(leadsRes.count || 0);
