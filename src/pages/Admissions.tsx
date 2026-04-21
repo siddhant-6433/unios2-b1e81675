@@ -108,6 +108,7 @@ interface Lead {
   // Application completion computed after fetch
   app_completion_pct?: number | null;   // 0-100 or null when no app
   app_payment_status?: string | null;
+  app_fee_amount?: number | null;
 }
 
 // Application step counts for % calculation (matches apply portal)
@@ -283,6 +284,7 @@ const Admissions = () => {
         counsellor_name: l.profiles?.display_name || "Unassigned",
         app_completion_pct: null as number | null,
         app_payment_status: null as string | null,
+        app_fee_amount: null as number | null,
       }));
 
       // Fetch applications for these leads (for completion %)
@@ -290,7 +292,7 @@ const Admissions = () => {
       if (leadIds.length > 0) {
         const { data: apps } = await supabase
           .from("applications")
-          .select("lead_id, completed_sections, program_category, payment_status, status")
+          .select("lead_id, completed_sections, program_category, payment_status, fee_amount, status")
           .in("lead_id", leadIds);
         if (apps && apps.length > 0) {
           const byLead: Record<string, any> = {};
@@ -299,7 +301,7 @@ const Admissions = () => {
             const existing = byLead[a.lead_id];
             const pct = getCompletionPct(a.completed_sections, a.program_category);
             if (!existing || pct > existing.pct) {
-              byLead[a.lead_id] = { pct, payment_status: a.payment_status, status: a.status };
+              byLead[a.lead_id] = { pct, payment_status: a.payment_status, fee_amount: a.fee_amount, status: a.status };
             }
           });
           enriched.forEach(l => {
@@ -307,6 +309,7 @@ const Admissions = () => {
             if (m) {
               l.app_completion_pct = m.pct;
               l.app_payment_status = m.payment_status;
+              l.app_fee_amount = m.fee_amount ?? null;
             }
           });
         }
@@ -356,7 +359,7 @@ const Admissions = () => {
               campus_name: l.campuses?.name || "—",
               counsellor_name: l.profiles?.display_name || "Unassigned",
               app_completion_pct: null,
-              app_payment_status: null,
+              app_payment_status: null, app_fee_amount: null,
             }));
           return newLeads.length > 0 ? [...prev, ...newLeads] : prev;
         });
@@ -746,7 +749,7 @@ const Admissions = () => {
                       const existingIds = new Set(prev.map(l => l.id));
                       const nl = stageData.filter((l: any) => !existingIds.has(l.id)).map((l: any) => ({
                         ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—",
-                        counsellor_name: l.profiles?.display_name || "Unassigned", app_completion_pct: null, app_payment_status: null,
+                        counsellor_name: l.profiles?.display_name || "Unassigned", app_completion_pct: null, app_payment_status: null, app_fee_amount: null,
                       }));
                       return nl.length > 0 ? [...prev, ...nl] : prev;
                     });
@@ -811,7 +814,7 @@ const Admissions = () => {
                     setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({
                       ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—",
                       counsellor_name: l.profiles?.display_name || "Unassigned",
-                      app_completion_pct: null, app_payment_status: null,
+                      app_completion_pct: null, app_payment_status: null, app_fee_amount: null,
                     }))]);
                   }
                 }
@@ -844,7 +847,7 @@ const Admissions = () => {
                       .map((l: any) => ({
                         ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—",
                         counsellor_name: l.profiles?.display_name || "Unassigned",
-                        app_completion_pct: null, app_payment_status: null,
+                        app_completion_pct: null, app_payment_status: null, app_fee_amount: null,
                       }));
                     return newLeads.length > 0 ? [...prev, ...newLeads] : prev;
                   });
@@ -1079,7 +1082,7 @@ const Admissions = () => {
                   setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({
                     ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—",
                     counsellor_name: l.profiles?.display_name || "Unassigned",
-                    app_completion_pct: null, app_payment_status: null,
+                    app_completion_pct: null, app_payment_status: null, app_fee_amount: null,
                   }))]);
                 }
               }
@@ -1222,6 +1225,7 @@ const Admissions = () => {
                   <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Score</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Stage</th>
                   <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">App %</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">App Fee</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Role</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Source</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Counsellor</th>
@@ -1268,6 +1272,15 @@ const Admissions = () => {
                     <td className="px-4 py-3 text-center" onClick={() => navigate(`/admissions/${lead.id}`)}>
                       {lead.app_completion_pct !== null && lead.app_completion_pct !== undefined ? (
                         <AppProgressBadge pct={lead.app_completion_pct} paymentStatus={lead.app_payment_status} />
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right" onClick={() => navigate(`/admissions/${lead.id}`)}>
+                      {lead.app_fee_amount != null && lead.app_fee_amount > 0 ? (
+                        <span className="text-xs font-semibold text-green-700 dark:text-green-400">
+                          ₹{Number(lead.app_fee_amount).toLocaleString("en-IN")}
+                        </span>
                       ) : (
                         <span className="text-[10px] text-muted-foreground">—</span>
                       )}

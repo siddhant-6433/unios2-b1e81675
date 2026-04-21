@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
-import { ArrowRight, Loader2, AlertTriangle } from "lucide-react";
+import { ArrowRight, Loader2, AlertTriangle, CalendarIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { ApplicationData } from "./types";
 import { validateDobEligibility, fetchEligibilityRules, EligibilityRule } from "./eligibilityRules";
@@ -18,40 +20,56 @@ const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text
 
 const NATIONALITIES = getNationalityOptions();
 
-function DobInput({ value, onChange, className }: { value: string; onChange: (v: string) => void; className?: string }) {
+function DobPicker({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
+  const [open, setOpen] = useState(false);
+
+  // Parse ISO date string to Date object
+  const selected: Date | undefined = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(value + 'T00:00:00')
+    : undefined;
+
+  const displayValue = selected
+    ? selected.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+    : '';
+
+  const today = new Date();
+  const fromYear = today.getFullYear() - 80;
+  const toYear = today.getFullYear() - 3;
+
   return (
-    <input
-      type="text"
-      placeholder="dd/mm/yyyy"
-      value={value ? (() => {
-        const d = new Date(value);
-        if (isNaN(d.getTime())) return value;
-        const dd = String(d.getDate()).padStart(2, '0');
-        const mm = String(d.getMonth() + 1).padStart(2, '0');
-        const yyyy = String(d.getFullYear());
-        return `${dd}/${mm}/${yyyy}`;
-      })() : ''}
-      onChange={e => {
-        let val = e.target.value.replace(/[^\d/]/g, '');
-        const digits = val.replace(/\//g, '');
-        if (digits.length <= 2) val = digits;
-        else if (digits.length <= 4) val = digits.slice(0, 2) + '/' + digits.slice(2);
-        else val = digits.slice(0, 2) + '/' + digits.slice(2, 4) + '/' + digits.slice(4, 8);
-        const parts = val.split('/');
-        if (parts.length === 3 && parts[0].length === 2 && parts[1].length === 2 && parts[2].length === 4) {
-          const fullYear = parseInt(parts[2], 10);
-          if (fullYear >= 1900 && fullYear <= new Date().getFullYear()) {
-            onChange(`${fullYear}-${parts[1]}-${parts[0]}`);
-          } else {
-            onChange(val);
-          }
-        } else {
-          onChange(val);
-        }
-      }}
-      maxLength={10}
-      className={className || inputCls}
-    />
+    <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          className={`${inputCls} flex items-center justify-between text-left ${!displayValue ? 'text-muted-foreground' : ''}`}
+        >
+          <span>{displayValue || 'Select date of birth'}</span>
+          <CalendarIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-0" align="start">
+        <Calendar
+          mode="single"
+          selected={selected}
+          onSelect={(date) => {
+            if (date) {
+              const yyyy = date.getFullYear();
+              const mm = String(date.getMonth() + 1).padStart(2, '0');
+              const dd = String(date.getDate()).padStart(2, '0');
+              onChange(`${yyyy}-${mm}-${dd}`);
+            }
+            setOpen(false);
+          }}
+          defaultMonth={selected ?? new Date(toYear, 5, 1)}
+          captionLayout="dropdown-buttons"
+          fromYear={fromYear}
+          toYear={toYear}
+          disabled={(date) => date > today}
+          initialFocus
+        />
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -107,7 +125,7 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
             Date of Birth {isSchool ? '*' : ''}
           </label>
-          <DobInput value={data.dob} onChange={v => onChange({ dob: v })} className={inputCls} />
+          <DobPicker value={data.dob} onChange={v => onChange({ dob: v })} disabled={readOnly} />
           {dobWarning && (
             <div className="mt-1.5 flex items-start gap-1.5 text-destructive">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
