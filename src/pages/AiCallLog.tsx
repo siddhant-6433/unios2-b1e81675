@@ -20,6 +20,10 @@ interface AiCallRecord {
   lead_name?: string;
   lead_phone?: string;
   counsellor_name?: string;
+  retry_count?: number;
+  followup_status?: string;
+  followup_date?: string;
+  followup_counsellor?: string;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -120,12 +124,45 @@ const AiCallLog = () => {
     const { data } = await query;
 
     if (data) {
-      let mapped = (data as any[]).map((r: any) => ({
-        ...r,
-        lead_name: r.leads?.name || "Unknown",
-        lead_phone: r.leads?.phone || "",
-        counsellor_name: r.leads?.profiles?.display_name || "Unassigned",
-      }));
+      // Batch-fetch retry counts and followup info for all lead_ids in this page
+      const leadIds = [...new Set((data as any[]).map((r: any) => r.lead_id).filter(Boolean))];
+      const [retryRes, followupRes] = await Promise.all([
+        // Count total AI calls per lead
+        supabase.from("ai_call_records" as any)
+          .select("lead_id", { count: "exact", head: false })
+          .in("lead_id", leadIds),
+        // Latest followup per lead
+        supabase.from("lead_followups" as any)
+          .select("lead_id, scheduled_at, status, type, notes")
+          .in("lead_id", leadIds)
+          .order("scheduled_at", { ascending: false }),
+      ]);
+
+      // Build retry count map
+      const retryCounts: Record<string, number> = {};
+      (retryRes.data || []).forEach((r: any) => {
+        retryCounts[r.lead_id] = (retryCounts[r.lead_id] || 0) + 1;
+      });
+
+      // Build followup map (latest per lead)
+      const followupMap: Record<string, any> = {};
+      (followupRes.data || []).forEach((f: any) => {
+        if (!followupMap[f.lead_id]) followupMap[f.lead_id] = f;
+      });
+
+      let mapped = (data as any[]).map((r: any) => {
+        const fu = followupMap[r.lead_id];
+        return {
+          ...r,
+          lead_name: r.leads?.name || "Unknown",
+          lead_phone: r.leads?.phone || "",
+          counsellor_name: r.leads?.profiles?.display_name || "Unassigned",
+          retry_count: retryCounts[r.lead_id] || 1,
+          followup_status: fu?.status || null,
+          followup_date: fu?.scheduled_at || null,
+          followup_counsellor: r.leads?.profiles?.display_name || null,
+        };
+      });
 
       // Client-side search filter (across joined fields)
       if (search) {
@@ -246,6 +283,8 @@ const AiCallLog = () => {
                   <th className="px-4 py-2.5 text-center font-medium text-muted-foreground">Duration</th>
                   <th className="px-4 py-2.5 text-center font-medium text-muted-foreground">Conversion</th>
                   <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Summary</th>
+                  <th className="px-4 py-2.5 text-center font-medium text-muted-foreground">Retries</th>
+                  <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Follow-up</th>
                   <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Counsellor</th>
                   <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Date & Time</th>
                   <th className="px-4 py-2.5 text-center font-medium text-muted-foreground">Recording</th>
@@ -278,8 +317,31 @@ const AiCallLog = () => {
                           <Badge className={`text-[10px] border-0 ${probColor}`}>{r.conversion_probability}%</Badge>
                         ) : <span className="text-[10px] text-muted-foreground">—</span>}
                       </td>
-                      <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-[300px]">
+                      <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-[250px]">
                         <p className="line-clamp-2">{r.summary || "—"}</p>
+                      </td>
+                      <td className="px-4 py-2.5 text-center">
+                        <span className={`text-xs font-medium ${(r.retry_count || 1) > 1 ? "text-amber-600" : "text-muted-foreground"}`}>
+                          {r.retry_count || 1}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-xs">
+                        {r.followup_status ? (
+                          <div>
+                            <Badge className={`text-[10px] border-0 ${
+                              r.followup_status === "pending" ? "bg-amber-100 text-amber-700"
+                              : r.followup_status === "completed" ? "bg-emerald-100 text-emerald-700"
+                              : "bg-muted text-muted-foreground"
+                            }`}>
+                              {r.followup_status}
+                            </Badge>
+                            {r.followup_date && (
+                              <div className="text-[10px] text-muted-foreground mt-0.5">
+                                {new Date(r.followup_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true })}
+                              </div>
+                            )}
+                          </div>
+                        ) : <span className="text-[10px] text-muted-foreground">—</span>}
                       </td>
                       <td className="px-4 py-2.5 text-xs text-muted-foreground">{r.counsellor_name}</td>
                       <td className="px-4 py-2.5 text-xs text-muted-foreground">
@@ -299,7 +361,7 @@ const AiCallLog = () => {
                   );
                 })}
                 {records.length === 0 && (
-                  <tr><td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
+                  <tr><td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">
                     <Bot className="h-8 w-8 mx-auto mb-2 opacity-30" />
                     <p className="text-sm">No AI call records found</p>
                   </td></tr>
