@@ -46,7 +46,7 @@ const admissionSubMenu: MenuItem[] = [
   { title: "Performance", url: "/counsellor-dashboard", icon: BarChart3, permission: "performance:view" },
   { title: "Lead Buckets", url: "/lead-buckets", icon: Inbox, permission: "lead_buckets:view" },
   { title: "Lead Allocation", url: "/lead-allocation", icon: Shuffle, permission: "lead_allocation:view" },
-  { title: "Call Log", url: "/call-log", icon: Phone, permission: "automation:view" },
+  { title: "Call Log", url: "/call-log", icon: Phone, permission: "call_log:view" },
   { title: "AI Call Log", url: "/ai-call-log", icon: Bot, permission: "automation:view" },
   { title: "Automation", url: "/automation-rules", icon: Zap, permission: "automation:view" },
   { title: "Consultants", url: "/consultants", icon: Handshake, permission: "consultants:view" },

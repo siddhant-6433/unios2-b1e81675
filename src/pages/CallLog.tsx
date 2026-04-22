@@ -53,7 +53,9 @@ const PAGE_SIZE = 50;
 
 const CallLog = () => {
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { role, user } = useAuth();
+  const isCounsellor = role === "counsellor";
+  const [myUserId, setMyUserId] = useState<string | null>(null);
   const [records, setRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -71,15 +73,22 @@ const CallLog = () => {
   const [totalCount, setTotalCount] = useState(0);
   const [stats, setStats] = useState({ total: 0, interested: 0, not_interested: 0, no_answer: 0, busy: 0, call_back: 0 });
 
-  // Fetch counsellor list
+  // Fetch counsellor list + resolve current user's auth ID
   useEffect(() => {
     (async () => {
+      // Set current user auth ID for counsellor self-filter
+      if (user?.id) setMyUserId(user.id);
+
       const { data: roleRows } = await supabase.from("user_roles").select("user_id").eq("role", "counsellor");
       if (!roleRows?.length) return;
       const { data: profs } = await supabase.from("profiles").select("id, display_name, user_id").in("user_id", roleRows.map(r => r.user_id));
-      if (profs) setCounsellorOptions(profs.map(p => ({ id: p.id, name: p.display_name || "Unnamed" })).sort((a, b) => a.name.localeCompare(b.name)));
+      if (profs) {
+        setCounsellorOptions(profs.map(p => ({ id: p.user_id, name: p.display_name || "Unnamed" })).sort((a, b) => a.name.localeCompare(b.name)));
+        // Auto-filter counsellor to own calls if logged in as counsellor
+        if (isCounsellor && user?.id) setCounsellorFilter(user.id);
+      }
     })();
-  }, []);
+  }, [user?.id]);
 
   const fetchRecords = useCallback(async () => {
     setLoading(true);
@@ -90,29 +99,39 @@ const CallLog = () => {
       .from("call_logs" as any)
       .select(`
         id, lead_id, disposition, duration_seconds, notes, recording_url, created_at, called_at, user_id,
-        leads:lead_id(name, phone, stage, source, counsellor_id,
-          profiles:counsellor_id(display_name, id)
-        )
+        leads:lead_id(name, phone, stage, source)
       `, { count: "exact" })
       .order("created_at", { ascending: false });
 
     if (from) query = query.gte("created_at", `${from}T00:00:00`);
     if (to) query = query.lte("created_at", `${to}T23:59:59`);
 
-    // Counsellor filter — match via lead's counsellor_id
-    // We'll filter client-side after fetch since Supabase nested filters are limited
+    // Server-side counsellor filter by user_id (who made the call)
+    if (counsellorFilter !== "all") {
+      query = query.eq("user_id", counsellorFilter);
+    } else if (isCounsellor && myUserId) {
+      query = query.eq("user_id", myUserId);
+    }
 
     const { data, count } = await query.range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
 
     if (data) {
+      // Batch-fetch caller profiles
+      const callerIds = [...new Set((data as any[]).map((r: any) => r.user_id).filter(Boolean))];
+      const callerMap: Record<string, string> = {};
+      if (callerIds.length > 0) {
+        const { data: profs } = await supabase.from("profiles").select("user_id, display_name").in("user_id", callerIds);
+        (profs || []).forEach((p: any) => { callerMap[p.user_id] = p.display_name || "Unknown"; });
+      }
+
       let enriched = (data as any[]).map((r: any) => ({
         ...r,
         lead_name: r.leads?.name || "Unknown",
         lead_phone: r.leads?.phone || "",
         lead_stage: r.leads?.stage || "",
         lead_source: r.leads?.source || "",
-        counsellor_id: r.leads?.profiles?.id || r.leads?.counsellor_id || "",
-        counsellor_name: r.leads?.profiles?.display_name || "Unassigned",
+        caller_user_id: r.user_id || "",
+        counsellor_name: callerMap[r.user_id] || "Unknown",
       }));
 
       setRecords(enriched);
@@ -130,14 +149,13 @@ const CallLog = () => {
       setStats(s);
     }
     setLoading(false);
-  }, [datePreset, customFrom, customTo, page]);
+  }, [datePreset, customFrom, customTo, page, counsellorFilter, myUserId]);
 
   useEffect(() => { fetchRecords(); }, [fetchRecords]);
   useEffect(() => { setPage(1); }, [datePreset, counsellorFilter, dispositionFilter]);
 
-  // Client-side filters (counsellor + disposition + search)
+  // Client-side filters (disposition + search — counsellor is now server-side)
   const filtered = records.filter(r => {
-    if (counsellorFilter !== "all" && r.counsellor_id !== counsellorFilter) return false;
     if (dispositionFilter !== "all" && r.disposition !== dispositionFilter) return false;
     if (search) {
       const q = search.toLowerCase();
@@ -164,8 +182,8 @@ const CallLog = () => {
   return (
     <div className="space-y-5 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Manual Call Log</h1>
-        <p className="text-sm text-muted-foreground mt-1">All calls logged manually by counsellors</p>
+        <h1 className="text-2xl font-bold text-foreground">{isCounsellor ? "My Call Log" : "Manual Call Log"}</h1>
+        <p className="text-sm text-muted-foreground mt-1">{isCounsellor ? "Your manually logged calls" : "All calls logged manually by counsellors"}</p>
       </div>
 
       {/* Stats */}
@@ -211,11 +229,13 @@ const CallLog = () => {
           <input type="date" value={customTo} onChange={e => { setCustomTo(e.target.value); setDatePreset("custom"); }} className={`${inputCls} w-[130px] text-xs`} />
         </div>
 
-        {/* Counsellor filter */}
-        <select value={counsellorFilter} onChange={e => setCounsellorFilter(e.target.value)} className={inputCls}>
-          <option value="all">All Counsellors</option>
-          {counsellorOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        {/* Counsellor filter (admins only — counsellors are auto-filtered) */}
+        {!isCounsellor && (
+          <select value={counsellorFilter} onChange={e => setCounsellorFilter(e.target.value)} className={inputCls}>
+            <option value="all">All Counsellors</option>
+            {counsellorOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        )}
 
         {/* Disposition filter */}
         <select value={dispositionFilter} onChange={e => setDispositionFilter(e.target.value)} className={inputCls}>
@@ -275,7 +295,7 @@ const CallLog = () => {
                     <th className="px-3 py-2.5 text-left font-medium text-muted-foreground text-xs uppercase">Disposition</th>
                     <th className="px-3 py-2.5 text-center font-medium text-muted-foreground text-xs uppercase">Duration</th>
                     <th className="px-4 py-2.5 text-left font-medium text-muted-foreground text-xs uppercase">Notes</th>
-                    <th className="px-3 py-2.5 text-left font-medium text-muted-foreground text-xs uppercase">Counsellor</th>
+                    <th className="px-3 py-2.5 text-left font-medium text-muted-foreground text-xs uppercase">Called By</th>
                     <th className="px-3 py-2.5 text-left font-medium text-muted-foreground text-xs uppercase">Date & Time</th>
                     <th className="px-3 py-2.5 text-center font-medium text-muted-foreground text-xs uppercase">Recording</th>
                   </tr>
