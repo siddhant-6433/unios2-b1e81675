@@ -46,6 +46,7 @@ const FreshLeads = () => {
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const [counsellorFilter, setCounsellorFilter] = useState("all");
+  const [assignmentFilter, setAssignmentFilter] = useState<"all" | "assigned" | "unassigned">("all");
   const [counsellorOptions, setCounsellorOptions] = useState<{ id: string; name: string }[]>([]);
 
   // Get profile id
@@ -74,30 +75,34 @@ const FreshLeads = () => {
   const fetchLeads = useCallback(async () => {
     setLoading(true);
 
-    // Count query
-    let cq = supabase.from("leads").select("id", { count: "exact", head: true })
-      .eq("stage", "new_lead" as any)
-      .is("first_contact_at", null)
-      .not("counsellor_id", "is", null);
-    if (counsellorFilter !== "all") cq = cq.eq("counsellor_id", counsellorFilter);
+    // Base filters
+    const applyFilters = (q: any) => {
+      q = q.eq("stage", "new_lead" as any).is("first_contact_at", null);
+      if (isCounsellor && profileId) {
+        q = q.eq("counsellor_id", profileId);
+      } else {
+        if (counsellorFilter !== "all") q = q.eq("counsellor_id", counsellorFilter);
+        if (assignmentFilter === "assigned") q = q.not("counsellor_id", "is", null);
+        else if (assignmentFilter === "unassigned") q = q.is("counsellor_id", null);
+      }
+      return q;
+    };
 
-    const { count } = await cq;
+    // Count query
+    const { count } = await applyFilters(
+      supabase.from("leads").select("id", { count: "exact", head: true })
+    );
     setTotalCount(count || 0);
 
     // Data query
-    let q = supabase.from("leads")
-      .select(`id, name, phone, source, created_at, counsellor_id,
+    let q = applyFilters(
+      supabase.from("leads").select(`id, name, phone, source, created_at, counsellor_id,
         courses:course_id(name),
         campuses:campus_id(name),
         counsellor_profile:counsellor_id(display_name)
       `)
-      .eq("stage", "new_lead" as any)
-      .is("first_contact_at", null)
-      .not("counsellor_id", "is", null)
-      .order("created_at", { ascending: true })
-      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-
-    if (counsellorFilter !== "all") q = q.eq("counsellor_id", counsellorFilter);
+    ).order("created_at", { ascending: true })
+     .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
 
     const { data } = await q;
 
@@ -117,10 +122,10 @@ const FreshLeads = () => {
       })));
     }
     setLoading(false);
-  }, [counsellorFilter, page]);
+  }, [counsellorFilter, assignmentFilter, page, isCounsellor, profileId]);
 
   useEffect(() => { fetchLeads(); }, [fetchLeads]);
-  useEffect(() => { setPage(0); }, [counsellorFilter, search]);
+  useEffect(() => { setPage(0); }, [counsellorFilter, assignmentFilter, search]);
 
   const filtered = search
     ? leads.filter(l => {
@@ -186,11 +191,21 @@ const FreshLeads = () => {
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
         {!isCounsellor && (
-          <select value={counsellorFilter} onChange={e => setCounsellorFilter(e.target.value)}
-            className="rounded-xl border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20">
-            <option value="all">All Counsellors</option>
-            {counsellorOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          <>
+            <select value={assignmentFilter} onChange={e => { setAssignmentFilter(e.target.value as any); if (e.target.value === "unassigned") setCounsellorFilter("all"); }}
+              className="rounded-xl border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20">
+              <option value="all">All Leads</option>
+              <option value="assigned">Assigned Only</option>
+              <option value="unassigned">Unassigned Only</option>
+            </select>
+            {assignmentFilter !== "unassigned" && (
+              <select value={counsellorFilter} onChange={e => setCounsellorFilter(e.target.value)}
+                className="rounded-xl border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20">
+                <option value="all">All Counsellors</option>
+                {counsellorOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            )}
+          </>
         )}
         <div className="relative flex-1 min-w-[180px] max-w-sm">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
