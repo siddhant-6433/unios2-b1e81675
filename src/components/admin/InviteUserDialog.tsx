@@ -20,8 +20,19 @@ const ALL_ROLES: { value: AppRole; label: string }[] = [
   { value: "office_admin", label: "Office Administrator" },
   { value: "office_assistant", label: "Office Assistant" },
   { value: "hostel_warden", label: "Hostel Warden" },
+  { value: "consultant", label: "Consultant" },
+  { value: "publisher", label: "Publisher (Lead Aggregator)" },
   { value: "student", label: "Student" },
   { value: "parent", label: "Parent" },
+];
+
+// External lead sources that can have a publisher portal account
+const PUBLISHER_SOURCES: { value: string; label: string }[] = [
+  { value: "collegedunia", label: "Collegedunia" },
+  { value: "collegehai", label: "CollegeHai" },
+  { value: "justdial", label: "JustDial" },
+  { value: "salahlo", label: "Salahlo" },
+  { value: "shiksha", label: "Shiksha" },
 ];
 
 interface InviteUserDialogProps {
@@ -38,6 +49,7 @@ const InviteUserDialog = ({ open, onClose, onSuccess }: InviteUserDialogProps) =
   const [campusDropdownOpen, setCampusDropdownOpen] = useState(false);
   const [campuses, setCampuses] = useState<{ id: string; name: string }[]>([]);
   const [role, setRole] = useState<AppRole>("student");
+  const [publisherSource, setPublisherSource] = useState(PUBLISHER_SOURCES[0].value);
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
@@ -90,6 +102,25 @@ const InviteUserDialog = ({ open, onClose, onSuccess }: InviteUserDialogProps) =
         }
       }
 
+      // Auto-create or link publisher record when inviting with publisher role
+      if (role === "publisher" && data?.user_id) {
+        const { data: existing } = await supabase.from("publishers").select("id").eq("user_id", data.user_id).maybeSingle();
+        if (!existing) {
+          // Check if a publishers record for this source already exists (unlinked)
+          const { data: bySource } = await supabase.from("publishers").select("id").eq("source", publisherSource).is("user_id", null).maybeSingle();
+          if (bySource) {
+            await supabase.from("publishers").update({ user_id: data.user_id, display_name: displayName.trim() || email.trim() }).eq("id", bySource.id);
+          } else {
+            await supabase.from("publishers").insert({
+              display_name: displayName.trim() || email.trim(),
+              source: publisherSource,
+              user_id: data.user_id,
+              is_active: true,
+            });
+          }
+        }
+      }
+
       toast({
         title: password ? "User created" : "User invited",
         description: password
@@ -102,6 +133,7 @@ const InviteUserDialog = ({ open, onClose, onSuccess }: InviteUserDialogProps) =
       setPhone("");
       setSelectedCampuses([]);
       setRole("student");
+      setPublisherSource(PUBLISHER_SOURCES[0].value);
       setPassword("");
       onSuccess();
       onClose();
@@ -225,6 +257,24 @@ const InviteUserDialog = ({ open, onClose, onSuccess }: InviteUserDialogProps) =
               ))}
             </select>
           </div>
+
+          {role === "publisher" && (
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                Lead Source <span className="text-destructive">*</span>
+                <span className="ml-1 text-muted-foreground/60 font-normal">— must match the source on their leads</span>
+              </label>
+              <select
+                value={publisherSource}
+                onChange={(e) => setPublisherSource(e.target.value)}
+                className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+              >
+                {PUBLISHER_SOURCES.map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1.5">

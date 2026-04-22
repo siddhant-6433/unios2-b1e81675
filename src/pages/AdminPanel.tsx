@@ -77,8 +77,10 @@ const AdminPanel = () => {
   const [searchParams] = useSearchParams();
   const [users, setUsers] = useState<UserWithRole[]>([]);
   const [loading, setLoading] = useState(true);
+  const [publishers, setPublishers] = useState<any[]>([]);
+  const [publishersLoading, setPublishersLoading] = useState(false);
   const [search, setSearch] = useState("");
-  const [userSubTab, setUserSubTab] = useState<"employees" | "consultants" | "families" | "leads">("employees");
+  const [userSubTab, setUserSubTab] = useState<"employees" | "consultants" | "publishers" | "families" | "leads">("employees");
   const [roleFilter, setRoleFilter] = useState<AppRole | "all" | "none">("all");
   const [editingUser, setEditingUser] = useState<string | null>(null);
   const [savingUser, setSavingUser] = useState<string | null>(null);
@@ -145,8 +147,18 @@ const AdminPanel = () => {
   const isSuperAdmin = realRole === "super_admin" || role === "super_admin";
   const canManageUsers = isSuperAdmin || hasPermission("user_management:view");
 
+  const fetchPublishers = async () => {
+    setPublishersLoading(true);
+    const { data } = await supabase
+      .from("publishers")
+      .select("id, display_name, source, is_active, user_id, created_at, profiles!publishers_user_id_fkey(display_name, email)")
+      .order("source", { ascending: true });
+    setPublishers(data ?? []);
+    setPublishersLoading(false);
+  };
+
   useEffect(() => {
-    if (canManageUsers) fetchUsers();
+    if (canManageUsers) { fetchUsers(); fetchPublishers(); }
   }, [canManageUsers]);
 
   const handleRoleChange = async (userId: string, newRole: AppRole | "none") => {
@@ -186,6 +198,11 @@ const AdminPanel = () => {
       // Unlink consultant profile if role changed away from consultant
       if (user.role === "consultant" && newRole !== "consultant") {
         await supabase.from("consultants").update({ user_id: null }).eq("user_id", userId);
+      }
+
+      // Unlink publisher profile if role changed away from publisher
+      if (user.role === "publisher" && newRole !== "publisher") {
+        await supabase.from("publishers").update({ user_id: null }).eq("user_id", userId);
       }
 
       toast({ title: "Role updated", description: `Role ${newRole === "none" ? "removed" : `set to ${newRole.replace("_", " ")}`} successfully.` });
@@ -330,6 +347,7 @@ const AdminPanel = () => {
               {([
                 { key: "employees" as const, label: "Employees" },
                 { key: "consultants" as const, label: "Consultants" },
+                { key: "publishers" as const, label: "Publishers" },
                 { key: "families" as const, label: "Students & Families" },
                 { key: "leads" as const, label: "Leads & Applicants" },
               ]).map((tab) => (
@@ -370,14 +388,16 @@ const AdminPanel = () => {
 
             {(() => {
               const subFiltered = filtered.filter((u) => {
-                if (userSubTab === "employees") return u.role && !["student", "parent", "consultant"].includes(u.role);
+                if (userSubTab === "employees") return u.role && !["student", "parent", "consultant", "publisher"].includes(u.role);
                 if (userSubTab === "consultants") return u.role === "consultant";
+                if (userSubTab === "publishers") return u.role === "publisher";
                 if (userSubTab === "families") return u.role === "student" || u.role === "parent";
                 return !u.role;
               });
               const allSubUsers = users.filter((u) => {
-                if (userSubTab === "employees") return u.role && !["student", "parent", "consultant"].includes(u.role);
+                if (userSubTab === "employees") return u.role && !["student", "parent", "consultant", "publisher"].includes(u.role);
                 if (userSubTab === "consultants") return u.role === "consultant";
+                if (userSubTab === "publishers") return u.role === "publisher";
                 if (userSubTab === "families") return u.role === "student" || u.role === "parent";
                 return !u.role;
               });
@@ -395,6 +415,12 @@ const AdminPanel = () => {
                 <SummaryCard label="With Email" value={allSubUsers.filter((u) => u.email).length} bg="bg-pastel-blue" />
                 <SummaryCard label="Shown" value={subFiltered.length} bg="bg-pastel-yellow" />
               </>)}
+              {userSubTab === "publishers" && (<>
+                <SummaryCard label="Total Publishers" value={publishers.length} bg="bg-pastel-blue" />
+                <SummaryCard label="Active" value={publishers.filter((p) => p.is_active).length} bg="bg-pastel-green" />
+                <SummaryCard label="Linked Users" value={publishers.filter((p) => p.user_id).length} bg="bg-pastel-purple" />
+                <SummaryCard label="Pending Login" value={publishers.filter((p) => !p.user_id).length} bg="bg-pastel-yellow" />
+              </>)}
               {userSubTab === "families" && (<>
                 <SummaryCard label="Total" value={allSubUsers.length} bg="bg-pastel-blue" />
                 <SummaryCard label="Students" value={allSubUsers.filter((u) => u.role === "student").length} bg="bg-pastel-green" />
@@ -409,7 +435,67 @@ const AdminPanel = () => {
               </>)}
             </div>
 
-            <div className="rounded-xl bg-card card-shadow overflow-x-auto">
+            {/* Publishers tab — dedicated table from publishers table */}
+            {userSubTab === "publishers" && (
+              <div className="rounded-xl bg-card card-shadow overflow-x-auto">
+                {publishersLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : publishers.length === 0 ? (
+                  <div className="py-12 text-center text-sm text-muted-foreground">
+                    No publishers found. Use "Invite User" with the Publisher role to add one.
+                  </div>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left">
+                        <th className="px-4 py-3 font-medium text-muted-foreground">Publisher</th>
+                        <th className="px-4 py-3 font-medium text-muted-foreground">Lead Source</th>
+                        <th className="px-4 py-3 font-medium text-muted-foreground">Linked User</th>
+                        <th className="px-4 py-3 font-medium text-muted-foreground">Status</th>
+                        <th className="px-4 py-3 font-medium text-muted-foreground">Created</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {publishers.map((pub) => (
+                        <tr key={pub.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                          <td className="px-4 py-3 font-medium text-foreground">{pub.display_name}</td>
+                          <td className="px-4 py-3">
+                            <span className="inline-flex items-center rounded-full bg-blue-100 dark:bg-blue-950/40 px-2.5 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-400 capitalize">
+                              {pub.source}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground text-xs">
+                            {pub.user_id ? (
+                              <span className="text-green-700 dark:text-green-400 font-medium">
+                                ✓ {pub.profiles?.display_name || pub.profiles?.email || pub.user_id.slice(0, 8) + "…"}
+                              </span>
+                            ) : (
+                              <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                                ⚠ No login yet — invite user with publisher role + source "{pub.source}"
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {pub.is_active ? (
+                              <span className="inline-flex items-center rounded-full bg-green-100 dark:bg-green-950/40 px-2 py-0.5 text-xs font-medium text-green-700 dark:text-green-400">Active</span>
+                            ) : (
+                              <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">Inactive</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground text-xs">
+                            {new Date(pub.created_at).toLocaleDateString("en-IN")}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+
+            <div className="rounded-xl bg-card card-shadow overflow-x-auto" style={{ display: userSubTab === "publishers" ? "none" : undefined }}>
               {loading ? (
                 <div className="flex items-center justify-center py-16">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
