@@ -60,7 +60,7 @@ const CallLog = () => {
   const [page, setPage] = useState(1);
 
   // Filters
-  const [datePreset, setDatePreset] = useState<DatePreset>("all");
+  const [datePreset, setDatePreset] = useState<DatePreset>("today");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [counsellorFilter, setCounsellorFilter] = useState("all");
