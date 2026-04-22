@@ -53,6 +53,7 @@ const admissionSubMenu: MenuItem[] = [
   { title: "Templates", url: "/template-manager", icon: Newspaper, permission: "templates:view" },
   { title: "Courses & Fees", url: "/fee-structures", icon: IndianRupee, permission: "courses_fees:view" },
   { title: "My Leads", url: "/consultant-portal", icon: Users, permission: "consultant_portal:view" },
+  { title: "My Leads", url: "/publisher-portal", icon: Users, permission: "publisher_portal:view" },
   { title: "Analytics", url: "/admission-analytics", icon: PieChart, permission: "analytics:view" },
 ];
 

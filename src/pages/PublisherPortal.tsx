@@ -1,0 +1,422 @@
+import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Loader2, Users, TrendingUp, CheckCircle, Clock,
+  Search, ChevronRight, ArrowUpRight, Activity,
+} from "lucide-react";
+
+// ── Types ──────────────────────────────────────────────────────────────────
+
+interface Publisher {
+  id: string;
+  display_name: string;
+  source: string;
+}
+
+interface PublisherLead {
+  id: string;
+  name: string;
+  phone: string;
+  email: string | null;
+  stage: string;
+  course_name: string;
+  campus_name: string;
+  created_at: string;
+}
+
+interface LeadActivity {
+  id: string;
+  type: string;
+  description: string;
+  created_at: string;
+}
+
+// ── Constants ──────────────────────────────────────────────────────────────
+
+const STAGE_LABELS: Record<string, string> = {
+  new_lead: "New Lead",
+  application_in_progress: "App In Progress",
+  application_fee_paid: "Fee Paid",
+  application_submitted: "Submitted",
+  counsellor_call: "Counsellor Call",
+  visit_scheduled: "Visit Scheduled",
+  interview: "Interview",
+  offer_sent: "Offer Sent",
+  token_paid: "Token Paid",
+  pre_admitted: "Pre-Admitted",
+  admitted: "Admitted",
+  waitlisted: "Waitlisted",
+  not_interested: "Not Interested",
+  rejected: "Rejected",
+};
+
+const STAGE_COLORS: Record<string, string> = {
+  new_lead: "bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400",
+  application_in_progress: "bg-yellow-100 text-yellow-700 dark:bg-yellow-950/40 dark:text-yellow-400",
+  application_fee_paid: "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-400",
+  application_submitted: "bg-teal-100 text-teal-700 dark:bg-teal-950/40 dark:text-teal-400",
+  counsellor_call: "bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-400",
+  visit_scheduled: "bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-400",
+  interview: "bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-400",
+  offer_sent: "bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-400",
+  token_paid: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400",
+  pre_admitted: "bg-lime-100 text-lime-700 dark:bg-lime-950/40 dark:text-lime-400",
+  admitted: "bg-green-200 text-green-800 dark:bg-green-900/50 dark:text-green-300",
+  waitlisted: "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400",
+  not_interested: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
+  rejected: "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400",
+};
+
+const ACTIVITY_LABELS: Record<string, string> = {
+  stage_change: "Stage Updated",
+  application_submitted: "Application Submitted",
+  application_started: "Application Started",
+  payment: "Payment Recorded",
+};
+
+// ── Component ──────────────────────────────────────────────────────────────
+
+export default function PublisherPortal() {
+  const { user } = useAuth();
+  const { toast } = useToast();
+
+  const [publisher, setPublisher] = useState<Publisher | null>(null);
+  const [leads, setLeads] = useState<PublisherLead[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [stageFilter, setStageFilter] = useState("all");
+
+  const [selectedLead, setSelectedLead] = useState<PublisherLead | null>(null);
+  const [activities, setActivities] = useState<LeadActivity[]>([]);
+  const [activitiesLoading, setActivitiesLoading] = useState(false);
+
+  // Fetch publisher record + leads
+  useEffect(() => {
+    if (!user?.id) return;
+    (async () => {
+      setLoading(true);
+
+      // Get this user's publisher record
+      const { data: pub, error: pubErr } = await supabase
+        .from("publishers")
+        .select("id, display_name, source")
+        .eq("user_id", user.id)
+        .eq("is_active", true)
+        .single();
+
+      if (pubErr || !pub) {
+        toast({ title: "Access denied", description: "No publisher account linked to this login.", variant: "destructive" });
+        setLoading(false);
+        return;
+      }
+      setPublisher(pub);
+
+      // Fetch leads with this source
+      const { data: leadsData, error: leadsErr } = await supabase
+        .from("leads")
+        .select(`
+          id, name, phone, email, stage, created_at,
+          courses!left(name),
+          campuses!left(name)
+        `)
+        .eq("source", pub.source)
+        .order("created_at", { ascending: false });
+
+      if (leadsErr) {
+        toast({ title: "Failed to load leads", variant: "destructive" });
+      } else {
+        setLeads((leadsData ?? []).map((l: any) => ({
+          id: l.id,
+          name: l.name,
+          phone: l.phone,
+          email: l.email,
+          stage: l.stage,
+          created_at: l.created_at,
+          course_name: l.courses?.name ?? "—",
+          campus_name: l.campuses?.name ?? "—",
+        })));
+      }
+      setLoading(false);
+    })();
+  }, [user?.id]);
+
+  // Fetch activities when a lead is selected
+  useEffect(() => {
+    if (!selectedLead) return;
+    (async () => {
+      setActivitiesLoading(true);
+      const { data } = await supabase
+        .from("lead_activities")
+        .select("id, type, description, created_at")
+        .eq("lead_id", selectedLead.id)
+        .in("type", ["stage_change", "application_submitted", "application_started", "payment"])
+        .order("created_at", { ascending: false });
+      setActivities(data ?? []);
+      setActivitiesLoading(false);
+    })();
+  }, [selectedLead?.id]);
+
+  // Derived stats
+  const total = leads.length;
+  const admitted = leads.filter(l => l.stage === "admitted").length;
+  const inProgress = leads.filter(l =>
+    ["application_in_progress", "application_fee_paid", "application_submitted",
+     "counsellor_call", "visit_scheduled", "interview", "offer_sent",
+     "token_paid", "pre_admitted"].includes(l.stage)
+  ).length;
+  const conversionRate = total > 0 ? Math.round((admitted / total) * 100) : 0;
+
+  // Unique stages for filter
+  const stageOptions = Array.from(new Set(leads.map(l => l.stage)));
+
+  const filtered = leads.filter(l => {
+    const q = search.toLowerCase();
+    const matchSearch = !q || l.name.toLowerCase().includes(q) ||
+      l.phone.includes(q) || (l.email?.toLowerCase().includes(q) ?? false) ||
+      l.course_name.toLowerCase().includes(q);
+    const matchStage = stageFilter === "all" || l.stage === stageFilter;
+    return matchSearch && matchStage;
+  });
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!publisher) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3 text-muted-foreground">
+        <Users className="h-10 w-10" />
+        <p className="text-sm">No publisher account found for this login.</p>
+        <p className="text-xs">Contact your NIMT account manager to get access.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6 p-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">{publisher.display_name} — Lead Reports</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">
+          Showing leads supplied via <span className="font-medium capitalize">{publisher.source}</span>
+        </p>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card className="border-border/60 shadow-none">
+          <CardContent className="pt-5 pb-4">
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Total Leads</p>
+              <Users className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <p className="text-3xl font-bold text-foreground">{total}</p>
+          </CardContent>
+        </Card>
+        <Card className="border-border/60 shadow-none">
+          <CardContent className="pt-5 pb-4">
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">In Pipeline</p>
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <p className="text-3xl font-bold text-foreground">{inProgress}</p>
+          </CardContent>
+        </Card>
+        <Card className="border-border/60 shadow-none">
+          <CardContent className="pt-5 pb-4">
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Admitted</p>
+              <CheckCircle className="h-4 w-4 text-green-500" />
+            </div>
+            <p className="text-3xl font-bold text-foreground">{admitted}</p>
+          </CardContent>
+        </Card>
+        <Card className="border-border/60 shadow-none">
+          <CardContent className="pt-5 pb-4">
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Conversion</p>
+              <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <p className="text-3xl font-bold text-foreground">{conversionRate}%</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search by name, phone, course…"
+            className="w-full rounded-xl border border-input bg-card pl-9 pr-4 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+          />
+        </div>
+        <select
+          value={stageFilter}
+          onChange={e => setStageFilter(e.target.value)}
+          className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+        >
+          <option value="all">All Stages</option>
+          {stageOptions.map(s => (
+            <option key={s} value={s}>{STAGE_LABELS[s] || s}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Leads table */}
+      <Card className="border-border/60 shadow-none overflow-hidden">
+        <CardContent className="p-0">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/50">
+                <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Lead</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Course / Campus</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Stage</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Date</th>
+                <th className="px-4 py-3 w-10" />
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                    {search || stageFilter !== "all" ? "No leads match your filters." : "No leads found for your source."}
+                  </td>
+                </tr>
+              ) : filtered.map(lead => (
+                <tr
+                  key={lead.id}
+                  className="border-b border-border last:border-0 hover:bg-muted/30 cursor-pointer transition-colors"
+                  onClick={() => setSelectedLead(lead)}
+                >
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-foreground">{lead.name}</div>
+                    <div className="text-xs text-muted-foreground">{lead.phone}{lead.email ? ` · ${lead.email}` : ""}</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="text-foreground">{lead.course_name}</div>
+                    <div className="text-xs text-muted-foreground">{lead.campus_name}</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <Badge className={`text-[11px] font-medium border-0 ${STAGE_COLORS[lead.stage] ?? "bg-muted"}`}>
+                      {STAGE_LABELS[lead.stage] ?? lead.stage}
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-muted-foreground">
+                    {new Date(lead.created_at).toLocaleDateString("en-IN")}
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    <ChevronRight className="h-4 w-4" />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+
+      <p className="text-xs text-muted-foreground">
+        Showing {filtered.length} of {total} leads
+      </p>
+
+      {/* Lead detail dialog */}
+      <Dialog open={!!selectedLead} onOpenChange={open => { if (!open) setSelectedLead(null); }}>
+        <DialogContent className="max-w-lg">
+          {selectedLead && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="text-base">{selectedLead.name}</DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-4">
+                {/* Basic info */}
+                <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-2 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Phone</span>
+                    <span className="font-medium">{selectedLead.phone}</span>
+                  </div>
+                  {selectedLead.email && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Email</span>
+                      <span className="font-medium">{selectedLead.email}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Course</span>
+                    <span className="font-medium text-right max-w-[60%]">{selectedLead.course_name}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Campus</span>
+                    <span className="font-medium">{selectedLead.campus_name}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Applied On</span>
+                    <span className="font-medium">{new Date(selectedLead.created_at).toLocaleDateString("en-IN")}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Current Stage</span>
+                    <Badge className={`text-[11px] font-medium border-0 ${STAGE_COLORS[selectedLead.stage] ?? "bg-muted"}`}>
+                      {STAGE_LABELS[selectedLead.stage] ?? selectedLead.stage}
+                    </Badge>
+                  </div>
+                </div>
+
+                {/* Timeline */}
+                <div>
+                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                    <Activity className="h-3.5 w-3.5" /> Timeline
+                  </h3>
+                  {activitiesLoading ? (
+                    <div className="flex justify-center py-4">
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : activities.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4">No timeline events yet.</p>
+                  ) : (
+                    <div className="relative space-y-0">
+                      {activities.map((a, i) => (
+                        <div key={a.id} className="flex gap-3 pb-4 last:pb-0">
+                          <div className="flex flex-col items-center">
+                            <div className="h-2 w-2 rounded-full bg-primary mt-1.5 shrink-0" />
+                            {i < activities.length - 1 && <div className="w-px flex-1 bg-border mt-1" />}
+                          </div>
+                          <div className="flex-1 min-w-0 pb-1">
+                            <div className="flex items-baseline justify-between gap-2">
+                              <span className="text-xs font-semibold text-foreground">
+                                {ACTIVITY_LABELS[a.type] ?? a.type.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground shrink-0">
+                                {new Date(a.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                              </span>
+                            </div>
+                            {a.description && (
+                              <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{a.description}</p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
