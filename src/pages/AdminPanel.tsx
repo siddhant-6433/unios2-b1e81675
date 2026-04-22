@@ -109,7 +109,7 @@ const AdminPanel = () => {
 
       const [{ data: roles, error: roleError }, { data: authInfo }] = await Promise.all([
         supabase.from("user_roles").select("id, user_id, role"),
-        supabase.from("user_auth_info" as any).select("user_id, last_sign_in_at").then(r => r).catch(() => ({ data: [], error: null })),
+        supabase.rpc("get_user_auth_info" as any).then((r: any) => r).catch(() => ({ data: [], error: null })),
       ]);
 
       if (roleError) {
