@@ -63,20 +63,31 @@ const PendingFollowups = () => {
     const todayEnd = `${today}T23:59:59+05:30`;
     const weekEnd = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10) + "T23:59:59+05:30";
 
+    // For counsellors, first get their assigned lead IDs
+    let myLeadIds: string[] | null = null;
+    if (isCounsellor && profileId) {
+      const { data: myLeads } = await supabase.from("leads").select("id").eq("counsellor_id", profileId);
+      myLeadIds = (myLeads || []).map((l: any) => l.id);
+      if (myLeadIds.length === 0) {
+        setCounts({ overdue: 0, today: 0, upcoming: 0, visit_confirm: 0, post_visit: 0 });
+        return;
+      }
+    }
+
     // Overdue
     let oq = supabase.from("lead_followups" as any).select("id", { count: "exact", head: true })
       .eq("status", "pending").lt("scheduled_at", todayStart);
-    if (isCounsellor && profileId) oq = oq.eq("user_id", user!.id);
+    if (myLeadIds) oq = oq.in("lead_id", myLeadIds);
 
     // Today
     let tq = supabase.from("lead_followups" as any).select("id", { count: "exact", head: true })
       .eq("status", "pending").gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd);
-    if (isCounsellor && profileId) tq = tq.eq("user_id", user!.id);
+    if (myLeadIds) tq = tq.in("lead_id", myLeadIds);
 
-    // Upcoming (next 7 days, excluding today)
+    // Upcoming
     let uq = supabase.from("lead_followups" as any).select("id", { count: "exact", head: true })
       .eq("status", "pending").gt("scheduled_at", todayEnd).lte("scheduled_at", weekEnd);
-    if (isCounsellor && profileId) uq = uq.eq("user_id", user!.id);
+    if (myLeadIds) uq = uq.in("lead_id", myLeadIds);
 
     // Visit confirmations
     let vcq = supabase.from("visits_needing_confirmation" as any).select("visit_id", { count: "exact", head: true });
@@ -94,7 +105,7 @@ const PendingFollowups = () => {
       visit_confirm: vcRes.count || 0,
       post_visit: pvRes.count || 0,
     });
-  }, [isCounsellor, profileId, user?.id]);
+  }, [isCounsellor, profileId]);
 
   const fetchItems = useCallback(async () => {
     setLoading(true);
@@ -106,9 +117,11 @@ const PendingFollowups = () => {
     let result: FollowupItem[] = [];
 
     if (tab === "overdue" || tab === "today" || tab === "upcoming") {
+      // Use !inner join so we can filter by leads.counsellor_id for counsellors
+      const joinType = isCounsellor && profileId ? "!inner" : "";
       let q = supabase.from("lead_followups" as any)
         .select(`id, lead_id, type, scheduled_at, notes, status, user_id,
-          leads:lead_id(name, phone, stage, counsellor_id,
+          leads${joinType}:lead_id(name, phone, stage, counsellor_id,
             counsellor_profile:counsellor_id(display_name),
             courses:course_id(name), campuses:campus_id(name)
           )`)
@@ -119,7 +132,8 @@ const PendingFollowups = () => {
       else if (tab === "today") q = q.gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd);
       else q = q.gt("scheduled_at", todayEnd).lte("scheduled_at", weekEnd);
 
-      if (isCounsellor && user?.id) q = q.eq("user_id", user.id);
+      // Filter by lead's assigned counsellor (not followup user_id)
+      if (isCounsellor && profileId) q = q.eq("leads.counsellor_id", profileId);
 
       q = q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
       const { data } = await q;
