@@ -41,7 +41,7 @@ const mainMenu: MenuItem[] = [
 ];
 
 const admissionSubMenu: MenuItem[] = [
-  { title: "Leads Dashboard", url: "/admissions", icon: GraduationCap, permission: "leads:view" },
+  { title: "Lead Dashboard", url: "/admissions", icon: GraduationCap, permission: "leads:view" },
   { title: "WhatsApp", url: "/whatsapp-inbox", icon: MessageSquare, permission: "whatsapp:view" },
   { title: "Performance", url: "/counsellor-dashboard", icon: BarChart3, permission: "performance:view" },
   { title: "Lead Buckets", url: "/lead-buckets", icon: Inbox, permission: "lead_buckets:view" },
