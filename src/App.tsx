@@ -16,6 +16,7 @@ import LeadAllocation from "./pages/LeadAllocation";
 import LeadBuckets from "./pages/LeadBuckets";
 import CallLog from "./pages/CallLog";
 import AiCallLog from "./pages/AiCallLog";
+import PendingFollowups from "./pages/PendingFollowups";
 import StudentReferrals from "./pages/StudentReferrals";
 import GlobalSearch from "./pages/GlobalSearch";
 import Students from "./pages/Students";
@@ -105,6 +106,7 @@ const App = () => (
                       <Route path="/admissions/:id" element={<LeadDetail />} />
                       <Route path="/lead-allocation" element={<LeadAllocation />} />
                       <Route path="/lead-buckets" element={<LeadBuckets />} />
+                      <Route path="/pending-followups" element={<PendingFollowups />} />
                       <Route path="/call-log" element={<CallLog />} />
                       <Route path="/ai-call-log" element={<AiCallLog />} />
                       <Route path="/referrals" element={<StudentReferrals />} />
