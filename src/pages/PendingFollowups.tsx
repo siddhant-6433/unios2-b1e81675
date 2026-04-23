@@ -14,13 +14,13 @@ import { useToast } from "@/hooks/use-toast";
 
 type Tab = "overdue" | "today" | "upcoming" | "visit_confirm" | "unclosed_visits" | "post_visit";
 
-const TABS: { key: Tab; label: string; icon: any }[] = [
-  { key: "overdue", label: "Overdue", icon: AlertTriangle },
-  { key: "today", label: "Today", icon: Clock },
-  { key: "upcoming", label: "Upcoming", icon: CalendarCheck },
-  { key: "visit_confirm", label: "Visit Confirmations", icon: MapPin },
-  { key: "unclosed_visits", label: "Unclosed Visits", icon: AlertTriangle },
-  { key: "post_visit", label: "Post-Visit", icon: Phone },
+const TABS: { key: Tab; label: string; icon: any; description: string }[] = [
+  { key: "overdue", label: "Overdue", icon: AlertTriangle, description: "Follow-up calls that were scheduled but not completed — these leads are waiting for contact." },
+  { key: "today", label: "Today", icon: Clock, description: "Follow-ups scheduled for today — call these leads before end of day." },
+  { key: "upcoming", label: "Upcoming", icon: CalendarCheck, description: "Follow-ups scheduled for the next 7 days — plan your calls ahead." },
+  { key: "visit_confirm", label: "Visit Confirmations", icon: MapPin, description: "Visits scheduled for today or tomorrow — call each lead to confirm they are coming." },
+  { key: "unclosed_visits", label: "Unclosed Visits", icon: AlertTriangle, description: "Visits that happened but were never marked completed or no-show — close these to avoid score penalties." },
+  { key: "post_visit", label: "Post-Visit", icon: Phone, description: "Completed visits with no follow-up call logged — call to collect feedback and push towards admission." },
 ];
 
 interface FollowupItem {
@@ -48,8 +48,13 @@ const PendingFollowups = () => {
   const { role, user } = useAuth();
   const isCounsellor = role === "counsellor";
   const [profileId, setProfileId] = useState<string | null>(null);
-  const initialTab = (searchParams.get("tab") as Tab) || "overdue";
-  const [tab, setTab] = useState<Tab>(initialTab);
+  const [tab, setTab] = useState<Tab>((searchParams.get("tab") as Tab) || "overdue");
+
+  // Sync tab from URL when navigating from global bar
+  useEffect(() => {
+    const urlTab = searchParams.get("tab") as Tab;
+    if (urlTab && TABS.some(t => t.key === urlTab)) setTab(urlTab);
+  }, [searchParams]);
   const [items, setItems] = useState<FollowupItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -453,13 +458,18 @@ const PendingFollowups = () => {
               {c > 0 && (
                 <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
                   isActive ? "bg-primary-foreground/20 text-primary-foreground"
-                    : t.key === "overdue" ? "bg-red-100 text-red-700" : "bg-muted text-muted-foreground"
+                    : t.key === "overdue" || t.key === "unclosed_visits" ? "bg-red-100 text-red-700" : "bg-muted text-muted-foreground"
                 }`}>{c}</span>
               )}
             </button>
           );
         })}
       </div>
+
+      {/* Tab description */}
+      <p className="text-xs text-muted-foreground -mt-2">
+        {TABS.find(t => t.key === tab)?.description}
+      </p>
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
