@@ -151,23 +151,33 @@ export default function PublisherPortal() {
       }
       setPublisher(pub);
 
-      // Fetch leads with this source (raise limit above Supabase default of 1000)
-      const { data: leadsData, error: leadsErr } = await supabase
-        .from("leads")
-        .select(`
-          id, name, phone, email, stage, created_at,
-          ai_called, ai_called_at,
-          courses!left(name),
-          campuses!left(name)
-        `)
-        .eq("source", pub.source)
-        .order("created_at", { ascending: false })
-        .limit(5000);
+      // Paginate to bypass Supabase server-side max-rows cap (default 1000)
+      const PAGE = 1000;
+      let allLeads: any[] = [];
+      let page = 0;
+      let fetchErr = null;
+      while (true) {
+        const { data: batch, error } = await supabase
+          .from("leads")
+          .select(`
+            id, name, phone, email, stage, created_at,
+            ai_called, ai_called_at,
+            courses!left(name),
+            campuses!left(name)
+          `)
+          .eq("source", pub.source)
+          .order("created_at", { ascending: false })
+          .range(page * PAGE, (page + 1) * PAGE - 1);
+        if (error) { fetchErr = error; break; }
+        allLeads = allLeads.concat(batch ?? []);
+        if ((batch ?? []).length < PAGE) break; // last page
+        page++;
+      }
 
-      if (leadsErr) {
+      if (fetchErr) {
         toast({ title: "Failed to load leads", variant: "destructive" });
       } else {
-        setLeads((leadsData ?? []).map((l: any) => ({
+        setLeads(allLeads.map((l: any) => ({
           id: l.id,
           name: l.name,
           phone: l.phone,
