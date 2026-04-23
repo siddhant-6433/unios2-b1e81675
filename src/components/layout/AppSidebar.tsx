@@ -56,6 +56,7 @@ const admissionSubMenu: MenuItem[] = [
   { title: "Courses & Fees", url: "/fee-structures", icon: IndianRupee, permission: "courses_fees:view" },
   { title: "My Leads", url: "/consultant-portal", icon: Users, permission: "consultant_portal:view", hideForSuperAdmin: true },
   { title: "Publisher Leads", url: "/publisher-portal", icon: Users, permission: "publisher_portal:view", hideForSuperAdmin: true },
+  { title: "Publisher Portal", url: "/publisher-portal", icon: Users, permission: "user_management:view" },
   { title: "Analytics", url: "/admission-analytics", icon: PieChart, permission: "analytics:view" },
 ];
 
@@ -75,7 +76,6 @@ const managementMenu: MenuItem[] = [
   { title: "Campuses & Courses", url: "/admin?tab=course-campus", icon: Building2, permission: "campuses_courses:view" },
   { title: "Documents", url: "/documents", icon: FileText, permission: "documents:view" },
   { title: "Alumni Verification", url: "/alumni-verifications", icon: ShieldCheck, permission: "alumni_verification:view" },
-  { title: "Publisher Portal", url: "/publisher-portal", icon: Users, permission: "user_management:view" },
   { title: "User Management", url: "/admin", icon: ShieldCheck, permission: "user_management:view" },
   { title: "Permissions", url: "/admin?tab=permissions", icon: ShieldCheck, permission: "permissions:view" },
 ];
