@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   Loader2, Users, TrendingUp, CheckCircle, Clock,
-  Search, ChevronRight, ArrowUpRight, Activity,
+  Search, ChevronRight, ArrowUpRight, Activity, Phone, PhoneOff,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -30,6 +30,8 @@ interface PublisherLead {
   course_name: string;
   campus_name: string;
   created_at: string;
+  ai_called: boolean;
+  ai_called_at: string | null;
 }
 
 interface LeadActivity {
@@ -149,16 +151,18 @@ export default function PublisherPortal() {
       }
       setPublisher(pub);
 
-      // Fetch leads with this source
+      // Fetch leads with this source (raise limit above Supabase default of 1000)
       const { data: leadsData, error: leadsErr } = await supabase
         .from("leads")
         .select(`
           id, name, phone, email, stage, created_at,
+          ai_called, ai_called_at,
           courses!left(name),
           campuses!left(name)
         `)
         .eq("source", pub.source)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .limit(5000);
 
       if (leadsErr) {
         toast({ title: "Failed to load leads", variant: "destructive" });
@@ -170,6 +174,8 @@ export default function PublisherPortal() {
           email: l.email,
           stage: l.stage,
           created_at: l.created_at,
+          ai_called: l.ai_called ?? false,
+          ai_called_at: l.ai_called_at ?? null,
           course_name: l.courses?.name ?? "—",
           campus_name: l.campuses?.name ?? "—",
         })));
@@ -355,6 +361,7 @@ export default function PublisherPortal() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Lead</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Course / Campus</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Stage</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">AI Call</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Date</th>
                 <th className="px-4 py-3 w-10" />
               </tr>
@@ -362,7 +369,7 @@ export default function PublisherPortal() {
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                  <td colSpan={6} className="px-4 py-12 text-center text-sm text-muted-foreground">
                     {search || stageFilter !== "all" ? "No leads match your filters." : "No leads found for your source."}
                   </td>
                 </tr>
@@ -384,6 +391,24 @@ export default function PublisherPortal() {
                     <Badge className={`text-[11px] font-medium border-0 ${STAGE_COLORS[lead.stage] ?? "bg-muted"}`}>
                       {STAGE_LABELS[lead.stage] ?? lead.stage}
                     </Badge>
+                  </td>
+                  <td className="px-4 py-3">
+                    {lead.ai_called ? (
+                      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-green-700 dark:text-green-400">
+                        <Phone className="h-3.5 w-3.5" />
+                        Called
+                        {lead.ai_called_at && (
+                          <span className="text-muted-foreground font-normal">
+                            · {new Date(lead.ai_called_at).toLocaleDateString("en-IN")}
+                          </span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <PhoneOff className="h-3.5 w-3.5" />
+                        Not called
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-sm text-muted-foreground">
                     {new Date(lead.created_at).toLocaleDateString("en-IN")}

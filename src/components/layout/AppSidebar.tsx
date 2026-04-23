@@ -75,6 +75,7 @@ const managementMenu: MenuItem[] = [
   { title: "Campuses & Courses", url: "/admin?tab=course-campus", icon: Building2, permission: "campuses_courses:view" },
   { title: "Documents", url: "/documents", icon: FileText, permission: "documents:view" },
   { title: "Alumni Verification", url: "/alumni-verifications", icon: ShieldCheck, permission: "alumni_verification:view" },
+  { title: "Publisher Portal", url: "/publisher-portal", icon: Users, permission: "user_management:view" },
   { title: "User Management", url: "/admin", icon: ShieldCheck, permission: "user_management:view" },
   { title: "Permissions", url: "/admin?tab=permissions", icon: ShieldCheck, permission: "permissions:view" },
 ];
