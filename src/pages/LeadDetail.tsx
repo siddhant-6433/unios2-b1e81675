@@ -1249,7 +1249,7 @@ function ScheduledVisitsSection({ visits, campuses, courses, leadId, userId, onR
                     setExpectedAdmissionDate("");
                   }}
                   className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-700"
-                >Completed</button>
+                >Mark Complete</button>
                 <button
                   onClick={async () => {
                     await supabase.from("campus_visits").update({ status: "no_show" }).eq("id", v.id);

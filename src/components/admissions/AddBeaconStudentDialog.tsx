@@ -96,7 +96,7 @@ export function AddBeaconStudentDialog({ open, onOpenChange, onSuccess }: AddBea
     const { data: inserted, error } = await supabase.from("students").insert({
       name: form.name.trim(),
       dob: form.dob || null,
-      gender: form.gender || null,
+      gender: form.gender ? form.gender.toLowerCase() : null,
       course_id: form.course_id,
       campus_id: form.campus_id,
       session_id: form.session_id || null,
