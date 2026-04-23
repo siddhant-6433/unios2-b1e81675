@@ -1,6 +1,7 @@
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { ImpersonationBanner } from "@/components/layout/ImpersonationBanner";
+import { GlobalActionBar } from "@/components/layout/GlobalActionBar";
 import { NotificationPanel } from "@/components/layout/NotificationPanel";
 import { HeaderSearch } from "@/components/layout/HeaderSearch";
 import { HeaderProfile } from "@/components/layout/HeaderProfile";
@@ -65,6 +66,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 <HeaderProfile />
               </div>
             </header>
+            <GlobalActionBar />
             <main className="flex-1 overflow-auto p-6">
               {children}
             </main>
