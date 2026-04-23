@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   Clock, AlertTriangle, CalendarCheck, Phone, MapPin, Loader2, Search,
-  ChevronLeft, ChevronRight, ExternalLink,
+  ChevronLeft, ChevronRight, ExternalLink, UserSwitch, X, Check,
 } from "lucide-react";
 
 type Tab = "overdue" | "today" | "upcoming" | "visit_confirm" | "post_visit";
@@ -49,6 +49,10 @@ const PendingFollowups = () => {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [counts, setCounts] = useState<Record<Tab, number>>({ overdue: 0, today: 0, upcoming: 0, visit_confirm: 0, post_visit: 0 });
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [counsellorOptions, setCounsellorOptions] = useState<{ id: string; name: string }[]>([]);
+  const [reassignTo, setReassignTo] = useState("");
+  const [reassigning, setReassigning] = useState(false);
 
   // Get profile id for counsellor filtering
   useEffect(() => {
@@ -56,6 +60,17 @@ const PendingFollowups = () => {
     supabase.from("profiles").select("id").eq("user_id", user.id).single()
       .then(({ data }) => { if (data) setProfileId(data.id); });
   }, [user?.id]);
+
+  // Fetch counsellor options for reassignment (admins only)
+  useEffect(() => {
+    if (isCounsellor) return;
+    (async () => {
+      const { data: roleRows } = await supabase.from("user_roles").select("user_id").eq("role", "counsellor");
+      if (!roleRows?.length) return;
+      const { data: profs } = await supabase.from("profiles").select("id, display_name").in("user_id", roleRows.map(r => r.user_id));
+      if (profs) setCounsellorOptions(profs.map(p => ({ id: p.id, name: p.display_name || "Unnamed" })).sort((a, b) => a.name.localeCompare(b.name)));
+    })();
+  }, [isCounsellor]);
 
   const fetchCounts = useCallback(async () => {
     const today = new Date().toISOString().slice(0, 10);
@@ -207,7 +222,7 @@ const PendingFollowups = () => {
 
   useEffect(() => { fetchCounts(); }, [fetchCounts]);
   useEffect(() => { fetchItems(); }, [fetchItems]);
-  useEffect(() => { setPage(0); }, [tab]);
+  useEffect(() => { setPage(0); setSelected(new Set()); }, [tab]);
 
   const filtered = search
     ? items.filter(r => {
@@ -219,6 +234,48 @@ const PendingFollowups = () => {
   const handleMarkComplete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     await supabase.from("lead_followups" as any).update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", id);
+    fetchItems();
+    fetchCounts();
+  };
+
+  const toggleSelect = (leadId: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(leadId)) next.delete(leadId); else next.add(leadId);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selected.size === filtered.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(filtered.map(r => r.lead_id)));
+    }
+  };
+
+  const handleReassign = async () => {
+    if (!reassignTo || selected.size === 0) return;
+    setReassigning(true);
+    const leadIds = [...selected];
+    const { error } = await supabase.from("leads").update({ counsellor_id: reassignTo } as any).in("id", leadIds);
+    if (error) {
+      console.error("Reassign failed:", error);
+    } else {
+      // Log activity for each lead
+      const counsellorName = counsellorOptions.find(c => c.id === reassignTo)?.name || "Unknown";
+      await supabase.from("lead_activities").insert(
+        leadIds.map(lid => ({
+          lead_id: lid,
+          user_id: user?.id || null,
+          type: "assignment",
+          description: `Lead reassigned to ${counsellorName} (bulk from Pending Follow-ups)`,
+        }))
+      );
+    }
+    setSelected(new Set());
+    setReassignTo("");
+    setReassigning(false);
     fetchItems();
     fetchCounts();
   };
@@ -274,6 +331,27 @@ const PendingFollowups = () => {
           className="w-full rounded-xl border border-input bg-card py-2 pl-10 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20" />
       </div>
 
+      {/* Bulk action bar */}
+      {!isCounsellor && selected.size > 0 && (
+        <div className="flex items-center gap-3 rounded-xl bg-primary/5 border border-primary/20 px-4 py-2.5">
+          <span className="text-sm font-medium text-foreground">{selected.size} lead{selected.size > 1 ? "s" : ""} selected</span>
+          <select value={reassignTo} onChange={e => setReassignTo(e.target.value)}
+            className="rounded-lg border border-input bg-card px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20">
+            <option value="">Reassign to...</option>
+            {counsellorOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <button onClick={handleReassign} disabled={!reassignTo || reassigning}
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors">
+            {reassigning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+            Reassign
+          </button>
+          <button onClick={() => setSelected(new Set())}
+            className="rounded-lg p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" title="Clear selection">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       <Card className="border-border/60 shadow-none overflow-x-auto">
         <CardContent className="p-0">
@@ -283,6 +361,13 @@ const PendingFollowups = () => {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/40">
+                  {!isCounsellor && (
+                    <th className="px-3 py-2.5 w-10">
+                      <input type="checkbox" checked={filtered.length > 0 && selected.size === filtered.length}
+                        onChange={toggleSelectAll}
+                        className="h-4 w-4 rounded border-border text-primary focus:ring-primary/20 cursor-pointer" />
+                    </th>
+                  )}
                   <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Lead</th>
                   <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Type</th>
                   <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">
@@ -297,8 +382,15 @@ const PendingFollowups = () => {
               </thead>
               <tbody>
                 {filtered.map(r => (
-                  <tr key={r.id} className="border-b border-border/40 hover:bg-muted/20 cursor-pointer"
+                  <tr key={r.id} className={`border-b border-border/40 hover:bg-muted/20 cursor-pointer ${selected.has(r.lead_id) ? "bg-primary/5" : ""}`}
                     onClick={() => navigate(`/admissions/${r.lead_id}`)}>
+                    {!isCounsellor && (
+                      <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" checked={selected.has(r.lead_id)}
+                          onChange={() => toggleSelect(r.lead_id)}
+                          className="h-4 w-4 rounded border-border text-primary focus:ring-primary/20 cursor-pointer" />
+                      </td>
+                    )}
                     <td className="px-4 py-2.5">
                       <p className="font-medium text-foreground">{r.lead_name}</p>
                       <p className="text-[10px] text-muted-foreground">{r.lead_phone}</p>
@@ -351,7 +443,7 @@ const PendingFollowups = () => {
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={isCounsellor ? 7 : 8} className="px-4 py-12 text-center text-muted-foreground">
+                  <tr><td colSpan={isCounsellor ? 7 : 9} className="px-4 py-12 text-center text-muted-foreground">
                     <CalendarCheck className="h-8 w-8 mx-auto mb-2 opacity-30" />
                     <p className="text-sm">{tab === "overdue" ? "No overdue follow-ups!" : "No pending items"}</p>
                   </td></tr>
