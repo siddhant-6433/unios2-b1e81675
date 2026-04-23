@@ -45,9 +45,9 @@ const PAGE_SIZE = 50;
 const PendingFollowups = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { role, user } = useAuth();
+  const { role, user, profile } = useAuth();
   const isCounsellor = role === "counsellor";
-  const [profileId, setProfileId] = useState<string | null>(null);
+  const profileId = profile?.id || null;
   const [tab, setTab] = useState<Tab>((searchParams.get("tab") as Tab) || "overdue");
 
   // Sync tab from URL when navigating from global bar
@@ -74,13 +74,6 @@ const PendingFollowups = () => {
   const [rescheduleDate, setRescheduleDate] = useState("");
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
-
-  // Get profile id for counsellor filtering
-  useEffect(() => {
-    if (!user?.id) return;
-    supabase.from("profiles").select("id").eq("user_id", user.id).single()
-      .then(({ data }) => { if (data) setProfileId(data.id); });
-  }, [user?.id]);
 
   // Fetch counsellor options for reassignment (admins only)
   useEffect(() => {
