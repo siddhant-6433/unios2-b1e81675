@@ -129,6 +129,9 @@ export default function PublisherPortal() {
   const [stageFilter, setStageFilter] = useState("all");
   const [aiFilter, setAiFilter] = useState("all"); // "all" | "called" | "not_called"
 
+  const [avgAiCallMs, setAvgAiCallMs] = useState<number | null>(null);
+  const [avgManualCallMs, setAvgManualCallMs] = useState<number | null>(null);
+
   const [selectedLead, setSelectedLead] = useState<PublisherLead | null>(null);
   const [activities, setActivities] = useState<LeadActivity[]>([]);
   const [activitiesLoading, setActivitiesLoading] = useState(false);
@@ -206,7 +209,7 @@ export default function PublisherPortal() {
       if (fetchErr) {
         toast({ title: "Failed to load leads", variant: "destructive" });
       } else {
-        setLeads(allLeads.map((l: any) => ({
+        const mapped = allLeads.map((l: any) => ({
           id: l.id,
           name: l.name,
           phone: l.phone,
@@ -217,7 +220,38 @@ export default function PublisherPortal() {
           ai_called_at: l.ai_called_at ?? null,
           course_name: l.courses?.name ?? "—",
           campus_name: l.campuses?.name ?? "—",
-        })));
+        }));
+        setLeads(mapped);
+
+        // Avg AI call time from leads data
+        const aiDelays = mapped
+          .filter((l: any) => l.ai_called && l.ai_called_at)
+          .map((l: any) => new Date(l.ai_called_at).getTime() - new Date(l.created_at).getTime())
+          .filter((ms: number) => ms >= 0);
+        setAvgAiCallMs(aiDelays.length > 0 ? aiDelays.reduce((a: number, b: number) => a + b, 0) / aiDelays.length : null);
+
+        // Avg manual call time — fetch first 'call' activity per lead in batches
+        const leadIds = mapped.map((l: any) => l.id);
+        const leadCreatedMap: Record<string, number> = {};
+        mapped.forEach((l: any) => { leadCreatedMap[l.id] = new Date(l.created_at).getTime(); });
+
+        const firstCallMap: Record<string, number> = {};
+        const BATCH = 500;
+        for (let i = 0; i < leadIds.length; i += BATCH) {
+          const { data: callBatch } = await supabase
+            .from("lead_activities")
+            .select("lead_id, created_at")
+            .in("lead_id", leadIds.slice(i, i + BATCH))
+            .eq("type", "call")
+            .order("created_at", { ascending: true });
+          (callBatch ?? []).forEach((a: any) => {
+            if (!firstCallMap[a.lead_id]) firstCallMap[a.lead_id] = new Date(a.created_at).getTime();
+          });
+        }
+        const manualDelays = Object.entries(firstCallMap)
+          .map(([lid, callTime]) => callTime - (leadCreatedMap[lid] ?? callTime))
+          .filter(ms => ms >= 0);
+        setAvgManualCallMs(manualDelays.length > 0 ? manualDelays.reduce((a, b) => a + b, 0) / manualDelays.length : null);
       }
       setLoading(false);
     })();
@@ -316,7 +350,7 @@ export default function PublisherPortal() {
           <div className="flex items-center gap-2 flex-wrap">
             <select
               value={impersonatingId}
-              onChange={e => { setImpersonatingId(e.target.value); setSearch(""); setStageFilter("all"); setAiFilter("all"); }}
+              onChange={e => { setImpersonatingId(e.target.value); setSearch(""); setStageFilter("all"); setAiFilter("all"); setAvgAiCallMs(null); setAvgManualCallMs(null); }}
               className="rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
             >
               <option value="">— Switch Publisher —</option>
@@ -348,7 +382,7 @@ export default function PublisherPortal() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
         <Card className="border-border/60 shadow-none">
           <CardContent className="pt-5 pb-4">
             <div className="flex items-center justify-between mb-1">
@@ -383,6 +417,38 @@ export default function PublisherPortal() {
               <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
             </div>
             <p className="text-3xl font-bold text-foreground">{conversionRate}%</p>
+          </CardContent>
+        </Card>
+        <Card className="border-border/60 shadow-none">
+          <CardContent className="pt-5 pb-4">
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Avg. AI Call Time</p>
+              <Phone className="h-4 w-4 text-violet-500" />
+            </div>
+            {avgAiCallMs === null ? (
+              <p className="text-sm text-muted-foreground mt-1">No data</p>
+            ) : (
+              <>
+                <p className="text-3xl font-bold text-foreground">{formatDuration(avgAiCallMs)}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">after lead received</p>
+              </>
+            )}
+          </CardContent>
+        </Card>
+        <Card className="border-border/60 shadow-none">
+          <CardContent className="pt-5 pb-4">
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Avg. Manual Call Time</p>
+              <Phone className="h-4 w-4 text-orange-500" />
+            </div>
+            {avgManualCallMs === null ? (
+              <p className="text-sm text-muted-foreground mt-1">No data</p>
+            ) : (
+              <>
+                <p className="text-3xl font-bold text-foreground">{formatDuration(avgManualCallMs)}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">after lead received</p>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>
