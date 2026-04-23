@@ -88,7 +88,28 @@ const ACTIVITY_LABELS: Record<string, string> = {
   application_submitted: "Application Submitted",
   application_started: "Application Started",
   payment: "Payment Recorded",
+  call: "Call Logged",
+  ai_call: "AI Call",
 };
+
+const ACTIVITY_COLORS: Record<string, string> = {
+  stage_change: "bg-blue-500",
+  call: "bg-orange-500",
+  ai_call: "bg-violet-500",
+  payment: "bg-green-500",
+  application_submitted: "bg-teal-500",
+  application_started: "bg-yellow-500",
+};
+
+function formatDuration(ms: number): string {
+  const mins = Math.floor(ms / 60000);
+  const hours = Math.floor(mins / 60);
+  const days = Math.floor(hours / 24);
+  if (days > 0) return `${days}d ${hours % 24}h`;
+  if (hours > 0) return `${hours}h ${mins % 60}m`;
+  if (mins > 0) return `${mins}m`;
+  return "< 1m";
+}
 
 // ── Component ──────────────────────────────────────────────────────────────
 
@@ -211,7 +232,7 @@ export default function PublisherPortal() {
         .from("lead_activities")
         .select("id, type, description, created_at")
         .eq("lead_id", selectedLead.id)
-        .in("type", ["stage_change", "application_submitted", "application_started", "payment"])
+        .in("type", ["stage_change", "application_submitted", "application_started", "payment", "call", "ai_call"])
         .order("created_at", { ascending: false });
       setActivities(data ?? []);
       setActivitiesLoading(false);
@@ -517,7 +538,7 @@ export default function PublisherPortal() {
 
       {/* Lead detail dialog */}
       <Dialog open={!!selectedLead} onOpenChange={open => { if (!open) setSelectedLead(null); }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           {selectedLead && (
             <>
               <DialogHeader>
@@ -546,9 +567,36 @@ export default function PublisherPortal() {
                     <span className="font-medium">{selectedLead.campus_name}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Applied On</span>
-                    <span className="font-medium">{new Date(selectedLead.created_at).toLocaleDateString("en-IN")}</span>
+                    <span className="text-muted-foreground">Lead Received</span>
+                    <span className="font-medium">
+                      {new Date(selectedLead.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                      {" · "}
+                      {new Date(selectedLead.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                    </span>
                   </div>
+                  {/* Time to first call */}
+                  {(() => {
+                    const firstCall = [...activities]
+                      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+                      .find(a => a.type === "call" || a.type === "ai_call");
+                    if (!firstCall) return (
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">First Call</span>
+                        <span className="text-amber-600 dark:text-amber-400 text-xs font-medium">Not called yet</span>
+                      </div>
+                    );
+                    const ms = new Date(firstCall.created_at).getTime() - new Date(selectedLead.created_at).getTime();
+                    const isAi = firstCall.type === "ai_call";
+                    return (
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">Time to First Call</span>
+                        <span className={`font-medium text-xs flex items-center gap-1 ${ms <= 3600000 ? "text-green-600 dark:text-green-400" : ms <= 86400000 ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400"}`}>
+                          {isAi && <span className="text-[9px] bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400 px-1.5 py-0.5 rounded-full font-semibold">AI</span>}
+                          {formatDuration(ms)}
+                        </span>
+                      </div>
+                    );
+                  })()}
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Current Stage</span>
                     <Badge className={`text-[11px] font-medium border-0 ${STAGE_COLORS[selectedLead.stage] ?? "bg-muted"}`}>
@@ -570,27 +618,54 @@ export default function PublisherPortal() {
                     <p className="text-sm text-muted-foreground text-center py-4">No timeline events yet.</p>
                   ) : (
                     <div className="relative space-y-0">
-                      {activities.map((a, i) => (
-                        <div key={a.id} className="flex gap-3 pb-4 last:pb-0">
-                          <div className="flex flex-col items-center">
-                            <div className="h-2 w-2 rounded-full bg-primary mt-1.5 shrink-0" />
-                            {i < activities.length - 1 && <div className="w-px flex-1 bg-border mt-1" />}
-                          </div>
-                          <div className="flex-1 min-w-0 pb-1">
-                            <div className="flex items-baseline justify-between gap-2">
-                              <span className="text-xs font-semibold text-foreground">
-                                {ACTIVITY_LABELS[a.type] ?? a.type.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}
-                              </span>
-                              <span className="text-[10px] text-muted-foreground shrink-0">
-                                {new Date(a.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
-                              </span>
-                            </div>
-                            {a.description && (
-                              <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{a.description}</p>
-                            )}
+                      {/* Lead created marker */}
+                      <div className="flex gap-3 pb-4">
+                        <div className="flex flex-col items-center">
+                          <div className="h-2 w-2 rounded-full bg-muted-foreground mt-1.5 shrink-0" />
+                          {activities.length > 0 && <div className="w-px flex-1 bg-border mt-1" />}
+                        </div>
+                        <div className="flex-1 min-w-0 pb-1">
+                          <div className="flex items-baseline justify-between gap-2">
+                            <span className="text-xs font-semibold text-muted-foreground">Lead Received</span>
+                            <span className="text-[10px] text-muted-foreground shrink-0">
+                              {new Date(selectedLead.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                              {" "}
+                              {new Date(selectedLead.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                            </span>
                           </div>
                         </div>
-                      ))}
+                      </div>
+                      {activities.map((a, i) => {
+                        const prev = i === 0 ? selectedLead.created_at : activities[i - 1].created_at;
+                        const gap = new Date(a.created_at).getTime() - new Date(prev).getTime();
+                        const dotColor = ACTIVITY_COLORS[a.type] ?? "bg-primary";
+                        return (
+                          <div key={a.id} className="flex gap-3 pb-4 last:pb-0">
+                            <div className="flex flex-col items-center">
+                              <div className={`h-2.5 w-2.5 rounded-full ${dotColor} mt-1 shrink-0`} />
+                              {i < activities.length - 1 && <div className="w-px flex-1 bg-border mt-1" />}
+                            </div>
+                            <div className="flex-1 min-w-0 pb-1">
+                              <div className="flex items-baseline justify-between gap-2">
+                                <span className="text-xs font-semibold text-foreground">
+                                  {ACTIVITY_LABELS[a.type] ?? a.type.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground shrink-0">
+                                  {new Date(a.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                                  {" "}
+                                  {new Date(a.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                                </span>
+                              </div>
+                              {a.description && (
+                                <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{a.description}</p>
+                              )}
+                              {gap > 60000 && (
+                                <p className="text-[10px] text-muted-foreground/60 mt-0.5">+{formatDuration(gap)} after previous</p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
