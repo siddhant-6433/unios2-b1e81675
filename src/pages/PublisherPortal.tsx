@@ -85,10 +85,14 @@ const ACTIVITY_LABELS: Record<string, string> = {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function PublisherPortal() {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const { toast } = useToast();
 
+  const isSuperAdmin = role === "super_admin";
+
   const [publisher, setPublisher] = useState<Publisher | null>(null);
+  const [allPublishers, setAllPublishers] = useState<Publisher[]>([]);
+  const [impersonatingId, setImpersonatingId] = useState<string>("");
   const [leads, setLeads] = useState<PublisherLead[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -98,22 +102,48 @@ export default function PublisherPortal() {
   const [activities, setActivities] = useState<LeadActivity[]>([]);
   const [activitiesLoading, setActivitiesLoading] = useState(false);
 
+  // Super admin: load all publisher records for the picker
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    supabase.from("publishers").select("id, display_name, source").eq("is_active", true).order("source")
+      .then(({ data }) => { if (data) setAllPublishers(data); });
+  }, [isSuperAdmin]);
+
   // Fetch publisher record + leads
   useEffect(() => {
     if (!user?.id) return;
     (async () => {
       setLoading(true);
 
-      // Get this user's publisher record
-      const { data: pub, error: pubErr } = await supabase
-        .from("publishers")
-        .select("id, display_name, source")
-        .eq("user_id", user.id)
-        .eq("is_active", true)
-        .single();
+      let pub: Publisher | null = null;
 
-      if (pubErr || !pub) {
-        toast({ title: "Access denied", description: "No publisher account linked to this login.", variant: "destructive" });
+      if (isSuperAdmin && impersonatingId) {
+        // Super admin viewing as a specific publisher
+        const { data } = await supabase
+          .from("publishers")
+          .select("id, display_name, source")
+          .eq("id", impersonatingId)
+          .single();
+        pub = data ?? null;
+      } else if (!isSuperAdmin) {
+        // Normal publisher login
+        const { data, error: pubErr } = await supabase
+          .from("publishers")
+          .select("id, display_name, source")
+          .eq("user_id", user.id)
+          .eq("is_active", true)
+          .single();
+        if (pubErr || !data) {
+          toast({ title: "Access denied", description: "No publisher account linked to this login.", variant: "destructive" });
+          setLoading(false);
+          return;
+        }
+        pub = data;
+      }
+
+      if (!pub) {
+        setPublisher(null);
+        setLeads([]);
         setLoading(false);
         return;
       }
@@ -146,7 +176,7 @@ export default function PublisherPortal() {
       }
       setLoading(false);
     })();
-  }, [user?.id]);
+  }, [user?.id, impersonatingId]);
 
   // Fetch activities when a lead is selected
   useEffect(() => {
@@ -195,6 +225,31 @@ export default function PublisherPortal() {
   }
 
   if (!publisher) {
+    if (isSuperAdmin) {
+      return (
+        <div className="space-y-6 p-6">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Publisher Leads</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">Select a publisher to view their lead reports.</p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {allPublishers.map(p => (
+              <button
+                key={p.id}
+                onClick={() => setImpersonatingId(p.id)}
+                className="rounded-xl border border-input bg-card px-4 py-3 text-sm font-medium text-foreground hover:bg-muted transition-colors shadow-sm"
+              >
+                <span className="capitalize">{p.display_name}</span>
+                <span className="ml-2 text-xs text-muted-foreground">({p.source})</span>
+              </button>
+            ))}
+            {allPublishers.length === 0 && (
+              <p className="text-sm text-muted-foreground">No active publishers found.</p>
+            )}
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3 text-muted-foreground">
         <Users className="h-10 w-10" />
@@ -207,11 +262,25 @@ export default function PublisherPortal() {
   return (
     <div className="space-y-6 p-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">{publisher.display_name} — Lead Reports</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          Showing leads supplied via <span className="font-medium capitalize">{publisher.source}</span>
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">{publisher.display_name} — Lead Reports</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Showing leads supplied via <span className="font-medium capitalize">{publisher.source}</span>
+          </p>
+        </div>
+        {isSuperAdmin && (
+          <select
+            value={impersonatingId}
+            onChange={e => { setImpersonatingId(e.target.value); setSearch(""); setStageFilter("all"); }}
+            className="rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+          >
+            <option value="">— Switch Publisher —</option>
+            {allPublishers.map(p => (
+              <option key={p.id} value={p.id}>{p.display_name} ({p.source})</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* Stats */}

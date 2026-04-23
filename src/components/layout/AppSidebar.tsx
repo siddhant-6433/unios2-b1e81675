@@ -107,6 +107,9 @@ export function AppSidebar() {
     if (!item.permission) return true;
     // When impersonating, always show User Management so admin can navigate back
     if (isImpersonating && realRole === "super_admin" && item.url === "/admin") return true;
+    // Role-specific portals: hide from super_admin (they're meant for consultants/publishers only)
+    if (realRole === "super_admin" && !isImpersonating &&
+      (item.url === "/consultant-portal" || item.url === "/publisher-portal")) return false;
     const [mod, act] = item.permission.split(":");
     return can(mod, act);
   };
