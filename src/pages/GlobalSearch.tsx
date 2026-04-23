@@ -71,7 +71,7 @@ const GlobalSearch = () => {
   };
 
   const stageLabels: Record<string, string> = {
-    new_lead: "New Lead", ai_called: "AI Called", counsellor_call: "Counsellor Call",
+    new_lead: "New Lead", ai_called: "AI Called", counsellor_call: "In Follow Up",
     visit_scheduled: "Visit Scheduled", interview: "Interview", offer_sent: "Offer Sent",
     token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", rejected: "Rejected",
   };

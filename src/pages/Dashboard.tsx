@@ -25,7 +25,7 @@ import { AiCallLogsPanel } from "@/components/dashboard/AiCallLogsPanel";
 
 const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", application_in_progress: "App In Progress", application_submitted: "App Submitted",
-  ai_called: "AI Called", counsellor_call: "Counsellor Call",
+  ai_called: "AI Called", counsellor_call: "In Follow Up",
   visit_scheduled: "Visit Scheduled", interview: "Interview", offer_sent: "Offer Sent",
   token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted",
 };

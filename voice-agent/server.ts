@@ -1243,13 +1243,11 @@ Deno.serve({ port: PORT }, async (req) => {
     const recordingCallbackUrl = SUPABASE_URL
       ? `${SUPABASE_URL}/functions/v1/voice-call-callback`
       : "";
+    const wsUrl = `${wsProtocol}://${host}/ws/${callId}`;
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Record recordSession="true" redirect="false" maxLength="3600"${recordingCallbackUrl ? ` callbackUrl="${recordingCallbackUrl}" callbackMethod="POST"` : ""} />
-  <Stream streamTimeout="600" keepCallAlive="true" bidirectional="true"
-          contentType="audio/x-mulaw;rate=8000">
-    ${wsProtocol}://${host}/ws/${callId}
-  </Stream>
+  <Stream streamTimeout="600" keepCallAlive="true" bidirectional="true" contentType="audio/x-mulaw;rate=8000">${wsUrl}</Stream>
 </Response>`;
 
     console.log(`[${callId}] Answer URL hit, returning XML`);

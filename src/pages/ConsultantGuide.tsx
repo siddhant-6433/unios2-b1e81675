@@ -397,7 +397,7 @@ function MockPipeline() {
     { label: "New Lead", color: "bg-gray-100 text-gray-700" },
     { label: "App in Progress", color: "bg-amber-100 text-amber-700" },
     { label: "Submitted", color: "bg-blue-100 text-blue-700" },
-    { label: "Counsellor Call", color: "bg-purple-100 text-purple-700" },
+    { label: "In Follow Up", color: "bg-purple-100 text-purple-700" },
     { label: "Visit Scheduled", color: "bg-violet-100 text-violet-700" },
     { label: "Interview", color: "bg-indigo-100 text-indigo-700" },
     { label: "Offer Sent", color: "bg-teal-100 text-teal-700" },

@@ -50,7 +50,7 @@ const STEPS = [
         <div className="space-y-1.5">
           {[
             { stage: "New Lead", desc: "Just assigned — make first contact", color: "bg-blue-500" },
-            { stage: "Counsellor Call", desc: "Called — discuss course & campus", color: "bg-orange-500" },
+            { stage: "In Follow Up", desc: "Called — discuss course & campus", color: "bg-orange-500" },
             { stage: "Visit Scheduled", desc: "Campus visit booked", color: "bg-yellow-500" },
             { stage: "Interview", desc: "Conduct interview & score", color: "bg-indigo-500" },
             { stage: "Offer Sent", desc: "Send admission offer letter", color: "bg-teal-500" },

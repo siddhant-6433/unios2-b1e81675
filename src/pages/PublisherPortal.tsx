@@ -48,7 +48,7 @@ const STAGE_LABELS: Record<string, string> = {
   application_in_progress: "App In Progress",
   application_fee_paid: "Fee Paid",
   application_submitted: "Submitted",
-  counsellor_call: "Counsellor Call",
+  counsellor_call: "In Follow Up",
   visit_scheduled: "Visit Scheduled",
   interview: "Interview",
   offer_sent: "Offer Sent",

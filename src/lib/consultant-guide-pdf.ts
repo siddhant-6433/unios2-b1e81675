@@ -111,7 +111,7 @@ export function generateConsultantGuidePDF() {
   addBullet("New Lead → Just registered, awaiting first contact.");
   addBullet("Application In Progress → Student has started filling the application form.");
   addBullet("Application Submitted → Form complete, under review.");
-  addBullet("Counsellor Call → Our team has spoken to the student.");
+  addBullet("In Follow Up → Our team has spoken to the student.");
   addBullet("Visit Scheduled → Campus visit arranged.");
   addBullet("Interview → Student attending interview.");
   addBullet("Offer Sent → Admission offer issued.");

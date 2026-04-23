@@ -16,7 +16,7 @@ interface SearchResult {
 }
 
 const stageLabels: Record<string, string> = {
-  new_lead: "New", ai_called: "AI Called", counsellor_call: "Called",
+  new_lead: "New", ai_called: "AI Called", counsellor_call: "In Follow Up",
   visit_scheduled: "Visit", interview: "Interview", offer_sent: "Offer",
   token_paid: "Token", pre_admitted: "Pre-Admit", admitted: "Admitted",
   rejected: "Rejected", not_interested: "Not Int.",
