@@ -87,18 +87,20 @@ const ACTIVITY_LABELS: Record<string, string> = {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function PublisherPortal() {
-  const { user, role } = useAuth();
+  const { user, role, startImpersonating } = useAuth();
   const { toast } = useToast();
 
   const isSuperAdmin = role === "super_admin";
 
   const [publisher, setPublisher] = useState<Publisher | null>(null);
-  const [allPublishers, setAllPublishers] = useState<Publisher[]>([]);
+  const [allPublishers, setAllPublishers] = useState<(Publisher & { user_id: string | null })[]>([]);
   const [impersonatingId, setImpersonatingId] = useState<string>("");
   const [leads, setLeads] = useState<PublisherLead[]>([]);
   const [loading, setLoading] = useState(true);
+  const [impersonatingUser, setImpersonatingUser] = useState(false);
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState("all");
+  const [aiFilter, setAiFilter] = useState("all"); // "all" | "called" | "not_called"
 
   const [selectedLead, setSelectedLead] = useState<PublisherLead | null>(null);
   const [activities, setActivities] = useState<LeadActivity[]>([]);
@@ -107,8 +109,8 @@ export default function PublisherPortal() {
   // Super admin: load all publisher records for the picker
   useEffect(() => {
     if (!isSuperAdmin) return;
-    supabase.from("publishers").select("id, display_name, source").eq("is_active", true).order("source")
-      .then(({ data }) => { if (data) setAllPublishers(data); });
+    supabase.from("publishers").select("id, display_name, source, user_id").eq("is_active", true).order("source")
+      .then(({ data }) => { if (data) setAllPublishers(data as any); });
   }, [isSuperAdmin]);
 
   // Fetch publisher record + leads
@@ -220,16 +222,14 @@ export default function PublisherPortal() {
   ).length;
   const conversionRate = total > 0 ? Math.round((admitted / total) * 100) : 0;
 
-  // Unique stages for filter
-  const stageOptions = Array.from(new Set(leads.map(l => l.stage)));
-
   const filtered = leads.filter(l => {
     const q = search.toLowerCase();
     const matchSearch = !q || l.name.toLowerCase().includes(q) ||
       l.phone.includes(q) || (l.email?.toLowerCase().includes(q) ?? false) ||
       l.course_name.toLowerCase().includes(q);
     const matchStage = stageFilter === "all" || l.stage === stageFilter;
-    return matchSearch && matchStage;
+    const matchAi = aiFilter === "all" || (aiFilter === "called" ? l.ai_called : !l.ai_called);
+    return matchSearch && matchStage && matchAi;
   });
 
   if (loading) {
@@ -286,16 +286,37 @@ export default function PublisherPortal() {
           </p>
         </div>
         {isSuperAdmin && (
-          <select
-            value={impersonatingId}
-            onChange={e => { setImpersonatingId(e.target.value); setSearch(""); setStageFilter("all"); }}
-            className="rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-          >
-            <option value="">— Switch Publisher —</option>
-            {allPublishers.map(p => (
-              <option key={p.id} value={p.id}>{p.display_name} ({p.source})</option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={impersonatingId}
+              onChange={e => { setImpersonatingId(e.target.value); setSearch(""); setStageFilter("all"); setAiFilter("all"); }}
+              className="rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+            >
+              <option value="">— Switch Publisher —</option>
+              {allPublishers.map(p => (
+                <option key={p.id} value={p.id}>{p.display_name} ({p.source})</option>
+              ))}
+            </select>
+            {impersonatingId && (() => {
+              const pub = allPublishers.find(p => p.id === impersonatingId);
+              return pub?.user_id ? (
+                <button
+                  disabled={impersonatingUser}
+                  onClick={async () => {
+                    setImpersonatingUser(true);
+                    await startImpersonating(pub.user_id!);
+                    setImpersonatingUser(false);
+                  }}
+                  className="rounded-xl bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {impersonatingUser ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Users className="h-3.5 w-3.5" />}
+                  Login as {pub.display_name}
+                </button>
+              ) : (
+                <span className="text-xs text-amber-600 dark:text-amber-400">⚠ No user account linked</span>
+              );
+            })()}
+          </div>
         )}
       </div>
 
@@ -340,8 +361,8 @@ export default function PublisherPortal() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1 max-w-sm">
+      <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <input
             value={search}
@@ -356,9 +377,18 @@ export default function PublisherPortal() {
           className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
         >
           <option value="all">All Stages</option>
-          {stageOptions.map(s => (
-            <option key={s} value={s}>{STAGE_LABELS[s] || s}</option>
+          {Object.entries(STAGE_LABELS).map(([key, label]) => (
+            <option key={key} value={key}>{label}</option>
           ))}
+        </select>
+        <select
+          value={aiFilter}
+          onChange={e => setAiFilter(e.target.value)}
+          className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+        >
+          <option value="all">All AI Call Status</option>
+          <option value="called">AI Called</option>
+          <option value="not_called">Not Called</option>
         </select>
       </div>
 
