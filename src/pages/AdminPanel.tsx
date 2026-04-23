@@ -151,7 +151,7 @@ const AdminPanel = () => {
     setPublishersLoading(true);
     const { data } = await supabase
       .from("publishers")
-      .select("id, display_name, source, is_active, user_id, created_at, profiles!publishers_user_id_fkey(display_name, email)")
+      .select("id, display_name, source, is_active, user_id, created_at")
       .order("source", { ascending: true });
     setPublishers(data ?? []);
     setPublishersLoading(false);
@@ -467,11 +467,14 @@ const AdminPanel = () => {
                             </span>
                           </td>
                           <td className="px-4 py-3 text-muted-foreground text-xs">
-                            {pub.user_id ? (
-                              <span className="text-green-700 dark:text-green-400 font-medium">
-                                ✓ {pub.profiles?.display_name || pub.profiles?.email || pub.user_id.slice(0, 8) + "…"}
-                              </span>
-                            ) : (
+                            {pub.user_id ? (() => {
+                              const u = users.find(u => u.user_id === pub.user_id);
+                              return (
+                                <span className="text-green-700 dark:text-green-400 font-medium">
+                                  ✓ {u?.display_name || u?.email || pub.user_id.slice(0, 8) + "…"}
+                                </span>
+                              );
+                            })() : (
                               <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1">
                                 ⚠ No login yet — invite user with publisher role + source "{pub.source}"
                               </span>
