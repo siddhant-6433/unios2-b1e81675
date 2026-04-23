@@ -119,6 +119,8 @@ export function AppSidebar() {
   const [pendingApprovals, setPendingApprovals] = useState(0);
   // TAT defaults for current user
   const [tatDefaults, setTatDefaults] = useState(0);
+  // Pending followups count for sidebar badge
+  const [pendingFollowupCount, setPendingFollowupCount] = useState(0);
 
   const fetchNewLeadCount = () => {
     let query = supabase
@@ -168,6 +170,20 @@ export function AppSidebar() {
           setTatDefaults((data as any[]).reduce((s: number, d: any) => s + (d.total_defaults || 0), 0));
         }
       }
+    })();
+
+    // Fetch pending followup count (overdue + today)
+    (async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      let q = supabase.from("lead_followups").select("id", { count: "exact", head: true })
+        .eq("status", "pending").lte("scheduled_at", `${today}T23:59:59`);
+      if (role === "counsellor" && profile?.id) {
+        const { data: myLeads } = await supabase.from("leads").select("id").eq("counsellor_id", profile.id);
+        if (myLeads?.length) q = q.in("lead_id", myLeads.map((l: any) => l.id));
+        else { setPendingFollowupCount(0); return; }
+      }
+      const { count } = await q;
+      setPendingFollowupCount(count || 0);
     })();
 
     const waChannel = supabase
@@ -226,6 +242,7 @@ export function AppSidebar() {
     if (item.url === "/whatsapp-inbox" && waUnread > 0) return { ...item, badge: waUnread };
     if (item.url === "/admissions" && newLeadCount > 0) return { ...item, badge: newLeadCount };
     if (item.url === "/counsellor-dashboard" && tatDefaults > 0) return { ...item, badge: tatDefaults };
+    if (item.url === "/pending-followups" && pendingFollowupCount > 0) return { ...item, badge: pendingFollowupCount };
     return item;
   }
   );

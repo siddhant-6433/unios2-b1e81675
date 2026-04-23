@@ -9,6 +9,7 @@ ALTER TABLE public.students ADD COLUMN IF NOT EXISTS created_by uuid REFERENCES 
 -- These roles need to create/update student records as part of their workflow.
 
 DROP POLICY IF EXISTS "Admins can manage students" ON public.students;
+DROP POLICY IF EXISTS "Staff can manage students" ON public.students;
 CREATE POLICY "Staff can manage students" ON public.students
   FOR ALL TO authenticated
   USING (

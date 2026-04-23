@@ -509,6 +509,7 @@ const Admissions = () => {
   const [overdueFollowups, setOverdueFollowups] = useState(0);
   const [upcomingVisits, setUpcomingVisits] = useState(0);
   const [completedVisits, setCompletedVisits] = useState(0);
+  const [postVisitPendingIds, setPostVisitPendingIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     (async () => {
@@ -595,6 +596,12 @@ const Admissions = () => {
       // Count unique leads with visits (not visit count)
       setUpcomingVisits(new Set((upVisitRes.data || []).map((r: any) => r.lead_id)).size);
       setCompletedVisits(new Set((compVisitRes.data || []).map((r: any) => r.lead_id)).size);
+
+      // Fetch post-visit pending lead IDs for visual indicator
+      const { data: pvPending } = await supabase
+        .from("post_visit_pending_followups" as any)
+        .select("lead_id");
+      setPostVisitPendingIds(new Set((pvPending || []).map((r: any) => r.lead_id)));
       // Stage counts
       setNewLeads(newLeadRes.count || 0);
       setTodayLeads(todayLeadRes.count || 0);
@@ -1252,6 +1259,12 @@ const Admissions = () => {
                         {lead.ai_called && (
                           <span className="flex h-4 w-4 items-center justify-center rounded bg-violet-100 dark:bg-violet-900/30" title="AI Called">
                             <Bot className="h-2.5 w-2.5 text-violet-600" />
+                          </span>
+                        )}
+                        {postVisitPendingIds.has(lead.id) && (
+                          <span className="flex h-4 items-center gap-0.5 rounded bg-amber-100 dark:bg-amber-900/30 px-1" title="Post-visit followup pending">
+                            <MapPin className="h-2.5 w-2.5 text-amber-600" />
+                            <span className="text-[8px] font-bold text-amber-700">VISIT F/U</span>
                           </span>
                         )}
                       </div>
