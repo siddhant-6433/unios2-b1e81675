@@ -102,7 +102,7 @@ export function GlobalActionBar() {
       });
       if ((unassignedRes as any).count > 0) result.push({
         key: "unassigned", label: "Unassigned", count: (unassignedRes as any).count || 0,
-        icon: Inbox, color: "text-slate-600 bg-slate-50 border-slate-200", url: "/fresh-leads",
+        icon: Inbox, color: "text-slate-600 bg-slate-50 border-slate-200", url: "/lead-allocation",
       });
       if ((overdueRes.count || 0) > 0) result.push({
         key: "overdue", label: "Overdue Follow-ups", count: overdueRes.count || 0,
