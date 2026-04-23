@@ -27,7 +27,7 @@ type AppRole =
   | "data_entry" | "office_admin" | "office_assistant" | "hostel_warden" | "consultant" | "student" | "parent"
   | "ib_coordinator";
 
-type MenuItem = { title: string; url: string; icon: any; permission?: string; badge?: number };
+type MenuItem = { title: string; url: string; icon: any; permission?: string; badge?: number; hideForSuperAdmin?: boolean };
 
 const mainMenu: MenuItem[] = [
   { title: "Overview", url: "/", icon: LayoutDashboard, permission: "dashboard:view" },
@@ -54,8 +54,8 @@ const admissionSubMenu: MenuItem[] = [
   { title: "Consultants", url: "/consultants", icon: Handshake, permission: "consultants:view" },
   { title: "Templates", url: "/template-manager", icon: Newspaper, permission: "templates:view" },
   { title: "Courses & Fees", url: "/fee-structures", icon: IndianRupee, permission: "courses_fees:view" },
-  { title: "My Leads", url: "/consultant-portal", icon: Users, permission: "consultant_portal:view" },
-  { title: "Publisher Leads", url: "/publisher-portal", icon: Users, permission: "publisher_portal:view" },
+  { title: "My Leads", url: "/consultant-portal", icon: Users, permission: "consultant_portal:view", hideForSuperAdmin: true },
+  { title: "Publisher Leads", url: "/publisher-portal", icon: Users, permission: "publisher_portal:view", hideForSuperAdmin: true },
   { title: "Analytics", url: "/admission-analytics", icon: PieChart, permission: "analytics:view" },
 ];
 
@@ -108,9 +108,8 @@ export function AppSidebar() {
     if (!item.permission) return true;
     // When impersonating, always show User Management so admin can navigate back
     if (isImpersonating && realRole === "super_admin" && item.url === "/admin") return true;
-    // Role-specific portals: hide from super_admin (they're meant for consultants/publishers only)
-    if (realRole === "super_admin" && !isImpersonating &&
-      (item.url === "/consultant-portal" || item.url === "/publisher-portal")) return false;
+    // Role-specific portals: hide from super_admin when not impersonating
+    if (item.hideForSuperAdmin && realRole === "super_admin" && !isImpersonating) return false;
     const [mod, act] = item.permission.split(":");
     return can(mod, act);
   };
