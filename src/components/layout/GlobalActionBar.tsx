@@ -15,11 +15,11 @@ interface ActionItem {
 }
 
 export function GlobalActionBar() {
-  const { role, user } = useAuth();
+  const { role, user, profile } = useAuth();
   const navigate = useNavigate();
   const isTeamLeader = useIsTeamLeader();
   const [items, setItems] = useState<ActionItem[]>([]);
-  const [profileId, setProfileId] = useState<string | null>(null);
+  const profileId = profile?.id || null;
   const [dismissed, setDismissed] = useState(false);
   const [counsellorFilter, setCounsellorFilter] = useState<string>("all");
   const [counsellorOptions, setCounsellorOptions] = useState<{ id: string; name: string }[]>([]);
@@ -28,8 +28,6 @@ export function GlobalActionBar() {
 
   useEffect(() => {
     if (!user?.id) return;
-    supabase.from("profiles").select("id").eq("user_id", user.id).single()
-      .then(({ data }) => { if (data) setProfileId(data.id); });
 
     // Fetch counsellor list for filter
     if (canFilterCounsellor) {
