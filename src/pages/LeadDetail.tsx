@@ -54,7 +54,8 @@ const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", application_in_progress: "Application In Progress", application_submitted: "Application Submitted",
   ai_called: "AI Called", counsellor_call: "In Follow Up",
   visit_scheduled: "Visit Scheduled", interview: "Interview", offer_sent: "Offer Sent",
-  token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", rejected: "Rejected",
+  token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted",
+  not_interested: "Not Interested", ineligible: "Ineligible", dnc: "Do Not Contact", deferred: "Deferred (Next Session)", rejected: "Rejected",
 };
 
 const STAGE_ORDER = [
@@ -70,7 +71,7 @@ const stageIndex = (stage: string) => {
 
 /** Auto-advance lead stage only if newStage is ahead of current stage (forward-only). */
 const shouldAutoAdvance = (currentStage: string, newStage: string) => {
-  if (currentStage === "rejected" || currentStage === "not_interested") return false;
+  if (["rejected", "not_interested", "ineligible", "dnc", "deferred"].includes(currentStage)) return false;
   return stageIndex(newStage) > stageIndex(currentStage);
 };
 
@@ -239,27 +240,33 @@ const LeadDetail = () => {
     // 3. Auto-advance stage based on disposition
     if (data.disposition === "interested" || data.disposition === "call_back" || data.disposition === "not_answered") {
       await autoAdvanceStage("counsellor_call");
-    } else if (data.disposition === "not_interested" || data.disposition === "do_not_contact") {
-      await supabase.from("leads").update({ stage: "rejected" as any }).eq("id", id);
+    } else if (data.disposition === "not_interested") {
+      await supabase.from("leads").update({ stage: "not_interested" as any }).eq("id", id);
       await supabase.from("lead_activities").insert({
         lead_id: id, user_id: profileId, type: "stage_change",
-        description: `Stage changed to Rejected (${label})`,
-        old_stage: lead.stage as any, new_stage: "rejected" as any,
+        description: `Stage changed to Not Interested`,
+        old_stage: lead.stage as any, new_stage: "not_interested" as any,
+      });
+    } else if (data.disposition === "do_not_contact") {
+      await supabase.from("leads").update({ stage: "dnc" as any }).eq("id", id);
+      await supabase.from("lead_activities").insert({
+        lead_id: id, user_id: profileId, type: "stage_change",
+        description: `Stage changed to Do Not Contact`,
+        old_stage: lead.stage as any, new_stage: "dnc" as any,
       });
     } else if (data.disposition === "ineligible") {
-      // Mark as rejected for current session, save future eligibility if provided
-      const updates: Record<string, any> = { stage: "rejected" as any };
-      if (data.future_eligible_session) {
-        updates.future_eligible_session = data.future_eligible_session;
-      }
+      // Deferred if future session noted, otherwise ineligible
+      const newStage = data.future_eligible_session ? "deferred" : "ineligible";
+      const updates: Record<string, any> = { stage: newStage as any };
+      if (data.future_eligible_session) updates.future_eligible_session = data.future_eligible_session;
       await supabase.from("leads").update(updates).eq("id", id);
-      const futureNote = data.future_eligible_session
-        ? ` — eligible for ${data.future_eligible_session}`
-        : "";
+      const futureNote = data.future_eligible_session ? ` — eligible for ${data.future_eligible_session}` : "";
       await supabase.from("lead_activities").insert({
         lead_id: id, user_id: profileId, type: "stage_change",
-        description: `Stage changed to Rejected (Ineligible${futureNote})`,
-        old_stage: lead.stage as any, new_stage: "rejected" as any,
+        description: newStage === "deferred"
+          ? `Stage changed to Deferred (Next Session${futureNote})`
+          : `Stage changed to Ineligible`,
+        old_stage: lead.stage as any, new_stage: newStage as any,
       });
     }
 

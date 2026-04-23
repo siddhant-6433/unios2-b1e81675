@@ -36,7 +36,7 @@ interface Message {
 const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", application_in_progress: "App In Progress",
   application_fee_paid: "Fee Paid", application_submitted: "Submitted",
-  offer_sent: "Offer Sent", admitted: "Admitted", rejected: "Rejected",
+  offer_sent: "Offer Sent", admitted: "Admitted", rejected: "Rejected", ineligible: "Ineligible", dnc: "Do Not Contact", deferred: "Deferred (Next Session)",
 };
 
 const QUICK_REPLIES = [

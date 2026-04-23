@@ -38,7 +38,8 @@ import {
 
 const STAGES = [
   "new_lead", "application_in_progress", "application_fee_paid", "application_submitted", "counsellor_call", "visit_scheduled",
-  "interview", "offer_sent", "token_paid", "pre_admitted", "admitted", "waitlisted", "not_interested", "rejected"
+  "interview", "offer_sent", "token_paid", "pre_admitted", "admitted", "waitlisted",
+  "not_interested", "ineligible", "dnc", "deferred", "rejected"
 ] as const;
 
 type Stage = typeof STAGES[number];
@@ -48,7 +49,8 @@ const STAGE_LABELS: Record<string, string> = {
   application_fee_paid: "Fee Paid", application_submitted: "Application Submitted",
   counsellor_call: "In Follow Up",
   visit_scheduled: "Visit Scheduled", interview: "Interview", offer_sent: "Offer Sent",
-  token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", waitlisted: "Waitlisted", not_interested: "Not Interested", rejected: "Rejected",
+  token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", waitlisted: "Waitlisted",
+  not_interested: "Not Interested", ineligible: "Ineligible", dnc: "Do Not Contact", deferred: "Deferred (Next Session)", rejected: "Rejected",
 };
 
 const stageColors: Record<string, string> = {
@@ -65,6 +67,9 @@ const stageColors: Record<string, string> = {
   admitted: "bg-primary text-primary-foreground",
   waitlisted: "bg-pastel-orange text-foreground/70",
   not_interested: "bg-muted text-foreground/60",
+  ineligible: "bg-pastel-red text-foreground/70",
+  dnc: "bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
+  deferred: "bg-pastel-purple text-foreground/70",
   rejected: "bg-pastel-red text-foreground/70",
 };
 
@@ -72,7 +77,8 @@ const stageIcons: Record<string, typeof Users> = {
   new_lead: Users, application_in_progress: FileText, application_fee_paid: CheckCircle, application_submitted: CheckCircle,
   counsellor_call: Phone,
   visit_scheduled: MapPin, interview: UserCheck, offer_sent: FileText,
-  token_paid: CheckCircle, pre_admitted: Clock, admitted: CheckCircle, waitlisted: Clock, not_interested: XCircle, rejected: XCircle,
+  token_paid: CheckCircle, pre_admitted: Clock, admitted: CheckCircle, waitlisted: Clock,
+  not_interested: XCircle, ineligible: XCircle, dnc: XCircle, deferred: Clock, rejected: XCircle,
 };
 
 // Lead sources imported from @/config/leadSources
