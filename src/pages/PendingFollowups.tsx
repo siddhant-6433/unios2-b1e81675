@@ -53,6 +53,7 @@ const PendingFollowups = () => {
   const [counsellorOptions, setCounsellorOptions] = useState<{ id: string; name: string }[]>([]);
   const [reassignTo, setReassignTo] = useState("");
   const [reassigning, setReassigning] = useState(false);
+  const [counsellorFilter, setCounsellorFilter] = useState("all");
 
   // Get profile id for counsellor filtering
   useEffect(() => {
@@ -78,12 +79,15 @@ const PendingFollowups = () => {
     const todayEnd = `${today}T23:59:59+05:30`;
     const weekEnd = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10) + "T23:59:59+05:30";
 
-    // For counsellors, first get their assigned lead IDs
-    let myLeadIds: string[] | null = null;
-    if (isCounsellor && profileId) {
-      const { data: myLeads } = await supabase.from("leads").select("id").eq("counsellor_id", profileId);
-      myLeadIds = (myLeads || []).map((l: any) => l.id);
-      if (myLeadIds.length === 0) {
+    // Determine which counsellor to scope to
+    const scopeId = isCounsellor ? profileId : (counsellorFilter !== "all" ? counsellorFilter : null);
+
+    // Get lead IDs for the scoped counsellor
+    let scopedLeadIds: string[] | null = null;
+    if (scopeId) {
+      const { data: scopedLeads } = await supabase.from("leads").select("id").eq("counsellor_id", scopeId);
+      scopedLeadIds = (scopedLeads || []).map((l: any) => l.id);
+      if (scopedLeadIds.length === 0) {
         setCounts({ overdue: 0, today: 0, upcoming: 0, visit_confirm: 0, post_visit: 0 });
         return;
       }
@@ -92,25 +96,25 @@ const PendingFollowups = () => {
     // Overdue
     let oq = supabase.from("lead_followups" as any).select("id", { count: "exact", head: true })
       .eq("status", "pending").lt("scheduled_at", todayStart);
-    if (myLeadIds) oq = oq.in("lead_id", myLeadIds);
+    if (scopedLeadIds) oq = oq.in("lead_id", scopedLeadIds);
 
     // Today
     let tq = supabase.from("lead_followups" as any).select("id", { count: "exact", head: true })
       .eq("status", "pending").gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd);
-    if (myLeadIds) tq = tq.in("lead_id", myLeadIds);
+    if (scopedLeadIds) tq = tq.in("lead_id", scopedLeadIds);
 
     // Upcoming
     let uq = supabase.from("lead_followups" as any).select("id", { count: "exact", head: true })
       .eq("status", "pending").gt("scheduled_at", todayEnd).lte("scheduled_at", weekEnd);
-    if (myLeadIds) uq = uq.in("lead_id", myLeadIds);
+    if (scopedLeadIds) uq = uq.in("lead_id", scopedLeadIds);
 
     // Visit confirmations
     let vcq = supabase.from("visits_needing_confirmation" as any).select("visit_id", { count: "exact", head: true });
-    if (isCounsellor && profileId) vcq = vcq.eq("counsellor_id", profileId);
+    if (scopeId) vcq = vcq.eq("counsellor_id", scopeId);
 
     // Post-visit
     let pvq = supabase.from("post_visit_pending_followups" as any).select("visit_id", { count: "exact", head: true });
-    if (isCounsellor && profileId) pvq = pvq.eq("counsellor_id", profileId);
+    if (scopeId) pvq = pvq.eq("counsellor_id", scopeId);
 
     const [oRes, tRes, uRes, vcRes, pvRes] = await Promise.all([oq, tq, uq, vcq, pvq]);
     setCounts({
@@ -120,7 +124,7 @@ const PendingFollowups = () => {
       visit_confirm: vcRes.count || 0,
       post_visit: pvRes.count || 0,
     });
-  }, [isCounsellor, profileId]);
+  }, [isCounsellor, profileId, counsellorFilter]);
 
   const fetchItems = useCallback(async () => {
     setLoading(true);
@@ -131,9 +135,11 @@ const PendingFollowups = () => {
 
     let result: FollowupItem[] = [];
 
+    const filterCounsellorId = isCounsellor ? profileId : (counsellorFilter !== "all" ? counsellorFilter : null);
+
     if (tab === "overdue" || tab === "today" || tab === "upcoming") {
-      // Use !inner join so we can filter by leads.counsellor_id for counsellors
-      const joinType = isCounsellor && profileId ? "!inner" : "";
+      // Use !inner join so we can filter by leads.counsellor_id
+      const joinType = filterCounsellorId ? "!inner" : "";
       let q = supabase.from("lead_followups" as any)
         .select(`id, lead_id, type, scheduled_at, notes, status, user_id,
           leads${joinType}:lead_id(name, phone, stage, counsellor_id,
@@ -147,8 +153,8 @@ const PendingFollowups = () => {
       else if (tab === "today") q = q.gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd);
       else q = q.gt("scheduled_at", todayEnd).lte("scheduled_at", weekEnd);
 
-      // Filter by lead's assigned counsellor (not followup user_id)
-      if (isCounsellor && profileId) q = q.eq("leads.counsellor_id", profileId);
+      // Filter by counsellor (own for counsellors, selected for admins)
+      if (filterCounsellorId) q = q.eq("leads.counsellor_id", filterCounsellorId);
 
       q = q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
       const { data } = await q;
@@ -174,7 +180,7 @@ const PendingFollowups = () => {
       let q = supabase.from("visits_needing_confirmation" as any)
         .select("*")
         .order("visit_date", { ascending: true });
-      if (isCounsellor && profileId) q = q.eq("counsellor_id", profileId);
+      if (filterCounsellorId) q = q.eq("counsellor_id", filterCounsellorId);
       q = q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
       const { data } = await q;
 
@@ -196,7 +202,7 @@ const PendingFollowups = () => {
       let q = supabase.from("post_visit_pending_followups" as any)
         .select("*")
         .order("visit_date", { ascending: true });
-      if (isCounsellor && profileId) q = q.eq("counsellor_id", profileId);
+      if (filterCounsellorId) q = q.eq("counsellor_id", filterCounsellorId);
       q = q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
       const { data } = await q;
 
@@ -218,11 +224,11 @@ const PendingFollowups = () => {
 
     setItems(result);
     setLoading(false);
-  }, [tab, page, isCounsellor, profileId, user?.id]);
+  }, [tab, page, isCounsellor, profileId, counsellorFilter, user?.id]);
 
   useEffect(() => { fetchCounts(); }, [fetchCounts]);
   useEffect(() => { fetchItems(); }, [fetchItems]);
-  useEffect(() => { setPage(0); setSelected(new Set()); }, [tab]);
+  useEffect(() => { setPage(0); setSelected(new Set()); }, [tab, counsellorFilter]);
 
   const filtered = search
     ? items.filter(r => {
@@ -323,12 +329,21 @@ const PendingFollowups = () => {
         })}
       </div>
 
-      {/* Search */}
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <input type="text" placeholder="Search name, phone, notes..." value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="w-full rounded-xl border border-input bg-card py-2 pl-10 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20" />
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-3">
+        {!isCounsellor && (
+          <select value={counsellorFilter} onChange={e => setCounsellorFilter(e.target.value)}
+            className="rounded-xl border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20">
+            <option value="all">All Counsellors</option>
+            {counsellorOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        )}
+        <div className="relative flex-1 min-w-[180px] max-w-sm">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input type="text" placeholder="Search name, phone, notes..." value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full rounded-xl border border-input bg-card py-2 pl-10 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20" />
+        </div>
       </div>
 
       {/* Bulk action bar */}
