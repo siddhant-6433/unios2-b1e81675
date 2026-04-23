@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -64,7 +65,7 @@ const PendingFollowups = () => {
   const [counsellorOptions, setCounsellorOptions] = useState<{ id: string; name: string }[]>([]);
   const [reassignTo, setReassignTo] = useState("");
   const [reassigning, setReassigning] = useState(false);
-  const [counsellorFilter, setCounsellorFilter] = useState("all");
+  const { counsellorFilter, setCounsellorFilter } = useCounsellorFilter();
   // Visit closure dialogs
   const [completeDialog, setCompleteDialog] = useState<{ visitId: string; leadId: string; leadName: string } | null>(null);
   const [noShowDialog, setNoShowDialog] = useState<{ visitId: string; leadId: string; leadName: string; campusId: string | null } | null>(null);

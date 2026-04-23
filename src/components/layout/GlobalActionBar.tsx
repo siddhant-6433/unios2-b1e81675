@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
+import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { AlertTriangle, Clock, MapPin, Phone, CalendarCheck, X, Sparkles, Inbox, Users } from "lucide-react";
 
 interface ActionItem {
@@ -20,8 +21,8 @@ export function GlobalActionBar() {
   const isTeamLeader = useIsTeamLeader();
   const [items, setItems] = useState<ActionItem[]>([]);
   const profileId = profile?.id || null;
-  const [dismissed, setDismissed] = useState(false);
-  const [counsellorFilter, setCounsellorFilter] = useState<string>("all");
+  // No dismiss button — bar auto-hides when no items
+  const { counsellorFilter, setCounsellorFilter } = useCounsellorFilter();
   const [counsellorOptions, setCounsellorOptions] = useState<{ id: string; name: string }[]>([]);
   const isCounsellor = role === "counsellor";
   const canFilterCounsellor = role === "super_admin" || role === "admission_head" || role === "campus_admin" || isTeamLeader;
@@ -148,7 +149,7 @@ export function GlobalActionBar() {
     return () => clearInterval(interval);
   }, [profileId, isCounsellor, role, counsellorFilter]);
 
-  if (dismissed || items.length === 0) return null;
+  if (items.length === 0 && !canFilterCounsellor) return null;
 
   return (
     <div className="border-b border-border bg-card/80 backdrop-blur-sm px-5 py-1.5">
@@ -173,11 +174,6 @@ export function GlobalActionBar() {
             {item.label}
           </button>
         ))}
-        <button onClick={() => setDismissed(true)}
-          className="ml-auto rounded-lg p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
-          title="Dismiss for now">
-          <X className="h-3.5 w-3.5" />
-        </button>
       </div>
     </div>
   );

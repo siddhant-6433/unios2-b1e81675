@@ -9,6 +9,7 @@ import { HeaderProfile } from "@/components/layout/HeaderProfile";
 import { HeaderResponseTime } from "@/components/layout/HeaderResponseTime";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { CounsellorFilterProvider } from "@/contexts/CounsellorFilterContext";
 
 const pageTitles: Record<string, string> = {
   "/": "Dashboard",
@@ -41,6 +42,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const { profile } = useAuth();
 
   return (
+    <CounsellorFilterProvider>
     <div className="flex flex-col min-h-screen">
       <ImpersonationBanner />
       <SidebarProvider>
@@ -73,5 +75,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </SidebarProvider>
     </div>
+    </CounsellorFilterProvider>
   );
 }
