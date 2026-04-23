@@ -1,13 +1,16 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   Clock, AlertTriangle, CalendarCheck, Phone, MapPin, Loader2, Search,
-  ChevronLeft, ChevronRight, ExternalLink, UserSwitch, X, Check,
+  ChevronLeft, ChevronRight, ExternalLink, X, Check,
 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 
 type Tab = "overdue" | "today" | "upcoming" | "visit_confirm" | "unclosed_visits" | "post_visit";
 
@@ -41,10 +44,12 @@ const PAGE_SIZE = 50;
 
 const PendingFollowups = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { role, user } = useAuth();
   const isCounsellor = role === "counsellor";
   const [profileId, setProfileId] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("overdue");
+  const initialTab = (searchParams.get("tab") as Tab) || "overdue";
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [items, setItems] = useState<FollowupItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -55,6 +60,15 @@ const PendingFollowups = () => {
   const [reassignTo, setReassignTo] = useState("");
   const [reassigning, setReassigning] = useState(false);
   const [counsellorFilter, setCounsellorFilter] = useState("all");
+  // Visit closure dialogs
+  const [completeDialog, setCompleteDialog] = useState<{ visitId: string; leadId: string; leadName: string } | null>(null);
+  const [noShowDialog, setNoShowDialog] = useState<{ visitId: string; leadId: string; leadName: string; campusId: string | null } | null>(null);
+  const [visitFeedback, setVisitFeedback] = useState("");
+  const [followupDate, setFollowupDate] = useState("");
+  const [followupAction, setFollowupAction] = useState<"followup" | "reschedule">("followup");
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
 
   // Get profile id for counsellor filtering
   useEffect(() => {
@@ -287,15 +301,79 @@ const PendingFollowups = () => {
     fetchCounts();
   };
 
-  const handleVisitStatus = async (visitId: string, status: "completed" | "no_show", leadId: string, e: React.MouseEvent) => {
+  const openCompleteDialog = (visitId: string, leadId: string, leadName: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    await supabase.from("campus_visits" as any).update({ status }).eq("id", visitId);
+    setVisitFeedback("");
+    setFollowupDate(new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 16)); // default +2 days
+    setCompleteDialog({ visitId, leadId, leadName });
+  };
+
+  const openNoShowDialog = (visitId: string, leadId: string, leadName: string, campusId: string | null, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setFollowupAction("followup");
+    setFollowupDate(new Date(Date.now() + 86400000).toISOString().slice(0, 16)); // default tomorrow
+    setRescheduleDate(new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 16)); // default +3 days
+    setNoShowDialog({ visitId, leadId, leadName, campusId });
+  };
+
+  const handleCompleteVisit = async () => {
+    if (!completeDialog || !followupDate) return;
+    setSaving(true);
+    await supabase.from("campus_visits" as any).update({ status: "completed", feedback: visitFeedback || null }).eq("id", completeDialog.visitId);
     await supabase.from("lead_activities").insert({
-      lead_id: leadId, user_id: user?.id || null, type: "visit",
-      description: status === "completed" ? "Campus visit marked completed" : "Campus visit: student did not show up",
+      lead_id: completeDialog.leadId, user_id: user?.id || null, type: "visit",
+      description: `Campus visit completed${visitFeedback ? `: ${visitFeedback}` : ""}`,
     });
-    fetchItems();
-    fetchCounts();
+    // Create mandatory follow-up
+    await supabase.from("lead_followups" as any).insert({
+      lead_id: completeDialog.leadId, scheduled_at: new Date(followupDate).toISOString(),
+      type: "call", notes: "Post-visit follow-up", status: "pending",
+    });
+    toast({ title: "Visit completed", description: `Follow-up scheduled for ${new Date(followupDate).toLocaleDateString("en-IN")}` });
+    setSaving(false);
+    setCompleteDialog(null);
+    fetchItems(); fetchCounts();
+  };
+
+  const handleNoShowVisit = async () => {
+    if (!noShowDialog) return;
+    if (followupAction === "followup" && !followupDate) return;
+    if (followupAction === "reschedule" && !rescheduleDate) return;
+    setSaving(true);
+    // Mark no-show (trigger auto-creates followup, but we override with user's choice)
+    await supabase.from("campus_visits" as any).update({ status: "no_show" }).eq("id", noShowDialog.visitId);
+    await supabase.from("lead_activities").insert({
+      lead_id: noShowDialog.leadId, user_id: user?.id || null, type: "visit",
+      description: "Campus visit: student did not show up",
+    });
+
+    if (followupAction === "reschedule") {
+      // Create rescheduled visit
+      await supabase.from("campus_visits" as any).insert({
+        lead_id: noShowDialog.leadId, campus_id: noShowDialog.campusId,
+        visit_date: new Date(rescheduleDate).toISOString(), status: "scheduled",
+        scheduled_by: user?.id || null,
+      } as any);
+      // Update lead stage back to visit_scheduled
+      await supabase.from("leads").update({ stage: "visit_scheduled" as any }).eq("id", noShowDialog.leadId);
+      toast({ title: "No-show recorded", description: `Visit rescheduled for ${new Date(rescheduleDate).toLocaleDateString("en-IN")}` });
+    } else {
+      // The DB trigger already creates a followup, but let's ensure the user's date is used
+      // Delete the auto-created one and insert with user's date
+      await supabase.from("lead_followups" as any)
+        .delete()
+        .eq("lead_id", noShowDialog.leadId)
+        .eq("status", "pending")
+        .ilike("notes", "%Auto: No-show%");
+      await supabase.from("lead_followups" as any).insert({
+        lead_id: noShowDialog.leadId, scheduled_at: new Date(followupDate).toISOString(),
+        type: "call", notes: "No-show follow-up — call to reschedule or close", status: "pending",
+      });
+      toast({ title: "No-show recorded", description: `Follow-up call scheduled for ${new Date(followupDate).toLocaleDateString("en-IN")}` });
+    }
+    setSaving(false);
+    setNoShowDialog(null);
+    fetchItems(); fetchCounts();
   };
 
   const toggleSelect = (leadId: string) => {
@@ -500,12 +578,12 @@ const PendingFollowups = () => {
                       <div className="flex items-center justify-center gap-1.5">
                         {tab === "unclosed_visits" && (
                           <>
-                            <button onClick={(e) => handleVisitStatus(r.id, "completed", r.lead_id, e)}
+                            <button onClick={(e) => openCompleteDialog(r.id, r.lead_id, r.lead_name, e)}
                               className="rounded-lg bg-emerald-100 px-2 py-1 text-[10px] font-medium text-emerald-700 hover:bg-emerald-200 transition-colors"
                               title="Mark visit completed">Completed</button>
-                            <button onClick={(e) => handleVisitStatus(r.id, "no_show", r.lead_id, e)}
+                            <button onClick={(e) => openNoShowDialog(r.id, r.lead_id, r.lead_name, null, e)}
                               className="rounded-lg bg-red-100 px-2 py-1 text-[10px] font-medium text-red-700 hover:bg-red-200 transition-colors"
-                              title="Mark as no-show (auto-creates follow-up)">No Show</button>
+                              title="Mark as no-show">No Show</button>
                           </>
                         )}
                         {(tab === "overdue" || tab === "today" || tab === "upcoming") && (
@@ -544,6 +622,70 @@ const PendingFollowups = () => {
             className="rounded-lg border border-input bg-card p-1.5 disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>
         </div>
       )}
+      {/* Visit Completed Dialog */}
+      <Dialog open={!!completeDialog} onOpenChange={o => { if (!o) setCompleteDialog(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Complete Visit: {completeDialog?.leadName}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Visit Feedback (optional)</label>
+              <textarea value={visitFeedback} onChange={e => setVisitFeedback(e.target.value)} rows={3}
+                placeholder="How was the visit? Any observations..."
+                className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Follow-up Date <span className="text-red-500">*</span></label>
+              <input type="datetime-local" value={followupDate} onChange={e => setFollowupDate(e.target.value)}
+                className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20" />
+            </div>
+            <Button onClick={handleCompleteVisit} disabled={saving || !followupDate} className="w-full">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Mark Completed & Schedule Follow-up
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* No-Show Dialog */}
+      <Dialog open={!!noShowDialog} onOpenChange={o => { if (!o) setNoShowDialog(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>No-Show: {noShowDialog?.leadName}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">Student didn't show up. Choose next action:</p>
+            <div className="flex gap-2">
+              <button onClick={() => setFollowupAction("followup")}
+                className={`flex-1 rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
+                  followupAction === "followup" ? "border-primary bg-primary/10 text-primary" : "border-input text-muted-foreground hover:bg-muted"
+                }`}>Schedule Follow-up Call</button>
+              <button onClick={() => setFollowupAction("reschedule")}
+                className={`flex-1 rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
+                  followupAction === "reschedule" ? "border-primary bg-primary/10 text-primary" : "border-input text-muted-foreground hover:bg-muted"
+                }`}>Reschedule Visit</button>
+            </div>
+            {followupAction === "followup" ? (
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Follow-up Call Date <span className="text-red-500">*</span></label>
+                <input type="datetime-local" value={followupDate} onChange={e => setFollowupDate(e.target.value)}
+                  className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20" />
+              </div>
+            ) : (
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">New Visit Date <span className="text-red-500">*</span></label>
+                <input type="datetime-local" value={rescheduleDate} onChange={e => setRescheduleDate(e.target.value)}
+                  className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20" />
+              </div>
+            )}
+            <Button onClick={handleNoShowVisit} disabled={saving} variant="destructive" className="w-full">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {followupAction === "followup" ? "Mark No-Show & Schedule Call" : "Mark No-Show & Reschedule Visit"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

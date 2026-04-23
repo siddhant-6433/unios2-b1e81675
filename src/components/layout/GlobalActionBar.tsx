@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { AlertTriangle, Clock, MapPin, Phone, CalendarCheck, X } from "lucide-react";
+import { AlertTriangle, Clock, MapPin, Phone, CalendarCheck, X, Sparkles, Inbox } from "lucide-react";
 
 interface ActionItem {
   key: string;
@@ -60,6 +60,19 @@ export function GlobalActionBar() {
           if (myLeadIds) q = q.in("lead_id", myLeadIds);
           return q;
         })(),
+        // Fresh leads (assigned but not called)
+        (() => {
+          let q = supabase.from("leads").select("id", { count: "exact", head: true })
+            .eq("stage", "new_lead" as any).is("first_contact_at", null);
+          if (isCounsellor && profileId) q = q.eq("counsellor_id", profileId);
+          return q;
+        })(),
+        // Unassigned leads bucket
+        (() => {
+          if (isCounsellor) return Promise.resolve({ count: 0 });
+          return supabase.from("leads").select("id", { count: "exact", head: true })
+            .eq("stage", "new_lead" as any).is("counsellor_id", null);
+        })(),
         // Unclosed visits
         (() => {
           let q = supabase.from("visits_unclosed_today" as any).select("visit_id", { count: "exact", head: true });
@@ -81,27 +94,35 @@ export function GlobalActionBar() {
       ]);
 
       const result: ActionItem[] = [];
-      const [overdueRes, todayRes, unclosedRes, confirmRes, postVisitRes] = queries;
+      const [overdueRes, todayRes, freshRes, unassignedRes, unclosedRes, confirmRes, postVisitRes] = queries;
 
+      if ((freshRes.count || 0) > 0) result.push({
+        key: "fresh", label: isCounsellor ? "Fresh Leads" : "Fresh Leads", count: freshRes.count || 0,
+        icon: Sparkles, color: "text-orange-600 bg-orange-50 border-orange-200", url: "/fresh-leads",
+      });
+      if ((unassignedRes as any).count > 0) result.push({
+        key: "unassigned", label: "Unassigned", count: (unassignedRes as any).count || 0,
+        icon: Inbox, color: "text-slate-600 bg-slate-50 border-slate-200", url: "/fresh-leads",
+      });
       if ((overdueRes.count || 0) > 0) result.push({
         key: "overdue", label: "Overdue Follow-ups", count: overdueRes.count || 0,
-        icon: AlertTriangle, color: "text-red-600 bg-red-50 border-red-200", url: "/pending-followups",
+        icon: AlertTriangle, color: "text-red-600 bg-red-50 border-red-200", url: "/pending-followups?tab=overdue",
       });
       if ((todayRes.count || 0) > 0) result.push({
         key: "today", label: "Today's Follow-ups", count: todayRes.count || 0,
-        icon: Clock, color: "text-amber-600 bg-amber-50 border-amber-200", url: "/pending-followups",
+        icon: Clock, color: "text-amber-600 bg-amber-50 border-amber-200", url: "/pending-followups?tab=today",
       });
       if ((unclosedRes.count || 0) > 0) result.push({
         key: "unclosed", label: "Visits to Close", count: unclosedRes.count || 0,
-        icon: MapPin, color: "text-red-600 bg-red-50 border-red-200", url: "/pending-followups",
+        icon: MapPin, color: "text-red-600 bg-red-50 border-red-200", url: "/pending-followups?tab=unclosed_visits",
       });
       if ((confirmRes.count || 0) > 0) result.push({
         key: "confirm", label: "Visit Confirmations", count: confirmRes.count || 0,
-        icon: CalendarCheck, color: "text-purple-600 bg-purple-50 border-purple-200", url: "/pending-followups",
+        icon: CalendarCheck, color: "text-purple-600 bg-purple-50 border-purple-200", url: "/pending-followups?tab=visit_confirm",
       });
       if ((postVisitRes.count || 0) > 0) result.push({
         key: "post_visit", label: "Post-Visit Follow-ups", count: postVisitRes.count || 0,
-        icon: Phone, color: "text-amber-600 bg-amber-50 border-amber-200", url: "/pending-followups",
+        icon: Phone, color: "text-amber-600 bg-amber-50 border-amber-200", url: "/pending-followups?tab=post_visit",
       });
 
       setItems(result);
