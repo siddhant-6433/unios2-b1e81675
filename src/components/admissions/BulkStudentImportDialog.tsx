@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -119,6 +120,7 @@ function parseCsv(text: string): string[][] {
 }
 
 export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkStudentImportDialogProps) {
+  const { user } = useAuth();
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const [parsed, setParsed] = useState<ParsedRow[]>([]);
@@ -284,6 +286,7 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
         guardian_phone: r.father_phone || null,
         fee_structure_version: r.fee_version,
         status: "active",
+        created_by: user?.id || null,
       }));
 
       const { error, data } = await supabase.from("students").insert(batch as any).select("id");

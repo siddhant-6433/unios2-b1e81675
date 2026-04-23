@@ -70,7 +70,8 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
       pre_admission_no: pan,
       admission_no: an,
       status: isPreadmit ? "pre_admitted" as any : "active" as any,
-    }).select("id").single();
+      created_by: user?.id || null,
+    } as any).select("id").single();
 
     if (studentErr) {
       toast({ title: "Error", description: studentErr.message, variant: "destructive" });

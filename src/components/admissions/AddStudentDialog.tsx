@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -44,6 +45,7 @@ function courseLabel(c: Course) {
 const STEPS = ["Student Details", "Parent / Guardian", "Programme & Session"];
 
 export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusId }: AddStudentDialogProps) {
+  const { user } = useAuth();
   const { toast } = useToast();
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -157,6 +159,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
       guardian_phone: form.father_phone.trim() || null,
       fee_structure_version: form.fee_version,
       status: "active" as any,
+      created_by: user?.id || null,
     } as any);
 
     setSaving(false);
