@@ -360,6 +360,48 @@ export default function PublisherPortal() {
         </Card>
       </div>
 
+      {/* Stage Breakdown */}
+      {(() => {
+        const stageCounts = Object.entries(STAGE_LABELS)
+          .map(([key, label]) => ({ key, label, count: leads.filter(l => l.stage === key).length }))
+          .filter(s => s.count > 0)
+          .sort((a, b) => b.count - a.count);
+        if (stageCounts.length === 0) return null;
+        return (
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Leads by Stage</p>
+            <div className="flex flex-wrap gap-2">
+              {stageFilter !== "all" && (
+                <button
+                  onClick={() => setStageFilter("all")}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-primary bg-primary/10 px-3 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+                >
+                  ✕ Clear filter
+                </button>
+              )}
+              {stageCounts.map(({ key, label, count }) => (
+                <button
+                  key={key}
+                  onClick={() => setStageFilter(stageFilter === key ? "all" : key)}
+                  className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium transition-colors border ${
+                    stageFilter === key
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : `border-transparent ${STAGE_COLORS[key] ?? "bg-muted text-muted-foreground"} hover:opacity-80`
+                  }`}
+                >
+                  {label}
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                    stageFilter === key ? "bg-white/20 text-inherit" : "bg-black/10 dark:bg-white/10"
+                  }`}>
+                    {count}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
