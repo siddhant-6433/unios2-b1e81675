@@ -9,13 +9,14 @@ import {
   ChevronLeft, ChevronRight, ExternalLink, UserSwitch, X, Check,
 } from "lucide-react";
 
-type Tab = "overdue" | "today" | "upcoming" | "visit_confirm" | "post_visit";
+type Tab = "overdue" | "today" | "upcoming" | "visit_confirm" | "unclosed_visits" | "post_visit";
 
 const TABS: { key: Tab; label: string; icon: any }[] = [
   { key: "overdue", label: "Overdue", icon: AlertTriangle },
   { key: "today", label: "Today", icon: Clock },
   { key: "upcoming", label: "Upcoming", icon: CalendarCheck },
   { key: "visit_confirm", label: "Visit Confirmations", icon: MapPin },
+  { key: "unclosed_visits", label: "Unclosed Visits", icon: AlertTriangle },
   { key: "post_visit", label: "Post-Visit", icon: Phone },
 ];
 
@@ -48,7 +49,7 @@ const PendingFollowups = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
-  const [counts, setCounts] = useState<Record<Tab, number>>({ overdue: 0, today: 0, upcoming: 0, visit_confirm: 0, post_visit: 0 });
+  const [counts, setCounts] = useState<Record<Tab, number>>({ overdue: 0, today: 0, upcoming: 0, visit_confirm: 0, unclosed_visits: 0, post_visit: 0 });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [counsellorOptions, setCounsellorOptions] = useState<{ id: string; name: string }[]>([]);
   const [reassignTo, setReassignTo] = useState("");
@@ -117,17 +118,23 @@ const PendingFollowups = () => {
     if (scopeId) vcq = vcq.eq("counsellor_id", scopeId);
     else if (scopeUnassigned) vcq = vcq.is("counsellor_id", null);
 
+    // Unclosed visits
+    let uvq = supabase.from("visits_unclosed_today" as any).select("visit_id", { count: "exact", head: true });
+    if (scopeId) uvq = uvq.eq("counsellor_id", scopeId);
+    else if (scopeUnassigned) uvq = uvq.is("counsellor_id", null);
+
     // Post-visit
     let pvq = supabase.from("post_visit_pending_followups" as any).select("visit_id", { count: "exact", head: true });
     if (scopeId) pvq = pvq.eq("counsellor_id", scopeId);
     else if (scopeUnassigned) pvq = pvq.is("counsellor_id", null);
 
-    const [oRes, tRes, uRes, vcRes, pvRes] = await Promise.all([oq, tq, uq, vcq, pvq]);
+    const [oRes, tRes, uRes, vcRes, uvRes, pvRes] = await Promise.all([oq, tq, uq, vcq, uvq, pvq]);
     setCounts({
       overdue: oRes.count || 0,
       today: tRes.count || 0,
       upcoming: uRes.count || 0,
       visit_confirm: vcRes.count || 0,
+      unclosed_visits: uvRes.count || 0,
       post_visit: pvRes.count || 0,
     });
   }, [isCounsellor, profileId, counsellorFilter]);
@@ -207,6 +214,32 @@ const PendingFollowups = () => {
         urgency: r.urgency,
         campus_name: r.campus_name || "",
       }));
+    } else if (tab === "unclosed_visits") {
+      let q = supabase.from("visits_unclosed_today" as any)
+        .select("*")
+        .order("visit_date", { ascending: true });
+      if (filterCounsellorId) q = q.eq("counsellor_id", filterCounsellorId);
+      else if (filterUnassigned) q = q.is("counsellor_id", null);
+      q = q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+      const { data } = await q;
+
+      result = (data || []).map((r: any) => {
+        const daysPast = Math.floor((Date.now() - new Date(r.visit_date).getTime()) / 86400000);
+        return {
+          id: r.visit_id,
+          lead_id: r.lead_id,
+          lead_name: r.lead_name || "Unknown",
+          lead_phone: r.lead_phone || "",
+          lead_stage: "",
+          counsellor_name: r.counsellor_name || "Unassigned",
+          counsellor_id: r.counsellor_id,
+          type: "unclosed_visit",
+          scheduled_at: r.visit_date,
+          notes: null,
+          days_overdue: daysPast,
+          campus_name: r.campus_name || "",
+        };
+      });
     } else if (tab === "post_visit") {
       let q = supabase.from("post_visit_pending_followups" as any)
         .select("*")
@@ -250,6 +283,17 @@ const PendingFollowups = () => {
   const handleMarkComplete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     await supabase.from("lead_followups" as any).update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", id);
+    fetchItems();
+    fetchCounts();
+  };
+
+  const handleVisitStatus = async (visitId: string, status: "completed" | "no_show", leadId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    await supabase.from("campus_visits" as any).update({ status }).eq("id", visitId);
+    await supabase.from("lead_activities").insert({
+      lead_id: leadId, user_id: user?.id || null, type: "visit",
+      description: status === "completed" ? "Campus visit marked completed" : "Campus visit: student did not show up",
+    });
     fetchItems();
     fetchCounts();
   };
@@ -397,7 +441,7 @@ const PendingFollowups = () => {
                   <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Lead</th>
                   <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Type</th>
                   <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">
-                    {tab === "overdue" ? "Overdue" : tab === "post_visit" ? "Since Visit" : "Scheduled"}
+                    {tab === "overdue" || tab === "unclosed_visits" ? "Overdue" : tab === "post_visit" ? "Since Visit" : "Scheduled"}
                   </th>
                   <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Stage</th>
                   {!isCounsellor && <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Counsellor</th>}
@@ -430,7 +474,7 @@ const PendingFollowups = () => {
                       }`}>{r.type.replace(/_/g, " ")}</Badge>
                     </td>
                     <td className="px-3 py-2.5 text-xs">
-                      {tab === "overdue" && r.days_overdue !== undefined ? (
+                      {(tab === "overdue" || tab === "unclosed_visits") && r.days_overdue !== undefined ? (
                         <span className={`font-medium ${r.days_overdue > 2 ? "text-red-600" : "text-amber-600"}`}>
                           {fmtOverdue(r.days_overdue)}
                         </span>
@@ -454,6 +498,16 @@ const PendingFollowups = () => {
                     <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[200px] truncate">{r.notes || "—"}</td>
                     <td className="px-3 py-2.5 text-center">
                       <div className="flex items-center justify-center gap-1.5">
+                        {tab === "unclosed_visits" && (
+                          <>
+                            <button onClick={(e) => handleVisitStatus(r.id, "completed", r.lead_id, e)}
+                              className="rounded-lg bg-emerald-100 px-2 py-1 text-[10px] font-medium text-emerald-700 hover:bg-emerald-200 transition-colors"
+                              title="Mark visit completed">Completed</button>
+                            <button onClick={(e) => handleVisitStatus(r.id, "no_show", r.lead_id, e)}
+                              className="rounded-lg bg-red-100 px-2 py-1 text-[10px] font-medium text-red-700 hover:bg-red-200 transition-colors"
+                              title="Mark as no-show (auto-creates follow-up)">No Show</button>
+                          </>
+                        )}
                         {(tab === "overdue" || tab === "today" || tab === "upcoming") && (
                           <button onClick={(e) => handleMarkComplete(r.id, e)}
                             className="rounded-lg bg-emerald-100 px-2.5 py-1 text-[10px] font-medium text-emerald-700 hover:bg-emerald-200 transition-colors"
