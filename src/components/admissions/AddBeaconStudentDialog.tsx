@@ -197,9 +197,9 @@ export function AddBeaconStudentDialog({ open, onOpenChange, onSuccess }: AddBea
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">Gender <span className="text-destructive">*</span></label>
                 <select className={sel} value={form.gender} onChange={e => set("gender", e.target.value)}>
                   <option value="">Select</option>
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                  <option value="Other">Other</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
                 </select>
               </div>
             </div>
@@ -405,7 +405,7 @@ export function AddBeaconStudentDialog({ open, onOpenChange, onSuccess }: AddBea
               <p className="text-muted-foreground">
                 <span className="text-foreground font-medium">{form.name || "—"}</span>
                 {form.dob && ` · DOB: ${form.dob}`}
-                {form.gender && ` · ${form.gender}`}
+                {form.gender && ` · ${form.gender.charAt(0).toUpperCase() + form.gender.slice(1)}`}
               </p>
               {form.school_admission_no && (
                 <p className="text-muted-foreground">Admission No: <span className="font-mono text-foreground">{form.school_admission_no}</span></p>

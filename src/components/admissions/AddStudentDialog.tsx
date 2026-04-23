@@ -219,9 +219,9 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">Gender <span className="text-destructive">*</span></label>
                 <select className={sel} value={form.gender} onChange={e => set("gender", e.target.value)}>
                   <option value="">Select</option>
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                  <option value="Other">Other</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
                 </select>
               </div>
             </div>
@@ -404,7 +404,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
               <p className="font-semibold text-foreground text-[11px]">Summary</p>
               <p className="text-muted-foreground">
                 <span className="font-medium text-foreground">{form.name || "—"}</span>
-                {form.gender && ` · ${form.gender}`}
+                {form.gender && ` · ${form.gender.charAt(0).toUpperCase() + form.gender.slice(1)}`}
                 {form.dob && ` · DOB: ${form.dob}`}
               </p>
               <p className="text-muted-foreground">
