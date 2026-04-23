@@ -80,17 +80,21 @@ const PendingFollowups = () => {
     const weekEnd = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10) + "T23:59:59+05:30";
 
     // Determine which counsellor to scope to
-    const scopeId = isCounsellor ? profileId : (counsellorFilter !== "all" ? counsellorFilter : null);
+    const scopeId = isCounsellor ? profileId : (counsellorFilter !== "all" && counsellorFilter !== "unassigned" ? counsellorFilter : null);
+    const scopeUnassigned = !isCounsellor && counsellorFilter === "unassigned";
 
-    // Get lead IDs for the scoped counsellor
+    // Get lead IDs for the scoped counsellor or unassigned
     let scopedLeadIds: string[] | null = null;
     if (scopeId) {
       const { data: scopedLeads } = await supabase.from("leads").select("id").eq("counsellor_id", scopeId);
       scopedLeadIds = (scopedLeads || []).map((l: any) => l.id);
-      if (scopedLeadIds.length === 0) {
-        setCounts({ overdue: 0, today: 0, upcoming: 0, visit_confirm: 0, post_visit: 0 });
-        return;
-      }
+    } else if (scopeUnassigned) {
+      const { data: scopedLeads } = await supabase.from("leads").select("id").is("counsellor_id", null);
+      scopedLeadIds = (scopedLeads || []).map((l: any) => l.id);
+    }
+    if (scopedLeadIds && scopedLeadIds.length === 0) {
+      setCounts({ overdue: 0, today: 0, upcoming: 0, visit_confirm: 0, post_visit: 0 });
+      return;
     }
 
     // Overdue
@@ -111,10 +115,12 @@ const PendingFollowups = () => {
     // Visit confirmations
     let vcq = supabase.from("visits_needing_confirmation" as any).select("visit_id", { count: "exact", head: true });
     if (scopeId) vcq = vcq.eq("counsellor_id", scopeId);
+    else if (scopeUnassigned) vcq = vcq.is("counsellor_id", null);
 
     // Post-visit
     let pvq = supabase.from("post_visit_pending_followups" as any).select("visit_id", { count: "exact", head: true });
     if (scopeId) pvq = pvq.eq("counsellor_id", scopeId);
+    else if (scopeUnassigned) pvq = pvq.is("counsellor_id", null);
 
     const [oRes, tRes, uRes, vcRes, pvRes] = await Promise.all([oq, tq, uq, vcq, pvq]);
     setCounts({
@@ -135,11 +141,12 @@ const PendingFollowups = () => {
 
     let result: FollowupItem[] = [];
 
-    const filterCounsellorId = isCounsellor ? profileId : (counsellorFilter !== "all" ? counsellorFilter : null);
+    const filterCounsellorId = isCounsellor ? profileId : (counsellorFilter !== "all" && counsellorFilter !== "unassigned" ? counsellorFilter : null);
+    const filterUnassigned = !isCounsellor && counsellorFilter === "unassigned";
 
     if (tab === "overdue" || tab === "today" || tab === "upcoming") {
       // Use !inner join so we can filter by leads.counsellor_id
-      const joinType = filterCounsellorId ? "!inner" : "";
+      const joinType = (filterCounsellorId || filterUnassigned) ? "!inner" : "";
       let q = supabase.from("lead_followups" as any)
         .select(`id, lead_id, type, scheduled_at, notes, status, user_id,
           leads${joinType}:lead_id(name, phone, stage, counsellor_id,
@@ -155,6 +162,7 @@ const PendingFollowups = () => {
 
       // Filter by counsellor (own for counsellors, selected for admins)
       if (filterCounsellorId) q = q.eq("leads.counsellor_id", filterCounsellorId);
+      else if (filterUnassigned) q = q.is("leads.counsellor_id", null);
 
       q = q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
       const { data } = await q;
@@ -181,6 +189,7 @@ const PendingFollowups = () => {
         .select("*")
         .order("visit_date", { ascending: true });
       if (filterCounsellorId) q = q.eq("counsellor_id", filterCounsellorId);
+      else if (filterUnassigned) q = q.is("counsellor_id", null);
       q = q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
       const { data } = await q;
 
@@ -203,6 +212,7 @@ const PendingFollowups = () => {
         .select("*")
         .order("visit_date", { ascending: true });
       if (filterCounsellorId) q = q.eq("counsellor_id", filterCounsellorId);
+      else if (filterUnassigned) q = q.is("counsellor_id", null);
       q = q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
       const { data } = await q;
 
@@ -335,6 +345,7 @@ const PendingFollowups = () => {
           <select value={counsellorFilter} onChange={e => setCounsellorFilter(e.target.value)}
             className="rounded-xl border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20">
             <option value="all">All Counsellors</option>
+            <option value="unassigned">Unassigned</option>
             {counsellorOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         )}
