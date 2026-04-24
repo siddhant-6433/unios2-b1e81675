@@ -7,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeft, Loader2, Trash2, ArrowRightLeft, Phone, MessageSquare,
   Calendar, CalendarDays, Clock, FileText, Bot, UserCheck, Mail, IndianRupee, MapPin, ThumbsDown, CheckCircle, Footprints,
-  ChevronRight,
+  ChevronRight, Ban,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -394,11 +394,37 @@ const LeadDetail = () => {
   const scheduleVisit = async (data: { visit_date: string; campus_id: string }) => {
     if (!data.visit_date || !id) return;
     const campusLabel = campuses.find(c => c.id === data.campus_id)?.name || "";
-    const { error } = await supabase.from("campus_visits").insert({
-      lead_id: id, scheduled_by: user?.id,
-      visit_date: data.visit_date, campus_id: data.campus_id || null,
-    });
-    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+
+    // Check for existing scheduled/confirmed visit — reschedule instead of creating duplicate
+    const existingVisit = visits.find((v: any) => ["scheduled", "confirmed"].includes(v.status));
+
+    if (existingVisit) {
+      // Reschedule: update existing visit + log history
+      const oldDate = new Date(existingVisit.visit_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+      const oldCampus = campuses.find(c => c.id === existingVisit.campus_id)?.name || "";
+
+      const { error } = await supabase.from("campus_visits")
+        .update({ visit_date: data.visit_date, campus_id: data.campus_id || existingVisit.campus_id, status: "scheduled" })
+        .eq("id", existingVisit.id);
+      if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+
+      const newDateFormatted = new Date(data.visit_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) +
+        " " + new Date(data.visit_date).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+
+      await supabase.from("lead_activities").insert({
+        lead_id: id, user_id: profileId, type: "visit",
+        description: `Campus visit rescheduled from ${oldDate}${oldCampus ? ` at ${oldCampus}` : ""} to ${newDateFormatted}${campusLabel ? ` at ${campusLabel}` : ""}`,
+      });
+
+      toast({ title: "Visit rescheduled", description: `Previous visit on ${oldDate} has been rescheduled.` });
+    } else {
+      // No existing visit — create new
+      const { error } = await supabase.from("campus_visits").insert({
+        lead_id: id, scheduled_by: user?.id,
+        visit_date: data.visit_date, campus_id: data.campus_id || null,
+      });
+      if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+    }
 
     const visitDateFormatted = new Date(data.visit_date).toLocaleDateString("en-GB", {
       day: "2-digit", month: "2-digit", year: "2-digit",
@@ -464,6 +490,44 @@ const LeadDetail = () => {
       description: `Stage changed from ${STAGE_LABELS[lead.stage] || lead.stage} to ${STAGE_LABELS[newStage] || newStage}`,
       old_stage: lead.stage as any, new_stage: newStage as any,
     });
+    await fetchAll(true);
+  };
+
+  const markAsDnc = async () => {
+    if (!id || !lead || lead.stage === "dnc") return;
+    const { error } = await supabase.from("leads").update({ stage: "dnc" as any }).eq("id", id);
+    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+    await supabase.from("lead_activities").insert({
+      lead_id: id, user_id: profileId, type: "stage_change",
+      description: `Lead marked as Do Not Contact (DNC)`,
+      old_stage: lead.stage as any, new_stage: "dnc" as any,
+    });
+    // Send DNC acknowledgment via WhatsApp if phone available
+    if (lead.phone) {
+      try {
+        await supabase.functions.invoke("whatsapp-reply", {
+          body: {
+            phone: lead.phone.replace(/[^0-9]/g, ""),
+            message: "You have been added to our Do Not Contact list. We will not reach out to you via call or WhatsApp going forward. If this was a mistake, please reply START or call us at +91 9555192192.",
+            lead_id: id,
+          },
+        });
+      } catch (_) {}
+    }
+    toast({ title: "Lead marked as DNC", description: "No further calls or WhatsApp messages will be sent." });
+    await fetchAll(true);
+  };
+
+  const unmarkDnc = async () => {
+    if (!id || !lead || lead.stage !== "dnc") return;
+    const { error } = await supabase.from("leads").update({ stage: "new_lead" as any }).eq("id", id);
+    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+    await supabase.from("lead_activities").insert({
+      lead_id: id, user_id: profileId, type: "stage_change",
+      description: "Lead removed from DNC list and moved back to New Lead",
+      old_stage: "dnc" as any, new_stage: "new_lead" as any,
+    });
+    toast({ title: "DNC removed", description: "Lead restored to New Lead." });
     await fetchAll(true);
   };
 
@@ -603,6 +667,20 @@ const LeadDetail = () => {
 
   return (
     <div className="space-y-4 animate-fade-in px-0">
+      {/* DNC Banner */}
+      {lead.stage === "dnc" && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-red-400/60 bg-red-50 dark:bg-red-950/30 px-4 py-3">
+          <div className="flex items-center gap-2.5">
+            <Ban className="h-4 w-4 text-red-600 shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-red-700 dark:text-red-400">Do Not Contact (DNC)</p>
+              <p className="text-xs text-red-600/80 dark:text-red-500">This lead has opted out. No calls or WhatsApp messages should be sent.</p>
+            </div>
+          </div>
+          <button onClick={unmarkDnc} className="text-xs font-medium text-red-600 hover:underline shrink-0">Remove DNC</button>
+        </div>
+      )}
+
       {/* Breadcrumb + Actions */}
       <div className="flex items-center gap-2 text-sm overflow-x-auto">
         <Link to="/admissions" className="text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 shrink-0">
@@ -629,6 +707,11 @@ const LeadDetail = () => {
           {canTransfer && (
             <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => setShowTransfer(true)}>
               <ArrowRightLeft className="h-3.5 w-3.5" /> Transfer
+            </Button>
+          )}
+          {lead.stage !== "dnc" && (
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs text-red-600 border-red-300/60 hover:bg-red-50 dark:hover:bg-red-950/20" onClick={markAsDnc}>
+              <Ban className="h-3.5 w-3.5" /> Mark DNC
             </Button>
           )}
           {isSuperAdmin && (
