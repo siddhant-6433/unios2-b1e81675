@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCampus } from "@/contexts/CampusContext";
+import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -165,7 +166,7 @@ const Admissions = () => {
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [tempFilter, setTempFilter] = useState<string>("all");
-  const [counsellorFilter, setCounsellorFilter] = useState<string>("all");
+  const { counsellorFilter, setCounsellorFilter } = useCounsellorFilter();
   const [counsellorOptions, setCounsellorOptions] = useState<{ id: string; name: string }[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
@@ -274,9 +275,11 @@ const Admissions = () => {
       .select(`*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`)
       .order("created_at", { ascending: false })
       .limit(500);
-    // Counsellors see their assigned leads across all campuses
+    // Apply counsellor filter (from global bar or self for counsellors)
     if (role === "counsellor" && profile?.id) {
       query = query.eq("counsellor_id", profile.id);
+    } else if (counsellorFilter !== "all") {
+      query = query.eq("counsellor_id", counsellorFilter);
     } else if (selectedCampusId !== "all") {
       query = query.eq("campus_id", selectedCampusId);
     }
@@ -327,7 +330,7 @@ const Admissions = () => {
     setLoading(false);
   };
 
-  useEffect(() => { fetchLeads(); }, [selectedCampusId]);
+  useEffect(() => { fetchLeads(); }, [selectedCampusId, counsellorFilter]);
 
   // Server-side search: when search has 3+ chars, query DB for leads beyond the loaded 200
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);

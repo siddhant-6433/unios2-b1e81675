@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -45,7 +46,7 @@ const FreshLeads = () => {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
-  const [counsellorFilter, setCounsellorFilter] = useState("all");
+  const { counsellorFilter, setCounsellorFilter } = useCounsellorFilter();
   const [assignmentFilter, setAssignmentFilter] = useState<"all" | "assigned" | "unassigned">("all");
   const [counsellorOptions, setCounsellorOptions] = useState<{ id: string; name: string }[]>([]);
 

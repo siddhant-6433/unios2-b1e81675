@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -65,7 +66,7 @@ const CallLog = () => {
   const [datePreset, setDatePreset] = useState<DatePreset>("today");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
-  const [counsellorFilter, setCounsellorFilter] = useState("all");
+  const { counsellorFilter, setCounsellorFilter } = useCounsellorFilter();
   const [dispositionFilter, setDispositionFilter] = useState("all");
   const [counsellorOptions, setCounsellorOptions] = useState<{ id: string; name: string }[]>([]);
 
