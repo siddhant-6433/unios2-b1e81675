@@ -50,6 +50,12 @@ export function LeadInfoCard({
           <div className="min-w-0">
             <EditableText field="name" label="Name" value={lead.name} onSave={onFieldUpdate} className="text-lg font-bold text-foreground" />
             <EditableText field="phone" label="Phone" value={lead.phone} onSave={onFieldUpdate} className="text-sm text-muted-foreground" />
+            {(lead.city || lead.state) && (
+              <p className="text-xs text-muted-foreground/70 flex items-center gap-1 mt-0.5">
+                <svg className="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                {[lead.city, lead.state].filter(Boolean).join(", ")}
+              </p>
+            )}
           </div>
         </div>
 
