@@ -51,6 +51,18 @@ Deno.serve(async (req) => {
       });
     }
 
+    const admin = createClient(supabaseUrl, serviceRoleKey);
+
+    // Block sends to DNC leads
+    if (lead_id) {
+      const { data: leadCheck } = await admin.from("leads").select("stage").eq("id", lead_id).single();
+      if (leadCheck?.stage === "dnc") {
+        return new Response(JSON.stringify({ error: "Lead is DNC — message not sent" }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     const waPhone = phone.replace(/[^0-9]/g, "");
 
     // Send free-form text message (only works within 24hr conversation window)
@@ -81,7 +93,6 @@ Deno.serve(async (req) => {
     }
 
     // Log to whatsapp_messages
-    const admin = createClient(supabaseUrl, serviceRoleKey);
     await admin.from("whatsapp_messages").insert({
       lead_id: lead_id || null,
       wa_message_id: waResult?.messages?.[0]?.id || null,

@@ -104,9 +104,11 @@ TOOLS (call, don't just promise):
 
 TOOL ORDER FOR VISIT: schedule_visit(date, time) → send_whatsapp_to_lead(visit_confirmation) → set_call_disposition("visit_scheduled"). All three must be called in sequence. Do NOT set disposition "visit_scheduled" without first calling schedule_visit.
 
-STYLE: 2-3 sentences per turn. Pause — don't monologue. STOP immediately when caller speaks. Never repeat what you already said. Share course info in parts: highlights → practical → careers → eligibility → fees last. If asked directly about fees, answer directly.
+STYLE: 2-3 sentences per turn. Pause — don't monologue. STOP immediately when caller speaks. Never repeat what you already said. Share course info in parts: highlights → practical → careers → eligibility → fees last. If asked directly about fees, answer directly. CRITICAL: After asking ANY question, STOP and WAIT for at least 5 seconds for the caller to respond. Do NOT ask multiple questions in a row without waiting for answers.
 
 SILENCE: No response for 8s → "Hello? Aap sun pa rahe hain?" → wait 8s → "Lagta hai connection mein problem hai, dobara try karti hoon." → set_call_disposition("not_answered").
+
+VOICEMAIL DETECTION: If you hear a beep, automated greeting, "leave a message", or the called party doesn't respond with human speech within 5 seconds — this is a voicemail. Say EXACTLY: "Hello, yeh call NIMT Educational Institutions ki admissions team ki taraf se hai. Aap humein 9555192192 par call back kar sakte hain. Dhanyavaad." → Then immediately call set_call_disposition("voicemail") and stop speaking. Do NOT continue the conversation flow.
 
 ${isOutbound ? `${outboundCtx}
 
@@ -128,13 +130,28 @@ ELIGIBILITY PENDING: If student says results are awaited (12th, graduation, or e
 
 NOT INTERESTED: "No problem, thank you for your time!" → set_call_disposition("not_interested").`
   : `INBOUND CALL to ${persona.org}.
+Caller phone: ${ctx.calledNumber || "unknown"}
+${ctx.leadName && !isPlaceholder ? `KNOWN LEAD: ${ctx.leadName}${ctx.courseName ? ` | Course: ${ctx.courseName}` : ""}${ctx.campusName ? ` | Campus: ${ctx.campusName}` : ""}` : "NEW CALLER: No matching lead found in system."}
+
+CRITICAL RULES FOR INBOUND:
+- The caller's phone number is ALREADY captured from caller ID. NEVER ask for their phone number.
+- NEVER ask for email on the call — spelling errors are common on phone. Instead say "Main aapko WhatsApp par ek message bhejti hoon, usme aap apna email type karke reply kar dijiye" → call send_whatsapp_to_lead(course_info).
+- WAIT for the caller to finish speaking before responding. Do NOT interrupt or continue before they answer.
+- Pause after EVERY question. Wait at least 5 seconds for a response before saying anything else.
 
 FLOW:
-1. "Thank you for calling ${persona.org}! I'm ${persona.name}. How can I help?" → wait, detect language.
-2. "Which programme are you interested in?" → get_course_info → share in parts.
-3. "May I have your name?" → "And a contact number or email?" → create_lead.
-4. Offer campus visit → schedule_visit if yes.
-5. set_call_disposition → close.`}`;
+${ctx.leadName && !isPlaceholder
+  ? `1. "Hello ${firstName}! Thank you for calling ${persona.org}. Main ${persona.name} hoon. Kaise help kar sakti hoon?" → STOP. Wait for response.
+2. You already know their name and course interest. Ask what specific information they need → get_course_info if needed.`
+  : `1. "Thank you for calling ${persona.org}! Main ${persona.name} hoon. Aapka naam bata dijiye?" → STOP. Wait for name. Call update_lead_info with name.
+2. "Aap konse course mein interested hain?" → STOP. Wait. → get_course_info.
+3. Confirm: "Aap jis number se call kar rahe hain, kya isi par WhatsApp details bhej dein?" → if yes, use the caller's phone. If different number, ask and call update_lead_info.`}
+${hasCourse ? "" : `\nIf caller mentions a course → call get_course_info immediately.`}
+4. Share course info in parts. After covering details, offer next steps:
+   A. ONLINE APPLY: "Aap online apply kar sakte hain, main link WhatsApp par bhej deti hoon." → send_whatsapp_to_lead(apply_link).
+   B. CAMPUS VISIT: "Aap campus visit bhi kar sakte hain." → if yes: get date → schedule_visit → send_whatsapp_to_lead(visit_confirmation).
+   C. SENIOR COUNSELLOR: → request_human_callback if needed.
+5. set_call_disposition → close: "Thank you for calling! Feel free to reach out anytime."`}`;
 }
 
 /**
@@ -243,7 +260,7 @@ export const VOICE_AGENT_TOOLS = [
       properties: {
         disposition: {
           type: "string",
-          enum: ["interested", "not_interested", "ineligible", "call_back", "wrong_number", "do_not_contact", "not_answered"],
+          enum: ["interested", "not_interested", "ineligible", "call_back", "wrong_number", "do_not_contact", "not_answered", "voicemail"],
         },
         notes: { type: "string", description: "Brief summary of conversation and outcome" },
         schedule_followup: { type: "boolean" },

@@ -1233,7 +1233,71 @@ Deno.serve({ port: PORT }, async (req) => {
     });
   }
 
-  // Plivo Answer URL — returns XML with bidirectional Stream
+  // Inbound call answer URL — handles callbacks from leads (must be before generic /answer/)
+  if (path === "/answer/inbound") {
+    const body = await req.formData().catch(() => null);
+    const params = body ? Object.fromEntries(body) : {} as any;
+    const callerPhone = params.From || params.CallerName || "";
+    const callId = `inbound-${crypto.randomUUID().slice(0, 8)}`;
+    const host = req.headers.get("host") || url.host;
+    const wsProtocol = host.includes("localhost") ? "ws" : "wss";
+
+    console.log(`[${callId}] Inbound call from ${callerPhone}`);
+
+    const dbHeaders = {
+      "Content-Type": "application/json",
+      apikey: SUPABASE_SERVICE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+    };
+
+    let leadName = "";
+    let courseName = "";
+    let campusName = "";
+    let leadId = "";
+    try {
+      const phone = callerPhone.replace(/[^0-9]/g, "").slice(-10);
+      if (phone) {
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/leads?phone=ilike.*${phone}&select=id,name,course_id,courses:course_id(name),campuses:campus_id(name)&limit=1`,
+          { headers: dbHeaders },
+        );
+        const leads = await res.json().catch(() => []);
+        if (leads?.[0]) {
+          leadId = leads[0].id;
+          leadName = leads[0].name || "";
+          courseName = (leads[0].courses as any)?.name || "";
+          campusName = (leads[0].campuses as any)?.name || "";
+        }
+      }
+    } catch (e) {
+      console.error(`[${callId}] Lead lookup failed:`, e);
+    }
+
+    activeCallContexts.set(callId, {
+      direction: "inbound",
+      leadId: leadId || undefined,
+      leadName,
+      courseName,
+      campusName,
+      calledNumber: params.To || "",
+      callerTranscript: [],
+      aiTranscript: [],
+      toolCallsMade: [],
+    });
+
+    const wsUrl = `${wsProtocol}://${host}/ws/${callId}`;
+    const recordingCallbackUrl = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/voice-call-callback` : "";
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Record recordSession="true" redirect="false" maxLength="3600"${recordingCallbackUrl ? ` callbackUrl="${recordingCallbackUrl}" callbackMethod="POST"` : ""} />
+  <Stream streamTimeout="600" keepCallAlive="true" bidirectional="true" contentType="audio/x-mulaw;rate=8000">${wsUrl}</Stream>
+</Response>`;
+
+    console.log(`[${callId}] Inbound answer XML for ${callerPhone}, lead: ${leadName || "unknown"}`);
+    return new Response(xml, { headers: { "Content-Type": "application/xml" } });
+  }
+
+  // Plivo Answer URL (outbound) — returns XML with bidirectional Stream
   if (path.startsWith("/answer/")) {
     const callId = path.split("/answer/")[1];
     const host = req.headers.get("host") || url.host;
@@ -1308,6 +1372,7 @@ Deno.serve({ port: PORT }, async (req) => {
           "no-answer": "not_answered",
           failed: "not_answered",
           cancel: "not_answered",
+          machine: "voicemail",
         };
         const autoDisposition = autoDispositions[plivoStatus] || null;
 
@@ -1359,7 +1424,7 @@ Deno.serve({ port: PORT }, async (req) => {
         }
 
         // Auto-retry unanswered/busy via AI — re-queue with 4-hour delay, 9AM–8PM IST window
-        if (autoDisposition && leadId && (autoDisposition === "busy" || autoDisposition === "not_answered")) {
+        if (autoDisposition && leadId && (autoDisposition === "busy" || autoDisposition === "not_answered" || autoDisposition === "voicemail")) {
           // Cap: check how many AI calls have already been made for this lead
           const retryCountRes = await fetch(
             `${SUPABASE_URL}/rest/v1/ai_call_records?lead_id=eq.${leadId}&select=id`,

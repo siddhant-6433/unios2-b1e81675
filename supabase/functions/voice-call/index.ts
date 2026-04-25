@@ -75,6 +75,7 @@ Deno.serve(async (req) => {
         .single();
 
       if (leadErr || !lead) return json({ error: "Lead not found" }, 404);
+      if (lead.stage === "dnc") return json({ error: "Lead is DNC — call blocked" }, 200);
       if (!lead.phone) return json({ error: "Lead has no phone number" }, 400);
 
       // For automated/queue calls (service role), wait briefly so lead data settles.
@@ -140,6 +141,10 @@ Deno.serve(async (req) => {
         hangup_method: "POST",
         time_limit: 600,
         ring_timeout: 30,
+        machine_detection: "true",
+        machine_detection_time: "5000",
+        machine_detection_url: statusUrl,
+        machine_detection_method: "POST",
       };
 
       console.log("Plivo call payload:", JSON.stringify({ ...plivoPayload, from: "***", to: phone.slice(-4) }));

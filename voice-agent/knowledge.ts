@@ -29,6 +29,7 @@ export const COURSE_KNOWLEDGE: Record<string, {
   entrance: string;
   duration: string;
   campus: string;
+  fee?: string;
   placementHighlights?: string;
 }> = {
   "B.Sc Nursing": {
@@ -48,6 +49,7 @@ export const COURSE_KNOWLEDGE: Record<string, {
     entrance: "UPCNET (UP Combined Nursing Entrance Test) or CPNET / merit-based",
     duration: "4 Years (8 Semesters) + 6-month paid internship",
     campus: "Greater Noida, Kotputli (Jaipur)",
+    fee: "Rs 1,53,000 per year (first year fee)",
     placementHighlights: "Highest: Rs 10 LPA. Average: Rs 3 LPA. Top employers: Max Hospital, Apollo, Fortis.",
   },
   "GNM": {
@@ -65,6 +67,7 @@ export const COURSE_KNOWLEDGE: Record<string, {
     entrance: "UPCNET / merit-based",
     duration: "3 Years + 6-month Internship",
     campus: "Greater Noida",
+    fee: "Rs 1,18,000 per year (first year fee)",
   },
   "BPT": {
     highlights: [
@@ -80,6 +83,7 @@ export const COURSE_KNOWLEDGE: Record<string, {
     entrance: "CPET (Common Paramedical Entrance Test) / UPCPAT",
     duration: "4.5 Years (8 Semesters + 6-month Internship)",
     campus: "Greater Noida",
+    fee: "Rs 92,000 per year (first year fee)",
   },
   "MBA": {
     highlights: [
@@ -97,6 +101,7 @@ export const COURSE_KNOWLEDGE: Record<string, {
     entrance: "CAT, MAT, XAT, CMAT, GMAT, SNAP, or NMAT",
     duration: "2 Years (4 Semesters)",
     campus: "Greater Noida, Ghaziabad",
+    fee: "Rs 1,30,000 per year (first year fee)",
     placementHighlights: "Highest: INR 18.75 LPA. Average: INR 5.40 LPA. 60+ companies visit campus. Top: Fortis, KPMG, Cognizant, ICICI Bank, Wipro, Dell.",
   },
   "PGDM": {
@@ -114,6 +119,7 @@ export const COURSE_KNOWLEDGE: Record<string, {
     entrance: "CAT, MAT, XAT, CMAT",
     duration: "2 Years (4 Semesters), Full-time Residential",
     campus: "Greater Noida, Ghaziabad, Kotputli (Jaipur)",
+    fee: "Rs 2,25,000 per year (first year fee)",
   },
   "LLB": {
     highlights: [
@@ -133,6 +139,7 @@ export const COURSE_KNOWLEDGE: Record<string, {
     entrance: "BA LLB: CLAT, LSAT, ULSAT. LLB: Merit-based / CLAT PG.",
     duration: "BA LLB: 5 Years. LLB: 3 Years.",
     campus: "Greater Noida (main), Kotputli (affiliated to University of Rajasthan and Dr. Bhimrao Ambedkar Law University)",
+    fee: "BA LLB: Rs 1,10,000/year | LLB: Rs 44,250/year (first year fees)",
   },
   "B.Ed": {
     highlights: [
@@ -149,6 +156,7 @@ export const COURSE_KNOWLEDGE: Record<string, {
     entrance: "UP B.Ed Joint Entrance Examination (UP BED JEE). Kotputli: State Level PTET.",
     duration: "2 Years (4 Semesters)",
     campus: "Greater Noida, Ghaziabad (Arthala), Kotputli (Jaipur)",
+    fee: "Rs 56,000/year (Greater Noida & Ghaziabad) | Rs 27,000/year (Kotputli) — first year fee",
   },
   "BCA": {
     highlights: [
@@ -164,6 +172,7 @@ export const COURSE_KNOWLEDGE: Record<string, {
     entrance: "Merit-based / JEECUP score",
     duration: "3 Years (6 Semesters)",
     campus: "Greater Noida",
+    fee: "Rs 75,000 per year (first year fee)",
   },
   "BBA": {
     highlights: [
@@ -179,6 +188,7 @@ export const COURSE_KNOWLEDGE: Record<string, {
     entrance: "Merit-based (Class 12 marks)",
     duration: "3 Years (6 Semesters)",
     campus: "Greater Noida, Ghaziabad (Arthala)",
+    fee: "Rs 75,000 per year (first year fee)",
   },
   "BMRIT": {
     highlights: [
@@ -193,6 +203,7 @@ export const COURSE_KNOWLEDGE: Record<string, {
     entrance: "Merit-based (no entrance exam required)",
     duration: "4 Years (including internship)",
     campus: "Greater Noida",
+    fee: "Rs 92,000 per year (first year fee)",
   },
   "D Pharma": {
     highlights: [
@@ -207,6 +218,7 @@ export const COURSE_KNOWLEDGE: Record<string, {
     entrance: "JEECUP / merit-based",
     duration: "2 Years + 3-month training",
     campus: "Greater Noida",
+    fee: "Rs 95,000 per year (first year fee)",
   },
   "Grade": {
     highlights: [
@@ -258,6 +270,26 @@ export function getCourseKnowledge(courseName: string): typeof COURSE_KNOWLEDGE[
   }
   return null;
 }
+
+export const FEE_STRUCTURE = `First Year / Annual Fees (all campuses, current session):
+B.Sc Nursing: Rs 1,53,000/year (Greater Noida)
+GNM: Rs 1,18,000/year (Greater Noida)
+BPT: Rs 92,000/year (Greater Noida)
+MBA: Rs 1,30,000/year (Greater Noida)
+PGDM: Rs 2,25,000/year (Greater Noida & Kotputli)
+BA LLB: Rs 1,10,000/year (Greater Noida)
+LLB: Rs 44,250/year (Greater Noida & Kotputli)
+B.Ed: Rs 56,000/year (Greater Noida & Ghaziabad) | Rs 27,000/year (Kotputli)
+BCA: Rs 75,000/year (Greater Noida)
+BBA: Rs 75,000/year (Greater Noida & Ghaziabad)
+BMRIT: Rs 92,000/year (Greater Noida)
+D.Pharma: Rs 95,000/year (Greater Noida)
+DPT (Diploma Physiotherapy): Rs 62,000/year (Greater Noida)
+OTT (Operation Theater Technician): Rs 62,000/year (Greater Noida)
+D.El.Ed: Rs 45,000/year (Ghaziabad)
+MPT: Rs 89,000/year (Greater Noida)
+MMRIT: Rs 89,000/year (Greater Noida)
+Note: These are first-year fees. Scholarships available for merit, SC/ST/OBC categories.`;
 
 export const ADMISSIONS_INFO = `How to Apply:
 1. Visit apply.nimt.ac.in and complete online application

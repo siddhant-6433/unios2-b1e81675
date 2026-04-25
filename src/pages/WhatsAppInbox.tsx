@@ -421,12 +421,18 @@ const WhatsAppInbox = () => {
     const previewText = getTemplatePreview(selectedTemplate);
 
     // KB quick-reply templates → send as freeform text via whatsapp-reply
+    // These only work within the 24-hour WhatsApp conversation window
     if (KB_TEMPLATE_KEYS.has(selectedTemplate)) {
-      const { error } = await supabase.functions.invoke("whatsapp-reply", {
+      const { data: replyData, error } = await supabase.functions.invoke("whatsapp-reply", {
         body: { phone: selectedPhone, message: previewText, lead_id: conv?.lead_id || null },
       });
-      if (error) {
-        toast({ title: "Failed to send", description: error.message, variant: "destructive" });
+      if (error || replyData?.error) {
+        const errMsg = replyData?.error || error?.message || "Unknown error";
+        if (errMsg.includes("window") || errMsg.includes("24") || errMsg.includes("expired")) {
+          toast({ title: "24-hour window expired", description: "This message can only be sent within 24 hours of the lead's last reply. Use a Meta-approved template instead.", variant: "destructive" });
+        } else {
+          toast({ title: "Failed to send", description: errMsg, variant: "destructive" });
+        }
       } else {
         toast({ title: "Message sent" });
         setSelectedTemplate(null);
@@ -436,19 +442,37 @@ const WhatsAppInbox = () => {
       return;
     }
 
+    // Fetch lead details for accurate template params
+    let courseName = "your selected course";
+    let campusName = "NIMT campus";
+    let leadSource = "enquiry";
+    if (conv?.lead_id) {
+      const { data: leadInfo } = await supabase
+        .from("leads")
+        .select("source, courses:course_id(name), campuses:campus_id(name)")
+        .eq("id", conv.lead_id)
+        .single();
+      if (leadInfo) {
+        courseName = (leadInfo.courses as any)?.name || courseName;
+        campusName = (leadInfo.campuses as any)?.name || campusName;
+        leadSource = leadInfo.source || leadSource;
+      }
+    }
+
     // Meta-approved templates via whatsapp-send
     let params: string[] = [];
+    let buttonUrls: string[] | undefined;
     switch (selectedTemplate) {
-      case "lead_welcome": params = [leadName, "your selected course"]; break;
-      case "visit_confirmation": params = [leadName, "your scheduled date", "our campus"]; break;
-      case "visit_reminder_24hr": params = [leadName, "tomorrow"]; break;
+      case "lead_welcome": params = [leadName, courseName, leadSource]; break;
+      case "visit_confirmation": params = [leadName, "the scheduled date", campusName]; buttonUrls = ["1820424915210710582"]; break;
+      case "visit_reminder_24hr": params = [leadName, "tomorrow", campusName]; break;
       case "application_received": params = [leadName, "N/A"]; break;
       case "fee_reminder": params = [leadName, "the pending amount", "the due date"]; break;
-      case "course_details": params = [leadName, "your selected course"]; break;
+      case "course_details": params = [leadName, courseName]; break;
     }
 
     const { data, error } = await supabase.functions.invoke("whatsapp-send", {
-      body: { template_key: selectedTemplate, phone: selectedPhone, params, lead_id: conv?.lead_id || null },
+      body: { template_key: selectedTemplate, phone: selectedPhone, params, lead_id: conv?.lead_id || null, ...(buttonUrls ? { button_urls: buttonUrls } : {}) },
     });
 
     if (error) {

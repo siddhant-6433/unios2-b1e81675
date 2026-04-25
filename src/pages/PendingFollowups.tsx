@@ -165,11 +165,21 @@ const PendingFollowups = () => {
     const filterUnassigned = !isCounsellor && counsellorFilter === "unassigned";
 
     if (tab === "overdue" || tab === "today" || tab === "upcoming") {
-      // Use !inner join so we can filter by leads.counsellor_id
-      const joinType = (filterCounsellorId || filterUnassigned) ? "!inner" : "";
+      // Pre-fetch lead IDs for counsellor scoping (same approach as counts)
+      let scopedLeadIds: string[] | null = null;
+      if (filterCounsellorId) {
+        const { data: sLeads } = await supabase.from("leads").select("id").eq("counsellor_id", filterCounsellorId);
+        scopedLeadIds = (sLeads || []).map((l: any) => l.id);
+        if (!scopedLeadIds.length) { setItems([]); setLoading(false); return; }
+      } else if (filterUnassigned) {
+        const { data: sLeads } = await supabase.from("leads").select("id").is("counsellor_id", null);
+        scopedLeadIds = (sLeads || []).map((l: any) => l.id);
+        if (!scopedLeadIds.length) { setItems([]); setLoading(false); return; }
+      }
+
       let q = supabase.from("lead_followups" as any)
         .select(`id, lead_id, type, scheduled_at, notes, status, user_id,
-          leads${joinType}:lead_id(name, phone, stage, counsellor_id,
+          leads:lead_id(name, phone, stage, counsellor_id,
             counsellor_profile:counsellor_id(display_name),
             courses:course_id(name), campuses:campus_id(name)
           )`)
@@ -180,9 +190,8 @@ const PendingFollowups = () => {
       else if (tab === "today") q = q.gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd);
       else q = q.gt("scheduled_at", todayEnd).lte("scheduled_at", weekEnd);
 
-      // Filter by counsellor (own for counsellors, selected for admins)
-      if (filterCounsellorId) q = q.eq("leads.counsellor_id", filterCounsellorId);
-      else if (filterUnassigned) q = q.is("leads.counsellor_id", null);
+      // Filter by pre-fetched lead IDs
+      if (scopedLeadIds) q = q.in("lead_id", scopedLeadIds);
 
       q = q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
       const { data } = await q;
