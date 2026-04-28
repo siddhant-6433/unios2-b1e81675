@@ -1052,6 +1052,23 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
               toolResponse: { functionResponses: responses },
             }));
           }
+
+          // Auto-hangup after terminal dispositions (voicemail, not_answered, etc.)
+          // Wait 8 seconds for Gemini to finish speaking, then close connections
+          const terminalDispositions = new Set(["voicemail", "not_interested", "wrong_number", "do_not_contact", "not_answered"]);
+          const dispositionCall = responses.find((r: any) => r.name === "set_call_disposition");
+          if (dispositionCall) {
+            const disposition = msg.toolCall.functionCalls.find((fc: any) => fc.name === "set_call_disposition")?.args?.disposition;
+            if (disposition && terminalDispositions.has(disposition)) {
+              const delay = disposition === "voicemail" ? 3000 : 5000; // voicemail needs less time (short message)
+              console.log(`[${callId}] Terminal disposition "${disposition}" — auto-hangup in ${delay / 1000}s`);
+              setTimeout(() => {
+                console.log(`[${callId}] Auto-hangup: closing Gemini and Plivo connections`);
+                if (geminiWs.readyState === WebSocket.OPEN) geminiWs.close(1000, "call_ended");
+                if (plivoWs.readyState === WebSocket.OPEN) plivoWs.close();
+              }, delay);
+            }
+          }
         });
       }
 
@@ -1684,7 +1701,7 @@ Deno.serve({ port: PORT }, async (req) => {
     await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records`, {
       method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
       body: JSON.stringify({
-        lead_id: leadId, call_uuid: callId, plivo_call_uuid: bLegUUID || aLegUUID,
+        lead_id: leadId, call_uuid: callId, plivo_call_uuid: aLegUUID,
         status: callStatus, duration_seconds: totalDuration, disposition,
         summary: isAuto ? `Cloud Call: ${disposition?.replace("_"," ")} (auto)` : `Cloud Call: connected (${totalDuration}s) by ${counsellorName}`,
         call_type: "manual", completed_at: new Date().toISOString(),
