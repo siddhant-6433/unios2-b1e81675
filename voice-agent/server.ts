@@ -1624,12 +1624,15 @@ Deno.serve({ port: PORT }, async (req) => {
     const autoDispositions: Record<string, string> = {
       busy: "busy",
       "no-answer": "not_answered",
+      timeout: "not_answered",
       failed: "not_answered",
       cancel: "cancelled",
     };
     let disposition = autoDispositions[dialStatus] || null;
     if (machineResult === "true") disposition = "voicemail";
-    // completed = counsellor talked to student, needs manual disposition
+    // "completed" with 0 duration = student didn't answer or counsellor cancelled
+    if (dialStatus === "completed" && duration === 0) disposition = "cancelled";
+    // completed with >0 duration = actual conversation, needs manual disposition
     const isAutoDisposition = !!disposition;
 
     if (callCtx?.leadId && SUPABASE_URL) {
