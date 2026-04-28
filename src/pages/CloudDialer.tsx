@@ -52,6 +52,8 @@ const CONNECTED_DISPOSITIONS = [
   { value: "not_interested", label: "Not Interested", icon: XCircle, color: "bg-red-100 text-red-700 border-red-300 hover:bg-red-50" },
   { value: "call_back", label: "Call Back", icon: Clock, color: "bg-blue-100 text-blue-700 border-blue-300 hover:bg-blue-50" },
   { value: "ineligible", label: "Ineligible", icon: AlertCircle, color: "bg-purple-100 text-purple-700 border-purple-300 hover:bg-purple-50" },
+  { value: "cancelled", label: "Cancelled", icon: PhoneOff, color: "bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-50" },
+  { value: "not_answered", label: "Not Answered", icon: PhoneMissed, color: "bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-50" },
 ];
 
 const FOLLOWUP_GAPS = [4, 8, 48]; // hours: 4h, 8h, 2 days
@@ -251,6 +253,47 @@ export default function CloudDialer() {
 
   // ── Place call ────────────────────────────────────────────────────────────
 
+  const pollRef = useRef<number | null>(null);
+  const callIdRef = useRef<string | null>(null);
+
+  // Poll for call end — checks ai_call_records for our call_uuid
+  const startPolling = (callId: string) => {
+    callIdRef.current = callId;
+    const poll = async () => {
+      const { data } = await supabase
+        .from("ai_call_records" as any)
+        .select("status, duration_seconds, disposition, recording_url")
+        .eq("call_uuid", callId)
+        .maybeSingle();
+
+      if (data) {
+        // Call record exists — call has ended on server side
+        const serverDisp = data.disposition;
+        const serverDur = data.duration_seconds || 0;
+        const autoMap: Record<string, string> = { busy: "busy", "no-answer": "not_answered", cancelled: "cancelled", voicemail: "voicemail" };
+
+        if (serverDisp && autoMap[serverDisp]) {
+          // Auto-disposed by server (unanswered/busy/voicemail)
+          handleAutoDisposition(serverDisp);
+        } else {
+          // Connected call ended — show disposition panel
+          setCallState(prev => ({
+            ...prev,
+            status: "ended",
+            elapsed: serverDur > 0 ? serverDur : prev.elapsed,
+          }));
+        }
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+        return;
+      }
+    };
+    // Poll every 3 seconds
+    pollRef.current = window.setInterval(poll, 3000);
+  };
+
+  // Cleanup polling on unmount
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
   const placeCall = async () => {
     if (!currentLead || !user?.id) return;
     setCallState({ status: "calling", startTime: Date.now(), elapsed: 0, disposition: null, autoDisposition: false });
@@ -270,6 +313,11 @@ export default function CloudDialer() {
 
       setCallState(prev => ({ ...prev, status: "connected" }));
       toast({ title: "Calling...", description: data?.message || "Pick up your phone" });
+
+      // Start polling for call end using the internal call_id
+      if (data?.call_id) {
+        startPolling(data.call_id);
+      }
     } catch (e: any) {
       toast({ title: "Call Failed", description: e.message, variant: "destructive" });
       setCallState(prev => ({ ...prev, status: "ended", disposition: "failed" }));
@@ -653,6 +701,23 @@ export default function CloudDialer() {
                           <SkipForward className="h-3.5 w-3.5 mr-1.5" />Skip
                         </Button>
                       )}
+                      {callState.status === "calling" && (
+                        <Button size="sm" variant="outline" onClick={() => {
+                          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+                          handleAutoDisposition("cancelled");
+                          setStats(prev => ({ ...prev, noAnswer: prev.noAnswer + 1 }));
+                        }}>
+                          <PhoneOff className="h-3.5 w-3.5 mr-1.5" />Cancelled
+                        </Button>
+                      )}
+                      {callState.status === "connected" && (
+                        <Button size="sm" variant="destructive" onClick={() => {
+                          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+                          setCallState(prev => ({ ...prev, status: "ended" }));
+                        }}>
+                          <PhoneOff className="h-3.5 w-3.5 mr-1.5" />End Call
+                        </Button>
+                      )}
                     </div>
                   </div>
 
@@ -666,8 +731,8 @@ export default function CloudDialer() {
                 </CardContent>
               </Card>
 
-              {/* Disposition (for connected calls) */}
-              {callState.status === "connected" && (
+              {/* Disposition (for connected or ended calls) */}
+              {(callState.status === "connected" || callState.status === "ended") && (
                 <Card className="border-border/60 shadow-none">
                   <CardContent className="p-5">
                     <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Mark Disposition</p>
