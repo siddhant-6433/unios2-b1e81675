@@ -21,8 +21,14 @@ interface QueueLead {
   source: string;
   course_name: string;
   campus_name: string;
-  counsellor_name: string;
+  counsellor_name: string; // bucket label in smart queue
   attempt_count: number;
+  // Course details for script
+  course_fee?: string;
+  course_eligibility?: string;
+  course_duration?: string;
+  course_entrance?: string;
+  course_highlights?: string;
 }
 
 interface CallState {
@@ -66,9 +72,10 @@ export default function CloudDialer() {
 
   // Queue
   const [queue, setQueue] = useState<QueueLead[]>([]);
+  const [queueBuckets, setQueueBuckets] = useState<{key:string; label:string; color:string; count:number}[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [queueSource, setQueueSource] = useState<"followups" | "fresh" | "all">("followups");
+  const [queueSource, setQueueSource] = useState<"smart" | "followups" | "fresh" | "all">("smart");
 
   // Dialer state
   const [dialerActive, setDialerActive] = useState(false);
@@ -90,64 +97,152 @@ export default function CloudDialer() {
 
   const loadQueue = useCallback(async () => {
     setLoading(true);
-    let leads: any[] = [];
 
-    if (queueSource === "followups") {
-      // Pending followups for this counsellor
-      const { data } = await supabase
-        .from("lead_followups")
-        .select("lead_id, leads:lead_id(id, name, phone, stage, source, courses:course_id(name), campuses:campus_id(name))")
-        .eq("status", "pending")
-        .eq("type", "call")
-        .lte("scheduled_at", new Date().toISOString())
-        .order("scheduled_at", { ascending: true })
-        .limit(100);
-      leads = (data || []).map((f: any) => f.leads).filter(Boolean);
+    // Get counsellor's profile ID for scoped queries
+    const { data: myProfile } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("user_id", user?.id || "")
+      .single();
+    const counsellorId = myProfile?.id || null;
+
+    let allLeads: { id: string; name: string; phone: string; bucket: string }[] = [];
+    const buckets: {key:string; label:string; color:string; count:number}[] = [];
+
+    if (queueSource === "smart" || queueSource === "followups") {
+      const now = new Date();
+      const todayStart = now.toISOString().slice(0, 10);
+      const todayEnd = todayStart + "T23:59:59";
+
+      const queries: Promise<any>[] = [
+        // 1. Post-visit pending followups
+        supabase.from("post_visit_pending_followups" as any)
+          .select("lead_id, lead_name, lead_phone")
+          .eq(counsellorId ? "counsellor_id" : "lead_id", counsellorId || "none")
+          .order("visit_date", { ascending: true }).limit(50),
+        // 2. Visit confirmations (upcoming visits needing confirmation call)
+        supabase.from("lead_visits" as any)
+          .select("lead_id, leads:lead_id(name, phone)")
+          .eq("status", "scheduled")
+          .gte("visit_date", todayStart)
+          .order("visit_date", { ascending: true }).limit(50),
+        // 3. Overdue followups
+        supabase.from("overdue_followups" as any)
+          .select("lead_id, lead_name, lead_phone")
+          .eq(counsellorId ? "counsellor_id" : "lead_id", counsellorId || "none")
+          .order("scheduled_at", { ascending: true }).limit(50),
+        // 4. Today's followups
+        supabase.from("lead_followups")
+          .select("lead_id, leads!inner(id, name, phone, counsellor_id)")
+          .eq("status", "pending")
+          .gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd)
+          .order("scheduled_at", { ascending: true }).limit(50),
+        // 5. New leads (never contacted)
+        supabase.from("leads")
+          .select("id, name, phone")
+          .eq("stage", "new_lead")
+          .is("first_contact_at", null)
+          .not("phone", "is", null)
+          .order("created_at", { ascending: true }).limit(50),
+      ];
+
+      // Scope to counsellor if available
+      if (counsellorId) {
+        queries[3] = supabase.from("lead_followups")
+          .select("lead_id, leads!inner(id, name, phone, counsellor_id)")
+          .eq("status", "pending")
+          .eq("leads.counsellor_id", counsellorId)
+          .gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd)
+          .order("scheduled_at", { ascending: true }).limit(50);
+        queries[4] = supabase.from("leads")
+          .select("id, name, phone")
+          .eq("counsellor_id", counsellorId)
+          .eq("stage", "new_lead")
+          .is("first_contact_at", null)
+          .not("phone", "is", null)
+          .order("created_at", { ascending: true }).limit(50);
+      }
+
+      const [r1, r2, r3, r4, r5] = await Promise.all(queries);
+
+      const seen = new Set<string>();
+      const add = (items: {id:string;name:string;phone:string}[], bucket: string) => {
+        items.forEach(l => { if (!seen.has(l.id) && l.phone) { seen.add(l.id); allLeads.push({ ...l, bucket }); } });
+      };
+
+      const postVisit = (r1.data || []).map((r: any) => ({ id: r.lead_id, name: r.lead_name, phone: r.lead_phone }));
+      const visitConf = (r2.data || []).map((r: any) => ({ id: r.lead_id, name: (r.leads as any)?.name || "", phone: (r.leads as any)?.phone || "" })).filter((l: any) => l.phone);
+      const overdue = (r3.data || []).map((r: any) => ({ id: r.lead_id, name: r.lead_name, phone: r.lead_phone }));
+      const todayFu = (r4.data || []).map((r: any) => ({ id: r.lead_id, name: (r.leads as any)?.name || "", phone: (r.leads as any)?.phone || "" }));
+      const newLeads = (r5.data || []).map((r: any) => ({ id: r.id, name: r.name, phone: r.phone }));
+
+      add(postVisit, "Post-Visit");
+      add(visitConf, "Visit Confirm");
+      add(overdue, "Overdue");
+      add(todayFu, "Today");
+      add(newLeads, "New Lead");
+
+      if (postVisit.length) buckets.push({ key: "post_visit", label: "Post-Visit", color: "bg-amber-500", count: postVisit.length });
+      if (visitConf.length) buckets.push({ key: "visit_confirm", label: "Visit Confirm", color: "bg-violet-500", count: visitConf.length });
+      if (overdue.length) buckets.push({ key: "overdue", label: "Overdue", color: "bg-red-500", count: overdue.length });
+      if (todayFu.length) buckets.push({ key: "today", label: "Today", color: "bg-blue-500", count: todayFu.length });
+      if (newLeads.length) buckets.push({ key: "new", label: "New Leads", color: "bg-orange-500", count: newLeads.length });
+
     } else if (queueSource === "fresh") {
-      // Fresh leads not yet called
-      const { data } = await supabase
-        .from("leads")
-        .select("id, name, phone, stage, source, courses:course_id(name), campuses:campus_id(name)")
-        .eq("stage", "new_lead")
-        .not("phone", "is", null)
-        .order("created_at", { ascending: true })
-        .limit(100);
-      leads = data || [];
+      const { data } = await supabase.from("leads")
+        .select("id, name, phone").eq("stage", "new_lead")
+        .not("phone", "is", null).order("created_at", { ascending: true }).limit(100);
+      allLeads = (data || []).filter((l: any) => l.phone).map((l: any) => ({ id: l.id, name: l.name, phone: l.phone, bucket: "New Lead" }));
+      buckets.push({ key: "new", label: "New Leads", color: "bg-orange-500", count: allLeads.length });
     } else {
-      // All leads in pipeline
-      const { data } = await supabase
-        .from("leads")
-        .select("id, name, phone, stage, source, courses:course_id(name), campuses:campus_id(name)")
-        .in("stage", ["new_lead", "counsellor_call", "application_in_progress"])
-        .not("phone", "is", null)
-        .order("created_at", { ascending: true })
-        .limit(100);
-      leads = data || [];
+      const { data } = await supabase.from("leads")
+        .select("id, name, phone, stage").in("stage", ["new_lead", "counsellor_call", "application_in_progress"])
+        .not("phone", "is", null).order("created_at", { ascending: true }).limit(100);
+      allLeads = (data || []).filter((l: any) => l.phone).map((l: any) => ({ id: l.id, name: l.name, phone: l.phone, bucket: STAGE_LABELS[l.stage] || l.stage }));
+      buckets.push({ key: "all", label: "All Pipeline", color: "bg-gray-500", count: allLeads.length });
     }
 
-    // Get attempt counts
-    const leadIds = leads.map((l: any) => l.id);
+    // Get full lead details + attempt counts
+    const leadIds = allLeads.map(l => l.id);
+    const detailMap: Record<string, any> = {};
     const attemptMap: Record<string, number> = {};
+
     if (leadIds.length > 0) {
-      const { data: calls } = await supabase
-        .from("ai_call_records")
-        .select("lead_id")
-        .in("lead_id", leadIds)
-        .eq("call_type", "manual");
+      // Batch fetch lead details with course info for script
+      for (let i = 0; i < leadIds.length; i += 50) {
+        const batch = leadIds.slice(i, i + 50);
+        const { data } = await supabase.from("leads")
+          .select("id, name, phone, stage, source, courses:course_id(name, fee_per_year, eligibility, entrance_exam, duration_years, highlights, career_options), campuses:campus_id(name)")
+          .in("id", batch);
+        (data || []).forEach((l: any) => { detailMap[l.id] = l; });
+      }
+
+      const { data: calls } = await supabase.from("ai_call_records")
+        .select("lead_id").in("lead_id", leadIds).eq("call_type", "manual");
       (calls || []).forEach((c: any) => { attemptMap[c.lead_id] = (attemptMap[c.lead_id] || 0) + 1; });
     }
 
-    const mapped: QueueLead[] = leads.map((l: any) => ({
-      id: l.id, name: l.name || "Unknown", phone: l.phone || "",
-      stage: l.stage || "", source: l.source || "",
-      course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—",
-      counsellor_name: "", attempt_count: attemptMap[l.id] || 0,
-    })).filter(l => l.phone);
+    const mapped: QueueLead[] = allLeads.map(l => {
+      const d = detailMap[l.id] || {};
+      const c = d.courses || {};
+      return {
+        id: l.id, name: d.name || l.name || "Unknown", phone: d.phone || l.phone || "",
+        stage: d.stage || "", source: d.source || "",
+        course_name: c.name || "—", campus_name: d.campuses?.name || "—",
+        counsellor_name: l.bucket, attempt_count: attemptMap[l.id] || 0,
+        course_fee: c.fee_per_year ? `₹${Number(c.fee_per_year).toLocaleString("en-IN")}/year` : undefined,
+        course_eligibility: c.eligibility || undefined,
+        course_duration: c.duration_years ? `${c.duration_years} year${c.duration_years > 1 ? "s" : ""}` : undefined,
+        course_entrance: c.entrance_exam || undefined,
+        course_highlights: Array.isArray(c.highlights) ? c.highlights.join(" | ") : c.highlights || undefined,
+      };
+    }).filter(l => l.phone);
 
     setQueue(mapped);
+    setQueueBuckets(buckets);
     setCurrentIdx(0);
     setLoading(false);
-  }, [queueSource]);
+  }, [queueSource, user?.id]);
 
   useEffect(() => { loadQueue(); }, [loadQueue]);
 
@@ -363,8 +458,9 @@ export default function CloudDialer() {
           {/* Queue source */}
           <select value={queueSource} onChange={e => { setQueueSource(e.target.value as any); }} disabled={dialerActive}
             className="rounded-xl border border-input bg-background px-3 py-2 text-sm disabled:opacity-50">
-            <option value="followups">Pending Follow-ups</option>
-            <option value="fresh">Fresh Leads</option>
+            <option value="smart">Smart Queue (Priority)</option>
+            <option value="followups">All Follow-ups</option>
+            <option value="fresh">Fresh Leads Only</option>
             <option value="all">All Pipeline</option>
           </select>
           <Button variant="outline" size="sm" onClick={loadQueue} disabled={dialerActive}><Users className="h-3.5 w-3.5 mr-1.5" />Refresh</Button>
@@ -399,6 +495,15 @@ export default function CloudDialer() {
           <div className="px-4 py-3 border-b border-border">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Call Queue</p>
             <p className="text-[10px] text-muted-foreground mt-0.5">{currentIdx + 1} of {queue.length}</p>
+            {queueBuckets.length > 1 && (
+              <div className="flex flex-wrap gap-1 mt-2">
+                {queueBuckets.map(b => (
+                  <span key={b.key} className="inline-flex items-center gap-1 text-[9px] font-medium text-muted-foreground">
+                    <span className={`w-1.5 h-1.5 rounded-full ${b.color}`} />{b.label}: {b.count}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
           <div className="flex-1 overflow-y-auto">
             {queue.map((lead, idx) => (
@@ -412,8 +517,8 @@ export default function CloudDialer() {
                 <p className="text-sm font-medium text-foreground truncate">{lead.name}</p>
                 <p className="text-[10px] text-muted-foreground">{lead.course_name} · {lead.phone.slice(-4)}</p>
                 <div className="flex items-center gap-1.5 mt-1">
-                  <Badge className="text-[9px] border-0 bg-muted text-muted-foreground">{STAGE_LABELS[lead.stage] || lead.stage}</Badge>
-                  {lead.attempt_count > 0 && <Badge className="text-[9px] border-0 bg-amber-100 text-amber-700">{lead.attempt_count} calls</Badge>}
+                  <Badge className="text-[9px] border-0 bg-cyan-50 text-cyan-700 dark:bg-cyan-950/30">{lead.counsellor_name}</Badge>
+                  {lead.attempt_count > 0 && <Badge className="text-[9px] border-0 bg-amber-100 text-amber-700">{lead.attempt_count}x</Badge>}
                   {idx < currentIdx && <CheckCircle className="h-3 w-3 text-emerald-500 ml-auto" />}
                 </div>
               </div>
@@ -431,31 +536,119 @@ export default function CloudDialer() {
         {/* Right: Current lead + dialer */}
         <div className="flex-1 flex flex-col overflow-y-auto">
           {currentLead ? (
-            <div className="p-6 space-y-5 max-w-2xl mx-auto w-full">
-              {/* Lead info card */}
-              <Card className="border-border/60 shadow-none">
-                <CardContent className="p-5">
-                  <div className="flex items-start gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-cyan-100 dark:bg-cyan-900/30 flex items-center justify-center shrink-0">
-                      <span className="text-lg font-bold text-cyan-700">{currentLead.name[0]?.toUpperCase()}</span>
+            <div className="p-5 space-y-4 w-full">
+              {/* Lead info + Script side by side */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Lead info */}
+                <Card className="border-border/60 shadow-none">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-cyan-100 dark:bg-cyan-900/30 flex items-center justify-center shrink-0">
+                          <span className="text-base font-bold text-cyan-700">{currentLead.name[0]?.toUpperCase()}</span>
+                        </div>
+                        <div>
+                          <h2 className="text-base font-bold text-foreground leading-tight">{currentLead.name}</h2>
+                          <p className="text-xs text-muted-foreground">{currentLead.phone}</p>
+                        </div>
+                      </div>
+                      <a href={`/admissions/${currentLead.id}`} target="_blank" rel="noreferrer"
+                        className="text-[10px] text-primary hover:underline shrink-0">Open Lead →</a>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <h2 className="text-lg font-bold text-foreground">{currentLead.name}</h2>
-                      <p className="text-sm text-muted-foreground">{currentLead.phone}</p>
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        <Badge className="text-[10px] border-0 bg-muted">{currentLead.course_name}</Badge>
-                        <Badge className="text-[10px] border-0 bg-muted">{currentLead.campus_name}</Badge>
-                        <Badge className="text-[10px] border-0 bg-muted capitalize">{currentLead.source}</Badge>
-                        <Badge className={`text-[10px] border-0 ${currentLead.attempt_count > 0 ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>
-                          {currentLead.attempt_count > 0 ? `${currentLead.attempt_count} prev calls` : "First call"}
-                        </Badge>
+
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                      <div>
+                        <span className="text-muted-foreground">Course</span>
+                        <p className="font-medium text-foreground">{currentLead.course_name}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Campus</span>
+                        <p className="font-medium text-foreground">{currentLead.campus_name}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Stage</span>
+                        <p className="font-medium text-foreground">{STAGE_LABELS[currentLead.stage] || currentLead.stage}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Source</span>
+                        <p className="font-medium text-foreground capitalize">{currentLead.source}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Bucket</span>
+                        <p className="font-medium text-foreground">{currentLead.counsellor_name}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Attempts</span>
+                        <p className={`font-medium ${currentLead.attempt_count > 0 ? "text-amber-600" : "text-emerald-600"}`}>
+                          {currentLead.attempt_count > 0 ? `${currentLead.attempt_count} previous` : "First call"}
+                        </p>
                       </div>
                     </div>
-                    <a href={`/admissions/${currentLead.id}`} target="_blank" rel="noreferrer"
-                      className="text-xs text-primary hover:underline shrink-0">Open Lead →</a>
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+
+                {/* Counsellor Script / Course Info */}
+                <Card className="border-border/60 shadow-none bg-blue-50/30 dark:bg-blue-950/10">
+                  <CardContent className="p-4">
+                    <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide mb-2">📋 Counsellor Script</p>
+                    {currentLead.course_name !== "—" ? (
+                      <div className="space-y-2 text-xs">
+                        <div className="flex justify-between items-start">
+                          <span className="text-muted-foreground shrink-0 w-20">Course</span>
+                          <span className="font-semibold text-foreground text-right">{currentLead.course_name}</span>
+                        </div>
+                        {currentLead.course_fee && (
+                          <div className="flex justify-between items-start">
+                            <span className="text-muted-foreground shrink-0 w-20">Fee</span>
+                            <span className="font-bold text-emerald-700 dark:text-emerald-400 text-right">{currentLead.course_fee}</span>
+                          </div>
+                        )}
+                        {currentLead.course_duration && (
+                          <div className="flex justify-between items-start">
+                            <span className="text-muted-foreground shrink-0 w-20">Duration</span>
+                            <span className="font-medium text-foreground text-right">{currentLead.course_duration}</span>
+                          </div>
+                        )}
+                        {currentLead.course_eligibility && (
+                          <div className="flex justify-between items-start">
+                            <span className="text-muted-foreground shrink-0 w-20">Eligibility</span>
+                            <span className="font-medium text-foreground text-right leading-relaxed">{currentLead.course_eligibility}</span>
+                          </div>
+                        )}
+                        {currentLead.course_entrance && (
+                          <div className="flex justify-between items-start">
+                            <span className="text-muted-foreground shrink-0 w-20">Entrance</span>
+                            <span className="font-medium text-foreground text-right">{currentLead.course_entrance}</span>
+                          </div>
+                        )}
+                        {currentLead.course_highlights && (
+                          <div className="pt-1.5 border-t border-blue-200/50">
+                            <span className="text-muted-foreground text-[10px]">Highlights</span>
+                            <p className="font-medium text-foreground leading-relaxed mt-0.5">{currentLead.course_highlights}</p>
+                          </div>
+                        )}
+
+                        <div className="pt-2 border-t border-blue-200/50 space-y-1.5">
+                          <p className="text-[10px] font-semibold text-blue-600">Talking Points:</p>
+                          <p className="text-muted-foreground leading-relaxed">
+                            "Hello {currentLead.name.split(" ")[0]}, this is [Your Name] from NIMT. I'm calling regarding your interest in {currentLead.course_name}.
+                            {currentLead.course_fee ? ` The annual fee is ${currentLead.course_fee}.` : ""}
+                            {" "}Would you like to know more about the course or schedule a campus visit?"
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-xs text-muted-foreground space-y-1.5">
+                        <p>No course selected for this lead.</p>
+                        <p className="leading-relaxed">
+                          "Hello {currentLead.name.split(" ")[0]}, this is [Your Name] from NIMT Educational Institutions.
+                          I'm calling regarding your enquiry. What course are you interested in?"
+                        </p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
 
               {/* Call status */}
               <Card className={`border-2 shadow-none ${
