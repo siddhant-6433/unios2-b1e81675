@@ -147,14 +147,14 @@ export default function CloudDialer() {
       const todayFu = (r4.data || []).map((r: any) => ({ id: r.lead_id, name: (r.leads as any)?.name || "", phone: (r.leads as any)?.phone || "" }));
       const newLeads = (r5.data || []).map((r: any) => ({ id: r.id, name: r.name, phone: r.phone }));
 
-      add(postVisit, "Post-Visit");
-      add(visitConf, "Visit Confirm");
+      add(postVisit, "Visit Checkin");
+      add(visitConf, "Visit Checkin");
       add(overdue, "Overdue");
       add(todayFu, "Today");
       add(newLeads, "New Lead");
 
-      if (postVisit.length) buckets.push({ key: "post_visit", label: "Post-Visit", color: "bg-amber-500", count: postVisit.length });
-      if (visitConf.length) buckets.push({ key: "visit_confirm", label: "Visit Confirm", color: "bg-violet-500", count: visitConf.length });
+      if (postVisit.length) buckets.push({ key: "post_visit", label: "Visit Checkin", color: "bg-amber-500", count: postVisit.length });
+      if (visitConf.length) buckets.push({ key: "visit_confirm", label: "Visit Checkin", color: "bg-violet-500", count: visitConf.length });
       if (overdue.length) buckets.push({ key: "overdue", label: "Overdue", color: "bg-red-500", count: overdue.length });
       if (todayFu.length) buckets.push({ key: "today", label: "Today", color: "bg-blue-500", count: todayFu.length });
       if (newLeads.length) buckets.push({ key: "new", label: "New Leads", color: "bg-orange-500", count: newLeads.length });
@@ -493,8 +493,7 @@ export default function CloudDialer() {
                 <p className="text-[10px] text-muted-foreground">{lead.course_name} · {lead.phone.slice(-4)}</p>
                 <div className="flex items-center gap-1.5 mt-1">
                   <Badge className={`text-[9px] border-0 ${
-                    lead.counsellor_name === "Post-Visit" ? "bg-amber-100 text-amber-700" :
-                    lead.counsellor_name === "Visit Confirm" ? "bg-violet-100 text-violet-700" :
+                    lead.counsellor_name === "Visit Checkin" ? "bg-amber-100 text-amber-700" :
                     lead.counsellor_name === "Overdue" ? "bg-red-100 text-red-700" :
                     lead.counsellor_name === "Today" ? "bg-blue-100 text-blue-700" :
                     lead.counsellor_name === "New Lead" ? "bg-orange-100 text-orange-700" :
