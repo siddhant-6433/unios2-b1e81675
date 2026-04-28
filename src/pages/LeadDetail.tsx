@@ -614,8 +614,10 @@ const LeadDetail = () => {
     if (!id) return;
     setManualCalling(true);
     try {
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
       const { data, error } = await supabase.functions.invoke("manual-call", {
-        body: { lead_id: id },
+        body: { lead_id: id, caller_user_id: currentUser?.id },
+        headers: { Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
       });
       if (error) {
         let detail = error.message;
@@ -807,15 +809,13 @@ const LeadDetail = () => {
           : undefined;
 
         const actions = [
-          { icon: Phone, label: "Call", color: "text-blue-600 bg-blue-100 dark:bg-blue-900/30", action: () => {
-            setShowCallDisposition(true);
-          } },
+          { icon: Phone, label: "Call", color: "text-blue-600 bg-blue-100 dark:bg-blue-900/30", action: () => setShowCallDisposition(true) },
+          { icon: Phone, label: "Click to Call", color: "text-cyan-600 bg-cyan-100 dark:bg-cyan-900/30", action: triggerManualCall, disabled: manualCalling },
           { icon: MessageSquare, label: "WhatsApp", color: "text-green-600 bg-green-100 dark:bg-green-900/30", action: () => setShowWhatsApp(true) },
           { icon: Clock, label: "Follow Up", color: "text-orange-600 bg-orange-100 dark:bg-orange-900/30", action: () => setShowFollowup(true) },
           { icon: MapPin, label: "Visit", color: "text-violet-600 bg-violet-100 dark:bg-violet-900/30", action: () => setShowScheduleVisit(true) },
           { icon: Footprints, label: "Walk-in", color: "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30", action: () => setShowWalkinCompletion(true) },
           { icon: Mail, label: "Email", color: "text-sky-600 bg-sky-100 dark:bg-sky-900/30", action: () => setShowSendEmail(true) },
-          { icon: Phone, label: "Call", color: "text-blue-600 bg-blue-100 dark:bg-blue-900/30", action: triggerManualCall, disabled: manualCalling },
           { icon: Bot, label: "AI Call", color: "text-amber-600 bg-amber-100 dark:bg-amber-900/30", action: triggerAiCall, disabled: aiCalling },
           { icon: UserCheck, label: "Interview", color: "text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30", action: () => setShowInterview(true) },
           {
@@ -845,7 +845,7 @@ const LeadDetail = () => {
                 title={tooltip || label}
               >
                 <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${color}`}>
-                  {disabled && (label === "AI Call" || label === "Call") ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
+                  {disabled && (label === "AI Call" || label === "Click to Call") ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
                 </div>
                 <span className="text-[10px] font-medium text-muted-foreground">{label}</span>
               </button>

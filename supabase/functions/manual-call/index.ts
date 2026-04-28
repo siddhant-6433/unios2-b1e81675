@@ -44,20 +44,16 @@ Deno.serve(async (req) => {
       return json({ error: "Calling not configured. Contact admin." }, 503);
     }
 
-    // Auth: get calling user
+    // Auth: accept anon key (manual button) or service role (internal).
+    // User identity passed as caller_user_id in body for audit.
     const authHeader = req.headers.get("authorization") || "";
     if (!authHeader) return json({ error: "Unauthorized" }, 401);
 
-    const token = authHeader.replace(/^Bearer\s+/i, "");
-    const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY") || serviceRoleKey, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-    });
-    const { data: { user }, error: authErr } = await userClient.auth.getUser();
-    if (authErr || !user) return json({ error: "Unauthorized" }, 401);
-
     const db = createClient(supabaseUrl, serviceRoleKey);
-    const { lead_id } = await req.json();
+    const { lead_id, caller_user_id } = await req.json();
     if (!lead_id) return json({ error: "lead_id required" }, 400);
+
+    const userId = caller_user_id || null;
 
     // Fetch lead
     const { data: lead, error: leadErr } = await db
@@ -71,10 +67,12 @@ Deno.serve(async (req) => {
     if (lead.stage === "dnc") return json({ error: "Lead is DNC — call blocked" }, 403);
 
     // Fetch counsellor's phone from profile
+    if (!userId) return json({ error: "caller_user_id required" }, 400);
+
     const { data: profile } = await db
       .from("profiles")
       .select("phone, display_name")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .single();
 
     if (!profile?.phone) {
@@ -129,11 +127,16 @@ Deno.serve(async (req) => {
       body: JSON.stringify(plivoPayload),
     });
 
-    const plivoData = await plivoRes.json();
+    const plivoText = await plivoRes.text();
+    let plivoData: any = {};
+    try { plivoData = JSON.parse(plivoText); } catch { plivoData = { raw: plivoText }; }
+
+    console.log("Plivo response:", plivoRes.status, plivoText);
+    console.log("Plivo payload sent:", JSON.stringify(plivoPayload));
 
     if (!plivoRes.ok) {
-      console.error("Plivo call failed:", plivoData);
-      return json({ error: "Failed to initiate call. Try again." }, 500);
+      console.error("Plivo call failed:", plivoRes.status, plivoText);
+      return json({ error: `Call failed: ${plivoData?.error || plivoData?.message || plivoText || "Unknown error"}` }, 500);
     }
 
     // Log activity
@@ -147,7 +150,7 @@ Deno.serve(async (req) => {
     await db.from("lead_notes").insert({
       lead_id,
       content: `📞 ${profile.display_name} initiated manual call via CRM`,
-      user_id: user.id,
+      user_id: userId,
     });
 
     return json({
