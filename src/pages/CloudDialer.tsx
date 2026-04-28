@@ -67,8 +67,9 @@ const STAGE_LABELS: Record<string, string> = {
 // ── Component ───────────────────────────────────────────────────────────────
 
 export default function CloudDialer() {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const { toast } = useToast();
+  const isCounsellor = role === "counsellor";
 
   // Queue
   const [queue, setQueue] = useState<QueueLead[]>([]);
@@ -98,13 +99,13 @@ export default function CloudDialer() {
   const loadQueue = useCallback(async () => {
     setLoading(true);
 
-    // Get counsellor's profile ID for scoped queries
-    const { data: myProfile } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("user_id", user?.id || "")
-      .single();
-    const counsellorId = myProfile?.id || null;
+    // Get counsellor's profile ID for scoped queries (counsellors only)
+    let counsellorId: string | null = null;
+    if (isCounsellor) {
+      const { data: myProfile } = await supabase
+        .from("profiles").select("id").eq("user_id", user?.id || "").single();
+      counsellorId = myProfile?.id || null;
+    }
 
     let allLeads: { id: string; name: string; phone: string; bucket: string }[] = [];
     const buckets: {key:string; label:string; color:string; count:number}[] = [];
@@ -114,56 +115,21 @@ export default function CloudDialer() {
       const todayStart = now.toISOString().slice(0, 10);
       const todayEnd = todayStart + "T23:59:59";
 
-      const queries: Promise<any>[] = [
-        // 1. Post-visit pending followups
-        supabase.from("post_visit_pending_followups" as any)
-          .select("lead_id, lead_name, lead_phone")
-          .eq(counsellorId ? "counsellor_id" : "lead_id", counsellorId || "none")
-          .order("visit_date", { ascending: true }).limit(50),
-        // 2. Visit confirmations (upcoming visits needing confirmation call)
-        supabase.from("lead_visits" as any)
-          .select("lead_id, leads:lead_id(name, phone)")
-          .eq("status", "scheduled")
-          .gte("visit_date", todayStart)
-          .order("visit_date", { ascending: true }).limit(50),
-        // 3. Overdue followups
-        supabase.from("overdue_followups" as any)
-          .select("lead_id, lead_name, lead_phone")
-          .eq(counsellorId ? "counsellor_id" : "lead_id", counsellorId || "none")
-          .order("scheduled_at", { ascending: true }).limit(50),
-        // 4. Today's followups
-        supabase.from("lead_followups")
-          .select("lead_id, leads!inner(id, name, phone, counsellor_id)")
-          .eq("status", "pending")
-          .gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd)
-          .order("scheduled_at", { ascending: true }).limit(50),
-        // 5. New leads (never contacted)
-        supabase.from("leads")
-          .select("id, name, phone")
-          .eq("stage", "new_lead")
-          .is("first_contact_at", null)
-          .not("phone", "is", null)
-          .order("created_at", { ascending: true }).limit(50),
-      ];
+      // Build queries — scoped to counsellor if counsellor role, unscoped for admin
+      let q1 = supabase.from("post_visit_pending_followups" as any).select("lead_id, lead_name, lead_phone").order("visit_date" as any, { ascending: true }).limit(50);
+      let q2 = supabase.from("lead_visits" as any).select("lead_id, leads:lead_id(name, phone)").eq("status", "scheduled").gte("visit_date", todayStart).order("visit_date", { ascending: true }).limit(50);
+      let q3 = supabase.from("overdue_followups" as any).select("lead_id, lead_name, lead_phone").order("scheduled_at" as any, { ascending: true }).limit(50);
+      let q4 = supabase.from("lead_followups").select("lead_id, leads!inner(id, name, phone, counsellor_id)").eq("status", "pending").gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd).order("scheduled_at", { ascending: true }).limit(50);
+      let q5 = supabase.from("leads").select("id, name, phone").eq("stage", "new_lead").is("first_contact_at", null).not("phone", "is", null).order("created_at", { ascending: true }).limit(50);
 
-      // Scope to counsellor if available
       if (counsellorId) {
-        queries[3] = supabase.from("lead_followups")
-          .select("lead_id, leads!inner(id, name, phone, counsellor_id)")
-          .eq("status", "pending")
-          .eq("leads.counsellor_id", counsellorId)
-          .gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd)
-          .order("scheduled_at", { ascending: true }).limit(50);
-        queries[4] = supabase.from("leads")
-          .select("id, name, phone")
-          .eq("counsellor_id", counsellorId)
-          .eq("stage", "new_lead")
-          .is("first_contact_at", null)
-          .not("phone", "is", null)
-          .order("created_at", { ascending: true }).limit(50);
+        q1 = q1.eq("counsellor_id", counsellorId);
+        q3 = q3.eq("counsellor_id", counsellorId);
+        q4 = supabase.from("lead_followups").select("lead_id, leads!inner(id, name, phone, counsellor_id)").eq("status", "pending").eq("leads.counsellor_id", counsellorId).gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd).order("scheduled_at", { ascending: true }).limit(50);
+        q5 = q5.eq("counsellor_id", counsellorId);
       }
 
-      const [r1, r2, r3, r4, r5] = await Promise.all(queries);
+      const [r1, r2, r3, r4, r5] = await Promise.all([q1, q2, q3, q4, q5]);
 
       const seen = new Set<string>();
       const add = (items: {id:string;name:string;phone:string}[], bucket: string) => {
@@ -189,15 +155,15 @@ export default function CloudDialer() {
       if (newLeads.length) buckets.push({ key: "new", label: "New Leads", color: "bg-orange-500", count: newLeads.length });
 
     } else if (queueSource === "fresh") {
-      const { data } = await supabase.from("leads")
-        .select("id, name, phone").eq("stage", "new_lead")
-        .not("phone", "is", null).order("created_at", { ascending: true }).limit(100);
+      let fq = supabase.from("leads").select("id, name, phone").eq("stage", "new_lead").not("phone", "is", null).order("created_at", { ascending: true }).limit(100);
+      if (counsellorId) fq = fq.eq("counsellor_id", counsellorId);
+      const { data } = await fq;
       allLeads = (data || []).filter((l: any) => l.phone).map((l: any) => ({ id: l.id, name: l.name, phone: l.phone, bucket: "New Lead" }));
       buckets.push({ key: "new", label: "New Leads", color: "bg-orange-500", count: allLeads.length });
     } else {
-      const { data } = await supabase.from("leads")
-        .select("id, name, phone, stage").in("stage", ["new_lead", "counsellor_call", "application_in_progress"])
-        .not("phone", "is", null).order("created_at", { ascending: true }).limit(100);
+      let aq = supabase.from("leads").select("id, name, phone, stage").in("stage", ["new_lead", "counsellor_call", "application_in_progress"]).not("phone", "is", null).order("created_at", { ascending: true }).limit(100);
+      if (counsellorId) aq = aq.eq("counsellor_id", counsellorId);
+      const { data } = await aq;
       allLeads = (data || []).filter((l: any) => l.phone).map((l: any) => ({ id: l.id, name: l.name, phone: l.phone, bucket: STAGE_LABELS[l.stage] || l.stage }));
       buckets.push({ key: "all", label: "All Pipeline", color: "bg-gray-500", count: allLeads.length });
     }
