@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import {
   Phone, PhoneOff, Pause, Play, SkipForward, Clock,
   Loader2, CheckCircle, XCircle, PhoneMissed, Users, BarChart3,
-  Calendar, AlertCircle, Volume2,
+  Calendar, AlertCircle, Volume2, Pencil, Check, X,
 } from "lucide-react";
 import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
 
@@ -238,23 +238,34 @@ export default function CloudDialer() {
   }, [paused]);
 
   // ── Auto-next countdown ───────────────────────────────────────────────────
+  // Only counts down when autoNextTimer > 0. When it hits 0, moves to next.
+  // Never auto-fires on initial 0 — must be set to >0 first by showFollowupAndAutoNext.
+
+  const autoNextTriggered = useRef(false);
 
   useEffect(() => {
-    if (autoNextTimer > 0 && !paused) {
+    if (autoNextTimer > 0) {
+      autoNextTriggered.current = true; // timer was started
       autoNextRef.current = window.setTimeout(() => {
         setAutoNextTimer(prev => prev - 1);
       }, 1000);
-    } else if (autoNextTimer === 0 && callState.status === "auto-disposed" && dialerActive && !paused) {
-      // Timer expired, move to next
+    } else if (autoNextTimer === 0 && autoNextTriggered.current && callState.status === "auto-disposed" && !paused) {
+      // Timer ran down to 0 — move to next
+      autoNextTriggered.current = false;
       moveToNext();
     }
     return () => { if (autoNextRef.current) clearTimeout(autoNextRef.current); };
-  }, [autoNextTimer, paused, callState.status, dialerActive]);
+  }, [autoNextTimer, paused, callState.status]);
 
   // ── Place call ────────────────────────────────────────────────────────────
 
   const pollRef = useRef<number | null>(null);
   const callIdRef = useRef<string | null>(null);
+
+  // Inline editing
+  const [editing, setEditing] = useState<"name"|"course"|null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [courseOptions, setCourseOptions] = useState<{id:string;name:string;campus:string}[]>([]);
 
   // Poll for call end — checks ai_call_records for our call_uuid
   const startPolling = (callId: string) => {
@@ -268,22 +279,23 @@ export default function CloudDialer() {
 
       if (data) {
         // Call record exists — call has ended on server side
-        const serverDisp = data.disposition;
+        const serverStatus = data.status; // "answered", "busy", "not_answered", "cancelled", "voicemail"
         const serverDur = data.duration_seconds || 0;
-        const autoMap: Record<string, string> = { busy: "busy", "no-answer": "not_answered", cancelled: "cancelled", voicemail: "voicemail" };
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
 
-        if (serverDisp && autoMap[serverDisp]) {
-          // Auto-disposed by server (unanswered/busy/voicemail)
-          handleAutoDisposition(serverDisp);
-        } else {
-          // Connected call ended — show disposition panel
+        if (serverStatus === "answered") {
+          // Student answered, counsellor talked — show disposition panel
           setCallState(prev => ({
             ...prev,
             status: "ended",
             elapsed: serverDur > 0 ? serverDur : prev.elapsed,
           }));
+          setStats(prev => ({ ...prev, connected: prev.connected + 1, totalTalkTime: prev.totalTalkTime + serverDur }));
+        } else {
+          // Auto-disposed by server (unanswered/busy/voicemail/cancelled)
+          const disp = data.disposition || serverStatus || "cancelled";
+          handleAutoDisposition(disp);
         }
-        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
         return;
       }
     };
@@ -293,6 +305,30 @@ export default function CloudDialer() {
 
   // Cleanup polling on unmount
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  // Load course options for edit dropdown
+  useEffect(() => {
+    supabase.from("courses").select("id, name, departments!inner(institutions!inner(campuses!inner(name)))").eq("is_active", true).order("name")
+      .then(({ data }) => {
+        setCourseOptions((data || []).map((c: any) => ({
+          id: c.id, name: c.name, campus: c.departments?.institutions?.campuses?.name || "",
+        })));
+      });
+  }, []);
+
+  const saveLeadEdit = async (field: "name" | "course", value: string) => {
+    if (!currentLead) return;
+    if (field === "name") {
+      await supabase.from("leads").update({ name: value } as any).eq("id", currentLead.id);
+      setQueue(prev => prev.map((l, i) => i === currentIdx ? { ...l, name: value } : l));
+    } else if (field === "course") {
+      const course = courseOptions.find(c => c.id === value);
+      await supabase.from("leads").update({ course_id: value } as any).eq("id", currentLead.id);
+      setQueue(prev => prev.map((l, i) => i === currentIdx ? { ...l, course_id: value, course_name: course?.name || "—", campus_name: course?.campus || "—" } : l));
+    }
+    setEditing(null);
+    toast({ title: "Updated", description: `Lead ${field} updated.` });
+  };
 
   const placeCall = async () => {
     if (!currentLead || !user?.id) return;
@@ -564,7 +600,20 @@ export default function CloudDialer() {
                           <span className="text-base font-bold text-cyan-700">{currentLead.name[0]?.toUpperCase()}</span>
                         </div>
                         <div>
-                          <h2 className="text-base font-bold text-foreground leading-tight">{currentLead.name}</h2>
+                          {editing === "name" ? (
+                            <div className="flex items-center gap-1">
+                              <input type="text" value={editValue} onChange={e => setEditValue(e.target.value)} autoFocus
+                                className="text-base font-bold text-foreground leading-tight border border-input rounded-md px-1.5 py-0.5 w-40 outline-none focus:ring-1 focus:ring-primary"
+                                onKeyDown={e => { if (e.key === "Enter") saveLeadEdit("name", editValue); if (e.key === "Escape") setEditing(null); }} />
+                              <button onClick={() => saveLeadEdit("name", editValue)} className="text-emerald-600 hover:text-emerald-700"><Check className="h-3.5 w-3.5" /></button>
+                              <button onClick={() => setEditing(null)} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
+                            </div>
+                          ) : (
+                            <h2 className="text-base font-bold text-foreground leading-tight flex items-center gap-1.5 group">
+                              {currentLead.name}
+                              <button onClick={() => { setEditing("name"); setEditValue(currentLead.name); }} className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-primary"><Pencil className="h-3 w-3" /></button>
+                            </h2>
+                          )}
                           <p className="text-xs text-muted-foreground">{currentLead.phone}</p>
                         </div>
                       </div>
@@ -573,13 +622,24 @@ export default function CloudDialer() {
                     </div>
 
                     <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                      <div>
-                        <span className="text-muted-foreground">Course</span>
-                        <p className="font-medium text-foreground">{currentLead.course_name}</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Campus</span>
-                        <p className="font-medium text-foreground">{currentLead.campus_name}</p>
+                      <div className="col-span-2">
+                        <span className="text-muted-foreground">Course & Campus</span>
+                        {editing === "course" ? (
+                          <div className="flex items-center gap-1 mt-0.5">
+                            <select value={editValue} onChange={e => setEditValue(e.target.value)} autoFocus
+                              className="text-xs border border-input rounded-md px-1.5 py-1 flex-1 outline-none focus:ring-1 focus:ring-primary bg-background">
+                              <option value="">Select course...</option>
+                              {courseOptions.map(c => <option key={c.id} value={c.id}>{c.name} — {c.campus}</option>)}
+                            </select>
+                            <button onClick={() => saveLeadEdit("course", editValue)} className="text-emerald-600 hover:text-emerald-700"><Check className="h-3.5 w-3.5" /></button>
+                            <button onClick={() => setEditing(null)} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
+                          </div>
+                        ) : (
+                          <p className="font-medium text-foreground flex items-center gap-1.5 group">
+                            {currentLead.course_name} · {currentLead.campus_name}
+                            <button onClick={() => { setEditing("course"); setEditValue(currentLead.course_id || ""); }} className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-primary"><Pencil className="h-3 w-3" /></button>
+                          </p>
+                        )}
                       </div>
                       <div>
                         <span className="text-muted-foreground">Stage</span>
@@ -622,10 +682,11 @@ export default function CloudDialer() {
                       <p className="text-muted-foreground leading-relaxed italic">
                         "Hello {currentLead.name.split(" ")[0]}, this is {counsellorDisplayName} from NIMT Educational Institutions.
                         {currentLead.course_name !== "—"
-                          ? ` I'm calling about your interest in ${currentLead.course_name}.${currentLead.course_fee ? ` The annual fee is ${currentLead.course_fee}.` : ""}`
+                          ? ` I'm calling about your interest in ${currentLead.course_name}. I'd like to share some details about the course.`
                           : " I'm calling regarding your enquiry."}
                         {" "}Would you like to know more or schedule a campus visit?"
                       </p>
+                      <p className="text-[9px] text-muted-foreground/60 mt-1">💡 Refer to the fee structure on the right for accurate fees</p>
                       <div className="mt-3">
                         <Button size="sm" variant="outline" className="text-[10px] h-7 gap-1"
                           onClick={() => window.open(`https://wa.me/${currentLead.phone.replace(/[^0-9]/g,"")}?text=${encodeURIComponent(`Hi ${currentLead.name.split(" ")[0]}, this is ${counsellorDisplayName} from NIMT. I tried calling you regarding ${currentLead.course_name !== "—" ? currentLead.course_name : "your enquiry"}. Would you like to discuss?`)}`, "_blank")}>
@@ -663,141 +724,130 @@ export default function CloudDialer() {
               </Card>
 
 
-              {/* Call status */}
-              <Card className={`border-2 shadow-none ${
-                callState.status === "connected" ? "border-emerald-300 bg-emerald-50/50 dark:border-emerald-600 dark:bg-emerald-950/20" :
-                callState.status === "calling" ? "border-cyan-300 bg-cyan-50/50 dark:border-cyan-600 dark:bg-cyan-950/20" :
-                callState.status === "auto-disposed" ? "border-amber-300 bg-amber-50/50 dark:border-amber-600 dark:bg-amber-950/20" :
-                "border-border"
-              }`}>
-                <CardContent className="p-5">
+              {/* ── Sticky Call Bar: status + disposition + followup ────── */}
+              {callState.status !== "idle" && (
+                <div className={`sticky top-0 z-10 rounded-xl border-2 p-4 space-y-3 ${
+                  callState.status === "calling" ? "border-cyan-300 bg-cyan-50 dark:bg-cyan-950/20" :
+                  callState.status === "connected" ? "border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20" :
+                  callState.status === "ended" ? "border-primary/30 bg-primary/5" :
+                  callState.status === "auto-disposed" ? "border-amber-300 bg-amber-50 dark:bg-amber-950/20" :
+                  "border-border bg-card"
+                }`}>
+                  {/* Row 1: Status + Timer + Actions */}
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       {callState.status === "calling" && <Loader2 className="h-5 w-5 animate-spin text-cyan-600" />}
                       {callState.status === "connected" && <Volume2 className="h-5 w-5 text-emerald-600 animate-pulse" />}
-                      {callState.status === "auto-disposed" && <CheckCircle className="h-5 w-5 text-amber-600" />}
-                      {callState.status === "idle" && <Phone className="h-5 w-5 text-muted-foreground" />}
+                      {callState.status === "ended" && <Phone className="h-5 w-5 text-primary" />}
+                      {callState.status === "auto-disposed" && <AlertCircle className="h-5 w-5 text-amber-600" />}
                       <div>
-                        <p className="text-sm font-semibold text-foreground">
-                          {callState.status === "idle" && "Ready to call"}
+                        <p className="text-sm font-bold text-foreground">
                           {callState.status === "calling" && "Calling your phone..."}
-                          {callState.status === "connected" && "Connected"}
-                          {callState.status === "ended" && "Call ended"}
-                          {callState.status === "auto-disposed" && `${callState.disposition?.replace("_", " ").toUpperCase()}`}
+                          {callState.status === "connected" && "On Call"}
+                          {callState.status === "ended" && "Call Ended"}
+                          {callState.status === "auto-disposed" && (callState.disposition?.replace("_", " ").toUpperCase())}
                         </p>
-                        {callState.status !== "idle" && (
-                          <p className="text-xs text-muted-foreground">{formatTime(callState.elapsed)}</p>
-                        )}
+                        <p className="text-xs text-muted-foreground tabular-nums">{formatTime(callState.elapsed)}</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      {callState.status === "idle" && !dialerActive && (
-                        <Button size="sm" onClick={placeCall} className="bg-cyan-600 hover:bg-cyan-700">
-                          <Phone className="h-3.5 w-3.5 mr-1.5" />Call Now
-                        </Button>
-                      )}
-                      {callState.status === "idle" && (
-                        <Button size="sm" variant="ghost" onClick={skipLead}>
-                          <SkipForward className="h-3.5 w-3.5 mr-1.5" />Skip
-                        </Button>
-                      )}
                       {callState.status === "calling" && (
-                        <Button size="sm" variant="outline" onClick={() => {
-                          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-                          handleAutoDisposition("cancelled");
-                          setStats(prev => ({ ...prev, noAnswer: prev.noAnswer + 1 }));
-                        }}>
+                        <Button size="sm" variant="outline" onClick={() => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } handleAutoDisposition("cancelled"); }}>
                           <PhoneOff className="h-3.5 w-3.5 mr-1.5" />Cancelled
                         </Button>
                       )}
                       {callState.status === "connected" && (
-                        <Button size="sm" variant="destructive" onClick={() => {
-                          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-                          setCallState(prev => ({ ...prev, status: "ended" }));
-                        }}>
+                        <Button size="sm" variant="destructive" onClick={() => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } setCallState(prev => ({ ...prev, status: "ended" })); }}>
                           <PhoneOff className="h-3.5 w-3.5 mr-1.5" />End Call
                         </Button>
                       )}
                     </div>
                   </div>
 
-                  {/* Call timer bar */}
+                  {/* Timer bar for calling/connected */}
                   {(callState.status === "calling" || callState.status === "connected") && (
-                    <div className="mt-3 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                    <div className="h-1.5 bg-white/50 rounded-full overflow-hidden">
                       <div className={`h-full rounded-full transition-all ${callState.status === "connected" ? "bg-emerald-500" : "bg-cyan-500"}`}
                         style={{ width: `${Math.min(100, (callState.elapsed / 300) * 100)}%` }} />
                     </div>
                   )}
-                </CardContent>
-              </Card>
 
-              {/* Disposition (for connected or ended calls) */}
-              {(callState.status === "connected" || callState.status === "ended") && (
-                <Card className="border-border/60 shadow-none">
-                  <CardContent className="p-5">
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Mark Disposition</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {CONNECTED_DISPOSITIONS.map(d => (
-                        <button key={d.value} onClick={() => markDisposition(d.value)}
-                          className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium transition-colors ${d.color}`}>
-                          <d.icon className="h-4 w-4" />
-                          {d.label}
-                        </button>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Auto-disposition + followup */}
-              {callState.status === "auto-disposed" && (
-                <Card className="border-border/60 shadow-none">
-                  <CardContent className="p-5 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">
-                          {callState.autoDisposition ? "Auto-marked" : "Disposition saved"}: {callState.disposition?.replace("_", " ")}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground mt-0.5">
-                          Attempt {currentLead.attempt_count + 1} · Next gap: {formatGap(FOLLOWUP_GAPS[Math.min(currentLead.attempt_count, FOLLOWUP_GAPS.length - 1)])}
-                        </p>
+                  {/* Row 2: Disposition buttons (ONLY after call ended, not during connected) */}
+                  {callState.status === "ended" && (
+                    <div>
+                      <p className="text-[10px] font-semibold text-primary uppercase tracking-wide mb-2">Mark Disposition</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {CONNECTED_DISPOSITIONS.map(d => (
+                          <button key={d.value} onClick={() => markDisposition(d.value)}
+                            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${d.color}`}>
+                            <d.icon className="h-3 w-3" />{d.label}
+                          </button>
+                        ))}
                       </div>
-                      {autoNextTimer > 0 && (
+                    </div>
+                  )}
+
+                  {/* Row 2 alt: Auto-disposition followup + timer */}
+                  {callState.status === "auto-disposed" && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs text-muted-foreground">
+                          {callState.autoDisposition ? "Auto" : "Saved"}: <span className="font-semibold text-foreground">{callState.disposition?.replace("_"," ")}</span>
+                          {" · "}Attempt {(currentLead?.attempt_count || 0) + 1}
+                        </p>
                         <div className="flex items-center gap-2">
-                          <div className="relative w-10 h-10">
-                            <svg className="w-10 h-10 -rotate-90">
-                              <circle cx="20" cy="20" r="16" fill="none" stroke="#e5e7eb" strokeWidth="3" />
-                              <circle cx="20" cy="20" r="16" fill="none" stroke="#06b6d4" strokeWidth="3"
-                                strokeDasharray={`${(autoNextTimer / 15) * 100.5} 100.5`} strokeLinecap="round" />
-                            </svg>
-                            <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-foreground">{autoNextTimer}</span>
-                          </div>
+                          {autoNextTimer > 0 && (
+                            <div className="relative w-9 h-9">
+                              <svg className="w-9 h-9 -rotate-90">
+                                <circle cx="18" cy="18" r="14" fill="none" stroke="#e5e7eb" strokeWidth="2.5" />
+                                <circle cx="18" cy="18" r="14" fill="none" stroke="#06b6d4" strokeWidth="2.5"
+                                  strokeDasharray={`${(autoNextTimer / 15) * 88} 88`} strokeLinecap="round" />
+                              </svg>
+                              <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold">{autoNextTimer}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      {callState.disposition !== "not_interested" && (
+                        <div className="flex items-center gap-2">
+                          <Calendar className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          <input type="date" value={followupDate} onChange={e => setFollowupDate(e.target.value)}
+                            className="rounded-md border border-input bg-background px-2 py-1 text-xs flex-1" />
+                          <input type="time" value={followupTime} onChange={e => setFollowupTime(e.target.value)}
+                            className="rounded-md border border-input bg-background px-2 py-1 text-xs w-24" />
                         </div>
                       )}
-                    </div>
-
-                    {/* Followup edit */}
-                    {callState.disposition !== "not_interested" && (
                       <div className="flex items-center gap-2">
-                        <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
-                        <input type="date" value={followupDate} onChange={e => setFollowupDate(e.target.value)}
-                          className="rounded-lg border border-input bg-background px-2 py-1.5 text-sm flex-1" />
-                        <input type="time" value={followupTime} onChange={e => setFollowupTime(e.target.value)}
-                          className="rounded-lg border border-input bg-background px-2 py-1.5 text-sm w-28" />
+                        <Button size="sm" onClick={moveToNext} className="bg-cyan-600 hover:bg-cyan-700 flex-1 h-8 text-xs">
+                          <SkipForward className="h-3 w-3 mr-1" />{currentIdx < queue.length - 1 ? "Next Call" : "Finish"}
+                        </Button>
+                        {autoNextTimer > 0 && (
+                          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => { autoNextTriggered.current = false; setAutoNextTimer(0); }}>Stop Timer</Button>
+                        )}
                       </div>
-                    )}
-
-                    <div className="flex items-center gap-2">
-                      <Button size="sm" onClick={moveToNext} className="bg-cyan-600 hover:bg-cyan-700 flex-1">
-                        <SkipForward className="h-3.5 w-3.5 mr-1.5" />
-                        {currentIdx < queue.length - 1 ? "Next Call" : "Finish"}
-                      </Button>
-                      {autoNextTimer > 0 && (
-                        <Button size="sm" variant="outline" onClick={() => setAutoNextTimer(0)}>Stop Timer</Button>
-                      )}
                     </div>
-                  </CardContent>
-                </Card>
+                  )}
+                </div>
+              )}
+
+              {/* Idle state: Call Now / Skip */}
+              {callState.status === "idle" && (
+                <div className="flex items-center justify-between rounded-xl border border-border p-4">
+                  <div className="flex items-center gap-3">
+                    <Phone className="h-5 w-5 text-muted-foreground" />
+                    <p className="text-sm font-semibold text-foreground">Ready to call</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {!dialerActive && (
+                      <Button size="sm" onClick={() => { setDialerActive(true); placeCall(); }} className="bg-cyan-600 hover:bg-cyan-700">
+                        <Phone className="h-3.5 w-3.5 mr-1.5" />Call Now
+                      </Button>
+                    )}
+                    <Button size="sm" variant="ghost" onClick={skipLead}>
+                      <SkipForward className="h-3.5 w-3.5 mr-1.5" />Skip
+                    </Button>
+                  </div>
+                </div>
               )}
             </div>
           ) : (

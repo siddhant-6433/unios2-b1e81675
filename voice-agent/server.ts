@@ -1702,7 +1702,8 @@ Deno.serve({ port: PORT }, async (req) => {
       method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
       body: JSON.stringify({
         lead_id: leadId, call_uuid: callId, plivo_call_uuid: aLegUUID,
-        status: callStatus, duration_seconds: totalDuration, disposition,
+        status: isConnected ? "answered" : (disposition || dialStatus),
+        duration_seconds: totalDuration, disposition,
         summary: isAuto ? `Cloud Call: ${disposition?.replace("_"," ")} (auto)` : `Cloud Call: connected (${totalDuration}s) by ${counsellorName}`,
         call_type: "manual", completed_at: new Date().toISOString(),
       }),
