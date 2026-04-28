@@ -1601,197 +1601,35 @@ Deno.serve({ port: PORT }, async (req) => {
     return new Response(xml, { headers: { "Content-Type": "application/xml" } });
   }
 
-  // POST /bridge-status/{callId} — Plivo status callback after bridge call ends
+  // POST /bridge-status/{callId} — Plivo Dial action callback (student leg result)
+  // Only saves disposition to context. bridge-hangup creates ALL DB records.
   if (path.startsWith("/bridge-status/")) {
     const callId = path.split("/bridge-status/")[1];
     const body = await req.formData().catch(() => null);
     const params = body ? Object.fromEntries(body) : {} as any;
-    const duration = parseInt(params.DialBLegDuration || params.Duration || "0");
     const dialStatus = (params.DialStatus || params.CallStatus || "unknown").toLowerCase();
-    const recordingUrl = params.RecordUrl || params.RecordingUrl || null;
-    const machineResult = (params.Machine || "").toLowerCase(); // "true" if voicemail detected
+    const machineResult = (params.Machine || "").toLowerCase();
+    const aLegUUID = params.ALegUUID || params.ALegRequestUUID || params.CallUUID || "";
+    const bLegUUID = params.DialBLegUUID || "";
 
-    console.log(`[BRIDGE ${callId}] Call ended — ALL PARAMS:`, JSON.stringify(params));
-    console.log(`[BRIDGE ${callId}] Parsed:`, { dialStatus, duration, machine: machineResult, recording: !!recordingUrl });
+    console.log(`[BRIDGE-STATUS ${callId}] ALL PARAMS:`, JSON.stringify(params));
 
     const callCtx = activeCallContexts.get(callId);
-    const dbHeaders = {
-      "Content-Type": "application/json",
-      apikey: SUPABASE_SERVICE_KEY,
-      Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-    };
-
-    // Auto-disposition mapping
-    const autoDispositions: Record<string, string> = {
-      busy: "busy",
-      "no-answer": "not_answered",
-      timeout: "not_answered",
-      failed: "not_answered",
-      cancel: "cancelled",
-    };
-    let disposition = autoDispositions[dialStatus] || null;
-    if (machineResult === "true") disposition = "voicemail";
-    // completed = Dial element finished. Check actual B-leg duration.
-    // Note: Plivo may send duration=0 even for real calls if param name differs.
-    // We'll let bridge-hangup handle the final duration from A-leg.
-    const isAutoDisposition = !!disposition;
-
-    if (callCtx?.leadId && SUPABASE_URL) {
-      const leadId = callCtx.leadId;
-
-      // 1. Create call record in call_logs (manual call log table — shows in Call Log page)
-      await fetch(`${SUPABASE_URL}/rest/v1/call_logs`, {
-        method: "POST",
-        headers: { ...dbHeaders, Prefer: "return=minimal" },
-        body: JSON.stringify({
-          lead_id: leadId,
-          disposition: disposition || (dialStatus === "completed" ? null : dialStatus),
-          duration_seconds: duration,
-          recording_url: recordingUrl,
-          notes: isAutoDisposition
-            ? `Cloud Call [${callId.slice(0,8)}]: ${disposition?.replace("_", " ")} (auto-marked by Plivo)`
-            : `Cloud Call [${callId.slice(0,8)}]: connected`,
-          direction: "outbound",
-          user_id: callCtx.toolCallsMade?.[0]?.args?.counsellorUserId || null,
-          called_at: new Date().toISOString(),
-        }),
-      }).catch(e => console.error(`[BRIDGE ${callId}] call_logs insert failed:`, e.message));
-
-      // Also log to ai_call_records for unified reporting
-      // Store plivo_call_uuid so voice-call-callback can match recording to this record
-      const plivoCallUuid = params.DialBLegUUID || params.CallUUID || params.ALegUUID || "";
-      await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records`, {
-        method: "POST",
-        headers: { ...dbHeaders, Prefer: "return=minimal" },
-        body: JSON.stringify({
-          lead_id: leadId,
-          call_uuid: callId,
-          plivo_call_uuid: plivoCallUuid,
-          status: dialStatus,
-          duration_seconds: duration,
-          recording_url: recordingUrl,
-          disposition: disposition,
-          summary: isAutoDisposition
-            ? `Manual call: ${disposition?.replace("_", " ")} (auto)`
-            : `Manual call: connected`,
-          call_type: "manual",
-          completed_at: new Date().toISOString(),
-        }),
-      }).catch(e => console.error(`[BRIDGE ${callId}] ai_call_records insert failed:`, e.message));
-
-      // 2. Log as lead_activity
-      const activityDesc = isAutoDisposition
-        ? `Manual call — ${disposition?.replace("_", " ").toUpperCase()} (auto-marked)`
-        : `Manual call — connected (${duration}s)${recordingUrl ? " — recorded" : ""}`;
-      await fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
-        method: "POST",
-        headers: { ...dbHeaders, Prefer: "return=minimal" },
-        body: JSON.stringify({ lead_id: leadId, type: "call", description: activityDesc }),
-      }).catch(e => console.error(`[BRIDGE ${callId}] Activity log failed:`, e.message));
-
-      // 3. Add note with recording link
-      if (recordingUrl) {
-        await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, {
-          method: "POST",
-          headers: { ...dbHeaders, Prefer: "return=minimal" },
-          body: JSON.stringify({
-            lead_id: leadId,
-            content: `📞 Manual Call Recording (${duration}s): ${recordingUrl}`,
-          }),
-        }).catch(e => console.error(`[BRIDGE ${callId}] Note failed:`, e.message));
-      }
-
-      // 4. Update lead: first_contact_at if not set
-      await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}&first_contact_at=is.null`, {
-        method: "PATCH",
-        headers: { ...dbHeaders, Prefer: "return=minimal" },
-        body: JSON.stringify({ first_contact_at: new Date().toISOString() }),
-      }).catch(() => {});
-
-      // 5. Auto-followup for unanswered/busy/voicemail with escalating gaps
-      if (isAutoDisposition && disposition !== "cancelled") {
-        // Count previous manual call attempts for this lead
-        const countRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/ai_call_records?lead_id=eq.${leadId}&call_type=eq.manual&select=id`,
-          { headers: dbHeaders },
-        );
-        const prevCalls = await countRes.json().catch(() => []);
-        const attemptCount = Array.isArray(prevCalls) ? prevCalls.length : 1;
-
-        // Escalating followup gaps: attempt 1→4h, 2→1d, 3→3d, 4+→mark inactive
-        if (attemptCount >= 4) {
-          // Mark lead as not_interested (inactive) after 4 unanswered attempts
-          await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}`, {
-            method: "PATCH",
-            headers: { ...dbHeaders, Prefer: "return=minimal" },
-            body: JSON.stringify({ stage: "not_interested" }),
-          });
-          await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, {
-            method: "POST",
-            headers: { ...dbHeaders, Prefer: "return=minimal" },
-            body: JSON.stringify({
-              lead_id: leadId,
-              content: `📞 Lead marked inactive — ${attemptCount} manual call attempts, all ${disposition?.replace("_", " ")}`,
-            }),
-          });
-          console.log(`[BRIDGE ${callId}] Lead ${leadId} marked inactive after ${attemptCount} attempts`);
-        } else {
-          const gapHours = attemptCount === 1 ? 4 : attemptCount === 2 ? 24 : 72;
-          const followupAt = new Date(Date.now() + gapHours * 60 * 60 * 1000);
-
-          // Clamp to 9AM-8PM IST window
-          const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-          const istDate = new Date(followupAt.getTime() + IST_OFFSET_MS);
-          const totalMins = istDate.getUTCHours() * 60 + istDate.getUTCMinutes();
-          let scheduledAt: string;
-          if (totalMins >= 540 && totalMins < 1200) {
-            scheduledAt = followupAt.toISOString();
-          } else {
-            const y = istDate.getUTCFullYear(), mo = istDate.getUTCMonth(), d = istDate.getUTCDate();
-            const dayOffset = totalMins >= 1200 ? 1 : 0;
-            scheduledAt = new Date(Date.UTC(y, mo, d + dayOffset, 3, 30, 0)).toISOString();
-          }
-
-          await fetch(`${SUPABASE_URL}/rest/v1/lead_followups`, {
-            method: "POST",
-            headers: { ...dbHeaders, Prefer: "return=minimal" },
-            body: JSON.stringify({
-              lead_id: leadId,
-              scheduled_at: scheduledAt,
-              type: "call",
-              notes: `Auto-followup: ${disposition?.replace("_", " ")} on attempt ${attemptCount}. Gap: ${gapHours}h. Next is attempt ${attemptCount + 1}${attemptCount + 1 >= 4 ? " (final)" : ""}.`,
-              status: "pending",
-            }),
-          });
-          await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, {
-            method: "POST",
-            headers: { ...dbHeaders, Prefer: "return=minimal" },
-            body: JSON.stringify({
-              lead_id: leadId,
-              content: `📞 ${disposition?.replace("_", " ").toUpperCase()} — auto-followup scheduled in ${gapHours}h (attempt ${attemptCount}/${4})`,
-            }),
-          });
-          console.log(`[BRIDGE ${callId}] Auto-followup in ${gapHours}h for lead ${leadId} (attempt ${attemptCount})`);
-        }
-      }
+    if (callCtx) {
+      const autoMap: Record<string, string> = { busy: "busy", "no-answer": "not_answered", timeout: "not_answered", failed: "not_answered", cancel: "cancelled" };
+      let disp = autoMap[dialStatus] || null;
+      if (machineResult === "true") disp = "voicemail";
+      (callCtx as any)._disp = disp;
+      (callCtx as any)._dialStatus = dialStatus;
+      (callCtx as any)._aLegUUID = aLegUUID;
+      (callCtx as any)._statusRan = true;
+      console.log(`[BRIDGE-STATUS ${callId}] disposition=${disp || "connected"} aLeg=${aLegUUID.slice(0,12)}`);
     }
-
-    // Don't delete context here — bridge-hangup needs it for duration update.
-    // bridge-hangup will clean up.
-
-    // Return JSON with disposition info so frontend can show the right modal
-    return new Response(JSON.stringify({
-      status: dialStatus,
-      duration,
-      disposition,
-      auto_disposition: isAutoDisposition,
-      recording_url: recordingUrl,
-    }), { headers: { "Content-Type": "application/json" } });
+    return new Response("OK");
   }
 
-  // POST /bridge-hangup/{callId} — Plivo hangup callback for the A-leg (counsellor)
-  // This is the FINAL callback. Fires after the entire call ends.
-  // Has the real total duration. bridge-status fires first with disposition.
+  // POST /bridge-hangup/{callId} — Plivo A-leg hangup (FINAL callback)
+  // Creates ALL database records. Single source of truth.
   if (path.startsWith("/bridge-hangup/")) {
     const callId = path.split("/bridge-hangup/")[1];
     const body = await req.formData().catch(() => null);
@@ -1799,90 +1637,91 @@ Deno.serve({ port: PORT }, async (req) => {
     const callStatus = (params.CallStatus || "unknown").toLowerCase();
     const totalDuration = parseInt(params.Duration || "0");
     const hangupCause = params.HangupCause || "";
-    const hangupSource = params.HangupSource || "";
+    const plivoALegUUID = params.CallUUID || params.ALegUUID || "";
 
     console.log(`[BRIDGE-HANGUP ${callId}] ALL PARAMS:`, JSON.stringify(params));
-    console.log(`[BRIDGE-HANGUP ${callId}] status=${callStatus} totalDuration=${totalDuration} cause=${hangupCause} source=${hangupSource}`);
 
-    const dbHeaders = {
-      "Content-Type": "application/json",
-      apikey: SUPABASE_SERVICE_KEY,
-      Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-    };
-
-    // Check if bridge-status already logged this call
     const callCtx = activeCallContexts.get(callId);
-    const bridgeStatusAlreadyRan = !callCtx;
+    if (!callCtx?.leadId || !SUPABASE_URL) {
+      if (callCtx) activeCallContexts.delete(callId);
+      return new Response("OK");
+    }
 
-    // Get context from in-memory or reconstruct from what bridge-status saved
-    const leadId = callCtx?.leadId;
-    const counsellorUserId = callCtx?.toolCallsMade?.[0]?.args?.counsellorUserId || null;
-    const counsellorName = callCtx?.toolCallsMade?.[0]?.args?.counsellorName || "Counsellor";
+    const leadId = callCtx.leadId;
+    const counsellorUserId = callCtx.toolCallsMade?.[0]?.args?.counsellorUserId || null;
+    const counsellorName = callCtx.toolCallsMade?.[0]?.args?.counsellorName || "Counsellor";
+    const statusRan = !!(callCtx as any)._statusRan;
+    const disposition: string | null = (callCtx as any)._disp ??
+      (callStatus === "cancel" ? "cancelled" : callStatus === "busy" ? "busy" : callStatus === "no-answer" ? "not_answered" : null);
+    const dialStatus: string = (callCtx as any)._dialStatus ?? callStatus;
+    const aLegUUID = (callCtx as any)._aLegUUID ?? plivoALegUUID;
+    const isAuto = !!disposition;
+    const isConnected = !disposition && (dialStatus === "completed" || callStatus === "completed");
 
-    if (leadId && SUPABASE_URL) {
-      if (bridgeStatusAlreadyRan) {
-        // bridge-status already created the call_logs + ai_call_records entry.
-        // Update with real duration from A-leg hangup.
-        console.log(`[BRIDGE-HANGUP ${callId}] Updating existing records with duration=${totalDuration}`);
+    const dbH = { "Content-Type": "application/json", apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
 
-        // Update call_logs — find by call UUID in notes
-        await fetch(`${SUPABASE_URL}/rest/v1/call_logs?notes=like.*${callId.slice(0, 8)}*&lead_id=eq.${leadId}`, {
-          method: "PATCH",
-          headers: { ...dbHeaders, Prefer: "return=minimal" },
-          body: JSON.stringify({ duration_seconds: totalDuration }),
-        }).catch(() => {});
+    console.log(`[BRIDGE-HANGUP ${callId}] statusRan=${statusRan} disp=${disposition || "connected"} dur=${totalDuration} aLeg=${aLegUUID.slice(0,12)}`);
 
-        // Update ai_call_records
-        await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
-          method: "PATCH",
-          headers: { ...dbHeaders, Prefer: "return=minimal" },
-          body: JSON.stringify({ duration_seconds: totalDuration }),
-        }).catch(() => {});
+    // 1. call_logs (Call Log page)
+    await fetch(`${SUPABASE_URL}/rest/v1/call_logs`, {
+      method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
+      body: JSON.stringify({
+        lead_id: leadId,
+        disposition: disposition || (isConnected ? null : callStatus),
+        duration_seconds: totalDuration,
+        notes: isAuto ? `Cloud Call [${callId.slice(0,8)}]: ${disposition?.replace("_"," ")} (auto)` : `Cloud Call [${callId.slice(0,8)}]: connected (${totalDuration}s)`,
+        direction: "outbound",
+        user_id: counsellorUserId,
+        called_at: new Date().toISOString(),
+      }),
+    }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] call_logs:`, e.message));
+
+    // 2. ai_call_records (unified reporting + recording match)
+    // Store A-leg UUID as plivo_call_uuid — recording callback uses A-leg UUID
+    await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records`, {
+      method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
+      body: JSON.stringify({
+        lead_id: leadId, call_uuid: callId, plivo_call_uuid: aLegUUID,
+        status: callStatus, duration_seconds: totalDuration, disposition,
+        summary: isAuto ? `Cloud Call: ${disposition?.replace("_"," ")} (auto)` : `Cloud Call: connected (${totalDuration}s) by ${counsellorName}`,
+        call_type: "manual", completed_at: new Date().toISOString(),
+      }),
+    }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] ai_call_records:`, e.message));
+
+    // 3. lead_activity
+    await fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
+      method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
+      body: JSON.stringify({ lead_id: leadId, type: "call",
+        description: isAuto ? `Cloud Call by ${counsellorName} — ${disposition?.replace("_"," ").toUpperCase()} (auto)` : `Cloud Call by ${counsellorName} — connected (${totalDuration}s)`,
+      }),
+    }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] activity:`, e.message));
+
+    // 4. first_contact_at
+    await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}&first_contact_at=is.null`, {
+      method: "PATCH", headers: { ...dbH, Prefer: "return=minimal" },
+      body: JSON.stringify({ first_contact_at: new Date().toISOString() }),
+    }).catch(() => {});
+
+    // 5. Auto-followup for unanswered/busy/voicemail
+    if (isAuto && disposition !== "cancelled") {
+      const cntRes = await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?lead_id=eq.${leadId}&call_type=eq.manual&select=id`, { headers: dbH });
+      const prev = await cntRes.json().catch(() => []);
+      const att = Array.isArray(prev) ? prev.length : 1;
+      if (att >= 4) {
+        await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}`, { method: "PATCH", headers: { ...dbH, Prefer: "return=minimal" }, body: JSON.stringify({ stage: "not_interested" }) });
+        await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, { method: "POST", headers: { ...dbH, Prefer: "return=minimal" }, body: JSON.stringify({ lead_id: leadId, content: `📞 Lead marked inactive — ${att} Cloud Call attempts, all ${disposition?.replace("_"," ")}` }) });
       } else {
-        // bridge-status never fired (counsellor hung up before Dial completed).
-        // This is the only callback — log everything here.
-        const dispositionMap: Record<string, string> = {
-          cancel: "cancelled", busy: "busy", "no-answer": "not_answered", failed: "not_answered",
-        };
-        const disposition = dispositionMap[callStatus] || "cancelled";
-
-        await fetch(`${SUPABASE_URL}/rest/v1/call_logs`, {
-          method: "POST",
-          headers: { ...dbHeaders, Prefer: "return=minimal" },
-          body: JSON.stringify({
-            lead_id: leadId,
-            disposition,
-            duration_seconds: totalDuration,
-            notes: `Cloud Call: ${disposition.replace("_", " ")} (${hangupCause || "ended before connect"})`,
-            direction: "outbound",
-            user_id: counsellorUserId,
-            called_at: new Date().toISOString(),
-          }),
-        }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] call_logs failed:`, e.message));
-
-        await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records`, {
-          method: "POST",
-          headers: { ...dbHeaders, Prefer: "return=minimal" },
-          body: JSON.stringify({
-            lead_id: leadId, call_uuid: callId, status: callStatus,
-            duration_seconds: totalDuration, disposition,
-            summary: `Manual call: ${disposition.replace("_", " ")} (${hangupCause || "counsellor ended"})`,
-            call_type: "manual", completed_at: new Date().toISOString(),
-          }),
-        }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] ai_call_records failed:`, e.message));
-
-        await fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
-          method: "POST",
-          headers: { ...dbHeaders, Prefer: "return=minimal" },
-          body: JSON.stringify({
-            lead_id: leadId, type: "call",
-            description: `Cloud Call by ${counsellorName} — ${disposition.replace("_", " ")} (${hangupCause || "ended before connect"})`,
-          }),
-        }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] activity failed:`, e.message));
+        const gap = att === 1 ? 4 : att === 2 ? 24 : 72;
+        const fut = new Date(Date.now() + gap * 3600000);
+        const ist = new Date(fut.getTime() + 5.5 * 3600000);
+        const mins = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+        const sched = (mins >= 540 && mins < 1200) ? fut.toISOString() : new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate() + (mins >= 1200 ? 1 : 0), 3, 30, 0)).toISOString();
+        await fetch(`${SUPABASE_URL}/rest/v1/lead_followups`, { method: "POST", headers: { ...dbH, Prefer: "return=minimal" }, body: JSON.stringify({ lead_id: leadId, scheduled_at: sched, type: "call", notes: `Auto: ${disposition?.replace("_"," ")} attempt ${att}. Next in ${gap}h.`, status: "pending" }) });
+        await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, { method: "POST", headers: { ...dbH, Prefer: "return=minimal" }, body: JSON.stringify({ lead_id: leadId, content: `📞 ${disposition?.replace("_"," ").toUpperCase()} — followup in ${gap}h (${att}/4)` }) });
       }
     }
 
-    if (callCtx) activeCallContexts.delete(callId);
+    activeCallContexts.delete(callId);
     return new Response("OK");
   }
 
