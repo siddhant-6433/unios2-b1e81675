@@ -98,6 +98,16 @@ Deno.serve(async (req) => {
 
     const { template_key, phone, params, lead_id, header_video_url, button_urls } = await req.json();
 
+    // Block sends to DNC leads
+    if (lead_id) {
+      const { data: leadCheck } = await admin.from("leads").select("stage").eq("id", lead_id).single();
+      if (leadCheck?.stage === "dnc") {
+        return new Response(JSON.stringify({ error: "Lead is DNC — message not sent" }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     if (!template_key || !phone) {
       return new Response(
         JSON.stringify({ error: "template_key and phone are required" }),

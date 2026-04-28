@@ -1,0 +1,63 @@
+{
+  "expo": {
+    "name": "UniOs",
+    "slug": "unios",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "unios",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0035C5"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "in.ac.nimt.unios",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "UniOs needs your location to verify you are on campus for attendance.",
+        "NSCameraUsageDescription": "UniOs uses the camera for attendance selfie verification."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#0035C5"
+      },
+      "package": "in.ac.nimt.unios",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "CAMERA"
+      ],
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-font",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "UniOs needs your location to verify campus attendance."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "UniOs uses the camera for attendance selfie."
+        }
+      ],
+      "expo-web-browser"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

@@ -219,7 +219,7 @@ Deno.serve(async (req) => {
 
     // ── Verify Payment (fallback manual check) ─────────────────────
     if (action === "verify-payment") {
-      const { txnid } = body;
+      const { txnid, application_id } = body;
       if (!txnid) {
         return new Response(
           JSON.stringify({ error: "txnid is required" }),
@@ -246,6 +246,26 @@ Deno.serve(async (req) => {
       }
 
       const txn = Array.isArray(data.data) ? data.data[0] : data.data;
+
+      // If payment is confirmed as success, update the DB directly
+      // (covers cases where surl callback was missed — popup closed early, etc.)
+      if (txn?.status?.toLowerCase() === "success") {
+        const appId = application_id || txn?.udf1 || "";
+        const paymentRef = txn?.easepayid || txnid;
+        if (appId) {
+          const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+          const { error: dbErr } = await admin
+            .from("applications")
+            .update({ payment_status: "paid", payment_ref: paymentRef })
+            .eq("application_id", appId);
+          if (dbErr) {
+            console.error("[easebuzz] verify-payment DB update error:", dbErr.message);
+          } else {
+            console.log("[easebuzz] verify-payment: updated application", appId, "to paid");
+          }
+        }
+      }
+
       return new Response(
         JSON.stringify({ txnid: txn?.txnid, status: txn?.status, amount: txn?.amount, easepayid: txn?.easepayid }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }

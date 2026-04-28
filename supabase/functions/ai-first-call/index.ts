@@ -24,6 +24,7 @@ serve(async (req) => {
       .eq("id", lead_id).single();
 
     if (leadErr || !lead) throw new Error("Lead not found");
+    if (lead.stage === "dnc") throw new Error("Lead is DNC — call blocked");
 
     if (!lovableApiKey) throw new Error("LOVABLE_API_KEY not configured");
 

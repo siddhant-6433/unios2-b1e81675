@@ -936,18 +936,29 @@ const ApplyPortal = () => {
     }
 
     if (app.lead_id) {
-      await supabase.from("leads").update({
-        stage: "application_submitted" as any,
-        application_progress: { personal_details: true, education_details: true, application_fee_paid: true, documents_uploaded: true } as any,
-      }).eq("id", app.lead_id);
+      // Only advance stage if lead is in a stage where submission makes sense
+      // DNC/rejected/ineligible leads keep their stage (but application is still saved)
+      const { data: currentLead } = await supabase.from("leads").select("stage").eq("id", app.lead_id).single();
+      const advanceableStages = ["new_lead", "ai_called", "counsellor_call", "application_in_progress", "application_fee_paid", "not_interested", "deferred"];
+      if (currentLead && advanceableStages.includes(currentLead.stage)) {
+        await supabase.from("leads").update({
+          stage: "application_submitted" as any,
+          application_progress: { personal_details: true, education_details: true, application_fee_paid: true, documents_uploaded: true } as any,
+        }).eq("id", app.lead_id);
 
-      await supabase.from("lead_activities").insert({
-        lead_id: app.lead_id,
-        type: "application_submitted",
-        description: `Application ${app.application_id} submitted`,
-        old_stage: "application_in_progress" as any,
-        new_stage: "application_submitted" as any,
-      });
+        await supabase.from("lead_activities").insert({
+          lead_id: app.lead_id,
+          type: "application_submitted",
+          description: `Application ${app.application_id} submitted`,
+          old_stage: currentLead.stage as any,
+          new_stage: "application_submitted" as any,
+        });
+      } else {
+        // Still update application progress even if stage isn't advanced
+        await supabase.from("leads").update({
+          application_progress: { personal_details: true, education_details: true, application_fee_paid: true, documents_uploaded: true } as any,
+        }).eq("id", app.lead_id);
+      }
     }
 
     setSubmitted(true);

@@ -626,6 +626,13 @@ const LeadDetail = () => {
       return;
     }
 
+    // Cancel all pending followups — prevents lead from reappearing in overdue queue
+    await supabase
+      .from("lead_followups")
+      .update({ status: "completed", completed_at: new Date().toISOString() } as any)
+      .eq("lead_id", id)
+      .eq("status", "pending");
+
     // Add reason as a note
     await supabase.from("lead_notes").insert({
       lead_id: id,

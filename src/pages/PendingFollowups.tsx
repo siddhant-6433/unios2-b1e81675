@@ -196,23 +196,26 @@ const PendingFollowups = () => {
       q = q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
       const { data } = await q;
 
-      result = (data || []).map((r: any) => {
-        const daysOverdue = Math.max(0, Math.floor((Date.now() - new Date(r.scheduled_at).getTime()) / 86400000));
-        return {
-          id: r.id,
-          lead_id: r.lead_id,
-          lead_name: r.leads?.name || "Unknown",
-          lead_phone: r.leads?.phone || "",
-          lead_stage: r.leads?.stage || "",
-          counsellor_name: r.leads?.counsellor_profile?.display_name || "Unassigned",
-          counsellor_id: r.leads?.counsellor_id || null,
-          type: r.type || "call",
-          scheduled_at: r.scheduled_at,
-          notes: r.notes,
-          days_overdue: daysOverdue,
-          campus_name: r.leads?.campuses?.name || "",
-        };
-      });
+      const TERMINAL_STAGES = ["not_interested", "dnc", "rejected", "ineligible"];
+      result = (data || [])
+        .filter((r: any) => !TERMINAL_STAGES.includes(r.leads?.stage))
+        .map((r: any) => {
+          const daysOverdue = Math.max(0, Math.floor((Date.now() - new Date(r.scheduled_at).getTime()) / 86400000));
+          return {
+            id: r.id,
+            lead_id: r.lead_id,
+            lead_name: r.leads?.name || "Unknown",
+            lead_phone: r.leads?.phone || "",
+            lead_stage: r.leads?.stage || "",
+            counsellor_name: r.leads?.counsellor_profile?.display_name || "Unassigned",
+            counsellor_id: r.leads?.counsellor_id || null,
+            type: r.type || "call",
+            scheduled_at: r.scheduled_at,
+            notes: r.notes,
+            days_overdue: daysOverdue,
+            campus_name: r.leads?.campuses?.name || "",
+          };
+        });
     } else if (tab === "visit_confirm") {
       let q = supabase.from("visits_needing_confirmation" as any)
         .select("*")

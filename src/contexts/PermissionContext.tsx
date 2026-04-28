@@ -31,15 +31,15 @@ export function usePermission(module: string, action?: string): boolean {
 }
 
 export const PermissionProvider = ({ children }: { children: ReactNode }) => {
-  const { user, role, roleLoaded } = useAuth();
+  const { user, role, realRole, roleLoaded } = useAuth();
   const [permissions, setPermissions] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
 
   const fetchPermissions = useCallback(async () => {
     if (!user?.id || !roleLoaded) return;
 
-    // Super admin has all permissions — no query needed
-    if (role === "super_admin") {
+    // Super admin has all permissions — no query needed (even when impersonating)
+    if (role === "super_admin" || realRole === "super_admin") {
       setPermissions(new Set(["*"])); // sentinel for "all"
       setLoading(false);
       return;
@@ -53,7 +53,7 @@ export const PermissionProvider = ({ children }: { children: ReactNode }) => {
       setPermissions(new Set(data || []));
     }
     setLoading(false);
-  }, [user?.id, role, roleLoaded]);
+  }, [user?.id, role, realRole, roleLoaded]);
 
   useEffect(() => {
     if (roleLoaded) fetchPermissions();
@@ -68,19 +68,19 @@ export const PermissionProvider = ({ children }: { children: ReactNode }) => {
   }, [user]);
 
   const can = useCallback((module: string, action: string): boolean => {
-    if (role === "super_admin") return true;
+    if (role === "super_admin" || realRole === "super_admin") return true;
     if (loading) return true; // Show everything while loading to avoid flash
     return permissions.has(`${module}:${action}`);
-  }, [permissions, role, loading]);
+  }, [permissions, role, realRole, loading]);
 
   const canAny = useCallback((module: string): boolean => {
-    if (role === "super_admin") return true;
+    if (role === "super_admin" || realRole === "super_admin") return true;
     if (loading) return true;
     for (const p of permissions) {
       if (p.startsWith(`${module}:`)) return true;
     }
     return false;
-  }, [permissions, role, loading]);
+  }, [permissions, role, realRole, loading]);
 
   return (
     <PermissionContext.Provider value={{ permissions, loading, can, canAny, refresh: fetchPermissions }}>

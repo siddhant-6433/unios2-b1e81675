@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FeeStructureViewer } from "@/components/finance/FeeStructureViewer";
 import { ConcessionApprovalPanel } from "@/components/finance/ConcessionApprovalPanel";
+import { FinanceOverview } from "@/components/finance/FinanceOverview";
 
 const statusStyles: Record<string, string> = {
   paid: "bg-pastel-green text-foreground/80",
@@ -269,14 +270,7 @@ const Finance = () => {
 
       {tab === "concessions" && <ConcessionApprovalPanel />}
 
-      {tab === "reports" && (
-        <Card className="border-border/60 shadow-none">
-          <CardContent className="py-16 text-center">
-            <BarChart3 className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
-            <p className="text-sm text-muted-foreground">Financial reports will be generated from live data</p>
-          </CardContent>
-        </Card>
-      )}
+      {tab === "reports" && <FinanceOverview />}
     </div>
     </>
   );

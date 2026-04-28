@@ -7,49 +7,17 @@ const corsHeaders = {
 
 // Auto-reply rules: keyword patterns → response
 // Matched top-to-bottom; first match wins. Patterns are case-insensitive.
+// Only keep exact greeting and menu-number responses.
+// Everything else (fee, course, eligibility, campus, etc.) is handled by the AI knowledge base.
 const AUTO_REPLIES: { patterns: RegExp; reply: string }[] = [
   {
-    patterns: /^(hi|hello|hey|hii+|hlo|good\s*(morning|evening|afternoon))[\s!.]*$/i,
+    patterns: /^(hi|hello|hey|hii+|hlo|good\s*(morning|evening|afternoon)|namaste|namaskar|helo|hy)[\s!.]*$/i,
     reply: "Hi! 👋 Welcome to NIMT Educational Institutions. How can I help you today?\n\n1️⃣ Admission enquiry\n2️⃣ Course information\n3️⃣ Fee structure\n4️⃣ Campus visit\n5️⃣ Talk to a counsellor",
   },
+  // Menu number responses are intentionally NOT here — they go to AI with context
+  // so Gemini can give a rich, knowledge-base-driven answer
   {
-    patterns: /^1$/,
-    reply: "Great! To start your admission process, please visit our application portal:\nhttps://uni.nimt.ac.in/apply/nimt\n\nOr reply with your name and course of interest, and our counsellor will reach out to you shortly.",
-  },
-  {
-    patterns: /^2$/,
-    reply: "We offer a wide range of courses across Engineering, Management, Law, Pharmacy, Nursing, Education and more.\n\nPlease visit https://nimt.ac.in/courses for the full list, or tell us which course you're interested in!",
-  },
-  {
-    patterns: /^3$/,
-    reply: "Our fee structure varies by course and campus. A counsellor will share the detailed fee breakdown for your chosen course.\n\nPlease reply with the course name you're interested in, and we'll have someone reach out to you.",
-  },
-  {
-    patterns: /^4$/,
-    reply: "We'd love to have you visit our campus! 🏫\n\nPlease share your preferred date and the campus you'd like to visit, and we'll schedule it for you.",
-  },
-  {
-    patterns: /^5$/,
-    reply: "Our counsellor will connect with you shortly. If it's urgent, you can call us at 📞 +91-120-4167822.",
-  },
-  {
-    patterns: /\b(admission|apply|enroll|enrol)\b/i,
-    reply: "For admissions, please visit our application portal:\nhttps://uni.nimt.ac.in/apply/nimt\n\nOr share your name, phone number, and course interest — our counsellor will guide you through the process.",
-  },
-  {
-    patterns: /\b(fee|fees|cost|price|charges)\b/i,
-    reply: "Our fee structure varies by course and campus. Could you tell us which course you're interested in? A counsellor will share the detailed fee breakdown.",
-  },
-  {
-    patterns: /\b(course|program|programme|branch|stream)\b/i,
-    reply: "We offer courses in Engineering, Management, Law, Pharmacy, Nursing, Education, Arts, Science and more.\n\nVisit https://nimt.ac.in/courses or tell us your area of interest!",
-  },
-  {
-    patterns: /\b(visit|campus\s*tour|come\s*to\s*campus)\b/i,
-    reply: "We'd love to have you visit! 🏫 Please share your preferred date and campus, and we'll schedule your visit.",
-  },
-  {
-    patterns: /\b(thank|thanks|thanku|thnx|thnks|dhanyawad|shukriya)\b/i,
+    patterns: /\b(thank|thanks|thanku|thnx|thnks|dhanyawad|shukriya|ty)\b/i,
     reply: "You're welcome! 😊 Feel free to reach out anytime if you have more questions. We're here to help!",
   },
 ];
@@ -161,10 +129,24 @@ Deno.serve(async (req) => {
           const normalizedPhone = phone.replace(/^91/, "+91");
           const { data: leadRows } = await admin
             .from("leads")
-            .select("id, counsellor_id, name")
+            .select("id, counsellor_id, name, stage")
             .or(`phone.eq.${phone},phone.eq.${normalizedPhone},phone.eq.+${phone}`)
             .limit(1);
           const lead = leadRows?.[0] || null;
+
+          // Skip all processing for DNC leads (except logging the message)
+          if (lead?.stage === "dnc") {
+            // Still log the message but skip replies
+            await admin.from("whatsapp_messages").insert({
+              lead_id: lead.id,
+              wa_message_id: waMessageId,
+              direction: "inbound",
+              phone, message_type: msgType, content, media_url: mediaUrl,
+              status: "received", is_read: false,
+              assigned_to: lead.counsellor_id || null,
+            });
+            continue;
+          }
 
           // Insert message
           await admin.from("whatsapp_messages").insert({
@@ -315,10 +297,66 @@ Deno.serve(async (req) => {
             }
           }
 
-          // Auto-reply bot: match inbound text against keyword patterns
+          // ── DNC detection: "stop", "not interested", etc. ──────────────────
+          const DNC_PATTERNS = /\b(stop|unsubscribe|opt.?out|do not contact|dont contact|don'?t contact|not interested|nahi chahiye|mujhe nahi chahiye|remove me|block me|dnc|irritating|irritate|stop calling|stop messaging|stop whatsapp|band karo|chhodiye|chhodo|mat karo|pareshan|hata do|hatao)\b/i;
+          if (!feedbackHandled && msgType === "text" && content && DNC_PATTERNS.test(content.trim())) {
+            // Mark lead as DNC if known
+            if (lead?.id) {
+              await admin.from("leads").update({ stage: "dnc" }).eq("id", lead.id);
+              await admin.from("lead_activities").insert({
+                lead_id: lead.id,
+                type: "whatsapp",
+                description: `Lead marked DNC via WhatsApp opt-out: "${content.substring(0, 100)}"`,
+              });
+              // Notify counsellor / admins
+              const notifyUserId = lead.counsellor_id || null;
+              if (notifyUserId) {
+                await admin.from("notifications").insert({
+                  user_id: notifyUserId,
+                  type: "general",
+                  title: `DNC: ${lead.name || phone} opted out`,
+                  body: `Lead replied "${content.substring(0, 60)}" on WhatsApp and has been marked Do Not Contact.`,
+                  link: `/admissions/${lead.id}`,
+                  lead_id: lead.id,
+                });
+              }
+            }
+            // Send DNC acknowledgment
+            try {
+              const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
+              const pnId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+              const dncMsg = "You have been unsubscribed and added to our Do Not Contact list. We will not reach out to you again. If this was a mistake, please reply \"START\" to re-subscribe.";
+              const dncRes = await fetch(`https://graph.facebook.com/v21.0/${pnId}/messages`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${waToken}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ messaging_product: "whatsapp", to: phone.replace(/[^0-9]/g, ""), type: "text", text: { body: dncMsg } }),
+              });
+              if (dncRes.ok) {
+                const dncResult = await dncRes.json();
+                await admin.from("whatsapp_messages").insert({
+                  lead_id: lead?.id || null,
+                  wa_message_id: dncResult?.messages?.[0]?.id || null,
+                  direction: "outbound", phone,
+                  message_type: "text", content: dncMsg, status: "sent", is_read: true,
+                });
+              }
+            } catch (e) { console.error("DNC ack error:", e); }
+            feedbackHandled = true; // skip further auto-replies
+          }
+
+          // ── Re-subscribe detection ───────────────────────────────────────
+          if (!feedbackHandled && msgType === "text" && content && /^start$/i.test(content.trim())) {
+            if (lead?.id) {
+              await admin.from("leads").update({ stage: "new_lead" }).eq("id", lead.id);
+            }
+          }
+
+          // ── Auto-reply bot: match inbound text against keyword patterns ──
+          let keywordMatched = false;
           if (!feedbackHandled && msgType === "text" && content) {
             const matched = AUTO_REPLIES.find(r => r.patterns.test(content.trim()));
             if (matched) {
+              keywordMatched = true;
               try {
                 const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
                 const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
@@ -328,10 +366,7 @@ Deno.serve(async (req) => {
                   `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
                   {
                     method: "POST",
-                    headers: {
-                      Authorization: `Bearer ${waToken}`,
-                      "Content-Type": "application/json",
-                    },
+                    headers: { Authorization: `Bearer ${waToken}`, "Content-Type": "application/json" },
                     body: JSON.stringify({
                       messaging_product: "whatsapp",
                       to: waPhone,
@@ -343,31 +378,20 @@ Deno.serve(async (req) => {
                 const autoResult = await autoRes.json();
 
                 if (autoRes.ok) {
-                  // Log auto-reply as outbound message
                   await admin.from("whatsapp_messages").insert({
                     lead_id: lead?.id || null,
                     wa_message_id: autoResult?.messages?.[0]?.id || null,
                     direction: "outbound",
-                    phone,
-                    message_type: "text",
-                    content: matched.reply,
-                    status: "sent",
-                    is_read: true,
+                    phone, message_type: "text", content: matched.reply, status: "sent", is_read: true,
+                    template_key: "auto_reply",
                   });
-                  // For options 3 (fee) and 5 (counsellor), create a follow-up task
                   const trimmedContent = content.trim();
                   if (lead?.id && lead?.counsellor_id && (trimmedContent === "3" || trimmedContent === "5")) {
                     const followupType = trimmedContent === "3" ? "Fee structure request via WhatsApp" : "Student requested counsellor callback via WhatsApp";
-                    // Schedule follow-up in 1 hour
                     const scheduledAt = new Date(Date.now() + 3600000).toISOString();
                     await admin.from("lead_followups").insert({
-                      lead_id: lead.id,
-                      scheduled_at: scheduledAt,
-                      type: "call",
-                      status: "pending",
-                      notes: followupType,
+                      lead_id: lead.id, scheduled_at: scheduledAt, type: "call", status: "pending", notes: followupType,
                     });
-                    // Notify the counsellor
                     await admin.from("notifications").insert({
                       user_id: lead.counsellor_id,
                       type: "followup_due",
@@ -383,6 +407,51 @@ Deno.serve(async (req) => {
               } catch (autoErr) {
                 console.error("Auto-reply error:", autoErr);
               }
+            }
+          }
+
+          // ── AI Knowledge Base reply (handles everything not matched above) ──
+          if (!feedbackHandled && !keywordMatched && msgType === "text" && content) {
+            try {
+              // Map menu number selections to explicit intent so AI gives a rich answer
+              const MENU_CONTEXT: Record<string, string> = {
+                "1": "The user selected option 1 — they want information about admissions and how to apply.",
+                "2": "The user selected option 2 — they want to know about courses offered at NIMT.",
+                "3": "The user selected option 3 — they want fee structure information.",
+                "4": "The user selected option 4 — they want to schedule a campus visit.",
+                "5": "The user selected option 5 — they want to talk to a counsellor.",
+              };
+              const menuCtx = MENU_CONTEXT[content.trim()];
+              const messageForAI = menuCtx
+                ? `[System note: ${menuCtx}]\n\nUser message: ${content}`
+                : content;
+
+              // Fetch last 6 messages for context
+              const { data: recentMsgs } = await admin
+                .from("whatsapp_messages")
+                .select("direction, content")
+                .eq("phone", phone)
+                .order("created_at", { ascending: false })
+                .limit(6);
+
+              const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+              await fetch(`${supabaseUrl}/functions/v1/whatsapp-ai-reply`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+                },
+                body: JSON.stringify({
+                  phone,
+                  message: messageForAI,
+                  lead_name: lead?.name || null,
+                  lead_stage: lead?.stage || null,
+                  course_interest: null,
+                  recent_messages: (recentMsgs || []).reverse(),
+                }),
+              });
+            } catch (aiErr) {
+              console.error("AI reply dispatch error:", aiErr);
             }
           }
         }

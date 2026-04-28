@@ -1,4 +1,5 @@
 // GitHub sync confirmed - test commit March 8, 2026 v2
+import { Component, ReactNode } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -49,6 +50,14 @@ import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
 import AlumniVerification from "./pages/AlumniVerification";
 import AlumniVerifications from "./pages/AlumniVerifications";
+import HrDashboard from "./pages/HrDashboard";
+import HrAttendance from "./pages/HrAttendance";
+import HrLeaveManagement from "./pages/HrLeaveManagement";
+import HrEmployeeDirectory from "./pages/HrEmployeeDirectory";
+import FeeCollections from "./pages/FeeCollections";
+import ParentPortal from "./pages/ParentPortal";
+import StudentPortalPage from "./pages/StudentPortal";
+import PaymentPortal from "./pages/PaymentPortal";
 // IB Academics pages
 import ProgrammeOfInquiry from "./pages/ib/ProgrammeOfInquiry";
 import UnitPlanner from "./pages/ib/UnitPlanner";
@@ -68,7 +77,30 @@ import InterdisciplinaryUnits from "./pages/ib/InterdisciplinaryUnits";
 
 const queryClient = new QueryClient();
 
+class AppErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-screen gap-4 p-8 bg-background">
+          <p className="text-lg font-semibold text-destructive">Something went wrong</p>
+          <pre className="text-xs text-muted-foreground bg-muted rounded-lg p-4 max-w-2xl overflow-auto">{this.state.error.message}{"\n"}{this.state.error.stack}</pre>
+          <button className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm" onClick={() => { this.setState({ error: null }); window.location.href = "/"; }}>
+            Go to Home
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const App = () => (
+  <AppErrorBoundary>
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
@@ -86,12 +118,29 @@ const App = () => (
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/terms" element={<TermsOfService />} />
             <Route path="/alumni-verification" element={<AlumniVerification />} />
+            <Route path="/pay" element={<PaymentPortal />} />
             <Route
               path="/my-applications"
               element={
                 <ApplicantRoute>
                   <ApplicantPortal />
                 </ApplicantRoute>
+              }
+            />
+            <Route
+              path="/parent"
+              element={
+                <ProtectedRoute>
+                  <ParentPortal />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/student"
+              element={
+                <ProtectedRoute>
+                  <StudentPortalPage />
+                </ProtectedRoute>
               }
             />
             <Route
@@ -117,6 +166,11 @@ const App = () => (
                       <Route path="/students/:admissionNo" element={<StudentProfile />} />
                       <Route path="/attendance" element={<Attendance />} />
                       <Route path="/finance" element={<Finance />} />
+                      <Route path="/collections" element={<FeeCollections />} />
+                      <Route path="/hr" element={<HrDashboard />} />
+                      <Route path="/hr-attendance" element={<HrAttendance />} />
+                      <Route path="/hr-leave" element={<HrLeaveManagement />} />
+                      <Route path="/hr-directory" element={<HrEmployeeDirectory />} />
                       <Route path="/admin" element={<AdminPanel />} />
                       <Route path="/consultants" element={<Consultants />} />
                       <Route path="/admission-analytics" element={<AdmissionAnalytics />} />
@@ -162,6 +216,7 @@ const App = () => (
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
+  </AppErrorBoundary>
 );
 
 export default App;

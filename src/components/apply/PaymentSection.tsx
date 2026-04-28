@@ -225,10 +225,10 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
             return;
           }
 
-          // Fallback: verify via EaseBuzz transaction API
+          // Fallback: verify via EaseBuzz transaction API (also updates DB server-side)
           try {
             const { data: verifyData } = await supabase.functions.invoke("easebuzz-payment", {
-              body: { action: "verify-payment", txnid },
+              body: { action: "verify-payment", txnid, application_id: data.application_id },
             });
             if (verifyData?.status?.toLowerCase() === "success") {
               onChange({ payment_status: "paid", payment_ref: verifyData.easepayid || txnid });

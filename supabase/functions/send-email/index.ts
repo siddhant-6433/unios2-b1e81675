@@ -42,6 +42,17 @@ Deno.serve(async (req) => {
 
     const { template_slug, to_email, variables, lead_id, custom_subject, custom_body, cc } = await req.json();
 
+    // Block emails to DNC leads
+    if (lead_id) {
+      const adminCheck = createClient(supabaseUrl, serviceRoleKey);
+      const { data: leadCheck } = await adminCheck.from("leads").select("stage").eq("id", lead_id).single();
+      if (leadCheck?.stage === "dnc") {
+        return new Response(JSON.stringify({ error: "Lead is DNC — email not sent" }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     if (!to_email) {
       return new Response(JSON.stringify({ error: "to_email is required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },

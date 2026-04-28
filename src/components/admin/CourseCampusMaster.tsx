@@ -6,12 +6,14 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Building2, GraduationCap, Pencil, Check, X, Plus, Loader2,
-  ChevronDown, ChevronRight, Shield, MapPin,
+  ChevronDown, ChevronRight, Shield, MapPin, Trash2, Power,
 } from "lucide-react";
 import EligibilityRuleDialog, { EligibilityRuleRow } from "./EligibilityRuleDialog";
+import GeofenceDialog from "./GeofenceDialog";
 
 interface Campus {
   id: string; name: string; code: string; city: string | null; state: string | null; address: string | null;
+  latitude: number | null; longitude: number | null; geofence_radius_meters: number | null;
 }
 interface Institution {
   id: string; name: string; code: string; campus_id: string; type: string;
@@ -54,16 +56,30 @@ export default function CourseCampusMaster() {
   const [ruleDialogOpen, setRuleDialogOpen] = useState(false);
   const [ruleDialogCourse, setRuleDialogCourse] = useState<{ id: string; name: string } | null>(null);
 
+  // Geofence dialog
+  const [geofenceCampus, setGeofenceCampus] = useState<Campus | null>(null);
+
+  // Custom geofence locations
+  interface CustomGeofence {
+    id: string; name: string; description: string | null;
+    latitude: number; longitude: number; radius_meters: number;
+    is_active: boolean;
+  }
+  const [customGeofences, setCustomGeofences] = useState<CustomGeofence[]>([]);
+  const [addingCustom, setAddingCustom] = useState(false);
+  const [editingCustomGeofence, setEditingCustomGeofence] = useState<CustomGeofence | null>(null);
+
   useEffect(() => { fetchAll(); }, []);
 
   const fetchAll = async () => {
     setLoading(true);
-    const [c, i, d, co, er] = await Promise.all([
+    const [c, i, d, co, er, cg] = await Promise.all([
       supabase.from("campuses").select("*").order("name"),
       supabase.from("institutions").select("*").order("name"),
       supabase.from("departments").select("*").order("name"),
       supabase.from("courses").select("*").order("name"),
       supabase.from("eligibility_rules").select("*"),
+      supabase.from("geofence_locations").select("*").order("name"),
     ]);
     if (c.data) setCampuses(c.data);
     if (i.data) setInstitutions(i.data);
@@ -74,6 +90,7 @@ export default function CourseCampusMaster() {
       for (const row of er.data as unknown as EligibilityRuleRow[]) map[row.course_id] = row;
       setEligibilityRules(map);
     }
+    if (cg.data) setCustomGeofences(cg.data as CustomGeofence[]);
     setLoading(false);
   };
 
@@ -410,6 +427,18 @@ export default function CourseCampusMaster() {
                 {(campus.city || campus.state) && (
                   <span className="text-xs text-muted-foreground">{[campus.city, campus.state].filter(Boolean).join(", ")}</span>
                 )}
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setGeofenceCampus(campus); }}
+                  className={`relative z-10 flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1 rounded-lg cursor-pointer border transition-colors ${
+                    campus.latitude
+                      ? "bg-pastel-green border-green-200 text-green-800 hover:bg-green-100"
+                      : "bg-pastel-yellow border-yellow-200 text-yellow-800 hover:bg-yellow-100"
+                  }`}
+                >
+                  <MapPin className="h-3 w-3" />
+                  {campus.latitude ? `Geofence: ${campus.geofence_radius_meters || 500}m` : "Set Geofence"}
+                </button>
                 <span className="text-xs text-muted-foreground">— no institutions</span>
               </div>
             </div>
@@ -427,6 +456,18 @@ export default function CourseCampusMaster() {
                   {[campus.city, campus.state].filter(Boolean).join(", ")}
                 </span>
               )}
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setGeofenceCampus(campus); }}
+                className={`relative z-10 flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1 rounded-lg cursor-pointer border transition-colors ${
+                  campus.latitude
+                    ? "bg-pastel-green border-green-200 text-green-800 hover:bg-green-100"
+                    : "bg-pastel-yellow border-yellow-200 text-yellow-800 hover:bg-yellow-100"
+                }`}
+              >
+                <MapPin className="h-3 w-3" />
+                {campus.latitude ? `Geofence: ${campus.geofence_radius_meters || 500}m` : "Set Geofence"}
+              </button>
             </div>
             {/* Institution cards */}
             {campusInstitutions.map(inst => renderInstitutionCard(inst, campus))}
@@ -442,11 +483,125 @@ export default function CourseCampusMaster() {
         </div>
       )}
 
+      {/* Additional Geofence Locations */}
+      <div className="space-y-3 pt-4 border-t border-border/60">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Additional Geofence Locations</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">Satellite offices, event venues, or partner locations where employees can punch in</p>
+          </div>
+          <Button onClick={() => setAddingCustom(true)} size="sm" variant="outline" className="gap-1.5 rounded-xl">
+            <Plus className="h-3.5 w-3.5" /> Add Location
+          </Button>
+        </div>
+
+        {/* Add form */}
+        {addingCustom && (
+          <CustomGeofenceForm
+            onSave={async (data) => {
+              const { error } = await supabase.from("geofence_locations").insert(data);
+              if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+              toast({ title: "Location added" });
+              setAddingCustom(false);
+              fetchAll();
+            }}
+            onCancel={() => setAddingCustom(false)}
+          />
+        )}
+
+        {/* Edit form */}
+        {editingCustomGeofence && (
+          <CustomGeofenceForm
+            initial={editingCustomGeofence}
+            onSave={async (data) => {
+              const { error } = await supabase.from("geofence_locations").update(data).eq("id", editingCustomGeofence.id);
+              if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+              toast({ title: "Location updated" });
+              setEditingCustomGeofence(null);
+              fetchAll();
+            }}
+            onCancel={() => setEditingCustomGeofence(null)}
+          />
+        )}
+
+        {/* List */}
+        {customGeofences.length === 0 && !addingCustom ? (
+          <div className="rounded-xl border border-dashed border-border py-8 text-center">
+            <MapPin className="h-6 w-6 text-muted-foreground/30 mx-auto mb-2" />
+            <p className="text-sm text-muted-foreground">No additional locations configured</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {customGeofences.map((loc) => (
+              <Card key={loc.id} className="border-border/60">
+                <CardContent className="p-4 flex items-center gap-3">
+                  <div className={`flex h-9 w-9 items-center justify-center rounded-lg shrink-0 ${loc.is_active ? "bg-pastel-green" : "bg-muted"}`}>
+                    <MapPin className={`h-4 w-4 ${loc.is_active ? "text-green-700" : "text-muted-foreground"}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-foreground">{loc.name}</span>
+                      {!loc.is_active && (
+                        <Badge className="text-[9px] border-0 bg-muted text-muted-foreground">Disabled</Badge>
+                      )}
+                    </div>
+                    {loc.description && <p className="text-xs text-muted-foreground truncate">{loc.description}</p>}
+                    <p className="text-[10px] text-muted-foreground font-mono mt-0.5">
+                      {loc.latitude.toFixed(4)}, {loc.longitude.toFixed(4)} · {loc.radius_meters}m
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => setEditingCustomGeofence(loc)}
+                      className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-muted transition-colors"
+                      title="Edit"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={async () => {
+                        await supabase.from("geofence_locations").update({ is_active: !loc.is_active }).eq("id", loc.id);
+                        fetchAll();
+                      }}
+                      className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                      title={loc.is_active ? "Disable" : "Enable"}
+                    >
+                      <Power className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!confirm(`Delete "${loc.name}"?`)) return;
+                        await supabase.from("geofence_locations").delete().eq("id", loc.id);
+                        fetchAll();
+                      }}
+                      className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                      title="Delete"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Empty state */}
       {campuses.length === 0 && institutions.length === 0 && (
         <div className="text-center py-16 text-muted-foreground text-sm">
           No campuses or institutions found. Click <strong>Add Campus</strong> to get started.
         </div>
+      )}
+
+      {/* Geofence Dialog */}
+      {geofenceCampus && (
+        <GeofenceDialog
+          open={!!geofenceCampus}
+          onClose={() => setGeofenceCampus(null)}
+          campus={geofenceCampus}
+          onSaved={fetchAll}
+        />
       )}
 
       {/* Eligibility Rule Dialog */}
@@ -461,5 +616,79 @@ export default function CourseCampusMaster() {
         />
       )}
     </div>
+  );
+}
+
+// ── Inline form for custom geofence locations ──
+function CustomGeofenceForm({ initial, onSave, onCancel }: {
+  initial?: { name: string; description: string | null; latitude: number; longitude: number; radius_meters: number };
+  onSave: (data: { name: string; description: string | null; latitude: number; longitude: number; radius_meters: number }) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(initial?.name || "");
+  const [description, setDescription] = useState(initial?.description || "");
+  const [coords, setCoords] = useState(
+    initial ? `${initial.latitude}, ${initial.longitude}` : ""
+  );
+  const [radius, setRadius] = useState(initial?.radius_meters || 200);
+  const [saving, setSaving] = useState(false);
+
+  const parsedCoords = coords.match(/(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)/);
+  const isValid = name.trim() && parsedCoords;
+
+  const handleSubmit = async () => {
+    if (!parsedCoords) return;
+    setSaving(true);
+    await onSave({
+      name: name.trim(),
+      description: description.trim() || null,
+      latitude: parseFloat(parsedCoords[1]),
+      longitude: parseFloat(parsedCoords[2]),
+      radius_meters: radius,
+    });
+    setSaving(false);
+  };
+
+  const inputCls = "rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
+
+  return (
+    <Card className="border-primary/30">
+      <CardContent className="p-4 space-y-3">
+        <p className="text-sm font-semibold text-foreground">{initial ? "Edit Location" : "New Location"}</p>
+        <div className="grid grid-cols-2 gap-3">
+          <input placeholder="Location name *" value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
+          <input placeholder="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} className={inputCls} />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <input
+              placeholder="Paste coordinates: 28.467, 77.508"
+              value={coords}
+              onChange={(e) => setCoords(e.target.value)}
+              className={`${inputCls} w-full font-mono`}
+            />
+            <p className="text-[10px] text-muted-foreground mt-1">Right-click Google Maps → copy coordinates</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="range" min="50" max="2000" step="50"
+              value={radius}
+              onChange={(e) => setRadius(parseInt(e.target.value))}
+              className="flex-1 accent-primary"
+            />
+            <span className="text-sm font-mono text-foreground w-14 text-right">{radius}m</span>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <Button onClick={handleSubmit} size="sm" disabled={!isValid || saving} className="gap-1 h-8 rounded-lg">
+            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+            {initial ? "Update" : "Add"}
+          </Button>
+          <Button onClick={onCancel} size="sm" variant="ghost" className="h-8 rounded-lg">
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

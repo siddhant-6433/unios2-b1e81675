@@ -133,6 +133,7 @@ export function NotificationPanel() {
       .from("notifications" as any)
       .select("*")
       .eq("user_id", user.id)
+      .neq("type", "whatsapp_message")
       .order("created_at", { ascending: false })
       .limit(50);
     setNotifications((data || []) as any);
@@ -160,6 +161,7 @@ export function NotificationPanel() {
         },
         (payload: any) => {
           const newNotif = payload.new as Notification;
+          if (newNotif.type === "whatsapp_message") return;
           setNotifications((prev) => [newNotif, ...prev]);
           setUnreadCount((prev) => prev + 1);
 

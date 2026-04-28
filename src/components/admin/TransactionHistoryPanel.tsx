@@ -106,6 +106,8 @@ export default function TransactionHistoryPanel() {
   const [errorStudent, setErrorStudent]   = useState<string | null>(null);
   const [receipt, setReceipt]             = useState<ReceiptData | null>(null);
   const [togglingId, setTogglingId]       = useState<string | null>(null);
+  const [reconciling, setReconciling]     = useState(false);
+  const [reconcileResult, setReconcileResult] = useState<string | null>(null);
 
   const { selectedCampusId } = useCampus();
 
@@ -156,6 +158,25 @@ export default function TransactionHistoryPanel() {
   };
 
   useEffect(() => { fetchAppTxns(); fetchStudentPmts(); }, []);
+
+  // ── Reconcile pending payments ──────────────────────────────────────────────
+  const reconcilePending = async () => {
+    setReconciling(true);
+    setReconcileResult(null);
+    let updated = 0;
+    const pending = appTxns.filter((t) => t.payment_status === "pending" && t.fee_amount > 0);
+    for (const txn of pending) {
+      try {
+        const { data } = await supabase.functions.invoke("easebuzz-payment", {
+          body: { action: "verify-payment", txnid: `EB${txn.application_id.replace(/[^a-zA-Z0-9]/g, "")}`, application_id: txn.application_id },
+        });
+        if (data?.status?.toLowerCase() === "success") updated++;
+      } catch (_) { /* skip */ }
+    }
+    setReconcileResult(`Reconciled ${updated} of ${pending.length} pending payments`);
+    if (updated > 0) fetchAppTxns();
+    setReconciling(false);
+  };
 
   // ── Applicant type toggle (BSAV only) ──────────────────────────────────────
 
@@ -416,6 +437,18 @@ export default function TransactionHistoryPanel() {
           <RefreshCw className="h-4 w-4" />
         </button>
 
+        {tab === "applications" && appStats.pendingCount > 0 && (
+          <button
+            onClick={reconcilePending}
+            disabled={reconciling}
+            className="flex items-center gap-2 rounded-xl border border-input bg-card px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+            title="Verify pending payments with EaseBuzz"
+          >
+            {reconciling ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+            Reconcile Pending
+          </button>
+        )}
+
         <button
           onClick={tab === "applications" ? exportAppCSV : exportStudentCSV}
           className="flex items-center gap-2 rounded-xl border border-input bg-card px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
@@ -423,6 +456,13 @@ export default function TransactionHistoryPanel() {
           <Download className="h-4 w-4" /> Export CSV
         </button>
       </div>
+
+      {reconcileResult && (
+        <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 rounded-xl px-4 py-2 border border-green-200">
+          <CheckCircle2 className="h-4 w-4" />
+          {reconcileResult}
+        </div>
+      )}
 
       {/* ── Application Fee Table ── */}
       {tab === "applications" && (

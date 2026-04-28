@@ -123,11 +123,23 @@ Deno.serve(async (req) => {
       if (r.status === "completed") stats[r.lead_id].completed++;
     }
 
-    const retryInserts: any[] = [];
-    for (const [lid, s] of Object.entries(stats)) {
-      if (s.total < 3 && s.completed === 0 && !pendingSet.has(lid)) {
-        retryInserts.push({ lead_id: lid, status: "pending", scheduled_at: new Date(Date.now() + 4 * 3600000).toISOString() });
-      }
+    // Filter out leads in terminal stages before retrying
+    const TERMINAL_STAGES = ["not_interested", "dnc", "rejected", "ineligible", "admitted"];
+    const candidateIds = Object.entries(stats)
+      .filter(([lid, s]) => s.total < 3 && s.completed === 0 && !pendingSet.has(lid))
+      .map(([lid]) => lid);
+
+    let retryInserts: any[] = [];
+    if (candidateIds.length > 0) {
+      const { data: activeLeads } = await db
+        .from("leads")
+        .select("id, stage")
+        .in("id", candidateIds)
+        .not("stage", "in", `(${TERMINAL_STAGES.join(",")})`);
+      const activeSet = new Set((activeLeads || []).map((l: any) => l.id));
+      retryInserts = candidateIds
+        .filter(lid => activeSet.has(lid))
+        .map(lid => ({ lead_id: lid, status: "pending", scheduled_at: new Date(Date.now() + 4 * 3600000).toISOString() }));
     }
     for (let i = 0; i < retryInserts.length; i += 100) {
       await db.from("ai_call_queue").insert(retryInserts.slice(i, i + 100));

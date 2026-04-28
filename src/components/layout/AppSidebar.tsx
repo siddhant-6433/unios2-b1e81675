@@ -5,7 +5,8 @@ import {
   ClipboardCheck, Settings, LogOut,
   BookOpen, BarChart3, FileText, Search, Shuffle, Handshake, PieChart,
   ChevronDown, Phone, Calendar, MessageSquare, Newspaper, Building2, School, ShieldCheck, Zap, Inbox,
-  Globe, FolderOpen, Heart, Award, Target, GitMerge, Bot, Gift, AlertTriangle, Sparkles
+  Globe, FolderOpen, Heart, Award, Target, GitMerge, Bot, Gift, AlertTriangle, Sparkles, Receipt,
+  Briefcase, CalendarOff, UserCheck, Fingerprint,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -36,6 +37,7 @@ const mainMenu: MenuItem[] = [
   { title: "Attendance", url: "/attendance", icon: ClipboardCheck, permission: "attendance:view" },
   { title: "Exams", url: "/exams", icon: BookOpen, permission: "exams:view" },
   { title: "Finance", url: "/finance", icon: IndianRupee, permission: "finance:view" },
+  { title: "Collections", url: "/collections", icon: Receipt, permission: "finance:view" },
   { title: "Refer & Earn", url: "/referrals", icon: Gift, permission: "referrals:view" },
   { title: "Reports", url: "/reports", icon: BarChart3, permission: "reports:view" },
 ];
@@ -70,6 +72,13 @@ const ibAcademicsSubMenu: MenuItem[] = [
   { title: "Exhibition",           url: "/ib/exhibition", icon: Award,      permission: "ib_exhibition:view" },
   { title: "MYP Projects",         url: "/ib/projects",   icon: Target,     permission: "ib_projects:view" },
   { title: "IDU",                   url: "/ib/idu",       icon: GitMerge,   permission: "ib_idu:view" },
+];
+
+const hrSubMenu: MenuItem[] = [
+  { title: "HR Overview", url: "/hr", icon: Briefcase, permission: "hr:view" },
+  { title: "Attendance", url: "/hr-attendance", icon: Fingerprint, permission: "hr:view" },
+  { title: "Leave Mgmt", url: "/hr-leave", icon: CalendarOff, permission: "hr:view" },
+  { title: "Directory", url: "/hr-directory", icon: Users, permission: "hr:view" },
 ];
 
 const managementMenu: MenuItem[] = [
@@ -250,9 +259,11 @@ export function AppSidebar() {
   }
   );
   const visibleIB = ibAcademicsSubMenu.filter(canSee);
+  const visibleHr = hrSubMenu.filter(canSee);
   const visibleMgmt = managementMenu.filter(canSee);
   const isAdmissionActive = admissionSubMenu.some(item => isActive(item.url));
   const isIBActive = ibAcademicsSubMenu.some(item => isActive(item.url) || location.pathname.startsWith("/ib/"));
+  const isHrActive = hrSubMenu.some(item => isActive(item.url) || location.pathname.startsWith("/hr"));
 
   // IB Academics only shows when Mirai campus is selected (or "all" for super_admin)
   const isMiraiContext = selectedCampusId === "all" || campuses.find(c => c.id === selectedCampusId)?.name?.toLowerCase().includes("mirai");
@@ -374,6 +385,39 @@ export function AppSidebar() {
                     <CollapsibleContent>
                       <SidebarMenuSub>
                         {visibleIB.map((item) => (
+                          <SidebarMenuSubItem key={item.title}>
+                            <SidebarMenuSubButton asChild isActive={isActive(item.url)}>
+                              <NavLink to={item.url} className={subLinkClass} activeClassName={activeClass}>
+                                <item.icon className="h-3.5 w-3.5" />
+                                <span>{item.title}</span>
+                              </NavLink>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        ))}
+                      </SidebarMenuSub>
+                    </CollapsibleContent>
+                  </SidebarMenuItem>
+                </Collapsible>
+              )}
+
+              {/* HR */}
+              {visibleHr.length > 0 && (
+                <Collapsible defaultOpen={isHrActive} className="group/collapsible">
+                  <SidebarMenuItem>
+                    <CollapsibleTrigger asChild>
+                      <SidebarMenuButton className={`${linkClass} justify-between`} isActive={isHrActive}>
+                        <span className="flex items-center gap-3">
+                          <Briefcase className="h-[17px] w-[17px]" />
+                          {!collapsed && <span>HR</span>}
+                        </span>
+                        {!collapsed && (
+                          <ChevronDown className="h-3.5 w-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                        )}
+                      </SidebarMenuButton>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <SidebarMenuSub>
+                        {visibleHr.map((item) => (
                           <SidebarMenuSubItem key={item.title}>
                             <SidebarMenuSubButton asChild isActive={isActive(item.url)}>
                               <NavLink to={item.url} className={subLinkClass} activeClassName={activeClass}>

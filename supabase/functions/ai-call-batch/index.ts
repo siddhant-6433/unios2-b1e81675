@@ -40,12 +40,13 @@ Deno.serve(async (req) => {
     const { lead_ids } = await req.json();
     if (!lead_ids?.length) return json({ error: "lead_ids required" }, 400);
 
-    // Filter leads that have phone numbers
+    // Filter leads that have phone numbers and are not in terminal stages
     const { data: validLeads } = await db
       .from("leads")
-      .select("id, phone")
+      .select("id, phone, stage")
       .in("id", lead_ids)
-      .not("phone", "is", null);
+      .not("phone", "is", null)
+      .not("stage", "in", '("not_interested","dnc","rejected","ineligible")');
 
     const validIds = (validLeads || []).filter((l: any) => l.phone?.trim()).map((l: any) => l.id);
     const skipped = lead_ids.length - validIds.length;

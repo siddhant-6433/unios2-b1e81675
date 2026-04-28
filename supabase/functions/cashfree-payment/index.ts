@@ -117,6 +117,23 @@ Deno.serve(async (req) => {
         );
       }
 
+      // If paid, also update the application in DB (belt-and-suspenders with webhook)
+      if (data.order_status === "PAID") {
+        const match = order_id.match(/^APP_(.+)_\d+$/);
+        const applicationId = match ? match[1].replace(/_/g, "-") : "";
+        if (applicationId) {
+          const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
+          const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+          const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+          const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+          await admin
+            .from("applications")
+            .update({ payment_status: "paid", payment_ref: order_id })
+            .eq("application_id", applicationId);
+          console.log("[cashfree] verify-payment: updated application", applicationId, "to paid");
+        }
+      }
+
       return new Response(
         JSON.stringify({
           order_id: data.order_id,
@@ -131,6 +148,40 @@ Deno.serve(async (req) => {
     // Cashfree POSTs payment notifications here (notify_url above)
     if (action === undefined && req.method === "POST") {
       console.log("[cashfree] webhook:", rawBody);
+
+      try {
+        const webhook = JSON.parse(rawBody);
+        const orderData = webhook?.data?.order;
+        const paymentData = webhook?.data?.payment;
+
+        if (orderData && orderData.order_status === "PAID") {
+          const orderId = orderData.order_id || "";
+          // Extract application_id from order_id: APP_{application_id}_timestamp
+          const match = orderId.match(/^APP_(.+)_\d+$/);
+          const applicationId = match ? match[1].replace(/_/g, "-") : "";
+          const paymentRef = paymentData?.cf_payment_id || orderId;
+
+          if (applicationId) {
+            const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
+            const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+            const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+            const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+
+            const { data: updated, error: dbErr } = await admin
+              .from("applications")
+              .update({ payment_status: "paid", payment_ref: paymentRef })
+              .eq("application_id", applicationId)
+              .select("application_id, payment_status");
+
+            console.log("[cashfree] webhook DB update:", JSON.stringify({ updated, dbErr, applicationId, paymentRef }));
+          } else {
+            console.error("[cashfree] webhook: could not extract application_id from order_id:", orderId);
+          }
+        }
+      } catch (e) {
+        console.error("[cashfree] webhook parse error:", e);
+      }
+
       return new Response("ok", { status: 200, headers: corsHeaders });
     }
 

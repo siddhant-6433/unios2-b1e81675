@@ -3,6 +3,12 @@ import { X, Download, Loader2, Printer } from "lucide-react";
 
 // ── Receipt data shape ────────────────────────────────────────────────────────
 
+export interface FeeLineItem {
+  fee_head: string;
+  amount: number;
+  status?: string;
+}
+
 export interface ReceiptData {
   type: "application_fee" | "student_fee";
   // Application fee
@@ -14,15 +20,22 @@ export interface ReceiptData {
   receipt_no?: string;
   student_name?: string;
   admission_no?: string;
+  roll_no?: string;
+  course_name?: string;
+  semester?: string;
   payment_mode?: string;
   fee_description?: string;
   recorded_by?: string;
+  line_items?: FeeLineItem[];
   // Common
   amount: number;
   payment_ref?: string | null;
   payment_date: string;
   institution_name?: string;
+  institution_address?: string;
+  institution_pan?: string;
   campus_name?: string;
+  contact_email?: string;
   // Branding
   logo?: string;
   primaryColor?: string;
@@ -40,6 +53,7 @@ function ReceiptContent({ d }: { d: ReceiptData }) {
       day: "2-digit", month: "long", year: "numeric",
       hour: "2-digit", minute: "2-digit", hour12: true,
     });
+  const hasLineItems = d.line_items && d.line_items.length > 0;
 
   return (
     <div
@@ -71,26 +85,19 @@ function ReceiptContent({ d }: { d: ReceiptData }) {
             )}
           </div>
           {d.logo && d.campus_name && <p style={{ margin: "4px 0 0", fontSize: "11px", color: "#64748b" }}>{d.campus_name}</p>}
+          {d.institution_address && <p style={{ margin: "4px 0 0", fontSize: "10px", color: "#94a3b8" }}>{d.institution_address}</p>}
+          {d.institution_pan && <p style={{ margin: "2px 0 0", fontSize: "10px", color: "#94a3b8" }}>PAN: {d.institution_pan}</p>}
         </div>
         <div style={{ textAlign: "right" }}>
-          <p style={{ margin: 0, fontSize: "20px", fontWeight: 800, color, textTransform: "uppercase", letterSpacing: "1px" }}>
-            {isApp ? "Application Receipt" : "Payment Receipt"}
+          <p style={{ margin: 0, fontSize: "18px", fontWeight: 800, color, textTransform: "uppercase", letterSpacing: "1px" }}>
+            {isApp ? "Application Receipt" : "FEE RECEIPT"}
           </p>
           <p style={{ margin: "4px 0 0", fontSize: "11px", color: "#94a3b8" }}>
             {isApp ? `Application ID: ${d.application_id}` : `Receipt No: ${d.receipt_no || "—"}`}
           </p>
-        </div>
-      </div>
-
-      {/* Date */}
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "24px" }}>
-        <div>
-          <p style={{ margin: 0, fontSize: "11px", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px" }}>Date & Time</p>
-          <p style={{ margin: "3px 0 0", fontSize: "13px", fontWeight: 600 }}>{fmtDate(d.payment_date)}</p>
-        </div>
-        <div style={{ textAlign: "right" }}>
-          <p style={{ margin: 0, fontSize: "11px", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px" }}>Status</p>
-          <p style={{ margin: "3px 0 0", fontSize: "13px", fontWeight: 700, color: "#16a34a" }}>✓ PAID</p>
+          <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#94a3b8" }}>
+            Date: {new Date(d.payment_date).toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" })}
+          </p>
         </div>
       </div>
 
@@ -110,36 +117,81 @@ function ReceiptContent({ d }: { d: ReceiptData }) {
               </>
             ) : (
               <>
-                <Row label="Name" value={d.student_name} />
+                <Row label="Student" value={d.student_name} />
+                {d.roll_no && <Row label="Roll No" value={d.roll_no} mono />}
                 {d.admission_no && <Row label="Admission No" value={d.admission_no} mono />}
-                {d.fee_description && <Row label="Fee Head" value={d.fee_description} />}
-                {d.payment_mode && <Row label="Payment Mode" value={d.payment_mode.replace("_", " ").toUpperCase()} />}
-                {d.recorded_by && <Row label="Recorded By" value={d.recorded_by} />}
+                {d.course_name && <Row label="Course" value={d.course_name} />}
+                {d.semester && <Row label="Semester" value={d.semester} />}
+                {d.campus_name && <Row label="Campus" value={d.campus_name} />}
               </>
             )}
           </tbody>
         </table>
       </div>
 
-      {/* Amount */}
-      <div style={{ background: color, borderRadius: "10px", padding: "16px 20px", marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ color: "#c7d2fe", fontSize: "13px", fontWeight: 600 }}>Amount Paid</span>
-        <span style={{ color: "#fff", fontSize: "24px", fontWeight: 800 }}>₹{fmt(d.amount)}</span>
-      </div>
-
-      {/* Transaction Ref */}
-      {d.payment_ref && (
-        <div style={{ marginBottom: "20px", padding: "12px 16px", border: "1px solid #e2e8f0", borderRadius: "8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: "11px", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px" }}>Transaction Reference</span>
-          <span style={{ fontSize: "12px", fontFamily: "monospace", fontWeight: 600, color: "#334155" }}>{d.payment_ref}</span>
+      {/* Fee line items table */}
+      {hasLineItems && (
+        <div style={{ marginBottom: "20px", border: "1px solid #e2e8f0", borderRadius: "10px", overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "#f8fafc" }}>
+                <th style={{ padding: "10px 16px", fontSize: "11px", fontWeight: 700, color: "#64748b", textAlign: "left", textTransform: "uppercase", letterSpacing: "0.5px" }}>Fee Head</th>
+                <th style={{ padding: "10px 16px", fontSize: "11px", fontWeight: 700, color: "#64748b", textAlign: "right", textTransform: "uppercase", letterSpacing: "0.5px" }}>Amount</th>
+                <th style={{ padding: "10px 16px", fontSize: "11px", fontWeight: 700, color: "#64748b", textAlign: "center", textTransform: "uppercase", letterSpacing: "0.5px" }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.line_items!.map((item, i) => (
+                <tr key={i} style={{ borderTop: "1px solid #e2e8f0" }}>
+                  <td style={{ padding: "10px 16px", fontSize: "12px", fontWeight: 500, color: "#1e293b" }}>{item.fee_head}</td>
+                  <td style={{ padding: "10px 16px", fontSize: "12px", fontWeight: 600, color: "#1e293b", textAlign: "right" }}>₹{fmt(item.amount)}</td>
+                  <td style={{ padding: "10px 16px", fontSize: "11px", fontWeight: 600, color: "#16a34a", textAlign: "center" }}>{item.status || "Paid"}</td>
+                </tr>
+              ))}
+              <tr style={{ borderTop: "2px solid #e2e8f0", background: "#f8fafc" }}>
+                <td style={{ padding: "12px 16px", fontSize: "13px", fontWeight: 700, color: "#1e293b" }}>TOTAL</td>
+                <td style={{ padding: "12px 16px", fontSize: "13px", fontWeight: 800, color: "#1e293b", textAlign: "right" }}>₹{fmt(d.amount)}</td>
+                <td />
+              </tr>
+            </tbody>
+          </table>
         </div>
       )}
 
+      {/* Amount (single line — shown when no line items) */}
+      {!hasLineItems && (
+        <div style={{ background: color, borderRadius: "10px", padding: "16px 20px", marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ color: "#c7d2fe", fontSize: "13px", fontWeight: 600 }}>Amount Paid</span>
+          <span style={{ color: "#fff", fontSize: "24px", fontWeight: 800 }}>₹{fmt(d.amount)}</span>
+        </div>
+      )}
+
+      {/* Payment method + Transaction Ref */}
+      <div style={{ marginBottom: "20px", display: "flex", gap: "12px" }}>
+        {d.payment_mode && (
+          <div style={{ flex: 1, padding: "12px 16px", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
+            <span style={{ fontSize: "11px", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px", display: "block" }}>Payment Method</span>
+            <span style={{ fontSize: "12px", fontWeight: 600, color: "#334155", marginTop: "2px", display: "block" }}>{d.payment_mode.replace("_", " ").toUpperCase()}</span>
+          </div>
+        )}
+        {d.payment_ref && (
+          <div style={{ flex: 1, padding: "12px 16px", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
+            <span style={{ fontSize: "11px", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px", display: "block" }}>Transaction Ref</span>
+            <span style={{ fontSize: "12px", fontFamily: "monospace", fontWeight: 600, color: "#334155", marginTop: "2px", display: "block" }}>{d.payment_ref}</span>
+          </div>
+        )}
+      </div>
+
       {/* Footer */}
       <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <p style={{ margin: 0, fontSize: "10px", color: "#94a3b8" }}>
-          This is a computer-generated receipt and does not require a signature.
-        </p>
+        <div>
+          <p style={{ margin: 0, fontSize: "10px", color: "#94a3b8" }}>
+            This is a computer-generated receipt.
+          </p>
+          {d.contact_email && (
+            <p style={{ margin: "2px 0 0", fontSize: "10px", color: "#94a3b8" }}>For queries: {d.contact_email}</p>
+          )}
+        </div>
         <p style={{ margin: 0, fontSize: "10px", color, fontWeight: 600 }}>unios.nimt.ac.in</p>
       </div>
     </div>
