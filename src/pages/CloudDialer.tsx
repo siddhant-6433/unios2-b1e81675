@@ -10,6 +10,7 @@ import {
   Loader2, CheckCircle, XCircle, PhoneMissed, Users, BarChart3,
   Calendar, AlertCircle, Volume2,
 } from "lucide-react";
+import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -19,20 +20,12 @@ interface QueueLead {
   phone: string;
   stage: string;
   source: string;
+  course_id: string | null;
   course_name: string;
   campus_name: string;
-  counsellor_name: string; // bucket label in smart queue
+  bucket: string; // bucket label in smart queue
   attempt_count: number;
-  // Course details for script
   course_fee?: string;
-  course_fee_total?: string;
-  course_fee_notes?: string;
-  course_eligibility?: string;
-  course_duration?: string;
-  course_entrance?: string;
-  course_entrance_mandatory?: boolean;
-  course_highlights?: string;
-  course_careers?: string;
 }
 
 interface CallState {
@@ -147,13 +140,13 @@ export default function CloudDialer() {
       const todayFu = (r4.data || []).map((r: any) => ({ id: r.lead_id, name: (r.leads as any)?.name || "", phone: (r.leads as any)?.phone || "" }));
       const newLeads = (r5.data || []).map((r: any) => ({ id: r.id, name: r.name, phone: r.phone }));
 
-      add(postVisit, "Visit Checkin");
+      add(postVisit, "Post-Visit");
       add(visitConf, "Visit Checkin");
       add(overdue, "Overdue");
       add(todayFu, "Today");
       add(newLeads, "New Lead");
 
-      if (postVisit.length) buckets.push({ key: "post_visit", label: "Visit Checkin", color: "bg-amber-500", count: postVisit.length });
+      if (postVisit.length) buckets.push({ key: "post_visit", label: "Post-Visit", color: "bg-amber-500", count: postVisit.length });
       if (visitConf.length) buckets.push({ key: "visit_confirm", label: "Visit Checkin", color: "bg-violet-500", count: visitConf.length });
       if (overdue.length) buckets.push({ key: "overdue", label: "Overdue", color: "bg-red-500", count: overdue.length });
       if (todayFu.length) buckets.push({ key: "today", label: "Today", color: "bg-blue-500", count: todayFu.length });
@@ -179,11 +172,11 @@ export default function CloudDialer() {
     const attemptMap: Record<string, number> = {};
 
     if (leadIds.length > 0) {
-      // Batch fetch lead details with course info for script
+      // Batch fetch lead details
       for (let i = 0; i < leadIds.length; i += 50) {
         const batch = leadIds.slice(i, i + 50);
         const { data } = await supabase.from("leads")
-          .select("id, name, phone, stage, source, courses:course_id(name, fee_per_year, fee_total, fee_notes, eligibility, entrance_exam, entrance_mandatory, duration_years, highlights, career_options), campuses:campus_id(name)")
+          .select("id, name, phone, stage, source, course_id, courses:course_id(name, fee_per_year), campuses:campus_id(name)")
           .in("id", batch);
         (data || []).forEach((l: any) => { detailMap[l.id] = l; });
       }
@@ -199,17 +192,10 @@ export default function CloudDialer() {
       return {
         id: l.id, name: d.name || l.name || "Unknown", phone: d.phone || l.phone || "",
         stage: d.stage || "", source: d.source || "",
+        course_id: d.course_id || null,
         course_name: c.name || "—", campus_name: d.campuses?.name || "—",
-        counsellor_name: l.bucket, attempt_count: attemptMap[l.id] || 0,
+        bucket: l.bucket, attempt_count: attemptMap[l.id] || 0,
         course_fee: c.fee_per_year ? `₹${Number(c.fee_per_year).toLocaleString("en-IN")}/year` : undefined,
-        course_fee_total: c.fee_total ? `₹${Number(c.fee_total).toLocaleString("en-IN")} total` : undefined,
-        course_fee_notes: c.fee_notes || undefined,
-        course_eligibility: c.eligibility || undefined,
-        course_duration: c.duration_years ? `${c.duration_years} year${c.duration_years > 1 ? "s" : ""}` : undefined,
-        course_entrance: c.entrance_exam || undefined,
-        course_entrance_mandatory: c.entrance_mandatory ?? false,
-        course_highlights: Array.isArray(c.highlights) ? c.highlights.join(" | ") : c.highlights || undefined,
-        course_careers: c.career_options || undefined,
       };
     }).filter(l => l.phone);
 
@@ -493,12 +479,13 @@ export default function CloudDialer() {
                 <p className="text-[10px] text-muted-foreground">{lead.course_name} · {lead.phone.slice(-4)}</p>
                 <div className="flex items-center gap-1.5 mt-1">
                   <Badge className={`text-[9px] border-0 ${
-                    lead.counsellor_name === "Visit Checkin" ? "bg-amber-100 text-amber-700" :
-                    lead.counsellor_name === "Overdue" ? "bg-red-100 text-red-700" :
-                    lead.counsellor_name === "Today" ? "bg-blue-100 text-blue-700" :
-                    lead.counsellor_name === "New Lead" ? "bg-orange-100 text-orange-700" :
+                    lead.bucket === "Post-Visit" ? "bg-amber-200 text-amber-800 animate-pulse" :
+                    lead.bucket === "Visit Checkin" ? "bg-violet-100 text-violet-700" :
+                    lead.bucket === "Overdue" ? "bg-red-100 text-red-700" :
+                    lead.bucket === "Today" ? "bg-blue-100 text-blue-700" :
+                    lead.bucket === "New Lead" ? "bg-orange-100 text-orange-700" :
                     "bg-gray-100 text-gray-600"
-                  }`}>{lead.counsellor_name}</Badge>
+                  }`}>{lead.bucket}</Badge>
                   {lead.attempt_count > 0 && <Badge className="text-[9px] border-0 bg-gray-100 text-gray-500">{lead.attempt_count}x</Badge>}
                   {idx < currentIdx && <CheckCircle className="h-3 w-3 text-emerald-500 ml-auto" />}
                 </div>
@@ -556,7 +543,7 @@ export default function CloudDialer() {
                       </div>
                       <div>
                         <span className="text-muted-foreground">Bucket</span>
-                        <p className="font-medium text-foreground">{currentLead.counsellor_name}</p>
+                        <p className="font-medium text-foreground">{currentLead.bucket}</p>
                       </div>
                       <div>
                         <span className="text-muted-foreground">Attempts</span>
@@ -568,93 +555,65 @@ export default function CloudDialer() {
                   </CardContent>
                 </Card>
 
-                {/* Counsellor Script / Course Info */}
-                <Card className="border-border/60 shadow-none bg-blue-50/30 dark:bg-blue-950/10">
-                  <CardContent className="p-4">
-                    <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide mb-2">📋 Counsellor Script</p>
-                    {currentLead.course_name !== "—" ? (
-                      <div className="space-y-2.5 text-xs">
-                        {/* Course + Duration */}
-                        <div>
-                          <p className="font-bold text-foreground text-sm">{currentLead.course_name}</p>
-                          {currentLead.course_duration && <p className="text-muted-foreground">{currentLead.course_duration}{currentLead.campus_name !== "—" ? ` · ${currentLead.campus_name}` : ""}</p>}
-                        </div>
-
-                        {/* Fee box */}
-                        {currentLead.course_fee && (
-                          <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200/50 px-3 py-2">
-                            <div className="flex items-baseline justify-between">
-                              <span className="text-muted-foreground">Annual Fee</span>
-                              <span className="font-bold text-emerald-700 dark:text-emerald-400 text-sm">{currentLead.course_fee}</span>
-                            </div>
-                            {currentLead.course_fee_total && (
-                              <div className="flex items-baseline justify-between mt-0.5">
-                                <span className="text-muted-foreground">Total Course Fee</span>
-                                <span className="font-semibold text-foreground">{currentLead.course_fee_total}</span>
-                              </div>
-                            )}
-                            {currentLead.course_fee_notes && (
-                              <p className="text-[10px] text-muted-foreground mt-1 leading-relaxed">{currentLead.course_fee_notes}</p>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Eligibility + Entrance */}
-                        {currentLead.course_eligibility && (
-                          <div>
-                            <span className="text-[10px] font-semibold text-blue-600">Eligibility</span>
-                            <p className="font-medium text-foreground leading-relaxed mt-0.5">{currentLead.course_eligibility}</p>
-                          </div>
-                        )}
-                        {currentLead.course_entrance && (
-                          <div>
-                            <span className="text-[10px] font-semibold text-blue-600">Entrance Exam {currentLead.course_entrance_mandatory ? "(Required)" : "(Optional/Merit)"}</span>
-                            <p className="font-medium text-foreground mt-0.5">{currentLead.course_entrance}</p>
-                          </div>
-                        )}
-
-                        {/* Highlights */}
-                        {currentLead.course_highlights && (
-                          <div>
-                            <span className="text-[10px] font-semibold text-blue-600">Key Highlights</span>
-                            <p className="text-foreground leading-relaxed mt-0.5">{currentLead.course_highlights}</p>
-                          </div>
-                        )}
-
-                        {/* Careers */}
-                        {currentLead.course_careers && (
-                          <div>
-                            <span className="text-[10px] font-semibold text-blue-600">Career Options</span>
-                            <p className="text-foreground leading-relaxed mt-0.5">{currentLead.course_careers}</p>
-                          </div>
-                        )}
-
-                        {/* Talking Points */}
-                        <div className="pt-2 border-t border-blue-200/50">
-                          <p className="text-[10px] font-semibold text-blue-600 mb-1">💬 Talking Points</p>
-                          <p className="text-muted-foreground leading-relaxed italic">
-                            "Hello {currentLead.name.split(" ")[0]}, this is {counsellorDisplayName} from NIMT. I'm calling regarding your interest in {currentLead.course_name}.
-                            {currentLead.course_fee ? ` The annual fee is ${currentLead.course_fee}.` : ""}
-                            {currentLead.course_eligibility ? ` You'll need ${currentLead.course_eligibility.split(".")[0]}.` : ""}
-                            {" "}Would you like to know more or schedule a campus visit?"
-                          </p>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="text-xs space-y-2">
-                        <p className="text-muted-foreground">No course selected for this lead.</p>
-                        <div className="pt-2 border-t border-blue-200/50">
-                          <p className="text-[10px] font-semibold text-blue-600 mb-1">💬 Talking Points</p>
-                          <p className="text-muted-foreground leading-relaxed italic">
-                            "Hello {currentLead.name.split(" ")[0]}, this is {counsellorDisplayName} from NIMT Educational Institutions.
-                            I'm calling regarding your enquiry. Which course are you interested in?"
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+                {/* Course Info Panel (same component as lead page) + Script */}
+                <div className="space-y-3">
+                  {currentLead.course_id && (
+                    <Card className="border-border/60 shadow-none max-h-[300px] overflow-y-auto">
+                      <CardContent className="p-3"><CourseInfoPanel courseId={currentLead.course_id} /></CardContent>
+                    </Card>
+                  )}
+                </div>
               </div>
+
+              {/* Talking Points + NIMT Highlights + WhatsApp */}
+              <Card className="border-border/60 shadow-none bg-blue-50/30 dark:bg-blue-950/10">
+                <CardContent className="p-4">
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 text-xs">
+                    <div>
+                      <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide mb-2">💬 Talking Points</p>
+                      <p className="text-muted-foreground leading-relaxed italic">
+                        "Hello {currentLead.name.split(" ")[0]}, this is {counsellorDisplayName} from NIMT Educational Institutions.
+                        {currentLead.course_name !== "—"
+                          ? ` I'm calling about your interest in ${currentLead.course_name}.${currentLead.course_fee ? ` The annual fee is ${currentLead.course_fee}.` : ""}`
+                          : " I'm calling regarding your enquiry."}
+                        {" "}Would you like to know more or schedule a campus visit?"
+                      </p>
+                      <div className="mt-3">
+                        <Button size="sm" variant="outline" className="text-[10px] h-7 gap-1"
+                          onClick={() => window.open(`https://wa.me/${currentLead.phone.replace(/[^0-9]/g,"")}?text=${encodeURIComponent(`Hi ${currentLead.name.split(" ")[0]}, this is ${counsellorDisplayName} from NIMT. I tried calling you regarding ${currentLead.course_name !== "—" ? currentLead.course_name : "your enquiry"}. Would you like to discuss?`)}`, "_blank")}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="#25D366"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/></svg>
+                          WhatsApp Lead
+                        </Button>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide mb-2">🏛️ About NIMT</p>
+                      <ul className="text-muted-foreground leading-relaxed space-y-1">
+                        <li>• Est. 1987 — <b>37+ years</b> in education</li>
+                        <li>• 5 campuses, 36+ programmes, 21 colleges</li>
+                        <li>• AICTE, UGC, BCI, NCTE, INC, PCI approved</li>
+                        <li>• Placements: <b>₹18.75 LPA highest</b>, ₹5.40 LPA avg</li>
+                        <li>• 1,200+ recruiters: KPMG, Wipro, Deloitte, TCS</li>
+                        <li>• 6 NIRF ranked institutions (2025)</li>
+                        <li>• Own hospital on campus for clinical training</li>
+                      </ul>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide mb-2">🎯 Nudge Checklist</p>
+                      <ul className="text-muted-foreground leading-relaxed space-y-1">
+                        <li>☐ Paid internship (Nursing/BPT: ₹10K/month)</li>
+                        <li>☐ Scholarships (merit/SC/ST/OBC/sports)</li>
+                        <li>☐ Apply online: <b>uni.nimt.ac.in/apply/nimt</b></li>
+                        <li>☐ Invite for campus visit</li>
+                        <li>☐ Hostel: 600+ beds, AC/non-AC</li>
+                        <li>☐ Transport facility available</li>
+                        <li>☐ Send WhatsApp with course details</li>
+                      </ul>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
 
               {/* Call status */}
               <Card className={`border-2 shadow-none ${
