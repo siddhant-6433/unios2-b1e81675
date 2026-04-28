@@ -138,6 +138,7 @@ export default function PublisherPortal() {
   const [selectedLead, setSelectedLead] = useState<PublisherLead | null>(null);
   const [activities, setActivities] = useState<LeadActivity[]>([]);
   const [activitiesLoading, setActivitiesLoading] = useState(false);
+  const [courseSortBy, setCourseSortBy] = useState<"total"|"ratio">("total");
 
   // Super admin: load all publisher records for the picker
   useEffect(() => {
@@ -513,40 +514,70 @@ export default function PublisherPortal() {
 
       {/* ── Course-wise Stage Breakdown ────────────────────────────── */}
       {(() => {
-        // Group leads by course, then by stage
+        // Group leads by course, then by stage + called count
         const courseMap = new Map<string, Map<string, number>>();
         const courseTotals = new Map<string, number>();
+        const courseCalled = new Map<string, number>();
+        const courseInterested = new Map<string, number>();
+        const interestStages = new Set(["counsellor_call","visit_scheduled","interview","offer_sent","token_paid","pre_admitted","admitted","application_in_progress","application_fee_paid","application_submitted"]);
+
         leads.forEach(l => {
           const c = l.course_name || "—";
           if (!courseMap.has(c)) courseMap.set(c, new Map());
           const stages = courseMap.get(c)!;
           stages.set(l.stage, (stages.get(l.stage) || 0) + 1);
           courseTotals.set(c, (courseTotals.get(c) || 0) + 1);
+          if (l.ai_called) courseCalled.set(c, (courseCalled.get(c) || 0) + 1);
+          if (interestStages.has(l.stage)) courseInterested.set(c, (courseInterested.get(c) || 0) + 1);
         });
-        // Get active stages (that have at least one lead)
+
         const activeStages = Array.from(new Set(leads.map(l => l.stage)));
         const pipelineStages = ["application_in_progress","application_fee_paid","application_submitted","counsellor_call","visit_scheduled","interview","offer_sent","token_paid","pre_admitted","admitted"];
-        const sortedCourses = Array.from(courseMap.entries()).sort((a, b) => (courseTotals.get(b[0]) || 0) - (courseTotals.get(a[0]) || 0));
-        // Best performing: highest admitted/total ratio with at least 5 leads
-        const bestCourse = sortedCourses
-          .filter(([, stages]) => (courseTotals.get(sortedCourses.find(([c]) => c === Array.from(stages.keys())[0])?.[0] || "") || 0) >= 5)
-          .map(([c, stages]) => ({ course: c, admitted: stages.get("admitted") || 0, total: courseTotals.get(c) || 1, rate: ((stages.get("admitted") || 0) / (courseTotals.get(c) || 1)) * 100 }))
-          .sort((a, b) => b.rate - a.rate)[0];
 
-        if (sortedCourses.length <= 1) return null;
+        // Build rows with computed values
+        const courseRows = Array.from(courseMap.entries()).map(([course, stages]) => {
+          const total = courseTotals.get(course) || 0;
+          const called = courseCalled.get(course) || 0;
+          const interested = courseInterested.get(course) || 0;
+          const dropped = (stages.get("not_interested") || 0) + (stages.get("ineligible") || 0) + (stages.get("dnc") || 0) + (stages.get("rejected") || 0);
+          const ratio = called > 0 ? interested / called : 0;
+          return { course, stages, total, called, interested, dropped, ratio };
+        });
+
+        // Sort
+        if (courseSortBy === "ratio") {
+          courseRows.sort((a, b) => b.ratio - a.ratio || b.total - a.total);
+        } else {
+          courseRows.sort((a, b) => b.total - a.total);
+        }
+
+        // Best performing
+        const bestCourse = courseRows.filter(r => r.total >= 5 && r.called > 0).sort((a, b) => b.ratio - a.ratio)[0];
+
+        if (courseRows.length <= 1) return null;
         return (
           <Card className="border-border/60 shadow-none">
             <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-2">
                 <CardTitle className="text-sm font-semibold flex items-center gap-2">
                   <BookOpen className="h-4 w-4 text-muted-foreground" />
                   Course-wise Lead Stages
                 </CardTitle>
-                {bestCourse && bestCourse.rate > 0 && (
-                  <span className="text-[11px] text-green-600 dark:text-green-400 font-medium bg-green-50 dark:bg-green-950/30 px-2.5 py-1 rounded-full">
-                    Best: {bestCourse.course} ({bestCourse.rate.toFixed(0)}% conversion)
-                  </span>
-                )}
+                <div className="flex items-center gap-2">
+                  {bestCourse && bestCourse.ratio > 0 && (
+                    <span className="text-[11px] text-green-600 dark:text-green-400 font-medium bg-green-50 dark:bg-green-950/30 px-2.5 py-1 rounded-full">
+                      Best: {bestCourse.course} ({(bestCourse.ratio * 100).toFixed(0)}% int/called)
+                    </span>
+                  )}
+                  <select
+                    value={courseSortBy}
+                    onChange={e => setCourseSortBy(e.target.value as "total"|"ratio")}
+                    className="rounded-lg border border-input bg-background px-2 py-1 text-[11px] font-medium text-foreground focus:outline-none"
+                  >
+                    <option value="total">Sort: Total Leads</option>
+                    <option value="ratio">Sort: Interested/Called ↓</option>
+                  </select>
+                </div>
               </div>
             </CardHeader>
             <CardContent className="p-0">
@@ -556,6 +587,10 @@ export default function PublisherPortal() {
                     <tr className="border-b border-t border-border bg-muted/50">
                       <th className="px-4 py-2.5 text-left font-semibold text-muted-foreground uppercase tracking-wide sticky left-0 bg-muted/50 z-10">Course</th>
                       <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground">Total</th>
+                      <th className="px-3 py-2.5 text-center font-semibold text-violet-500 whitespace-nowrap">Called</th>
+                      <th className="px-3 py-2.5 text-center font-semibold text-blue-500 whitespace-nowrap cursor-pointer hover:text-blue-700" onClick={() => setCourseSortBy(courseSortBy === "ratio" ? "total" : "ratio")}>
+                        Int/Called{courseSortBy === "ratio" ? " ↓" : ""}
+                      </th>
                       {pipelineStages.filter(s => activeStages.includes(s)).map(s => (
                         <th key={s} className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap">
                           {(STAGE_LABELS[s] || s).replace(/ /g, "\u00A0")}
@@ -565,35 +600,49 @@ export default function PublisherPortal() {
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedCourses.map(([course, stages]) => {
-                      const total = courseTotals.get(course) || 0;
-                      const dropped = (stages.get("not_interested") || 0) + (stages.get("ineligible") || 0) + (stages.get("dnc") || 0) + (stages.get("rejected") || 0);
-                      return (
-                        <tr key={course} className="border-b border-border last:border-0 hover:bg-muted/30">
-                          <td className="px-4 py-2.5 font-medium text-foreground sticky left-0 bg-white dark:bg-background z-10 whitespace-nowrap">{course}</td>
-                          <td className="px-3 py-2.5 text-center font-bold text-foreground">{total}</td>
-                          {pipelineStages.filter(s => activeStages.includes(s)).map(s => {
-                            const count = stages.get(s) || 0;
-                            return (
-                              <td key={s} className="px-3 py-2.5 text-center">
-                                {count > 0 ? (
-                                  <span className={`inline-block min-w-[24px] px-1.5 py-0.5 rounded-md text-[11px] font-semibold ${STAGE_COLORS[s] || "bg-muted"}`}>
-                                    {count}
-                                  </span>
-                                ) : <span className="text-muted-foreground/40">—</span>}
-                              </td>
-                            );
-                          })}
-                          <td className="px-3 py-2.5 text-center">
-                            {dropped > 0 ? (
-                              <span className="inline-block min-w-[24px] px-1.5 py-0.5 rounded-md text-[11px] font-semibold bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400">
-                                {dropped}
-                              </span>
-                            ) : <span className="text-muted-foreground/40">—</span>}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {courseRows.map(({ course, stages, total, called, interested, dropped, ratio }) => (
+                      <tr key={course} className="border-b border-border last:border-0 hover:bg-muted/30">
+                        <td className="px-4 py-2.5 font-medium text-foreground sticky left-0 bg-white dark:bg-background z-10 whitespace-nowrap">{course}</td>
+                        <td className="px-3 py-2.5 text-center font-bold text-foreground">{total}</td>
+                        <td className="px-3 py-2.5 text-center">
+                          {called > 0 ? (
+                            <span className="inline-block min-w-[24px] px-1.5 py-0.5 rounded-md text-[11px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-400">
+                              {called}
+                            </span>
+                          ) : <span className="text-muted-foreground/40">—</span>}
+                        </td>
+                        <td className="px-3 py-2.5 text-center">
+                          {called > 0 ? (
+                            <span className={`inline-block min-w-[36px] px-1.5 py-0.5 rounded-md text-[11px] font-bold ${
+                              ratio >= 0.5 ? "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-400"
+                              : ratio >= 0.25 ? "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400"
+                              : "bg-red-100 text-red-600 dark:bg-red-950/40 dark:text-red-400"
+                            }`}>
+                              {(ratio * 100).toFixed(0)}%
+                            </span>
+                          ) : <span className="text-muted-foreground/40">—</span>}
+                        </td>
+                        {pipelineStages.filter(s => activeStages.includes(s)).map(s => {
+                          const count = stages.get(s) || 0;
+                          return (
+                            <td key={s} className="px-3 py-2.5 text-center">
+                              {count > 0 ? (
+                                <span className={`inline-block min-w-[24px] px-1.5 py-0.5 rounded-md text-[11px] font-semibold ${STAGE_COLORS[s] || "bg-muted"}`}>
+                                  {count}
+                                </span>
+                              ) : <span className="text-muted-foreground/40">—</span>}
+                            </td>
+                          );
+                        })}
+                        <td className="px-3 py-2.5 text-center">
+                          {dropped > 0 ? (
+                            <span className="inline-block min-w-[24px] px-1.5 py-0.5 rounded-md text-[11px] font-semibold bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400">
+                              {dropped}
+                            </span>
+                          ) : <span className="text-muted-foreground/40">—</span>}
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
