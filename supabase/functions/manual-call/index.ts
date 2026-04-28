@@ -102,6 +102,7 @@ Deno.serve(async (req) => {
         counsellorPhone,
         studentPhone,
         counsellorName: profile.display_name,
+        counsellorUserId: userId,
       }),
     });
 

@@ -16,10 +16,15 @@ const DISPOSITION_COLORS: Record<string, string> = {
   not_interested: "bg-red-100 text-red-700",
   not_answered: "bg-amber-100 text-amber-700",
   no_answer: "bg-amber-100 text-amber-700",
+  "no-answer": "bg-amber-100 text-amber-700",
   voicemail: "bg-indigo-100 text-indigo-700",
   call_back: "bg-blue-100 text-blue-700",
   callback: "bg-blue-100 text-blue-700",
   busy: "bg-orange-100 text-orange-700",
+  cancelled: "bg-slate-100 text-slate-600",
+  timeout: "bg-amber-100 text-amber-600",
+  failed: "bg-red-100 text-red-600",
+  completed: "bg-green-100 text-green-700",
   wrong_number: "bg-pink-100 text-pink-700",
   do_not_contact: "bg-red-200 text-red-800",
   ineligible: "bg-gray-100 text-gray-600",
@@ -250,6 +255,8 @@ const CallLog = () => {
           <option value="wrong_number">Wrong Number</option>
           <option value="do_not_contact">DNC</option>
           <option value="ineligible">Ineligible</option>
+          <option value="cancelled">Cancelled</option>
+          <option value="timeout">Timeout</option>
         </select>
 
         {/* Search */}
@@ -293,6 +300,7 @@ const CallLog = () => {
                 <thead>
                   <tr className="border-b border-border bg-muted/40">
                     <th className="px-4 py-2.5 text-left font-medium text-muted-foreground text-xs uppercase">Lead</th>
+                    <th className="px-3 py-2.5 text-center font-medium text-muted-foreground text-xs uppercase">Type</th>
                     <th className="px-3 py-2.5 text-left font-medium text-muted-foreground text-xs uppercase">Disposition</th>
                     <th className="px-3 py-2.5 text-center font-medium text-muted-foreground text-xs uppercase">Duration</th>
                     <th className="px-4 py-2.5 text-left font-medium text-muted-foreground text-xs uppercase">Notes</th>
@@ -309,9 +317,16 @@ const CallLog = () => {
                         <p className="font-medium text-foreground text-sm">{r.lead_name}</p>
                         <p className="text-[10px] text-muted-foreground">{r.lead_phone}</p>
                       </td>
+                      <td className="px-3 py-2.5 text-center">
+                        {(r.notes || "").includes("Click-to-Call") ? (
+                          <Badge className="text-[9px] border-0 bg-cyan-100 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-400">CTC</Badge>
+                        ) : (
+                          <Badge className="text-[9px] border-0 bg-gray-100 text-gray-500">Manual</Badge>
+                        )}
+                      </td>
                       <td className="px-3 py-2.5">
                         <Badge className={`text-[10px] border-0 ${DISPOSITION_COLORS[r.disposition || ""] || "bg-muted text-muted-foreground"}`}>
-                          {(r.disposition || "unknown").replace(/_/g, " ")}
+                          {(r.disposition || "pending").replace(/_/g, " ").replace(/-/g, " ")}
                         </Badge>
                       </td>
                       <td className="px-3 py-2.5 text-center text-xs text-muted-foreground">
@@ -340,7 +355,7 @@ const CallLog = () => {
                   ))}
                   {filtered.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
+                      <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
                         <Phone className="h-8 w-8 mx-auto mb-2 opacity-30" />
                         <p className="text-sm">No call records found</p>
                       </td>

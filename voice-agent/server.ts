@@ -1571,7 +1571,8 @@ Deno.serve({ port: PORT }, async (req) => {
       campusName: ctx.campusName,
       callerTranscript: [],
       aiTranscript: [],
-      toolCallsMade: [],
+      // Store counsellor info for call_logs attribution
+      toolCallsMade: [{ name: "bridge_meta", args: { counsellorUserId: ctx.counsellorUserId, counsellorName: ctx.counsellorName }, result: null }],
     });
     console.log(`[BRIDGE ${callId}] Context set: counsellor=${ctx.counsellorPhone} → student=${ctx.studentPhone}`);
     return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } });
@@ -1634,10 +1635,28 @@ Deno.serve({ port: PORT }, async (req) => {
     if (callCtx?.leadId && SUPABASE_URL) {
       const leadId = callCtx.leadId;
 
-      // 1. Create call record (so it appears in call log page)
-      const callRecordRes = await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records`, {
+      // 1. Create call record in call_logs (manual call log table — shows in Call Log page)
+      await fetch(`${SUPABASE_URL}/rest/v1/call_logs`, {
         method: "POST",
-        headers: { ...dbHeaders, Prefer: "return=representation" },
+        headers: { ...dbHeaders, Prefer: "return=minimal" },
+        body: JSON.stringify({
+          lead_id: leadId,
+          disposition: disposition || (dialStatus === "completed" ? null : dialStatus),
+          duration_seconds: duration,
+          recording_url: recordingUrl,
+          notes: isAutoDisposition
+            ? `Click-to-Call: ${disposition?.replace("_", " ")} (auto-marked by Plivo)`
+            : `Click-to-Call: connected (${duration}s)`,
+          direction: "outbound",
+          user_id: callCtx.toolCallsMade?.[0]?.args?.counsellorUserId || null,
+          called_at: new Date().toISOString(),
+        }),
+      }).catch(e => console.error(`[BRIDGE ${callId}] call_logs insert failed:`, e.message));
+
+      // Also log to ai_call_records for unified reporting
+      await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records`, {
+        method: "POST",
+        headers: { ...dbHeaders, Prefer: "return=minimal" },
         body: JSON.stringify({
           lead_id: leadId,
           call_uuid: callId,
@@ -1651,7 +1670,7 @@ Deno.serve({ port: PORT }, async (req) => {
           call_type: "manual",
           completed_at: new Date().toISOString(),
         }),
-      }).catch(e => { console.error(`[BRIDGE ${callId}] Call record failed:`, e.message); return null; });
+      }).catch(e => console.error(`[BRIDGE ${callId}] ai_call_records insert failed:`, e.message));
 
       // 2. Log as lead_activity
       const activityDesc = isAutoDisposition
