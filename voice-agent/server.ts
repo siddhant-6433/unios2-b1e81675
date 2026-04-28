@@ -1558,6 +1558,102 @@ Deno.serve({ port: PORT }, async (req) => {
     return new Response("OK");
   }
 
+  // ── Manual Call: Bridge counsellor ↔ student ──────────────────────────────
+  // POST /bridge-context/{callId} — store bridge call metadata
+  if (path.startsWith("/bridge-context/") && req.method === "POST") {
+    const callId = path.split("/bridge-context/")[1];
+    const ctx = await req.json();
+    activeCallContexts.set(callId, {
+      direction: "outbound",
+      leadId: ctx.leadId,
+      leadName: ctx.leadName,
+      courseName: ctx.courseName,
+      campusName: ctx.campusName,
+      callerTranscript: [],
+      aiTranscript: [],
+      toolCallsMade: [],
+    });
+    console.log(`[BRIDGE ${callId}] Context set: counsellor=${ctx.counsellorPhone} → student=${ctx.studentPhone}`);
+    return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } });
+  }
+
+  // GET /bridge-answer/{callId}?student={phone} — Plivo answer URL for bridge calls
+  // When counsellor picks up, Plivo hits this → returns XML to dial the student
+  if (path.startsWith("/bridge-answer/")) {
+    const callId = path.split("/bridge-answer/")[1];
+    const studentPhone = url.searchParams.get("student") || "";
+    const PLIVO_PHONE_NUMBER = Deno.env.get("PLIVO_PHONE_NUMBER") || "";
+    const recordingCallbackUrl = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/voice-call-callback` : "";
+    const host = req.headers.get("host") || url.host;
+    const statusUrl = `https://${host}/bridge-status/${callId}`;
+
+    console.log(`[BRIDGE ${callId}] Counsellor answered, dialing student: ${studentPhone}`);
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Speak voice="WOMAN">Connecting you to the student now.</Speak>
+  <Dial callerId="${PLIVO_PHONE_NUMBER}" record="true" recordFileFormat="mp3"${recordingCallbackUrl ? ` recordingCallbackUrl="${recordingCallbackUrl}"` : ""} action="${statusUrl}" method="POST">
+    <Number>${studentPhone}</Number>
+  </Dial>
+</Response>`;
+
+    return new Response(xml, { headers: { "Content-Type": "application/xml" } });
+  }
+
+  // POST /bridge-status/{callId} — Plivo status callback after bridge call ends
+  if (path.startsWith("/bridge-status/")) {
+    const callId = path.split("/bridge-status/")[1];
+    const body = await req.formData().catch(() => null);
+    const params = body ? Object.fromEntries(body) : {} as any;
+    console.log(`[BRIDGE ${callId}] Call ended:`, { status: params.DialStatus || params.CallStatus, duration: params.DialBLegDuration || params.Duration });
+
+    const callCtx = activeCallContexts.get(callId);
+    const dbHeaders = {
+      "Content-Type": "application/json",
+      apikey: SUPABASE_SERVICE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+    };
+
+    if (callCtx?.leadId && SUPABASE_URL) {
+      const duration = parseInt(params.DialBLegDuration || params.Duration || "0");
+      const dialStatus = params.DialStatus || params.CallStatus || "unknown";
+      const recordingUrl = params.RecordUrl || params.RecordingUrl || null;
+
+      // Log as lead_activity
+      await fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
+        method: "POST",
+        headers: { ...dbHeaders, Prefer: "return=minimal" },
+        body: JSON.stringify({
+          lead_id: callCtx.leadId,
+          type: "call",
+          description: `Manual call via CRM (${duration}s, ${dialStatus})${recordingUrl ? " — recorded" : ""}`,
+        }),
+      }).catch(e => console.error(`[BRIDGE ${callId}] Activity log failed:`, e.message));
+
+      // Add note with recording link
+      if (recordingUrl) {
+        await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, {
+          method: "POST",
+          headers: { ...dbHeaders, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            lead_id: callCtx.leadId,
+            content: `📞 Manual Call Recording (${duration}s): ${recordingUrl}`,
+          }),
+        }).catch(e => console.error(`[BRIDGE ${callId}] Note failed:`, e.message));
+      }
+
+      // Update lead: first_contact_at if not set
+      await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${callCtx.leadId}&first_contact_at=is.null`, {
+        method: "PATCH",
+        headers: { ...dbHeaders, Prefer: "return=minimal" },
+        body: JSON.stringify({ first_contact_at: new Date().toISOString() }),
+      }).catch(() => {});
+    }
+
+    activeCallContexts.delete(callId);
+    return new Response("OK");
+  }
+
   // WebSocket upgrade for Plivo audio stream
   if (path.startsWith("/ws/")) {
     const callId = path.split("/ws/")[1];

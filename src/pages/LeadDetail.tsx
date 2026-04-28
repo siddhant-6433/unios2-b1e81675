@@ -101,6 +101,7 @@ const LeadDetail = () => {
   const [showConvert, setShowConvert] = useState(false);
   const [showWhatsApp, setShowWhatsApp] = useState(false);
   const [aiCalling, setAiCalling] = useState(false);
+  const [manualCalling, setManualCalling] = useState(false);
   const [showSecondaryCounsellor, setShowSecondaryCounsellor] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
@@ -609,6 +610,32 @@ const LeadDetail = () => {
     setAiCalling(false);
   };
 
+  const triggerManualCall = async () => {
+    if (!id) return;
+    setManualCalling(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("manual-call", {
+        body: { lead_id: id },
+      });
+      if (error) {
+        let detail = error.message;
+        try {
+          const ctx = (error as any).context as Response | undefined;
+          if (ctx) { const raw = await ctx.text().catch(() => ""); try { detail = JSON.parse(raw)?.error || raw; } catch { detail = raw || error.message; } }
+        } catch {}
+        toast({ title: "Call Failed", description: detail, variant: "destructive" });
+      } else if (data?.error) {
+        toast({ title: "Call Failed", description: data.error, variant: "destructive" });
+      } else {
+        toast({ title: "Calling You", description: data?.message || "Pick up your phone to connect to the student." });
+        fetchAll(true);
+      }
+    } catch (e: any) {
+      toast({ title: "Call Failed", description: e.message, variant: "destructive" });
+    }
+    setManualCalling(false);
+  };
+
   const handleNotInterested = async () => {
     const wordCount = notInterestedReason.trim().split(/\s+/).length;
     if (wordCount < 5) {
@@ -788,6 +815,7 @@ const LeadDetail = () => {
           { icon: MapPin, label: "Visit", color: "text-violet-600 bg-violet-100 dark:bg-violet-900/30", action: () => setShowScheduleVisit(true) },
           { icon: Footprints, label: "Walk-in", color: "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30", action: () => setShowWalkinCompletion(true) },
           { icon: Mail, label: "Email", color: "text-sky-600 bg-sky-100 dark:bg-sky-900/30", action: () => setShowSendEmail(true) },
+          { icon: Phone, label: "Call", color: "text-blue-600 bg-blue-100 dark:bg-blue-900/30", action: triggerManualCall, disabled: manualCalling },
           { icon: Bot, label: "AI Call", color: "text-amber-600 bg-amber-100 dark:bg-amber-900/30", action: triggerAiCall, disabled: aiCalling },
           { icon: UserCheck, label: "Interview", color: "text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30", action: () => setShowInterview(true) },
           {
@@ -817,7 +845,7 @@ const LeadDetail = () => {
                 title={tooltip || label}
               >
                 <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${color}`}>
-                  {disabled && label === "AI Call" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
+                  {disabled && (label === "AI Call" || label === "Call") ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
                 </div>
                 <span className="text-[10px] font-medium text-muted-foreground">{label}</span>
               </button>
