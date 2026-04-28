@@ -318,8 +318,8 @@ const CallLog = () => {
                         <p className="text-[10px] text-muted-foreground">{r.lead_phone}</p>
                       </td>
                       <td className="px-3 py-2.5 text-center">
-                        {(r.notes || "").includes("Click-to-Call") ? (
-                          <Badge className="text-[9px] border-0 bg-cyan-100 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-400">CTC</Badge>
+                        {(r.notes || "").includes("Cloud Call") ? (
+                          <Badge className="text-[9px] border-0 bg-cyan-100 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-400">Cloud Call</Badge>
                         ) : (
                           <Badge className="text-[9px] border-0 bg-gray-100 text-gray-500">Manual</Badge>
                         )}

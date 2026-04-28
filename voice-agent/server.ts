@@ -1611,7 +1611,8 @@ Deno.serve({ port: PORT }, async (req) => {
     const recordingUrl = params.RecordUrl || params.RecordingUrl || null;
     const machineResult = (params.Machine || "").toLowerCase(); // "true" if voicemail detected
 
-    console.log(`[BRIDGE ${callId}] Call ended:`, { dialStatus, duration, machine: machineResult, recording: !!recordingUrl });
+    console.log(`[BRIDGE ${callId}] Call ended — ALL PARAMS:`, JSON.stringify(params));
+    console.log(`[BRIDGE ${callId}] Parsed:`, { dialStatus, duration, machine: machineResult, recording: !!recordingUrl });
 
     const callCtx = activeCallContexts.get(callId);
     const dbHeaders = {
@@ -1630,9 +1631,9 @@ Deno.serve({ port: PORT }, async (req) => {
     };
     let disposition = autoDispositions[dialStatus] || null;
     if (machineResult === "true") disposition = "voicemail";
-    // "completed" with 0 duration = student didn't answer or counsellor cancelled
-    if (dialStatus === "completed" && duration === 0) disposition = "cancelled";
-    // completed with >0 duration = actual conversation, needs manual disposition
+    // completed = Dial element finished. Check actual B-leg duration.
+    // Note: Plivo may send duration=0 even for real calls if param name differs.
+    // We'll let bridge-hangup handle the final duration from A-leg.
     const isAutoDisposition = !!disposition;
 
     if (callCtx?.leadId && SUPABASE_URL) {
@@ -1648,8 +1649,8 @@ Deno.serve({ port: PORT }, async (req) => {
           duration_seconds: duration,
           recording_url: recordingUrl,
           notes: isAutoDisposition
-            ? `Click-to-Call: ${disposition?.replace("_", " ")} (auto-marked by Plivo)`
-            : `Click-to-Call: connected (${duration}s)`,
+            ? `Cloud Call [${callId.slice(0,8)}]: ${disposition?.replace("_", " ")} (auto-marked by Plivo)`
+            : `Cloud Call [${callId.slice(0,8)}]: connected`,
           direction: "outbound",
           user_id: callCtx.toolCallsMade?.[0]?.args?.counsellorUserId || null,
           called_at: new Date().toISOString(),
@@ -1657,19 +1658,22 @@ Deno.serve({ port: PORT }, async (req) => {
       }).catch(e => console.error(`[BRIDGE ${callId}] call_logs insert failed:`, e.message));
 
       // Also log to ai_call_records for unified reporting
+      // Store plivo_call_uuid so voice-call-callback can match recording to this record
+      const plivoCallUuid = params.DialBLegUUID || params.CallUUID || params.ALegUUID || "";
       await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records`, {
         method: "POST",
         headers: { ...dbHeaders, Prefer: "return=minimal" },
         body: JSON.stringify({
           lead_id: leadId,
           call_uuid: callId,
+          plivo_call_uuid: plivoCallUuid,
           status: dialStatus,
           duration_seconds: duration,
           recording_url: recordingUrl,
           disposition: disposition,
           summary: isAutoDisposition
             ? `Manual call: ${disposition?.replace("_", " ")} (auto)`
-            : `Manual call: connected (${duration}s)`,
+            : `Manual call: connected`,
           call_type: "manual",
           completed_at: new Date().toISOString(),
         }),
@@ -1772,7 +1776,8 @@ Deno.serve({ port: PORT }, async (req) => {
       }
     }
 
-    activeCallContexts.delete(callId);
+    // Don't delete context here — bridge-hangup needs it for duration update.
+    // bridge-hangup will clean up.
 
     // Return JSON with disposition info so frontend can show the right modal
     return new Response(JSON.stringify({
@@ -1784,25 +1789,20 @@ Deno.serve({ port: PORT }, async (req) => {
     }), { headers: { "Content-Type": "application/json" } });
   }
 
-  // POST /bridge-hangup/{callId} — Plivo hangup callback for the counsellor leg
-  // Fires when counsellor hangs up OR when call is cancelled/not-answered before bridge
+  // POST /bridge-hangup/{callId} — Plivo hangup callback for the A-leg (counsellor)
+  // This is the FINAL callback. Fires after the entire call ends.
+  // Has the real total duration. bridge-status fires first with disposition.
   if (path.startsWith("/bridge-hangup/")) {
     const callId = path.split("/bridge-hangup/")[1];
     const body = await req.formData().catch(() => null);
     const params = body ? Object.fromEntries(body) : {} as any;
     const callStatus = (params.CallStatus || "unknown").toLowerCase();
-    const duration = parseInt(params.Duration || "0");
+    const totalDuration = parseInt(params.Duration || "0");
     const hangupCause = params.HangupCause || "";
+    const hangupSource = params.HangupSource || "";
 
-    console.log(`[BRIDGE-HANGUP ${callId}] status=${callStatus} duration=${duration} cause=${hangupCause}`);
-
-    // Only log if bridge-status hasn't already handled this call
-    const callCtx = activeCallContexts.get(callId);
-    if (!callCtx) {
-      // bridge-status already cleaned up — skip to avoid duplicate logging
-      console.log(`[BRIDGE-HANGUP ${callId}] Already handled by bridge-status, skipping`);
-      return new Response("OK");
-    }
+    console.log(`[BRIDGE-HANGUP ${callId}] ALL PARAMS:`, JSON.stringify(params));
+    console.log(`[BRIDGE-HANGUP ${callId}] status=${callStatus} totalDuration=${totalDuration} cause=${hangupCause} source=${hangupSource}`);
 
     const dbHeaders = {
       "Content-Type": "application/json",
@@ -1810,63 +1810,79 @@ Deno.serve({ port: PORT }, async (req) => {
       Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
     };
 
-    if (callCtx.leadId && SUPABASE_URL) {
-      const leadId = callCtx.leadId;
-      // Map hangup statuses
-      const dispositionMap: Record<string, string> = {
-        "cancel": "cancelled",
-        "busy": "busy",
-        "no-answer": "not_answered",
-        "failed": "not_answered",
-      };
-      const disposition = dispositionMap[callStatus] || "cancelled";
-      const counsellorUserId = callCtx.toolCallsMade?.[0]?.args?.counsellorUserId || null;
-      const counsellorName = callCtx.toolCallsMade?.[0]?.args?.counsellorName || "Counsellor";
+    // Check if bridge-status already logged this call
+    const callCtx = activeCallContexts.get(callId);
+    const bridgeStatusAlreadyRan = !callCtx;
 
-      // Log to call_logs
-      await fetch(`${SUPABASE_URL}/rest/v1/call_logs`, {
-        method: "POST",
-        headers: { ...dbHeaders, Prefer: "return=minimal" },
-        body: JSON.stringify({
-          lead_id: leadId,
-          disposition,
-          duration_seconds: duration,
-          notes: `Click-to-Call: ${disposition.replace("_", " ")} (counsellor hung up before connecting)`,
-          direction: "outbound",
-          user_id: counsellorUserId,
-          called_at: new Date().toISOString(),
-        }),
-      }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] call_logs failed:`, e.message));
+    // Get context from in-memory or reconstruct from what bridge-status saved
+    const leadId = callCtx?.leadId;
+    const counsellorUserId = callCtx?.toolCallsMade?.[0]?.args?.counsellorUserId || null;
+    const counsellorName = callCtx?.toolCallsMade?.[0]?.args?.counsellorName || "Counsellor";
 
-      // Log to ai_call_records
-      await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records`, {
-        method: "POST",
-        headers: { ...dbHeaders, Prefer: "return=minimal" },
-        body: JSON.stringify({
-          lead_id: leadId,
-          call_uuid: callId,
-          status: callStatus,
-          duration_seconds: duration,
-          disposition,
-          summary: `Manual call: ${disposition.replace("_", " ")} (${hangupCause || "counsellor ended"})`,
-          call_type: "manual",
-          completed_at: new Date().toISOString(),
-        }),
-      }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] ai_call_records failed:`, e.message));
+    if (leadId && SUPABASE_URL) {
+      if (bridgeStatusAlreadyRan) {
+        // bridge-status already created the call_logs + ai_call_records entry.
+        // Update with real duration from A-leg hangup.
+        console.log(`[BRIDGE-HANGUP ${callId}] Updating existing records with duration=${totalDuration}`);
 
-      // Log activity
-      await fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
-        method: "POST",
-        headers: { ...dbHeaders, Prefer: "return=minimal" },
-        body: JSON.stringify({
-          lead_id: leadId,
-          type: "call",
-          description: `Click-to-Call by ${counsellorName} — ${disposition.replace("_", " ")} (${hangupCause || "ended before connect"})`,
-        }),
-      }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] activity failed:`, e.message));
+        // Update call_logs — find by call UUID in notes
+        await fetch(`${SUPABASE_URL}/rest/v1/call_logs?notes=like.*${callId.slice(0, 8)}*&lead_id=eq.${leadId}`, {
+          method: "PATCH",
+          headers: { ...dbHeaders, Prefer: "return=minimal" },
+          body: JSON.stringify({ duration_seconds: totalDuration }),
+        }).catch(() => {});
+
+        // Update ai_call_records
+        await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
+          method: "PATCH",
+          headers: { ...dbHeaders, Prefer: "return=minimal" },
+          body: JSON.stringify({ duration_seconds: totalDuration }),
+        }).catch(() => {});
+      } else {
+        // bridge-status never fired (counsellor hung up before Dial completed).
+        // This is the only callback — log everything here.
+        const dispositionMap: Record<string, string> = {
+          cancel: "cancelled", busy: "busy", "no-answer": "not_answered", failed: "not_answered",
+        };
+        const disposition = dispositionMap[callStatus] || "cancelled";
+
+        await fetch(`${SUPABASE_URL}/rest/v1/call_logs`, {
+          method: "POST",
+          headers: { ...dbHeaders, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            lead_id: leadId,
+            disposition,
+            duration_seconds: totalDuration,
+            notes: `Cloud Call: ${disposition.replace("_", " ")} (${hangupCause || "ended before connect"})`,
+            direction: "outbound",
+            user_id: counsellorUserId,
+            called_at: new Date().toISOString(),
+          }),
+        }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] call_logs failed:`, e.message));
+
+        await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records`, {
+          method: "POST",
+          headers: { ...dbHeaders, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            lead_id: leadId, call_uuid: callId, status: callStatus,
+            duration_seconds: totalDuration, disposition,
+            summary: `Manual call: ${disposition.replace("_", " ")} (${hangupCause || "counsellor ended"})`,
+            call_type: "manual", completed_at: new Date().toISOString(),
+          }),
+        }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] ai_call_records failed:`, e.message));
+
+        await fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
+          method: "POST",
+          headers: { ...dbHeaders, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            lead_id: leadId, type: "call",
+            description: `Cloud Call by ${counsellorName} — ${disposition.replace("_", " ")} (${hangupCause || "ended before connect"})`,
+          }),
+        }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] activity failed:`, e.message));
+      }
     }
 
-    activeCallContexts.delete(callId);
+    if (callCtx) activeCallContexts.delete(callId);
     return new Response("OK");
   }
 
