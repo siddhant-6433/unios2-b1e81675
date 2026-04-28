@@ -1781,6 +1781,92 @@ Deno.serve({ port: PORT }, async (req) => {
     }), { headers: { "Content-Type": "application/json" } });
   }
 
+  // POST /bridge-hangup/{callId} — Plivo hangup callback for the counsellor leg
+  // Fires when counsellor hangs up OR when call is cancelled/not-answered before bridge
+  if (path.startsWith("/bridge-hangup/")) {
+    const callId = path.split("/bridge-hangup/")[1];
+    const body = await req.formData().catch(() => null);
+    const params = body ? Object.fromEntries(body) : {} as any;
+    const callStatus = (params.CallStatus || "unknown").toLowerCase();
+    const duration = parseInt(params.Duration || "0");
+    const hangupCause = params.HangupCause || "";
+
+    console.log(`[BRIDGE-HANGUP ${callId}] status=${callStatus} duration=${duration} cause=${hangupCause}`);
+
+    // Only log if bridge-status hasn't already handled this call
+    const callCtx = activeCallContexts.get(callId);
+    if (!callCtx) {
+      // bridge-status already cleaned up — skip to avoid duplicate logging
+      console.log(`[BRIDGE-HANGUP ${callId}] Already handled by bridge-status, skipping`);
+      return new Response("OK");
+    }
+
+    const dbHeaders = {
+      "Content-Type": "application/json",
+      apikey: SUPABASE_SERVICE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+    };
+
+    if (callCtx.leadId && SUPABASE_URL) {
+      const leadId = callCtx.leadId;
+      // Map hangup statuses
+      const dispositionMap: Record<string, string> = {
+        "cancel": "cancelled",
+        "busy": "busy",
+        "no-answer": "not_answered",
+        "failed": "not_answered",
+      };
+      const disposition = dispositionMap[callStatus] || "cancelled";
+      const counsellorUserId = callCtx.toolCallsMade?.[0]?.args?.counsellorUserId || null;
+      const counsellorName = callCtx.toolCallsMade?.[0]?.args?.counsellorName || "Counsellor";
+
+      // Log to call_logs
+      await fetch(`${SUPABASE_URL}/rest/v1/call_logs`, {
+        method: "POST",
+        headers: { ...dbHeaders, Prefer: "return=minimal" },
+        body: JSON.stringify({
+          lead_id: leadId,
+          disposition,
+          duration_seconds: duration,
+          notes: `Click-to-Call: ${disposition.replace("_", " ")} (counsellor hung up before connecting)`,
+          direction: "outbound",
+          user_id: counsellorUserId,
+          called_at: new Date().toISOString(),
+        }),
+      }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] call_logs failed:`, e.message));
+
+      // Log to ai_call_records
+      await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records`, {
+        method: "POST",
+        headers: { ...dbHeaders, Prefer: "return=minimal" },
+        body: JSON.stringify({
+          lead_id: leadId,
+          call_uuid: callId,
+          status: callStatus,
+          duration_seconds: duration,
+          disposition,
+          summary: `Manual call: ${disposition.replace("_", " ")} (${hangupCause || "counsellor ended"})`,
+          call_type: "manual",
+          completed_at: new Date().toISOString(),
+        }),
+      }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] ai_call_records failed:`, e.message));
+
+      // Log activity
+      await fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
+        method: "POST",
+        headers: { ...dbHeaders, Prefer: "return=minimal" },
+        body: JSON.stringify({
+          lead_id: leadId,
+          type: "call",
+          description: `Click-to-Call by ${counsellorName} — ${disposition.replace("_", " ")} (${hangupCause || "ended before connect"})`,
+        }),
+      }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] activity failed:`, e.message));
+    }
+
+    activeCallContexts.delete(callId);
+    return new Response("OK");
+  }
+
   // WebSocket upgrade for Plivo audio stream
   if (path.startsWith("/ws/")) {
     const callId = path.split("/ws/")[1];

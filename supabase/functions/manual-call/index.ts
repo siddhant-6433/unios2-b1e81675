@@ -110,11 +110,15 @@ Deno.serve(async (req) => {
     const answerUrl = `${VOICE_AGENT_URL}/bridge-answer/${callId}?student=${studentPhone}`;
     const plivoUrl = `https://api.plivo.com/v1/Account/${PLIVO_AUTH_ID}/Call/`;
 
+    const hangupUrl = `${VOICE_AGENT_URL}/bridge-hangup/${callId}`;
+
     const plivoPayload = {
       from: PLIVO_PHONE_NUMBER,
       to: counsellorPhone,
       answer_url: answerUrl,
       answer_method: "GET",
+      hangup_url: hangupUrl,
+      hangup_method: "POST",
       ring_timeout: 30,
       caller_name: `NIMT CRM: ${lead.name || "Lead"}`,
     };
