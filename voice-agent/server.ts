@@ -1592,8 +1592,9 @@ Deno.serve({ port: PORT }, async (req) => {
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
+  <Record recordSession="true" redirect="false" maxLength="3600"${recordingCallbackUrl ? ` callbackUrl="${recordingCallbackUrl}" callbackMethod="POST"` : ""} />
   <Speak voice="WOMAN">Connecting you to the student now.</Speak>
-  <Dial callerId="${PLIVO_PHONE_NUMBER}" record="true" recordFileFormat="mp3"${recordingCallbackUrl ? ` recordingCallbackUrl="${recordingCallbackUrl}"` : ""} action="${statusUrl}" method="POST" machineDetection="true" machineDetectionTime="5000">
+  <Dial callerId="${PLIVO_PHONE_NUMBER}" action="${statusUrl}" method="POST" machineDetection="true" machineDetectionTime="5000">
     <Number>${studentPhone}</Number>
   </Dial>
 </Response>`;
