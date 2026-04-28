@@ -1302,9 +1302,14 @@ const Admissions = () => {
                       )}
                     </td>
                     <td className="px-4 py-3 text-right" onClick={() => navigate(`/admissions/${lead.id}`)}>
-                      {lead.app_fee_amount != null && lead.app_fee_amount > 0 ? (
+                      {lead.app_payment_status === "paid" && lead.app_fee_amount != null && lead.app_fee_amount > 0 ? (
                         <span className="text-xs font-semibold text-green-700 dark:text-green-400">
                           ₹{Number(lead.app_fee_amount).toLocaleString("en-IN")}
+                        </span>
+                      ) : lead.app_fee_amount != null && lead.app_fee_amount > 0 ? (
+                        <span className="text-[10px] text-amber-500" title="Not paid yet">
+                          ₹{Number(lead.app_fee_amount).toLocaleString("en-IN")}
+                          <span className="ml-0.5 text-[9px]">⏳</span>
                         </span>
                       ) : (
                         <span className="text-[10px] text-muted-foreground">—</span>
