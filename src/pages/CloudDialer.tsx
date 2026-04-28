@@ -25,10 +25,14 @@ interface QueueLead {
   attempt_count: number;
   // Course details for script
   course_fee?: string;
+  course_fee_total?: string;
+  course_fee_notes?: string;
   course_eligibility?: string;
   course_duration?: string;
   course_entrance?: string;
+  course_entrance_mandatory?: boolean;
   course_highlights?: string;
+  course_careers?: string;
 }
 
 interface CallState {
@@ -67,9 +71,10 @@ const STAGE_LABELS: Record<string, string> = {
 // ── Component ───────────────────────────────────────────────────────────────
 
 export default function CloudDialer() {
-  const { user, role } = useAuth();
+  const { user, role, profile } = useAuth();
   const { toast } = useToast();
   const isCounsellor = role === "counsellor";
+  const counsellorDisplayName = profile?.display_name || "Counsellor";
 
   // Queue
   const [queue, setQueue] = useState<QueueLead[]>([]);
@@ -178,7 +183,7 @@ export default function CloudDialer() {
       for (let i = 0; i < leadIds.length; i += 50) {
         const batch = leadIds.slice(i, i + 50);
         const { data } = await supabase.from("leads")
-          .select("id, name, phone, stage, source, courses:course_id(name, fee_per_year, eligibility, entrance_exam, duration_years, highlights, career_options), campuses:campus_id(name)")
+          .select("id, name, phone, stage, source, courses:course_id(name, fee_per_year, fee_total, fee_notes, eligibility, entrance_exam, entrance_mandatory, duration_years, highlights, career_options), campuses:campus_id(name)")
           .in("id", batch);
         (data || []).forEach((l: any) => { detailMap[l.id] = l; });
       }
@@ -197,10 +202,14 @@ export default function CloudDialer() {
         course_name: c.name || "—", campus_name: d.campuses?.name || "—",
         counsellor_name: l.bucket, attempt_count: attemptMap[l.id] || 0,
         course_fee: c.fee_per_year ? `₹${Number(c.fee_per_year).toLocaleString("en-IN")}/year` : undefined,
+        course_fee_total: c.fee_total ? `₹${Number(c.fee_total).toLocaleString("en-IN")} total` : undefined,
+        course_fee_notes: c.fee_notes || undefined,
         course_eligibility: c.eligibility || undefined,
         course_duration: c.duration_years ? `${c.duration_years} year${c.duration_years > 1 ? "s" : ""}` : undefined,
         course_entrance: c.entrance_exam || undefined,
+        course_entrance_mandatory: c.entrance_mandatory ?? false,
         course_highlights: Array.isArray(c.highlights) ? c.highlights.join(" | ") : c.highlights || undefined,
+        course_careers: c.career_options || undefined,
       };
     }).filter(l => l.phone);
 
@@ -483,8 +492,15 @@ export default function CloudDialer() {
                 <p className="text-sm font-medium text-foreground truncate">{lead.name}</p>
                 <p className="text-[10px] text-muted-foreground">{lead.course_name} · {lead.phone.slice(-4)}</p>
                 <div className="flex items-center gap-1.5 mt-1">
-                  <Badge className="text-[9px] border-0 bg-cyan-50 text-cyan-700 dark:bg-cyan-950/30">{lead.counsellor_name}</Badge>
-                  {lead.attempt_count > 0 && <Badge className="text-[9px] border-0 bg-amber-100 text-amber-700">{lead.attempt_count}x</Badge>}
+                  <Badge className={`text-[9px] border-0 ${
+                    lead.counsellor_name === "Post-Visit" ? "bg-amber-100 text-amber-700" :
+                    lead.counsellor_name === "Visit Confirm" ? "bg-violet-100 text-violet-700" :
+                    lead.counsellor_name === "Overdue" ? "bg-red-100 text-red-700" :
+                    lead.counsellor_name === "Today" ? "bg-blue-100 text-blue-700" :
+                    lead.counsellor_name === "New Lead" ? "bg-orange-100 text-orange-700" :
+                    "bg-gray-100 text-gray-600"
+                  }`}>{lead.counsellor_name}</Badge>
+                  {lead.attempt_count > 0 && <Badge className="text-[9px] border-0 bg-gray-100 text-gray-500">{lead.attempt_count}x</Badge>}
                   {idx < currentIdx && <CheckCircle className="h-3 w-3 text-emerald-500 ml-auto" />}
                 </div>
               </div>
@@ -558,58 +574,83 @@ export default function CloudDialer() {
                   <CardContent className="p-4">
                     <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide mb-2">📋 Counsellor Script</p>
                     {currentLead.course_name !== "—" ? (
-                      <div className="space-y-2 text-xs">
-                        <div className="flex justify-between items-start">
-                          <span className="text-muted-foreground shrink-0 w-20">Course</span>
-                          <span className="font-semibold text-foreground text-right">{currentLead.course_name}</span>
+                      <div className="space-y-2.5 text-xs">
+                        {/* Course + Duration */}
+                        <div>
+                          <p className="font-bold text-foreground text-sm">{currentLead.course_name}</p>
+                          {currentLead.course_duration && <p className="text-muted-foreground">{currentLead.course_duration}{currentLead.campus_name !== "—" ? ` · ${currentLead.campus_name}` : ""}</p>}
                         </div>
+
+                        {/* Fee box */}
                         {currentLead.course_fee && (
-                          <div className="flex justify-between items-start">
-                            <span className="text-muted-foreground shrink-0 w-20">Fee</span>
-                            <span className="font-bold text-emerald-700 dark:text-emerald-400 text-right">{currentLead.course_fee}</span>
-                          </div>
-                        )}
-                        {currentLead.course_duration && (
-                          <div className="flex justify-between items-start">
-                            <span className="text-muted-foreground shrink-0 w-20">Duration</span>
-                            <span className="font-medium text-foreground text-right">{currentLead.course_duration}</span>
-                          </div>
-                        )}
-                        {currentLead.course_eligibility && (
-                          <div className="flex justify-between items-start">
-                            <span className="text-muted-foreground shrink-0 w-20">Eligibility</span>
-                            <span className="font-medium text-foreground text-right leading-relaxed">{currentLead.course_eligibility}</span>
-                          </div>
-                        )}
-                        {currentLead.course_entrance && (
-                          <div className="flex justify-between items-start">
-                            <span className="text-muted-foreground shrink-0 w-20">Entrance</span>
-                            <span className="font-medium text-foreground text-right">{currentLead.course_entrance}</span>
-                          </div>
-                        )}
-                        {currentLead.course_highlights && (
-                          <div className="pt-1.5 border-t border-blue-200/50">
-                            <span className="text-muted-foreground text-[10px]">Highlights</span>
-                            <p className="font-medium text-foreground leading-relaxed mt-0.5">{currentLead.course_highlights}</p>
+                          <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200/50 px-3 py-2">
+                            <div className="flex items-baseline justify-between">
+                              <span className="text-muted-foreground">Annual Fee</span>
+                              <span className="font-bold text-emerald-700 dark:text-emerald-400 text-sm">{currentLead.course_fee}</span>
+                            </div>
+                            {currentLead.course_fee_total && (
+                              <div className="flex items-baseline justify-between mt-0.5">
+                                <span className="text-muted-foreground">Total Course Fee</span>
+                                <span className="font-semibold text-foreground">{currentLead.course_fee_total}</span>
+                              </div>
+                            )}
+                            {currentLead.course_fee_notes && (
+                              <p className="text-[10px] text-muted-foreground mt-1 leading-relaxed">{currentLead.course_fee_notes}</p>
+                            )}
                           </div>
                         )}
 
-                        <div className="pt-2 border-t border-blue-200/50 space-y-1.5">
-                          <p className="text-[10px] font-semibold text-blue-600">Talking Points:</p>
-                          <p className="text-muted-foreground leading-relaxed">
-                            "Hello {currentLead.name.split(" ")[0]}, this is [Your Name] from NIMT. I'm calling regarding your interest in {currentLead.course_name}.
+                        {/* Eligibility + Entrance */}
+                        {currentLead.course_eligibility && (
+                          <div>
+                            <span className="text-[10px] font-semibold text-blue-600">Eligibility</span>
+                            <p className="font-medium text-foreground leading-relaxed mt-0.5">{currentLead.course_eligibility}</p>
+                          </div>
+                        )}
+                        {currentLead.course_entrance && (
+                          <div>
+                            <span className="text-[10px] font-semibold text-blue-600">Entrance Exam {currentLead.course_entrance_mandatory ? "(Required)" : "(Optional/Merit)"}</span>
+                            <p className="font-medium text-foreground mt-0.5">{currentLead.course_entrance}</p>
+                          </div>
+                        )}
+
+                        {/* Highlights */}
+                        {currentLead.course_highlights && (
+                          <div>
+                            <span className="text-[10px] font-semibold text-blue-600">Key Highlights</span>
+                            <p className="text-foreground leading-relaxed mt-0.5">{currentLead.course_highlights}</p>
+                          </div>
+                        )}
+
+                        {/* Careers */}
+                        {currentLead.course_careers && (
+                          <div>
+                            <span className="text-[10px] font-semibold text-blue-600">Career Options</span>
+                            <p className="text-foreground leading-relaxed mt-0.5">{currentLead.course_careers}</p>
+                          </div>
+                        )}
+
+                        {/* Talking Points */}
+                        <div className="pt-2 border-t border-blue-200/50">
+                          <p className="text-[10px] font-semibold text-blue-600 mb-1">💬 Talking Points</p>
+                          <p className="text-muted-foreground leading-relaxed italic">
+                            "Hello {currentLead.name.split(" ")[0]}, this is {counsellorDisplayName} from NIMT. I'm calling regarding your interest in {currentLead.course_name}.
                             {currentLead.course_fee ? ` The annual fee is ${currentLead.course_fee}.` : ""}
-                            {" "}Would you like to know more about the course or schedule a campus visit?"
+                            {currentLead.course_eligibility ? ` You'll need ${currentLead.course_eligibility.split(".")[0]}.` : ""}
+                            {" "}Would you like to know more or schedule a campus visit?"
                           </p>
                         </div>
                       </div>
                     ) : (
-                      <div className="text-xs text-muted-foreground space-y-1.5">
-                        <p>No course selected for this lead.</p>
-                        <p className="leading-relaxed">
-                          "Hello {currentLead.name.split(" ")[0]}, this is [Your Name] from NIMT Educational Institutions.
-                          I'm calling regarding your enquiry. What course are you interested in?"
-                        </p>
+                      <div className="text-xs space-y-2">
+                        <p className="text-muted-foreground">No course selected for this lead.</p>
+                        <div className="pt-2 border-t border-blue-200/50">
+                          <p className="text-[10px] font-semibold text-blue-600 mb-1">💬 Talking Points</p>
+                          <p className="text-muted-foreground leading-relaxed italic">
+                            "Hello {currentLead.name.split(" ")[0]}, this is {counsellorDisplayName} from NIMT Educational Institutions.
+                            I'm calling regarding your enquiry. Which course are you interested in?"
+                          </p>
+                        </div>
                       </div>
                     )}
                   </CardContent>
