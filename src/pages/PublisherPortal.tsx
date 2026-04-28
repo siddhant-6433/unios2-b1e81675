@@ -11,6 +11,7 @@ import {
 import {
   Loader2, Users, TrendingUp, CheckCircle, Clock,
   Search, ChevronRight, ArrowUpRight, Activity, Phone, PhoneOff,
+  BookOpen, MapPin, BarChart3,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -29,6 +30,8 @@ interface PublisherLead {
   stage: string;
   course_name: string;
   campus_name: string;
+  city: string | null;
+  state: string | null;
   created_at: string;
   ai_called: boolean;
   ai_called_at: string | null;
@@ -192,7 +195,7 @@ export default function PublisherPortal() {
         const { data: batch, error } = await supabase
           .from("leads")
           .select(`
-            id, name, phone, email, stage, created_at,
+            id, name, phone, email, stage, city, state, created_at,
             ai_called, ai_called_at,
             courses!left(name),
             campuses!left(name)
@@ -220,38 +223,51 @@ export default function PublisherPortal() {
           ai_called_at: l.ai_called_at ?? null,
           course_name: l.courses?.name ?? "—",
           campus_name: l.campuses?.name ?? "—",
+          city: l.city ?? null,
+          state: l.state ?? null,
         }));
         setLeads(mapped);
 
-        // Avg AI call time from leads data
-        const aiDelays = mapped
-          .filter((l: any) => l.ai_called && l.ai_called_at)
-          .map((l: any) => new Date(l.ai_called_at).getTime() - new Date(l.created_at).getTime())
-          .filter((ms: number) => ms >= 0);
-        setAvgAiCallMs(aiDelays.length > 0 ? aiDelays.reduce((a: number, b: number) => a + b, 0) / aiDelays.length : null);
+        // Avg AI/manual call time — only leads received in last 3 days
+        const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
+        const recentLeads = mapped.filter((l: any) => new Date(l.created_at).getTime() >= threeDaysAgo);
 
-        // Avg manual call time — fetch first 'call' activity per lead in batches
-        const leadIds = mapped.map((l: any) => l.id);
-        const leadCreatedMap: Record<string, number> = {};
-        mapped.forEach((l: any) => { leadCreatedMap[l.id] = new Date(l.created_at).getTime(); });
+        const median = (arr: number[]) => {
+          if (arr.length === 0) return null;
+          const sorted = [...arr].sort((a, b) => a - b);
+          const mid = Math.floor(sorted.length / 2);
+          return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+        };
+
+        const aiDelays = mapped
+          .filter((l: any) => l.ai_called && l.ai_called_at && new Date(l.ai_called_at).getTime() >= threeDaysAgo)
+          .map((l: any) => new Date(l.ai_called_at).getTime() - new Date(l.created_at).getTime())
+          .filter((ms: number) => ms >= 0 && ms <= 3600000); // cap at 1h to exclude manual retries
+        setAvgAiCallMs(median(aiDelays));
+
+        // Avg manual call time — fetch first 'call' activity placed in last 3 days, across all leads
+        const allLeadIds = mapped.map((l: any) => l.id);
+        const allLeadCreatedMap: Record<string, number> = {};
+        mapped.forEach((l: any) => { allLeadCreatedMap[l.id] = new Date(l.created_at).getTime(); });
 
         const firstCallMap: Record<string, number> = {};
         const BATCH = 500;
-        for (let i = 0; i < leadIds.length; i += BATCH) {
+        for (let i = 0; i < allLeadIds.length; i += BATCH) {
           const { data: callBatch } = await supabase
             .from("lead_activities")
             .select("lead_id, created_at")
-            .in("lead_id", leadIds.slice(i, i + BATCH))
+            .in("lead_id", allLeadIds.slice(i, i + BATCH))
             .eq("type", "call")
+            .gte("created_at", new Date(threeDaysAgo).toISOString())
             .order("created_at", { ascending: true });
           (callBatch ?? []).forEach((a: any) => {
             if (!firstCallMap[a.lead_id]) firstCallMap[a.lead_id] = new Date(a.created_at).getTime();
           });
         }
         const manualDelays = Object.entries(firstCallMap)
-          .map(([lid, callTime]) => callTime - (leadCreatedMap[lid] ?? callTime))
+          .map(([lid, callTime]) => callTime - (allLeadCreatedMap[lid] ?? callTime))
           .filter(ms => ms >= 0);
-        setAvgManualCallMs(manualDelays.length > 0 ? manualDelays.reduce((a, b) => a + b, 0) / manualDelays.length : null);
+        setAvgManualCallMs(median(manualDelays));
       }
       setLoading(false);
     })();
@@ -422,7 +438,7 @@ export default function PublisherPortal() {
         <Card className="border-border/60 shadow-none">
           <CardContent className="pt-5 pb-4">
             <div className="flex items-center justify-between mb-1">
-              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Avg. AI Call Time</p>
+              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Avg. Response — AI</p>
               <Phone className="h-4 w-4 text-violet-500" />
             </div>
             {avgAiCallMs === null ? (
@@ -430,7 +446,7 @@ export default function PublisherPortal() {
             ) : (
               <>
                 <p className="text-3xl font-bold text-foreground">{formatDuration(avgAiCallMs)}</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">after lead received</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">median · lead received → first AI call · last 3 days</p>
               </>
             )}
           </CardContent>
@@ -438,7 +454,7 @@ export default function PublisherPortal() {
         <Card className="border-border/60 shadow-none">
           <CardContent className="pt-5 pb-4">
             <div className="flex items-center justify-between mb-1">
-              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Avg. Manual Call Time</p>
+              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Avg. Response — Manual</p>
               <Phone className="h-4 w-4 text-orange-500" />
             </div>
             {avgManualCallMs === null ? (
@@ -446,7 +462,7 @@ export default function PublisherPortal() {
             ) : (
               <>
                 <p className="text-3xl font-bold text-foreground">{formatDuration(avgManualCallMs)}</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">after lead received</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">median · lead received → first call · last 3 days</p>
               </>
             )}
           </CardContent>
@@ -492,6 +508,185 @@ export default function PublisherPortal() {
               ))}
             </div>
           </div>
+        );
+      })()}
+
+      {/* ── Course-wise Stage Breakdown ────────────────────────────── */}
+      {(() => {
+        // Group leads by course, then by stage
+        const courseMap = new Map<string, Map<string, number>>();
+        const courseTotals = new Map<string, number>();
+        leads.forEach(l => {
+          const c = l.course_name || "—";
+          if (!courseMap.has(c)) courseMap.set(c, new Map());
+          const stages = courseMap.get(c)!;
+          stages.set(l.stage, (stages.get(l.stage) || 0) + 1);
+          courseTotals.set(c, (courseTotals.get(c) || 0) + 1);
+        });
+        // Get active stages (that have at least one lead)
+        const activeStages = Array.from(new Set(leads.map(l => l.stage)));
+        const pipelineStages = ["application_in_progress","application_fee_paid","application_submitted","counsellor_call","visit_scheduled","interview","offer_sent","token_paid","pre_admitted","admitted"];
+        const sortedCourses = Array.from(courseMap.entries()).sort((a, b) => (courseTotals.get(b[0]) || 0) - (courseTotals.get(a[0]) || 0));
+        // Best performing: highest admitted/total ratio with at least 5 leads
+        const bestCourse = sortedCourses
+          .filter(([, stages]) => (courseTotals.get(sortedCourses.find(([c]) => c === Array.from(stages.keys())[0])?.[0] || "") || 0) >= 5)
+          .map(([c, stages]) => ({ course: c, admitted: stages.get("admitted") || 0, total: courseTotals.get(c) || 1, rate: ((stages.get("admitted") || 0) / (courseTotals.get(c) || 1)) * 100 }))
+          .sort((a, b) => b.rate - a.rate)[0];
+
+        if (sortedCourses.length <= 1) return null;
+        return (
+          <Card className="border-border/60 shadow-none">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <BookOpen className="h-4 w-4 text-muted-foreground" />
+                  Course-wise Lead Stages
+                </CardTitle>
+                {bestCourse && bestCourse.rate > 0 && (
+                  <span className="text-[11px] text-green-600 dark:text-green-400 font-medium bg-green-50 dark:bg-green-950/30 px-2.5 py-1 rounded-full">
+                    Best: {bestCourse.course} ({bestCourse.rate.toFixed(0)}% conversion)
+                  </span>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-t border-border bg-muted/50">
+                      <th className="px-4 py-2.5 text-left font-semibold text-muted-foreground uppercase tracking-wide sticky left-0 bg-muted/50 z-10">Course</th>
+                      <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground">Total</th>
+                      {pipelineStages.filter(s => activeStages.includes(s)).map(s => (
+                        <th key={s} className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap">
+                          {(STAGE_LABELS[s] || s).replace(/ /g, "\u00A0")}
+                        </th>
+                      ))}
+                      <th className="px-3 py-2.5 text-center font-semibold text-red-400">Dropped</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedCourses.map(([course, stages]) => {
+                      const total = courseTotals.get(course) || 0;
+                      const dropped = (stages.get("not_interested") || 0) + (stages.get("ineligible") || 0) + (stages.get("dnc") || 0) + (stages.get("rejected") || 0);
+                      return (
+                        <tr key={course} className="border-b border-border last:border-0 hover:bg-muted/30">
+                          <td className="px-4 py-2.5 font-medium text-foreground sticky left-0 bg-white dark:bg-background z-10 whitespace-nowrap">{course}</td>
+                          <td className="px-3 py-2.5 text-center font-bold text-foreground">{total}</td>
+                          {pipelineStages.filter(s => activeStages.includes(s)).map(s => {
+                            const count = stages.get(s) || 0;
+                            return (
+                              <td key={s} className="px-3 py-2.5 text-center">
+                                {count > 0 ? (
+                                  <span className={`inline-block min-w-[24px] px-1.5 py-0.5 rounded-md text-[11px] font-semibold ${STAGE_COLORS[s] || "bg-muted"}`}>
+                                    {count}
+                                  </span>
+                                ) : <span className="text-muted-foreground/40">—</span>}
+                              </td>
+                            );
+                          })}
+                          <td className="px-3 py-2.5 text-center">
+                            {dropped > 0 ? (
+                              <span className="inline-block min-w-[24px] px-1.5 py-0.5 rounded-md text-[11px] font-semibold bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400">
+                                {dropped}
+                              </span>
+                            ) : <span className="text-muted-foreground/40">—</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
+
+      {/* ── City/State Conversion Chart ──────────────────────────── */}
+      {(() => {
+        // Group leads by city and state
+        type GeoData = { total: number; called: number; interested: number; admitted: number };
+        const cityMap = new Map<string, GeoData>();
+        const stateMap = new Map<string, GeoData>();
+        const interestStages = new Set(["counsellor_call","visit_scheduled","interview","offer_sent","token_paid","pre_admitted","admitted","application_in_progress","application_fee_paid","application_submitted"]);
+
+        leads.forEach(l => {
+          const lead = l as any;
+          const city = lead.city || null;
+          const state = lead.state || null;
+
+          const update = (map: Map<string, GeoData>, key: string | null) => {
+            if (!key || key === "—") return;
+            const k = key.trim();
+            if (!k) return;
+            if (!map.has(k)) map.set(k, { total: 0, called: 0, interested: 0, admitted: 0 });
+            const d = map.get(k)!;
+            d.total++;
+            if (lead.ai_called) d.called++;
+            if (interestStages.has(l.stage)) d.interested++;
+            if (l.stage === "admitted") d.admitted++;
+          };
+          update(cityMap, city);
+          update(stateMap, state);
+        });
+
+        // Only show if we have geo data
+        const hasCityData = cityMap.size > 0;
+        const hasStateData = stateMap.size > 0;
+        if (!hasCityData && !hasStateData) return null;
+
+        const renderGeoTable = (map: Map<string, GeoData>, label: string) => {
+          const sorted = Array.from(map.entries())
+            .filter(([, d]) => d.total >= 2)
+            .sort((a, b) => b[1].total - a[1].total)
+            .slice(0, 15);
+          if (sorted.length === 0) return null;
+          const maxTotal = Math.max(...sorted.map(([, d]) => d.total));
+          return (
+            <div className="flex-1 min-w-[300px]">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                <MapPin className="h-3.5 w-3.5" /> By {label}
+              </p>
+              <div className="space-y-2">
+                {sorted.map(([name, d]) => {
+                  const intRate = d.total > 0 ? Math.round((d.interested / d.total) * 100) : 0;
+                  const barWidth = (d.total / maxTotal) * 100;
+                  return (
+                    <div key={name} className="flex items-center gap-3">
+                      <span className="text-xs text-foreground font-medium w-28 truncate shrink-0" title={name}>{name}</span>
+                      <div className="flex-1 h-6 bg-muted/50 rounded-md overflow-hidden relative">
+                        <div className="h-full bg-blue-100 dark:bg-blue-950/40 rounded-md transition-all" style={{ width: `${barWidth}%` }} />
+                        <div className="absolute inset-0 flex items-center px-2 justify-between">
+                          <span className="text-[10px] font-semibold text-foreground">{d.total} leads</span>
+                          <span className={`text-[10px] font-bold ${intRate >= 50 ? "text-green-600" : intRate >= 25 ? "text-amber-600" : "text-red-500"}`}>
+                            {intRate}% interested
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-[10px] text-muted-foreground w-14 text-right shrink-0">{d.called}/{d.total} called</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        };
+
+        return (
+          <Card className="border-border/60 shadow-none">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                <BarChart3 className="h-4 w-4 text-muted-foreground" />
+                Geographic Distribution & Conversion
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col lg:flex-row gap-8">
+                {hasCityData && renderGeoTable(cityMap, "City")}
+                {hasStateData && renderGeoTable(stateMap, "State")}
+              </div>
+            </CardContent>
+          </Card>
         );
       })()}
 
