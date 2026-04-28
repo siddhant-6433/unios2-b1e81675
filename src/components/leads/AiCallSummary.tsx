@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Bot, Play, FileText, ChevronDown } from "lucide-react";
+import { Bot, Play, FileText, ChevronDown, Phone } from "lucide-react";
 
 interface AiCallRecord {
   id: string;
@@ -61,16 +61,19 @@ export function AiCallSummary({ leadId }: AiCallSummaryProps) {
           : call.conversion_probability ? "bg-red-100 text-red-700" : "";
 
         return (
-          <Card key={call.id} className={`border-2 ${idx === 0 ? "border-amber-300 dark:border-amber-600 bg-amber-50/50 dark:bg-amber-950/20" : "border-border bg-card"} overflow-hidden`}>
+          <Card key={call.id} className={`border-2 ${idx === 0 ? ((call as any).call_type === "manual" ? "border-cyan-300 dark:border-cyan-600 bg-cyan-50/50 dark:bg-cyan-950/20" : "border-amber-300 dark:border-amber-600 bg-amber-50/50 dark:bg-amber-950/20") : "border-border bg-card"} overflow-hidden`}>
             <CardContent className="p-4">
               <div className="flex items-start gap-3">
                 <div className={`flex h-9 w-9 items-center justify-center rounded-xl shrink-0 ${idx === 0 ? "bg-amber-100 dark:bg-amber-900/40" : "bg-muted"}`}>
-                  <Bot className={`h-4 w-4 ${idx === 0 ? "text-amber-600" : "text-muted-foreground"}`} />
+                  {(call as any).call_type === "manual"
+                    ? <Phone className={`h-4 w-4 ${idx === 0 ? "text-cyan-600" : "text-muted-foreground"}`} />
+                    : <Bot className={`h-4 w-4 ${idx === 0 ? "text-amber-600" : "text-muted-foreground"}`} />
+                  }
                 </div>
                 <div className="flex-1 min-w-0">
                   {/* Header row */}
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="text-sm font-bold text-foreground">AI Call {calls.length > 1 ? `#${calls.length - idx}` : ""}</h3>
+                    <h3 className="text-sm font-bold text-foreground">{(call as any).call_type === "manual" ? "Cloud Call" : "AI Call"} {calls.length > 1 ? `#${calls.length - idx}` : ""}</h3>
                     <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-200 text-amber-800 dark:bg-amber-800/50 dark:text-amber-300">
                       {dateLabel} {timeLabel}
                     </span>

@@ -1622,6 +1622,7 @@ Deno.serve({ port: PORT }, async (req) => {
       (callCtx as any)._disp = disp;
       (callCtx as any)._dialStatus = dialStatus;
       (callCtx as any)._aLegUUID = aLegUUID;
+      (callCtx as any)._bLegUUID = bLegUUID;
       (callCtx as any)._statusRan = true;
       console.log(`[BRIDGE-STATUS ${callId}] disposition=${disp || "connected"} aLeg=${aLegUUID.slice(0,12)}`);
     }
@@ -1655,6 +1656,7 @@ Deno.serve({ port: PORT }, async (req) => {
       (callStatus === "cancel" ? "cancelled" : callStatus === "busy" ? "busy" : callStatus === "no-answer" ? "not_answered" : null);
     const dialStatus: string = (callCtx as any)._dialStatus ?? callStatus;
     const aLegUUID = (callCtx as any)._aLegUUID ?? plivoALegUUID;
+    const bLegUUID: string = (callCtx as any)._bLegUUID ?? "";
     const isAuto = !!disposition;
     const isConnected = !disposition && (dialStatus === "completed" || callStatus === "completed");
 
@@ -1681,7 +1683,7 @@ Deno.serve({ port: PORT }, async (req) => {
     await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records`, {
       method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
       body: JSON.stringify({
-        lead_id: leadId, call_uuid: callId, plivo_call_uuid: aLegUUID,
+        lead_id: leadId, call_uuid: callId, plivo_call_uuid: bLegUUID || aLegUUID,
         status: callStatus, duration_seconds: totalDuration, disposition,
         summary: isAuto ? `Cloud Call: ${disposition?.replace("_"," ")} (auto)` : `Cloud Call: connected (${totalDuration}s) by ${counsellorName}`,
         call_type: "manual", completed_at: new Date().toISOString(),

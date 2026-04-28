@@ -630,6 +630,8 @@ const LeadDetail = () => {
         toast({ title: "Call Failed", description: data.error, variant: "destructive" });
       } else {
         toast({ title: "Calling You", description: data?.message || "Pick up your phone to connect to the student." });
+        // Show disposition dialog after a short delay so counsellor can log the call outcome
+        setTimeout(() => setShowCallDisposition(true), 3000);
         fetchAll(true);
       }
     } catch (e: any) {
