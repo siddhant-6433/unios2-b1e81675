@@ -279,22 +279,24 @@ export default function CloudDialer() {
 
       if (data) {
         // Call record exists — call has ended on server side
-        const serverStatus = data.status; // "answered", "busy", "not_answered", "cancelled", "voicemail"
         const serverDur = data.duration_seconds || 0;
+        const serverDisp = data.disposition;
         if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
 
-        if (serverStatus === "answered") {
-          // Student answered, counsellor talked — show disposition panel
+        if (!serverDisp && serverDur > 0) {
+          // Connected call (no auto-disposition, has duration) — show disposition panel
           setCallState(prev => ({
             ...prev,
             status: "ended",
             elapsed: serverDur > 0 ? serverDur : prev.elapsed,
           }));
           setStats(prev => ({ ...prev, connected: prev.connected + 1, totalTalkTime: prev.totalTalkTime + serverDur }));
+        } else if (serverDisp) {
+          // Auto-disposed by server (busy/not_answered/voicemail/cancelled)
+          handleAutoDisposition(serverDisp);
         } else {
-          // Auto-disposed by server (unanswered/busy/voicemail/cancelled)
-          const disp = data.disposition || serverStatus || "cancelled";
-          handleAutoDisposition(disp);
+          // Short/no connection (0 duration, no disposition) — treat as cancelled
+          handleAutoDisposition("cancelled");
         }
         return;
       }
