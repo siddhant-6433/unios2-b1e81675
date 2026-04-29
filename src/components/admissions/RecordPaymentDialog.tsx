@@ -6,7 +6,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { IndianRupee, Loader2 } from "lucide-react";
+import { IndianRupee, Loader2, Upload, FileImage, X } from "lucide-react";
 
 const PAYMENT_TYPES = [
   { value: "application_fee", label: "Application Fee" },
@@ -29,38 +29,70 @@ interface RecordPaymentDialogProps {
   leadId: string;
   leadName: string;
   onSuccess?: () => void;
+  defaultType?: string;
+  requireScreenshot?: boolean;
+  title?: string;
 }
 
-export function RecordPaymentDialog({ open, onOpenChange, leadId, leadName, onSuccess }: RecordPaymentDialogProps) {
+export function RecordPaymentDialog({
+  open, onOpenChange, leadId, leadName, onSuccess,
+  defaultType, requireScreenshot, title,
+}: RecordPaymentDialogProps) {
   const { toast } = useToast();
   const { user } = useAuth();
-  const [type, setType] = useState("application_fee");
+  const [type, setType] = useState(defaultType || "application_fee");
   const [amount, setAmount] = useState("");
   const [mode, setMode] = useState("upi");
   const [transactionRef, setTransactionRef] = useState("");
   const [receiptNo, setReceiptNo] = useState("");
   const [notes, setNotes] = useState("");
+  const [screenshot, setScreenshot] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (open) {
-      setType("application_fee");
+      setType(defaultType || "application_fee");
       setAmount("");
       setMode("upi");
       setTransactionRef("");
       setReceiptNo("");
       setNotes("");
+      setScreenshot(null);
     }
-  }, [open]);
+  }, [open, defaultType]);
 
   const handleSave = async () => {
     if (!amount || parseFloat(amount) <= 0) return;
+    if (requireScreenshot && !screenshot) {
+      toast({ title: "Screenshot required", description: "Upload the payment proof image to continue.", variant: "destructive" });
+      return;
+    }
+    if (requireScreenshot && !transactionRef.trim()) {
+      toast({ title: "Transaction reference required", description: "Enter the UTR / transaction ref.", variant: "destructive" });
+      return;
+    }
     setSaving(true);
 
     let profileId: string | null = null;
     if (user?.id) {
       const { data: p } = await supabase.from("profiles").select("id").eq("user_id", user.id).single();
       profileId = p?.id || null;
+    }
+
+    let receiptUrl: string | null = null;
+    if (screenshot) {
+      const ext = screenshot.name.split(".").pop() || "jpg";
+      const path = `payment-receipts/${leadId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from("application-documents")
+        .upload(path, screenshot, { contentType: screenshot.type, upsert: false });
+      if (upErr) {
+        toast({ title: "Screenshot upload failed", description: upErr.message, variant: "destructive" });
+        setSaving(false);
+        return;
+      }
+      const { data: pub } = supabase.storage.from("application-documents").getPublicUrl(path);
+      receiptUrl = pub?.publicUrl || path;
     }
 
     const { error } = await supabase.from("lead_payments" as any).insert({
@@ -70,6 +102,7 @@ export function RecordPaymentDialog({ open, onOpenChange, leadId, leadName, onSu
       payment_mode: mode,
       transaction_ref: transactionRef || null,
       receipt_no: receiptNo || null,
+      receipt_url: receiptUrl,
       notes: notes || null,
       recorded_by: profileId,
       status: "confirmed",
@@ -120,7 +153,7 @@ export function RecordPaymentDialog({ open, onOpenChange, leadId, leadName, onSu
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <IndianRupee className="h-5 w-5 text-primary" />
-            Record Payment
+            {title || "Record Payment"}
           </DialogTitle>
           <p className="text-sm text-muted-foreground">{leadName}</p>
         </DialogHeader>
@@ -198,6 +231,33 @@ export function RecordPaymentDialog({ open, onOpenChange, leadId, leadName, onSu
           </div>
 
           <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">
+              Payment Proof / Screenshot{requireScreenshot && <span className="text-destructive ml-0.5">*</span>}
+            </label>
+            {screenshot ? (
+              <div className="flex items-center gap-2 rounded-xl border border-input bg-card px-3 py-2 text-sm">
+                <FileImage className="h-4 w-4 text-muted-foreground shrink-0" />
+                <span className="flex-1 truncate text-foreground">{screenshot.name}</span>
+                <span className="text-xs text-muted-foreground">{(screenshot.size / 1024).toFixed(0)} KB</span>
+                <button onClick={() => setScreenshot(null)} className="text-muted-foreground hover:text-destructive">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <label className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-input bg-card px-3 py-3 text-sm text-muted-foreground hover:bg-muted cursor-pointer">
+                <Upload className="h-4 w-4" />
+                <span>Click to upload (image or PDF)</span>
+                <input
+                  type="file"
+                  accept="image/*,application/pdf"
+                  onChange={(e) => setScreenshot(e.target.files?.[0] || null)}
+                  className="hidden"
+                />
+              </label>
+            )}
+          </div>
+
+          <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1">Notes</label>
             <textarea
               value={notes}
@@ -211,7 +271,11 @@ export function RecordPaymentDialog({ open, onOpenChange, leadId, leadName, onSu
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
-          <Button onClick={handleSave} disabled={!amount || parseFloat(amount) <= 0 || saving} className="gap-2">
+          <Button
+            onClick={handleSave}
+            disabled={!amount || parseFloat(amount) <= 0 || saving || (requireScreenshot && (!screenshot || !transactionRef.trim()))}
+            className="gap-2"
+          >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <IndianRupee className="h-4 w-4" />}
             Record Payment
           </Button>

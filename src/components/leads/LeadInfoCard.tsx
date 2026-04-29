@@ -13,6 +13,22 @@ const STAGE_LABELS: Record<string, string> = {
   token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", rejected: "Rejected", ineligible: "Ineligible", dnc: "Do Not Contact", deferred: "Deferred (Next Session)",
 };
 
+// Pipeline stages can only be reached via their proper workflow (call log, visit
+// scheduler, interview scoring, offer letter, payment, admission conversion, apply
+// portal). Locking them out of the manual dropdown keeps stage history honest.
+const AUTO_ONLY_STAGES = new Set([
+  "counsellor_call",
+  "visit_scheduled",
+  "interview",
+  "offer_sent",
+  "token_paid",
+  "pre_admitted",
+  "admitted",
+  "application_in_progress",
+  "application_fee_paid",
+  "application_submitted",
+]);
+
 interface LeadInfoCardProps {
   lead: any;
   counsellorName?: string;
@@ -23,13 +39,16 @@ interface LeadInfoCardProps {
   getCampusesForCourse?: (courseId: string | null) => CampusOption[];
   onStageChange: (stage: string) => void;
   onFieldUpdate?: (field: string, value: string | null, label: string) => void;
+  userRole?: string | null;
+  onTokenPaidOverride?: () => void;
 }
 
 export function LeadInfoCard({
   lead, counsellorName, courseName, campusName, campusCity,
   coursesByDepartment, getCampusesForCourse,
-  onStageChange, onFieldUpdate,
+  onStageChange, onFieldUpdate, userRole, onTokenPaidOverride,
 }: LeadInfoCardProps) {
+  const isSuperAdmin = userRole === "super_admin";
   const initials = lead.name
     .split(" ")
     .map((n: string) => n[0])
@@ -93,7 +112,16 @@ export function LeadInfoCard({
           <label className="block text-[11px] font-medium text-muted-foreground mb-1.5">Current Stage</label>
           <select
             value={lead.stage}
-            onChange={(e) => onStageChange(e.target.value)}
+            onChange={(e) => {
+              const next = e.target.value;
+              // Super admin token_paid override — opens a payment dialog that requires
+              // transaction details + screenshot; the dialog handles stage advancement.
+              if (next === "token_paid" && isSuperAdmin && onTokenPaidOverride) {
+                onTokenPaidOverride();
+                return;
+              }
+              onStageChange(next);
+            }}
             className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
           >
             {Object.entries(STAGE_LABELS)
@@ -102,21 +130,23 @@ export function LeadInfoCard({
                 if (key === lead.stage) return true;
                 // Hide new_lead once a lead has moved past it.
                 if (key === "new_lead" && lead.stage !== "new_lead") return false;
-                // counsellor_call ("In Follow Up") is auto-set when a call is logged with
-                // an interested-style disposition. Don't let users pick it manually —
-                // forces actual call logging so the Called metric stays consistent.
-                if (key === "counsellor_call") return false;
+                // token_paid is the one auto-only stage super admins can override
+                // manually (with required transaction details + screenshot).
+                if (key === "token_paid") return isSuperAdmin;
+                // All other pipeline stages can only be reached via their proper workflow.
+                if (AUTO_ONLY_STAGES.has(key)) return false;
                 return true;
               })
               .map(([key, label]) => (
-                <option key={key} value={key}>{label}</option>
+                <option key={key} value={key}>
+                  {label}{key === "token_paid" && isSuperAdmin && lead.stage !== "token_paid" ? " (manual override)" : ""}
+                </option>
               ))}
           </select>
-          {lead.stage !== "counsellor_call" && (
-            <p className="mt-1.5 text-[10px] text-muted-foreground/70">
-              "In Follow Up" is set automatically when a call is logged.
-            </p>
-          )}
+          <p className="mt-1.5 text-[10px] text-muted-foreground/70">
+            Pipeline stages (In Follow Up, Visit Scheduled, etc.) are set automatically by their respective workflows.
+            {isSuperAdmin && " Token Paid can be overridden manually with transaction details + screenshot."}
+          </p>
         </div>
 
         {/* Info rows */}

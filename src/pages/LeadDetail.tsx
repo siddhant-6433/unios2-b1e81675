@@ -111,6 +111,7 @@ const LeadDetail = () => {
   const [showCallDisposition, setShowCallDisposition] = useState(false);
   const [dispositionWaSent, setDispositionWaSent] = useState(false);
   const [showRecordPayment, setShowRecordPayment] = useState(false);
+  const [showTokenOverride, setShowTokenOverride] = useState(false);
   const [showWalkinCompletion, setShowWalkinCompletion] = useState(false);
   const [showSendEmail, setShowSendEmail] = useState(false);
   const [paymentRefreshKey, setPaymentRefreshKey] = useState(0);
@@ -485,12 +486,29 @@ const LeadDetail = () => {
       toast({ title: "Cannot revert", description: "Lead cannot be moved back to New Lead stage.", variant: "destructive" });
       return;
     }
-    // counsellor_call must be reached by logging an actual call (with an interested-style
-    // disposition), so the Called metric can never lag behind the In Follow Up count.
-    if (newStage === "counsellor_call") {
+    // Pipeline stages must be reached via their proper workflow so the activity
+    // history stays honest. Each stage's auto-set path is enforced here:
+    const autoOnlyHints: Record<string, string> = {
+      counsellor_call: "Use 'Log Call' with disposition Interested / Call Back / Not Answered.",
+      visit_scheduled: "Use 'Schedule Visit' from the lead actions.",
+      interview: "Set via the Interview Scoring workflow.",
+      offer_sent: "Generate an offer letter from the documents/offer flow.",
+      pre_admitted: "Use 'Convert to Student' (pre-admit option).",
+      admitted: "Use 'Convert to Student' (admit option).",
+      application_in_progress: "Set automatically by the Apply portal.",
+      application_fee_paid: "Set automatically when an application_fee payment is recorded.",
+      application_submitted: "Set automatically by the Apply portal on submission.",
+    };
+    if (autoOnlyHints[newStage]) {
+      toast({ title: "Use the proper workflow", description: autoOnlyHints[newStage], variant: "destructive" });
+      return;
+    }
+    // token_paid is super-admin-only and must go through the override dialog,
+    // not this generic update path.
+    if (newStage === "token_paid" && role !== "super_admin") {
       toast({
-        title: "Log a call instead",
-        description: "Use 'Log Call' and set disposition to Interested / Call Back / Not Answered. The stage will move to In Follow Up automatically.",
+        title: "Record a token payment instead",
+        description: "Use 'Record Payment' with type Token Fee — the stage advances automatically.",
         variant: "destructive",
       });
       return;
@@ -891,6 +909,8 @@ const LeadDetail = () => {
             getCampusesForCourse={getCampusesForCourse}
             onStageChange={updateStage}
             onFieldUpdate={updateField}
+            userRole={role ?? null}
+            onTokenPaidOverride={() => setShowTokenOverride(true)}
           />
           <FuzzyDuplicateAlert leadId={lead.id} leadName={lead.name} leadPhone={lead.phone} leadEmail={lead.email} />
           <LeadPaymentHistory leadId={lead.id} refreshKey={paymentRefreshKey} />
@@ -1059,6 +1079,18 @@ const LeadDetail = () => {
         leadId={lead.id}
         leadName={lead.name}
         onSuccess={() => { fetchAll(true); setPaymentRefreshKey(k => k + 1); }}
+      />
+
+      {/* Super-admin manual override: Token Paid — requires transaction details + screenshot */}
+      <RecordPaymentDialog
+        open={showTokenOverride}
+        onOpenChange={setShowTokenOverride}
+        leadId={lead.id}
+        leadName={lead.name}
+        onSuccess={() => { fetchAll(true); setPaymentRefreshKey(k => k + 1); }}
+        defaultType="token_fee"
+        requireScreenshot
+        title="Manual Override — Token Paid"
       />
 
       {/* Schedule Visit Dialog */}
