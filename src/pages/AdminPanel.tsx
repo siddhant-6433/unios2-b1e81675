@@ -94,6 +94,10 @@ const AdminPanel = () => {
   const [deleteTarget, setDeleteTarget] = useState<{ userId: string; name: string } | null>(null);
   const [permTarget, setPermTarget] = useState<{ userId: string; name: string; role: string | null } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [linkingPubId, setLinkingPubId] = useState<string | null>(null);
+  const [linkUserId, setLinkUserId] = useState<string>("");
+  const [linking, setLinking] = useState(false);
+  const [inviteDefaults, setInviteDefaults] = useState<{ role?: AppRole; source?: string; publisherId?: string }>({});
   const { toast } = useToast();
 
   const fetchUsers = async () => {
@@ -162,6 +166,25 @@ const AdminPanel = () => {
   useEffect(() => {
     if (canManageUsers) { fetchUsers(); fetchPublishers(); }
   }, [canManageUsers]);
+
+  const handleLinkPublisher = async (publisherId: string, userId: string) => {
+    if (!userId) return;
+    setLinking(true);
+    try {
+      // Clear any prior publisher row holding this user_id (UNIQUE constraint).
+      await supabase.from("publishers").update({ user_id: null }).eq("user_id", userId);
+      const { error } = await supabase.from("publishers").update({ user_id: userId }).eq("id", publisherId);
+      if (error) throw error;
+      toast({ title: "Linked", description: "Publisher linked to user account." });
+      setLinkingPubId(null);
+      setLinkUserId("");
+      await fetchPublishers();
+    } catch (err: any) {
+      toast({ title: "Link failed", description: err.message, variant: "destructive" });
+    } finally {
+      setLinking(false);
+    }
+  };
 
   const handleRoleChange = async (userId: string, newRole: AppRole | "none") => {
     setSavingUser(userId);
@@ -475,14 +498,77 @@ const AdminPanel = () => {
                             {pub.user_id ? (() => {
                               const u = users.find(u => u.user_id === pub.user_id);
                               return (
-                                <span className="text-green-700 dark:text-green-400 font-medium">
-                                  ✓ {u?.display_name || u?.email || pub.user_id.slice(0, 8) + "…"}
-                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-green-700 dark:text-green-400 font-medium">
+                                    ✓ {u?.display_name || u?.email || pub.user_id.slice(0, 8) + "…"}
+                                  </span>
+                                  <button
+                                    onClick={async () => {
+                                      await supabase.from("publishers").update({ user_id: null }).eq("id", pub.id);
+                                      await fetchPublishers();
+                                    }}
+                                    className="text-[11px] text-muted-foreground hover:text-red-600 underline"
+                                  >
+                                    unlink
+                                  </button>
+                                </div>
                               );
-                            })() : (
-                              <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1">
-                                ⚠ No login yet — invite user with publisher role + source "{pub.source}"
-                              </span>
+                            })() : linkingPubId === pub.id ? (
+                              <div className="flex items-center gap-2">
+                                <select
+                                  value={linkUserId}
+                                  onChange={(e) => setLinkUserId(e.target.value)}
+                                  className="rounded-md border border-input bg-background px-2 py-1 text-xs focus:outline-none"
+                                >
+                                  <option value="">— Select user —</option>
+                                  <optgroup label="Publisher role">
+                                    {users.filter(u => u.role === "publisher").map(u => (
+                                      <option key={u.user_id} value={u.user_id}>
+                                        {u.display_name || u.email || u.user_id.slice(0, 8)} {u.email ? `· ${u.email}` : ""}
+                                      </option>
+                                    ))}
+                                  </optgroup>
+                                  <optgroup label="Other users">
+                                    {users.filter(u => u.role !== "publisher").map(u => (
+                                      <option key={u.user_id} value={u.user_id}>
+                                        {u.display_name || u.email || u.user_id.slice(0, 8)} {u.email ? `· ${u.email}` : ""} {u.role ? `(${u.role})` : "(no role)"}
+                                      </option>
+                                    ))}
+                                  </optgroup>
+                                </select>
+                                <button
+                                  disabled={!linkUserId || linking}
+                                  onClick={() => handleLinkPublisher(pub.id, linkUserId)}
+                                  className="rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                                >
+                                  {linking ? "Linking…" : "Link"}
+                                </button>
+                                <button
+                                  onClick={() => { setLinkingPubId(null); setLinkUserId(""); }}
+                                  className="text-xs text-muted-foreground hover:text-foreground"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-amber-600 dark:text-amber-400">⚠ No login yet</span>
+                                <button
+                                  onClick={() => {
+                                    setInviteDefaults({ role: "publisher", source: pub.source, publisherId: pub.id });
+                                    setInviteOpen(true);
+                                  }}
+                                  className="rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+                                >
+                                  + Create user
+                                </button>
+                                <button
+                                  onClick={() => { setLinkingPubId(pub.id); setLinkUserId(""); }}
+                                  className="rounded-md border border-input bg-card px-2 py-1 text-xs font-medium text-foreground hover:bg-muted"
+                                >
+                                  Link existing…
+                                </button>
+                              </div>
                             )}
                           </td>
                           <td className="px-4 py-3">
@@ -646,7 +732,14 @@ const AdminPanel = () => {
               </>);
             })()}
 
-            <InviteUserDialog open={inviteOpen} onClose={() => setInviteOpen(false)} onSuccess={() => fetchUsers()} />
+            <InviteUserDialog
+              open={inviteOpen}
+              onClose={() => { setInviteOpen(false); setInviteDefaults({}); }}
+              onSuccess={() => { fetchUsers(); fetchPublishers(); }}
+              defaultRole={inviteDefaults.role}
+              defaultPublisherSource={inviteDefaults.source}
+              publisherId={inviteDefaults.publisherId}
+            />
             <BulkImportDialog open={bulkOpen} onClose={() => setBulkOpen(false)} onSuccess={() => fetchUsers()} />
             <EditPhoneDialog open={!!phoneEdit} onClose={() => setPhoneEdit(null)} onSuccess={() => fetchUsers()}
               userId={phoneEdit?.userId || ""} userName={phoneEdit?.name || ""} currentPhone={phoneEdit?.phone || null} />

@@ -39,17 +39,27 @@ interface InviteUserDialogProps {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  defaultRole?: AppRole;
+  defaultPublisherSource?: string;
+  publisherId?: string;
 }
 
-const InviteUserDialog = ({ open, onClose, onSuccess }: InviteUserDialogProps) => {
+const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublisherSource, publisherId }: InviteUserDialogProps) => {
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [phone, setPhone] = useState("");
   const [selectedCampuses, setSelectedCampuses] = useState<string[]>([]);
   const [campusDropdownOpen, setCampusDropdownOpen] = useState(false);
   const [campuses, setCampuses] = useState<{ id: string; name: string }[]>([]);
-  const [role, setRole] = useState<AppRole>("student");
-  const [publisherSource, setPublisherSource] = useState(PUBLISHER_SOURCES[0].value);
+  const [role, setRole] = useState<AppRole>(defaultRole ?? "student");
+  const [publisherSource, setPublisherSource] = useState(defaultPublisherSource ?? PUBLISHER_SOURCES[0].value);
+
+  useEffect(() => {
+    if (open) {
+      if (defaultRole) setRole(defaultRole);
+      if (defaultPublisherSource) setPublisherSource(defaultPublisherSource);
+    }
+  }, [open, defaultRole, defaultPublisherSource]);
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
@@ -82,10 +92,24 @@ const InviteUserDialog = ({ open, onClose, onSuccess }: InviteUserDialogProps) =
           role,
           campus: selectedCampuses.length > 0 ? selectedCampuses.join(", ") : undefined,
           password: password.trim() || undefined,
+          publisher_id: role === "publisher" ? publisherId : undefined,
+          publisher_source: role === "publisher" ? publisherSource : undefined,
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        // Pull the real error body out of the FunctionsHttpError context (supabase-js
+        // surfaces "non-2xx status code" otherwise).
+        let message = error.message;
+        try {
+          const text = await (error as any)?.context?.text?.();
+          if (text) {
+            try { const body = JSON.parse(text); if (body?.error) message = body.error; }
+            catch { message = text.slice(0, 300); }
+          }
+        } catch {}
+        throw new Error(message);
+      }
       if (data?.error) throw new Error(data.error);
 
       // Auto-create consultant profile when inviting with consultant role
@@ -102,38 +126,23 @@ const InviteUserDialog = ({ open, onClose, onSuccess }: InviteUserDialogProps) =
         }
       }
 
-      // Auto-create or link publisher record when inviting with publisher role
-      if (role === "publisher" && data?.user_id) {
-        const { data: existing } = await supabase.from("publishers").select("id").eq("user_id", data.user_id).maybeSingle();
-        if (!existing) {
-          // Check if a publishers record for this source already exists (unlinked)
-          const { data: bySource } = await supabase.from("publishers").select("id").eq("source", publisherSource).is("user_id", null).maybeSingle();
-          if (bySource) {
-            await supabase.from("publishers").update({ user_id: data.user_id, display_name: displayName.trim() || email.trim() }).eq("id", bySource.id);
-          } else {
-            await supabase.from("publishers").insert({
-              display_name: displayName.trim() || email.trim(),
-              source: publisherSource,
-              user_id: data.user_id,
-              is_active: true,
-            });
-          }
-        }
-      }
-
       toast({
-        title: password ? "User created" : "User invited",
-        description: password
-          ? `Account created for ${email}. They can log in immediately.`
-          : `Invite sent to ${email}. They'll receive an email to set up their account.`,
+        title: data?.reused_existing
+          ? "Existing user updated"
+          : password ? "User created" : "User invited",
+        description: data?.reused_existing
+          ? `Reused existing account for ${email}: role set to ${role}${password ? ", password reset" : ""}.`
+          : password
+            ? `Account created for ${email}. They can log in immediately.`
+            : `Invite sent to ${email}. They'll receive an email to set up their account.`,
       });
 
       setEmail("");
       setDisplayName("");
       setPhone("");
       setSelectedCampuses([]);
-      setRole("student");
-      setPublisherSource(PUBLISHER_SOURCES[0].value);
+      setRole(defaultRole ?? "student");
+      setPublisherSource(defaultPublisherSource ?? PUBLISHER_SOURCES[0].value);
       setPassword("");
       onSuccess();
       onClose();

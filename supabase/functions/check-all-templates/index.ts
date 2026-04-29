@@ -8,8 +8,19 @@ Deno.serve(async (req) => {
   try {
     const wabaId = Deno.env.get("WHATSAPP_WABA_ID");
     const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
-    const res = await fetch(`https://graph.facebook.com/v21.0/${wabaId}/message_templates?limit=100&access_token=${waToken}`);
+    const url = new URL(req.url);
+    const nameFilter = url.searchParams.get("name");
+    const apiUrl = nameFilter
+      ? `https://graph.facebook.com/v21.0/${wabaId}/message_templates?name=${nameFilter}&access_token=${waToken}`
+      : `https://graph.facebook.com/v21.0/${wabaId}/message_templates?limit=100&access_token=${waToken}`;
+    const res = await fetch(apiUrl);
     const data = await res.json();
+    if (nameFilter) {
+      // Return full details for a specific template
+      return new Response(JSON.stringify(data), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     const templates = (data.data || []).map((t: any) => ({ name: t.name, status: t.status, category: t.category }));
     // Sort by name
     templates.sort((a: any, b: any) => a.name.localeCompare(b.name));

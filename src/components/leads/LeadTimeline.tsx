@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Send, Loader2, ArrowRight, Phone, StickyNote, Bot, MapPin, Clock, Plus, MessageSquare, Link2,
   CalendarCheck, FileText, UserCheck, GraduationCap, Mail, ClipboardList, Edit,
+  Globe, MousePointer, Flame,
 } from "lucide-react";
 import { DocumentChecklist } from "@/components/leads/DocumentChecklist";
 import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
@@ -216,6 +217,54 @@ const ACTIVITY_CONFIG: Record<string, {
     bg: "bg-slate-500 text-white",
     getTitle: () => "Info Updated",
   },
+  // Engagement events
+  page_view: {
+    icon: <Globe className="h-3.5 w-3.5" />,
+    bg: "bg-orange-400 text-white",
+    getTitle: () => "Visited Website",
+    getSub: (a) => a.description || null,
+  },
+  chat_open: {
+    icon: <MessageSquare className="h-3.5 w-3.5" />,
+    bg: "bg-orange-500 text-white",
+    getTitle: () => "Opened Chat",
+  },
+  chat_message: {
+    icon: <MessageSquare className="h-3.5 w-3.5" />,
+    bg: "bg-orange-500 text-white",
+    getTitle: () => "Sent Chat Message",
+  },
+  navya_click: {
+    icon: <Phone className="h-3.5 w-3.5" />,
+    bg: "bg-orange-500 text-white",
+    getTitle: () => "Clicked Talk to Navya",
+  },
+  whatsapp_click: {
+    icon: <MessageSquare className="h-3.5 w-3.5" />,
+    bg: "bg-green-500 text-white",
+    getTitle: () => "Clicked WhatsApp",
+  },
+  email_open: {
+    icon: <Mail className="h-3.5 w-3.5" />,
+    bg: "bg-orange-400 text-white",
+    getTitle: () => "Opened Email",
+  },
+  form_start: {
+    icon: <ClipboardList className="h-3.5 w-3.5" />,
+    bg: "bg-orange-500 text-white",
+    getTitle: () => "Started Form",
+  },
+  apply_click: {
+    icon: <MousePointer className="h-3.5 w-3.5" />,
+    bg: "bg-red-500 text-white",
+    getTitle: () => "Clicked Apply Now",
+    getSub: (a) => a.description || null,
+  },
+  whatsapp_reply: {
+    icon: <MessageSquare className="h-3.5 w-3.5" />,
+    bg: "bg-green-500 text-white",
+    getTitle: () => "Replied on WhatsApp",
+  },
 };
 
 const DEFAULT_CONFIG: {
@@ -234,32 +283,54 @@ const DEFAULT_CONFIG: {
 function TimelineList({ activities, leadId }: { activities: any[]; leadId?: string }) {
   // Fetch AI call records to match recordings to timeline entries
   const [aiRecordings, setAiRecordings] = useState<Record<string, string>>({});
+  const [engagementEvents, setEngagementEvents] = useState<any[]>([]);
+
   useEffect(() => {
     if (!leadId) return;
     supabase.from("ai_call_records" as any).select("created_at, recording_url, duration_seconds")
       .eq("lead_id", leadId).not("recording_url", "is", null)
       .then(({ data }) => {
         if (!data) return;
-        // Map by timestamp (round to minute for fuzzy matching)
         const map: Record<string, string> = {};
         for (const r of data as any[]) {
           if (r.recording_url) {
-            // Key by minute-precision timestamp for matching with activities
             const key = new Date(r.created_at).toISOString().slice(0, 16);
             map[key] = r.recording_url;
           }
         }
         setAiRecordings(map);
       });
+
+    // Fetch engagement events
+    supabase.from("lead_engagement_events" as any)
+      .select("id, event_type, page_url, metadata, created_at")
+      .eq("lead_id", leadId)
+      .order("created_at", { ascending: false })
+      .limit(50)
+      .then(({ data }) => {
+        if (data) setEngagementEvents(data as any[]);
+      });
   }, [leadId]);
 
-  if (activities.length === 0) return <EmptyState text="No activity recorded yet" />;
+  // Merge activities + engagement events into a single sorted list
+  const mergedActivities = [
+    ...activities,
+    ...engagementEvents.map((e: any) => ({
+      id: e.id,
+      type: e.event_type,
+      description: e.page_url || null,
+      created_at: e.created_at,
+      _engagement: true,
+    })),
+  ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+  if (mergedActivities.length === 0) return <EmptyState text="No activity recorded yet" />;
 
   return (
     <div className="relative pl-5">
       <div className="absolute left-[13px] top-5 bottom-5 w-px bg-border" />
       <div className="space-y-0">
-        {activities.map((a) => {
+        {mergedActivities.map((a) => {
           const config = ACTIVITY_CONFIG[a.type] || DEFAULT_CONFIG;
           const title = config.getTitle(a);
           const subtitle = config.getSub?.(a) ?? (a.type === "stage_change" ? a.description?.replace(/^Stage changed from /i, "") : null);

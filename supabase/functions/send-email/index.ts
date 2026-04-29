@@ -101,6 +101,19 @@ Deno.serve(async (req) => {
     // Get profile id
     const { data: profile } = await admin.from("profiles").select("id").eq("user_id", user.id).single();
 
+    // Inject email open tracking pixel
+    const trackingBaseUrl = `${supabaseUrl}/functions/v1/track-engagement`;
+    if (lead_id) {
+      const pixelUrl = `${trackingBaseUrl}?t=email_open&lid=${lead_id}`;
+      const pixelTag = `<img src="${pixelUrl}" width="1" height="1" style="display:none" alt="" />`;
+      // Insert before </body> or append to end
+      if (bodyHtml.includes("</body>")) {
+        bodyHtml = bodyHtml.replace("</body>", `${pixelTag}</body>`);
+      } else {
+        bodyHtml += pixelTag;
+      }
+    }
+
     // Send via Resend
     const fromEmail = Deno.env.get("EMAIL_FROM") || "admissions@nimt.ac.in";
     const emailRes = await fetch("https://api.resend.com/emails", {
@@ -122,7 +135,7 @@ Deno.serve(async (req) => {
     const success = emailRes.ok;
 
     // Log to email_messages
-    await admin.from("email_messages").insert({
+    const { data: emailMsg } = await admin.from("email_messages").insert({
       lead_id: lead_id || null,
       to_email,
       from_email: fromEmail,
@@ -133,7 +146,7 @@ Deno.serve(async (req) => {
       provider_id: emailResult?.id || null,
       sent_by: profile?.id || null,
       sent_at: success ? new Date().toISOString() : null,
-    });
+    }).select("id").single();
 
     // Log activity
     if (lead_id) {

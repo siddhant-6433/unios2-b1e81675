@@ -188,6 +188,7 @@ const PARSERS: Record<string, (body: any) => ParsedLead> = {
   meta_ads: parseMetaAds,
   google_ads: parseGoogleAds,
   website: parseWebsite,
+  website_chat: parseWebsite,
   mirai: parseMirai,
 };
 
@@ -258,9 +259,11 @@ Deno.serve(async (req) => {
 
     // Resolve lead source early (needed for duplicate tracking)
     const validSources = [
-      "website", "mirai_website", "meta_ads", "google_ads", "shiksha", "walk_in",
+      "website", "website_chat", "mirai_website", "meta_ads", "google_ads", "shiksha", "walk_in",
       "consultant", "justdial", "referral", "education_fair", "collegedunia", "collegehai", "salahlo", "other",
     ];
+    // Sources that should NOT trigger an AI call (user is already chatting)
+    const skipAiCallSources = ["website_chat"];
     const leadSource = validSources.includes(parsed.source) ? parsed.source : "other";
 
     // ── Duplicate detection by phone ──
@@ -391,6 +394,7 @@ Deno.serve(async (req) => {
         jd_category: parsed.jd_category || null,
         notes: parsed.notes?.slice(0, 1000) || null,
         stage: "new_lead",
+        skip_ai_call: skipAiCallSources.includes(leadSource),
         application_id: appId,
         application_progress: {
           personal_details: false,
@@ -416,6 +420,16 @@ Deno.serve(async (req) => {
       type: "lead_created",
       description: `Lead captured via ${leadSource} API`,
     });
+
+    // For chat widget leads: schedule AI call after 10 minutes (after chat likely ends)
+    if (skipAiCallSources.includes(leadSource)) {
+      const scheduledAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+      await supabase.from("ai_call_queue" as any).insert({
+        lead_id: lead.id,
+        status: "pending",
+        scheduled_at: scheduledAt,
+      }).catch(() => {}); // non-blocking
+    }
 
     return new Response(
       JSON.stringify({ status: "created", lead }),

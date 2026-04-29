@@ -1250,14 +1250,22 @@ Deno.serve({ port: PORT }, async (req) => {
     });
   }
 
-  // Inbound call answer URL — handles callbacks from leads (must be before generic /answer/)
+  // ── Sticky Inbound Call System ────────────────────────────────────────────
+  // When a student calls back:
+  // 1. Look up the lead by phone number
+  // 2. Find the assigned counsellor
+  // 3. Route to counsellor's phone (ring 20s)
+  // 4. If counsellor doesn't answer → fall back to AI agent
+  // 5. Log inbound call in DB for timeline + missed call followup
   if (path === "/answer/inbound") {
     const body = await req.formData().catch(() => null);
     const params = body ? Object.fromEntries(body) : {} as any;
     const callerPhone = params.From || params.CallerName || "";
+    const plivoCallUUID = params.CallUUID || "";
     const callId = `inbound-${crypto.randomUUID().slice(0, 8)}`;
     const host = req.headers.get("host") || url.host;
     const wsProtocol = host.includes("localhost") ? "ws" : "wss";
+    const PLIVO_PHONE_NUMBER = Deno.env.get("PLIVO_PHONE_NUMBER") || "";
 
     console.log(`[${callId}] Inbound call from ${callerPhone}`);
 
@@ -1271,11 +1279,14 @@ Deno.serve({ port: PORT }, async (req) => {
     let courseName = "";
     let campusName = "";
     let leadId = "";
+    let counsellorPhone = "";
+    let counsellorName = "";
+    let counsellorUserId = "";
     try {
       const phone = callerPhone.replace(/[^0-9]/g, "").slice(-10);
       if (phone) {
         const res = await fetch(
-          `${SUPABASE_URL}/rest/v1/leads?phone=ilike.*${phone}&select=id,name,course_id,courses:course_id(name),campuses:campus_id(name)&limit=1`,
+          `${SUPABASE_URL}/rest/v1/leads?phone=ilike.*${phone}&select=id,name,course_id,counsellor_id,courses:course_id(name),campuses:campus_id(name)&limit=1`,
           { headers: dbHeaders },
         );
         const leads = await res.json().catch(() => []);
@@ -1284,6 +1295,22 @@ Deno.serve({ port: PORT }, async (req) => {
           leadName = leads[0].name || "";
           courseName = (leads[0].courses as any)?.name || "";
           campusName = (leads[0].campuses as any)?.name || "";
+
+          // Look up assigned counsellor's phone
+          if (leads[0].counsellor_id) {
+            const profRes = await fetch(
+              `${SUPABASE_URL}/rest/v1/profiles?id=eq.${leads[0].counsellor_id}&select=phone,display_name,user_id`,
+              { headers: dbHeaders },
+            );
+            const profiles = await profRes.json().catch(() => []);
+            if (profiles?.[0]?.phone) {
+              counsellorPhone = profiles[0].phone.replace(/[^0-9+]/g, "");
+              if (counsellorPhone.startsWith("+")) counsellorPhone = counsellorPhone.substring(1);
+              if (counsellorPhone.length === 10) counsellorPhone = `91${counsellorPhone}`;
+              counsellorName = profiles[0].display_name || "Counsellor";
+              counsellorUserId = profiles[0].user_id || "";
+            }
+          }
         }
       }
     } catch (e) {
@@ -1299,19 +1326,224 @@ Deno.serve({ port: PORT }, async (req) => {
       calledNumber: params.To || "",
       callerTranscript: [],
       aiTranscript: [],
-      toolCallsMade: [],
+      toolCallsMade: [{ name: "inbound_meta", args: { counsellorUserId, counsellorName, counsellorPhone, plivoCallUUID }, result: null }],
     });
 
-    const wsUrl = `${wsProtocol}://${host}/ws/${callId}`;
+    // Create ai_call_records entry for real-time tracking (LiveCallBar, timeline)
+    if (leadId && SUPABASE_URL) {
+      await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records`, {
+        method: "POST", headers: { ...dbHeaders, Prefer: "return=minimal" },
+        body: JSON.stringify({
+          lead_id: leadId,
+          call_uuid: callId,
+          plivo_call_uuid: plivoCallUUID,
+          status: "initiated",
+          call_type: "inbound",
+          caller_user_id: counsellorUserId || null,
+          summary: `Inbound call from ${leadName || callerPhone}${counsellorName ? ` → routing to ${counsellorName}` : ""}`,
+        }),
+      }).catch(e => console.error(`[${callId}] ai_call_records insert failed:`, e.message));
+    }
+
     const recordingCallbackUrl = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/voice-call-callback` : "";
+    const hangupUrl = `https://${host}/inbound-hangup/${callId}`;
+
+    // If lead has an assigned counsellor → ring counsellor first, then fall back to AI
+    if (leadId && counsellorPhone) {
+      const aiUrl = `https://${host}/answer/inbound-ai/${callId}`;
+
+      console.log(`[${callId}] Routing inbound from ${leadName} to counsellor ${counsellorName} (${counsellorPhone})`);
+
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Record recordSession="true" redirect="false" maxLength="3600"${recordingCallbackUrl ? ` callbackUrl="${recordingCallbackUrl}" callbackMethod="POST"` : ""} />
+  <Speak voice="WOMAN">Connecting you to your counsellor. Please hold.</Speak>
+  <Dial callerId="${PLIVO_PHONE_NUMBER}" action="${aiUrl}" method="POST" timeout="20" hangupOnStar="true">
+    <Number>${counsellorPhone}</Number>
+  </Dial>
+</Response>`;
+
+      return new Response(xml, { headers: { "Content-Type": "application/xml" } });
+    }
+
+    // No assigned counsellor or no phone → go straight to AI agent
+    const wsUrl = `${wsProtocol}://${host}/ws/${callId}`;
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Record recordSession="true" redirect="false" maxLength="3600"${recordingCallbackUrl ? ` callbackUrl="${recordingCallbackUrl}" callbackMethod="POST"` : ""} />
   <Stream streamTimeout="600" keepCallAlive="true" bidirectional="true" contentType="audio/x-mulaw;rate=8000">${wsUrl}</Stream>
 </Response>`;
 
-    console.log(`[${callId}] Inbound answer XML for ${callerPhone}, lead: ${leadName || "unknown"}`);
+    console.log(`[${callId}] Inbound from ${callerPhone}, no counsellor → AI agent. lead: ${leadName || "unknown"}`);
     return new Response(xml, { headers: { "Content-Type": "application/xml" } });
+  }
+
+  // ── Inbound AI fallback ──────────────────────────────────────────────────
+  // When counsellor doesn't answer inbound call, Plivo hits this action URL
+  // which falls through to the AI voice agent
+  if (path.startsWith("/answer/inbound-ai/")) {
+    const callId = path.split("/answer/inbound-ai/")[1];
+    const body = await req.formData().catch(() => null);
+    const params = body ? Object.fromEntries(body) : {} as any;
+    const dialStatus = (params.DialStatus || "").toLowerCase();
+    const host = req.headers.get("host") || url.host;
+    const wsProtocol = host.includes("localhost") ? "ws" : "wss";
+
+    const callCtx = activeCallContexts.get(callId);
+    const leadId = callCtx?.leadId || "";
+    const counsellorName = callCtx?.toolCallsMade?.[0]?.args?.counsellorName || "Counsellor";
+
+    console.log(`[${callId}] Inbound-AI fallback: dialStatus=${dialStatus}, lead=${callCtx?.leadName || "unknown"}`);
+
+    // Counsellor answered → they're talking, just hang up gracefully (call is handled)
+    if (dialStatus === "completed" || dialStatus === "answer") {
+      // Counsellor picked up and call completed normally — log connected call
+      if (leadId && SUPABASE_URL) {
+        const dbH = { "Content-Type": "application/json", apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
+        // Update ai_call_records with connected status
+        await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
+          method: "PATCH", headers: { ...dbH, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            status: "completed",
+            student_connected_at: new Date().toISOString(),
+            completed_at: new Date().toISOString(),
+            summary: `Inbound call answered by ${counsellorName}`,
+          }),
+        }).catch(() => {});
+
+        // Log in call_logs + activity
+        await fetch(`${SUPABASE_URL}/rest/v1/call_logs`, {
+          method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            lead_id: leadId, direction: "inbound", disposition: "answered",
+            notes: `Inbound call from ${callCtx?.leadName || "student"} — answered by ${counsellorName}`,
+            user_id: callCtx?.toolCallsMade?.[0]?.args?.counsellorUserId || null,
+            called_at: new Date().toISOString(),
+          }),
+        }).catch(() => {});
+        await fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
+          method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            lead_id: leadId, type: "call",
+            description: `Inbound call from student — answered by ${counsellorName}`,
+          }),
+        }).catch(() => {});
+
+        // Mark pending followups as completed
+        await fetch(`${SUPABASE_URL}/rest/v1/lead_followups?lead_id=eq.${leadId}&status=eq.pending`, {
+          method: "PATCH", headers: { ...dbH, Prefer: "return=minimal" },
+          body: JSON.stringify({ status: "completed", completed_at: new Date().toISOString() }),
+        }).catch(() => {});
+      }
+
+      activeCallContexts.delete(callId);
+      return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>`, {
+        headers: { "Content-Type": "application/xml" },
+      });
+    }
+
+    // Counsellor didn't answer → log missed call + create followup, then connect to AI
+    if (leadId && SUPABASE_URL) {
+      const dbH = { "Content-Type": "application/json", apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
+
+      // Log missed inbound call
+      await fetch(`${SUPABASE_URL}/rest/v1/call_logs`, {
+        method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
+        body: JSON.stringify({
+          lead_id: leadId, direction: "inbound", disposition: "missed",
+          notes: `Inbound call from ${callCtx?.leadName || "student"} — ${counsellorName} did not answer. Routed to AI.`,
+          user_id: callCtx?.toolCallsMade?.[0]?.args?.counsellorUserId || null,
+          called_at: new Date().toISOString(),
+        }),
+      }).catch(() => {});
+
+      // Log activity in timeline
+      await fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
+        method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
+        body: JSON.stringify({
+          lead_id: leadId, type: "call",
+          description: `Missed inbound call — ${callCtx?.leadName || "student"} called back, ${counsellorName} did not answer. Routed to AI.`,
+        }),
+      }).catch(() => {});
+
+      // Create missed call followup (urgent — 30 min)
+      const followupAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+      await fetch(`${SUPABASE_URL}/rest/v1/lead_followups`, {
+        method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
+        body: JSON.stringify({
+          lead_id: leadId,
+          scheduled_at: followupAt,
+          type: "call",
+          notes: `Missed inbound call — student called back but ${counsellorName} did not answer. Call back urgently.`,
+          status: "pending",
+        }),
+      }).catch(() => {});
+
+      // Update ai_call_records
+      await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
+        method: "PATCH", headers: { ...dbH, Prefer: "return=minimal" },
+        body: JSON.stringify({
+          summary: `Inbound call — ${counsellorName} missed, routed to AI`,
+          disposition: "missed",
+        }),
+      }).catch(() => {});
+
+      // Send notification to counsellor
+      if (callCtx?.toolCallsMade?.[0]?.args?.counsellorUserId) {
+        await fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
+          method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            user_id: callCtx.toolCallsMade[0].args.counsellorUserId,
+            type: "missed_call",
+            title: `Missed call from ${callCtx?.leadName || "student"}`,
+            body: `${callCtx?.leadName || "A student"} called back but you didn't answer. Call back within 30 minutes.`,
+            link: `/admissions/${leadId}`,
+            lead_id: leadId,
+          }),
+        }).catch(() => {});
+      }
+
+      console.log(`[${callId}] Missed inbound call logged + followup created for ${counsellorName}`);
+    }
+
+    // Fall through to AI voice agent
+    const wsUrl = `${wsProtocol}://${host}/ws/${callId}`;
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Speak voice="WOMAN">Your counsellor is currently unavailable. Let me connect you with our admissions assistant.</Speak>
+  <Stream streamTimeout="600" keepCallAlive="true" bidirectional="true" contentType="audio/x-mulaw;rate=8000">${wsUrl}</Stream>
+</Response>`;
+
+    return new Response(xml, { headers: { "Content-Type": "application/xml" } });
+  }
+
+  // ── Inbound call hangup ─────────────────────────────────────────────────
+  // Final hangup callback for inbound calls — ensures terminal state in DB
+  if (path.startsWith("/inbound-hangup/")) {
+    const callId = path.split("/inbound-hangup/")[1];
+    const body = await req.formData().catch(() => null);
+    const params = body ? Object.fromEntries(body) : {} as any;
+    const totalDuration = parseInt(params.Duration || params.BillDuration || "0");
+
+    const callCtx = activeCallContexts.get(callId);
+    if (callCtx?.leadId && SUPABASE_URL) {
+      const dbH = { "Content-Type": "application/json", apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
+
+      // Mark call as completed if still initiated
+      await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}&status=eq.initiated`, {
+        method: "PATCH", headers: { ...dbH, Prefer: "return=minimal" },
+        body: JSON.stringify({
+          status: "completed",
+          duration_seconds: totalDuration,
+          completed_at: new Date().toISOString(),
+        }),
+      }).catch(() => {});
+
+      console.log(`[${callId}] Inbound hangup: dur=${totalDuration}s`);
+    }
+
+    activeCallContexts.delete(callId);
+    return new Response("OK");
   }
 
   // Plivo Answer URL (outbound) — returns XML with bidirectional Stream
@@ -1607,12 +1839,14 @@ Deno.serve({ port: PORT }, async (req) => {
 
     console.log(`[BRIDGE ${callId}] Counsellor answered, dialing student: ${studentPhone}`);
 
+    const bStatusUrl = `https://${host}/bridge-b-status/${callId}`;
+
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Record recordSession="true" redirect="false" maxLength="3600"${recordingCallbackUrl ? ` callbackUrl="${recordingCallbackUrl}" callbackMethod="POST"` : ""} />
   <Speak voice="WOMAN">Connecting you to the student now.</Speak>
   <Dial callerId="${PLIVO_PHONE_NUMBER}" action="${statusUrl}" method="POST" machineDetection="true" machineDetectionTime="5000">
-    <Number>${studentPhone}</Number>
+    <Number statusCallbackUrl="${bStatusUrl}" statusCallbackMethod="POST">${studentPhone}</Number>
   </Dial>
 </Response>`;
 
@@ -1647,8 +1881,40 @@ Deno.serve({ port: PORT }, async (req) => {
     return new Response("OK");
   }
 
+  // POST /bridge-b-status/{callId} — Plivo B-leg (student) status callback
+  // Fires when student's phone rings, answers, or hangs up.
+  // Key event: CallStatus="in-progress" means student ACTUALLY answered.
+  if (path.startsWith("/bridge-b-status/")) {
+    const callId = path.split("/bridge-b-status/")[1];
+    const body = await req.formData().catch(() => null);
+    const params = body ? Object.fromEntries(body) : {} as any;
+    const callStatus = (params.CallStatus || "").toLowerCase();
+    const bLegUUID = params.CallUUID || "";
+
+    console.log(`[BRIDGE-B-STATUS ${callId}] CallStatus=${callStatus} bLeg=${bLegUUID} ALL:`, JSON.stringify(params));
+
+    // Store bLegUUID in call context for bridge-hangup to use
+    const callCtx = activeCallContexts.get(callId);
+    if (callCtx && bLegUUID) {
+      (callCtx as any)._bLegUUID = bLegUUID;
+    }
+
+    // Student answered — update DB so client polling can detect it
+    if (callStatus === "in-progress" && SUPABASE_URL) {
+      const dbH = { "Content-Type": "application/json", apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
+      await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
+        method: "PATCH",
+        headers: { ...dbH, Prefer: "return=minimal" },
+        body: JSON.stringify({ student_connected_at: new Date().toISOString() }),
+      }).catch(e => console.error(`[BRIDGE-B-STATUS ${callId}] DB update failed:`, e.message));
+      console.log(`[BRIDGE-B-STATUS ${callId}] Student answered! Updated student_connected_at`);
+    }
+
+    return new Response("OK");
+  }
+
   // POST /bridge-hangup/{callId} — Plivo A-leg hangup (FINAL callback)
-  // Creates ALL database records. Single source of truth.
+  // Updates the ai_call_records row created by manual-call edge function.
   if (path.startsWith("/bridge-hangup/")) {
     const callId = path.split("/bridge-hangup/")[1];
     const body = await req.formData().catch(() => null);
@@ -1670,17 +1936,27 @@ Deno.serve({ port: PORT }, async (req) => {
     const counsellorUserId = callCtx.toolCallsMade?.[0]?.args?.counsellorUserId || null;
     const counsellorName = callCtx.toolCallsMade?.[0]?.args?.counsellorName || "Counsellor";
     const statusRan = !!(callCtx as any)._statusRan;
-    const disposition: string | null = (callCtx as any)._disp ??
+    let disposition: string | null = (callCtx as any)._disp ??
       (callStatus === "cancel" ? "cancelled" : callStatus === "busy" ? "busy" : callStatus === "no-answer" ? "not_answered" : null);
     const dialStatus: string = (callCtx as any)._dialStatus ?? callStatus;
     const aLegUUID = (callCtx as any)._aLegUUID ?? plivoALegUUID;
     const bLegUUID: string = (callCtx as any)._bLegUUID ?? "";
+
+    // Student actually connected only if bLegUUID is non-empty (Plivo sets it when B-leg answers)
+    // Plivo sends DialStatus="completed" even when student never answered — bLegUUID="" catches that
+    const isConnected = !disposition && bLegUUID !== "" && (dialStatus === "completed" || callStatus === "completed");
+
+    // If no disposition and student never connected → counsellor hung up before student answered
+    if (!disposition && !isConnected) {
+      disposition = "cancelled";
+      console.log(`[BRIDGE-HANGUP ${callId}] No bLegUUID, student never answered → cancelled`);
+    }
+
     const isAuto = !!disposition;
-    const isConnected = !disposition && (dialStatus === "completed" || callStatus === "completed");
 
     const dbH = { "Content-Type": "application/json", apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
 
-    console.log(`[BRIDGE-HANGUP ${callId}] statusRan=${statusRan} disp=${disposition || "connected"} dur=${totalDuration} aLeg=${aLegUUID.slice(0,12)}`);
+    console.log(`[BRIDGE-HANGUP ${callId}] statusRan=${statusRan} disp=${disposition || "connected"} dur=${totalDuration} aLeg=${aLegUUID.slice(0,12)} bLeg=${bLegUUID ? bLegUUID.slice(0,12) : "EMPTY"}`);
 
     // 1. call_logs (Call Log page)
     await fetch(`${SUPABASE_URL}/rest/v1/call_logs`, {
@@ -1696,16 +1972,16 @@ Deno.serve({ port: PORT }, async (req) => {
       }),
     }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] call_logs:`, e.message));
 
-    // 2. ai_call_records (unified reporting + recording match)
-    // Store A-leg UUID as plivo_call_uuid — recording callback uses A-leg UUID
-    await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records`, {
-      method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
+    // 2. ai_call_records — UPDATE the row created by manual-call edge function
+    // PATCH by call_uuid. If record doesn't exist (edge case), falls through silently.
+    await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
+      method: "PATCH", headers: { ...dbH, Prefer: "return=minimal" },
       body: JSON.stringify({
-        lead_id: leadId, call_uuid: callId, plivo_call_uuid: aLegUUID,
+        plivo_call_uuid: aLegUUID,
         status: isConnected ? "completed" : (disposition === "not_answered" ? "no_answer" : disposition === "cancelled" ? "failed" : "completed"),
         duration_seconds: totalDuration, disposition,
         summary: isAuto ? `Cloud Call: ${disposition?.replace("_"," ")} (auto)` : `Cloud Call: connected (${totalDuration}s) by ${counsellorName}`,
-        call_type: "manual", completed_at: new Date().toISOString(),
+        completed_at: new Date().toISOString(),
       }),
     }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] ai_call_records:`, e.message));
 

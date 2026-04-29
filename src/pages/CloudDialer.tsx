@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import {
   Phone, PhoneOff, Pause, Play, SkipForward, Clock,
   Loader2, CheckCircle, XCircle, PhoneMissed, Users, BarChart3,
-  Calendar, AlertCircle, Volume2, Pencil, Check, X,
+  Calendar, AlertCircle, Volume2, Pencil, Check, X, Search,
+  FileText, PhoneIncoming,
 } from "lucide-react";
 import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
 
@@ -57,10 +58,90 @@ const CONNECTED_DISPOSITIONS = [
 ];
 
 const FOLLOWUP_GAPS = [4, 8, 48]; // hours: 4h, 8h, 2 days
+const MAX_AUTO_ATTEMPTS = 4; // after 4 unanswered attempts → mark inactive
+
+const FOLLOWUP_TIME_SLOTS = ["09:00", "10:00", "11:00", "12:00", "14:00", "15:00", "16:00", "17:00"];
+
+const FUTURE_SESSIONS = ["2026-27 (Current)", "2027-28", "2028-29"];
 
 const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", counsellor_call: "Follow Up", application_in_progress: "App In Progress",
   visit_scheduled: "Visit Scheduled", application_fee_paid: "Fee Paid",
+};
+
+const formatFollowupDate = (dateStr: string) => {
+  if (!dateStr) return "";
+  const d = new Date(dateStr + "T00:00:00");
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const dd = d.getDate().toString().padStart(2, "0");
+  const mm = (d.getMonth() + 1).toString().padStart(2, "0");
+  const yy = d.getFullYear().toString().slice(-2);
+  return `${days[d.getDay()]}, ${dd}/${mm}/${yy}`;
+};
+
+const formatSlotLabel = (slot: string) => {
+  const [h] = slot.split(":");
+  const hr = parseInt(h);
+  return hr >= 12 ? `${hr === 12 ? 12 : hr - 12} PM` : `${hr} AM`;
+};
+
+// ── Course-specific script helpers ──────────────────────────────────────────
+
+const getCourseScript = (courseName: string): string => {
+  const c = courseName.toLowerCase();
+  if (c.includes("nursing") || c.includes("gnm") || c.includes("anm"))
+    return " We have our own 500-bed hospital on campus for clinical training. Students get paid internships of ₹10,000/month. Our nursing graduates are placed in top hospitals across India and abroad.";
+  if (c.includes("bpt") || c.includes("physiotherapy"))
+    return " Our BPT program includes hands-on clinical training at our campus hospital. Students get paid internships of ₹10,000/month and excellent placement opportunities in hospitals and sports medicine.";
+  if (c.includes("pharma") || c.includes("b.pharm") || c.includes("d.pharm"))
+    return " Our pharmacy program is PCI approved with modern labs and industry tie-ups. Students get placed in pharma companies, hospitals, and research labs. We also have a D.Pharm to B.Pharm lateral entry pathway.";
+  if (c.includes("mba") || c.includes("pgdm"))
+    return " Our MBA program is AICTE approved and NIRF ranked. We have 1,200+ recruiters with packages up to ₹18.75 LPA. The program includes industry internships and live projects.";
+  if (c.includes("bba") || c.includes("bca") || c.includes("bcom"))
+    return " This program gives you a strong foundation for management careers. Our graduates go on to top MBA programs or get placed directly. Industry visits and internships are part of the curriculum.";
+  if (c.includes("law") || c.includes("llb") || c.includes("ballb"))
+    return " Our law program is BCI approved with moot court facilities and legal aid clinics. Students participate in national moot court competitions and get placed at top law firms and corporate legal teams.";
+  if (c.includes("b.tech") || c.includes("btech") || c.includes("engineering") || c.includes("mtech"))
+    return " Our engineering program is AKTU affiliated and AICTE approved. We have modern labs, a dedicated placement cell, and tie-ups with top tech companies.";
+  if (c.includes("education") || c.includes("b.ed") || c.includes("bed") || c.includes("d.el.ed"))
+    return " Our education program is NCTE recognised. Graduates are eligible for government teaching positions and CTET/UPTET exams. We include school internship experience.";
+  return " It's a well-established program with strong placement support, experienced faculty, and modern infrastructure.";
+};
+
+const getCourseHighlights = (courseName: string): string[] => {
+  const c = courseName.toLowerCase();
+  if (c.includes("nursing") || c.includes("gnm") || c.includes("anm") || c.includes("bpt") || c.includes("physiotherapy"))
+    return ["Own 500-bed hospital for clinical training", "Paid internships: ₹10K/month", "INC/UP Medical Faculty approved"];
+  if (c.includes("pharma") || c.includes("b.pharm") || c.includes("d.pharm"))
+    return ["PCI approved with modern labs", "Pharma industry tie-ups for placements", "Lateral entry pathway available"];
+  if (c.includes("mba") || c.includes("pgdm") || c.includes("bba") || c.includes("bca") || c.includes("bcom"))
+    return ["NIRF ranked management institution", "₹18.75 LPA highest package", "Industry internships + live projects"];
+  if (c.includes("law") || c.includes("llb") || c.includes("ballb"))
+    return ["BCI approved with moot court facilities", "National moot court competitions", "Legal aid clinic on campus"];
+  if (c.includes("b.tech") || c.includes("btech") || c.includes("engineering") || c.includes("mtech"))
+    return ["AKTU affiliated, AICTE approved", "Modern labs + dedicated placement cell", "Tech company tie-ups"];
+  if (c.includes("education") || c.includes("b.ed") || c.includes("bed") || c.includes("d.el.ed"))
+    return ["NCTE recognised", "Eligible for govt teaching + CTET/UPTET", "School internship included"];
+  return [];
+};
+
+const getCourseNudges = (courseName: string): string[] => {
+  const c = courseName.toLowerCase();
+  if (c.includes("nursing") || c.includes("gnm") || c.includes("anm") || c.includes("bpt") || c.includes("physiotherapy"))
+    return ["Paid internship: ₹10K/month", "Own hospital for clinical training", "International placement opportunities"];
+  if (c.includes("pharma") || c.includes("b.pharm") || c.includes("d.pharm"))
+    return ["Modern pharma labs on campus", "Industry placement tie-ups", "D.Pharm → B.Pharm lateral entry"];
+  if (c.includes("mba") || c.includes("pgdm"))
+    return ["₹18.75 LPA highest package", "1,200+ recruiters on campus", "Industry internship included"];
+  if (c.includes("bba") || c.includes("bca") || c.includes("bcom"))
+    return ["Strong foundation for MBA/MCA", "Industry visits + internships", "Direct placement support"];
+  if (c.includes("law") || c.includes("llb") || c.includes("ballb"))
+    return ["Moot court + legal aid clinic", "National competition participation", "Law firm placement support"];
+  if (c.includes("b.tech") || c.includes("btech") || c.includes("engineering") || c.includes("mtech"))
+    return ["Modern engineering labs", "Campus placement drives", "Tech company internships"];
+  if (c.includes("education") || c.includes("b.ed") || c.includes("bed") || c.includes("d.el.ed"))
+    return ["Govt teaching eligibility", "CTET/UPTET preparation support", "School internship experience"];
+  return ["Strong placement support", "Experienced faculty"];
 };
 
 // ── Component ───────────────────────────────────────────────────────────────
@@ -86,11 +167,25 @@ export default function CloudDialer() {
   const [autoNextTimer, setAutoNextTimer] = useState(0);
   const [followupDate, setFollowupDate] = useState("");
   const [followupTime, setFollowupTime] = useState("");
+  const [visitDate, setVisitDate] = useState("");
+  const [visitTime, setVisitTime] = useState("10:00");
+  const [futureSession, setFutureSession] = useState("2027-28");
   const [stats, setStats] = useState<DialerStats>({ connected: 0, busy: 0, noAnswer: 0, voicemail: 0, interested: 0, totalTalkTime: 0 });
+
+  // Call history for current lead
+  const [callHistory, setCallHistory] = useState<{id:string; disposition:string|null; notes:string|null; called_at:string; duration_seconds:number|null; direction:string}[]>([]);
+  // Incoming call lookup
+  const [lookupPhone, setLookupPhone] = useState("");
+  const [lookupResult, setLookupResult] = useState<{id:string; name:string; phone:string; course_name:string; stage:string}|null>(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupNotFound, setLookupNotFound] = useState(false);
+  // Profile ID for activity logging
+  const [profileId, setProfileId] = useState<string | null>(null);
 
   const callTimerRef = useRef<number | null>(null);
   const autoNextRef = useRef<number | null>(null);
   const pauseTimerRef = useRef<number | null>(null);
+  const preDispositionRef = useRef<string | null>(null);
 
   const currentLead = queue[currentIdx] || null;
 
@@ -209,6 +304,44 @@ export default function CloudDialer() {
 
   useEffect(() => { loadQueue(); }, [loadQueue]);
 
+  // ── Fetch profile ID for activity logging ────────────────────────────────
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase.from("profiles").select("id").eq("user_id", user.id).single()
+      .then(({ data }) => { if (data) setProfileId(data.id); });
+  }, [user?.id]);
+
+  // ── Fetch call history when current lead changes ─────────────────────────
+  useEffect(() => {
+    if (!currentLead) { setCallHistory([]); return; }
+    supabase.from("call_logs" as any)
+      .select("id, disposition, notes, called_at, duration_seconds, direction")
+      .eq("lead_id", currentLead.id)
+      .order("called_at", { ascending: false })
+      .limit(10)
+      .then(({ data }) => setCallHistory(data || []));
+  }, [currentLead?.id]);
+
+  // ── Incoming call phone lookup ──────────────────────────────────────────
+  const lookupByPhone = async () => {
+    if (!lookupPhone.trim()) return;
+    setLookupLoading(true);
+    setLookupResult(null);
+    setLookupNotFound(false);
+    const digits = lookupPhone.replace(/[^0-9]/g, "").slice(-10);
+    const { data } = await supabase.from("leads")
+      .select("id, name, phone, stage, courses:course_id(name)")
+      .ilike("phone", `%${digits}`)
+      .limit(1)
+      .single();
+    if (data) {
+      setLookupResult({ id: data.id, name: data.name, phone: data.phone, course_name: (data.courses as any)?.name || "—", stage: data.stage });
+    } else {
+      setLookupNotFound(true);
+    }
+    setLookupLoading(false);
+  };
+
   // ── Call timer ────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -249,10 +382,15 @@ export default function CloudDialer() {
       autoNextRef.current = window.setTimeout(() => {
         setAutoNextTimer(prev => prev - 1);
       }, 1000);
-    } else if (autoNextTimer === 0 && autoNextTriggered.current && callState.status === "auto-disposed" && !paused) {
-      // Timer ran down to 0 — move to next
+    } else if (autoNextTimer === 0 && autoNextTriggered.current && !paused) {
       autoNextTriggered.current = false;
-      moveToNext();
+      if (callState.status === "auto-disposed") {
+        // Timer ran down after disposition — move to next
+        moveToNext();
+      } else if (callState.status === "ended") {
+        // 60s lapsed with no disposition — auto-mark as call_back
+        markDisposition("call_back");
+      }
     }
     return () => { if (autoNextRef.current) clearTimeout(autoNextRef.current); };
   }, [autoNextTimer, paused, callState.status]);
@@ -263,6 +401,7 @@ export default function CloudDialer() {
   const callIdRef = useRef<string | null>(null);
 
   // Inline editing
+  const [queueSearch, setQueueSearch] = useState("");
   const [editing, setEditing] = useState<"name"|"course"|null>(null);
   const [editValue, setEditValue] = useState("");
   const [courseOptions, setCourseOptions] = useState<{id:string;name:string;campus:string}[]>([]);
@@ -273,32 +412,54 @@ export default function CloudDialer() {
     const poll = async () => {
       const { data } = await supabase
         .from("ai_call_records" as any)
-        .select("status, duration_seconds, disposition, recording_url")
+        .select("status, duration_seconds, disposition, student_connected_at")
         .eq("call_uuid", callId)
         .maybeSingle();
 
-      if (data) {
-        // Call record exists — call has ended on server side
-        const serverDur = data.duration_seconds || 0;
-        const serverDisp = data.disposition;
-        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      if (!data) return; // Record not created yet — keep polling
 
-        if (!serverDisp && serverDur > 0) {
-          // Connected call (no auto-disposition, has duration) — show disposition panel
-          setCallState(prev => ({
-            ...prev,
-            status: "ended",
-            elapsed: serverDur > 0 ? serverDur : prev.elapsed,
-          }));
-          setStats(prev => ({ ...prev, connected: prev.connected + 1, totalTalkTime: prev.totalTalkTime + serverDur }));
-        } else if (serverDisp) {
-          // Auto-disposed by server (busy/not_answered/voicemail/cancelled)
-          handleAutoDisposition(serverDisp);
-        } else {
-          // Short/no connection (0 duration, no disposition) — treat as cancelled
-          handleAutoDisposition("cancelled");
+      // ── Phase: Still initiated (call in progress) ──
+      if (data.status === "initiated") {
+        if (data.student_connected_at && !data.disposition) {
+          // Student answered! Transition to "connected" + show disposition buttons
+          setCallState(prev => prev.status !== "connected"
+            ? { ...prev, status: "connected" }
+            : prev
+          );
+        } else if (data.disposition) {
+          // Auto-disposed during ringing (busy/not_answered/cancelled)
+          // Student never connected — stop polling, show auto-followup with 15s timer
+          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+          handleAutoDisposition(data.disposition);
         }
+        // else: still ringing/connecting — keep polling, stay in "calling" state
         return;
+      }
+
+      // ── Phase: Terminal status (call is over) ──
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+
+      const serverDur = data.duration_seconds || 0;
+      const serverDisp = data.disposition;
+
+      if (data.student_connected_at && !serverDisp) {
+        // Was connected, now ended, no disposition — show disposition panel
+        const preDispo = preDispositionRef.current;
+        if (preDispo) {
+          preDispositionRef.current = null;
+          setCallState(prev => ({ ...prev, elapsed: serverDur }));
+          await finalizeDisposition(preDispo, serverDur);
+        } else {
+          setCallState(prev => ({ ...prev, status: "ended", elapsed: serverDur }));
+          setAutoNextTimer(60);
+        }
+        setStats(prev => ({ ...prev, connected: prev.connected + 1, totalTalkTime: prev.totalTalkTime + serverDur }));
+      } else if (serverDisp) {
+        // Auto-disposed (busy/not_answered/voicemail/cancelled)
+        handleAutoDisposition(serverDisp);
+      } else {
+        // No student connection, no disposition — treat as cancelled
+        handleAutoDisposition("cancelled");
       }
     };
     // Poll every 3 seconds
@@ -349,7 +510,7 @@ export default function CloudDialer() {
         return;
       }
 
-      setCallState(prev => ({ ...prev, status: "connected" }));
+      // Stay in "calling" state — polling will transition to "connected" when student answers
       toast({ title: "Calling...", description: data?.message || "Pick up your phone" });
 
       // Start polling for call end using the internal call_id
@@ -360,6 +521,56 @@ export default function CloudDialer() {
       toast({ title: "Call Failed", description: e.message, variant: "destructive" });
       setCallState(prev => ({ ...prev, status: "ended", disposition: "failed" }));
     }
+  };
+
+  // ── Pre-select disposition during connected call ─────────────────────────
+
+  const preSelectDisposition = (disposition: string) => {
+    preDispositionRef.current = disposition;
+    setCallState(prev => ({ ...prev, disposition }));
+    toast({ title: "Disposition saved", description: `Marked as "${disposition.replace("_", " ")}". Will finalize when call ends.` });
+  };
+
+  // ── Finalize a pre-selected disposition after call ends ─────────────────
+
+  const finalizeDisposition = async (disposition: string, duration: number) => {
+    if (!currentLead) return;
+
+    await supabase.from("call_logs" as any).insert({
+      lead_id: currentLead.id, disposition, duration_seconds: duration,
+      notes: `Cloud Dialer: ${disposition.replace("_", " ")}`,
+      direction: "outbound", user_id: user?.id, called_at: new Date().toISOString(),
+    });
+
+    // Mark pending followups as completed (clears overdue status)
+    await supabase.from("lead_followups")
+      .update({ status: "completed", completed_at: new Date().toISOString() } as any)
+      .eq("lead_id", currentLead.id).eq("status", "pending");
+
+    // Log activity
+    const durStr = duration > 0 ? ` (${Math.floor(duration / 60)}m${duration % 60 ? ` ${duration % 60}s` : ""})` : "";
+    await supabase.from("lead_activities").insert({
+      lead_id: currentLead.id, user_id: profileId, type: "call",
+      description: `Call: ${disposition.replace("_", " ")}${durStr} (via Cloud Dialer)`,
+    });
+
+    // Update first_contact_at if first call
+    await supabase.from("leads").update({ first_contact_at: new Date().toISOString() } as any)
+      .eq("id", currentLead.id).is("first_contact_at", null);
+
+    if (disposition === "interested") {
+      await supabase.from("leads").update({ stage: "counsellor_call" as any }).eq("id", currentLead.id);
+    } else if (disposition === "not_interested") {
+      await supabase.from("leads").update({ stage: "not_interested" as any }).eq("id", currentLead.id);
+    }
+
+    setStats(prev => ({
+      ...prev,
+      interested: disposition === "interested" ? prev.interested + 1 : prev.interested,
+    }));
+
+    setCallState(prev => ({ ...prev, status: "auto-disposed", disposition, autoDisposition: false }));
+    showFollowupAndAutoNext(disposition, true);
   };
 
   // ── Handle call end (counsellor marks disposition) ────────────────────────
@@ -378,6 +589,22 @@ export default function CloudDialer() {
       called_at: new Date().toISOString(),
     });
 
+    // Mark pending followups as completed (clears overdue status)
+    await supabase.from("lead_followups")
+      .update({ status: "completed", completed_at: new Date().toISOString() } as any)
+      .eq("lead_id", currentLead.id).eq("status", "pending");
+
+    // Log activity
+    const durStr = callState.elapsed > 0 ? ` (${Math.floor(callState.elapsed / 60)}m${callState.elapsed % 60 ? ` ${callState.elapsed % 60}s` : ""})` : "";
+    await supabase.from("lead_activities").insert({
+      lead_id: currentLead.id, user_id: profileId, type: "call",
+      description: `Call: ${disposition.replace("_", " ")}${durStr} (via Cloud Dialer)`,
+    });
+
+    // Update first_contact_at if first call
+    await supabase.from("leads").update({ first_contact_at: new Date().toISOString() } as any)
+      .eq("id", currentLead.id).is("first_contact_at", null);
+
     // Update lead stage based on disposition
     if (disposition === "interested") {
       await supabase.from("leads").update({ stage: "counsellor_call" as any }).eq("id", currentLead.id);
@@ -393,7 +620,7 @@ export default function CloudDialer() {
     }));
 
     setCallState(prev => ({ ...prev, status: "auto-disposed", disposition, autoDisposition: false }));
-    showFollowupAndAutoNext(disposition);
+    showFollowupAndAutoNext(disposition, false);
   };
 
   // ── Auto-disposition (unanswered/busy/voicemail from Plivo) ───────────────
@@ -407,30 +634,49 @@ export default function CloudDialer() {
 
   // ── Show followup and start auto-next timer ───────────────────────────────
 
-  const showFollowupAndAutoNext = (disposition: string) => {
+  const showFollowupAndAutoNext = (disposition: string, wasConnected = false) => {
     if (!currentLead) return;
     const attempt = currentLead.attempt_count + 1;
+    const isAutoDisp = ["busy", "not_answered", "voicemail", "cancelled"].includes(disposition);
+
+    // After MAX_AUTO_ATTEMPTS unanswered attempts → mark inactive, no followup
+    if (isAutoDisp && attempt >= MAX_AUTO_ATTEMPTS) {
+      supabase.from("leads").update({ stage: "inactive" as any }).eq("id", currentLead.id);
+      setFollowupDate("");
+      setFollowupTime("");
+      setAutoNextTimer(10);
+      toast({ title: "Marked Inactive", description: `${currentLead.name} — ${attempt} unanswered attempts. Removed from followups.` });
+      return;
+    }
+
     const gapIdx = Math.min(attempt - 1, FOLLOWUP_GAPS.length - 1);
     const gapHours = FOLLOWUP_GAPS[gapIdx];
 
     const followup = new Date(Date.now() + gapHours * 3600000);
     setFollowupDate(followup.toISOString().split("T")[0]);
-    const hh = followup.getHours().toString().padStart(2, "0");
-    const mm = followup.getMinutes().toString().padStart(2, "0");
-    setFollowupTime(`${hh}:${mm}`);
+    // Snap to nearest business hour slot
+    const hr = followup.getHours();
+    const snapped = hr < 9 ? "09:00" : hr >= 17 ? "17:00" : FOLLOWUP_TIME_SLOTS.find(s => parseInt(s) >= hr) || "10:00";
+    setFollowupTime(snapped);
 
-    // Start 15s countdown for auto-disposition cases, 0 for manual
-    if (["busy", "not_answered", "voicemail", "cancelled"].includes(disposition)) {
-      setAutoNextTimer(15);
+    // Reset visit/session state
+    setVisitDate("");
+    setVisitTime("10:00");
+    setFutureSession("2027-28");
+
+    if (isAutoDisp) {
+      setAutoNextTimer(15); // 15s for auto-disposition
+    } else if (wasConnected) {
+      setAutoNextTimer(60); // 60s for connected calls (pre-selected during call)
     } else {
-      setAutoNextTimer(0); // manual disposition — no auto-next, counsellor clicks Next
+      setAutoNextTimer(60); // 60s for post-call dispositions
     }
   };
 
   // ── Confirm followup and move to next ─────────────────────────────────────
 
   const moveToNext = async () => {
-    // Save followup if there's a date
+    // Save followup if there's a date (skip for not_interested and inactive)
     if (currentLead && followupDate && callState.disposition !== "not_interested") {
       const scheduledAt = new Date(`${followupDate}T${followupTime || "10:00"}:00`);
       await supabase.from("lead_followups").insert({
@@ -442,7 +688,29 @@ export default function CloudDialer() {
       });
     }
 
+    // Save visit if interested + visit date set
+    if (currentLead && callState.disposition === "interested" && visitDate) {
+      const visitAt = new Date(`${visitDate}T${visitTime || "10:00"}:00`);
+      await supabase.from("lead_visits" as any).insert({
+        lead_id: currentLead.id,
+        visit_date: visitAt.toISOString(),
+        status: "scheduled",
+        notes: `Scheduled via Cloud Dialer`,
+      });
+      await supabase.from("leads").update({ stage: "visit_scheduled" as any }).eq("id", currentLead.id);
+    }
+
+    // Save future session note for ineligible
+    if (currentLead && callState.disposition === "ineligible" && futureSession) {
+      await supabase.from("lead_notes").insert({
+        lead_id: currentLead.id,
+        content: `Ineligible for current session. Interested for ${futureSession}.`,
+        user_id: user?.id,
+      });
+    }
+
     setAutoNextTimer(0);
+    preDispositionRef.current = null;
     setCallState({ status: "idle", startTime: null, elapsed: 0, disposition: null, autoDisposition: false });
 
     if (currentIdx < queue.length - 1) {
@@ -510,6 +778,35 @@ export default function CloudDialer() {
             <option value="fresh">Fresh Leads Only</option>
             <option value="all">All Pipeline</option>
           </select>
+          {/* Live call timer in header */}
+          {(callState.status === "calling" || callState.status === "connected") && (
+            <Badge className={`text-xs font-mono tabular-nums border-0 ${
+              callState.status === "connected" ? "bg-emerald-100 text-emerald-700 animate-pulse" : "bg-cyan-100 text-cyan-700"
+            }`}>
+              {callState.status === "connected" ? <Volume2 className="h-3 w-3 mr-1" /> : <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+              {formatTime(callState.elapsed)}
+            </Badge>
+          )}
+          {/* Incoming call phone lookup */}
+          <div className="flex items-center gap-1 border border-input rounded-xl px-2 py-1 bg-background">
+            <PhoneIncoming className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <input type="text" value={lookupPhone} onChange={e => { setLookupPhone(e.target.value); setLookupNotFound(false); setLookupResult(null); }}
+              placeholder="Incoming call? Enter phone..."
+              onKeyDown={e => { if (e.key === "Enter") lookupByPhone(); }}
+              className="w-36 text-xs bg-transparent outline-none placeholder:text-muted-foreground/60" />
+            <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={lookupByPhone} disabled={lookupLoading}>
+              {lookupLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Find"}
+            </Button>
+          </div>
+          {lookupResult && (
+            <a href={`/admissions/${lookupResult.id}`} target="_blank" rel="noreferrer"
+              className="flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20 px-3 py-1.5 text-xs">
+              <span className="font-semibold text-emerald-700">{lookupResult.name}</span>
+              <span className="text-muted-foreground">{lookupResult.course_name}</span>
+              <span className="text-primary hover:underline">Open →</span>
+            </a>
+          )}
+          {lookupNotFound && <span className="text-[10px] text-red-500">No lead found</span>}
           <Button variant="outline" size="sm" onClick={loadQueue} disabled={dialerActive}><Users className="h-3.5 w-3.5 mr-1.5" />Refresh</Button>
 
           {dialerActive ? (
@@ -551,9 +848,21 @@ export default function CloudDialer() {
                 ))}
               </div>
             )}
+            <div className="relative mt-2">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+              <input type="text" value={queueSearch} onChange={e => setQueueSearch(e.target.value)}
+                placeholder="Search name, phone, course..."
+                className="w-full rounded-md border border-input bg-background pl-7 pr-2 py-1.5 text-xs placeholder:text-muted-foreground/60 outline-none focus:ring-1 focus:ring-primary" />
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto">
-            {queue.map((lead, idx) => (
+            {queue.map((lead, idx) => {
+              if (queueSearch) {
+                const q = queueSearch.toLowerCase();
+                const matches = lead.name.toLowerCase().includes(q) || lead.phone.includes(q) || lead.course_name.toLowerCase().includes(q);
+                if (!matches) return null;
+              }
+              return (
               <div key={lead.id}
                 className={`px-4 py-2.5 border-b border-border/40 cursor-pointer transition-colors ${
                   idx === currentIdx ? "bg-cyan-50 dark:bg-cyan-950/20 border-l-2 border-l-cyan-500" :
@@ -576,7 +885,8 @@ export default function CloudDialer() {
                   {idx < currentIdx && <CheckCircle className="h-3 w-3 text-emerald-500 ml-auto" />}
                 </div>
               </div>
-            ))}
+              );
+            })}
             {queue.length === 0 && (
               <div className="px-4 py-12 text-center text-muted-foreground">
                 <Phone className="h-8 w-8 mx-auto mb-2 opacity-30" />
@@ -610,11 +920,14 @@ export default function CloudDialer() {
                       {callState.status === "auto-disposed" && <AlertCircle className="h-5 w-5 text-amber-600" />}
                       <div>
                         <p className="text-sm font-bold text-foreground">
-                          {callState.status === "calling" && "Calling your phone..."}
-                          {callState.status === "connected" && "On Call"}
+                          {callState.status === "calling" && "Calling..."}
+                          {callState.status === "connected" && "On Call — Student Connected"}
                           {callState.status === "ended" && "Call Ended"}
                           {callState.status === "auto-disposed" && (callState.disposition?.replace("_", " ").toUpperCase())}
                         </p>
+                        {callState.status === "calling" && (
+                          <p className="text-[10px] text-cyan-600">Pick up your phone. Waiting for student to answer...</p>
+                        )}
                         <p className="text-xs text-muted-foreground tabular-nums">{formatTime(callState.elapsed)}</p>
                       </div>
                     </div>
@@ -625,9 +938,15 @@ export default function CloudDialer() {
                         </Button>
                       )}
                       {callState.status === "connected" && (
-                        <Button size="sm" variant="destructive" onClick={() => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } setCallState(prev => ({ ...prev, status: "ended" })); }}>
+                        <Button size="sm" variant="destructive" onClick={() => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } setCallState(prev => ({ ...prev, status: "ended" })); setAutoNextTimer(60); }}>
                           <PhoneOff className="h-3.5 w-3.5 mr-1.5" />End Call
                         </Button>
+                      )}
+                      {/* Show pre-selected disposition badge during call */}
+                      {callState.status === "connected" && callState.disposition && (
+                        <Badge className="bg-emerald-100 text-emerald-700 border-0 text-xs">
+                          <CheckCircle className="h-3 w-3 mr-1" />{callState.disposition.replace("_", " ")}
+                        </Badge>
                       )}
                     </div>
                   </div>
@@ -637,13 +956,36 @@ export default function CloudDialer() {
                         style={{ width: `${Math.min(100, (callState.elapsed / 300) * 100)}%` }} />
                     </div>
                   )}
-                  {callState.status === "ended" && (
+                  {/* Disposition buttons: shown DURING connected call + after end */}
+                  {(callState.status === "connected" || callState.status === "ended") && (
                     <div>
-                      <p className="text-[10px] font-semibold text-primary uppercase tracking-wide mb-2">Mark Disposition</p>
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-[10px] font-semibold text-primary uppercase tracking-wide">
+                          {callState.status === "connected" ? "Mark During Call" : "Mark Disposition"}
+                        </p>
+                        {callState.status === "ended" && autoNextTimer > 0 && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-muted-foreground">Auto: Call Back in</span>
+                            <div className="relative w-9 h-9">
+                              <svg className="w-9 h-9 -rotate-90">
+                                <circle cx="18" cy="18" r="14" fill="none" stroke="#e5e7eb" strokeWidth="2.5" />
+                                <circle cx="18" cy="18" r="14" fill="none" stroke="#6366f1" strokeWidth="2.5"
+                                  strokeDasharray={`${(autoNextTimer / 60) * 88} 88`} strokeLinecap="round" />
+                              </svg>
+                              <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold">{autoNextTimer}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                       <div className="flex flex-wrap gap-1.5">
                         {CONNECTED_DISPOSITIONS.map(d => (
-                          <button key={d.value} onClick={() => markDisposition(d.value)}
-                            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${d.color}`}>
+                          <button key={d.value}
+                            onClick={() => callState.status === "connected" ? preSelectDisposition(d.value) : markDisposition(d.value)}
+                            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${
+                              callState.status === "connected" && callState.disposition === d.value
+                                ? "ring-2 ring-primary bg-primary/10 border-primary"
+                                : d.color
+                            }`}>
                             <d.icon className="h-3 w-3" />{d.label}
                           </button>
                         ))}
@@ -656,27 +998,82 @@ export default function CloudDialer() {
                         <p className="text-xs text-muted-foreground">
                           {callState.autoDisposition ? "Auto" : "Saved"}: <span className="font-semibold text-foreground">{callState.disposition?.replace("_"," ")}</span>
                           {" · "}Attempt {(currentLead?.attempt_count || 0) + 1}
+                          {(currentLead?.attempt_count || 0) + 1 >= MAX_AUTO_ATTEMPTS && callState.autoDisposition && (
+                            <span className="ml-2 text-red-600 font-semibold">→ Marked Inactive</span>
+                          )}
                         </p>
                         {autoNextTimer > 0 && (
                           <div className="relative w-9 h-9">
                             <svg className="w-9 h-9 -rotate-90">
                               <circle cx="18" cy="18" r="14" fill="none" stroke="#e5e7eb" strokeWidth="2.5" />
                               <circle cx="18" cy="18" r="14" fill="none" stroke="#06b6d4" strokeWidth="2.5"
-                                strokeDasharray={`${(autoNextTimer / 15) * 88} 88`} strokeLinecap="round" />
+                                strokeDasharray={`${(autoNextTimer / (callState.autoDisposition ? 15 : 60)) * 88} 88`} strokeLinecap="round" />
                             </svg>
                             <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold">{autoNextTimer}</span>
                           </div>
                         )}
                       </div>
-                      {callState.disposition !== "not_interested" && (
-                        <div className="flex items-center gap-2">
-                          <Calendar className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                          <input type="date" value={followupDate} onChange={e => setFollowupDate(e.target.value)}
-                            className="rounded-md border border-input bg-background px-2 py-1 text-xs flex-1" />
-                          <input type="time" value={followupTime} onChange={e => setFollowupTime(e.target.value)}
-                            className="rounded-md border border-input bg-background px-2 py-1 text-xs w-24" />
+
+                      {/* Followup scheduling (not for not_interested or inactive) */}
+                      {callState.disposition !== "not_interested" && followupDate && (
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <Calendar className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                            <span className="text-xs font-medium text-foreground">{formatFollowupDate(followupDate)}</span>
+                            <input type="date" value={followupDate} onChange={e => setFollowupDate(e.target.value)}
+                              className="rounded-md border border-input bg-background px-2 py-1 text-[10px] w-28" />
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {FOLLOWUP_TIME_SLOTS.map(slot => (
+                              <button key={slot} onClick={() => setFollowupTime(slot)}
+                                className={`px-2 py-1 rounded text-[10px] font-medium border transition-colors ${
+                                  followupTime === slot ? "bg-cyan-100 text-cyan-700 border-cyan-300" : "bg-background text-muted-foreground border-input hover:bg-muted/50"
+                                }`}>
+                                {formatSlotLabel(slot)}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       )}
+
+                      {/* Visit scheduling for "interested" */}
+                      {callState.disposition === "interested" && (
+                        <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/10 p-2.5 space-y-1.5">
+                          <p className="text-[10px] font-semibold text-emerald-700 uppercase tracking-wide">Schedule Campus Visit</p>
+                          <div className="flex items-center gap-2">
+                            <input type="date" value={visitDate} onChange={e => setVisitDate(e.target.value)}
+                              min={new Date().toISOString().split("T")[0]}
+                              className="rounded-md border border-input bg-background px-2 py-1 text-xs flex-1" />
+                            <select value={visitTime} onChange={e => setVisitTime(e.target.value)}
+                              className="rounded-md border border-input bg-background px-2 py-1 text-xs w-24">
+                              {FOLLOWUP_TIME_SLOTS.map(slot => (
+                                <option key={slot} value={slot}>{formatSlotLabel(slot)}</option>
+                              ))}
+                            </select>
+                          </div>
+                          {visitDate && <p className="text-[10px] text-emerald-600">Visit: {formatFollowupDate(visitDate)} at {formatSlotLabel(visitTime)}</p>}
+                        </div>
+                      )}
+
+                      {/* Future session selector for "ineligible" */}
+                      {callState.disposition === "ineligible" && (
+                        <div className="rounded-lg border border-purple-200 bg-purple-50/50 dark:bg-purple-950/10 p-2.5 space-y-1.5">
+                          <p className="text-[10px] font-semibold text-purple-700 uppercase tracking-wide">Interested for Future Session?</p>
+                          <div className="flex gap-1.5">
+                            {FUTURE_SESSIONS.map(session => (
+                              <button key={session} onClick={() => setFutureSession(session.split(" ")[0])}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                                  futureSession === session.split(" ")[0]
+                                    ? "bg-purple-100 text-purple-700 border-purple-300"
+                                    : "bg-background text-muted-foreground border-input hover:bg-muted/50"
+                                }`}>
+                                {session}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       <div className="flex items-center gap-2">
                         <Button size="sm" onClick={moveToNext} className="bg-cyan-600 hover:bg-cyan-700 flex-1 h-8 text-xs">
                           <SkipForward className="h-3 w-3 mr-1" />{currentIdx < queue.length - 1 ? "Next Call" : "Finish"}
@@ -782,6 +1179,44 @@ export default function CloudDialer() {
                   </CardContent>
                 </Card>
 
+                {/* Previous Call Notes */}
+                {callHistory.length > 0 && (
+                  <Card className="border-border/60 shadow-none">
+                    <CardContent className="p-4">
+                      <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                        <FileText className="h-3 w-3" />Previous Call Notes ({callHistory.length})
+                      </p>
+                      <div className="space-y-2 max-h-[180px] overflow-y-auto">
+                        {callHistory.map(c => (
+                          <div key={c.id} className="flex items-start gap-2 text-xs border-l-2 border-amber-200 pl-2.5 py-1">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <Badge className={`text-[9px] border-0 shrink-0 ${
+                                  c.disposition === "interested" ? "bg-emerald-100 text-emerald-700" :
+                                  c.disposition === "not_interested" ? "bg-red-100 text-red-700" :
+                                  c.disposition === "not_answered" ? "bg-amber-100 text-amber-700" :
+                                  c.disposition === "busy" ? "bg-orange-100 text-orange-700" :
+                                  "bg-gray-100 text-gray-600"
+                                }`}>{c.disposition?.replace("_", " ") || "—"}</Badge>
+                                <span className="text-muted-foreground text-[10px]">
+                                  {new Date(c.called_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                                  {" "}
+                                  {new Date(c.called_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                                </span>
+                                {c.duration_seconds && c.duration_seconds > 0 && (
+                                  <span className="text-muted-foreground text-[10px]">({Math.floor(c.duration_seconds / 60)}m{c.duration_seconds % 60}s)</span>
+                                )}
+                                <Badge className="text-[9px] border-0 bg-gray-50 text-gray-500">{c.direction}</Badge>
+                              </div>
+                              {c.notes && <p className="text-muted-foreground mt-0.5 leading-snug">{c.notes}</p>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
                 {/* Course Info Panel (same component as lead page) + Script */}
                 <div className="space-y-3">
                   {currentLead.course_id && (
@@ -796,15 +1231,25 @@ export default function CloudDialer() {
                 <CardContent className="p-4">
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 text-xs">
                     <div>
-                      <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide mb-2">💬 Talking Points</p>
-                      <p className="text-muted-foreground leading-relaxed italic">
-                        "Hello {currentLead.name.split(" ")[0]}, this is {counsellorDisplayName} from NIMT Educational Institutions.
-                        {currentLead.course_name !== "—"
-                          ? ` I'm calling about your interest in ${currentLead.course_name}. I'd like to share some details about the course.`
-                          : " I'm calling regarding your enquiry."}
-                        {" "}Would you like to know more or schedule a campus visit?"
-                      </p>
-                      <p className="text-[9px] text-muted-foreground/60 mt-1">💡 Refer to the fee structure on the right for accurate fees</p>
+                      <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide mb-2">💬 Call Script</p>
+                      <div className="text-muted-foreground leading-relaxed space-y-2">
+                        <p className="italic">
+                          "Hello, am I speaking with <b>{currentLead.name.split(" ")[0]}</b>?
+                          This is {counsellorDisplayName} from NIMT Educational Institutions.
+                          {currentLead.course_name !== "—"
+                            ? <> I see you've enquired about <b>{currentLead.course_name}</b>. Can you confirm this is the course you're interested in?</>
+                            : " I'm calling regarding your enquiry. Could you tell me which course you're interested in?"}
+                          "
+                        </p>
+                        <p className="text-[9px] text-amber-600 font-semibold">⚠️ Confirm name and course before proceeding</p>
+                        {currentLead.course_name !== "—" && (
+                          <p className="italic">
+                            "Great! Let me tell you about {currentLead.course_name} at our {currentLead.campus_name}.
+                            {getCourseScript(currentLead.course_name)}"
+                          </p>
+                        )}
+                      </div>
+                      <p className="text-[9px] text-muted-foreground/60 mt-2">💡 Refer to the fee structure above for accurate fees</p>
                       <div className="mt-3">
                         <Button size="sm" variant="outline" className="text-[10px] h-7 gap-1"
                           onClick={() => window.open(`https://wa.me/${currentLead.phone.replace(/[^0-9]/g,"")}?text=${encodeURIComponent(`Hi ${currentLead.name.split(" ")[0]}, this is ${counsellorDisplayName} from NIMT. I tried calling you regarding ${currentLead.course_name !== "—" ? currentLead.course_name : "your enquiry"}. Would you like to discuss?`)}`, "_blank")}>
@@ -822,15 +1267,15 @@ export default function CloudDialer() {
                         <li>• Placements: <b>₹18.75 LPA highest</b>, ₹5.40 LPA avg</li>
                         <li>• 1,200+ recruiters: KPMG, Wipro, Deloitte, TCS</li>
                         <li>• 6 NIRF ranked institutions (2025)</li>
-                        <li>• Own hospital on campus for clinical training</li>
+                        {getCourseHighlights(currentLead.course_name).map((h, i) => <li key={i}>• {h}</li>)}
                       </ul>
                     </div>
                     <div>
                       <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide mb-2">🎯 Nudge Checklist</p>
                       <ul className="text-muted-foreground leading-relaxed space-y-1">
-                        <li>☐ Paid internship (Nursing/BPT: ₹10K/month)</li>
+                        {getCourseNudges(currentLead.course_name).map((n, i) => <li key={i}>☐ {n}</li>)}
                         <li>☐ Scholarships (merit/SC/ST/OBC/sports)</li>
-                        <li>☐ Apply online: <b>uni.nimt.ac.in/apply/nimt</b></li>
+                        <li>☐ Apply online: <b>apply.nimt.ac.in</b></li>
                         <li>☐ Invite for campus visit</li>
                         <li>☐ Hostel: 600+ beds, AC/non-AC</li>
                         <li>☐ Transport facility available</li>

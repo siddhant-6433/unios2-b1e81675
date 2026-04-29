@@ -46,7 +46,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_KEY") || "";
 const JWT_SECRET = Deno.env.get("JWT_SECRET") || "nimt-web-chat-dev-secret";
 const ALLOWED_ORIGINS = (Deno.env.get("ALLOWED_ORIGINS") || "https://nimt.ac.in,https://www.nimt.ac.in,http://localhost:4321").split(",");
-const GEMINI_MODEL = "gemini-2.5-flash-lite";
+const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-2.5-flash";
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent?alt=sse&key=${GOOGLE_AI_API_KEY}`;
 const GEMINI_TRANSCRIBE_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GOOGLE_AI_API_KEY}`;
 
@@ -133,14 +133,74 @@ const supabaseHeaders = {
   Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
 };
 
+function normalisePhone(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length === 10) return `+91${digits}`;
+  if (digits.startsWith("91") && digits.length === 12) return `+${digits}`;
+  if (phone.startsWith("+")) return phone;
+  return `+${digits}`;
+}
+
 async function createLead(lead: LeadInfo): Promise<string | null> {
   try {
     const courseId = COURSE_ID_MAP[lead.course] || null;
+    const normPhone = normalisePhone(lead.mobile);
+    const newSource = "website_chat";
+
+    // Check for existing lead by phone
+    const existingRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/leads?phone=eq.${encodeURIComponent(normPhone)}&select=id,source,secondary_source,tertiary_source,source_history&limit=1`,
+      { headers: supabaseHeaders },
+    );
+
+    if (existingRes.ok) {
+      const existingData = await existingRes.json();
+      if (existingData.length > 0) {
+        const existing = existingData[0];
+
+        // Update source tracking if website_chat is a new source for this lead
+        if (existing.source !== newSource && existing.secondary_source !== newSource && existing.tertiary_source !== newSource) {
+          const updates: Record<string, unknown> = {};
+          const history = Array.isArray(existing.source_history) ? existing.source_history : [];
+          history.push({ source: newSource, timestamp: new Date().toISOString(), data: `Chat about ${lead.course}` });
+          updates.source_history = history;
+
+          if (!existing.secondary_source) {
+            updates.secondary_source = newSource;
+          } else if (!existing.tertiary_source) {
+            updates.tertiary_source = newSource;
+          }
+
+          await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${existing.id}`, {
+            method: "PATCH",
+            headers: { ...supabaseHeaders, Prefer: "return=minimal" },
+            body: JSON.stringify(updates),
+          });
+
+          // Log activity
+          await fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
+            method: "POST",
+            headers: { ...supabaseHeaders, Prefer: "return=minimal" },
+            body: JSON.stringify({
+              lead_id: existing.id,
+              type: "system",
+              description: `Lead re-inquired via website chat about ${lead.course}`,
+            }),
+          });
+        }
+
+        console.log(`Duplicate lead found for ${normPhone}, returning existing: ${existing.id}`);
+        return existing.id;
+      }
+    }
+
+    // No existing lead — create new one
     const body: Record<string, unknown> = {
       name: lead.name,
-      phone: lead.mobile.replace(/\D/g, "").replace(/^(\d{10})$/, "91$1"),
-      source: "website",
+      phone: normPhone,
+      source: newSource,
       stage: "new_lead",
+      skip_ai_call: true,
     };
     if (courseId) body.course_id = courseId;
 
@@ -180,6 +240,23 @@ async function saveConversation(
     });
   } catch (e) {
     console.error("Save conversation error:", e);
+  }
+}
+
+async function trackEngagement(leadId: string, phone: string, eventType: string, metadata?: Record<string, unknown>): Promise<void> {
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/lead_engagement_events`, {
+      method: "POST",
+      headers: { ...supabaseHeaders, Prefer: "return=minimal" },
+      body: JSON.stringify({
+        lead_id: leadId,
+        phone: normalisePhone(phone),
+        event_type: eventType,
+        metadata: metadata || {},
+      }),
+    });
+  } catch (e) {
+    console.error("Track engagement error:", e);
   }
 }
 
@@ -223,15 +300,25 @@ function buildKnowledgeContext(course: string): string {
 
 // ── System prompt ───────────────────────────────────────────────────────────
 
-function buildSystemPrompt(knowledge: string): string {
-  return `You are NIMT's AI admissions counsellor on the website. You help prospective students with admission queries.
+function buildSystemPrompt(knowledge: string, lang: string = "en"): string {
+  const langInstruction = lang === "hi"
+    ? "Language: Respond in Hinglish (mix of Hindi and English). Use simple, conversational language. Keep it friendly and warm."
+    : "Language: Respond in clear, simple English. Keep it friendly, warm, and professional.";
 
-Language: Respond in Hinglish (mix of Hindi and English). Use simple, conversational language. Keep it friendly and warm.
+  const fallbackMsg = lang === "hi"
+    ? "Main yeh confirm karke batata hoon, hamari team aapko jaldi call karegi."
+    : "Let me check on that — our team will get back to you shortly with the details.";
+
+  return `You are Navya, NIMT's AI admissions counsellor on the website. You help prospective students with admission queries.
+
+Your name is Navya. Always introduce yourself as Navya if asked.
+
+${langInstruction}
 
 Rules:
 1. Answer questions about fees, eligibility, courses, campuses, placements, scholarships using ONLY the knowledge base below.
 2. Keep responses concise — 2-3 sentences max for text chat.
-3. If you don't know something or the knowledge base doesn't cover it, respond with: "Main yeh confirm karke batata hoon, hamari team aapko jaldi call karegi." and set confidence to 0.
+3. If you don't know something or the knowledge base doesn't cover it, respond with: "${fallbackMsg}" and set confidence to 0.
 4. If the student seems ready, suggest scheduling a campus visit or applying at apply.nimt.ac.in.
 5. NEVER make up information. Only use the knowledge base.
 6. Be warm, helpful, and encouraging.
@@ -394,15 +481,20 @@ async function handleWebSocketChat(ws: WebSocket, session: SessionPayload, sessi
   activeSessions.set(sessionId, activeSession);
   activeConnectionCount++;
 
+  // Track chat session start
+  trackEngagement(session.leadId, session.lead.mobile, "chat_open", { course: session.lead.course });
+
   // Build knowledge context based on student's course interest
   const knowledge = buildKnowledgeContext(session.lead.course);
-  const systemPrompt = buildSystemPrompt(knowledge);
+  let currentLang = "en";
+  let systemPrompt = buildSystemPrompt(knowledge, currentLang);
 
-  // Send welcome message
+  // Send welcome message in English
   const welcomeName = session.lead.name.split(" ")[0];
+  const courseName = session.lead.course;
   const welcomeMsg: ServerMessage = {
     type: "complete",
-    content: `Namaste ${welcomeName}! Main NIMT ki AI counsellor hoon. Aapne ${session.lead.course} mein interest dikhaya hai. Kya jaanna chahte hain? Fees, eligibility, placements — kuch bhi puchiye!`,
+    content: `Hi${welcomeName ? ` ${welcomeName}` : ""}! I'm Navya, NIMT's AI Counsellor. Since you're interested in ${courseName}, would you like me to share the details — eligibility, fees, placements, or anything specific?`,
     timestamp: new Date().toISOString(),
     messageId: crypto.randomUUID(),
   };
@@ -419,11 +511,20 @@ async function handleWebSocketChat(ws: WebSocket, session: SessionPayload, sessi
       const msg: ChatMessage = JSON.parse(event.data);
       activeSession.lastActivity = Date.now();
 
+      // Update language if client sends it
+      const msgLang = (msg as any).lang;
+      if (msgLang && (msgLang === "en" || msgLang === "hi") && msgLang !== currentLang) {
+        currentLang = msgLang;
+        systemPrompt = buildSystemPrompt(knowledge, currentLang);
+      }
+
       // Rate limit check
       if (activeSession.messageCount >= MAX_MESSAGES_PER_SESSION) {
         ws.send(JSON.stringify({
           type: "error",
-          content: "Aap bahut sawal puch chuke hain is session mein. Naya session shuru karne ke liye page refresh karein.",
+          content: currentLang === "hi"
+            ? "Aap bahut sawal puch chuke hain is session mein. Naya session shuru karne ke liye page refresh karein."
+            : "You've reached the message limit for this session. Please refresh the page to start a new session.",
           timestamp: new Date().toISOString(),
         } as ServerMessage));
         return;
@@ -438,7 +539,9 @@ async function handleWebSocketChat(ws: WebSocket, session: SessionPayload, sessi
         if (!transcript) {
           ws.send(JSON.stringify({
             type: "complete",
-            content: "Aapka voice message samajh nahi aaya, kya aap type karke bhej sakte hain?",
+            content: currentLang === "hi"
+              ? "Aapka voice message samajh nahi aaya, kya aap type karke bhej sakte hain?"
+              : "Sorry, I couldn't understand that voice message. Could you type your question instead?",
             timestamp: new Date().toISOString(),
             messageId: crypto.randomUUID(),
           } as ServerMessage));
@@ -452,6 +555,9 @@ async function handleWebSocketChat(ws: WebSocket, session: SessionPayload, sessi
           timestamp: new Date().toISOString(),
         } as ServerMessage));
       }
+
+      // Track user message engagement
+      trackEngagement(session.leadId, session.lead.mobile, "chat_message", { message_num: activeSession.messageCount });
 
       // Save user message
       activeSession.messages.push({
@@ -485,7 +591,9 @@ async function handleWebSocketChat(ws: WebSocket, session: SessionPayload, sessi
         }
       } catch (e) {
         if (e instanceof Error && e.message === "TIMEOUT") {
-          const fallback = "Hamara system abhi busy hai. Aapko jaldi callback mil jayega. Kuch aur help chahiye?";
+          const fallback = currentLang === "hi"
+            ? "Hamara system abhi busy hai. Aapko jaldi callback mil jayega. Kuch aur help chahiye?"
+            : "I'm taking a moment to process. You'll receive a callback shortly. Is there anything else I can help with?";
           ws.send(JSON.stringify({
             type: "complete",
             content: fallback,
@@ -495,7 +603,9 @@ async function handleWebSocketChat(ws: WebSocket, session: SessionPayload, sessi
           fullResponse = fallback;
         } else {
           console.error("Gemini streaming error:", e);
-          const fallback = "Kuch technical issue aa raha hai. Aap hamein +91 9555192192 par call kar sakte hain.";
+          const fallback = currentLang === "hi"
+            ? "Kuch technical issue aa raha hai. Aap hamein +91 9555192192 par call kar sakte hain."
+            : "I'm experiencing a temporary issue. You can reach us at +91 9555192192 for immediate assistance.";
           ws.send(JSON.stringify({
             type: "complete",
             content: fallback,
@@ -679,6 +789,22 @@ async function handler(req: Request): Promise<Response> {
     };
 
     return response;
+  }
+
+  // Serve tracker.js
+  if (url.pathname === "/tracker.js") {
+    try {
+      const js = await Deno.readTextFile(new URL("./tracker.js", import.meta.url).pathname);
+      return new Response(js, {
+        headers: {
+          "Content-Type": "application/javascript",
+          "Cache-Control": "public, max-age=3600",
+          "Access-Control-Allow-Origin": "*",
+        },
+      });
+    } catch {
+      return new Response("Not found", { status: 404 });
+    }
   }
 
   return new Response("Not found", { status: 404, headers: corsHeaders(origin) });

@@ -49,7 +49,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { email, display_name, phone, role, campus, password } = await req.json();
+    const { email, display_name, phone, role, campus, password, publisher_id, publisher_source } = await req.json();
 
     if (!email || !role) {
       return new Response(
@@ -62,6 +62,30 @@ Deno.serve(async (req) => {
     }
 
     let newUser: any;
+    let reusedExisting = false;
+
+    // Helper: locate existing auth user by email when create/invite fails as "already registered".
+    const findExistingUserId = async (): Promise<string | null> => {
+      // Fast path: profiles.email is populated by the handle_new_user trigger.
+      const { data: prof } = await adminClient
+        .from("profiles")
+        .select("user_id")
+        .eq("email", email)
+        .maybeSingle();
+      if (prof?.user_id) return prof.user_id;
+
+      // Fallback: paginate auth.admin.listUsers.
+      for (let page = 1; page <= 20; page++) {
+        const { data } = await adminClient.auth.admin.listUsers({ page, perPage: 200 });
+        const match = (data?.users || []).find((u: any) => u.email?.toLowerCase() === email.toLowerCase());
+        if (match) return match.id;
+        if (!data?.users?.length || data.users.length < 200) break;
+      }
+      return null;
+    };
+
+    const isAlreadyExistsError = (msg: string) =>
+      /already (been )?registered|already exists|email.*taken|duplicate/i.test(msg || "");
 
     if (password) {
       // Create user with password immediately (no email invite)
@@ -75,12 +99,36 @@ Deno.serve(async (req) => {
         },
       });
       if (error) {
-        return new Response(JSON.stringify({ error: error.message }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        if (isAlreadyExistsError(error.message)) {
+          const existingId = await findExistingUserId();
+          if (!existingId) {
+            return new Response(JSON.stringify({ error: `User exists but couldn't be located: ${error.message}` }), {
+              status: 400,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          // Reset their password to the one supplied so creds work, and confirm email.
+          const { error: updErr } = await adminClient.auth.admin.updateUserById(existingId, {
+            password,
+            email_confirm: true,
+          });
+          if (updErr) {
+            return new Response(JSON.stringify({ error: `Found existing user but password update failed: ${updErr.message}` }), {
+              status: 400,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          newUser = { user: { id: existingId } };
+          reusedExisting = true;
+        } else {
+          return new Response(JSON.stringify({ error: error.message }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      } else {
+        newUser = data;
       }
-      newUser = data;
     } else {
       // Send email invite
       const { data, error: inviteError } =
@@ -91,12 +139,25 @@ Deno.serve(async (req) => {
           },
         });
       if (inviteError) {
-        return new Response(JSON.stringify({ error: inviteError.message }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        if (isAlreadyExistsError(inviteError.message)) {
+          const existingId = await findExistingUserId();
+          if (!existingId) {
+            return new Response(JSON.stringify({ error: `User exists but couldn't be located: ${inviteError.message}` }), {
+              status: 400,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          newUser = { user: { id: existingId } };
+          reusedExisting = true;
+        } else {
+          return new Response(JSON.stringify({ error: inviteError.message }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      } else {
+        newUser = data;
       }
-      newUser = data;
     }
 
     // Normalise phone: ensure it starts with +
@@ -117,16 +178,36 @@ Deno.serve(async (req) => {
         .upsert(profileUpdate, { onConflict: "user_id" });
     }
 
-    // Assign role
-    const { error: roleError } = await adminClient
+    // Assign role — replace any existing role row so we can also re-role existing users.
+    const { data: existingRole } = await adminClient
       .from("user_roles")
-      .insert({ user_id: newUser.user.id, role });
+      .select("id, role")
+      .eq("user_id", newUser.user.id)
+      .maybeSingle();
 
-    if (roleError) {
-      return new Response(JSON.stringify({ error: roleError.message }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (existingRole) {
+      if (existingRole.role !== role) {
+        const { error: updRoleErr } = await adminClient
+          .from("user_roles")
+          .update({ role })
+          .eq("id", existingRole.id);
+        if (updRoleErr) {
+          return new Response(JSON.stringify({ error: updRoleErr.message }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+    } else {
+      const { error: roleError } = await adminClient
+        .from("user_roles")
+        .insert({ user_id: newUser.user.id, role });
+      if (roleError) {
+        return new Response(JSON.stringify({ error: roleError.message }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     // Send WhatsApp staff_welcome if phone is provided
@@ -229,8 +310,54 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Publisher-role linking: handled here with service role so RLS can't silently block it.
+    if (role === "publisher") {
+      const userId = newUser.user.id;
+      const desiredDisplay = display_name || email;
+
+      if (publisher_id) {
+        // Caller specified the exact publisher row to link.
+        // First clear any other row currently holding this user_id (UNIQUE constraint).
+        await adminClient.from("publishers")
+          .update({ user_id: null })
+          .eq("user_id", userId)
+          .neq("id", publisher_id);
+
+        const { error: linkErr } = await adminClient.from("publishers")
+          .update({ user_id: userId, display_name: desiredDisplay, is_active: true })
+          .eq("id", publisher_id);
+        if (linkErr) {
+          return new Response(JSON.stringify({ error: `Failed to link publisher row: ${linkErr.message}` }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      } else if (publisher_source) {
+        // Fallback: caller didn't pin a row. Reuse if user is already linked anywhere;
+        // else find the first unlinked row for this source; else insert one.
+        const { data: alreadyLinked } = await adminClient.from("publishers")
+          .select("id").eq("user_id", userId).maybeSingle();
+        if (!alreadyLinked) {
+          const { data: bySource } = await adminClient.from("publishers")
+            .select("id").eq("source", publisher_source).is("user_id", null).limit(1).maybeSingle();
+          if (bySource) {
+            await adminClient.from("publishers")
+              .update({ user_id: userId, display_name: desiredDisplay })
+              .eq("id", bySource.id);
+          } else {
+            await adminClient.from("publishers").insert({
+              display_name: desiredDisplay,
+              source: publisher_source,
+              user_id: userId,
+              is_active: true,
+            });
+          }
+        }
+      }
+    }
+
     return new Response(
-      JSON.stringify({ success: true, user_id: newUser.user.id }),
+      JSON.stringify({ success: true, user_id: newUser.user.id, reused_existing: reusedExisting }),
       {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

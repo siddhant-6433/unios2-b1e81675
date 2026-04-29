@@ -51,6 +51,7 @@ const admissionSubMenu: MenuItem[] = [
   { title: "Fresh Leads", url: "/fresh-leads", icon: Sparkles, permission: "call_log:view" },
   { title: "Pending Follow-ups", url: "/pending-followups", icon: AlertTriangle, permission: "call_log:view" },
   { title: "Cloud Dialer", url: "/cloud-dialer", icon: PhoneCall, permission: "call_log:view" },
+  { title: "Applications", url: "/applications", icon: FileText, permission: "leads:view" },
   { title: "Call Log", url: "/call-log", icon: Phone, permission: "call_log:view" },
   { title: "AI Call Log", url: "/ai-call-log", icon: Bot, permission: "automation:view" },
   { title: "Automation", url: "/automation-rules", icon: Zap, permission: "automation:view" },

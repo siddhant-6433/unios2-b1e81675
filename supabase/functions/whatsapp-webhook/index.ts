@@ -169,6 +169,14 @@ Deno.serve(async (req) => {
               type: "whatsapp",
               description: `Inbound WhatsApp: ${content?.substring(0, 100) || "[media]"}`,
             });
+
+            // Track engagement — inbound WhatsApp reply is a strong intent signal
+            await admin.from("lead_engagement_events").insert({
+              lead_id: lead.id,
+              phone: normalizedPhone,
+              event_type: "whatsapp_reply",
+              metadata: { message_type: msgType, preview: content?.substring(0, 50) || null },
+            });
           }
 
           // Insert in-app notification for assigned counsellor or all admins

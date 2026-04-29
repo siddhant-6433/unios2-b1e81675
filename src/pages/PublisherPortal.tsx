@@ -35,6 +35,7 @@ interface PublisherLead {
   created_at: string;
   ai_called: boolean;
   ai_called_at: string | null;
+  manually_called: boolean;
 }
 
 interface LeadActivity {
@@ -213,6 +214,20 @@ export default function PublisherPortal() {
       if (fetchErr) {
         toast({ title: "Failed to load leads", variant: "destructive" });
       } else {
+        // Fetch lead_ids with any manual 'call' activity (all-time) so "Called" counts
+        // unique leads contacted by AI OR manually, not just AI-dialed.
+        const leadIds = allLeads.map((l: any) => l.id);
+        const manuallyCalledSet = new Set<string>();
+        const ID_BATCH = 500;
+        for (let i = 0; i < leadIds.length; i += ID_BATCH) {
+          const { data: callRows } = await supabase
+            .from("lead_activities")
+            .select("lead_id")
+            .in("lead_id", leadIds.slice(i, i + ID_BATCH))
+            .eq("type", "call");
+          (callRows ?? []).forEach((a: any) => manuallyCalledSet.add(a.lead_id));
+        }
+
         const mapped = allLeads.map((l: any) => ({
           id: l.id,
           name: l.name,
@@ -222,6 +237,7 @@ export default function PublisherPortal() {
           created_at: l.created_at,
           ai_called: l.ai_called ?? false,
           ai_called_at: l.ai_called_at ?? null,
+          manually_called: manuallyCalledSet.has(l.id),
           course_name: l.courses?.name ?? "—",
           campus_name: l.campuses?.name ?? "—",
           city: l.city ?? null,
@@ -527,7 +543,8 @@ export default function PublisherPortal() {
           const stages = courseMap.get(c)!;
           stages.set(l.stage, (stages.get(l.stage) || 0) + 1);
           courseTotals.set(c, (courseTotals.get(c) || 0) + 1);
-          if (l.ai_called) courseCalled.set(c, (courseCalled.get(c) || 0) + 1);
+          // "Called" = unique leads contacted by AI OR a manual call activity.
+          if (l.ai_called || l.manually_called) courseCalled.set(c, (courseCalled.get(c) || 0) + 1);
           if (interestStages.has(l.stage)) courseInterested.set(c, (courseInterested.get(c) || 0) + 1);
         });
 
@@ -540,7 +557,9 @@ export default function PublisherPortal() {
           const called = courseCalled.get(course) || 0;
           const interested = courseInterested.get(course) || 0;
           const dropped = (stages.get("not_interested") || 0) + (stages.get("ineligible") || 0) + (stages.get("dnc") || 0) + (stages.get("rejected") || 0);
-          const ratio = called > 0 ? interested / called : 0;
+          // Both numerator and denominator now share the same "called" definition (AI or manual),
+          // so this is bounded by 100% in practice — interested leads are by definition called leads.
+          const ratio = called > 0 ? Math.min(interested, called) / called : 0;
           return { course, stages, total, called, interested, dropped, ratio };
         });
 
@@ -671,7 +690,7 @@ export default function PublisherPortal() {
             if (!map.has(k)) map.set(k, { total: 0, called: 0, interested: 0, admitted: 0 });
             const d = map.get(k)!;
             d.total++;
-            if (lead.ai_called) d.called++;
+            if (lead.ai_called || lead.manually_called) d.called++;
             if (interestStages.has(l.stage)) d.interested++;
             if (l.stage === "admitted") d.admitted++;
           };

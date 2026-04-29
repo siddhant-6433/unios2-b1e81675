@@ -20,6 +20,7 @@ import {
 import { AiCallSummary } from "@/components/leads/AiCallSummary";
 import { LeadInfoCard } from "@/components/leads/LeadInfoCard";
 import { LeadTimeline } from "@/components/leads/LeadTimeline";
+import { WebChatTranscripts } from "@/components/leads/WebChatTranscripts";
 import { InterviewScoringDialog } from "@/components/admissions/InterviewScoringDialog";
 import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
 import { ConvertToStudentDialog } from "@/components/admissions/ConvertToStudentDialog";
@@ -961,6 +962,9 @@ const LeadDetail = () => {
 
           {/* AI Call Summary */}
           <AiCallSummary leadId={id!} />
+
+          {/* Website Chat Transcripts */}
+          <WebChatTranscripts leadId={id!} />
 
           {/* Scheduled Visits with completion dialog */}
           <ScheduledVisitsSection

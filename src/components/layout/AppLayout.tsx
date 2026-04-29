@@ -2,6 +2,7 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { ImpersonationBanner } from "@/components/layout/ImpersonationBanner";
 import { GlobalActionBar } from "@/components/layout/GlobalActionBar";
+import { LiveCallBar } from "@/components/layout/LiveCallBar";
 import { NotificationPanel } from "@/components/layout/NotificationPanel";
 import { WhatsAppPanel } from "@/components/layout/WhatsAppPanel";
 import { HeaderSearch } from "@/components/layout/HeaderSearch";
@@ -73,6 +74,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               </div>
             </header>
             <GlobalActionBar />
+            <LiveCallBar />
             <main className="flex-1 overflow-auto p-6">
               {children}
             </main>

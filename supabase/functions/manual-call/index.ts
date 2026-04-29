@@ -144,6 +144,18 @@ Deno.serve(async (req) => {
       return json({ error: `Call failed: ${plivoData?.error || plivoData?.message || plivoText || "Unknown error"}` }, 500);
     }
 
+    // Create ai_call_records immediately for progressive state tracking
+    // Client polls this record to detect: ringing → student connected → call ended
+    await db.from("ai_call_records").insert({
+      lead_id,
+      call_uuid: callId,
+      plivo_call_uuid: plivoData.request_uuid || null,
+      status: "initiated",
+      call_type: "manual",
+      caller_user_id: userId,
+      summary: `Cloud Call: connecting by ${profile.display_name}`,
+    });
+
     // Log activity
     await db.from("lead_activities").insert({
       lead_id,

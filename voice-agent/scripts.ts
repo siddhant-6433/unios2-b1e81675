@@ -38,8 +38,8 @@ export function buildSystemInstruction(ctx: CallContext): string {
   const institution = detectInstitution(ctx.courseCode, ctx.campusName);
 
   const personas = {
-    college: { name: "Nisha", org: "N.I.M.T. Educational Institutions" },
-    beacon:  { name: "Nisha", org: "N.I.M.T. Beacon School" },
+    college: { name: "Navya", org: "N.I.M.T. Educational Institutions" },
+    beacon:  { name: "Navya", org: "N.I.M.T. Beacon School" },
     mirai:   { name: "Mira",  org: "Mirai Experiential School" },
   };
   const persona = personas[institution];

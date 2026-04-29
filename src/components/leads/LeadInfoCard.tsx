@@ -162,7 +162,13 @@ export function LeadInfoCard({
           <InfoRow
             icon={<Globe className="h-4 w-4" />}
             iconColor="bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400"
-            label="Source" value={lead.source?.replace(/_/g, " ")} className="capitalize"
+            label="Source"
+            value={[
+              lead.source,
+              lead.secondary_source,
+              lead.tertiary_source,
+            ].filter(Boolean).map((s: string) => s.replace(/_/g, " ")).join(" → ")}
+            className="capitalize"
           />
 
           {counsellorName && (

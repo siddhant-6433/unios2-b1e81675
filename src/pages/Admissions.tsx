@@ -26,6 +26,7 @@ import { PaymentReconciliation } from "@/components/admissions/PaymentReconcilia
 import { ActionCenterView } from "@/components/admissions/ActionCenterView";
 import { CounsellorScoreBadge } from "@/components/admissions/CounsellorScoreBadge";
 import { InactivityAlertBanner } from "@/components/admissions/InactivityAlertBanner";
+import { HotEngagedLeads } from "@/components/admissions/HotEngagedLeads";
 import { CounsellorOnboarding } from "@/components/onboarding/CounsellorOnboarding";
 import { useTatDefaults } from "@/hooks/useTatDefaults";
 import { LEAD_SOURCES, SOURCE_LABELS, SOURCE_BADGE_COLORS } from "@/config/leadSources";
@@ -900,6 +901,13 @@ const Admissions = () => {
         }}
         onViewOverdue={() => navigate("/counsellor-dashboard")}
         campusId={selectedCampusId}
+      />
+
+      {/* Hot Leads — Recently Active on Website/Email */}
+      <HotEngagedLeads
+        profileId={profile?.id}
+        isSuperAdmin={isSuperAdmin}
+        isTeamLeader={isTeamLeader}
       />
 
       {/* TAT Defaults Banner — visible to counsellors with pending tasks */}

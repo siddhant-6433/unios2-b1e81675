@@ -18,6 +18,7 @@ import LeadBuckets from "./pages/LeadBuckets";
 import CallLog from "./pages/CallLog";
 import AiCallLog from "./pages/AiCallLog";
 import CloudDialer from "./pages/CloudDialer";
+import Applications from "./pages/Applications";
 import PendingFollowups from "./pages/PendingFollowups";
 import FreshLeads from "./pages/FreshLeads";
 import StudentReferrals from "./pages/StudentReferrals";
@@ -37,6 +38,7 @@ import WhatsAppInbox from "./pages/WhatsAppInbox";
 import AutomationRules from "./pages/AutomationRules";
 import ConsultantPortal from "./pages/ConsultantPortal";
 import PublisherPortal from "./pages/PublisherPortal";
+import PublisherLogin from "./pages/PublisherLogin";
 import ConsultantGuide from "./pages/ConsultantGuide";
 import TemplateManager from "./pages/TemplateManager";
 import FeeStructures from "./pages/FeeStructures";
@@ -116,6 +118,7 @@ const App = () => (
             <Route path="/apply/beacon" element={<ApplyPortal />} />
             <Route path="/apply/mirai" element={<ApplyPortal />} />
             <Route path="/enquiry" element={<EnquiryForm />} />
+            <Route path="/publisher-login" element={<PublisherLogin />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/terms" element={<TermsOfService />} />
             <Route path="/alumni-verification" element={<AlumniVerification />} />
@@ -162,6 +165,7 @@ const App = () => (
                       <Route path="/call-log" element={<CallLog />} />
                       <Route path="/ai-call-log" element={<AiCallLog />} />
                       <Route path="/cloud-dialer" element={<CloudDialer />} />
+                      <Route path="/applications" element={<Applications />} />
                       <Route path="/referrals" element={<StudentReferrals />} />
                       <Route path="/search" element={<GlobalSearch />} />
                       <Route path="/students" element={<Students />} />
