@@ -175,10 +175,25 @@ const AdminPanel = () => {
       await supabase.from("publishers").update({ user_id: null }).eq("user_id", userId);
       const { error } = await supabase.from("publishers").update({ user_id: userId }).eq("id", publisherId);
       if (error) throw error;
-      toast({ title: "Linked", description: "Publisher linked to user account." });
+
+      // Ensure the user has role=publisher; otherwise they can't pass RLS on the
+      // publisher-portal page or leads queries.
+      const { data: existingRole } = await supabase
+        .from("user_roles")
+        .select("id, role")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (!existingRole) {
+        await supabase.from("user_roles").insert({ user_id: userId, role: "publisher" });
+      } else if (existingRole.role !== "publisher") {
+        await supabase.from("user_roles").update({ role: "publisher" }).eq("id", existingRole.id);
+      }
+
+      toast({ title: "Linked", description: "Publisher linked & role set to publisher." });
       setLinkingPubId(null);
       setLinkUserId("");
       await fetchPublishers();
+      await fetchUsers();
     } catch (err: any) {
       toast({ title: "Link failed", description: err.message, variant: "destructive" });
     } finally {

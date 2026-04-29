@@ -485,6 +485,16 @@ const LeadDetail = () => {
       toast({ title: "Cannot revert", description: "Lead cannot be moved back to New Lead stage.", variant: "destructive" });
       return;
     }
+    // counsellor_call must be reached by logging an actual call (with an interested-style
+    // disposition), so the Called metric can never lag behind the In Follow Up count.
+    if (newStage === "counsellor_call") {
+      toast({
+        title: "Log a call instead",
+        description: "Use 'Log Call' and set disposition to Interested / Call Back / Not Answered. The stage will move to In Follow Up automatically.",
+        variant: "destructive",
+      });
+      return;
+    }
     const { error } = await supabase.from("leads").update({ stage: newStage as any }).eq("id", id);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
     await supabase.from("lead_activities").insert({
@@ -1284,6 +1294,13 @@ function ScheduledVisitsSection({ visits, campuses, courses, leadId, userId, onR
       expectedAdmissionDate ? `Expected Admission: ${expectedAdmissionDate}` : "",
     ].filter(Boolean).join("\n") || null;
 
+    // Get counsellor name and campus name for activity log
+    const { data: myProfile } = await supabase.from("profiles").select("display_name").eq("user_id", userId).single();
+    const counsellorLabel = myProfile?.display_name || "Counsellor";
+    const walkinCampus = campuses.find((c: any) => c.id === walkinCampusId);
+    const visitCampus = completingVisit ? campuses.find((c: any) => c.id === completingVisit.campus_id) : walkinCampus;
+    const campusLabel = visitCampus?.name || "Campus";
+
     if (isWalkin) {
       // Walk-in: create a new campus_visits record as completed
       await supabase.from("campus_visits").insert({
@@ -1296,8 +1313,8 @@ function ScheduledVisitsSection({ visits, campuses, courses, leadId, userId, onR
         feedback: feedbackText,
       });
       await supabase.from("lead_activities").insert({
-        lead_id: leadId, user_id: userId, type: "visit",
-        description: `Walk-in visit recorded.${feedback ? ` Feedback: ${feedback}` : ""}${courseInterest ? ` Course interest: ${courseInterest}` : ""}`,
+        lead_id: leadId, user_id: userId, type: "visit_completed",
+        description: `Walk-in visit completed at ${campusLabel}. Attended by ${counsellorLabel}.${feedback ? ` Feedback: ${feedback}` : ""}${courseInterest ? ` Course interest: ${courseInterest}` : ""}`,
       });
     } else {
       // Scheduled visit: update existing record
@@ -1306,8 +1323,8 @@ function ScheduledVisitsSection({ visits, campuses, courses, leadId, userId, onR
         feedback: feedbackText,
       }).eq("id", completingVisitId);
       await supabase.from("lead_activities").insert({
-        lead_id: leadId, user_id: userId, type: "visit",
-        description: `Campus visit completed.${feedback ? ` Feedback: ${feedback}` : ""}${courseInterest ? ` Course interest: ${courseInterest}` : ""}`,
+        lead_id: leadId, user_id: userId, type: "visit_completed",
+        description: `Visit completed at ${campusLabel}. Attended by ${counsellorLabel}.${feedback ? ` Feedback: ${feedback}` : ""}${courseInterest ? ` Course interest: ${courseInterest}` : ""}`,
       });
     }
 

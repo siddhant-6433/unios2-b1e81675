@@ -212,7 +212,12 @@ export default function PublisherPortal() {
       }
 
       if (fetchErr) {
-        toast({ title: "Failed to load leads", variant: "destructive" });
+        console.error("Publisher leads fetch error:", fetchErr);
+        toast({
+          title: "Failed to load leads",
+          description: (fetchErr as any)?.message || (fetchErr as any)?.code || "Unknown error",
+          variant: "destructive",
+        });
       } else {
         // Fetch lead_ids with any manual 'call' activity (all-time) so "Called" counts
         // unique leads contacted by AI OR manually, not just AI-dialed.
@@ -543,8 +548,11 @@ export default function PublisherPortal() {
           const stages = courseMap.get(c)!;
           stages.set(l.stage, (stages.get(l.stage) || 0) + 1);
           courseTotals.set(c, (courseTotals.get(c) || 0) + 1);
-          // "Called" = unique leads contacted by AI OR a manual call activity.
-          if (l.ai_called || l.manually_called) courseCalled.set(c, (courseCalled.get(c) || 0) + 1);
+          // "Called" = any lead that was engaged: AI-dialed, manually called, OR moved
+          // out of new_lead stage (counsellors sometimes update stage after a WhatsApp /
+          // email touch without logging a 'call' activity, but those leads were contacted).
+          const wasEngaged = l.ai_called || l.manually_called || l.stage !== "new_lead";
+          if (wasEngaged) courseCalled.set(c, (courseCalled.get(c) || 0) + 1);
           if (interestStages.has(l.stage)) courseInterested.set(c, (courseInterested.get(c) || 0) + 1);
         });
 
@@ -690,7 +698,7 @@ export default function PublisherPortal() {
             if (!map.has(k)) map.set(k, { total: 0, called: 0, interested: 0, admitted: 0 });
             const d = map.get(k)!;
             d.total++;
-            if (lead.ai_called || lead.manually_called) d.called++;
+            if (lead.ai_called || lead.manually_called || l.stage !== "new_lead") d.called++;
             if (interestStages.has(l.stage)) d.interested++;
             if (l.stage === "admitted") d.admitted++;
           };

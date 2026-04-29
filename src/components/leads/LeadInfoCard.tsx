@@ -97,11 +97,26 @@ export function LeadInfoCard({
             className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
           >
             {Object.entries(STAGE_LABELS)
-              .filter(([key]) => key === lead.stage || (lead.stage !== "new_lead" ? key !== "new_lead" : true))
+              .filter(([key]) => {
+                // Always allow the current stage to render so the select doesn't go blank.
+                if (key === lead.stage) return true;
+                // Hide new_lead once a lead has moved past it.
+                if (key === "new_lead" && lead.stage !== "new_lead") return false;
+                // counsellor_call ("In Follow Up") is auto-set when a call is logged with
+                // an interested-style disposition. Don't let users pick it manually —
+                // forces actual call logging so the Called metric stays consistent.
+                if (key === "counsellor_call") return false;
+                return true;
+              })
               .map(([key, label]) => (
                 <option key={key} value={key}>{label}</option>
               ))}
           </select>
+          {lead.stage !== "counsellor_call" && (
+            <p className="mt-1.5 text-[10px] text-muted-foreground/70">
+              "In Follow Up" is set automatically when a call is logged.
+            </p>
+          )}
         </div>
 
         {/* Info rows */}
