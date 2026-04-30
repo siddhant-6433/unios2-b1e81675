@@ -13,25 +13,44 @@ async function fetchImage(pdf: PDFDocument, url: string | null): Promise<PDFImag
   if (!url) return null;
   try {
     const r = await fetch(url);
-    if (!r.ok) return null;
+    if (!r.ok) {
+      console.error("[application-form] image fetch failed:", url, r.status);
+      return null;
+    }
     const bytes = new Uint8Array(await r.arrayBuffer());
     const ct = r.headers.get("content-type") || "";
-    if (ct.includes("png") || url.toLowerCase().endsWith(".png")) return await pdf.embedPng(bytes);
-    return await pdf.embedJpg(bytes);
-  } catch { return null; }
+    const looksPng = ct.includes("png") || url.toLowerCase().endsWith(".png");
+    // Try the expected format first; fall back to the other on failure.
+    // Processed PNGs sometimes have alpha / indexed-colour quirks that pdf-lib's
+    // embedPng rejects, in which case the bytes might still load as JPEG.
+    try {
+      return looksPng ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes);
+    } catch (e1) {
+      console.warn("[application-form] embed primary failed, trying alt:", url, (e1 as Error).message);
+      try {
+        return looksPng ? await pdf.embedJpg(bytes) : await pdf.embedPng(bytes);
+      } catch (e2) {
+        console.error("[application-form] embed alt also failed:", url, (e2 as Error).message);
+        return null;
+      }
+    }
+  } catch (e) {
+    console.error("[application-form] image fetch threw:", url, (e as Error).message);
+    return null;
+  }
 }
 
 const fmtDate = (d?: string | null) => {
-  if (!d) return "—";
+  if (!d) return "-";
   const dt = new Date(d);
   if (isNaN(dt.getTime())) return d;
   return dt.toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" });
 };
 
-const upper = (s?: string | null) => (s ?? "").toString().toUpperCase().trim() || "—";
-// Display all data in CAPS — keeps the doc visually consistent and matches the
+const upper = (s?: string | null) => (s ?? "").toString().toUpperCase().trim() || "-";
+// Display all data in CAPS - keeps the doc visually consistent and matches the
 // historical NIMT-UG application format.
-const norm  = (s?: string | null) => (s ?? "").toString().toUpperCase().trim() || "—";
+const norm  = (s?: string | null) => (s ?? "").toString().toUpperCase().trim() || "-";
 const yesNo = (b?: any) => b ? "YES" : "NO";
 
 interface Ctx {
@@ -73,14 +92,14 @@ async function newPage(ctx: Ctx) {
     const aspectHW = lh.height / lh.width;
 
     if (aspectHW >= 1.2) {
-      // Tall image — likely full-page A4 background. Stretch to fit.
+      // Tall image - likely full-page A4 background. Stretch to fit.
       ctx.page.drawImage(lh, { x: 0, y: 0, width: ctx.width, height: ctx.height });
       // Reserve generous top + bottom for header/footer bands inside the
       // letterhead artwork itself.
       topReserve    = 150;
       bottomReserve = 150;
     } else {
-      // Banner / header-only — render at top, scaled to width at native aspect.
+      // Banner / header-only - render at top, scaled to width at native aspect.
       const lhHeight = ctx.width * aspectHW;
       ctx.page.drawImage(lh, { x: 0, y: ctx.height - lhHeight, width: ctx.width, height: lhHeight });
       topReserve = lhHeight + 16;
@@ -148,7 +167,7 @@ function drawSection(ctx: Ctx, title: string, height = 18) {
 }
 
 // Word-wrap a string into N lines that fit a given pixel width at a given font/size.
-// Drops trailing words to fit `maxLines`; appends "…" if truncated.
+// Drops trailing words to fit `maxLines`; appends "..." if truncated.
 function wrapText(text: string, font: any, size: number, maxWidth: number, maxLines = 2): string[] {
   if (!text) return [""];
   const words = text.split(/\s+/);
@@ -160,12 +179,12 @@ function wrapText(text: string, font: any, size: number, maxWidth: number, maxLi
       line = trial;
     } else {
       if (line) lines.push(line);
-      // word itself too long — hard-break.
+      // word itself too long - hard-break.
       if (font.widthOfTextAtSize(word, size) > maxWidth) {
         // Cut word at safe length.
         let cut = word;
-        while (cut.length > 1 && font.widthOfTextAtSize(cut + "…", size) > maxWidth) cut = cut.slice(0, -1);
-        lines.push(cut + "…");
+        while (cut.length > 1 && font.widthOfTextAtSize(cut + "...", size) > maxWidth) cut = cut.slice(0, -1);
+        lines.push(cut + "...");
         line = "";
       } else {
         line = word;
@@ -179,8 +198,8 @@ function wrapText(text: string, font: any, size: number, maxWidth: number, maxLi
     lines.length = maxLines;
     if (overflow) {
       let last = lines[maxLines - 1];
-      while (last.length > 1 && font.widthOfTextAtSize(last + "…", size) > maxWidth) last = last.slice(0, -1);
-      lines[maxLines - 1] = last + "…";
+      while (last.length > 1 && font.widthOfTextAtSize(last + "...", size) > maxWidth) last = last.slice(0, -1);
+      lines[maxLines - 1] = last + "...";
     }
   }
   return lines.length ? lines : [""];
@@ -265,14 +284,14 @@ function drawWide(ctx: Ctx, label: string, value: string, h = 24, red = false) {
 }
 
 function fmtAddress(addr: any): string {
-  if (!addr || typeof addr !== "object") return "—";
+  if (!addr || typeof addr !== "object") return "-";
   return [addr.line1, addr.line2, addr.city, addr.district, addr.state, addr.pincode, addr.country]
-    .filter(Boolean).join(", ") || "—";
+    .filter(Boolean).join(", ") || "-";
 }
 
 function fmtPersonName(p: any): string {
-  if (!p || typeof p !== "object") return "—";
-  return [p.title, p.first_name, p.middle_name, p.last_name, p.name].filter(Boolean).join(" ") || (p.name || "—");
+  if (!p || typeof p !== "object") return "-";
+  return [p.title, p.first_name, p.middle_name, p.last_name, p.name].filter(Boolean).join(" ") || (p.name || "-");
 }
 
 // ───────────────────────── builder ─────────────────────────
@@ -312,7 +331,7 @@ Deno.serve(async (req) => {
       const { data: files } = await admin.storage.from("application-documents").list(app.application_id, {
         limit: 200, sortBy: { column: "name", order: "asc" },
       });
-      // Photo conventions vary — PhotoUpload uses passport_photo.png; school
+      // Photo conventions vary - PhotoUpload uses passport_photo.png; school
       // form uses student_photo-*.png; admins might upload applicant_photo*.
       // Pick the first file matching any of these patterns.
       const photoPattern = /^(passport_photo|student_photo|applicant_photo)/i;
@@ -324,7 +343,7 @@ Deno.serve(async (req) => {
         if (!photoUrl && photoPattern.test(f.name)) {
           photoUrl = url;
         } else if (photoPattern.test(f.name)) {
-          // Already picked a photo — skip duplicates.
+          // Already picked a photo - skip duplicates.
         } else {
           const stripped = f.name.replace(/^[a-z0-9_]+-/i, "");
           documents.push({ name: stripped || f.name, url });
@@ -386,36 +405,21 @@ async function buildApplicationPdfInline(
   };
   await newPage(ctx);
 
-  // --- HEADER (title + app id + photo) --------------------------------
-  const courses: any[] = Array.isArray(app.course_selections) ? app.course_selections : [];
-  const programLabel: Record<string, string> = {
-    school: "Course for School",
-    undergraduate: "Course After 12th",
-    postgraduate: "Course After Graduation",
-    mba_pgdm: "MBA / PGDM Program",
-    professional: "Professional Course",
-    bed: "B.Ed Program",
-    deled: "D.El.Ed Program",
-  };
-  const titleText = (programLabel[app.program_category] || "Application Form").toUpperCase();
-
-  // Photo box sits at the top-right; title + app no sit to its left,
-  // centered within the remaining horizontal space. Drawn FIRST so the
-  // white-filled photo box covers the letterhead artwork beneath cleanly.
-  const photoW = 80, photoH = 100;
+  // ── HEADER: photo top-right, title + app no centered to the left ──
+  const photoW = 86, photoH = 110;
   const photoX = ctx.width - ctx.margin - photoW;
   const photoY = ctx.contentStart - 4;
   ctx.page.drawRectangle({ x: photoX, y: photoY - photoH, width: photoW, height: photoH, color: rgb(1,1,1), borderColor: COLORS.border, borderWidth: 0.5 });
   if (photoImg) {
     ctx.page.drawImage(photoImg, { x: photoX + 1, y: photoY - photoH + 1, width: photoW - 2, height: photoH - 2 });
   } else {
-    ctx.page.drawText("Paste Your Recent", { x: photoX + 6, y: photoY - 22, size: 7, font, color: COLORS.muted });
-    ctx.page.drawText("Passport Size",     { x: photoX + 6, y: photoY - 32, size: 7, font, color: COLORS.muted });
-    ctx.page.drawText("Photograph Here",   { x: photoX + 6, y: photoY - 42, size: 7, font, color: COLORS.muted });
+    ctx.page.drawText("Paste Your Recent", { x: photoX + 6, y: photoY - 26, size: 7, font, color: COLORS.muted });
+    ctx.page.drawText("Passport Size",     { x: photoX + 6, y: photoY - 38, size: 7, font, color: COLORS.muted });
+    ctx.page.drawText("Photograph Here",   { x: photoX + 6, y: photoY - 50, size: 7, font, color: COLORS.muted });
   }
 
-  // Title centered in the available width (left of photo box).
-  const titleArea = photoX - ctx.margin - 10; // leave 10pt gutter
+  const titleArea = photoX - ctx.margin - 12;
+  const titleText = "ADMISSION APPLICATION FORM";
   const titleW = bold.widthOfTextAtSize(titleText, 14);
   const titleX = ctx.margin + Math.max(0, (titleArea - titleW) / 2);
   ctx.page.drawText(titleText, { x: titleX, y: ctx.y - 36, size: 14, font: bold, color: COLORS.text });
@@ -424,239 +428,280 @@ async function buildApplicationPdfInline(
   const idX = ctx.margin + Math.max(0, (titleArea - idW) / 2);
   ctx.page.drawText(idText, { x: idX, y: ctx.y - 56, size: 11, font: bold, color: COLORS.text });
 
-  // Move cursor past the title block + photo box to wherever is lower.
-  const titleBottom = ctx.y - 70;
-  const photoBottom = photoY - photoH - 6;
-  ctx.y = Math.min(titleBottom, photoBottom);
+  ctx.y = Math.min(ctx.y - 70, photoY - photoH - 8);
 
-  // --- COURSE PREFERENCES ---------------------------------------------
+  // ── COURSE PREFERENCES ─────────────────────────────────────────────
+  const courses: any[] = Array.isArray(app.course_selections) ? app.course_selections : [];
   drawSection(ctx, "Course Preferences");
-  const prefHeaderCols = [
-    { label: "Course Category", w: (ctx.width - ctx.margin*2) * 0.18 },
-    { label: "Department",      w: (ctx.width - ctx.margin*2) * 0.20 },
-    { label: "Course Name",     w: (ctx.width - ctx.margin*2) * 0.42 },
-    { label: "Campus",          w: (ctx.width - ctx.margin*2) * 0.20 },
+  const prefHdr = [
+    { label: "Course Category", w: (ctx.width - ctx.margin*2) * 0.20 },
+    { label: "Course Name",     w: (ctx.width - ctx.margin*2) * 0.50 },
+    { label: "Campus",          w: (ctx.width - ctx.margin*2) * 0.30 },
   ];
   for (let i = 0; i < 3; i++) {
     const c = courses[i] || {};
     drawHeaderRow(ctx, [{ label: `Preference ${i + 1}`, w: ctx.width - ctx.margin*2 }], 14);
-    drawHeaderRow(ctx, prefHeaderCols, 14);
+    drawHeaderRow(ctx, prefHdr, 14);
     drawValueRow(ctx, [
-      { value: norm(c.program_category || c.category), w: prefHeaderCols[0].w },
-      { value: norm(c.department),                      w: prefHeaderCols[1].w },
-      { value: norm(c.course_name),                     w: prefHeaderCols[2].w },
-      { value: norm(c.campus_name),                     w: prefHeaderCols[3].w },
-    ], 18);
+      { value: norm(c.program_category), w: prefHdr[0].w },
+      { value: norm(c.course_name),      w: prefHdr[1].w },
+      { value: norm(c.campus_name),      w: prefHdr[2].w },
+    ], 26);
   }
 
-  // --- PERSONAL DETAILS -----------------------------------------------
+  // ── PERSONAL DETAILS ───────────────────────────────────────────────
   drawSection(ctx, "Personal Details");
   drawKVGrid(ctx, [
-    { label: "Title",          value: norm(app.title) },
-    { label: "First Name",     value: upper(app.first_name || (app.full_name || "").split(" ")[0]) },
-    { label: "Middle Name",    value: upper(app.middle_name) },
-    { label: "Last Name",      value: upper(app.last_name || (app.full_name || "").split(" ").slice(1).join(" ")) },
-    { label: "Gender",         value: upper(app.gender) },
-    { label: "Date of Birth",  value: fmtDate(app.dob) },
-    { label: "Mobile Number",  value: norm(app.phone) },
-    { label: "Alternate Mobile", value: norm(app.alternate_phone) },
-    { label: "Email ID",       value: norm(app.email) },
-    { label: "Blood Group",    value: norm(app.blood_group) },
-    { label: "Marital Status", value: upper(app.marital_status) },
-    { label: "Mother Tongue",  value: upper(app.mother_tongue) },
-    { label: "Religion",       value: upper(app.religion) },
-    { label: "PwD",            value: upper(app.pwd ? "YES" : "NO") },
-    { label: "Nationality",    value: upper(app.nationality) },
-    { label: "Aadhaar No",     value: norm(app.aadhaar) },
-    { label: "Category",       value: upper(app.category) },
-    { label: "APAAR ID",       value: norm(app.apaar_id) },
-    { label: "PEN Number",     value: norm(app.pen_number) },
-    { label: "State Domicile", value: upper(app.state_domicile) },
+    { label: "Full Name",       value: norm(app.full_name) },
+    { label: "Gender",          value: norm(app.gender) },
+    { label: "Date of Birth",   value: fmtDate(app.dob) },
+    { label: "Category",        value: norm(app.category) },
+    { label: "Nationality",     value: norm(app.nationality) },
+    { label: "Aadhaar Number",  value: norm(app.aadhaar) },
+    { label: "Passport Number", value: norm(app.passport_number) },
+    { label: "APAAR ID",        value: norm(app.apaar_id) },
+    { label: "PEN Number",      value: norm(app.pen_number) },
+    { label: "Mobile (WhatsApp)", value: norm(app.phone) + (app.whatsapp_verified ? "  (Verified)" : "") },
+    { label: "Email",           value: norm(app.email) },
+    { label: "",                value: "" },
   ]);
 
-  // --- EDUCATION -------------------------------------------------------
+  // ── ADDRESS ────────────────────────────────────────────────────────
+  drawSection(ctx, "Address");
+  const a = app.address || {};
+  drawKVGrid(ctx, [
+    { label: "Address Line 1", value: norm(a.line1) },
+    { label: "City",           value: norm(a.city) },
+    { label: "State",          value: norm(a.state) },
+    { label: "Country",        value: norm(a.country) },
+    { label: "PIN Code",       value: norm(a.pin_code) },
+    { label: "",               value: "" },
+    { label: "",               value: "" },
+    { label: "",               value: "" },
+  ]);
+
+  // ── PARENTS / GUARDIAN ─────────────────────────────────────────────
+  const parentName = (p: any) => {
+    if (!p || typeof p !== "object") return "-";
+    const composed = [p.first_name, p.last_name].filter(Boolean).join(" ").trim();
+    return norm(composed || p.name);
+  };
+
+  drawSection(ctx, "Father's Details");
+  const f = app.father || {};
+  drawKVGrid(ctx, [
+    { label: "Name",            value: parentName(f) },
+    { label: "Date of Birth",   value: fmtDate(f.dob) },
+    { label: "Nationality",     value: norm(f.nationality) },
+    { label: "Marital Status",  value: norm(f.marital_status) },
+    { label: "ID Type",         value: norm(f.id_type) },
+    { label: "ID Number",       value: norm(f.id_number) },
+    { label: "Education",       value: norm(f.education) },
+    { label: "Annual Income",   value: norm(f.annual_income) },
+    { label: "Employer",        value: norm(f.employer_name) },
+    { label: "Position",        value: norm(f.current_position) },
+    { label: "Occupation",      value: norm(f.occupation) },
+    { label: "",                value: "" },
+    { label: "Mobile",          value: norm(f.phone_mobile || f.phone) },
+    { label: "Home Phone",      value: norm(f.phone_home) },
+    { label: "Email",           value: norm(f.email) },
+    { label: "",                value: "" },
+  ]);
+
+  drawSection(ctx, "Mother's Details");
+  const m = app.mother || {};
+  drawKVGrid(ctx, [
+    { label: "Name",            value: parentName(m) },
+    { label: "Date of Birth",   value: fmtDate(m.dob) },
+    { label: "Nationality",     value: norm(m.nationality) },
+    { label: "Marital Status",  value: norm(m.marital_status) },
+    { label: "ID Type",         value: norm(m.id_type) },
+    { label: "ID Number",       value: norm(m.id_number) },
+    { label: "Education",       value: norm(m.education) },
+    { label: "Annual Income",   value: norm(m.annual_income) },
+    { label: "Employer",        value: norm(m.employer_name) },
+    { label: "Position",        value: norm(m.current_position) },
+    { label: "Occupation",      value: norm(m.occupation) },
+    { label: "",                value: "" },
+    { label: "Mobile",          value: norm(m.phone_mobile || m.phone) },
+    { label: "Home Phone",      value: norm(m.phone_home) },
+    { label: "Email",           value: norm(m.email) },
+    { label: "",                value: "" },
+  ]);
+
+  const g = app.guardian || {};
+  if (g.name || g.phone || g.email) {
+    drawSection(ctx, "Local Guardian");
+    drawKVGrid(ctx, [
+      { label: "Name",         value: norm(g.name) },
+      { label: "Relationship", value: norm(g.relationship) },
+      { label: "Mobile",       value: norm(g.phone) },
+      { label: "Email",        value: norm(g.email) },
+    ]);
+  }
+
+  // ── ACADEMIC DETAILS ───────────────────────────────────────────────
   const ad = app.academic_details || {};
   const customBoardFlag      = flags.has("custom_board");
   const customUniversityFlag = flags.has("custom_university");
 
-  drawSection(ctx, "Educational Details");
+  drawSection(ctx, "Academic Details");
 
+  // Helper to render a board name with the "Other → board_other" fallback.
+  const boardOf = (q: any) => {
+    if (!q) return "-";
+    if (q.board === "Other" || q.board === "Other (not in list)") return norm(q.board_other) + " (custom)";
+    return norm(q.board);
+  };
+  const universityOf = (q: any) => {
+    if (!q) return "-";
+    if (q.university === "Other" || q.university === "Other (not in list)") return norm(q.university_other) + " (custom)";
+    return norm(q.university);
+  };
+
+  // Class 10
   if (ad.class_10) {
-    drawHeaderRow(ctx, [{ label: "10th / SSC Details", w: ctx.width - ctx.margin*2 }], 14);
+    drawHeaderRow(ctx, [{ label: "Class 10 / SSC", w: ctx.width - ctx.margin*2 }], 14);
     const c10 = ad.class_10;
     const cols10 = [
-      { label: "Institute Name",  w: (ctx.width - ctx.margin*2) * 0.25 },
-      { label: "Board / University", w: (ctx.width - ctx.margin*2) * 0.30 },
-      { label: "Year",            w: (ctx.width - ctx.margin*2) * 0.10 },
-      { label: "Result Status",   w: (ctx.width - ctx.margin*2) * 0.13 },
-      { label: "Marking Scheme",  w: (ctx.width - ctx.margin*2) * 0.12 },
-      { label: "%/CGPA",          w: (ctx.width - ctx.margin*2) * 0.10 },
+      { label: "School",        w: (ctx.width - ctx.margin*2) * 0.32 },
+      { label: "Board",         w: (ctx.width - ctx.margin*2) * 0.34 },
+      { label: "Year",          w: (ctx.width - ctx.margin*2) * 0.10 },
+      { label: "Result Status", w: (ctx.width - ctx.margin*2) * 0.14 },
+      { label: "Marks",         w: (ctx.width - ctx.margin*2) * 0.10 },
     ];
     drawHeaderRow(ctx, cols10, 14);
     drawValueRow(ctx, [
-      { value: norm(c10.institute || c10.school), w: cols10[0].w },
-      { value: norm(c10.board),                    w: cols10[1].w, red: customBoardFlag && !!c10.board },
-      { value: norm(c10.year),                     w: cols10[2].w },
-      { value: norm(c10.result_status),            w: cols10[3].w },
-      { value: norm(c10.marking_scheme),           w: cols10[4].w },
-      { value: norm(c10.percentage || c10.cgpa),   w: cols10[5].w },
-    ], 20);
+      { value: norm(c10.school),        w: cols10[0].w },
+      { value: boardOf(c10),            w: cols10[1].w, red: customBoardFlag && (c10.board === "Other" || c10.board === "Other (not in list)") },
+      { value: norm(c10.year),          w: cols10[2].w },
+      { value: norm(c10.result_status), w: cols10[3].w },
+      { value: norm(c10.marks),         w: cols10[4].w },
+    ], 28);
   }
 
+  // Class 12
   if (ad.class_12) {
-    drawHeaderRow(ctx, [{ label: "12th / HSC Details", w: ctx.width - ctx.margin*2 }], 14);
+    drawHeaderRow(ctx, [{ label: "Class 12 / HSC", w: ctx.width - ctx.margin*2 }], 14);
     const c12 = ad.class_12;
     const cols12 = [
-      { label: "School Name",       w: (ctx.width - ctx.margin*2) * 0.22 },
-      { label: "Board / University", w: (ctx.width - ctx.margin*2) * 0.27 },
-      { label: "Major Subject",     w: (ctx.width - ctx.margin*2) * 0.13 },
-      { label: "Year",              w: (ctx.width - ctx.margin*2) * 0.08 },
-      { label: "Result Status",     w: (ctx.width - ctx.margin*2) * 0.12 },
-      { label: "Marking",           w: (ctx.width - ctx.margin*2) * 0.10 },
-      { label: "%/CGPA",            w: (ctx.width - ctx.margin*2) * 0.08 },
+      { label: "School",        w: (ctx.width - ctx.margin*2) * 0.30 },
+      { label: "Board",         w: (ctx.width - ctx.margin*2) * 0.30 },
+      { label: "Subjects/Stream", w: (ctx.width - ctx.margin*2) * 0.16 },
+      { label: "Year",          w: (ctx.width - ctx.margin*2) * 0.08 },
+      { label: "Result",        w: (ctx.width - ctx.margin*2) * 0.10 },
+      { label: "Marks",         w: (ctx.width - ctx.margin*2) * 0.06 },
     ];
     drawHeaderRow(ctx, cols12, 14);
     drawValueRow(ctx, [
-      { value: norm(c12.institute || c12.school),       w: cols12[0].w },
-      { value: norm(c12.board),                          w: cols12[1].w, red: customBoardFlag && !!c12.board },
-      { value: norm(c12.major_subject || c12.stream),    w: cols12[2].w },
-      { value: norm(c12.year),                           w: cols12[3].w },
-      { value: norm(c12.result_status),                  w: cols12[4].w },
-      { value: norm(c12.marking_scheme),                 w: cols12[5].w },
-      { value: norm(c12.percentage || c12.cgpa),         w: cols12[6].w },
-    ], 20);
+      { value: norm(c12.school),        w: cols12[0].w },
+      { value: boardOf(c12),            w: cols12[1].w, red: customBoardFlag && (c12.board === "Other" || c12.board === "Other (not in list)") },
+      { value: norm(c12.subjects),      w: cols12[2].w },
+      { value: norm(c12.year),          w: cols12[3].w },
+      { value: norm(c12.result_status) + (c12.expected_month ? " (" + c12.expected_month + ")" : ""), w: cols12[4].w },
+      { value: norm(c12.marks),         w: cols12[5].w },
+    ], 28);
   }
 
-  if (ad.diploma) {
-    drawHeaderRow(ctx, [{ label: "Diploma Details", w: ctx.width - ctx.margin*2 }], 14);
+  // Graduation
+  if (ad.graduation && (ad.graduation.degree || ad.graduation.university || ad.graduation.college)) {
+    drawHeaderRow(ctx, [{ label: "Graduation", w: ctx.width - ctx.margin*2 }], 14);
     drawKVGrid(ctx, [
-      { label: "Institute",        value: norm(ad.diploma.institute) },
-      { label: "Board/University", value: norm(ad.diploma.board || ad.diploma.university), red: customBoardFlag || customUniversityFlag },
-      { label: "Major Subject",    value: norm(ad.diploma.major_subject) },
-      { label: "Year",             value: norm(ad.diploma.year) },
-      { label: "Marking Scheme",   value: norm(ad.diploma.marking_scheme) },
-      { label: "%/CGPA",           value: norm(ad.diploma.percentage || ad.diploma.cgpa) },
+      { label: "Degree",      value: norm(ad.graduation.degree) },
+      { label: "University",  value: universityOf(ad.graduation), red: customUniversityFlag && (ad.graduation.university === "Other" || ad.graduation.university === "Other (not in list)") },
+      { label: "College",     value: norm(ad.graduation.college) },
+      { label: "Year",        value: norm(ad.graduation.year) },
+      { label: "Result",      value: norm(ad.graduation.result_status) },
+      { label: "Marks",       value: norm(ad.graduation.marks) },
+      { label: "Sem Done",    value: norm(ad.graduation.semesters_completed) },
+      { label: "CGPA till sem", value: norm(ad.graduation.cgpa_till_sem) },
     ]);
   }
 
-  if (ad.graduation) {
-    drawHeaderRow(ctx, [{ label: "Graduation Details", w: ctx.width - ctx.margin*2 }], 14);
+  // Additional qualifications
+  const addl: any[] = Array.isArray(ad.additional_qualifications) ? ad.additional_qualifications : [];
+  addl.forEach((q, i) => {
+    if (!q || (!q.degree && !q.university && !q.college)) return;
+    drawHeaderRow(ctx, [{ label: `Additional Qualification ${i + 1}`, w: ctx.width - ctx.margin*2 }], 14);
     drawKVGrid(ctx, [
-      { label: "Institute",      value: norm(ad.graduation.institute) },
-      { label: "University",     value: norm(ad.graduation.university), red: customUniversityFlag && !!ad.graduation.university },
-      { label: "Degree",         value: norm(ad.graduation.degree) },
-      { label: "Specialization", value: norm(ad.graduation.specialization || ad.graduation.discipline) },
-      { label: "Year",           value: norm(ad.graduation.year) },
-      { label: "Result Status",  value: norm(ad.graduation.result_status) },
-      { label: "Marking Scheme", value: norm(ad.graduation.marking_scheme) },
-      { label: "%/CGPA",         value: norm(ad.graduation.percentage || ad.graduation.cgpa) },
+      { label: "Degree",      value: norm(q.degree) },
+      { label: "University",  value: universityOf(q), red: customUniversityFlag && (q.university === "Other" || q.university === "Other (not in list)") },
+      { label: "College",     value: norm(q.college) },
+      { label: "Year",        value: norm(q.year) },
+      { label: "Result",      value: norm(q.result_status) },
+      { label: "Marks",       value: norm(q.marks) },
+      { label: "Sem Done",    value: norm(q.semesters_completed) },
+      { label: "CGPA till sem", value: norm(q.cgpa_till_sem) },
+    ]);
+  });
+
+  // Entrance exams
+  const exams: any[] = Array.isArray(ad.entrance_exams) ? ad.entrance_exams : [];
+  if (exams.length > 0) {
+    drawHeaderRow(ctx, [{ label: "Entrance Exams", w: ctx.width - ctx.margin*2 }], 14);
+    const cols = [
+      { label: "Exam",          w: (ctx.width - ctx.margin*2) * 0.40 },
+      { label: "Status",        w: (ctx.width - ctx.margin*2) * 0.20 },
+      { label: "Score",         w: (ctx.width - ctx.margin*2) * 0.20 },
+      { label: "Expected Date", w: (ctx.width - ctx.margin*2) * 0.20 },
+    ];
+    drawHeaderRow(ctx, cols, 14);
+    exams.forEach(e => {
+      drawValueRow(ctx, [
+        { value: norm(e.exam_name), w: cols[0].w },
+        { value: norm(e.status),    w: cols[1].w },
+        { value: norm(e.score),     w: cols[2].w },
+        { value: fmtDate(e.expected_date), w: cols[3].w },
+      ], 22);
+    });
+  }
+
+  // Previous school (school program)
+  if (ad.previous_school && (ad.previous_school.prev_school_name || ad.previous_school.board)) {
+    drawHeaderRow(ctx, [{ label: "Previous School", w: ctx.width - ctx.margin*2 }], 14);
+    drawKVGrid(ctx, [
+      { label: "School Name",   value: norm(ad.previous_school.prev_school_name) },
+      { label: "Board",         value: norm(ad.previous_school.board) },
+      { label: "Last Class",    value: norm(ad.previous_school.last_class) },
+      { label: "Academic Year", value: norm(ad.previous_school.academic_year) },
+      { label: "Percentage",    value: norm(ad.previous_school.percentage) },
+      { label: "TC Available",  value: norm(ad.previous_school.tc_available) },
     ]);
   }
 
+  // Manual-verification callout
   if (customBoardFlag || customUniversityFlag) {
-    ensureSpace(ctx, 28);
+    ensureSpace(ctx, 30);
     ctx.page.drawRectangle({
-      x: ctx.margin, y: ctx.y - 24, width: ctx.width - ctx.margin*2, height: 24,
+      x: ctx.margin, y: ctx.y - 26, width: ctx.width - ctx.margin*2, height: 26,
       color: COLORS.redFill, borderColor: COLORS.redBorder, borderWidth: 1,
     });
-    ctx.page.drawText("⚠ Note for Admissions Team — Manual Verification Required", {
-      x: ctx.margin + 8, y: ctx.y - 11, size: 9, font: bold, color: COLORS.redBorder,
+    ctx.page.drawText("Note for Admissions Team - Manual Verification Required", {
+      x: ctx.margin + 8, y: ctx.y - 12, size: 9, font: bold, color: COLORS.redBorder,
     });
-    ctx.page.drawText("Candidate selected a board/university not in our predefined list. Verify the highlighted entries before issuing an offer.", {
-      x: ctx.margin + 8, y: ctx.y - 21, size: 7.5, font, color: COLORS.text,
+    ctx.page.drawText("Candidate selected a board/university not in our predefined list. Verify validity before issuing an offer.", {
+      x: ctx.margin + 8, y: ctx.y - 22, size: 7.5, font, color: COLORS.text,
     });
-    ctx.y -= 30;
+    ctx.y -= 32;
   }
 
-  // --- WORK EXPERIENCE -------------------------------------------------
-  const work: any[] = Array.isArray(ad.work_experience) ? ad.work_experience : [];
-  if (work.length > 0) {
-    drawSection(ctx, "Work Experience");
-    const cols = [
-      { label: "#",            w: 24 },
-      { label: "Position",     w: (ctx.width - ctx.margin*2 - 24) * 0.30 },
-      { label: "Organisation", w: (ctx.width - ctx.margin*2 - 24) * 0.34 },
-      { label: "From",         w: (ctx.width - ctx.margin*2 - 24) * 0.12 },
-      { label: "To",           w: (ctx.width - ctx.margin*2 - 24) * 0.12 },
-      { label: "Total",        w: (ctx.width - ctx.margin*2 - 24) * 0.12 },
-    ];
-    drawHeaderRow(ctx, cols, 14);
-    work.slice(0, 8).forEach((w, i) => {
-      drawValueRow(ctx, [
-        { value: String(i + 1), w: cols[0].w },
-        { value: norm(w.position), w: cols[1].w },
-        { value: norm(w.organisation || w.organization || w.company), w: cols[2].w },
-        { value: norm(w.from || w.from_year), w: cols[3].w },
-        { value: norm(w.to || w.to_year),     w: cols[4].w },
-        { value: norm(w.total || w.duration), w: cols[5].w },
-      ], 16);
-    });
+  // ── EXTRACURRICULAR ────────────────────────────────────────────────
+  const ec = app.extracurricular || {};
+  const ecPairs = [
+    { label: "Achievements",  value: norm(ec.achievements) },
+    { label: "Competitions",  value: norm(ec.competitions) },
+    { label: "Leadership",    value: norm(ec.leadership) },
+    { label: "Sports",        value: norm(ec.sports) },
+    { label: "Volunteer",     value: norm(ec.volunteer) },
+    { label: "Portfolio URL", value: norm(ec.portfolio) },
+    { label: "LinkedIn",      value: norm(ec.linkedin) },
+  ].filter(p => p.value !== "-");
+  if (ecPairs.length > 0) {
+    drawSection(ctx, "Extracurricular");
+    ecPairs.forEach(p => drawWide(ctx, p.label, p.value));
   }
 
-  // --- CO-CURRICULAR ---------------------------------------------------
-  const eca: any[] = Array.isArray(app.extracurricular) ? app.extracurricular
-    : Array.isArray(ad.extracurricular) ? ad.extracurricular : [];
-  if (eca.length > 0) {
-    drawSection(ctx, "Co-curricular Activities");
-    const cols = [
-      { label: "#",                    w: 24 },
-      { label: "Name of the Activity", w: (ctx.width - ctx.margin*2 - 24) * 0.6 },
-      { label: "Level",                w: (ctx.width - ctx.margin*2 - 24) * 0.2 },
-      { label: "Year / Date",          w: (ctx.width - ctx.margin*2 - 24) * 0.2 },
-    ];
-    drawHeaderRow(ctx, cols, 14);
-    eca.slice(0, 8).forEach((e, i) => {
-      drawValueRow(ctx, [
-        { value: String(i + 1), w: cols[0].w },
-        { value: norm(e.name || e.activity), w: cols[1].w },
-        { value: norm(e.level),                w: cols[2].w },
-        { value: norm(e.date || e.year),       w: cols[3].w },
-      ], 16);
-    });
-  }
-
-  // --- PARENTS / GUARDIAN ---------------------------------------------
-  drawSection(ctx, "Parents' / Guardian Details");
-  const f = app.father || {}, m = app.mother || {}, g = app.guardian || {};
-  drawHeaderRow(ctx, [{ label: "Father's Details", w: ctx.width - ctx.margin*2 }], 14);
-  drawKVGrid(ctx, [
-    { label: "Title",         value: norm(f.title) },
-    { label: "Name",          value: fmtPersonName(f) },
-    { label: "Mobile",        value: norm(f.phone || f.mobile) },
-    { label: "Email",         value: norm(f.email) },
-    { label: "Occupation",    value: norm(f.occupation) },
-    { label: "Annual Income", value: norm(f.annual_income || app.family_annual_income) },
-  ]);
-  drawHeaderRow(ctx, [{ label: "Mother's Details", w: ctx.width - ctx.margin*2 }], 14);
-  drawKVGrid(ctx, [
-    { label: "Title",         value: norm(m.title) },
-    { label: "Name",          value: fmtPersonName(m) },
-    { label: "Mobile",        value: norm(m.phone || m.mobile) },
-    { label: "Email",         value: norm(m.email) },
-    { label: "Occupation",    value: norm(m.occupation) },
-    { label: "Annual Income", value: norm(m.annual_income) },
-  ]);
-  if (g && (g.name || g.phone)) {
-    drawHeaderRow(ctx, [{ label: "Local Guardian", w: ctx.width - ctx.margin*2 }], 14);
-    drawKVGrid(ctx, [
-      { label: "Name",     value: fmtPersonName(g) },
-      { label: "Mobile",   value: norm(g.phone || g.mobile) },
-      { label: "Relation", value: norm(g.relation) },
-      { label: "Address",  value: norm(g.address) },
-    ]);
-  }
-
-  // --- ADDRESS ---------------------------------------------------------
-  drawSection(ctx, "Address Details");
-  const addr = app.address || {};
-  const corres = addr.correspondence || addr;
-  const perm   = addr.permanent || addr;
-  drawHeaderRow(ctx, [{ label: "Address for Correspondence", w: ctx.width - ctx.margin*2 }], 14);
-  drawWide(ctx, "Address", fmtAddress(corres));
-  drawHeaderRow(ctx, [{ label: "Permanent Address", w: ctx.width - ctx.margin*2 }], 14);
-  drawWide(ctx, "Address", fmtAddress(perm));
-
-  // --- DOCUMENTS UPLOADED (with clickable file links) ------------------
+  // ── DOCUMENTS UPLOADED (with clickable links) ──────────────────────
   drawSection(ctx, "Documents Uploaded");
   if (documents.length === 0) {
     drawWide(ctx, "Status", "No documents uploaded yet.");
@@ -673,14 +718,14 @@ async function buildApplicationPdfInline(
       drawCell(ctx, ctx.margin + colsD[0].w, ctx.y, colsD[1].w, 16, "", d.name);
       const fileX = ctx.margin + colsD[0].w + colsD[1].w;
       ctx.page.drawRectangle({ x: fileX, y: ctx.y - 16, width: colsD[2].w, height: 16, color: rgb(1,1,1), borderColor: COLORS.border, borderWidth: 0.5 });
-      const linkText = d.url.length > 70 ? d.url.slice(0, 70) + "…" : d.url;
+      const linkText = d.url.length > 70 ? d.url.slice(0, 70) + "..." : d.url;
       ctx.page.drawText(linkText, { x: fileX + 4, y: ctx.y - 11, size: 7.5, font, color: COLORS.link });
       addLinkAnnotation(ctx, fileX, ctx.y - 16, colsD[2].w, 16, d.url);
       ctx.y -= 16;
     });
   }
 
-  // --- DECLARATION -----------------------------------------------------
+  // ── DECLARATION ────────────────────────────────────────────────────
   drawSection(ctx, "Declaration");
   const declarations = [
     "I HEREBY DECLARE THAT, the details given by me in the application form are complete and true to the best of my knowledge and based on records.",
@@ -705,14 +750,14 @@ async function buildApplicationPdfInline(
     ctx.y -= 2;
   });
 
-  // --- SIGNATURE ROW ---------------------------------------------------
+  // ── SIGNATURE ──────────────────────────────────────────────────────
   ensureSpace(ctx, 36);
   ctx.y -= 6;
   const sigCols = [
     { label: "Applicant Name", value: norm(app.full_name) },
-    { label: "Parent Name",    value: fmtPersonName(f) === "—" ? fmtPersonName(m) : fmtPersonName(f) },
+    { label: "Parent Name",    value: parentName(f) === "-" ? parentName(m) : parentName(f) },
     { label: "Date",           value: fmtDate(app.submitted_at || app.updated_at) },
-    { label: "Place",          value: norm((app.address?.city) || (corres?.city)) },
+    { label: "Place",          value: norm(a.city) },
   ];
   const totalW = ctx.width - ctx.margin*2;
   let xCur = ctx.margin;
