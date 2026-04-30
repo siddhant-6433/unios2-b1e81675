@@ -79,6 +79,108 @@ function docLabel(docKey: string): string {
   return docKey.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 }
 
+// ── Eligibility mismatch detection ────────────────────────────────────────
+// Each mismatch is keyed by the section it should highlight in the PDF.
+type MismatchSection =
+  | "personal"        // age / DOB
+  | "class_10_board"  // custom board flag affects class 10
+  | "class_12"        // marks
+  | "class_12_board"  // custom board flag affects class 12
+  | "graduation"      // marks / required-but-missing
+  | "graduation_uni"  // custom university
+  | "entrance";       // entrance exam missing
+interface Mismatch { section: MismatchSection; message: string }
+
+function ageInYears(dob?: string | null): number | null {
+  if (!dob) return null;
+  const d = new Date(dob);
+  if (isNaN(d.getTime())) return null;
+  const now = new Date();
+  let years = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) years--;
+  return years;
+}
+
+function parseMarks(v: any): number | null {
+  if (v == null || v === "") return null;
+  // accept "85", "85%", "8.5 CGPA"
+  const s = String(v).replace(/[^0-9.]/g, "");
+  const n = parseFloat(s);
+  if (isNaN(n)) return null;
+  // Heuristic: CGPA values usually <= 10, percentages > 10.
+  return n <= 10 ? n * 9.5 : n; // rough CGPA -> percent conversion
+}
+
+function computeMismatches(app: any, rules: any[]): Mismatch[] {
+  const out: Mismatch[] = [];
+  const flags = new Set<string>(Array.isArray(app.flags) ? app.flags : []);
+  if (flags.has("custom_board")) {
+    out.push({
+      section: "class_12_board",
+      message: "Board for Class 10 / 12 not in our predefined list - admissions team to verify validity.",
+    });
+  }
+  if (flags.has("custom_university")) {
+    out.push({
+      section: "graduation_uni",
+      message: "University for Graduation / additional qualification not in our predefined list - admissions team to verify validity.",
+    });
+  }
+
+  if (rules.length === 0) return out;
+
+  const ad = app.academic_details || {};
+  const c12Marks = parseMarks(ad.class_12?.marks);
+  const gradMarks = parseMarks(ad.graduation?.marks ?? ad.graduation?.cgpa_till_sem);
+  const candidateAge = ageInYears(app.dob);
+  const exams: any[] = Array.isArray(ad.entrance_exams) ? ad.entrance_exams : [];
+
+  // Aggregate per-course findings; surface the strictest one for each section.
+  const ageWarnings: string[] = [];
+  const c12Warnings: string[] = [];
+  const gradWarnings: string[] = [];
+  const entranceWarnings: string[] = [];
+
+  rules.forEach(r => {
+    if (candidateAge != null) {
+      if (r.min_age != null && candidateAge < r.min_age) {
+        ageWarnings.push(`Below minimum age (${candidateAge} < ${r.min_age}).`);
+      }
+      if (r.max_age != null && candidateAge > r.max_age) {
+        ageWarnings.push(`Above maximum age (${candidateAge} > ${r.max_age}).`);
+      }
+    }
+    if (r.class_12_min_marks != null && c12Marks != null && c12Marks < Number(r.class_12_min_marks)) {
+      c12Warnings.push(`Class 12 marks below minimum (${c12Marks.toFixed(1)}% < ${r.class_12_min_marks}%).`);
+    }
+    if (r.requires_graduation && !ad.graduation?.degree && !ad.graduation?.university) {
+      gradWarnings.push(`Graduation required but not provided.`);
+    }
+    if (r.graduation_min_marks != null && gradMarks != null && gradMarks < Number(r.graduation_min_marks)) {
+      gradWarnings.push(`Graduation marks below minimum (${gradMarks.toFixed(1)}% < ${r.graduation_min_marks}%).`);
+    }
+    if (r.entrance_exam_required) {
+      const examName = (r.entrance_exam_name || "").trim().toLowerCase();
+      const declared = exams.some((e: any) =>
+        (e.exam_name || "").toLowerCase().includes(examName) && e.status === "declared"
+      );
+      if (!declared && examName) {
+        entranceWarnings.push(`Entrance exam required: ${r.entrance_exam_name} (status not declared).`);
+      } else if (!declared && !examName) {
+        entranceWarnings.push("Entrance exam required (no scorecard declared yet).");
+      }
+    }
+  });
+
+  if (ageWarnings.length)      out.push({ section: "personal",     message: Array.from(new Set(ageWarnings)).join(" ") });
+  if (c12Warnings.length)      out.push({ section: "class_12",     message: Array.from(new Set(c12Warnings)).join(" ") });
+  if (gradWarnings.length)     out.push({ section: "graduation",   message: Array.from(new Set(gradWarnings)).join(" ") });
+  if (entranceWarnings.length) out.push({ section: "entrance",     message: Array.from(new Set(entranceWarnings)).join(" ") });
+
+  return out;
+}
+
 const upper = (s?: string | null) => (s ?? "").toString().toUpperCase().trim() || "-";
 // Display all data in CAPS - keeps the doc visually consistent and matches the
 // historical NIMT-UG application format.
@@ -99,6 +201,9 @@ interface Ctx {
   branding: any;
   hasLetterhead: boolean;
   flags: Set<string>;
+  // Repeating-header info: painted on every page above the body.
+  appId?: string;
+  sessionName?: string | null;
 }
 
 const COLORS = {
@@ -163,6 +268,52 @@ async function newPage(ctx: Ctx) {
   ctx.contentStart = ctx.height - topReserve;
   ctx.contentEnd   = bottomReserve;
   ctx.y = ctx.contentStart;
+
+  // Per-page repeating header: green App-No badge over the letterhead band,
+  // followed by the title + session line. The badge sits at a fixed offset
+  // from the top edge so it lands on the letterhead artwork regardless of
+  // its height.
+  if (ctx.appId) {
+    const badgeFontSize = 14;
+    const badgePadX = 16;
+    const badgePadY = 8;
+    const badgeText = ctx.appId;
+    const badgeTextW = ctx.bold.widthOfTextAtSize(badgeText, badgeFontSize);
+    const badgeW = badgeTextW + badgePadX * 2;
+    const badgeH = badgeFontSize + badgePadY * 2;
+    const badgeX = ctx.width - ctx.margin - badgeW;
+    const badgeY = ctx.height - 18;
+    const badgeColor = rgb(0.20, 0.69, 0.39);
+    ctx.page.drawRectangle({
+      x: badgeX + badgeH / 2, y: badgeY - badgeH,
+      width: badgeW - badgeH, height: badgeH,
+      color: badgeColor,
+    });
+    ctx.page.drawCircle({ x: badgeX + badgeH / 2,          y: badgeY - badgeH / 2, size: badgeH / 2, color: badgeColor });
+    ctx.page.drawCircle({ x: badgeX + badgeW - badgeH / 2, y: badgeY - badgeH / 2, size: badgeH / 2, color: badgeColor });
+    ctx.page.drawText(badgeText, {
+      x: badgeX + badgePadX,
+      y: badgeY - badgePadY - badgeFontSize + 2,
+      size: badgeFontSize, font: ctx.bold, color: rgb(1, 1, 1),
+    });
+
+    // Title + session — centered under the letterhead, before the body.
+    const titleText = "ADMISSION APPLICATION FORM";
+    const titleW = ctx.bold.widthOfTextAtSize(titleText, 13);
+    ctx.page.drawText(titleText, {
+      x: (ctx.width - titleW) / 2, y: ctx.y - 12, size: 13, font: ctx.bold, color: COLORS.text,
+    });
+    ctx.y -= 18;
+    if (ctx.sessionName) {
+      const sessText = `Applying for Session: ${ctx.sessionName.toUpperCase()}`;
+      const sessW = ctx.font.widthOfTextAtSize(sessText, 9);
+      ctx.page.drawText(sessText, {
+        x: (ctx.width - sessW) / 2, y: ctx.y - 10, size: 9, font: ctx.font, color: COLORS.muted,
+      });
+      ctx.y -= 14;
+    }
+    ctx.y -= 6;
+  }
 }
 
 function ensureSpace(ctx: Ctx, need: number) {
@@ -403,6 +554,17 @@ Deno.serve(async (req) => {
       sessionName = sess?.name || null;
     }
 
+    // Eligibility rules for every selected course (for mismatch flags).
+    const courseIds = (app.course_selections || []).map((c: any) => c.course_id).filter(Boolean);
+    let eligibilityRules: any[] = [];
+    if (courseIds.length > 0) {
+      const { data: rules } = await admin.from("eligibility_rules")
+        .select("course_id, min_age, max_age, class_12_min_marks, graduation_min_marks, requires_graduation, entrance_exam_name, entrance_exam_required, notes")
+        .in("course_id", courseIds);
+      eligibilityRules = rules || [];
+    }
+    const mismatches = computeMismatches(app, eligibilityRules);
+
     // List uploaded files for this application from storage.
     const documents: { name: string; url: string }[] = [];
     let photoUrl: string | null = null;
@@ -472,7 +634,7 @@ Deno.serve(async (req) => {
     const ftr   = await fetchImage(p, branding?.footer_url ?? null);
     const photo = await fetchImage(p, photoUrl);
     const sig   = await fetchImage(p, branding?.signature_url ?? null);
-    const out = await buildApplicationPdfInline(p, f, b, app, branding, lh, ftr, photo, sig, documents, appFeePayment, sessionName);
+    const out = await buildApplicationPdfInline(p, f, b, app, branding, lh, ftr, photo, sig, documents, appFeePayment, sessionName, mismatches);
 
     const path = `applications/${app.application_id}.pdf`;
     const { error: upErr } = await admin.storage
@@ -508,7 +670,32 @@ async function buildApplicationPdfInline(
   documents: { name: string; url: string }[],
   appFeePayment: any = null,
   sessionName: string | null = null,
+  mismatches: Mismatch[] = [],
 ): Promise<Uint8Array> {
+  // Helper to render an inline red callout strip. Used right after each
+  // section that has a mismatch flagged for it.
+  const renderMismatch = (ctx: Ctx, sec: MismatchSection) => {
+    const m = mismatches.find(x => x.section === sec);
+    if (!m) return;
+    const lines = wrapText(m.message, font, 8, ctx.width - ctx.margin*2 - 16, 4);
+    const h = 6 + lines.length * 11 + 8;
+    ensureSpace(ctx, h + 4);
+    ctx.page.drawRectangle({
+      x: ctx.margin, y: ctx.y - h, width: ctx.width - ctx.margin*2, height: h,
+      color: COLORS.redFill, borderColor: COLORS.redBorder, borderWidth: 0.8,
+    });
+    ctx.page.drawText("Eligibility Mismatch:", {
+      x: ctx.margin + 8, y: ctx.y - 11, size: 8, font: bold, color: COLORS.redBorder,
+    });
+    lines.forEach((line, i) => {
+      ctx.page.drawText(line, {
+        x: ctx.margin + 8 + (i === 0 ? 84 : 0),
+        y: ctx.y - 11 - i * 11,
+        size: 8, font, color: COLORS.text,
+      });
+    });
+    ctx.y -= h + 4;
+  };
   const flags = new Set<string>(Array.isArray(app.flags) ? app.flags : []);
   const ctx: Ctx = {
     pdf, page: null, font, bold,
@@ -517,50 +704,10 @@ async function buildApplicationPdfInline(
     branding: { ...(branding || {}), _lh: lhImg, _footer: footerImg },
     hasLetterhead: !!lhImg,
     flags,
+    appId: app.application_id,
+    sessionName,
   };
   await newPage(ctx);
-
-  // ── App-No badge OVER the letterhead band, top-right ──
-  const badgeFontSize = 14;
-  const badgePadX = 16;
-  const badgePadY = 8;
-  const badgeText = app.application_id;
-  const badgeTextW = bold.widthOfTextAtSize(badgeText, badgeFontSize);
-  const badgeW = badgeTextW + badgePadX * 2;
-  const badgeH = badgeFontSize + badgePadY * 2;
-  const badgeX = ctx.width - ctx.margin - badgeW;
-  // Sit ON the letterhead band, not below it: 18pt down from the page edge.
-  const badgeY = ctx.height - 18;
-  const badgeColor = rgb(0.20, 0.69, 0.39);
-  ctx.page.drawRectangle({
-    x: badgeX + badgeH / 2, y: badgeY - badgeH,
-    width: badgeW - badgeH, height: badgeH,
-    color: badgeColor,
-  });
-  ctx.page.drawCircle({ x: badgeX + badgeH / 2,          y: badgeY - badgeH / 2, size: badgeH / 2, color: badgeColor });
-  ctx.page.drawCircle({ x: badgeX + badgeW - badgeH / 2, y: badgeY - badgeH / 2, size: badgeH / 2, color: badgeColor });
-  ctx.page.drawText(badgeText, {
-    x: badgeX + badgePadX,
-    y: badgeY - badgePadY - badgeFontSize + 2,
-    size: badgeFontSize, font: bold, color: rgb(1, 1, 1),
-  });
-
-  // ── Title + session line, full-width centered (no photo conflict) ──
-  const titleText = "ADMISSION APPLICATION FORM";
-  const titleW = bold.widthOfTextAtSize(titleText, 14);
-  ctx.page.drawText(titleText, {
-    x: (ctx.width - titleW) / 2, y: ctx.y - 14, size: 14, font: bold, color: COLORS.text,
-  });
-  ctx.y -= 22;
-  if (sessionName) {
-    const sessText = `Applying for Session: ${sessionName.toUpperCase()}`;
-    const sessW = font.widthOfTextAtSize(sessText, 10);
-    ctx.page.drawText(sessText, {
-      x: (ctx.width - sessW) / 2, y: ctx.y - 12, size: 10, font, color: COLORS.muted,
-    });
-    ctx.y -= 18;
-  }
-  ctx.y -= 6;
 
   // ── COURSE PREFERENCES + PHOTO (split layout) ──
   const courses: any[] = Array.isArray(app.course_selections) ? app.course_selections : [];
@@ -673,6 +820,7 @@ async function buildApplicationPdfInline(
     { label: "Email",           value: norm(app.email) },
     { label: "",                value: "" },
   ]);
+  renderMismatch(ctx, "personal");
 
   // ── ADDRESS ────────────────────────────────────────────────────────
   drawSection(ctx, "Address");
@@ -815,6 +963,8 @@ async function buildApplicationPdfInline(
       { value: norm(c12.result_status) + (c12.expected_month ? " (" + c12.expected_month + ")" : ""), w: cols12[4].w },
       { value: norm(c12.marks),         w: cols12[5].w },
     ], 28);
+    renderMismatch(ctx, "class_12");
+    renderMismatch(ctx, "class_12_board");
   }
 
   // Graduation
@@ -830,6 +980,8 @@ async function buildApplicationPdfInline(
       { label: "Sem Done",    value: norm(ad.graduation.semesters_completed) },
       { label: "CGPA till sem", value: norm(ad.graduation.cgpa_till_sem) },
     ]);
+    renderMismatch(ctx, "graduation");
+    renderMismatch(ctx, "graduation_uni");
   }
 
   // Additional qualifications
@@ -868,6 +1020,10 @@ async function buildApplicationPdfInline(
         { value: fmtDate(e.expected_date), w: cols[3].w },
       ], 22);
     });
+    renderMismatch(ctx, "entrance");
+  } else {
+    // No exams declared at all - still surface the requirement if any course needs one.
+    renderMismatch(ctx, "entrance");
   }
 
   // Previous school (school program)
@@ -881,22 +1037,6 @@ async function buildApplicationPdfInline(
       { label: "Percentage",    value: norm(ad.previous_school.percentage) },
       { label: "TC Available",  value: norm(ad.previous_school.tc_available) },
     ]);
-  }
-
-  // Manual-verification callout
-  if (customBoardFlag || customUniversityFlag) {
-    ensureSpace(ctx, 30);
-    ctx.page.drawRectangle({
-      x: ctx.margin, y: ctx.y - 26, width: ctx.width - ctx.margin*2, height: 26,
-      color: COLORS.redFill, borderColor: COLORS.redBorder, borderWidth: 1,
-    });
-    ctx.page.drawText("Note for Admissions Team - Manual Verification Required", {
-      x: ctx.margin + 8, y: ctx.y - 12, size: 9, font: bold, color: COLORS.redBorder,
-    });
-    ctx.page.drawText("Candidate selected a board/university not in our predefined list. Verify validity before issuing an offer.", {
-      x: ctx.margin + 8, y: ctx.y - 22, size: 7.5, font, color: COLORS.text,
-    });
-    ctx.y -= 32;
   }
 
   // ── EXTRACURRICULAR ────────────────────────────────────────────────
@@ -1169,6 +1309,21 @@ async function buildApplicationPdfInline(
     x: ctx.margin + totalW * 0.55 + 6, y: ctx.y - signRowH + 4, size: 7, font: bold, color: COLORS.text,
   });
   ctx.y -= signRowH + 4;
+
+  // Two-pass page numbering: stamp "Page X of Y" centered near the bottom
+  // of every page (just inside the footer reserve). Done after all content
+  // is laid out so the total count is final.
+  const pages = pdf.getPages();
+  const total = pages.length;
+  pages.forEach((page, idx) => {
+    const text = `Page ${idx + 1} of ${total}`;
+    const w = font.widthOfTextAtSize(text, 8);
+    page.drawText(text, {
+      x: (page.getSize().width - w) / 2,
+      y: 24, // sits above the bottom margin
+      size: 8, font, color: COLORS.muted,
+    });
+  });
 
   return await pdf.save();
 }
