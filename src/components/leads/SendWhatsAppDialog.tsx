@@ -77,6 +77,17 @@ const TEMPLATES = [
     buildParams: (lead: any, courseName?: string) => [lead.name, lead.application_id || "N/A", courseName || "your selected course"],
     preview: "Hi {{1}}, thank you for starting your application at NIMT Educational Institutions!\n\nYour Application ID: {{2}}\nCourse: {{3}}\n\nComplete your application at https://uni.nimt.ac.in/apply/nimt/\n\nOur admissions team is here to help. Feel free to reach out anytime!",
   },
+  {
+    // Fired automatically by generate-payment-receipt edge function after every
+    // confirmed lead_payment. The button on the message links to the receipt PDF.
+    // Meta template body to register: see preview below; CTA URL button accepts
+    // the receipt URL as parameter {{5}} on a single dynamic-URL button.
+    key: "payment_receipt",
+    label: "Payment Receipt",
+    description: "Receipt + PDF link after a confirmed payment (fired automatically)",
+    buildParams: (lead: any, _courseName?: string) => [lead.name, "Payment", "0", "RCPT", "https://uni.nimt.ac.in"],
+    preview: "Hi {{1}}, we've received your payment of ₹{{3}} towards {{2}}. Receipt No: {{4}}.\n\nDownload your receipt: {{5}}\n\nNIMT Educational Institutions",
+  },
 ];
 
 interface SendWhatsAppDialogProps {
