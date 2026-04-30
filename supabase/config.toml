@@ -51,6 +51,9 @@ verify_jwt = false
 [functions.generate-application-form]
 verify_jwt = false
 
+[functions.preview-document]
+verify_jwt = false
+
 [functions.visit-reminders]
 verify_jwt = false
 

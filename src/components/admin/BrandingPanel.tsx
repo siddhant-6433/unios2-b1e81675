@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Upload, X, Plus, Image as ImageIcon, FileImage, Save, Star } from "lucide-react";
+import { Loader2, Upload, X, Plus, Image as ImageIcon, FileImage, Save, Star, Eye } from "lucide-react";
 
 interface Branding {
   id: string;
@@ -47,6 +47,10 @@ export function BrandingPanel() {
   const [showAdd, setShowAdd] = useState(false);
   const [newSlug, setNewSlug] = useState("");
   const [newName, setNewName] = useState("");
+  const [previewing, setPreviewing] = useState<{ slug: string; name: string } | null>(null);
+  const [previewDocType, setPreviewDocType] = useState<string>("offer_letter");
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -104,6 +108,41 @@ export function BrandingPanel() {
   };
 
   const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
+
+  const fetchPreview = async (slug: string, docType: string) => {
+    setPreviewLoading(true);
+    if (previewUrl) { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }
+    try {
+      const { data, error } = await supabase.functions.invoke("preview-document", {
+        body: { slug, doc_type: docType },
+      });
+      if (error) throw error;
+      const blob = data instanceof Blob ? data : new Blob([data as any], { type: "application/pdf" });
+      setPreviewUrl(URL.createObjectURL(blob));
+    } catch (e: any) {
+      toast({ title: "Preview failed", description: e?.message, variant: "destructive" });
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const openPreview = (row: Branding, docType: string) => {
+    setPreviewing({ slug: row.slug, name: row.name });
+    setPreviewDocType(docType);
+    fetchPreview(row.slug, docType);
+  };
+
+  const changePreviewDocType = (docType: string) => {
+    if (!previewing) return;
+    setPreviewDocType(docType);
+    fetchPreview(previewing.slug, docType);
+  };
+
+  const closePreview = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+    setPreviewing(null);
+  };
 
   if (loading) {
     return <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
@@ -195,11 +234,19 @@ export function BrandingPanel() {
                 </div>
                 <p className="text-[10px] text-muted-foreground/70">Last updated {new Date(row.updated_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</p>
               </div>
-              {!row.is_default && (
-                <button onClick={() => setDefault(row.id)} disabled={saving === row.id} className="text-xs text-muted-foreground hover:text-amber-600 underline shrink-0">
-                  Make default
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => openPreview(row, (row.applies_to || []).find(t => t !== "all") || "offer_letter")}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-input bg-card px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-muted"
+                >
+                  <Eye className="h-3 w-3" /> Preview
                 </button>
-              )}
+                {!row.is_default && (
+                  <button onClick={() => setDefault(row.id)} disabled={saving === row.id} className="text-xs text-muted-foreground hover:text-amber-600 underline">
+                    Make default
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Asset uploads */}
@@ -256,6 +303,44 @@ export function BrandingPanel() {
           </div>
         ))}
       </div>
+
+      {/* Preview modal — sample PDF rendered with the current branding */}
+      {previewing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={closePreview}>
+          <div className="relative w-full max-w-4xl h-[90vh] rounded-2xl bg-card shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground truncate">Preview — {previewing.name}</p>
+                <p className="text-[11px] text-muted-foreground">Sample data on the current letterhead. Real generated docs will use actual lead/payment values.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={previewDocType}
+                  onChange={(e) => changePreviewDocType(e.target.value)}
+                  className="rounded-lg border border-input bg-background px-2 py-1 text-xs"
+                >
+                  {DOC_TYPES.filter(d => d.value !== "all").map(d => (
+                    <option key={d.value} value={d.value}>{d.label}</option>
+                  ))}
+                </select>
+                <button onClick={closePreview} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 bg-muted/40 relative">
+              {previewLoading && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              )}
+              {previewUrl && (
+                <iframe src={previewUrl} title="Document preview" className="w-full h-full bg-white" />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
