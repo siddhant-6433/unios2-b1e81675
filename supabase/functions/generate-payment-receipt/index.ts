@@ -234,9 +234,7 @@ Deno.serve(async (req) => {
                 { type: "text", text: PAY_TYPE_LABELS[lp.type] || lp.type },
                 { type: "text", text: fmtINR(Number(lp.amount)) },
                 { type: "text", text: lp.receipt_no || "—" },
-              ]},
-              { type: "button", sub_type: "url", index: "0", parameters: [
-                { type: "text", text: receiptUrl }
+                { type: "text", text: receiptUrl },
               ]},
             ],
           },
