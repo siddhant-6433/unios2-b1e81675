@@ -31,7 +31,10 @@ interface OfferLetter {
   acceptance_deadline: string | null;
   accepted_at: string | null;
   created_at: string;
+  session_id?: string | null;
 }
+
+interface SessionOption { id: string; name: string; is_active: boolean }
 
 export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, courseId, campusId, onSuccess }: OfferLetterDialogProps) {
   const { user, role } = useAuth();
@@ -39,10 +42,12 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   const [offers, setOffers] = useState<OfferLetter[]>([]);
   const isApprover = role === "super_admin" || role === "principal";
   const isPrincipalOrAbove = isApprover;
+  const isSuperAdmin = role === "super_admin";
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ total_fee: "", scholarship_amount: "0", acceptance_deadline: "" });
+  const [form, setForm] = useState({ total_fee: "", scholarship_amount: "0", acceptance_deadline: "", session_id: "" });
+  const [sessions, setSessions] = useState<SessionOption[]>([]);
 
   const fetchOffers = async () => {
     setLoading(true);
@@ -52,6 +57,19 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   };
 
   useEffect(() => { if (open) fetchOffers(); }, [open]);
+
+  // Pull sessions whenever the form opens so the select has data + the active
+  // session is preselected as default for the offer.
+  useEffect(() => {
+    if (!showForm) return;
+    supabase.from("admission_sessions").select("id, name, is_active").order("name", { ascending: false })
+      .then(({ data }) => {
+        const list = (data ?? []) as SessionOption[];
+        setSessions(list);
+        const active = list.find(s => s.is_active);
+        setForm(p => ({ ...p, session_id: p.session_id || active?.id || (list[0]?.id ?? "") }));
+      });
+  }, [showForm]);
 
   const handleCreate = async () => {
     const totalFee = Number(form.total_fee);
@@ -64,6 +82,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     const autoApproved = isPrincipalOrAbove;
     const approvalStatus = autoApproved ? "approved" : "pending_principal";
 
+    if (!form.session_id) { toast({ title: "Pick an academic session", variant: "destructive" }); setSaving(false); return; }
+
     const { error } = await supabase.from("offer_letters").insert({
       lead_id: leadId,
       total_fee: totalFee,
@@ -72,6 +92,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       acceptance_deadline: form.acceptance_deadline || null,
       course_id: courseId,
       campus_id: campusId,
+      session_id: form.session_id,
       issued_by: user?.id || null,
       approval_status: approvalStatus,
       approved_by: autoApproved ? user?.id || null : null,
@@ -95,7 +116,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
         description: autoApproved ? undefined : "Principal will review and approve this offer.",
       });
       setShowForm(false);
-      setForm({ total_fee: "", scholarship_amount: "0", acceptance_deadline: "" });
+      setForm({ total_fee: "", scholarship_amount: "0", acceptance_deadline: "", session_id: "" });
       fetchOffers();
       onSuccess();
     }
@@ -145,10 +166,11 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
 
     await supabase.from("offer_letters").update(updates).eq("id", offerId);
     if (status === "accepted") {
-      await supabase.from("leads").update({ stage: "token_paid" as any }).eq("id", leadId);
+      // Note: stage stays at offer_sent until the actual token payment lands.
+      // The lead_payments trigger flips stage to token_paid once the 10% threshold is met.
       await supabase.from("lead_activities").insert({
         lead_id: leadId, user_id: user?.id || null, type: "offer",
-        description: `Offer letter accepted`,
+        description: `Offer letter accepted (awaiting token payment)`,
       });
     }
     fetchOffers();
@@ -196,6 +218,25 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                     <span className="text-sm font-semibold text-foreground">Net Fee: ₹{(Number(form.total_fee) - Number(form.scholarship_amount || 0)).toLocaleString("en-IN")}</span>
                   </div>
                 )}
+                <div>
+                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">
+                    Academic Session <span className="text-destructive">*</span>
+                  </label>
+                  <select
+                    value={form.session_id}
+                    onChange={e => setForm(p => ({ ...p, session_id: e.target.value }))}
+                    className={inputCls}
+                    disabled={!isSuperAdmin && sessions.length > 0}
+                  >
+                    {sessions.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}{s.is_active ? " (Active)" : ""}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[10px] text-muted-foreground/70">
+                    Locks the fee structure for this offer. Token amount = 10% of first-year fee from this session's structure.
+                    {!isSuperAdmin && " Only super admin can pick a non-active session."}
+                  </p>
+                </div>
                 <div>
                   <label className="block text-[11px] font-medium text-muted-foreground mb-1">Acceptance Deadline</label>
                   <input type="date" value={form.acceptance_deadline} onChange={e => setForm(p => ({ ...p, acceptance_deadline: e.target.value }))} className={inputCls} />

@@ -48,6 +48,33 @@ export function RecordPaymentDialog({
   const [notes, setNotes] = useState("");
   const [screenshot, setScreenshot] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const [feeStatus, setFeeStatus] = useState<{
+    first_year_fee: number;
+    token_required: number;
+    token_paid: number;
+    application_paid: number;
+    total_paid: number;
+    twenty_five_pct: number;
+    token_complete: boolean;
+    twenty_five_complete: boolean;
+  } | null>(null);
+
+  // Pull live fee status whenever the dialog opens so the user sees outstanding /
+  // threshold info and we can validate the minimum instalment.
+  useEffect(() => {
+    if (!open || !leadId) { setFeeStatus(null); return; }
+    supabase.rpc("lead_fee_status" as any, { _lead_id: leadId }).then(({ data }) => {
+      if (data) setFeeStatus(data as any);
+    });
+  }, [open, leadId]);
+
+  const tokenOutstanding = feeStatus ? Math.max(0, feeStatus.token_required - feeStatus.token_paid) : 0;
+  const isTokenInstalmentBelowMin =
+    type === "token_fee" &&
+    amount !== "" &&
+    parseFloat(amount) > 0 &&
+    parseFloat(amount) < 5000 &&
+    tokenOutstanding > 5000;
 
   useEffect(() => {
     if (open) {
@@ -63,6 +90,14 @@ export function RecordPaymentDialog({
 
   const handleSave = async () => {
     if (!amount || parseFloat(amount) <= 0) return;
+    if (isTokenInstalmentBelowMin) {
+      toast({
+        title: "Minimum ₹5,000 per token instalment",
+        description: `Outstanding token: ₹${tokenOutstanding.toLocaleString("en-IN")}. Pay at least ₹5,000 unless this is the final balance.`,
+        variant: "destructive",
+      });
+      return;
+    }
     if (requireScreenshot && !screenshot) {
       toast({ title: "Screenshot required", description: "Upload the payment proof image to continue.", variant: "destructive" });
       return;
@@ -122,22 +157,9 @@ export function RecordPaymentDialog({
       description: `${PAYMENT_TYPES.find((t) => t.value === type)?.label || type} of ₹${parseFloat(amount).toLocaleString("en-IN")} recorded (${PAYMENT_MODES.find((m) => m.value === mode)?.label || mode})${transactionRef ? ` — Ref: ${transactionRef}` : ""}`,
     });
 
-    // Auto-advance stage if applicable
-    const { data: lead } = await supabase.from("leads").select("stage").eq("id", leadId).single();
-    if (lead) {
-      const stageOrder = [
-        "new_lead", "application_in_progress", "application_fee_paid", "application_submitted",
-        "ai_called", "counsellor_call", "visit_scheduled", "interview",
-        "offer_sent", "token_paid", "pre_admitted", "admitted", "rejected",
-      ];
-      const currentIdx = stageOrder.indexOf(lead.stage);
-
-      if (type === "application_fee" && currentIdx < stageOrder.indexOf("application_fee_paid")) {
-        await supabase.from("leads").update({ stage: "application_fee_paid" }).eq("id", leadId);
-      } else if (type === "token_fee" && currentIdx < stageOrder.indexOf("token_paid")) {
-        await supabase.from("leads").update({ stage: "token_paid" }).eq("id", leadId);
-      }
-    }
+    // Stage advancement is handled by the lead_payments AFTER trigger
+    // (handle_lead_payment_change). It checks the 10% / 25% thresholds and
+    // auto-issues PAN / AN. We don't flip stage from here anymore.
 
     toast({ title: "Payment recorded", description: `₹${parseFloat(amount).toLocaleString("en-IN")} ${PAYMENT_TYPES.find((t) => t.value === type)?.label} recorded.` });
     setSaving(false);
@@ -157,6 +179,34 @@ export function RecordPaymentDialog({
           </DialogTitle>
           <p className="text-sm text-muted-foreground">{leadName}</p>
         </DialogHeader>
+
+        {feeStatus && feeStatus.first_year_fee > 0 && (
+          <div className="rounded-xl bg-muted/40 px-3 py-2.5 text-xs space-y-1">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">First-year fee</span>
+              <span className="font-semibold text-foreground">₹{feeStatus.first_year_fee.toLocaleString("en-IN")}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Token (10%)</span>
+              <span className="text-foreground">
+                ₹{feeStatus.token_paid.toLocaleString("en-IN")} / ₹{feeStatus.token_required.toLocaleString("en-IN")}
+                {feeStatus.token_complete && <span className="ml-1 text-emerald-600">✓ complete</span>}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Towards 25% (admission)</span>
+              <span className="text-foreground">
+                ₹{feeStatus.total_paid.toLocaleString("en-IN")} / ₹{feeStatus.twenty_five_pct.toLocaleString("en-IN")}
+                {feeStatus.twenty_five_complete && <span className="ml-1 text-emerald-600">✓ complete</span>}
+              </span>
+            </div>
+            {type === "token_fee" && tokenOutstanding > 0 && !feeStatus.token_complete && (
+              <p className="pt-1 text-[11px] text-muted-foreground/80">
+                Outstanding token: ₹{tokenOutstanding.toLocaleString("en-IN")} · min instalment ₹5,000{tokenOutstanding < 5000 && " (final balance, any amount allowed)"}
+              </p>
+            )}
+          </div>
+        )}
 
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
@@ -273,7 +323,11 @@ export function RecordPaymentDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
           <Button
             onClick={handleSave}
-            disabled={!amount || parseFloat(amount) <= 0 || saving || (requireScreenshot && (!screenshot || !transactionRef.trim()))}
+            disabled={
+              !amount || parseFloat(amount) <= 0 || saving ||
+              isTokenInstalmentBelowMin ||
+              (requireScreenshot && (!screenshot || !transactionRef.trim()))
+            }
             className="gap-2"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <IndianRupee className="h-4 w-4" />}
