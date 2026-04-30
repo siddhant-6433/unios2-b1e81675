@@ -20,6 +20,7 @@ interface AttendanceRecord {
   location_lng: number | null;
   face_match_score: number | null;
   face_match_result: string | null;
+  liveness_score: number | null;
   display_name: string;
   role: string;
 }
@@ -38,7 +39,7 @@ const HrAttendance = () => {
 
     const [attRes, profilesRes] = await Promise.all([
       supabase.from("employee_attendance")
-        .select("id, user_id, date, punch_in, punch_out, selfie_url, location_lat, location_lng, face_match_score, face_match_result")
+        .select("id, user_id, date, punch_in, punch_out, selfie_url, location_lat, location_lng, face_match_score, face_match_result, liveness_score")
         .eq("date", date)
         .order("punch_in", { ascending: false }),
       supabase.from("profiles")
@@ -141,12 +142,13 @@ const HrAttendance = () => {
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Punch Out</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Hours</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Face Match</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Liveness</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredRecords.length === 0 ? (
-                  <tr><td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">No records for this date</td></tr>
+                  <tr><td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">No records for this date</td></tr>
                 ) : filteredRecords.map((r) => (
                   <tr key={r.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
                     <td className="px-4 py-3">
@@ -172,6 +174,19 @@ const HrAttendance = () => {
                           "bg-pastel-red text-foreground/80"
                         }`}>
                           {r.face_match_score}%
+                        </Badge>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {r.liveness_score !== null ? (
+                        <Badge className={`text-[10px] border-0 ${
+                          r.liveness_score >= 85 ? "bg-emerald-100 text-emerald-700" :
+                          r.liveness_score >= 50 ? "bg-amber-100 text-amber-700" :
+                          "bg-red-100 text-red-700"
+                        }`}>
+                          {r.liveness_score}%
                         </Badge>
                       ) : (
                         <span className="text-[10px] text-muted-foreground">—</span>
