@@ -276,6 +276,7 @@ Deno.serve(async (req) => {
           amount: parseFloat(amount),
           payment_mode: payment_mode || "gateway",
           status: "pending",
+          gateway: "easebuzz",
           concession_amount: concession_amount ? parseFloat(concession_amount) : 0,
           waiver_reason: waiver_reason || null,
           concession_breakdown: concession_breakdown || null,

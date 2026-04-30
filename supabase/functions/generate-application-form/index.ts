@@ -413,7 +413,7 @@ Deno.serve(async (req) => {
     if (app.lead_id) {
       const { data: lp } = await admin
         .from("lead_payments")
-        .select("amount, payment_mode, transaction_ref, receipt_no, payment_date, created_at, status")
+        .select("amount, payment_mode, gateway, transaction_ref, receipt_no, payment_date, created_at, status")
         .eq("lead_id", app.lead_id)
         .eq("type", "application_fee")
         .eq("status", "confirmed")
@@ -523,13 +523,27 @@ async function buildApplicationPdfInline(
   ];
   for (let i = 0; i < 3; i++) {
     const c = courses[i] || {};
-    drawHeaderRow(ctx, [{ label: `Preference ${i + 1}`, w: ctx.width - ctx.margin*2 }], 14);
-    drawHeaderRow(ctx, prefHdr, 14);
-    drawValueRow(ctx, [
-      { value: norm(c.program_category), w: prefHdr[0].w },
-      { value: norm(c.course_name),      w: prefHdr[1].w },
-      { value: norm(c.campus_name),      w: prefHdr[2].w },
-    ], 26);
+    const hasContent = !!(c.course_name || c.campus_name || c.program_category);
+    if (hasContent) {
+      drawHeaderRow(ctx, [{ label: `Preference ${i + 1}`, w: ctx.width - ctx.margin*2 }], 14);
+      drawHeaderRow(ctx, prefHdr, 14);
+      drawValueRow(ctx, [
+        { value: norm(c.program_category), w: prefHdr[0].w },
+        { value: norm(c.course_name),      w: prefHdr[1].w },
+        { value: norm(c.campus_name),      w: prefHdr[2].w },
+      ], 26);
+    } else {
+      // Preference left empty — single muted row instead of an empty table.
+      ensureSpace(ctx, 18);
+      ctx.page.drawRectangle({
+        x: ctx.margin, y: ctx.y - 18, width: ctx.width - ctx.margin*2, height: 18,
+        color: rgb(0.97, 0.97, 0.99), borderColor: COLORS.border, borderWidth: 0.5,
+      });
+      ctx.page.drawText(`Preference ${i + 1}: Not Opted`, {
+        x: ctx.margin + 8, y: ctx.y - 12, size: 9, font: bold, color: COLORS.muted,
+      });
+      ctx.y -= 18;
+    }
   }
 
   // ── PERSONAL DETAILS ───────────────────────────────────────────────
@@ -552,16 +566,17 @@ async function buildApplicationPdfInline(
   // ── ADDRESS ────────────────────────────────────────────────────────
   drawSection(ctx, "Address");
   const a = app.address || {};
-  drawKVGrid(ctx, [
+  // PIN Code before Country; Country only when set.
+  const addrPairs = [
     { label: "Address Line 1", value: norm(a.line1) },
     { label: "City",           value: norm(a.city) },
     { label: "State",          value: norm(a.state) },
-    { label: "Country",        value: norm(a.country) },
     { label: "PIN Code",       value: norm(a.pin_code) },
-    { label: "",               value: "" },
-    { label: "",               value: "" },
-    { label: "",               value: "" },
-  ]);
+  ];
+  if (norm(a.country) !== "-") {
+    addrPairs.push({ label: "Country", value: norm(a.country) });
+  }
+  drawKVGrid(ctx, addrPairs);
 
   // ── PARENTS / GUARDIAN ─────────────────────────────────────────────
   const parentName = (p: any) => {
@@ -570,9 +585,11 @@ async function buildApplicationPdfInline(
     return norm(composed || p.name);
   };
 
-  drawSection(ctx, "Father's Details");
+  // Drop pairs whose value is "-" so empty fields don't render.
+  const nonEmpty = (pairs: { label: string; value: string }[]) => pairs.filter(p => p.value && p.value !== "-");
+
   const f = app.father || {};
-  drawKVGrid(ctx, [
+  const fatherPairs = nonEmpty([
     { label: "Name",            value: parentName(f) },
     { label: "Date of Birth",   value: fmtDate(f.dob) },
     { label: "Nationality",     value: norm(f.nationality) },
@@ -584,16 +601,17 @@ async function buildApplicationPdfInline(
     { label: "Employer",        value: norm(f.employer_name) },
     { label: "Position",        value: norm(f.current_position) },
     { label: "Occupation",      value: norm(f.occupation) },
-    { label: "",                value: "" },
     { label: "Mobile",          value: norm(f.phone_mobile || f.phone) },
     { label: "Home Phone",      value: norm(f.phone_home) },
     { label: "Email",           value: norm(f.email) },
-    { label: "",                value: "" },
   ]);
+  if (fatherPairs.length > 0) {
+    drawSection(ctx, "Father's Details");
+    drawKVGrid(ctx, fatherPairs);
+  }
 
-  drawSection(ctx, "Mother's Details");
   const m = app.mother || {};
-  drawKVGrid(ctx, [
+  const motherPairs = nonEmpty([
     { label: "Name",            value: parentName(m) },
     { label: "Date of Birth",   value: fmtDate(m.dob) },
     { label: "Nationality",     value: norm(m.nationality) },
@@ -605,12 +623,14 @@ async function buildApplicationPdfInline(
     { label: "Employer",        value: norm(m.employer_name) },
     { label: "Position",        value: norm(m.current_position) },
     { label: "Occupation",      value: norm(m.occupation) },
-    { label: "",                value: "" },
     { label: "Mobile",          value: norm(m.phone_mobile || m.phone) },
     { label: "Home Phone",      value: norm(m.phone_home) },
     { label: "Email",           value: norm(m.email) },
-    { label: "",                value: "" },
   ]);
+  if (motherPairs.length > 0) {
+    drawSection(ctx, "Mother's Details");
+    drawKVGrid(ctx, motherPairs);
+  }
 
   const g = app.guardian || {};
   if (g.name || g.phone || g.email) {
@@ -668,12 +688,12 @@ async function buildApplicationPdfInline(
     drawHeaderRow(ctx, [{ label: "Class 12 / HSC", w: ctx.width - ctx.margin*2 }], 14);
     const c12 = ad.class_12;
     const cols12 = [
-      { label: "School",        w: (ctx.width - ctx.margin*2) * 0.30 },
-      { label: "Board",         w: (ctx.width - ctx.margin*2) * 0.30 },
-      { label: "Subjects/Stream", w: (ctx.width - ctx.margin*2) * 0.16 },
-      { label: "Year",          w: (ctx.width - ctx.margin*2) * 0.08 },
-      { label: "Result",        w: (ctx.width - ctx.margin*2) * 0.10 },
-      { label: "Marks",         w: (ctx.width - ctx.margin*2) * 0.06 },
+      { label: "School",          w: (ctx.width - ctx.margin*2) * 0.22 },
+      { label: "Board",           w: (ctx.width - ctx.margin*2) * 0.22 },
+      { label: "Subjects/Stream", w: (ctx.width - ctx.margin*2) * 0.30 },
+      { label: "Year",            w: (ctx.width - ctx.margin*2) * 0.08 },
+      { label: "Result",          w: (ctx.width - ctx.margin*2) * 0.10 },
+      { label: "Marks",           w: (ctx.width - ctx.margin*2) * 0.08 },
     ];
     drawHeaderRow(ctx, cols12, 14);
     drawValueRow(ctx, [
@@ -787,10 +807,22 @@ async function buildApplicationPdfInline(
   // ── APPLICATION FEE PAYMENT ────────────────────────────────────────
   drawSection(ctx, "Application Fee Payment");
   if (appFeePayment) {
+    const gatewayLabel: Record<string, string> = {
+      easebuzz: "Easebuzz Gateway",
+      icici:    "ICICI Gateway",
+      cashfree: "Cashfree Gateway",
+    };
     const modeLabel: Record<string, string> = {
       cash: "Cash", upi: "UPI", bank_transfer: "Bank Transfer / NEFT",
-      cheque: "Cheque / DD", online: "Online", gateway: "Online (Gateway)",
+      cheque: "Cheque / DD", online: "Online",
     };
+    let modeText: string;
+    if (appFeePayment.payment_mode === "gateway" || appFeePayment.payment_mode === "online") {
+      const gw = appFeePayment.gateway ? gatewayLabel[appFeePayment.gateway] || appFeePayment.gateway : null;
+      modeText = gw ? `Online (${gw})` : "Online (Gateway)";
+    } else {
+      modeText = modeLabel[appFeePayment.payment_mode] || appFeePayment.payment_mode || "-";
+    }
     const paidAt = appFeePayment.payment_date || appFeePayment.created_at;
     const paidAtStr = paidAt ? new Date(paidAt).toLocaleString("en-IN", {
       day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
@@ -798,7 +830,7 @@ async function buildApplicationPdfInline(
     drawKVGrid(ctx, [
       { label: "Status",          value: "PAID" },
       { label: "Amount",          value: appFeePayment.amount != null ? `Rs. ${Number(appFeePayment.amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "-" },
-      { label: "Payment Mode",    value: norm(modeLabel[appFeePayment.payment_mode] || appFeePayment.payment_mode) },
+      { label: "Payment Mode",    value: norm(modeText) },
       { label: "Receipt No",      value: norm(appFeePayment.receipt_no) },
       { label: "Transaction Ref", value: norm(appFeePayment.transaction_ref) },
       { label: "Paid On",         value: paidAtStr.toUpperCase() },
@@ -881,22 +913,26 @@ async function buildApplicationPdfInline(
   const declSize = 8;
   const declLineH = 11;
   const declWidth = ctx.width - ctx.margin*2;
+  const padTop = 6;     // space above first line
+  const padBottom = 8;  // space below last line's descender
+  const sidePad = 8;    // horizontal padding inside the emphasis box
   declParas.forEach(para => {
-    const lines = wrapText(para.text, font, declSize, declWidth, 20);
-    // Reserve space for the whole paragraph; if not enough, page-break.
-    const paraH = lines.length * declLineH + 6;
+    // Wrap inside the available text width — narrower for emphasis paragraphs
+    // so the text never touches the red border.
+    const innerWidth = para.emphasis ? declWidth - sidePad*2 : declWidth;
+    const lines = wrapText(para.text, para.emphasis ? bold : font, declSize, innerWidth, 30);
+    const paraH = padTop + lines.length * declLineH + padBottom;
     ensureSpace(ctx, paraH);
     if (para.emphasis) {
-      // Subtle red-tinted background for the non-refund clause.
       ctx.page.drawRectangle({
-        x: ctx.margin, y: ctx.y - paraH + 2, width: declWidth, height: paraH,
+        x: ctx.margin, y: ctx.y - paraH, width: declWidth, height: paraH,
         color: COLORS.redFill, borderColor: COLORS.redBorder, borderWidth: 0.6,
       });
     }
     lines.forEach((line, i) => {
       ctx.page.drawText(line, {
-        x: ctx.margin + (para.emphasis ? 6 : 0),
-        y: ctx.y - 9 - i * declLineH,
+        x: ctx.margin + (para.emphasis ? sidePad : 0),
+        y: ctx.y - padTop - declSize - i * declLineH,
         size: declSize,
         font: para.emphasis ? bold : font,
         color: COLORS.text,
