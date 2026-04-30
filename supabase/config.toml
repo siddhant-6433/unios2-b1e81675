@@ -39,6 +39,9 @@ verify_jwt = false
 [functions.easebuzz-payment]
 verify_jwt = false
 
+[functions.icici-payment]
+verify_jwt = false
+
 [functions.generate-payment-receipt]
 verify_jwt = false
 
@@ -49,6 +52,9 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.generate-application-form]
+verify_jwt = false
+
+[functions.generate-application-fee-receipt]
 verify_jwt = false
 
 [functions.preview-document]

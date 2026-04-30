@@ -240,6 +240,13 @@ Deno.serve(async (req) => {
           console.error(`[${FN_NAME}] applications update error:`, dbErr?.message, "rows:", updated?.length);
           return returnPage("Payment Received", `Payment confirmed but could not link to application. Contact support. Txn: ${paymentRef}`, false);
         }
+        // Fire-and-forget: generate the application-fee receipt PDF so it's
+        // ready by the time the candidate lands back on their dashboard.
+        fetch(`${supabaseUrl}/functions/v1/generate-application-fee-receipt`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+          body: JSON.stringify({ application_id: addl2 }),
+        }).catch((e) => console.error(`[${FN_NAME}] receipt invoke failed:`, e));
         return returnPage("Payment Successful", "Your payment has been received. You may close this window.", true);
       }
 

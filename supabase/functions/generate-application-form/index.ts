@@ -520,10 +520,38 @@ async function buildApplicationPdfInline(
   };
   await newPage(ctx);
 
-  // ── HEADER: photo top-right, title + app no centered to the left ──
+  // ── HEADER: App-No badge + photo at top-right; title + session left of them ──
+
+  // Green rounded App-No badge (no border, bold, large).
+  const badgeFontSize = 14;
+  const badgePadX = 16;
+  const badgePadY = 8;
+  const badgeText = app.application_id;
+  const badgeTextW = bold.widthOfTextAtSize(badgeText, badgeFontSize);
+  const badgeW = badgeTextW + badgePadX * 2;
+  const badgeH = badgeFontSize + badgePadY * 2;
+  const badgeX = ctx.width - ctx.margin - badgeW;
+  const badgeY = ctx.contentStart - 2; // top edge
+  // Rounded rectangle: pdf-lib doesn't have border-radius, so simulate with a
+  // rectangle + two end-circles for pill shape.
+  const badgeColor = rgb(0.20, 0.69, 0.39); // tailwind emerald-600 ≈ #22c55e
+  ctx.page.drawRectangle({
+    x: badgeX + badgeH / 2, y: badgeY - badgeH,
+    width: badgeW - badgeH, height: badgeH,
+    color: badgeColor,
+  });
+  ctx.page.drawCircle({ x: badgeX + badgeH / 2,             y: badgeY - badgeH / 2, size: badgeH / 2, color: badgeColor });
+  ctx.page.drawCircle({ x: badgeX + badgeW - badgeH / 2,    y: badgeY - badgeH / 2, size: badgeH / 2, color: badgeColor });
+  ctx.page.drawText(badgeText, {
+    x: badgeX + badgePadX,
+    y: badgeY - badgePadY - badgeFontSize + 2,
+    size: badgeFontSize, font: bold, color: rgb(1, 1, 1),
+  });
+
+  // Photo box right-aligned, below the badge.
   const photoW = 86, photoH = 110;
   const photoX = ctx.width - ctx.margin - photoW;
-  const photoY = ctx.contentStart - 4;
+  const photoY = badgeY - badgeH - 8; // top of photo
   ctx.page.drawRectangle({ x: photoX, y: photoY - photoH, width: photoW, height: photoH, color: rgb(1,1,1), borderColor: COLORS.border, borderWidth: 0.5 });
   if (photoImg) {
     ctx.page.drawImage(photoImg, { x: photoX + 1, y: photoY - photoH + 1, width: photoW - 2, height: photoH - 2 });
@@ -533,24 +561,21 @@ async function buildApplicationPdfInline(
     ctx.page.drawText("Photograph Here",   { x: photoX + 6, y: photoY - 50, size: 7, font, color: COLORS.muted });
   }
 
-  const titleArea = photoX - ctx.margin - 12;
+  // Title + session line left of the photo column.
+  const rightColX = Math.min(badgeX, photoX) - 12;
+  const titleArea = rightColX - ctx.margin;
   const titleText = "ADMISSION APPLICATION FORM";
   const titleW = bold.widthOfTextAtSize(titleText, 14);
   const titleX = ctx.margin + Math.max(0, (titleArea - titleW) / 2);
   ctx.page.drawText(titleText, { x: titleX, y: ctx.y - 36, size: 14, font: bold, color: COLORS.text });
 
-  const idText = `Application No: ${app.application_id}`;
-  const idW = bold.widthOfTextAtSize(idText, 11);
-  const idX = ctx.margin + Math.max(0, (titleArea - idW) / 2);
-  ctx.page.drawText(idText, { x: idX, y: ctx.y - 56, size: 11, font: bold, color: COLORS.text });
-
-  let titleBlockBottom = ctx.y - 70;
+  let titleBlockBottom = ctx.y - 50;
   if (sessionName) {
     const sessText = `Applying for Session: ${sessionName.toUpperCase()}`;
     const sessW = font.widthOfTextAtSize(sessText, 10);
     const sessX = ctx.margin + Math.max(0, (titleArea - sessW) / 2);
-    ctx.page.drawText(sessText, { x: sessX, y: ctx.y - 72, size: 10, font, color: COLORS.muted });
-    titleBlockBottom = ctx.y - 86;
+    ctx.page.drawText(sessText, { x: sessX, y: ctx.y - 56, size: 10, font, color: COLORS.muted });
+    titleBlockBottom = ctx.y - 70;
   }
 
   ctx.y = Math.min(titleBlockBottom, photoY - photoH - 8);

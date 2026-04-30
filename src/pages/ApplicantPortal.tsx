@@ -28,6 +28,7 @@ interface Application {
   updated_at: string;
   submitted_at: string | null;
   form_pdf_url: string | null;
+  fee_receipt_url: string | null;
 }
 
 function portalFromFlags(flags: string[]): { slug: string; label: string } {
@@ -86,7 +87,7 @@ export default function ApplicantPortal() {
 
     let query = (supabase as any)
       .from("applications")
-      .select("application_id, full_name, status, payment_status, fee_amount, payment_ref, course_selections, flags, created_at, updated_at, submitted_at, form_pdf_url")
+      .select("application_id, full_name, status, payment_status, fee_amount, payment_ref, course_selections, flags, created_at, updated_at, submitted_at, form_pdf_url, fee_receipt_url")
       .order("created_at", { ascending: false });
 
     if (phone && email) {
@@ -328,7 +329,7 @@ export default function ApplicantPortal() {
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-2 shrink-0 flex-wrap">
                         {app.form_pdf_url && (
                           <a
                             href={app.form_pdf_url}
@@ -336,23 +337,34 @@ export default function ApplicantPortal() {
                             rel="noopener"
                             className="flex items-center gap-1.5 rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
                           >
-                            <FileText className="h-3.5 w-3.5" /> Form
+                            <FileText className="h-3.5 w-3.5" /> Application Form
                           </a>
                         )}
                         {app.payment_status === "paid" && app.fee_amount > 0 && (
-                          <button
-                            onClick={() => setReceipt({
-                              type: "application_fee",
-                              application_id: app.application_id,
-                              applicant_name: app.full_name,
-                              amount: app.fee_amount,
-                              payment_ref: app.payment_ref,
-                              payment_date: app.submitted_at || app.updated_at,
-                            })}
-                            className="flex items-center gap-1.5 rounded-xl border border-green-300 bg-green-50 px-3 py-2 text-xs font-semibold text-green-700 hover:bg-green-100 transition-colors"
-                          >
-                            <Receipt className="h-3.5 w-3.5" /> Receipt
-                          </button>
+                          app.fee_receipt_url ? (
+                            <a
+                              href={app.fee_receipt_url}
+                              target="_blank"
+                              rel="noopener"
+                              className="flex items-center gap-1.5 rounded-xl border border-green-300 bg-green-50 px-3 py-2 text-xs font-semibold text-green-700 hover:bg-green-100 transition-colors"
+                            >
+                              <Receipt className="h-3.5 w-3.5" /> Fee Receipt
+                            </a>
+                          ) : (
+                            <button
+                              onClick={() => setReceipt({
+                                type: "application_fee",
+                                application_id: app.application_id,
+                                applicant_name: app.full_name,
+                                amount: app.fee_amount,
+                                payment_ref: app.payment_ref,
+                                payment_date: app.submitted_at || app.updated_at,
+                              })}
+                              className="flex items-center gap-1.5 rounded-xl border border-green-300 bg-green-50 px-3 py-2 text-xs font-semibold text-green-700 hover:bg-green-100 transition-colors"
+                            >
+                              <Receipt className="h-3.5 w-3.5" /> Receipt
+                            </button>
+                          )
                         )}
                       </div>
                     </div>

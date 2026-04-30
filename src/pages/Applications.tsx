@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   FileText, Download, Eye, Loader2, Search, Filter, ExternalLink,
   CheckCircle, Clock, CreditCard, Upload, AlertCircle, ChevronDown, ChevronUp, X,
-  Sparkles, Send, Gift, Wallet, UserCheck, GraduationCap,
+  Sparkles, Send, Gift, Wallet, UserCheck, GraduationCap, Receipt,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -38,6 +38,7 @@ interface AppRow {
   address: any;
   academic_details: any;
   form_pdf_url: string | null;
+  fee_receipt_url: string | null;
   counsellor_name?: string;
   lead_stage?: string;
   lead_counsellor_id?: string;
@@ -110,11 +111,30 @@ export default function Applications() {
     }
   };
 
+  const generateFeeReceipt = async (app: AppRow) => {
+    setGeneratingPdfFor(app.id);
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-application-fee-receipt", {
+        body: { application_id: app.application_id },
+      });
+      if (error) throw error;
+      const url = (data as any)?.fee_receipt_url;
+      if (url) {
+        setApps(prev => prev.map(a => a.id === app.id ? { ...a, fee_receipt_url: url } : a));
+        window.open(url, "_blank");
+      }
+    } catch (e) {
+      console.error("generate-application-fee-receipt failed:", e);
+    } finally {
+      setGeneratingPdfFor(null);
+    }
+  };
+
   useEffect(() => {
     const fetchApps = async () => {
       setLoading(true);
       const { data } = await (supabase as any).from("applications")
-        .select("id, application_id, lead_id, full_name, phone, email, status, payment_status, payment_ref, fee_amount, program_category, course_selections, completed_sections, submitted_at, created_at, flags, dob, gender, category, father, mother, address, academic_details, form_pdf_url")
+        .select("id, application_id, lead_id, full_name, phone, email, status, payment_status, payment_ref, fee_amount, program_category, course_selections, completed_sections, submitted_at, created_at, flags, dob, gender, category, father, mother, address, academic_details, form_pdf_url, fee_receipt_url")
         .order("created_at", { ascending: false });
       const rows = data || [];
 
@@ -436,6 +456,22 @@ export default function Applications() {
                             title="Generate Application Form PDF">
                             {generatingPdfFor === app.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
                           </button>
+                        )}
+                        {/* Application fee receipt — only meaningful once payment is paid */}
+                        {app.payment_status === "paid" && (
+                          app.fee_receipt_url ? (
+                            <a href={app.fee_receipt_url} target="_blank" rel="noreferrer"
+                              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-emerald-600" title="View Fee Receipt PDF">
+                              <Receipt className="h-3.5 w-3.5" />
+                            </a>
+                          ) : (
+                            <button onClick={() => generateFeeReceipt(app)}
+                              disabled={generatingPdfFor === app.id}
+                              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-emerald-600 disabled:opacity-50"
+                              title="Generate Fee Receipt PDF">
+                              {generatingPdfFor === app.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Receipt className="h-3.5 w-3.5" />}
+                            </button>
+                          )
                         )}
                         <button onClick={() => fetchDocs(app.id, app.application_id)}
                           className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-primary" title="View Documents">

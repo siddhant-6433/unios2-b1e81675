@@ -965,12 +965,18 @@ const ApplyPortal = () => {
     setSaving(false);
     toast({ title: "Application submitted!" });
 
-    // Fire the server-side PDF generator so the candidate has a branded
-    // copy in storage. Fire-and-forget — the email/portal link picks up
-    // the URL once it's ready.
+    // Fire both PDF generators so the candidate has branded copies in
+    // storage (fire-and-forget). Application form is generated for every
+    // submission; fee receipt is generated only when the application fee
+    // is already paid (typical flow: pay fee then submit).
     supabase.functions.invoke("generate-application-form", {
       body: { application_id: app.application_id },
     }).catch(() => {});
+    if (app.payment_status === "paid") {
+      supabase.functions.invoke("generate-application-fee-receipt", {
+        body: { application_id: app.application_id },
+      }).catch(() => {});
+    }
   };
 
   const onChange = (updates: Partial<ApplicationData>) => {
