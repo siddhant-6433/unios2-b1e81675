@@ -14,7 +14,9 @@ import GeofenceDialog from "./GeofenceDialog";
 interface Campus {
   id: string; name: string; code: string; city: string | null; state: string | null; address: string | null;
   latitude: number | null; longitude: number | null; geofence_radius_meters: number | null;
+  branding_slug: string | null;
 }
+interface BrandingOption { slug: string; name: string }
 interface Institution {
   id: string; name: string; code: string; campus_id: string; type: string;
 }
@@ -28,6 +30,8 @@ interface Course {
 export default function CourseCampusMaster() {
   const { toast } = useToast();
   const [campuses, setCampuses] = useState<Campus[]>([]);
+  const [brandings, setBrandings] = useState<BrandingOption[]>([]);
+  const [savingBrandingFor, setSavingBrandingFor] = useState<string | null>(null);
   const [institutions, setInstitutions] = useState<Institution[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
@@ -70,6 +74,20 @@ export default function CourseCampusMaster() {
   const [editingCustomGeofence, setEditingCustomGeofence] = useState<CustomGeofence | null>(null);
 
   useEffect(() => { fetchAll(); }, []);
+
+  // Branding options for the per-campus dropdown.
+  useEffect(() => {
+    supabase.from("institution_branding").select("slug, name").order("name")
+      .then(({ data }) => { if (data) setBrandings(data as BrandingOption[]); });
+  }, []);
+
+  const setCampusBranding = async (campusId: string, slug: string | null) => {
+    setSavingBrandingFor(campusId);
+    const { error } = await supabase.from("campuses").update({ branding_slug: slug }).eq("id", campusId);
+    setSavingBrandingFor(null);
+    if (error) { toast({ title: "Save failed", description: error.message, variant: "destructive" }); return; }
+    setCampuses(prev => prev.map(c => c.id === campusId ? { ...c, branding_slug: slug } : c));
+  };
 
   const fetchAll = async () => {
     setLoading(true);
@@ -439,6 +457,12 @@ export default function CourseCampusMaster() {
                   <MapPin className="h-3 w-3" />
                   {campus.latitude ? `Geofence: ${campus.geofence_radius_meters || 500}m` : "Set Geofence"}
                 </button>
+                <BrandingSelect
+                  value={campus.branding_slug}
+                  options={brandings}
+                  saving={savingBrandingFor === campus.id}
+                  onChange={(slug) => setCampusBranding(campus.id, slug)}
+                />
                 <span className="text-xs text-muted-foreground">— no institutions</span>
               </div>
             </div>
@@ -468,6 +492,12 @@ export default function CourseCampusMaster() {
                 <MapPin className="h-3 w-3" />
                 {campus.latitude ? `Geofence: ${campus.geofence_radius_meters || 500}m` : "Set Geofence"}
               </button>
+              <BrandingSelect
+                value={campus.branding_slug}
+                options={brandings}
+                saving={savingBrandingFor === campus.id}
+                onChange={(slug) => setCampusBranding(campus.id, slug)}
+              />
             </div>
             {/* Institution cards */}
             {campusInstitutions.map(inst => renderInstitutionCard(inst, campus))}
@@ -690,5 +720,32 @@ function CustomGeofenceForm({ initial, onSave, onCancel }: {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function BrandingSelect({ value, options, saving, onChange }: {
+  value: string | null;
+  options: { slug: string; name: string }[];
+  saving: boolean;
+  onChange: (slug: string | null) => void;
+}) {
+  return (
+    <div className="relative inline-flex items-center">
+      <select
+        value={value || ""}
+        onChange={(e) => onChange(e.target.value || null)}
+        disabled={saving}
+        title="Branding (letterhead) used for this campus's offer letters and receipts"
+        className="appearance-none rounded-lg border border-input bg-background pl-2 pr-7 py-1 text-[11px] font-medium text-foreground hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:opacity-50"
+      >
+        <option value="">— Default branding —</option>
+        {options.map(o => (
+          <option key={o.slug} value={o.slug}>Branding: {o.name}</option>
+        ))}
+      </select>
+      <svg className="absolute right-1.5 h-3 w-3 text-muted-foreground pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <polyline points="6 9 12 15 18 9" />
+      </svg>
+    </div>
   );
 }
