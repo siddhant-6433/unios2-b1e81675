@@ -566,16 +566,15 @@ async function buildApplicationPdfInline(
   const courses: any[] = Array.isArray(app.course_selections) ? app.course_selections : [];
   drawSection(ctx, "Course Preferences");
 
-  const totalRowW = ctx.width - ctx.margin*2;
-  const leftW  = totalRowW * 0.65;
-  const rightW = totalRowW - leftW - 12; // 12pt gutter
+  // Photo takes its natural width, anchored to the right margin. Prefs fill
+  // the rest of the row - no fixed-percentage column means no awkward gap.
+  const photoW = 110;
+  const photoH = Math.round(photoW * 1.3);
+  const gutter = 12;
+  const leftW  = ctx.width - ctx.margin*2 - photoW - gutter;
 
   const blockTop = ctx.y;
-
-  // Photo box on the right column, top-aligned with the prefs band.
-  const photoW = Math.min(110, rightW);
-  const photoH = Math.round(photoW * 1.3);
-  const photoX = ctx.margin + leftW + 12 + (rightW - photoW) / 2;
+  const photoX = ctx.width - ctx.margin - photoW;
   const photoY = blockTop - 4;
   ctx.page.drawRectangle({
     x: photoX, y: photoY - photoH, width: photoW, height: photoH,
@@ -620,26 +619,38 @@ async function buildApplicationPdfInline(
     ctx.y -= rowH;
   };
 
-  for (let i = 0; i < 3; i++) {
-    const c = courses[i] || {};
-    const hasContent = !!(c.course_name || c.campus_name || c.program_category);
-    if (hasContent) {
+  // Render every selected preference (count is variable - user might pick 1
+  // or 5). After the last one, append a single muted closer indicating
+  // there are no further preferences. If none are selected at all, show a
+  // single line saying so.
+  const validCourses = courses.filter(c => c && (c.course_name || c.campus_name || c.program_category));
+  if (validCourses.length === 0) {
+    ctx.page.drawRectangle({
+      x: ctx.margin, y: ctx.y - 18, width: leftW, height: 18,
+      color: rgb(0.97, 0.97, 0.99), borderColor: COLORS.border, borderWidth: 0.5,
+    });
+    ctx.page.drawText("No Course Preferences Selected", {
+      x: ctx.margin + 8, y: ctx.y - 12, size: 9, font: bold, color: COLORS.muted,
+    });
+    ctx.y -= 18;
+  } else {
+    validCourses.forEach((c, i) => {
       drawPrefHeader(`Preference ${i + 1}`);
       drawPrefRow([
         { label: "Course Category", value: norm(c.program_category), w: leftW * 0.22 },
         { label: "Course Name",     value: norm(c.course_name),      w: leftW * 0.52 },
         { label: "Campus",          value: norm(c.campus_name),      w: leftW * 0.26 },
       ]);
-    } else {
-      ctx.page.drawRectangle({
-        x: ctx.margin, y: ctx.y - 18, width: leftW, height: 18,
-        color: rgb(0.97, 0.97, 0.99), borderColor: COLORS.border, borderWidth: 0.5,
-      });
-      ctx.page.drawText(`Preference ${i + 1}: Not Opted`, {
-        x: ctx.margin + 8, y: ctx.y - 12, size: 9, font: bold, color: COLORS.muted,
-      });
-      ctx.y -= 18;
-    }
+    });
+    // Closer row.
+    ctx.page.drawRectangle({
+      x: ctx.margin, y: ctx.y - 18, width: leftW, height: 18,
+      color: rgb(0.97, 0.97, 0.99), borderColor: COLORS.border, borderWidth: 0.5,
+    });
+    ctx.page.drawText("Additional Course Preferences: Not Selected", {
+      x: ctx.margin + 8, y: ctx.y - 12, size: 9, font: bold, color: COLORS.muted,
+    });
+    ctx.y -= 18;
   }
 
   // Sync ctx.y to whichever column ended lower.
