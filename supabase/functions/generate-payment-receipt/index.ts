@@ -1,5 +1,17 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { PDFDocument, rgb, StandardFonts } from "https://esm.sh/pdf-lib@1.17.1";
+import { PDFDocument, PDFImage, rgb, StandardFonts } from "https://esm.sh/pdf-lib@1.17.1";
+
+async function fetchImage(pdf: PDFDocument, url: string | null): Promise<PDFImage | null> {
+  if (!url) return null;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    const ct = r.headers.get("content-type") || "";
+    if (ct.includes("png") || url.toLowerCase().endsWith(".png")) return await pdf.embedPng(bytes);
+    return await pdf.embedJpg(bytes);
+  } catch { return null; }
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -38,6 +50,7 @@ async function buildReceiptPdf(opts: {
   application_id: string | null;
   pre_admission_no: string | null;
   admission_no: string | null;
+  branding?: any;
 }): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
   const page = pdf.addPage([595, 842]); // A4
@@ -45,17 +58,30 @@ async function buildReceiptPdf(opts: {
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
 
-  let y = height - 60;
   const margin = 50;
+  let y = height - 60;
+  const lh = await fetchImage(pdf, opts.branding?.letterhead_url ?? null);
+  if (lh) {
+    // Letterhead occupies the page; body starts ~140pt from top, ends 90pt from bottom.
+    page.drawImage(lh, { x: 0, y: 0, width, height });
+    y = height - 150;
+  } else {
+    page.drawRectangle({ x: 0, y: height - 80, width, height: 80, color: rgb(0.07, 0.09, 0.18) });
+    page.drawText(opts.branding?.name || "NIMT Educational Institutions", { x: margin, y: height - 38, size: 18, font: bold, color: rgb(1,1,1) });
+    page.drawText("Payment Receipt", { x: margin, y: height - 60, size: 11, font, color: rgb(0.85,0.88,0.95) });
 
-  page.drawRectangle({ x: 0, y: height - 80, width, height: 80, color: rgb(0.07, 0.09, 0.18) });
-  page.drawText("NIMT Educational Institutions", { x: margin, y: height - 38, size: 18, font: bold, color: rgb(1,1,1) });
-  page.drawText("Payment Receipt", { x: margin, y: height - 60, size: 11, font, color: rgb(0.85,0.88,0.95) });
+    page.drawText(`Receipt No: ${opts.receipt_no}`, { x: width - margin - 180, y: height - 38, size: 11, font: bold, color: rgb(1,1,1) });
+    page.drawText(`Date: ${opts.payment_date}`, { x: width - margin - 180, y: height - 56, size: 10, font, color: rgb(0.85,0.88,0.95) });
 
-  page.drawText(`Receipt No: ${opts.receipt_no}`, { x: width - margin - 180, y: height - 38, size: 11, font: bold, color: rgb(1,1,1) });
-  page.drawText(`Date: ${opts.payment_date}`, { x: width - margin - 180, y: height - 56, size: 10, font, color: rgb(0.85,0.88,0.95) });
-
-  y = height - 120;
+    y = height - 120;
+  }
+  // When a letterhead is in use, render receipt-no/date inside the body.
+  if (lh) {
+    page.drawText(`Receipt No: ${opts.receipt_no}`, { x: width - margin - 180, y, size: 11, font: bold, color: rgb(0.07,0.09,0.18) });
+    page.drawText(`Date: ${opts.payment_date}`, { x: width - margin - 180, y: y - 14, size: 10, font, color: rgb(0.4,0.4,0.4) });
+    page.drawText("Payment Receipt", { x: margin, y, size: 14, font: bold, color: rgb(0.07,0.09,0.18) });
+    y -= 30;
+  }
   page.drawText("Received from", { x: margin, y, size: 9, font, color: rgb(0.45,0.45,0.45) });
   y -= 16;
   page.drawText(opts.applicant_name, { x: margin, y, size: 14, font: bold, color: rgb(0.07,0.09,0.18) });
@@ -122,11 +148,13 @@ async function buildReceiptPdf(opts: {
     x: margin, y, size: 9, font, color: rgb(0.5,0.5,0.5),
   });
 
-  // Footer band
-  page.drawRectangle({ x: 0, y: 0, width, height: 30, color: rgb(0.07, 0.09, 0.18) });
-  page.drawText("UniOs · NIMT Educational Institutions", {
-    x: margin, y: 11, size: 9, font, color: rgb(0.85,0.88,0.95),
-  });
+  // Footer band — only render when no letterhead is present (letterhead carries its own footer).
+  if (!opts.branding?.letterhead_url) {
+    page.drawRectangle({ x: 0, y: 0, width, height: 30, color: rgb(0.07, 0.09, 0.18) });
+    page.drawText("UniOs · " + (opts.branding?.name || "NIMT Educational Institutions"), {
+      x: margin, y: 11, size: 9, font, color: rgb(0.85,0.88,0.95),
+    });
+  }
 
   return await pdf.save();
 }
@@ -183,6 +211,9 @@ Deno.serve(async (req) => {
       day: "numeric", month: "short", year: "numeric",
     });
 
+    // Resolve branding (campus → branding_slug → row, fallback to default).
+    const { data: branding } = await admin.rpc("lead_branding" as any, { _lead_id: lead?.id });
+
     // Build PDF.
     const pdfBytes = await buildReceiptPdf({
       receipt_no:      lp.receipt_no || "—",
@@ -199,6 +230,7 @@ Deno.serve(async (req) => {
       application_id:  lead?.application_id || null,
       pre_admission_no: lead?.pre_admission_no || null,
       admission_no:    lead?.admission_no || null,
+      branding,
     });
 
     // Upload (overwrite is fine — receipt content is immutable per receipt_no).

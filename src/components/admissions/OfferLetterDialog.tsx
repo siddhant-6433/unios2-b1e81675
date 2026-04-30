@@ -32,6 +32,7 @@ interface OfferLetter {
   accepted_at: string | null;
   created_at: string;
   session_id?: string | null;
+  letter_url?: string | null;
 }
 
 interface SessionOption { id: string; name: string; is_active: boolean }
@@ -84,7 +85,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
 
     if (!form.session_id) { toast({ title: "Pick an academic session", variant: "destructive" }); setSaving(false); return; }
 
-    const { error } = await supabase.from("offer_letters").insert({
+    const { data: insertedOffer, error } = await supabase.from("offer_letters").insert({
       lead_id: leadId,
       total_fee: totalFee,
       scholarship_amount: scholarship,
@@ -97,7 +98,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       approval_status: approvalStatus,
       approved_by: autoApproved ? user?.id || null : null,
       approved_at: autoApproved ? new Date().toISOString() : null,
-    } as any);
+    } as any).select("id").single();
 
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); }
     else {
@@ -111,9 +112,15 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
           ? `Offer letter issued: ₹${(totalFee - scholarship).toLocaleString("en-IN")} (Scholarship: ₹${scholarship.toLocaleString("en-IN")})`
           : `Offer letter submitted for principal approval: ₹${(totalFee - scholarship).toLocaleString("en-IN")}`,
       });
+      // If approved on create, generate the PDF immediately. The trigger
+      // already mirrored session_id and recomputed token_amount on the lead.
+      if (autoApproved && insertedOffer?.id) {
+        supabase.functions.invoke("generate-offer-letter", { body: { offer_letter_id: insertedOffer.id } }).catch(() => {});
+      }
+
       toast({
         title: autoApproved ? "Offer letter created" : "Offer submitted for approval",
-        description: autoApproved ? undefined : "Principal will review and approve this offer.",
+        description: autoApproved ? "PDF will be ready in a few seconds." : "Principal will review and approve this offer.",
       });
       setShowForm(false);
       setForm({ total_fee: "", scholarship_amount: "0", acceptance_deadline: "", session_id: "" });
@@ -148,6 +155,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
         lead_id: leadId, user_id: user?.id || null, type: "offer",
         description: `Offer letter approved by ${role === "principal" ? "principal" : "super admin"}`,
       });
+      // Fire the PDF generator now that the offer is officially approved.
+      supabase.functions.invoke("generate-offer-letter", { body: { offer_letter_id: offerId } }).catch(() => {});
     } else {
       await supabase.from("lead_activities").insert({
         lead_id: leadId, user_id: user?.id || null, type: "offer",
@@ -283,10 +292,22 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                           )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                      <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground flex-wrap">
                         <span>Issued: {new Date(offer.created_at).toLocaleDateString("en-IN")}</span>
                         {offer.acceptance_deadline && <span>Deadline: {new Date(offer.acceptance_deadline).toLocaleDateString("en-IN")}</span>}
                         {offer.accepted_at && <span>Accepted: {new Date(offer.accepted_at).toLocaleDateString("en-IN")}</span>}
+                        {offer.letter_url && (
+                          <a href={offer.letter_url} target="_blank" rel="noopener" className="text-primary hover:underline">Download PDF</a>
+                        )}
+                        {!offer.letter_url && offer.approval_status === "approved" && (
+                          <button
+                            onClick={async () => {
+                              await supabase.functions.invoke("generate-offer-letter", { body: { offer_letter_id: offer.id } });
+                              setTimeout(fetchOffers, 1500);
+                            }}
+                            className="text-primary hover:underline"
+                          >Generate PDF</button>
+                        )}
                       </div>
                       {offer.rejection_reason && (
                         <p className="text-xs text-destructive mt-1">Rejection: {offer.rejection_reason}</p>

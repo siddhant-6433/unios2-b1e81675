@@ -45,6 +45,9 @@ verify_jwt = false
 [functions.submit-whatsapp-template]
 verify_jwt = false
 
+[functions.generate-offer-letter]
+verify_jwt = false
+
 [functions.visit-reminders]
 verify_jwt = false
 

@@ -24,6 +24,7 @@ import CourseCampusMaster from "@/components/admin/CourseCampusMaster";
 import FinancialGroupsPanel from "@/components/admin/FinancialGroupsPanel";
 import PaymentGatewaysPanel from "@/components/admin/PaymentGatewaysPanel";
 import ApprovalLettersPanel from "@/components/admin/ApprovalLettersPanel";
+import { BrandingPanel } from "@/components/admin/BrandingPanel";
 import CampusGeofencePanel from "@/components/admin/CampusGeofencePanel";
 import FaceApprovalPanel from "@/components/admin/FaceApprovalPanel";
 import type { Database } from "@/integrations/supabase/types";
@@ -364,6 +365,9 @@ const AdminPanel = () => {
           </TabsTrigger>
           <TabsTrigger value="approval-letters" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
             Approval Letters
+          </TabsTrigger>
+          <TabsTrigger value="branding" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
+            Branding
           </TabsTrigger>
           <TabsTrigger value="face-approval" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
             Face ID
@@ -811,6 +815,10 @@ const AdminPanel = () => {
 
         <TabsContent value="approval-letters" className="mt-6">
           <ApprovalLettersPanel />
+        </TabsContent>
+
+        <TabsContent value="branding" className="mt-6">
+          <BrandingPanel />
         </TabsContent>
 
         <TabsContent value="face-approval" className="mt-6">

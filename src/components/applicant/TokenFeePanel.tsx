@@ -58,6 +58,7 @@ interface Offer {
   status: string;
   acceptance_deadline: string | null;
   created_at: string;
+  letter_url: string | null;
 }
 
 interface Props {
@@ -93,7 +94,7 @@ export function TokenFeePanel({ applicationId, applicantName, applicantPhone, ap
     const [{ data: status }, { data: offerRows }] = await Promise.all([
       supabase.rpc("lead_fee_status" as any, { _lead_id: leadRow.id }),
       supabase.from("offer_letters")
-        .select("id, total_fee, scholarship_amount, net_fee, approval_status, status, acceptance_deadline, created_at")
+        .select("id, total_fee, scholarship_amount, net_fee, approval_status, status, acceptance_deadline, created_at, letter_url")
         .eq("lead_id", leadRow.id)
         .eq("approval_status", "approved")
         .order("created_at", { ascending: false })
@@ -192,10 +193,15 @@ export function TokenFeePanel({ applicationId, applicantName, applicantPhone, ap
 
   return (
     <div className="mt-4 rounded-2xl border border-primary/20 bg-primary/5 p-4 space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
           <FileText className="h-4 w-4 text-primary" />
           <span className="text-sm font-semibold text-gray-900">Offer Letter Issued</span>
+          {offer.letter_url && (
+            <a href={offer.letter_url} target="_blank" rel="noopener" className="text-xs text-primary hover:underline">
+              Download PDF
+            </a>
+          )}
         </div>
         <span className="text-xs text-gray-500">
           {offer.acceptance_deadline ? `Accept by ${new Date(offer.acceptance_deadline).toLocaleDateString("en-IN")}` : ""}
