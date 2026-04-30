@@ -520,9 +520,7 @@ async function buildApplicationPdfInline(
   };
   await newPage(ctx);
 
-  // ── HEADER: App-No badge + photo at top-right; title + session left of them ──
-
-  // Green rounded App-No badge (no border, bold, large).
+  // ── App-No badge OVER the letterhead band, top-right ──
   const badgeFontSize = 14;
   const badgePadX = 16;
   const badgePadY = 8;
@@ -531,28 +529,58 @@ async function buildApplicationPdfInline(
   const badgeW = badgeTextW + badgePadX * 2;
   const badgeH = badgeFontSize + badgePadY * 2;
   const badgeX = ctx.width - ctx.margin - badgeW;
-  const badgeY = ctx.contentStart - 2; // top edge
-  // Rounded rectangle: pdf-lib doesn't have border-radius, so simulate with a
-  // rectangle + two end-circles for pill shape.
-  const badgeColor = rgb(0.20, 0.69, 0.39); // tailwind emerald-600 ≈ #22c55e
+  // Sit ON the letterhead band, not below it: 18pt down from the page edge.
+  const badgeY = ctx.height - 18;
+  const badgeColor = rgb(0.20, 0.69, 0.39);
   ctx.page.drawRectangle({
     x: badgeX + badgeH / 2, y: badgeY - badgeH,
     width: badgeW - badgeH, height: badgeH,
     color: badgeColor,
   });
-  ctx.page.drawCircle({ x: badgeX + badgeH / 2,             y: badgeY - badgeH / 2, size: badgeH / 2, color: badgeColor });
-  ctx.page.drawCircle({ x: badgeX + badgeW - badgeH / 2,    y: badgeY - badgeH / 2, size: badgeH / 2, color: badgeColor });
+  ctx.page.drawCircle({ x: badgeX + badgeH / 2,          y: badgeY - badgeH / 2, size: badgeH / 2, color: badgeColor });
+  ctx.page.drawCircle({ x: badgeX + badgeW - badgeH / 2, y: badgeY - badgeH / 2, size: badgeH / 2, color: badgeColor });
   ctx.page.drawText(badgeText, {
     x: badgeX + badgePadX,
     y: badgeY - badgePadY - badgeFontSize + 2,
     size: badgeFontSize, font: bold, color: rgb(1, 1, 1),
   });
 
-  // Photo box right-aligned, below the badge.
-  const photoW = 86, photoH = 110;
-  const photoX = ctx.width - ctx.margin - photoW;
-  const photoY = badgeY - badgeH - 8; // top of photo
-  ctx.page.drawRectangle({ x: photoX, y: photoY - photoH, width: photoW, height: photoH, color: rgb(1,1,1), borderColor: COLORS.border, borderWidth: 0.5 });
+  // ── Title + session line, full-width centered (no photo conflict) ──
+  const titleText = "ADMISSION APPLICATION FORM";
+  const titleW = bold.widthOfTextAtSize(titleText, 14);
+  ctx.page.drawText(titleText, {
+    x: (ctx.width - titleW) / 2, y: ctx.y - 14, size: 14, font: bold, color: COLORS.text,
+  });
+  ctx.y -= 22;
+  if (sessionName) {
+    const sessText = `Applying for Session: ${sessionName.toUpperCase()}`;
+    const sessW = font.widthOfTextAtSize(sessText, 10);
+    ctx.page.drawText(sessText, {
+      x: (ctx.width - sessW) / 2, y: ctx.y - 12, size: 10, font, color: COLORS.muted,
+    });
+    ctx.y -= 18;
+  }
+  ctx.y -= 6;
+
+  // ── COURSE PREFERENCES + PHOTO (split layout) ──
+  const courses: any[] = Array.isArray(app.course_selections) ? app.course_selections : [];
+  drawSection(ctx, "Course Preferences");
+
+  const totalRowW = ctx.width - ctx.margin*2;
+  const leftW  = totalRowW * 0.65;
+  const rightW = totalRowW - leftW - 12; // 12pt gutter
+
+  const blockTop = ctx.y;
+
+  // Photo box on the right column, top-aligned with the prefs band.
+  const photoW = Math.min(110, rightW);
+  const photoH = Math.round(photoW * 1.3);
+  const photoX = ctx.margin + leftW + 12 + (rightW - photoW) / 2;
+  const photoY = blockTop - 4;
+  ctx.page.drawRectangle({
+    x: photoX, y: photoY - photoH, width: photoW, height: photoH,
+    color: rgb(1,1,1), borderColor: COLORS.border, borderWidth: 0.5,
+  });
   if (photoImg) {
     ctx.page.drawImage(photoImg, { x: photoX + 1, y: photoY - photoH + 1, width: photoW - 2, height: photoH - 2 });
   } else {
@@ -561,49 +589,50 @@ async function buildApplicationPdfInline(
     ctx.page.drawText("Photograph Here",   { x: photoX + 6, y: photoY - 50, size: 7, font, color: COLORS.muted });
   }
 
-  // Title + session line left of the photo column.
-  const rightColX = Math.min(badgeX, photoX) - 12;
-  const titleArea = rightColX - ctx.margin;
-  const titleText = "ADMISSION APPLICATION FORM";
-  const titleW = bold.widthOfTextAtSize(titleText, 14);
-  const titleX = ctx.margin + Math.max(0, (titleArea - titleW) / 2);
-  ctx.page.drawText(titleText, { x: titleX, y: ctx.y - 36, size: 14, font: bold, color: COLORS.text });
+  // Render preferences confined to the left column.
+  const drawPrefHeader = (label: string) => {
+    ctx.page.drawRectangle({
+      x: ctx.margin, y: ctx.y - 14, width: leftW, height: 14,
+      color: COLORS.labelBg, borderColor: COLORS.border, borderWidth: 0.5,
+    });
+    ctx.page.drawText(label, { x: ctx.margin + 4, y: ctx.y - 11, size: 7.5, font: bold, color: COLORS.text });
+    ctx.y -= 14;
+  };
+  const drawPrefRow = (cols: { label: string; value: string; w: number }[]) => {
+    let xCur = ctx.margin;
+    for (const c of cols) {
+      ctx.page.drawRectangle({ x: xCur, y: ctx.y - 14, width: c.w, height: 14, color: COLORS.labelBg, borderColor: COLORS.border, borderWidth: 0.5 });
+      ctx.page.drawText(c.label, { x: xCur + 4, y: ctx.y - 11, size: 7.5, font: bold, color: COLORS.text });
+      xCur += c.w;
+    }
+    ctx.y -= 14;
+    let maxLines = 1;
+    for (const c of cols) {
+      const lines = wrapText(c.value || "", ctx.bold, 8.5, c.w - 8, 5);
+      if (lines.length > maxLines) maxLines = lines.length;
+    }
+    const rowH = Math.max(22, 10 + maxLines * 10.5);
+    xCur = ctx.margin;
+    for (const c of cols) {
+      drawCell(ctx, xCur, ctx.y, c.w, rowH, "", c.value, { maxLines: 5 });
+      xCur += c.w;
+    }
+    ctx.y -= rowH;
+  };
 
-  let titleBlockBottom = ctx.y - 50;
-  if (sessionName) {
-    const sessText = `Applying for Session: ${sessionName.toUpperCase()}`;
-    const sessW = font.widthOfTextAtSize(sessText, 10);
-    const sessX = ctx.margin + Math.max(0, (titleArea - sessW) / 2);
-    ctx.page.drawText(sessText, { x: sessX, y: ctx.y - 56, size: 10, font, color: COLORS.muted });
-    titleBlockBottom = ctx.y - 70;
-  }
-
-  ctx.y = Math.min(titleBlockBottom, photoY - photoH - 8);
-
-  // ── COURSE PREFERENCES ─────────────────────────────────────────────
-  const courses: any[] = Array.isArray(app.course_selections) ? app.course_selections : [];
-  drawSection(ctx, "Course Preferences");
-  const prefHdr = [
-    { label: "Course Category", w: (ctx.width - ctx.margin*2) * 0.20 },
-    { label: "Course Name",     w: (ctx.width - ctx.margin*2) * 0.50 },
-    { label: "Campus",          w: (ctx.width - ctx.margin*2) * 0.30 },
-  ];
   for (let i = 0; i < 3; i++) {
     const c = courses[i] || {};
     const hasContent = !!(c.course_name || c.campus_name || c.program_category);
     if (hasContent) {
-      drawHeaderRow(ctx, [{ label: `Preference ${i + 1}`, w: ctx.width - ctx.margin*2 }], 14);
-      drawHeaderRow(ctx, prefHdr, 14);
-      drawValueRow(ctx, [
-        { value: norm(c.program_category), w: prefHdr[0].w },
-        { value: norm(c.course_name),      w: prefHdr[1].w },
-        { value: norm(c.campus_name),      w: prefHdr[2].w },
-      ], 26);
+      drawPrefHeader(`Preference ${i + 1}`);
+      drawPrefRow([
+        { label: "Course Category", value: norm(c.program_category), w: leftW * 0.22 },
+        { label: "Course Name",     value: norm(c.course_name),      w: leftW * 0.52 },
+        { label: "Campus",          value: norm(c.campus_name),      w: leftW * 0.26 },
+      ]);
     } else {
-      // Preference left empty — single muted row instead of an empty table.
-      ensureSpace(ctx, 18);
       ctx.page.drawRectangle({
-        x: ctx.margin, y: ctx.y - 18, width: ctx.width - ctx.margin*2, height: 18,
+        x: ctx.margin, y: ctx.y - 18, width: leftW, height: 18,
         color: rgb(0.97, 0.97, 0.99), borderColor: COLORS.border, borderWidth: 0.5,
       });
       ctx.page.drawText(`Preference ${i + 1}: Not Opted`, {
@@ -612,6 +641,10 @@ async function buildApplicationPdfInline(
       ctx.y -= 18;
     }
   }
+
+  // Sync ctx.y to whichever column ended lower.
+  const photoBottom = photoY - photoH - 8;
+  if (photoBottom < ctx.y) ctx.y = photoBottom;
 
   // ── PERSONAL DETAILS ───────────────────────────────────────────────
   drawSection(ctx, "Personal Details");
