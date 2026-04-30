@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2, CreditCard, CheckCircle2, FileText, IndianRupee } from "lucide-react";
+import { LeadFeeLedger } from "@/components/finance/LeadFeeLedger";
 
 type FeeStatus = {
   first_year_fee: number;
@@ -73,6 +74,7 @@ export function TokenFeePanel({ applicationId, applicantName, applicantPhone, ap
   const [lead, setLead] = useState<Lead | null>(null);
   const [offer, setOffer] = useState<Offer | null>(null);
   const [feeStatus, setFeeStatus] = useState<FeeStatus | null>(null);
+  const [yearFees, setYearFees] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [payAmount, setPayAmount] = useState<string>("");
   const [paying, setPaying] = useState(false);
@@ -91,7 +93,7 @@ export function TokenFeePanel({ applicationId, applicantName, applicantPhone, ap
     if (!leadRow) { setLoading(false); return; }
     setLead(leadRow as Lead);
 
-    const [{ data: status }, { data: offerRows }] = await Promise.all([
+    const [{ data: status }, { data: offerRows }, { data: yearMap }] = await Promise.all([
       supabase.rpc("lead_fee_status" as any, { _lead_id: leadRow.id }),
       supabase.from("offer_letters")
         .select("id, total_fee, scholarship_amount, net_fee, approval_status, status, acceptance_deadline, created_at, letter_url")
@@ -99,9 +101,15 @@ export function TokenFeePanel({ applicationId, applicantName, applicantPhone, ap
         .eq("approval_status", "approved")
         .order("created_at", { ascending: false })
         .limit(1),
+      supabase.rpc("lead_year_fees" as any, { _lead_id: leadRow.id }),
     ]);
     if (status) setFeeStatus(status as FeeStatus);
     if (offerRows && offerRows.length > 0) setOffer(offerRows[0] as Offer);
+    if (yearMap && typeof yearMap === "object") {
+      const norm: Record<string, number> = {};
+      Object.entries(yearMap as Record<string, any>).forEach(([k, v]) => { norm[k] = Number(v); });
+      setYearFees(norm);
+    }
     setLoading(false);
   };
 
@@ -387,14 +395,26 @@ export function TokenFeePanel({ applicationId, applicantName, applicantPhone, ap
               </div>
               <button
                 disabled={paying || !applicantPhone}
-                onClick={() => startPayment(feeStatus.full_course_amount_due || 0, {
-                  paymentType: "other",
-                  productinfo: "Full course fee (with waivers)",
-                  concession: feeStatus.full_course_discount || 0,
-                  reason: inWindow
-                    ? `Full course: ${feeStatus.lump_sum_pct}% lump + ${feeStatus.multi_year_pct}% multi-year (within window)`
-                    : `Full course: ${feeStatus.lump_sum_pct}% lump (window expired)`,
-                })}
+                onClick={() => {
+                  // Precise per-year concession: lump on year_1, (lump+multi)
+                  // on later years if still inside the window.
+                  const lump  = (feeStatus.lump_sum_pct || 0) / 100;
+                  const multi = (feeStatus.multi_year_pct || 0) / 100;
+                  const breakdown: Record<string, number> = {};
+                  Object.entries(yearFees).forEach(([term, fee]) => {
+                    const pct = term === "year_1" ? lump : lump + (inWindow ? multi : 0);
+                    if (pct > 0) breakdown[term] = Math.round(fee * pct);
+                  });
+                  startPayment(feeStatus.full_course_amount_due || 0, {
+                    paymentType: "other",
+                    productinfo: "Full course fee (with waivers)",
+                    concession: feeStatus.full_course_discount || 0,
+                    reason: inWindow
+                      ? `Full course: ${feeStatus.lump_sum_pct}% lump + ${feeStatus.multi_year_pct}% multi-year (within window)`
+                      : `Full course: ${feeStatus.lump_sum_pct}% lump (window expired)`,
+                    concessionBreakdown: Object.keys(breakdown).length ? breakdown : undefined,
+                  });
+                }}
                 className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
               >
                 {paying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
@@ -406,6 +426,19 @@ export function TokenFeePanel({ applicationId, applicantName, applicantPhone, ap
       })()}
 
       {error && <p className="text-xs text-red-600">{error}</p>}
+
+      {/* Once a student row exists (PAN issued), show the full fee ledger
+          so the candidate sees every line item paid + outstanding. */}
+      {(isPreAdmitted || isAdmitted) && (
+        <details className="mt-2">
+          <summary className="cursor-pointer text-xs font-medium text-gray-700 hover:text-gray-900">
+            View fee ledger ({isAdmitted ? "admission confirmed" : "pre-admission"})
+          </summary>
+          <div className="mt-2">
+            <LeadFeeLedger leadId={lead.id} />
+          </div>
+        </details>
+      )}
     </div>
   );
 }

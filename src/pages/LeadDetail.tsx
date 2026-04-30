@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { TransferLeadDialog } from "@/components/admissions/TransferLeadDialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -30,7 +31,7 @@ import { ScheduleVisitDialog } from "@/components/admissions/ScheduleVisitDialog
 import { ScheduleFollowupDialog } from "@/components/admissions/ScheduleFollowupDialog";
 import { CallDispositionDialog, type CallDispositionData } from "@/components/admissions/CallDispositionDialog";
 import { RecordPaymentDialog } from "@/components/admissions/RecordPaymentDialog";
-import { LeadPaymentHistory } from "@/components/admissions/LeadPaymentHistory";
+import { LeadFeeLedger } from "@/components/finance/LeadFeeLedger";
 import { FuzzyDuplicateAlert } from "@/components/admissions/FuzzyDuplicateAlert";
 import { ApplicationProgress } from "@/components/leads/ApplicationProgress";
 import { FeeStructureViewer } from "@/components/finance/FeeStructureViewer";
@@ -118,6 +119,7 @@ const LeadDetail = () => {
   const [deletingLead, setDeletingLead] = useState(false);
   const [showNotInterested, setShowNotInterested] = useState(false);
   const [notInterestedReason, setNotInterestedReason] = useState("");
+  const [notInterestedCategory, setNotInterestedCategory] = useState<"lead" | "job_applicant" | "vendor" | "other">("lead");
   const [savingNotInterested, setSavingNotInterested] = useState(false);
   const [counsellorName, setCounsellorName] = useState<string | undefined>();
   const [courseName, setCourseName] = useState<string | undefined>();
@@ -274,15 +276,17 @@ const LeadDetail = () => {
     }
 
     // 4. Auto-send WhatsApp to lead based on disposition (fire-and-forget)
+    // Uses UTILITY templates (admissions_followup_update) which work outside the 24-hour window
+    // MARKETING templates (ai_call_course_info) may fail if conversation window expired
     if (lead.phone) {
       const course = courseName || "your selected course";
       let autoTemplate: string | null = null;
       let autoParams: string[] = [];
 
       if (data.disposition === "interested") {
-        autoTemplate = "ai_call_course_info";
-        const campusLabel = campusName || "NIMT campus";
-        autoParams = [lead.name, course, campusLabel, "https://www.nimt.ac.in/courses", "https://uni.nimt.ac.in/apply/nimt"];
+        // Use utility template (always delivers) instead of marketing template
+        autoTemplate = "callback_scheduled";
+        autoParams = [lead.name, course];
       } else if (data.disposition === "not_answered" || data.disposition === "busy" || data.disposition === "voicemail") {
         autoTemplate = "missed_call";
         autoParams = [lead.name, course];
@@ -293,19 +297,32 @@ const LeadDetail = () => {
 
       if (autoTemplate) {
         setDispositionWaSent(true);
-        supabase.functions.invoke("whatsapp-send", {
-          body: {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const accessToken = sessionData.session?.access_token;
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+        fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken || anonKey}`,
+            apikey: anonKey,
+          },
+          body: JSON.stringify({
             template_key: autoTemplate,
             phone: lead.phone,
             params: autoParams,
             lead_id: id,
-          },
-        }).then(({ error, data }) => {
-          if (error || data?.error) {
-            const detail = data?.error || data?.meta_error || error?.message || "Unknown error";
-            console.error("Auto WA after disposition failed:", detail);
-            toast({ title: "Auto WhatsApp failed", description: detail, variant: "destructive" });
+          }),
+        }).then(async res => {
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            console.error("Auto WA after disposition failed:", body);
+            toast({ title: "Auto WhatsApp failed", description: body?.error || body?.meta_error || `HTTP ${res.status}`, variant: "destructive" });
           }
+        }).catch(e => {
+          console.error("Auto WA exception:", e);
         });
       }
     }
@@ -678,8 +695,12 @@ const LeadDetail = () => {
     if (!id) return;
     setSavingNotInterested(true);
 
-    // Update lead stage to not_interested
-    const { error: stageErr } = await supabase.from("leads").update({ stage: "not_interested" } as any).eq("id", id);
+    // Update lead stage + category (lock to prevent auto-override)
+    const { error: stageErr } = await supabase.from("leads").update({
+      stage: "not_interested",
+      person_role: notInterestedCategory,
+      category_locked: true,
+    } as any).eq("id", id);
     if (stageErr) {
       toast({ title: "Error", description: stageErr.message, variant: "destructive" });
       setSavingNotInterested(false);
@@ -696,7 +717,7 @@ const LeadDetail = () => {
     // Add reason as a note
     await supabase.from("lead_notes").insert({
       lead_id: id,
-      content: `[Not Interested] ${notInterestedReason.trim()}`,
+      content: `[Not Interested${notInterestedCategory !== "lead" ? ` — ${notInterestedCategory.replace("_", " ")}` : ""}] ${notInterestedReason.trim()}`,
       created_by: profileId,
     } as any);
 
@@ -704,7 +725,7 @@ const LeadDetail = () => {
     await supabase.from("lead_activities").insert({
       lead_id: id,
       type: "stage_change",
-      description: `Marked as Not Interested: ${notInterestedReason.trim()}`,
+      description: `Marked as Not Interested${notInterestedCategory !== "lead" ? ` (${notInterestedCategory.replace("_", " ")})` : ""}: ${notInterestedReason.trim()}`,
       performed_by: profileId,
     } as any);
 
@@ -913,7 +934,12 @@ const LeadDetail = () => {
             onTokenPaidOverride={() => setShowTokenOverride(true)}
           />
           <FuzzyDuplicateAlert leadId={lead.id} leadName={lead.name} leadPhone={lead.phone} leadEmail={lead.email} />
-          <LeadPaymentHistory leadId={lead.id} refreshKey={paymentRefreshKey} />
+          <Card className="border-border/60">
+            <CardContent className="p-4 space-y-3">
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Fee Ledger</h3>
+              <LeadFeeLedger leadId={lead.id} refreshKey={paymentRefreshKey} />
+            </CardContent>
+          </Card>
           {lead.course_id && (
             <Card className="border-border/60">
               <CardContent className="p-4">
@@ -989,6 +1015,45 @@ const LeadDetail = () => {
               </div>
             );
           })()}
+
+          {/* Previous Call Notes */}
+          {callLogs.length > 0 && (
+            <Card className="border-border/60 shadow-none">
+              <CardContent className="p-4">
+                <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                  <FileText className="h-3 w-3" />Previous Call Notes ({callLogs.length})
+                </p>
+                <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                  {callLogs.map((c: any) => (
+                    <div key={c.id} className="flex items-start gap-2 text-xs border-l-2 border-amber-200 pl-2.5 py-1">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge className={`text-[9px] border-0 shrink-0 ${
+                            c.disposition === "interested" ? "bg-emerald-100 text-emerald-700" :
+                            c.disposition === "not_interested" ? "bg-red-100 text-red-700" :
+                            c.disposition === "not_answered" ? "bg-amber-100 text-amber-700" :
+                            c.disposition === "busy" ? "bg-orange-100 text-orange-700" :
+                            c.disposition === "cancelled" ? "bg-gray-100 text-gray-600" :
+                            "bg-gray-100 text-gray-600"
+                          }`}>{c.disposition?.replace(/_/g, " ") || "—"}</Badge>
+                          <span className="text-muted-foreground text-[10px]">
+                            {new Date(c.called_at || c.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                            {" "}
+                            {new Date(c.called_at || c.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                          </span>
+                          {c.duration_seconds > 0 && (
+                            <span className="text-muted-foreground text-[10px]">({Math.floor(c.duration_seconds / 60)}m{c.duration_seconds % 60}s)</span>
+                          )}
+                          <Badge className="text-[9px] border-0 bg-gray-50 text-gray-500">{c.direction || "outbound"}</Badge>
+                        </div>
+                        {c.notes && <p className="text-muted-foreground mt-0.5 leading-snug">{c.notes}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* AI Call Summary */}
           <AiCallSummary leadId={id!} />
@@ -1218,7 +1283,7 @@ const LeadDetail = () => {
       />
 
       {/* Not Interested Dialog */}
-      <AlertDialog open={showNotInterested} onOpenChange={(o) => { if (!savingNotInterested) { setShowNotInterested(o); if (!o) setNotInterestedReason(""); } }}>
+      <AlertDialog open={showNotInterested} onOpenChange={(o) => { if (!savingNotInterested) { setShowNotInterested(o); if (!o) { setNotInterestedReason(""); setNotInterestedCategory("lead"); } } }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
@@ -1228,16 +1293,37 @@ const LeadDetail = () => {
               This will move <strong>{lead.name}</strong> to <strong>Not Interested</strong>. Please provide a reason (minimum 5 words).
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <div className="py-2">
-            <textarea
-              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 min-h-[90px] resize-none"
-              placeholder="e.g. Parent decided to go with another school due to distance"
-              value={notInterestedReason}
-              onChange={e => setNotInterestedReason(e.target.value)}
-            />
-            <p className={`text-[11px] mt-1 ${notInterestedReason.trim().split(/\s+/).filter(Boolean).length >= 5 ? "text-muted-foreground" : "text-destructive"}`}>
-              {notInterestedReason.trim().split(/\s+/).filter(Boolean).length}/5 words minimum
-            </p>
+          <div className="py-2 space-y-3">
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-1.5">Category</p>
+              <div className="flex flex-wrap gap-1.5">
+                {([
+                  { value: "lead", label: "Admission Enquiry", color: "bg-blue-100 text-blue-700 border-blue-300" },
+                  { value: "job_applicant", label: "Job Applicant", color: "bg-purple-100 text-purple-700 border-purple-300" },
+                  { value: "vendor", label: "Vendor", color: "bg-amber-100 text-amber-700 border-amber-300" },
+                  { value: "other", label: "Other", color: "bg-gray-100 text-gray-600 border-gray-300" },
+                ] as const).map(cat => (
+                  <button key={cat.value} type="button"
+                    onClick={() => setNotInterestedCategory(cat.value)}
+                    className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                      notInterestedCategory === cat.value ? `ring-2 ring-primary ${cat.color}` : `${cat.color} opacity-60 hover:opacity-100`
+                    }`}>
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <textarea
+                className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 min-h-[90px] resize-none"
+                placeholder="e.g. Parent decided to go with another school due to distance"
+                value={notInterestedReason}
+                onChange={e => setNotInterestedReason(e.target.value)}
+              />
+              <p className={`text-[11px] mt-1 ${notInterestedReason.trim().split(/\s+/).filter(Boolean).length >= 5 ? "text-muted-foreground" : "text-destructive"}`}>
+                {notInterestedReason.trim().split(/\s+/).filter(Boolean).length}/5 words minimum
+              </p>
+            </div>
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={savingNotInterested}>Cancel</AlertDialogCancel>
