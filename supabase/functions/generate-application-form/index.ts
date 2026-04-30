@@ -464,14 +464,15 @@ Deno.serve(async (req) => {
       };
     }
 
-    // Build PDF (embeds letterhead/photo/signature in the same doc).
+    // Build PDF (embeds letterhead/footer/photo/signature in the same doc).
     const p = await PDFDocument.create();
     const f = await p.embedFont(StandardFonts.Helvetica);
     const b = await p.embedFont(StandardFonts.HelveticaBold);
     const lh    = await fetchImage(p, branding?.letterhead_url ?? null);
+    const ftr   = await fetchImage(p, branding?.footer_url ?? null);
     const photo = await fetchImage(p, photoUrl);
     const sig   = await fetchImage(p, branding?.signature_url ?? null);
-    const out = await buildApplicationPdfInline(p, f, b, app, branding, lh, photo, sig, documents, appFeePayment, sessionName);
+    const out = await buildApplicationPdfInline(p, f, b, app, branding, lh, ftr, photo, sig, documents, appFeePayment, sessionName);
 
     const path = `applications/${app.application_id}.pdf`;
     const { error: upErr } = await admin.storage
@@ -502,7 +503,8 @@ Deno.serve(async (req) => {
 async function buildApplicationPdfInline(
   pdf: PDFDocument, font: any, bold: any,
   app: any, branding: any,
-  lhImg: PDFImage | null, photoImg: PDFImage | null, sigImg: PDFImage | null,
+  lhImg: PDFImage | null, footerImg: PDFImage | null,
+  photoImg: PDFImage | null, sigImg: PDFImage | null,
   documents: { name: string; url: string }[],
   appFeePayment: any = null,
   sessionName: string | null = null,
@@ -512,7 +514,7 @@ async function buildApplicationPdfInline(
     pdf, page: null, font, bold,
     width: 595, height: 842, margin: 36, y: 0,
     contentStart: 0, contentEnd: 0,
-    branding: { ...(branding || {}), _lh: lhImg },
+    branding: { ...(branding || {}), _lh: lhImg, _footer: footerImg },
     hasLetterhead: !!lhImg,
     flags,
   };
