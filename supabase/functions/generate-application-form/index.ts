@@ -47,6 +47,38 @@ const fmtDate = (d?: string | null) => {
   return dt.toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" });
 };
 
+// Friendly labels for document upload keys. Mirrors getRequiredDocs() in
+// src/components/apply/DocumentUpload.tsx.
+const DOC_KEY_LABELS: Record<string, string> = {
+  birth_certificate:      "Birth Certificate",
+  report_card:            "Previous Class Report Card",
+  student_photo:          "Student Photograph",
+  transfer_certificate:   "Transfer Certificate",
+  aadhaar:                "Aadhaar Card",
+  medical_record:         "Medical Record",
+  class_10_marksheet:     "Class 10 Marksheet",
+  class_10_certificate:   "Class 10 Pass Certificate",
+  class_12_marksheet:     "Class 12 Marksheet",
+  class_12_certificate:   "Class 12 Pass Certificate",
+  graduation_marksheet:   "Graduation Marksheet",
+  graduation_certificate: "Graduation Degree Certificate",
+};
+
+function docLabel(docKey: string): string {
+  if (DOC_KEY_LABELS[docKey]) return DOC_KEY_LABELS[docKey];
+  // additional_qual_<N>_marksheet
+  const addl = docKey.match(/^additional_qual_(\d+)_marksheet$/);
+  if (addl) return `Additional Qualification ${parseInt(addl[1]) + 1} Marksheet`;
+  // entrance_<exam>_scorecard
+  const exam = docKey.match(/^entrance_(.+)_scorecard$/);
+  if (exam) {
+    const examName = exam[1].replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+    return `${examName} Scorecard`;
+  }
+  // Fallback: title-case the key.
+  return docKey.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
 const upper = (s?: string | null) => (s ?? "").toString().toUpperCase().trim() || "-";
 // Display all data in CAPS - keeps the doc visually consistent and matches the
 // historical NIMT-UG application format.
@@ -364,8 +396,11 @@ Deno.serve(async (req) => {
         } else if (photoPattern.test(f.name)) {
           // Already picked a photo - skip duplicates.
         } else {
-          const stripped = f.name.replace(/^[a-z0-9_]+-/i, "");
-          documents.push({ name: stripped || f.name, url });
+          // File names are uploaded as `${docKey}-${original_filename}`. Pull
+          // the docKey out of the prefix and resolve to the friendly label.
+          const dashIdx = f.name.indexOf("-");
+          const docKey = dashIdx > 0 ? f.name.substring(0, dashIdx) : f.name.replace(/\.[^.]+$/, "");
+          documents.push({ name: docLabel(docKey), url });
         }
       }
     } catch (e) {
@@ -786,20 +821,32 @@ async function buildApplicationPdfInline(
   } else {
     const colsD = [
       { label: "#",             w: 24 },
-      { label: "Document Name", w: (ctx.width - ctx.margin*2 - 24) * 0.4 },
-      { label: "File",          w: (ctx.width - ctx.margin*2 - 24) * 0.6 },
+      { label: "Document Name", w: (ctx.width - ctx.margin*2 - 24) * 0.65 },
+      { label: "File",          w: (ctx.width - ctx.margin*2 - 24) * 0.35 },
     ];
     drawHeaderRow(ctx, colsD, 14);
     documents.forEach((d, i) => {
-      ensureSpace(ctx, 16);
-      drawCell(ctx, ctx.margin, ctx.y, colsD[0].w, 16, "", String(i + 1));
-      drawCell(ctx, ctx.margin + colsD[0].w, ctx.y, colsD[1].w, 16, "", d.name);
+      ensureSpace(ctx, 18);
+      drawCell(ctx, ctx.margin, ctx.y, colsD[0].w, 18, "", String(i + 1));
+      drawCell(ctx, ctx.margin + colsD[0].w, ctx.y, colsD[1].w, 18, "", d.name);
       const fileX = ctx.margin + colsD[0].w + colsD[1].w;
-      ctx.page.drawRectangle({ x: fileX, y: ctx.y - 16, width: colsD[2].w, height: 16, color: rgb(1,1,1), borderColor: COLORS.border, borderWidth: 0.5 });
-      const linkText = d.url.length > 70 ? d.url.slice(0, 70) + "..." : d.url;
-      ctx.page.drawText(linkText, { x: fileX + 4, y: ctx.y - 11, size: 7.5, font, color: COLORS.link });
-      addLinkAnnotation(ctx, fileX, ctx.y - 16, colsD[2].w, 16, d.url);
-      ctx.y -= 16;
+      ctx.page.drawRectangle({ x: fileX, y: ctx.y - 18, width: colsD[2].w, height: 18, color: rgb(1,1,1), borderColor: COLORS.border, borderWidth: 0.5 });
+      // Render "View Document" as a hyperlink — underlined blue text. The
+      // PDF Link annotation makes the cell area clickable in any reader.
+      const linkText = "View Document";
+      const linkSize = 9;
+      const linkX = fileX + 6;
+      const linkY = ctx.y - 12;
+      ctx.page.drawText(linkText, { x: linkX, y: linkY, size: linkSize, font: ctx.bold, color: COLORS.link });
+      // Underline.
+      const linkW = ctx.bold.widthOfTextAtSize(linkText, linkSize);
+      ctx.page.drawLine({
+        start: { x: linkX, y: linkY - 1.5 },
+        end:   { x: linkX + linkW, y: linkY - 1.5 },
+        thickness: 0.5, color: COLORS.link,
+      });
+      addLinkAnnotation(ctx, fileX, ctx.y - 18, colsD[2].w, 18, d.url);
+      ctx.y -= 18;
     });
   }
 
