@@ -964,6 +964,13 @@ const ApplyPortal = () => {
     setSubmitted(true);
     setSaving(false);
     toast({ title: "Application submitted!" });
+
+    // Fire the server-side PDF generator so the candidate has a branded
+    // copy in storage. Fire-and-forget — the email/portal link picks up
+    // the URL once it's ready.
+    supabase.functions.invoke("generate-application-form", {
+      body: { application_id: app.application_id },
+    }).catch(() => {});
   };
 
   const onChange = (updates: Partial<ApplicationData>) => {
