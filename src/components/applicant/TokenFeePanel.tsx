@@ -134,7 +134,7 @@ export function TokenFeePanel({ applicationId, applicantName, applicantPhone, ap
 
   const startPayment = async (
     amount: number,
-    opts: { paymentType?: string; productinfo?: string; concession?: number; reason?: string } = {},
+    opts: { paymentType?: string; productinfo?: string; concession?: number; reason?: string; concessionBreakdown?: Record<string, number> } = {},
   ) => {
     if (!lead || !applicantPhone) return;
     if (amount <= 0) { setError("Enter a valid amount"); return; }
@@ -153,6 +153,7 @@ export function TokenFeePanel({ applicationId, applicantName, applicantPhone, ap
           productinfo: opts.productinfo || "Token Fee",
           concession_amount: opts.concession || 0,
           waiver_reason: opts.reason || null,
+          concession_breakdown: opts.concessionBreakdown || null,
         },
       });
       if (invErr) throw invErr;
@@ -333,6 +334,8 @@ export function TokenFeePanel({ applicationId, applicantName, applicantPhone, ap
                 productinfo: "First-year fee (lump-sum, 5% off)",
                 concession: feeStatus.full_first_year_discount || 0,
                 reason: `Lump-sum first-year ${feeStatus.lump_sum_pct}%`,
+                // The lump-sum waiver lands entirely on year_1 ledger items.
+                concessionBreakdown: { year_1: feeStatus.full_first_year_discount || 0 },
               })}
               className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
             >
