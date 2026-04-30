@@ -211,8 +211,8 @@ Deno.serve(async (req) => {
       day: "numeric", month: "short", year: "numeric",
     });
 
-    // Resolve branding (campus → branding_slug → row, fallback to default).
-    const { data: branding } = await admin.rpc("lead_branding" as any, { _lead_id: lead?.id });
+    // Resolve branding tagged for receipts; falls back to "all" / default.
+    const { data: branding } = await admin.rpc("lead_branding" as any, { _lead_id: lead?.id, _doc_type: "receipt" });
 
     // Build PDF.
     const pdfBytes = await buildReceiptPdf({

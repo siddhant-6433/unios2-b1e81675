@@ -18,8 +18,19 @@ interface Branding {
   website: string | null;
   gstin: string | null;
   is_default: boolean;
+  applies_to: string[];
   updated_at: string;
 }
+
+const DOC_TYPES: { value: string; label: string }[] = [
+  { value: "all",                label: "All documents" },
+  { value: "offer_letter",       label: "Offer Letter" },
+  { value: "receipt",            label: "Payment Receipt" },
+  { value: "admission_letter",   label: "Admission Letter" },
+  { value: "application_form",   label: "Application Form" },
+  { value: "transcript",         label: "Transcript" },
+  { value: "bona_fide",          label: "Bona Fide" },
+];
 
 const ASSET_FIELDS: { key: keyof Branding; label: string; hint: string }[] = [
   { key: "letterhead_url", label: "Letterhead (A4)", hint: "Background image used as the page backdrop. PNG / JPG, A4-aspect (210×297mm)." },
@@ -137,9 +148,14 @@ export function BrandingPanel() {
         {rows.map(row => (
           <div key={row.id} className="rounded-2xl border border-border bg-card p-5 space-y-4">
             <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1 space-y-1.5">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-base font-semibold text-foreground">{row.name}</span>
+                  <BlurInput
+                    label=""
+                    value={row.name}
+                    onSave={v => updateField(row.id, "name", v || row.name)}
+                    inline
+                  />
                   <span className="font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground">{row.slug}</span>
                   {row.is_default && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-950/40 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400">
@@ -147,10 +163,40 @@ export function BrandingPanel() {
                     </span>
                   )}
                 </div>
-                <p className="text-[11px] text-muted-foreground">Last updated {new Date(row.updated_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</p>
+                {/* Applies-to pills + multi-select */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Use for</span>
+                  {(row.applies_to || []).map(t => (
+                    <button
+                      key={t}
+                      onClick={() => updateField(row.id, "applies_to", row.applies_to.filter(x => x !== t))}
+                      className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-medium hover:bg-primary/20"
+                      title="Click to remove"
+                    >
+                      {DOC_TYPES.find(d => d.value === t)?.label || t}
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  ))}
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (!v) return;
+                      const next = Array.from(new Set([...(row.applies_to || []), v]));
+                      updateField(row.id, "applies_to", next);
+                    }}
+                    className="rounded-full border border-dashed border-input bg-background px-2 py-0.5 text-[10px] font-medium text-muted-foreground hover:bg-muted"
+                  >
+                    <option value="">+ Add doc type</option>
+                    {DOC_TYPES.filter(d => !(row.applies_to || []).includes(d.value)).map(d => (
+                      <option key={d.value} value={d.value}>{d.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <p className="text-[10px] text-muted-foreground/70">Last updated {new Date(row.updated_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</p>
               </div>
               {!row.is_default && (
-                <button onClick={() => setDefault(row.id)} disabled={saving === row.id} className="text-xs text-muted-foreground hover:text-amber-600 underline">
+                <button onClick={() => setDefault(row.id)} disabled={saving === row.id} className="text-xs text-muted-foreground hover:text-amber-600 underline shrink-0">
                   Make default
                 </button>
               )}
@@ -214,11 +260,22 @@ export function BrandingPanel() {
   );
 }
 
-function BlurInput({ label, value, onSave, multiline }: { label: string; value: string | null; onSave: (v: string | null) => void; multiline?: boolean }) {
+function BlurInput({ label, value, onSave, multiline, inline }: { label: string; value: string | null; onSave: (v: string | null) => void; multiline?: boolean; inline?: boolean }) {
   const [v, setV] = useState(value || "");
   useEffect(() => { setV(value || ""); }, [value]);
   const dirty = v !== (value || "");
   const cls = "w-full rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
+  if (inline) {
+    return (
+      <input
+        value={v}
+        onChange={e => setV(e.target.value)}
+        onBlur={() => dirty && onSave(v.trim() || null)}
+        className="text-base font-semibold text-foreground bg-transparent border-b border-transparent hover:border-input focus:border-primary focus:outline-none px-0.5 min-w-[200px]"
+        placeholder="Template name…"
+      />
+    );
+  }
   return (
     <div className="space-y-1">
       <label className="block text-[11px] font-medium text-muted-foreground">{label}</label>

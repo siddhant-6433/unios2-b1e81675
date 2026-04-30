@@ -212,8 +212,9 @@ Deno.serve(async (req) => {
       .map(([term, total]) => ({ term, total }));
     const totalCourseFee = yearItems.reduce((s, y) => s + y.total, 0);
 
-    // Branding (campus → branding_slug → row, fallback to default).
-    const { data: branding } = await admin.rpc("lead_branding" as any, { _lead_id: offer.lead_id });
+    // Branding (doc-type-aware: prefers a template tagged 'offer_letter',
+    // then 'all', then default).
+    const { data: branding } = await admin.rpc("lead_branding" as any, { _lead_id: offer.lead_id, _doc_type: "offer_letter" });
 
     const pdfBytes = await buildOfferPdf({
       offer,
