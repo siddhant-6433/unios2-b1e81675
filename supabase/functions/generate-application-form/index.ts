@@ -29,7 +29,9 @@ const fmtDate = (d?: string | null) => {
 };
 
 const upper = (s?: string | null) => (s ?? "").toString().toUpperCase().trim() || "—";
-const norm  = (s?: string | null) => (s ?? "").toString().trim() || "—";
+// Display all data in CAPS — keeps the doc visually consistent and matches the
+// historical NIMT-UG application format.
+const norm  = (s?: string | null) => (s ?? "").toString().toUpperCase().trim() || "—";
 const yesNo = (b?: any) => b ? "YES" : "NO";
 
 interface Ctx {
@@ -63,11 +65,39 @@ const COLORS = {
 
 async function newPage(ctx: Ctx) {
   ctx.page = ctx.pdf.addPage([595, 842]);
+  let topReserve = 90;
+  let bottomReserve = 50;
+
   if (ctx.hasLetterhead && ctx.branding?._lh) {
-    ctx.page.drawImage(ctx.branding._lh, { x: 0, y: 0, width: ctx.width, height: ctx.height });
-    ctx.contentStart = ctx.height - 130;
-    ctx.contentEnd   = 110;
+    const lh = ctx.branding._lh;
+    const aspectHW = lh.height / lh.width;
+
+    if (aspectHW >= 1.2) {
+      // Tall image — likely full-page A4 background. Stretch to fit.
+      ctx.page.drawImage(lh, { x: 0, y: 0, width: ctx.width, height: ctx.height });
+      // Reserve generous top + bottom for header/footer bands inside the
+      // letterhead artwork itself.
+      topReserve    = 150;
+      bottomReserve = 150;
+    } else {
+      // Banner / header-only — render at top, scaled to width at native aspect.
+      const lhHeight = ctx.width * aspectHW;
+      ctx.page.drawImage(lh, { x: 0, y: ctx.height - lhHeight, width: ctx.width, height: lhHeight });
+      topReserve = lhHeight + 16;
+
+      // Optional footer band at bottom.
+      if (ctx.branding._footer) {
+        const f = ctx.branding._footer;
+        const fAspect = f.height / f.width;
+        const fH = Math.min(ctx.width * fAspect, 120);
+        ctx.page.drawImage(f, { x: 0, y: 0, width: ctx.width, height: fH });
+        bottomReserve = fH + 12;
+      } else {
+        bottomReserve = 50;
+      }
+    }
   } else {
+    // Default branded header band.
     ctx.page.drawRectangle({ x: 0, y: ctx.height - 70, width: ctx.width, height: 70, color: COLORS.sectionBg });
     ctx.page.drawText(ctx.branding?.name || "NIMT Educational Institutions", {
       x: ctx.margin, y: ctx.height - 36, size: 14, font: ctx.bold, color: COLORS.sectionFg,
@@ -75,9 +105,12 @@ async function newPage(ctx: Ctx) {
     ctx.page.drawText(ctx.branding?.address || "", {
       x: ctx.margin, y: ctx.height - 54, size: 8, font: ctx.font, color: rgb(0.85,0.88,0.95),
     });
-    ctx.contentStart = ctx.height - 90;
-    ctx.contentEnd   = 50;
+    topReserve    = 90;
+    bottomReserve = 50;
   }
+
+  ctx.contentStart = ctx.height - topReserve;
+  ctx.contentEnd   = bottomReserve;
   ctx.y = ctx.contentStart;
 }
 
@@ -114,10 +147,49 @@ function drawSection(ctx: Ctx, title: string, height = 18) {
   ctx.y -= height + 2;
 }
 
-// One label/value cell. (label top-left small, value below in bold)
+// Word-wrap a string into N lines that fit a given pixel width at a given font/size.
+// Drops trailing words to fit `maxLines`; appends "…" if truncated.
+function wrapText(text: string, font: any, size: number, maxWidth: number, maxLines = 2): string[] {
+  if (!text) return [""];
+  const words = text.split(/\s+/);
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    const trial = line ? line + " " + word : word;
+    if (font.widthOfTextAtSize(trial, size) <= maxWidth) {
+      line = trial;
+    } else {
+      if (line) lines.push(line);
+      // word itself too long — hard-break.
+      if (font.widthOfTextAtSize(word, size) > maxWidth) {
+        // Cut word at safe length.
+        let cut = word;
+        while (cut.length > 1 && font.widthOfTextAtSize(cut + "…", size) > maxWidth) cut = cut.slice(0, -1);
+        lines.push(cut + "…");
+        line = "";
+      } else {
+        line = word;
+      }
+      if (lines.length >= maxLines) break;
+    }
+  }
+  if (lines.length < maxLines && line) lines.push(line);
+  if (lines.length > maxLines) {
+    const overflow = lines.slice(maxLines).join(" ");
+    lines.length = maxLines;
+    if (overflow) {
+      let last = lines[maxLines - 1];
+      while (last.length > 1 && font.widthOfTextAtSize(last + "…", size) > maxWidth) last = last.slice(0, -1);
+      lines[maxLines - 1] = last + "…";
+    }
+  }
+  return lines.length ? lines : [""];
+}
+
+// One label/value cell. Label small grey top-left; value bold beneath, wrapped to fit.
 function drawCell(
   ctx: Ctx, x: number, y: number, w: number, h: number,
-  label: string, value: string, opts: { red?: boolean } = {},
+  label: string, value: string, opts: { red?: boolean; valueSize?: number; maxLines?: number } = {},
 ) {
   const fillColor = opts.red ? COLORS.redFill : rgb(1, 1, 1);
   const border    = opts.red ? COLORS.redBorder : COLORS.border;
@@ -126,13 +198,19 @@ function drawCell(
   if (label) {
     ctx.page.drawText(label, { x: x + 4, y: y - 11, size: 6.5, font: ctx.font, color: COLORS.muted });
   }
-  // Truncate value if too wide.
-  const maxChars = Math.max(8, Math.floor((w - 8) / 4.6));
-  const v = value.length > maxChars ? value.slice(0, maxChars - 1) + "…" : value;
-  ctx.page.drawText(v, {
-    x: x + 4,
-    y: y - (label ? 22 : 14),
-    size: 8.5, font: ctx.bold, color: COLORS.text,
+  const valueSize = opts.valueSize ?? 8.5;
+  const maxLines  = opts.maxLines  ?? (label ? 2 : 1);
+  const innerW    = w - 8;
+  // Reserve label height at top if label is present.
+  const valueTop  = label ? y - 22 : y - 14;
+  const lineH     = valueSize + 2;
+  const lines = wrapText(value || "", ctx.bold, valueSize, innerW, maxLines);
+  lines.forEach((ln, i) => {
+    ctx.page.drawText(ln, {
+      x: x + 4,
+      y: valueTop - i * lineH,
+      size: valueSize, font: ctx.bold, color: COLORS.text,
+    });
   });
 }
 
@@ -147,18 +225,18 @@ function drawHeaderRow(ctx: Ctx, cols: { label: string; w: number }[], rowH = 16
   ctx.y -= rowH;
 }
 
-function drawValueRow(ctx: Ctx, cols: { value: string; w: number; red?: boolean }[], rowH = 18) {
+function drawValueRow(ctx: Ctx, cols: { value: string; w: number; red?: boolean }[], rowH = 26) {
   ensureSpace(ctx, rowH);
   let xCur = ctx.margin;
   for (const c of cols) {
-    drawCell(ctx, xCur, ctx.y, c.w, rowH, "", c.value, { red: c.red });
+    drawCell(ctx, xCur, ctx.y, c.w, rowH, "", c.value, { red: c.red, maxLines: 2 });
     xCur += c.w;
   }
   ctx.y -= rowH;
 }
 
 // 4-column key/value grid. Splits the row width into 4 cells of equal width.
-function drawKVGrid(ctx: Ctx, pairs: { label: string; value: string; red?: boolean }[], cellH = 22) {
+function drawKVGrid(ctx: Ctx, pairs: { label: string; value: string; red?: boolean }[], cellH = 30) {
   if (pairs.length === 0) return;
   const totalW = ctx.width - ctx.margin*2;
   for (let i = 0; i < pairs.length; i += 4) {
@@ -169,7 +247,7 @@ function drawKVGrid(ctx: Ctx, pairs: { label: string; value: string; red?: boole
     for (let j = 0; j < 4; j++) {
       const p = slice[j];
       if (p) {
-        drawCell(ctx, xCur, ctx.y, cellW, cellH, p.label, p.value, { red: p.red });
+        drawCell(ctx, xCur, ctx.y, cellW, cellH, p.label, p.value, { red: p.red, maxLines: 2 });
       } else {
         ctx.page.drawRectangle({ x: xCur, y: ctx.y - cellH, width: cellW, height: cellH, color: rgb(1,1,1), borderColor: COLORS.border, borderWidth: 0.5 });
       }
@@ -234,15 +312,20 @@ Deno.serve(async (req) => {
       const { data: files } = await admin.storage.from("application-documents").list(app.application_id, {
         limit: 200, sortBy: { column: "name", order: "asc" },
       });
+      // Photo conventions vary — PhotoUpload uses passport_photo.png; school
+      // form uses student_photo-*.png; admins might upload applicant_photo*.
+      // Pick the first file matching any of these patterns.
+      const photoPattern = /^(passport_photo|student_photo|applicant_photo)/i;
       for (const f of (files ?? [])) {
         if (!f.name) continue;
         const path = `${app.application_id}/${f.name}`;
         const { data: pub } = admin.storage.from("application-documents").getPublicUrl(path);
         const url = pub?.publicUrl || path;
-        if (f.name.toLowerCase().startsWith("passport_photo")) {
+        if (!photoUrl && photoPattern.test(f.name)) {
           photoUrl = url;
+        } else if (photoPattern.test(f.name)) {
+          // Already picked a photo — skip duplicates.
         } else {
-          // Friendlier display name: drop hash/prefix, keep the descriptive bit.
           const stripped = f.name.replace(/^[a-z0-9_]+-/i, "");
           documents.push({ name: stripped || f.name, url });
         }
@@ -314,26 +397,37 @@ async function buildApplicationPdfInline(
     bed: "B.Ed Program",
     deled: "D.El.Ed Program",
   };
-  const titleText = programLabel[app.program_category] || "Application Form";
-  const titleW = bold.widthOfTextAtSize(titleText, 14);
-  ctx.page.drawText(titleText, { x: (ctx.width - titleW) / 2, y: ctx.y - 12, size: 14, font: bold, color: COLORS.text });
-  ctx.y -= 18;
-  const idText = `Application No: ${app.application_id}`;
-  const idW = bold.widthOfTextAtSize(idText, 11);
-  ctx.page.drawText(idText, { x: (ctx.width - idW) / 2, y: ctx.y - 12, size: 11, font: bold, color: COLORS.text });
-  ctx.y -= 22;
+  const titleText = (programLabel[app.program_category] || "Application Form").toUpperCase();
 
-  const photoX = ctx.width - ctx.margin - 90;
-  const photoY = ctx.contentStart - 4;
+  // Photo box sits at the top-right; title + app no sit to its left,
+  // centered within the remaining horizontal space. Drawn FIRST so the
+  // white-filled photo box covers the letterhead artwork beneath cleanly.
   const photoW = 80, photoH = 100;
+  const photoX = ctx.width - ctx.margin - photoW;
+  const photoY = ctx.contentStart - 4;
   ctx.page.drawRectangle({ x: photoX, y: photoY - photoH, width: photoW, height: photoH, color: rgb(1,1,1), borderColor: COLORS.border, borderWidth: 0.5 });
   if (photoImg) {
     ctx.page.drawImage(photoImg, { x: photoX + 1, y: photoY - photoH + 1, width: photoW - 2, height: photoH - 2 });
   } else {
-    ctx.page.drawText("Paste Your Recent",  { x: photoX + 6, y: photoY - 22, size: 7, font, color: COLORS.muted });
-    ctx.page.drawText("Passport Size",      { x: photoX + 6, y: photoY - 32, size: 7, font, color: COLORS.muted });
-    ctx.page.drawText("Photograph Here",    { x: photoX + 6, y: photoY - 42, size: 7, font, color: COLORS.muted });
+    ctx.page.drawText("Paste Your Recent", { x: photoX + 6, y: photoY - 22, size: 7, font, color: COLORS.muted });
+    ctx.page.drawText("Passport Size",     { x: photoX + 6, y: photoY - 32, size: 7, font, color: COLORS.muted });
+    ctx.page.drawText("Photograph Here",   { x: photoX + 6, y: photoY - 42, size: 7, font, color: COLORS.muted });
   }
+
+  // Title centered in the available width (left of photo box).
+  const titleArea = photoX - ctx.margin - 10; // leave 10pt gutter
+  const titleW = bold.widthOfTextAtSize(titleText, 14);
+  const titleX = ctx.margin + Math.max(0, (titleArea - titleW) / 2);
+  ctx.page.drawText(titleText, { x: titleX, y: ctx.y - 36, size: 14, font: bold, color: COLORS.text });
+  const idText = `Application No: ${app.application_id}`;
+  const idW = bold.widthOfTextAtSize(idText, 11);
+  const idX = ctx.margin + Math.max(0, (titleArea - idW) / 2);
+  ctx.page.drawText(idText, { x: idX, y: ctx.y - 56, size: 11, font: bold, color: COLORS.text });
+
+  // Move cursor past the title block + photo box to wherever is lower.
+  const titleBottom = ctx.y - 70;
+  const photoBottom = photoY - photoH - 6;
+  ctx.y = Math.min(titleBottom, photoBottom);
 
   // --- COURSE PREFERENCES ---------------------------------------------
   drawSection(ctx, "Course Preferences");
