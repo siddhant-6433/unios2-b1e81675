@@ -428,6 +428,7 @@ Deno.serve(async (req) => {
       appFeePayment = {
         amount: app.fee_amount,
         payment_mode: "gateway",
+        gateway: "easebuzz", // pre-ICICI applications were all routed through Easebuzz
         transaction_ref: app.payment_ref,
         receipt_no: null,
         payment_date: app.submitted_at || app.updated_at,
