@@ -4,6 +4,8 @@ import { Loader2, CreditCard, CheckCircle2, FileText, IndianRupee } from "lucide
 
 type FeeStatus = {
   first_year_fee: number;
+  total_course_fee: number;
+  additional_years_fee: number;
   token_required: number;
   token_paid: number;
   application_paid: number;
@@ -12,6 +14,14 @@ type FeeStatus = {
   min_token_instalment?: number;
   token_complete: boolean;
   twenty_five_complete: boolean;
+  lump_sum_pct?: number;
+  multi_year_pct?: number;
+  multi_year_window_days?: number;
+  within_multi_year_window?: boolean;
+  full_first_year_discount?: number;
+  full_first_year_amount_due?: number;
+  full_course_discount?: number;
+  full_course_amount_due?: number;
 };
 
 interface Lead {
@@ -96,7 +106,10 @@ export function TokenFeePanel({ applicationId, applicantName, applicantPhone, ap
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const startPayment = async (amount: number) => {
+  const startPayment = async (
+    amount: number,
+    opts: { paymentType?: string; productinfo?: string; concession?: number; reason?: string } = {},
+  ) => {
     if (!lead || !applicantPhone) return;
     if (amount <= 0) { setError("Enter a valid amount"); return; }
     setPaying(true);
@@ -106,18 +119,19 @@ export function TokenFeePanel({ applicationId, applicantName, applicantPhone, ap
         body: {
           action: "initiate-lead-payment",
           lead_id: lead.id,
-          payment_type: "token_fee",
+          payment_type: opts.paymentType || "token_fee",
           amount,
           firstname: applicantName.split(" ")[0] || applicantName,
           email: applicantEmail || undefined,
           phone: applicantPhone,
-          productinfo: "Token Fee",
+          productinfo: opts.productinfo || "Token Fee",
+          concession_amount: opts.concession || 0,
+          waiver_reason: opts.reason || null,
         },
       });
       if (invErr) throw invErr;
       if (data?.error) throw new Error(data.error);
       if (!data?.pay_url) throw new Error("No payment URL returned");
-      // Open in a new tab — Easebuzz iframe-blocks itself in many embeds.
       window.open(data.pay_url, "_blank", "noopener");
     } catch (e: any) {
       setError(e?.message || "Failed to start payment");
@@ -265,6 +279,70 @@ export function TokenFeePanel({ applicationId, applicantName, applicantPhone, ap
           {paying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
           Pay ₹{towardsAdmission.toLocaleString("en-IN")} to confirm admission
         </button>
+      )}
+
+      {/* Waiver CTAs — shown when waivers are non-zero and there's still
+          balance owed. Pay-full-first-year and Pay-full-course apply the
+          policy-driven discount automatically. */}
+      {(feeStatus.lump_sum_pct || 0) > 0 && (feeStatus.full_first_year_amount_due || 0) > 0 && (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-amber-900">
+                Pay full first-year fee — save ₹{(feeStatus.full_first_year_discount || 0).toLocaleString("en-IN")}
+              </p>
+              <p className="text-[11px] text-amber-700">
+                {feeStatus.lump_sum_pct}% off the first-year fee when you clear it in one go.
+              </p>
+            </div>
+            <button
+              disabled={paying || !applicantPhone}
+              onClick={() => startPayment(feeStatus.full_first_year_amount_due || 0, {
+                paymentType: "other",
+                productinfo: "First-year fee (lump-sum, 5% off)",
+                concession: feeStatus.full_first_year_discount || 0,
+                reason: `Lump-sum first-year ${feeStatus.lump_sum_pct}%`,
+              })}
+              className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+            >
+              {paying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
+              Pay ₹{(feeStatus.full_first_year_amount_due || 0).toLocaleString("en-IN")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {(feeStatus.lump_sum_pct || 0) > 0 && (feeStatus.additional_years_fee || 0) > 0 && (feeStatus.full_course_amount_due || 0) > 0 && (
+        <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-emerald-900">
+                Pay full course fee — save ₹{(feeStatus.full_course_discount || 0).toLocaleString("en-IN")}
+              </p>
+              <p className="text-[11px] text-emerald-700">
+                {feeStatus.lump_sum_pct}% on year-1
+                {feeStatus.within_multi_year_window
+                  ? ` + extra ${feeStatus.multi_year_pct}% on later years (within ${feeStatus.multi_year_window_days} days of token).`
+                  : ` + ${feeStatus.lump_sum_pct}% on later years (multi-year bonus window expired).`}
+              </p>
+            </div>
+            <button
+              disabled={paying || !applicantPhone}
+              onClick={() => startPayment(feeStatus.full_course_amount_due || 0, {
+                paymentType: "other",
+                productinfo: "Full course fee (with waivers)",
+                concession: feeStatus.full_course_discount || 0,
+                reason: feeStatus.within_multi_year_window
+                  ? `Full course: ${feeStatus.lump_sum_pct}% lump + ${feeStatus.multi_year_pct}% multi-year (within window)`
+                  : `Full course: ${feeStatus.lump_sum_pct}% lump (window expired)`,
+              })}
+              className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {paying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
+              Pay ₹{(feeStatus.full_course_amount_due || 0).toLocaleString("en-IN")}
+            </button>
+          </div>
+        </div>
       )}
 
       {error && <p className="text-xs text-red-600">{error}</p>}

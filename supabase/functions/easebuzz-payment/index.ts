@@ -250,7 +250,7 @@ Deno.serve(async (req) => {
     // row to flip to status='confirmed'. The AFTER trigger on lead_payments
     // does the rest (stage advance, PAN/AN issuance).
     if (action === "initiate-lead-payment") {
-      const { lead_id, payment_type, amount, productinfo, firstname, email, phone, payment_mode } = body;
+      const { lead_id, payment_type, amount, productinfo, firstname, email, phone, payment_mode, concession_amount, waiver_reason } = body;
 
       if (!lead_id || !payment_type || !amount || !firstname || !phone) {
         return new Response(
@@ -276,6 +276,8 @@ Deno.serve(async (req) => {
           amount: parseFloat(amount),
           payment_mode: payment_mode || "gateway",
           status: "pending",
+          concession_amount: concession_amount ? parseFloat(concession_amount) : 0,
+          waiver_reason: waiver_reason || null,
         } as any)
         .select("id")
         .single();
