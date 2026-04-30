@@ -43,8 +43,8 @@ const HrAttendance = () => {
         .eq("date", date)
         .order("punch_in", { ascending: false }),
       supabase.from("profiles")
-        .select("user_id, display_name, role, phone")
-        .not("role", "in", "(student,parent)")
+        .select("user_id, display_name, phone, employee_id, user_roles!inner(role)")
+        .not("user_roles.role", "in", "(student,parent)")
         .order("display_name"),
     ]);
 
@@ -57,7 +57,7 @@ const HrAttendance = () => {
         return {
           ...a,
           display_name: p?.display_name || "Unknown",
-          role: p?.role || "",
+          role: (p?.user_roles as any)?.[0]?.role || (p?.user_roles as any)?.role || "",
         };
       }));
     }
