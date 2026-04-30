@@ -392,7 +392,7 @@ export default function PunchScreen() {
       identity_pool_id: 'ap-south-1:518a81c9-8722-431a-9d1b-2e988ab4f0b5',
     });
 
-    livenessUrlRef.current = `https://uni.nimt.ac.in/liveness.html?${params.toString()}`;
+    livenessUrlRef.current = `https://uni.nimt.ac.in/liveness/?${params.toString()}`;
     setStep('liveness');
   };
 
