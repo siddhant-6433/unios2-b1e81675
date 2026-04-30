@@ -3,159 +3,166 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Face Liveness Check — UniOs</title>
+  <title>Face Liveness — UniOs</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, system-ui, sans-serif; background: #000; color: #fff; height: 100vh; overflow: hidden; }
-    #root { height: 100vh; }
-    .loading { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; gap: 16px; }
-    .loading .spinner { width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.2); border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.8s linear infinite; }
+    #root { height: 100vh; display: flex; flex-direction: column; }
+    .center { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; gap: 16px; padding: 24px; }
+    .spinner { width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.2); border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .error { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; gap: 12px; padding: 24px; text-align: center; }
-    .error button { background: #3b82f6; color: #fff; border: none; padding: 12px 24px; border-radius: 8px; font-size: 16px; cursor: pointer; }
-    [data-amplify-liveness-detector] { height: 100vh !important; }
+    .error-text { color: #f87171; text-align: center; font-size: 14px; line-height: 1.5; max-width: 300px; word-break: break-word; }
+    .btn { background: #3b82f6; color: #fff; border: none; padding: 14px 28px; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; }
+    .btn:active { opacity: 0.8; }
+    .btn-outline { background: transparent; border: 1px solid rgba(255,255,255,0.3); color: #fff; padding: 10px 20px; border-radius: 8px; font-size: 14px; cursor: pointer; margin-top: 8px; }
+    .debug { font-size: 10px; color: rgba(255,255,255,0.4); margin-top: 12px; max-width: 300px; text-align: center; word-break: break-all; }
   </style>
 </head>
 <body>
   <div id="root">
-    <div class="loading">
+    <div class="center">
       <div class="spinner"></div>
-      <p>Initializing liveness check...</p>
+      <p>Loading liveness module...</p>
     </div>
   </div>
 
-  <script type="importmap">
-  {
-    "imports": {
-      "react": "https://esm.sh/react@18.3.1",
-      "react-dom": "https://esm.sh/react-dom@18.3.1",
-      "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
-      "aws-amplify": "https://esm.sh/aws-amplify@6.15.0",
-      "aws-amplify/auth": "https://esm.sh/aws-amplify@6.15.0/auth",
-      "@aws-amplify/ui-react": "https://esm.sh/@aws-amplify/ui-react@6.10.2",
-      "@aws-amplify/ui-react-liveness": "https://esm.sh/@aws-amplify/ui-react-liveness@3.6.4?external=react,react-dom,aws-amplify,@aws-amplify/ui-react"
-    }
-  }
-  </script>
-
-  <script type="module">
-    import React from 'react';
-    import { createRoot } from 'react-dom/client';
-    import { Amplify } from 'aws-amplify';
-    import { FaceLivenessDetector } from '@aws-amplify/ui-react-liveness';
-    import { ThemeProvider, Loader } from '@aws-amplify/ui-react';
-
-    // Parse params from URL
+  <script>
+    // Parse URL params
     const params = new URLSearchParams(window.location.search);
     const SUPABASE_URL = params.get('supabase_url') || '';
     const SUPABASE_KEY = params.get('supabase_key') || '';
-    const USER_ID = params.get('user_id') || '';
     const REGION = params.get('region') || 'ap-south-1';
-    const TOKEN = params.get('token') || '';
-
-    // Configure Amplify with Cognito Identity Pool for unauthenticated liveness access
     const IDENTITY_POOL_ID = params.get('identity_pool_id') || 'ap-south-1:518a81c9-8722-431a-9d1b-2e988ab4f0b5';
-    Amplify.configure({
-      Auth: {
-        Cognito: {
-          identityPoolId: IDENTITY_POOL_ID,
-          allowGuestAccess: true,
-        }
-      }
-    });
 
-    // Post result back to React Native WebView
-    function postResult(data) {
+    function postToRN(data) {
       if (window.ReactNativeWebView) {
         window.ReactNativeWebView.postMessage(JSON.stringify(data));
       }
+      console.log('[Liveness→RN]', JSON.stringify(data));
     }
 
-    function App() {
-      const [sessionId, setSessionId] = React.useState(null);
-      const [loading, setLoading] = React.useState(true);
-      const [error, setError] = React.useState(null);
-
-      const createSession = async () => {
-        setLoading(true);
-        setError(null);
-        try {
-          const res = await fetch(`${SUPABASE_URL}/functions/v1/face-liveness-session`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${TOKEN || SUPABASE_KEY}`,
-            },
-            body: JSON.stringify({ action: 'create' }),
-          });
-          const data = await res.json();
-          if (data.error) throw new Error(data.error);
-          setSessionId(data.session_id);
-          setLoading(false);
-        } catch (e) {
-          setError(e.message);
-          setLoading(false);
-        }
-      };
-
-      React.useEffect(() => { createSession(); }, []);
-
-      const handleComplete = async () => {
-        try {
-          const res = await fetch(`${SUPABASE_URL}/functions/v1/face-liveness-session`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${TOKEN || SUPABASE_KEY}`,
-            },
-            body: JSON.stringify({ action: 'get_results', session_id: sessionId }),
-          });
-          const data = await res.json();
-          postResult({ type: 'liveness_result', ...data });
-        } catch (e) {
-          postResult({ type: 'liveness_error', error: e.message });
-        }
-      };
-
-      const handleError = (err) => {
-        console.error('Liveness error:', err);
-        postResult({ type: 'liveness_error', error: err?.message || 'Liveness check failed' });
-        // Auto-retry with new session
-        createSession();
-      };
-
-      const handleCancel = () => {
-        postResult({ type: 'liveness_cancel' });
-      };
-
-      if (loading) {
-        return React.createElement('div', { className: 'loading' },
-          React.createElement('div', { className: 'spinner' }),
-          React.createElement('p', null, 'Preparing liveness check...')
-        );
-      }
-
-      if (error) {
-        return React.createElement('div', { className: 'error' },
-          React.createElement('p', null, `Error: ${error}`),
-          React.createElement('button', { onClick: createSession }, 'Retry')
-        );
-      }
-
-      return React.createElement(ThemeProvider, { colorMode: 'dark' },
-        React.createElement(FaceLivenessDetector, {
-          sessionId: sessionId,
-          region: REGION,
-          onAnalysisComplete: handleComplete,
-          onError: handleError,
-          onUserCancel: handleCancel,
-          disableStartScreen: true,
-        })
-      );
+    function showError(msg, detail) {
+      document.getElementById('root').innerHTML = `
+        <div class="center">
+          <p style="font-size:20px">⚠️</p>
+          <p class="error-text">${msg}</p>
+          ${detail ? `<p class="debug">${detail}</p>` : ''}
+          <button class="btn" onclick="location.reload()">Retry</button>
+          <button class="btn-outline" onclick="postToRN({type:'liveness_cancel'})">Cancel</button>
+        </div>
+      `;
     }
 
-    const root = createRoot(document.getElementById('root'));
-    root.render(React.createElement(App));
+    function showLoading(msg) {
+      document.getElementById('root').innerHTML = `
+        <div class="center">
+          <div class="spinner"></div>
+          <p>${msg}</p>
+        </div>
+      `;
+    }
+
+    async function run() {
+      try {
+        // Step 1: Create liveness session
+        showLoading('Creating liveness session...');
+        const sessionRes = await fetch(`${SUPABASE_URL}/functions/v1/face-liveness-session`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}` },
+          body: JSON.stringify({ action: 'create' }),
+        });
+        const sessionData = await sessionRes.json();
+        if (sessionData.error) throw new Error(sessionData.error);
+        const sessionId = sessionData.session_id;
+        console.log('[Liveness] Session:', sessionId);
+
+        // Step 2: Load Amplify + Liveness module
+        showLoading('Loading face detection...');
+
+        // Load React + Amplify from CDN
+        await loadScript('https://unpkg.com/react@18.3.1/umd/react.production.min.js');
+        await loadScript('https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js');
+
+        // Amplify is complex via UMD — use the ESM bundle approach with a dynamic import
+        const { Amplify } = await import('https://cdn.jsdelivr.net/npm/aws-amplify@6.15.0/+esm');
+
+        Amplify.configure({
+          Auth: {
+            Cognito: {
+              identityPoolId: IDENTITY_POOL_ID,
+              allowGuestAccess: true,
+            }
+          }
+        });
+
+        const { FaceLivenessDetector } = await import('https://cdn.jsdelivr.net/npm/@aws-amplify/ui-react-liveness@3.6.4/+esm');
+        const { ThemeProvider } = await import('https://cdn.jsdelivr.net/npm/@aws-amplify/ui-react@6.10.2/+esm');
+
+        // Load Amplify CSS
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = 'https://cdn.jsdelivr.net/npm/@aws-amplify/ui-react@6.10.2/styles.css';
+        document.head.appendChild(link);
+
+        // Step 3: Render FaceLivenessDetector
+        showLoading('Starting camera...');
+
+        const h = React.createElement;
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+
+        root.render(
+          h(ThemeProvider, { colorMode: 'dark' },
+            h('div', { style: { height: '100vh' } },
+              h(FaceLivenessDetector, {
+                sessionId: sessionId,
+                region: REGION,
+                onAnalysisComplete: async () => {
+                  showLoading('Verifying...');
+                  try {
+                    const res = await fetch(`${SUPABASE_URL}/functions/v1/face-liveness-session`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}` },
+                      body: JSON.stringify({ action: 'get_results', session_id: sessionId }),
+                    });
+                    const data = await res.json();
+                    postToRN({ type: 'liveness_result', ...data });
+                  } catch (e) {
+                    postToRN({ type: 'liveness_error', error: e.message });
+                  }
+                },
+                onError: (err) => {
+                  console.error('[Liveness] Error:', err);
+                  showError('Liveness check failed', err?.message || JSON.stringify(err));
+                  postToRN({ type: 'liveness_error', error: err?.message || 'Failed' });
+                },
+                onUserCancel: () => {
+                  postToRN({ type: 'liveness_cancel' });
+                },
+                disableStartScreen: true,
+              })
+            )
+          )
+        );
+
+      } catch (err) {
+        console.error('[Liveness] Init error:', err);
+        showError('Failed to initialize liveness check', err.message);
+      }
+    }
+
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
+        const s = document.createElement('script');
+        s.src = src;
+        s.crossOrigin = 'anonymous';
+        s.onload = resolve;
+        s.onerror = () => reject(new Error(`Failed to load ${src}`));
+        document.head.appendChild(s);
+      });
+    }
+
+    run();
   </script>
 </body>
 </html>
