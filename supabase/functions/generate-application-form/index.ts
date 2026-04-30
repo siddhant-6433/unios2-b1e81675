@@ -269,50 +269,64 @@ async function newPage(ctx: Ctx) {
   ctx.contentEnd   = bottomReserve;
   ctx.y = ctx.contentStart;
 
-  // Per-page repeating header: green App-No badge over the letterhead band,
-  // followed by the title + session line. The badge sits at a fixed offset
-  // from the top edge so it lands on the letterhead artwork regardless of
-  // its height.
+  // Per-page repeating header: a single green pill in the top-right corner
+  // OVER the letterhead band, carrying three lines stacked:
+  //   Line 1: "Admission Application"          (bold, regular size)
+  //   Line 2: <session name in caps>            (bold, regular size)
+  //   Line 3: <Application No>                  (bold, large size)
   if (ctx.appId) {
-    const badgeFontSize = 14;
-    const badgePadX = 16;
-    const badgePadY = 8;
-    const badgeText = ctx.appId;
-    const badgeTextW = ctx.bold.widthOfTextAtSize(badgeText, badgeFontSize);
-    const badgeW = badgeTextW + badgePadX * 2;
-    const badgeH = badgeFontSize + badgePadY * 2;
+    const line1 = "Admission Application";
+    const line2 = (ctx.sessionName || "").toUpperCase();
+    const line3 = ctx.appId;
+    const sizeSm = 10;
+    const sizeLg = 16;
+    const padX = 18;
+    const padY = 10;
+    const lineGap = 4;
+
+    const w1 = ctx.bold.widthOfTextAtSize(line1, sizeSm);
+    const w2 = line2 ? ctx.bold.widthOfTextAtSize(line2, sizeSm) : 0;
+    const w3 = ctx.bold.widthOfTextAtSize(line3, sizeLg);
+    const innerW = Math.max(w1, w2, w3);
+    const badgeW = innerW + padX * 2;
+
+    // Total height: padY + line1 + gap + line2 + gap + line3 + padY
+    const linesH =
+      sizeSm + (line2 ? lineGap + sizeSm : 0) + lineGap + sizeLg;
+    const badgeH = padY * 2 + linesH;
+
     const badgeX = ctx.width - ctx.margin - badgeW;
-    const badgeY = ctx.height - 18;
+    const badgeY = ctx.height - 18; // top edge of pill, 18pt down from page edge
     const badgeColor = rgb(0.20, 0.69, 0.39);
+    const radius = Math.min(18, badgeH / 2);
+
+    // Pill: a rectangle plus two end-circles.
     ctx.page.drawRectangle({
-      x: badgeX + badgeH / 2, y: badgeY - badgeH,
-      width: badgeW - badgeH, height: badgeH,
+      x: badgeX + radius, y: badgeY - badgeH,
+      width: badgeW - radius * 2, height: badgeH,
       color: badgeColor,
     });
-    ctx.page.drawCircle({ x: badgeX + badgeH / 2,          y: badgeY - badgeH / 2, size: badgeH / 2, color: badgeColor });
-    ctx.page.drawCircle({ x: badgeX + badgeW - badgeH / 2, y: badgeY - badgeH / 2, size: badgeH / 2, color: badgeColor });
-    ctx.page.drawText(badgeText, {
-      x: badgeX + badgePadX,
-      y: badgeY - badgePadY - badgeFontSize + 2,
-      size: badgeFontSize, font: ctx.bold, color: rgb(1, 1, 1),
-    });
+    ctx.page.drawCircle({ x: badgeX + radius,           y: badgeY - badgeH / 2, size: radius, color: badgeColor });
+    ctx.page.drawCircle({ x: badgeX + badgeW - radius,  y: badgeY - badgeH / 2, size: radius, color: badgeColor });
 
-    // Title + session — centered under the letterhead, before the body.
-    const titleText = "ADMISSION APPLICATION FORM";
-    const titleW = ctx.bold.widthOfTextAtSize(titleText, 13);
-    ctx.page.drawText(titleText, {
-      x: (ctx.width - titleW) / 2, y: ctx.y - 12, size: 13, font: ctx.bold, color: COLORS.text,
+    // Centre each line horizontally inside the pill.
+    let textY = badgeY - padY - sizeSm + 2;
+    ctx.page.drawText(line1, {
+      x: badgeX + (badgeW - w1) / 2, y: textY,
+      size: sizeSm, font: ctx.bold, color: rgb(1, 1, 1),
     });
-    ctx.y -= 18;
-    if (ctx.sessionName) {
-      const sessText = `Applying for Session: ${ctx.sessionName.toUpperCase()}`;
-      const sessW = ctx.font.widthOfTextAtSize(sessText, 9);
-      ctx.page.drawText(sessText, {
-        x: (ctx.width - sessW) / 2, y: ctx.y - 10, size: 9, font: ctx.font, color: COLORS.muted,
+    if (line2) {
+      textY -= lineGap + sizeSm;
+      ctx.page.drawText(line2, {
+        x: badgeX + (badgeW - w2) / 2, y: textY,
+        size: sizeSm, font: ctx.bold, color: rgb(1, 1, 1),
       });
-      ctx.y -= 14;
     }
-    ctx.y -= 6;
+    textY -= lineGap + sizeLg;
+    ctx.page.drawText(line3, {
+      x: badgeX + (badgeW - w3) / 2, y: textY,
+      size: sizeLg, font: ctx.bold, color: rgb(1, 1, 1),
+    });
   }
 }
 
