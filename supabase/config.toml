@@ -39,6 +39,9 @@ verify_jwt = false
 [functions.easebuzz-payment]
 verify_jwt = false
 
+[functions.generate-payment-receipt]
+verify_jwt = false
+
 [functions.visit-reminders]
 verify_jwt = false
 

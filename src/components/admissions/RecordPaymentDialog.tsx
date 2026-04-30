@@ -132,7 +132,7 @@ export function RecordPaymentDialog({
       receiptUrl = pub?.publicUrl || path;
     }
 
-    const { error } = await supabase.from("lead_payments" as any).insert({
+    const { data: inserted, error } = await supabase.from("lead_payments" as any).insert({
       lead_id: leadId,
       type,
       amount: parseFloat(amount),
@@ -143,12 +143,19 @@ export function RecordPaymentDialog({
       notes: notes || null,
       recorded_by: profileId,
       status: "confirmed",
-    } as any);
+    } as any).select("id").single();
 
     if (error) {
       toast({ title: "Failed to record payment", description: error.message, variant: "destructive" });
       setSaving(false);
       return;
+    }
+
+    // Fire receipt PDF + notifications (WhatsApp + email). Fire-and-forget so
+    // the user isn't blocked on PDF rendering / network.
+    if (inserted?.id) {
+      supabase.functions.invoke("generate-payment-receipt", { body: { lead_payment_id: inserted.id } })
+        .catch(() => {});
     }
 
     // Log activity

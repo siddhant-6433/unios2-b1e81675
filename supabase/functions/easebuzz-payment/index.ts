@@ -131,9 +131,17 @@ Deno.serve(async (req) => {
           console.error("[easebuzz] lead_payments update error:", lpErr.message);
           return returnPage("Payment Received", "Payment confirmed but our records could not be updated. Please contact support. Txn: " + (easepayid || txnid), false);
         }
+        // Fire receipt generator (PDF + WhatsApp + email). Don't block the user.
+        if (isSuccess) {
+          fetch(`${supabaseUrl}/functions/v1/generate-payment-receipt`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+            body: JSON.stringify({ lead_payment_id: udf2 }),
+          }).catch((e) => console.error("[easebuzz] receipt invoke failed:", e));
+        }
         return returnPage(
           isSuccess ? "Payment Successful" : "Payment Failed",
-          isSuccess ? "Your payment has been received. You may close this window." : `Payment could not be completed (status: ${status}). Please try again.`,
+          isSuccess ? "Your payment has been received. The receipt has been emailed to you. You may close this window." : `Payment could not be completed (status: ${status}). Please try again.`,
           isSuccess,
         );
       }
