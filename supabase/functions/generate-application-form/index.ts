@@ -199,40 +199,61 @@ function drawSection(ctx: Ctx, title: string, height = 18) {
 }
 
 // Word-wrap a string into N lines that fit a given pixel width at a given font/size.
-// Drops trailing words to fit `maxLines`; appends "..." if truncated.
+// When a single word is wider than the cell (e.g. a long email like
+// ABHIJEETKUMAR153020@GMAIL.COM), it's split across multiple lines at
+// character boundaries instead of getting truncated with an ellipsis.
 function wrapText(text: string, font: any, size: number, maxWidth: number, maxLines = 2): string[] {
   if (!text) return [""];
+
+  const charWrap = (word: string): string[] => {
+    const out: string[] = [];
+    let buf = "";
+    for (const ch of word) {
+      const trial = buf + ch;
+      if (font.widthOfTextAtSize(trial, size) <= maxWidth) {
+        buf = trial;
+      } else {
+        if (buf) out.push(buf);
+        buf = ch;
+      }
+    }
+    if (buf) out.push(buf);
+    return out;
+  };
+
   const words = text.split(/\s+/);
   const lines: string[] = [];
   let line = "";
-  for (const word of words) {
+  outer: for (const word of words) {
     const trial = line ? line + " " + word : word;
     if (font.widthOfTextAtSize(trial, size) <= maxWidth) {
       line = trial;
     } else {
       if (line) lines.push(line);
-      // word itself too long - hard-break.
+      line = "";
+      if (lines.length >= maxLines) break;
       if (font.widthOfTextAtSize(word, size) > maxWidth) {
-        // Cut word at safe length.
-        let cut = word;
-        while (cut.length > 1 && font.widthOfTextAtSize(cut + "...", size) > maxWidth) cut = cut.slice(0, -1);
-        lines.push(cut + "...");
-        line = "";
+        // Break the over-long word at character boundaries.
+        const chunks = charWrap(word);
+        for (let j = 0; j < chunks.length; j++) {
+          if (j === chunks.length - 1) {
+            line = chunks[j];
+          } else {
+            lines.push(chunks[j]);
+            if (lines.length >= maxLines) { line = ""; break outer; }
+          }
+        }
       } else {
         line = word;
       }
-      if (lines.length >= maxLines) break;
     }
   }
-  if (lines.length < maxLines && line) lines.push(line);
+  if (line && lines.length < maxLines) lines.push(line);
   if (lines.length > maxLines) {
-    const overflow = lines.slice(maxLines).join(" ");
     lines.length = maxLines;
-    if (overflow) {
-      let last = lines[maxLines - 1];
-      while (last.length > 1 && font.widthOfTextAtSize(last + "...", size) > maxWidth) last = last.slice(0, -1);
-      lines[maxLines - 1] = last + "...";
-    }
+    let last = lines[maxLines - 1];
+    while (last.length > 1 && font.widthOfTextAtSize(last + "...", size) > maxWidth) last = last.slice(0, -1);
+    lines[maxLines - 1] = last + "...";
   }
   return lines.length ? lines : [""];
 }
@@ -375,6 +396,13 @@ Deno.serve(async (req) => {
       _lead_id: app.lead_id, _doc_type: "application_form",
     });
 
+    // Resolve session name for the header.
+    let sessionName: string | null = null;
+    if (app.session_id) {
+      const { data: sess } = await admin.from("admission_sessions").select("name").eq("id", app.session_id).maybeSingle();
+      sessionName = sess?.name || null;
+    }
+
     // List uploaded files for this application from storage.
     const documents: { name: string; url: string }[] = [];
     let photoUrl: string | null = null;
@@ -443,7 +471,7 @@ Deno.serve(async (req) => {
     const lh    = await fetchImage(p, branding?.letterhead_url ?? null);
     const photo = await fetchImage(p, photoUrl);
     const sig   = await fetchImage(p, branding?.signature_url ?? null);
-    const out = await buildApplicationPdfInline(p, f, b, app, branding, lh, photo, sig, documents, appFeePayment);
+    const out = await buildApplicationPdfInline(p, f, b, app, branding, lh, photo, sig, documents, appFeePayment, sessionName);
 
     const path = `applications/${app.application_id}.pdf`;
     const { error: upErr } = await admin.storage
@@ -477,6 +505,7 @@ async function buildApplicationPdfInline(
   lhImg: PDFImage | null, photoImg: PDFImage | null, sigImg: PDFImage | null,
   documents: { name: string; url: string }[],
   appFeePayment: any = null,
+  sessionName: string | null = null,
 ): Promise<Uint8Array> {
   const flags = new Set<string>(Array.isArray(app.flags) ? app.flags : []);
   const ctx: Ctx = {
@@ -507,12 +536,22 @@ async function buildApplicationPdfInline(
   const titleW = bold.widthOfTextAtSize(titleText, 14);
   const titleX = ctx.margin + Math.max(0, (titleArea - titleW) / 2);
   ctx.page.drawText(titleText, { x: titleX, y: ctx.y - 36, size: 14, font: bold, color: COLORS.text });
+
   const idText = `Application No: ${app.application_id}`;
   const idW = bold.widthOfTextAtSize(idText, 11);
   const idX = ctx.margin + Math.max(0, (titleArea - idW) / 2);
   ctx.page.drawText(idText, { x: idX, y: ctx.y - 56, size: 11, font: bold, color: COLORS.text });
 
-  ctx.y = Math.min(ctx.y - 70, photoY - photoH - 8);
+  let titleBlockBottom = ctx.y - 70;
+  if (sessionName) {
+    const sessText = `Applying for Session: ${sessionName.toUpperCase()}`;
+    const sessW = font.widthOfTextAtSize(sessText, 10);
+    const sessX = ctx.margin + Math.max(0, (titleArea - sessW) / 2);
+    ctx.page.drawText(sessText, { x: sessX, y: ctx.y - 72, size: 10, font, color: COLORS.muted });
+    titleBlockBottom = ctx.y - 86;
+  }
+
+  ctx.y = Math.min(titleBlockBottom, photoY - photoH - 8);
 
   // ── COURSE PREFERENCES ─────────────────────────────────────────────
   const courses: any[] = Array.isArray(app.course_selections) ? app.course_selections : [];
@@ -826,8 +865,10 @@ async function buildApplicationPdfInline(
     }
     const paidAt = appFeePayment.payment_date || appFeePayment.created_at;
     const paidAtStr = paidAt ? new Date(paidAt).toLocaleString("en-IN", {
-      day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
-    }) : "-";
+      day: "2-digit", month: "short", year: "numeric",
+      hour: "2-digit", minute: "2-digit",
+      timeZone: "Asia/Kolkata",
+    }) + " IST" : "-";
     drawKVGrid(ctx, [
       { label: "Status",          value: "PAID" },
       { label: "Amount",          value: appFeePayment.amount != null ? `Rs. ${Number(appFeePayment.amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "-" },
@@ -942,7 +983,7 @@ async function buildApplicationPdfInline(
     ctx.y -= paraH + 4;
   });
 
-  // ── SIGNATURE ──────────────────────────────────────────────────────
+  // ── APPLICANT META (name / parent / submission date / place) ──────
   ensureSpace(ctx, 36);
   ctx.y -= 6;
   const sigCols = [
@@ -959,21 +1000,104 @@ async function buildApplicationPdfInline(
   }
   ctx.y -= 32;
 
-  if (sigImg && ctx.y - 50 > ctx.contentEnd) {
-    const sigW = 80, sigH = 32;
-    ctx.page.drawImage(sigImg, { x: ctx.width - ctx.margin - sigW, y: ctx.y - sigH, width: sigW, height: sigH });
+  // ── STUDENT SIGNATURE ─────────────────────────────────────────────
+  drawSection(ctx, "Student Signature");
+  ensureSpace(ctx, 70);
+  // Two boxes: signature space (left, larger) and date (right, smaller).
+  const sigBoxW = totalW * 0.65;
+  const sigDateW = totalW * 0.35;
+  ctx.page.drawRectangle({
+    x: ctx.margin, y: ctx.y - 60, width: sigBoxW, height: 60,
+    color: rgb(1,1,1), borderColor: COLORS.border, borderWidth: 0.5,
+  });
+  ctx.page.drawText("Signature of Applicant", {
+    x: ctx.margin + 6, y: ctx.y - 11, size: 7, font, color: COLORS.muted,
+  });
+  ctx.page.drawLine({
+    start: { x: ctx.margin + 12,         y: ctx.y - 50 },
+    end:   { x: ctx.margin + sigBoxW - 12, y: ctx.y - 50 },
+    thickness: 0.4, color: COLORS.muted,
+  });
+
+  ctx.page.drawRectangle({
+    x: ctx.margin + sigBoxW, y: ctx.y - 60, width: sigDateW, height: 60,
+    color: rgb(1,1,1), borderColor: COLORS.border, borderWidth: 0.5,
+  });
+  ctx.page.drawText("Date", {
+    x: ctx.margin + sigBoxW + 6, y: ctx.y - 11, size: 7, font, color: COLORS.muted,
+  });
+  ctx.page.drawLine({
+    start: { x: ctx.margin + sigBoxW + 12,         y: ctx.y - 50 },
+    end:   { x: ctx.margin + sigBoxW + sigDateW - 12, y: ctx.y - 50 },
+    thickness: 0.4, color: COLORS.muted,
+  });
+  ctx.y -= 64;
+
+  // ── PRINCIPAL / DIRECTOR VERIFICATION ─────────────────────────────
+  drawSection(ctx, "Principal / Director Verification (For Office Use Only)");
+  ensureSpace(ctx, 110);
+
+  // Two-row layout:
+  //   Row 1: Verified (checkbox space) | Name / Designation | Date
+  //   Row 2: Remarks (full width)
+  //   Row 3: Signature (with signatory image if available, or empty space)
+
+  const verifyRowH = 32;
+  const colA = totalW * 0.30;
+  const colB = totalW * 0.40;
+  const colC = totalW * 0.30;
+
+  drawCell(ctx, ctx.margin,                  ctx.y, colA, verifyRowH, "Verified By (Name)", " ", { });
+  drawCell(ctx, ctx.margin + colA,           ctx.y, colB, verifyRowH, "Designation", " ", { });
+  drawCell(ctx, ctx.margin + colA + colB,    ctx.y, colC, verifyRowH, "Date", " ", { });
+  ctx.y -= verifyRowH;
+
+  // Remarks — full width, taller for handwritten note.
+  drawCell(ctx, ctx.margin, ctx.y, totalW, 36, "Remarks", " ", { });
+  ctx.y -= 36;
+
+  // Signature row — institute signature image on the right if present;
+  // signature line for principal/director on the left.
+  const signRowH = 50;
+  ctx.page.drawRectangle({
+    x: ctx.margin, y: ctx.y - signRowH, width: totalW * 0.55, height: signRowH,
+    color: rgb(1,1,1), borderColor: COLORS.border, borderWidth: 0.5,
+  });
+  ctx.page.drawText("Principal / Director Signature & Seal", {
+    x: ctx.margin + 6, y: ctx.y - 11, size: 7, font, color: COLORS.muted,
+  });
+  ctx.page.drawLine({
+    start: { x: ctx.margin + 12,                      y: ctx.y - 38 },
+    end:   { x: ctx.margin + totalW * 0.55 - 12,       y: ctx.y - 38 },
+    thickness: 0.4, color: COLORS.muted,
+  });
+
+  // Right-side authority signature block (uses branding signature image).
+  ctx.page.drawRectangle({
+    x: ctx.margin + totalW * 0.55, y: ctx.y - signRowH, width: totalW * 0.45, height: signRowH,
+    color: rgb(1,1,1), borderColor: COLORS.border, borderWidth: 0.5,
+  });
+  ctx.page.drawText("For the Institution", {
+    x: ctx.margin + totalW * 0.55 + 6, y: ctx.y - 11, size: 7, font, color: COLORS.muted,
+  });
+  if (sigImg) {
+    const sigW = 80, sigH = 28;
+    ctx.page.drawImage(sigImg, {
+      x: ctx.margin + totalW * 0.55 + 8,
+      y: ctx.y - signRowH + 12,
+      width: sigW, height: sigH,
+    });
+  } else {
     ctx.page.drawLine({
-      start: { x: ctx.width - ctx.margin - 130, y: ctx.y - sigH - 4 },
-      end:   { x: ctx.width - ctx.margin,        y: ctx.y - sigH - 4 },
-      thickness: 0.5, color: COLORS.muted,
-    });
-    ctx.page.drawText(branding?.signatory_name || "Authorised Signatory", {
-      x: ctx.width - ctx.margin - 130, y: ctx.y - sigH - 16, size: 8, font: bold, color: COLORS.text,
-    });
-    ctx.page.drawText(branding?.signatory_designation || "for the Institution", {
-      x: ctx.width - ctx.margin - 130, y: ctx.y - sigH - 26, size: 7, font, color: COLORS.muted,
+      start: { x: ctx.margin + totalW * 0.55 + 12, y: ctx.y - 38 },
+      end:   { x: ctx.margin + totalW - 12,         y: ctx.y - 38 },
+      thickness: 0.4, color: COLORS.muted,
     });
   }
+  ctx.page.drawText(norm(branding?.signatory_name) === "-" ? "AUTHORISED SIGNATORY" : norm(branding?.signatory_name), {
+    x: ctx.margin + totalW * 0.55 + 6, y: ctx.y - signRowH + 4, size: 7, font: bold, color: COLORS.text,
+  });
+  ctx.y -= signRowH + 4;
 
   return await pdf.save();
 }
