@@ -13,9 +13,11 @@ import {
   AlertTriangle, LogOut, UserCheck, RefreshCw,
 } from 'lucide-react-native';
 
+import { WebView } from 'react-native-webview';
+
 type PunchStep =
   | 'loading' | 'face_register' | 'face_pending'
-  | 'checking_location' | 'location_ok' | 'selfie' | 'submitting'
+  | 'checking_location' | 'location_ok' | 'selfie' | 'liveness' | 'submitting'
   | 'done' | 'error';
 
 interface Geofence {
@@ -48,6 +50,8 @@ export default function PunchScreen() {
   const [selfieUri, setSelfieUri] = useState<string | null>(null);
   const [faceRegistered, setFaceRegistered] = useState<'none' | 'pending' | 'approved'>('none');
   const [faceImageUrl, setFaceImageUrl] = useState<string | null>(null);
+  const [regPhotos, setRegPhotos] = useState<string[]>([]);
+  const [regStep, setRegStep] = useState(0);
   const cameraRef = useRef<CameraView>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
@@ -203,8 +207,16 @@ export default function PunchScreen() {
         return;
       }
     }
+    setRegPhotos([]);
+    setRegStep(0);
     setStep('selfie');
   };
+
+  const REG_PROMPTS = [
+    'Look straight at the camera',
+    'Turn your head slightly to the LEFT',
+    'Turn your head slightly to the RIGHT',
+  ];
 
   const captureFaceRegistration = async () => {
     if (!cameraRef.current) return;
@@ -212,58 +224,73 @@ export default function PunchScreen() {
       const photo = await cameraRef.current.takePictureAsync({ quality: 0.7 });
       if (!photo?.uri) { setErrorMsg('Could not capture photo.'); setStep('error'); return; }
 
-      setStep('submitting');
-      setSelfieUri(photo.uri);
+      const updatedPhotos = [...regPhotos, photo.uri];
+      setRegPhotos(updatedPhotos);
 
-      // Upload to storage
-      const url = await uploadSelfie(photo.uri, 'face-registration');
-      if (!url) {
-        setErrorMsg('Failed to upload photo. Check your internet.');
-        setStep('error');
+      if (updatedPhotos.length < 3) {
+        setRegStep(updatedPhotos.length);
         return;
       }
 
-      // Register face with AWS Rekognition (or Gemini fallback)
-      console.log('[FaceReg] Registering face with matching service...');
+      setStep('submitting');
+      setSelfieUri(updatedPhotos[0]);
+
+      const urls: string[] = [];
+      for (const uri of updatedPhotos) {
+        const url = await uploadSelfie(uri, 'face-registration');
+        if (!url) {
+          setErrorMsg('Failed to upload photo. Check your internet.');
+          setStep('error');
+          setRegPhotos([]);
+          setRegStep(0);
+          return;
+        }
+        urls.push(url);
+      }
+
+      console.log('[FaceReg] Registering faces with matching service...');
       try {
         const { data: regResult, error: regError } = await supabase.functions.invoke('face-match', {
           body: {
             action: 'register',
-            registered_image_url: url,
+            registered_image_urls: urls,
             user_id: user?.id,
           },
         });
 
         if (regError) {
           console.warn('[FaceReg] Registration service error:', regError.message);
-          // Still save to DB — admin can approve manually
         } else if (regResult?.error) {
-          // Face not detected in photo
           setErrorMsg(regResult.error);
           setStep('error');
+          setRegPhotos([]);
+          setRegStep(0);
           return;
         } else {
-          console.log('[FaceReg] Face indexed, confidence:', regResult?.confidence);
+          console.log('[FaceReg] Faces indexed:', regResult?.indexed_count);
         }
       } catch (err) {
         console.warn('[FaceReg] Service unavailable:', err);
       }
 
-      // Save registration to DB
       const { error } = await supabase.from('employee_face_registrations').upsert({
         user_id: user?.id,
-        image_url: url,
-        image_urls: [url],
+        image_url: urls[0],
+        image_urls: urls,
         status: 'pending',
       }, { onConflict: 'user_id' });
 
-      if (error) { setErrorMsg(error.message); setStep('error'); return; }
+      if (error) { setErrorMsg(error.message); setStep('error'); setRegPhotos([]); setRegStep(0); return; }
 
       setFaceRegistered('pending');
+      setRegPhotos([]);
+      setRegStep(0);
       setStep('face_pending');
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to capture photo.');
       setStep('error');
+      setRegPhotos([]);
+      setRegStep(0);
     }
   };
 
@@ -350,8 +377,55 @@ export default function PunchScreen() {
     }
   };
 
+  // ── AWS Rekognition Liveness WebView ──
+  const livenessUrlRef = useRef<string | null>(null);
+
+  const startLivenessCheck = () => {
+    const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+    const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+
+    const params = new URLSearchParams({
+      supabase_url: supabaseUrl,
+      supabase_key: supabaseKey,
+      user_id: user?.id || '',
+      region: 'ap-south-1',
+      identity_pool_id: 'ap-south-1:518a81c9-8722-431a-9d1b-2e988ab4f0b5',
+    });
+
+    livenessUrlRef.current = `https://uni.nimt.ac.in/liveness.html?${params.toString()}`;
+    setStep('liveness');
+  };
+
+  const handleLivenessMessage = (event: any) => {
+    try {
+      const data = JSON.parse(event.nativeEvent.data);
+      console.log('[Liveness] Result:', JSON.stringify(data).slice(0, 200));
+
+      if (data.type === 'liveness_result') {
+        if (data.is_live) {
+          // Liveness passed — proceed with punch
+          console.log(`[Liveness] PASSED: ${data.confidence}%`);
+          setStep('submitting');
+          finalizePunch(data.confidence);
+        } else {
+          setErrorMsg(`Liveness check failed (${data.confidence}%). Please try again with your real face.`);
+          setStep('error');
+        }
+      } else if (data.type === 'liveness_error') {
+        setErrorMsg(`Liveness error: ${data.error}`);
+        setStep('error');
+      } else if (data.type === 'liveness_cancel') {
+        setStep('selfie');
+      }
+    } catch (e) {
+      console.error('[Liveness] Parse error:', e);
+    }
+  };
+
   // ── Submit Punch ──
   const [faceMatchResult, setFaceMatchResult] = useState<{ match: boolean; confidence: number; reason: string } | null>(null);
+
+  const [pendingSelfieUrl, setPendingSelfieUrl] = useState<string | null>(null);
 
   const submitPunch = async (photoUri: string | null) => {
     setStep('submitting');
@@ -361,7 +435,6 @@ export default function PunchScreen() {
       const now = new Date().toISOString();
 
       debugLog.push(`photoUri: ${photoUri ? 'YES' : 'NULL'}`);
-      debugLog.push(`faceImageUrl: ${faceImageUrl ? 'YES' : 'NULL'}`);
       debugLog.push(`isPunchedIn: ${isPunchedIn}`);
 
       // Step 1: Upload selfie
@@ -372,12 +445,12 @@ export default function PunchScreen() {
         debugLog.push(`Upload: ${selfieUrl ? 'OK' : 'FAILED'}`);
 
         if (!selfieUrl) {
-          setErrorMsg('Failed to upload selfie. Check your internet.\n\nDebug: ' + debugLog.join('\n'));
+          setErrorMsg('Failed to upload selfie. Check your internet.');
           setStep('error');
           return;
         }
       } else {
-        setErrorMsg('No photo was captured.\n\nDebug: ' + debugLog.join('\n'));
+        setErrorMsg('No photo was captured.');
         setStep('error');
         return;
       }
@@ -397,21 +470,57 @@ export default function PunchScreen() {
 
           if (matchError) {
             debugLog.push(`Match error: ${matchError.message}`);
-            // Allow punch but note the error
-          } else if (matchData && !matchData.error) {
-            setFaceMatchResult(matchData);
-            debugLog.push(`Match: ${matchData.match}, Confidence: ${matchData.confidence}%`);
-
-            if (!matchData.match && matchData.confidence < 30) {
-              setErrorMsg(`Face does not match (${matchData.confidence}%). ${matchData.reason || 'Try better lighting.'}`);
-              setStep('error');
-              return;
+            const msg = matchError.message?.toLowerCase() || '';
+            if (msg.includes('no face') || msg.includes('invalidparameterexception')) {
+              setErrorMsg('No face detected in photo. Please take a clear selfie with your face visible.');
+            } else {
+              setErrorMsg(`Face verification failed: ${matchError.message}`);
             }
-          } else if (matchData?.error) {
-            debugLog.push(`Match API error: ${matchData.error}`);
+            setStep('error');
+            return;
           }
+
+          if (matchData?.error) {
+            debugLog.push(`Match API error: ${matchData.error}`);
+            const msg = (matchData.error as string).toLowerCase();
+            if (msg.includes('no face') || msg.includes('invalidparameterexception')) {
+              setErrorMsg('No face detected in photo. Please take a clear selfie with your face visible.');
+            } else {
+              setErrorMsg(`Face verification failed: ${matchData.error}`);
+            }
+            setStep('error');
+            return;
+          }
+
+          setFaceMatchResult(matchData);
+          debugLog.push(`Match: ${matchData.match}, Confidence: ${matchData.confidence}%`);
+
+          if (!matchData.match) {
+            const reason = matchData.reason?.toLowerCase() || '';
+            if (reason.includes('no face')) {
+              setErrorMsg('No face detected in photo. Please take a clear selfie with your face visible.');
+            } else {
+              setErrorMsg(`Face does not match (${matchData.confidence}%). ${matchData.reason || 'Try better lighting.'}`);
+            }
+            setStep('error');
+            return;
+          }
+
+          // Step 3: Face matched — now do AWS Rekognition Liveness check
+          debugLog.push('Face matched. Starting AWS liveness check...');
+          setPendingSelfieUrl(selfieUrl);
+          startLivenessCheck();
+          return; // Liveness WebView will call finalizePunch on success
         } catch (faceErr: any) {
           debugLog.push(`Match exception: ${faceErr?.message}`);
+          const msg = faceErr?.message?.toLowerCase() || '';
+          if (msg.includes('no face') || msg.includes('invalidparameterexception')) {
+            setErrorMsg('No face detected in photo. Please take a clear selfie with your face visible.');
+          } else {
+            setErrorMsg(`Face verification error: ${faceErr?.message || 'Unknown error'}`);
+          }
+          setStep('error');
+          return;
         }
       } else {
         debugLog.push(`SKIPPED face match. selfieUrl=${!!selfieUrl}, faceImageUrl=${!!faceImageUrl}`);
@@ -449,6 +558,36 @@ export default function PunchScreen() {
     } catch (err: any) {
       debugLog.push(`Exception: ${err?.message}`);
       setErrorMsg((err?.message || 'Failed to record attendance.') + '\n\nDebug:\n' + debugLog.join('\n'));
+      setStep('error');
+    }
+  };
+
+  // Called after AWS Rekognition Liveness passes
+  const finalizePunch = async (livenessConfidence?: number) => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const now = new Date().toISOString();
+      const { error } = await supabase
+        .from('employee_attendance')
+        .insert({
+          user_id: user?.id,
+          campus_id: matchedCampus && !matchedCampus.isCustom ? matchedCampus.campusId : null,
+          geofence_location_id: matchedCampus?.isCustom ? matchedCampus.campusId : null,
+          date: today,
+          punch_in: now,
+          selfie_url: pendingSelfieUrl,
+          location_lat: userLocation?.lat,
+          location_lng: userLocation?.lng,
+          face_match_score: faceMatchResult?.confidence || null,
+          face_match_result: faceMatchResult ? (faceMatchResult.match ? 'match' : 'no_match') : null,
+          liveness_score: livenessConfidence || null,
+        });
+      if (error) throw error;
+      setPunchTime(now);
+      setIsPunchedIn(true);
+      setStep('done');
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Failed to record attendance.');
       setStep('error');
     }
   };
@@ -576,10 +715,24 @@ export default function PunchScreen() {
         <View style={styles.cameraContainer}>
           <CameraView ref={cameraRef} style={styles.camera} facing="front" />
           <View style={styles.cameraOverlay}>
-            <Text style={styles.cameraText}>
-              {isFaceRegMode ? 'Take a clear photo of your face' : 'Quick selfie for attendance'}
-            </Text>
+            {isFaceRegMode ? (
+              <>
+                <View style={styles.regStepBadge}>
+                  <Text style={styles.regStepBadgeText}>Photo {regStep + 1} of 3</Text>
+                </View>
+                <Text style={styles.cameraText}>{REG_PROMPTS[regStep]}</Text>
+              </>
+            ) : (
+              <Text style={styles.cameraText}>Quick selfie for attendance</Text>
+            )}
             <View style={styles.cameraCircle} />
+            {isFaceRegMode && regPhotos.length > 0 && (
+              <View style={styles.regPreviewRow}>
+                {regPhotos.map((uri, i) => (
+                  <Image key={i} source={{ uri }} style={styles.regPreviewThumb} />
+                ))}
+              </View>
+            )}
             <TouchableOpacity
               style={styles.captureButton}
               onPress={isFaceRegMode ? captureFaceRegistration : capturePunchSelfie}
@@ -587,21 +740,26 @@ export default function PunchScreen() {
             >
               <Camera size={24} color="#fff" />
               <Text style={styles.captureText}>
-                {isFaceRegMode ? 'Register Face' : 'Punch In'}
+                {isFaceRegMode ? `Capture ${regStep + 1}/3` : 'Punch In'}
               </Text>
             </TouchableOpacity>
-
-            {/* Skip selfie removed — selfie is mandatory */}
-            {false && (
-              <TouchableOpacity
-                style={styles.skipButton}
-                onPress={() => {}}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.skipText}>Skip selfie</Text>
-              </TouchableOpacity>
-            )}
           </View>
+        </View>
+      )}
+
+      {/* AWS Rekognition Liveness WebView */}
+      {step === 'liveness' && livenessUrlRef.current && (
+        <View style={styles.cameraContainer}>
+          <WebView
+            source={{ uri: livenessUrlRef.current }}
+            style={{ flex: 1 }}
+            onMessage={handleLivenessMessage}
+            javaScriptEnabled
+            domStorageEnabled
+            mediaPlaybackRequiresUserAction={false}
+            allowsInlineMediaPlayback
+            mediaCapturePermissionGrantType="grant"
+          />
         </View>
       )}
 
@@ -772,4 +930,32 @@ const styles = StyleSheet.create({
   skipText: { color: 'rgba(255,255,255,0.7)', fontSize: 14, fontWeight: '500' },
   matchBadge: { borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, marginTop: 4 },
   matchText: { fontSize: 12, fontWeight: '600' },
+  livenessBanner: {
+    backgroundColor: 'rgba(251,191,36,0.9)',
+    borderRadius: 12,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    marginBottom: 16,
+  },
+  livenessBannerText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '800',
+    textAlign: 'center',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  regStepBadge: {
+    backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 6, marginBottom: 8,
+  },
+  regStepBadgeText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  regPreviewRow: {
+    flexDirection: 'row', gap: 8, position: 'absolute', top: 60,
+    right: 16,
+  },
+  regPreviewThumb: {
+    width: 48, height: 48, borderRadius: 8,
+    borderWidth: 2, borderColor: '#fff',
+  },
 });
