@@ -244,29 +244,48 @@ function drawHeaderRow(ctx: Ctx, cols: { label: string; w: number }[], rowH = 16
   ctx.y -= rowH;
 }
 
-function drawValueRow(ctx: Ctx, cols: { value: string; w: number; red?: boolean }[], rowH = 26) {
-  ensureSpace(ctx, rowH);
+// Auto-sizing row: heights expand to fit the longest wrapped value across cols.
+function drawValueRow(ctx: Ctx, cols: { value: string; w: number; red?: boolean }[], minRowH = 22) {
+  const valueSize = 8.5;
+  const lineH = valueSize + 2;
+  let maxLines = 1;
+  for (const c of cols) {
+    const lines = wrapText(c.value || "", ctx.bold, valueSize, c.w - 8, 5);
+    if (lines.length > maxLines) maxLines = lines.length;
+  }
+  const computedH = Math.max(minRowH, 10 + maxLines * lineH);
+  ensureSpace(ctx, computedH);
   let xCur = ctx.margin;
   for (const c of cols) {
-    drawCell(ctx, xCur, ctx.y, c.w, rowH, "", c.value, { red: c.red, maxLines: 2 });
+    drawCell(ctx, xCur, ctx.y, c.w, computedH, "", c.value, { red: c.red, maxLines: 5 });
     xCur += c.w;
   }
-  ctx.y -= rowH;
+  ctx.y -= computedH;
 }
 
 // 4-column key/value grid. Splits the row width into 4 cells of equal width.
-function drawKVGrid(ctx: Ctx, pairs: { label: string; value: string; red?: boolean }[], cellH = 30) {
+// Auto-sizing 4-col grid: each row of 4 sizes to fit the longest wrapped value.
+function drawKVGrid(ctx: Ctx, pairs: { label: string; value: string; red?: boolean }[], minCellH = 26) {
   if (pairs.length === 0) return;
   const totalW = ctx.width - ctx.margin*2;
+  const cellW = totalW / 4;
+  const valueSize = 8.5;
+  const lineH = valueSize + 2;
   for (let i = 0; i < pairs.length; i += 4) {
-    ensureSpace(ctx, cellH);
     const slice = pairs.slice(i, i + 4);
-    const cellW = totalW / 4;
+    let maxLines = 1;
+    for (const p of slice) {
+      if (!p || !p.value || p.value === "-") continue;
+      const lines = wrapText(p.value, ctx.bold, valueSize, cellW - 8, 5);
+      if (lines.length > maxLines) maxLines = lines.length;
+    }
+    const cellH = Math.max(minCellH, 16 + maxLines * lineH);
+    ensureSpace(ctx, cellH);
     let xCur = ctx.margin;
     for (let j = 0; j < 4; j++) {
       const p = slice[j];
       if (p) {
-        drawCell(ctx, xCur, ctx.y, cellW, cellH, p.label, p.value, { red: p.red, maxLines: 2 });
+        drawCell(ctx, xCur, ctx.y, cellW, cellH, p.label, p.value, { red: p.red, maxLines: 5 });
       } else {
         ctx.page.drawRectangle({ x: xCur, y: ctx.y - cellH, width: cellW, height: cellH, color: rgb(1,1,1), borderColor: COLORS.border, borderWidth: 0.5 });
       }
@@ -353,6 +372,34 @@ Deno.serve(async (req) => {
       console.error("[application-form] storage list failed:", (e as Error).message);
     }
 
+    // Look up the application-fee payment for this lead so we can render
+    // the receipt details (ref, amount, paid-on timestamp) on the form.
+    let appFeePayment: any = null;
+    if (app.lead_id) {
+      const { data: lp } = await admin
+        .from("lead_payments")
+        .select("amount, payment_mode, transaction_ref, receipt_no, payment_date, created_at, status")
+        .eq("lead_id", app.lead_id)
+        .eq("type", "application_fee")
+        .eq("status", "confirmed")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      appFeePayment = lp || null;
+    }
+    // Fall back to applications.payment_ref if no lead_payments row exists yet
+    // (older flow stored the gateway ref directly on applications).
+    if (!appFeePayment && app.payment_status === "paid") {
+      appFeePayment = {
+        amount: app.fee_amount,
+        payment_mode: "gateway",
+        transaction_ref: app.payment_ref,
+        receipt_no: null,
+        payment_date: app.submitted_at || app.updated_at,
+        status: "confirmed",
+      };
+    }
+
     // Build PDF (embeds letterhead/photo/signature in the same doc).
     const p = await PDFDocument.create();
     const f = await p.embedFont(StandardFonts.Helvetica);
@@ -360,7 +407,7 @@ Deno.serve(async (req) => {
     const lh    = await fetchImage(p, branding?.letterhead_url ?? null);
     const photo = await fetchImage(p, photoUrl);
     const sig   = await fetchImage(p, branding?.signature_url ?? null);
-    const out = await buildApplicationPdfInline(p, f, b, app, branding, lh, photo, sig, documents);
+    const out = await buildApplicationPdfInline(p, f, b, app, branding, lh, photo, sig, documents, appFeePayment);
 
     const path = `applications/${app.application_id}.pdf`;
     const { error: upErr } = await admin.storage
@@ -393,6 +440,7 @@ async function buildApplicationPdfInline(
   app: any, branding: any,
   lhImg: PDFImage | null, photoImg: PDFImage | null, sigImg: PDFImage | null,
   documents: { name: string; url: string }[],
+  appFeePayment: any = null,
 ): Promise<Uint8Array> {
   const flags = new Set<string>(Array.isArray(app.flags) ? app.flags : []);
   const ctx: Ctx = {
@@ -701,6 +749,36 @@ async function buildApplicationPdfInline(
     ecPairs.forEach(p => drawWide(ctx, p.label, p.value));
   }
 
+  // ── APPLICATION FEE PAYMENT ────────────────────────────────────────
+  drawSection(ctx, "Application Fee Payment");
+  if (appFeePayment) {
+    const modeLabel: Record<string, string> = {
+      cash: "Cash", upi: "UPI", bank_transfer: "Bank Transfer / NEFT",
+      cheque: "Cheque / DD", online: "Online", gateway: "Online (Gateway)",
+    };
+    const paidAt = appFeePayment.payment_date || appFeePayment.created_at;
+    const paidAtStr = paidAt ? new Date(paidAt).toLocaleString("en-IN", {
+      day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+    }) : "-";
+    drawKVGrid(ctx, [
+      { label: "Status",          value: "PAID" },
+      { label: "Amount",          value: appFeePayment.amount != null ? `Rs. ${Number(appFeePayment.amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "-" },
+      { label: "Payment Mode",    value: norm(modeLabel[appFeePayment.payment_mode] || appFeePayment.payment_mode) },
+      { label: "Receipt No",      value: norm(appFeePayment.receipt_no) },
+      { label: "Transaction Ref", value: norm(appFeePayment.transaction_ref) },
+      { label: "Paid On",         value: paidAtStr.toUpperCase() },
+      { label: "",                value: "" },
+      { label: "",                value: "" },
+    ]);
+  } else {
+    drawKVGrid(ctx, [
+      { label: "Status",         value: norm(app.payment_status || "PENDING") },
+      { label: "Amount",         value: app.fee_amount != null ? `Rs. ${Number(app.fee_amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "-" },
+      { label: "Transaction Ref", value: norm(app.payment_ref) },
+      { label: "",               value: "" },
+    ]);
+  }
+
   // ── DOCUMENTS UPLOADED (with clickable links) ──────────────────────
   drawSection(ctx, "Documents Uploaded");
   if (documents.length === 0) {
@@ -725,29 +803,59 @@ async function buildApplicationPdfInline(
     });
   }
 
-  // ── DECLARATION ────────────────────────────────────────────────────
-  drawSection(ctx, "Declaration");
-  const declarations = [
-    "I HEREBY DECLARE THAT, the details given by me in the application form are complete and true to the best of my knowledge and based on records.",
-    "I HEREBY UNDERTAKE TO PRESENT THE ORIGINAL DOCUMENTS immediately upon demand by the concerned authorities of the institution.",
-    "I HEREBY PROMISE TO ABIDE BY THE ADMISSIBLE RULES AND REGULATIONS, concerning discipline, attendance, etc. of the institution, as in force from time to time and any subsequent changes/modifications/amendments made thereto. I acknowledge that the institution has the authority for taking punitive actions against me for violation and/or non-compliance of the same.",
-    "I UNDERSTAND THAT, 75% attendance in classes is compulsory and I commit myself to adhere to the same. I also understand that, in case my attendance falls short for any reason, the competent authority of the institute may take such punitive actions against me, as may be deemed fit and proper.",
-    "I HEREBY DECLARE THAT, I will neither join in any coercive agitation/strike for the purpose of forcing the authorities of the institution to solve any problem, nor will I participate in activity which has a tendency to disturb the peace and tranquility of life of the institution campus and/or its hostel premises.",
-    "I HEREBY DECLARE THAT, I will not indulge in, nor tolerate ragging, in any form, even in words or intentions, and I accept to give an undertaking in the prescribed format for the same. I shall be solely responsible for my involvement in any kind of undesirable/disciplinary activities outside the campus, and shall be liable for punishment as per university.",
-    "I ALSO DECLARE THAT, I am not suffering from any serious/contagious ailment and/or any psychiatric/psychological disorder.",
-    "I FURTHER DECLARE THAT, my admission may be cancelled, at any stage, if I am found ineligible and/or the information provided by me are found to be incorrect.",
-    "I HEREBY UNDERTAKE TO INFORM THE INSTITUTION about any changes in information submitted by me, in the application form and any other documents, including change in addresses and contact number, from time to time.",
-    "I HEREBY DECLARE THAT, in case I cancel my admission during anytime of course, I will follow all the rules and regulations of the university.",
+  // ── DECLARATION AND UNDERTAKING ────────────────────────────────────
+  drawSection(ctx, "Declaration and Undertaking");
+  const declParas: { text: string; emphasis?: boolean }[] = [
+    {
+      text:
+        "I declare that all information and documents submitted by me are genuine, complete, and accurate. " +
+        "I understand that if any document or information is found to be fake, forged, incorrect, or modified at any stage, " +
+        "my admission shall be cancelled immediately and no fee shall be refunded by NIMT Educational Institutions. " +
+        "I undertake to produce all original documents for verification upon request and to promptly inform the Institution " +
+        "of any subsequent changes to my submitted information.",
+    },
+    {
+      text:
+        "I agree to abide by all rules, regulations, and the code of conduct of NIMT Educational Institutions, as well as " +
+        "those of the affiliating university and applicable statutory/regulatory approval bodies, as amended from time to time, " +
+        "including requirements relating to attendance and discipline. I shall neither engage in nor tolerate ragging in any form " +
+        "and accept that the Institution may take disciplinary action for any violation. I further declare that I am not suffering " +
+        "from any serious, contagious, or psychiatric/psychological condition.",
+    },
+    {
+      text:
+        "ALL FEES ARE STRICTLY NON-REFUNDABLE. I unconditionally accept that all fees paid to NIMT Educational Institutions - " +
+        "including application, registration, tuition, hostel, examination, and any other charges - are non-refundable under any " +
+        "circumstances, whether due to voluntary withdrawal, cancellation by the Institution, disciplinary action, or any other reason. " +
+        "I shall have no claim to any refund at any stage.",
+      emphasis: true,
+    },
   ];
-  declarations.forEach((d, i) => {
-    const text = `${i + 1}. ${d}`;
-    const lines = text.match(/.{1,115}(\s|$)/g) || [text];
-    lines.forEach(line => {
-      ensureSpace(ctx, 10);
-      ctx.page.drawText(line.trim(), { x: ctx.margin, y: ctx.y - 7, size: 7.5, font, color: COLORS.text });
-      ctx.y -= 9;
+  const declSize = 8;
+  const declLineH = 11;
+  const declWidth = ctx.width - ctx.margin*2;
+  declParas.forEach(para => {
+    const lines = wrapText(para.text, font, declSize, declWidth, 20);
+    // Reserve space for the whole paragraph; if not enough, page-break.
+    const paraH = lines.length * declLineH + 6;
+    ensureSpace(ctx, paraH);
+    if (para.emphasis) {
+      // Subtle red-tinted background for the non-refund clause.
+      ctx.page.drawRectangle({
+        x: ctx.margin, y: ctx.y - paraH + 2, width: declWidth, height: paraH,
+        color: COLORS.redFill, borderColor: COLORS.redBorder, borderWidth: 0.6,
+      });
+    }
+    lines.forEach((line, i) => {
+      ctx.page.drawText(line, {
+        x: ctx.margin + (para.emphasis ? 6 : 0),
+        y: ctx.y - 9 - i * declLineH,
+        size: declSize,
+        font: para.emphasis ? bold : font,
+        color: COLORS.text,
+      });
     });
-    ctx.y -= 2;
+    ctx.y -= paraH + 4;
   });
 
   // ── SIGNATURE ──────────────────────────────────────────────────────
@@ -756,7 +864,7 @@ async function buildApplicationPdfInline(
   const sigCols = [
     { label: "Applicant Name", value: norm(app.full_name) },
     { label: "Parent Name",    value: parentName(f) === "-" ? parentName(m) : parentName(f) },
-    { label: "Date",           value: fmtDate(app.submitted_at || app.updated_at) },
+    { label: "Submission Date", value: fmtDate(app.submitted_at || app.updated_at) },
     { label: "Place",          value: norm(a.city) },
   ];
   const totalW = ctx.width - ctx.margin*2;
