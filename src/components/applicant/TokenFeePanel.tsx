@@ -18,11 +18,24 @@ type FeeStatus = {
   multi_year_pct?: number;
   multi_year_window_days?: number;
   within_multi_year_window?: boolean;
+  multi_year_window_expires_at?: string | null;
   full_first_year_discount?: number;
   full_first_year_amount_due?: number;
   full_course_discount?: number;
   full_course_amount_due?: number;
 };
+
+function formatCountdown(ms: number): string {
+  if (ms <= 0) return "Expired";
+  const totalSec = Math.floor(ms / 1000);
+  const days = Math.floor(totalSec / 86400);
+  const hours = Math.floor((totalSec % 86400) / 3600);
+  const mins = Math.floor((totalSec % 3600) / 60);
+  const secs = totalSec % 60;
+  if (days > 0) return `${days}d ${hours}h ${mins}m`;
+  if (hours > 0) return `${hours}h ${mins}m ${secs}s`;
+  return `${mins}m ${secs}s`;
+}
 
 interface Lead {
   id: string;
@@ -63,6 +76,7 @@ export function TokenFeePanel({ applicationId, applicantName, applicantPhone, ap
   const [payAmount, setPayAmount] = useState<string>("");
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
   const load = async () => {
     setLoading(true);
@@ -91,6 +105,17 @@ export function TokenFeePanel({ applicationId, applicantName, applicantPhone, ap
   };
 
   useEffect(() => { load(); }, [applicationId]);
+
+  // Tick a clock once a second so the multi-year countdown stays live
+  // (only when there's an active window we care about).
+  useEffect(() => {
+    const expiresAt = feeStatus?.multi_year_window_expires_at
+      ? new Date(feeStatus.multi_year_window_expires_at).getTime()
+      : null;
+    if (!expiresAt || expiresAt <= Date.now()) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [feeStatus?.multi_year_window_expires_at]);
 
   // Listen for the popup's success/failure ping.
   useEffect(() => {
@@ -312,38 +337,64 @@ export function TokenFeePanel({ applicationId, applicantName, applicantPhone, ap
         </div>
       )}
 
-      {(feeStatus.lump_sum_pct || 0) > 0 && (feeStatus.additional_years_fee || 0) > 0 && (feeStatus.full_course_amount_due || 0) > 0 && (
-        <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 space-y-2">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-xs font-semibold text-emerald-900">
-                Pay full course fee — save ₹{(feeStatus.full_course_discount || 0).toLocaleString("en-IN")}
-              </p>
-              <p className="text-[11px] text-emerald-700">
-                {feeStatus.lump_sum_pct}% on year-1
-                {feeStatus.within_multi_year_window
-                  ? ` + extra ${feeStatus.multi_year_pct}% on later years (within ${feeStatus.multi_year_window_days} days of token).`
-                  : ` + ${feeStatus.lump_sum_pct}% on later years (multi-year bonus window expired).`}
-              </p>
+      {(() => {
+        const showFullCourse = (feeStatus.lump_sum_pct || 0) > 0
+          && (feeStatus.additional_years_fee || 0) > 0
+          && (feeStatus.full_course_amount_due || 0) > 0;
+        if (!showFullCourse) return null;
+
+        const expiresAt = feeStatus.multi_year_window_expires_at
+          ? new Date(feeStatus.multi_year_window_expires_at).getTime()
+          : null;
+        const inWindow = !!feeStatus.within_multi_year_window;
+        const remainingMs = expiresAt ? expiresAt - now : null;
+        const showTimer = inWindow && remainingMs !== null && remainingMs > 0;
+
+        return (
+          <div className={`rounded-lg p-3 space-y-2 border ${showTimer ? "bg-emerald-50 border-emerald-300" : "bg-emerald-50 border-emerald-200"}`}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-emerald-900">
+                  Pay full course fee — save ₹{(feeStatus.full_course_discount || 0).toLocaleString("en-IN")}
+                </p>
+                <p className="text-[11px] text-emerald-700">
+                  {feeStatus.lump_sum_pct}% on year-1
+                  {inWindow
+                    ? ` + extra ${feeStatus.multi_year_pct}% on later years.`
+                    : ` + ${feeStatus.lump_sum_pct}% on later years (multi-year bonus expired).`}
+                </p>
+                {showTimer && (
+                  <div className="mt-1.5 flex items-center gap-1.5">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      Limited-time bonus
+                    </span>
+                    <span className="text-[11px] font-mono font-semibold text-emerald-900 tabular-nums">
+                      {formatCountdown(remainingMs!)}
+                    </span>
+                    <span className="text-[10px] text-emerald-600">left</span>
+                  </div>
+                )}
+              </div>
+              <button
+                disabled={paying || !applicantPhone}
+                onClick={() => startPayment(feeStatus.full_course_amount_due || 0, {
+                  paymentType: "other",
+                  productinfo: "Full course fee (with waivers)",
+                  concession: feeStatus.full_course_discount || 0,
+                  reason: inWindow
+                    ? `Full course: ${feeStatus.lump_sum_pct}% lump + ${feeStatus.multi_year_pct}% multi-year (within window)`
+                    : `Full course: ${feeStatus.lump_sum_pct}% lump (window expired)`,
+                })}
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {paying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
+                Pay ₹{(feeStatus.full_course_amount_due || 0).toLocaleString("en-IN")}
+              </button>
             </div>
-            <button
-              disabled={paying || !applicantPhone}
-              onClick={() => startPayment(feeStatus.full_course_amount_due || 0, {
-                paymentType: "other",
-                productinfo: "Full course fee (with waivers)",
-                concession: feeStatus.full_course_discount || 0,
-                reason: feeStatus.within_multi_year_window
-                  ? `Full course: ${feeStatus.lump_sum_pct}% lump + ${feeStatus.multi_year_pct}% multi-year (within window)`
-                  : `Full course: ${feeStatus.lump_sum_pct}% lump (window expired)`,
-              })}
-              className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-            >
-              {paying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
-              Pay ₹{(feeStatus.full_course_amount_due || 0).toLocaleString("en-IN")}
-            </button>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
