@@ -152,45 +152,42 @@ export default function PunchScreen() {
     }
   };
 
-  // ── Upload photo to Supabase Storage ──
+  // ── Upload photo to S3 via edge function ──
   const uploadSelfie = async (uri: string, folder: string): Promise<string | null> => {
     try {
       const filename = `${user?.id}/${folder}/${Date.now()}.jpg`;
 
-      // React Native: use FormData with file URI (blob/fetch doesn't work in RN)
       const formData = new FormData();
       formData.append('file', {
         uri,
         name: `${Date.now()}.jpg`,
         type: 'image/jpeg',
       } as any);
+      formData.append('key', filename);
+      formData.append('bucket', 'unios-selfies');
 
-      // Use raw fetch to Supabase Storage API
       const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
       const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
       const session = (await supabase.auth.getSession()).data.session;
       const token = session?.access_token || supabaseKey;
 
       const res = await fetch(
-        `${supabaseUrl}/storage/v1/object/selfies/${filename}`,
+        `${supabaseUrl}/functions/v1/s3-upload`,
         {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'x-upsert': 'true',
-          },
+          headers: { 'Authorization': `Bearer ${token}` },
           body: formData,
         }
       );
 
       if (!res.ok) {
         const errText = await res.text();
-        console.error('[Punch] Upload error:', res.status, errText);
+        console.error('[Punch] S3 upload error:', res.status, errText);
         return null;
       }
 
-      const { data: urlData } = supabase.storage.from('selfies').getPublicUrl(filename);
-      return urlData.publicUrl;
+      const data = await res.json();
+      return data.url || null;
     } catch (err) {
       console.error('[Punch] Upload exception:', err);
       return null;
