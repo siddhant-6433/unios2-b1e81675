@@ -9,6 +9,7 @@ type FeeStatus = {
   application_paid: number;
   total_paid: number;
   twenty_five_pct: number;
+  min_token_instalment?: number;
   token_complete: boolean;
   twenty_five_complete: boolean;
 };
@@ -146,6 +147,7 @@ export function TokenFeePanel({ applicationId, applicantName, applicantPhone, ap
 
   const tokenOutstanding = Math.max(0, feeStatus.token_required - feeStatus.token_paid);
   const towardsAdmission = Math.max(0, feeStatus.twenty_five_pct - feeStatus.total_paid);
+  const minInstalment = feeStatus.min_token_instalment ?? 5000;
   const isAdmitted = !!lead.admission_no;
   const isPreAdmitted = !!lead.pre_admission_no;
 
@@ -219,7 +221,7 @@ export function TokenFeePanel({ applicationId, applicantName, applicantPhone, ap
         <div className="rounded-lg bg-white p-3 border border-gray-200 space-y-2">
           <p className="text-xs text-gray-700">
             Outstanding token: <span className="font-semibold">₹{tokenOutstanding.toLocaleString("en-IN")}</span>
-            {tokenOutstanding > 5000 && <span className="text-gray-500"> · min instalment ₹5,000</span>}
+            {tokenOutstanding > minInstalment && <span className="text-gray-500"> · min instalment ₹{minInstalment.toLocaleString("en-IN")}</span>}
           </p>
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
@@ -227,7 +229,7 @@ export function TokenFeePanel({ applicationId, applicantName, applicantPhone, ap
               <input
                 type="number"
                 step="100"
-                min={tokenOutstanding > 5000 ? 5000 : 1}
+                min={tokenOutstanding > minInstalment ? minInstalment : 1}
                 max={tokenOutstanding}
                 value={payAmount}
                 onChange={(e) => setPayAmount(e.target.value)}

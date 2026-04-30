@@ -55,6 +55,7 @@ export function RecordPaymentDialog({
     application_paid: number;
     total_paid: number;
     twenty_five_pct: number;
+    min_token_instalment?: number;
     token_complete: boolean;
     twenty_five_complete: boolean;
   } | null>(null);
@@ -69,12 +70,13 @@ export function RecordPaymentDialog({
   }, [open, leadId]);
 
   const tokenOutstanding = feeStatus ? Math.max(0, feeStatus.token_required - feeStatus.token_paid) : 0;
+  const minInstalment = feeStatus?.min_token_instalment ?? 5000;
   const isTokenInstalmentBelowMin =
     type === "token_fee" &&
     amount !== "" &&
     parseFloat(amount) > 0 &&
-    parseFloat(amount) < 5000 &&
-    tokenOutstanding > 5000;
+    parseFloat(amount) < minInstalment &&
+    tokenOutstanding > minInstalment;
 
   useEffect(() => {
     if (open) {
@@ -92,8 +94,8 @@ export function RecordPaymentDialog({
     if (!amount || parseFloat(amount) <= 0) return;
     if (isTokenInstalmentBelowMin) {
       toast({
-        title: "Minimum ₹5,000 per token instalment",
-        description: `Outstanding token: ₹${tokenOutstanding.toLocaleString("en-IN")}. Pay at least ₹5,000 unless this is the final balance.`,
+        title: `Minimum ₹${minInstalment.toLocaleString("en-IN")} per token instalment`,
+        description: `Outstanding token: ₹${tokenOutstanding.toLocaleString("en-IN")}. Pay at least ₹${minInstalment.toLocaleString("en-IN")} unless this is the final balance.`,
         variant: "destructive",
       });
       return;
@@ -202,7 +204,7 @@ export function RecordPaymentDialog({
             </div>
             {type === "token_fee" && tokenOutstanding > 0 && !feeStatus.token_complete && (
               <p className="pt-1 text-[11px] text-muted-foreground/80">
-                Outstanding token: ₹{tokenOutstanding.toLocaleString("en-IN")} · min instalment ₹5,000{tokenOutstanding < 5000 && " (final balance, any amount allowed)"}
+                Outstanding token: ₹{tokenOutstanding.toLocaleString("en-IN")} · min instalment ₹{minInstalment.toLocaleString("en-IN")}{tokenOutstanding < minInstalment && " (final balance, any amount allowed)"}
               </p>
             )}
           </div>
