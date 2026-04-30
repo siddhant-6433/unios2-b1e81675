@@ -7,6 +7,7 @@ import {
   Clock, FileText, AlertCircle, Plus, RefreshCw, Receipt,
 } from "lucide-react";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
+import { TokenFeePanel } from "@/components/applicant/TokenFeePanel";
 
 interface CourseSelection {
   course_name?: string;
@@ -342,6 +343,15 @@ export default function ApplicantPortal() {
                         </button>
                       )}
                     </div>
+
+                    {/* Offer letter + token fee — only renders if an approved offer exists for this app's lead */}
+                    <TokenFeePanel
+                      applicationId={app.application_id}
+                      applicantName={app.full_name}
+                      applicantPhone={profile?.phone || user?.phone || null}
+                      applicantEmail={user?.email || null}
+                      onPayment={fetchApplications}
+                    />
                   </div>
                 );
               })}

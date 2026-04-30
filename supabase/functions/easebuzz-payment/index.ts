@@ -114,6 +114,29 @@ Deno.serve(async (req) => {
       console.log("[easebuzz] return parsed:", { status, txnid, applicationId, easepayid, hashValid });
 
       const isSuccess = status.toLowerCase() === "success";
+      const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+      const paymentRef = easepayid || txnid || null;
+
+      // udf2 carries the pre-created lead_payments.id when this is a lead-side
+      // payment (token_fee / application_fee for a lead). Update that row's
+      // status — the AFTER trigger will then auto-advance the lead's stage and
+      // issue PAN / AN as the threshold is crossed.
+      if (udf2 && /^[0-9a-f-]{36}$/i.test(udf2)) {
+        const newStatus = isSuccess ? "confirmed" : "pending"; // failed → leave pending so user can retry
+        const { error: lpErr } = await admin
+          .from("lead_payments")
+          .update({ status: newStatus, transaction_ref: paymentRef })
+          .eq("id", udf2);
+        if (lpErr) {
+          console.error("[easebuzz] lead_payments update error:", lpErr.message);
+          return returnPage("Payment Received", "Payment confirmed but our records could not be updated. Please contact support. Txn: " + (easepayid || txnid), false);
+        }
+        return returnPage(
+          isSuccess ? "Payment Successful" : "Payment Failed",
+          isSuccess ? "Your payment has been received. You may close this window." : `Payment could not be completed (status: ${status}). Please try again.`,
+          isSuccess,
+        );
+      }
 
       if (isSuccess) {
         if (!applicationId) {
@@ -122,9 +145,6 @@ Deno.serve(async (req) => {
         }
 
         // Update application in DB — trust EaseBuzz's status=success from surl
-        const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
-        const paymentRef = easepayid || txnid || null;
-
         const { data: updated, error: dbErr } = await admin
           .from("applications")
           .update({ payment_status: "paid", payment_ref: paymentRef })
@@ -213,6 +233,92 @@ Deno.serve(async (req) => {
           txnid,
           pay_url: `${baseUrl}/pay/${data.data}`,
         }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── Initiate LEAD-side payment (token_fee / application_fee for a lead) ─
+    // Pre-creates a pending lead_payments row so the surl handler has a precise
+    // row to flip to status='confirmed'. The AFTER trigger on lead_payments
+    // does the rest (stage advance, PAN/AN issuance).
+    if (action === "initiate-lead-payment") {
+      const { lead_id, payment_type, amount, productinfo, firstname, email, phone, payment_mode } = body;
+
+      if (!lead_id || !payment_type || !amount || !firstname || !phone) {
+        return new Response(
+          JSON.stringify({ error: "Missing required fields (lead_id, payment_type, amount, firstname, phone)" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      if (!["application_fee","token_fee","registration_fee","other"].includes(payment_type)) {
+        return new Response(
+          JSON.stringify({ error: "Invalid payment_type" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+
+      // Pre-insert pending lead_payments row.
+      const { data: lp, error: lpErr } = await admin
+        .from("lead_payments")
+        .insert({
+          lead_id,
+          type: payment_type,
+          amount: parseFloat(amount),
+          payment_mode: payment_mode || "gateway",
+          status: "pending",
+        } as any)
+        .select("id")
+        .single();
+      if (lpErr || !lp?.id) {
+        console.error("[easebuzz] lead_payments pre-insert error:", lpErr?.message);
+        return new Response(
+          JSON.stringify({ error: lpErr?.message || "Failed to record payment intent" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const txnid       = `LP-${lp.id.slice(0, 8)}-${Date.now()}`;
+      const amountStr   = parseFloat(amount).toFixed(2);
+      const emailStr    = email || "noreply@nimteducation.com";
+      const productStr  = productinfo || (payment_type === "token_fee" ? "Token Fee" : "Fee Payment");
+      const udf1        = lead_id;
+      const udf2        = lp.id;
+      const udf3        = payment_type;
+
+      // Hash: SHA512(key|txnid|amount|productinfo|firstname|email|udf1|udf2|udf3|udf4|udf5||||||salt)
+      const hashInput = `${merchantKey}|${txnid}|${amountStr}|${productStr}|${firstname}|${emailStr}|${udf1}|${udf2}|${udf3}||||||||${merchantSalt}`;
+      const hash = await sha512(hashInput);
+
+      const selfUrl = `${supabaseUrl}/functions/v1/easebuzz-payment`;
+
+      const formData = new URLSearchParams({
+        key: merchantKey, txnid, amount: amountStr, productinfo: productStr,
+        firstname, email: emailStr, phone: phone.replace(/\D/g, "").slice(-10),
+        hash, udf1, udf2, udf3, udf4: "", udf5: "",
+        surl: selfUrl, furl: selfUrl,
+      });
+
+      const res = await fetch(`${baseUrl}/payment/initiateLink`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: formData.toString(),
+      });
+      const data = await res.json();
+
+      if (data.status !== 1) {
+        console.error("[easebuzz] initiate-lead-payment error:", data);
+        // Roll back the pending row so we don't leak intent rows.
+        await admin.from("lead_payments").delete().eq("id", lp.id);
+        return new Response(
+          JSON.stringify({ error: data.error_desc || data.data || "Failed to initiate payment" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ txnid, lead_payment_id: lp.id, pay_url: `${baseUrl}/pay/${data.data}` }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
