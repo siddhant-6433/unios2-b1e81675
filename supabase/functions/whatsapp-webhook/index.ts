@@ -55,6 +55,11 @@ Deno.serve(async (req) => {
         const value = change?.value;
         if (!value) continue;
 
+        // Capture which business number received this event so the inbox can
+        // be filtered per-number (multiple WABAs / BSPs can fan out here).
+        const businessPnId   = value?.metadata?.phone_number_id || null;
+        const businessNumber = value?.metadata?.display_phone_number || null;
+
         // Handle inbound messages
         const messages = value?.messages || [];
         for (const msg of messages) {
@@ -144,6 +149,8 @@ Deno.serve(async (req) => {
               phone, message_type: msgType, content, media_url: mediaUrl,
               status: "received", is_read: false,
               assigned_to: lead.counsellor_id || null,
+              business_phone_number_id: businessPnId,
+              business_phone_number: businessNumber,
             });
             continue;
           }
@@ -160,6 +167,8 @@ Deno.serve(async (req) => {
             status: "received",
             is_read: false,
             assigned_to: lead?.counsellor_id || null,
+            business_phone_number_id: businessPnId,
+            business_phone_number: businessNumber,
           });
 
           // Log activity if lead found
@@ -177,6 +186,14 @@ Deno.serve(async (req) => {
               event_type: "whatsapp_reply",
               metadata: { message_type: msgType, preview: content?.substring(0, 50) || null },
             });
+
+            // Auto-categorize lead based on message content (job applicant, vendor, etc.)
+            if (content && msgType === "text") {
+              await admin.rpc("auto_categorize_lead_from_message", {
+                _lead_id: lead.id,
+                _message_text: content,
+              }).catch(() => {}); // non-critical, don't block
+            }
           }
 
           // Insert in-app notification for assigned counsellor or all admins
@@ -185,13 +202,15 @@ Deno.serve(async (req) => {
             ? (content?.substring(0, 80) || "")
             : `[${msgType}]`;
 
+          const waInboxLink = `/whatsapp-inbox?phone=${normalizedPhone}`;
+
           if (lead?.counsellor_id) {
             await admin.from("notifications").insert({
               user_id: lead.counsellor_id,
               type: "whatsapp_message",
               title: `New WhatsApp from ${senderName}`,
               body: previewText,
-              link: `/whatsapp-inbox`,
+              link: waInboxLink,
               lead_id: lead.id,
             });
           } else {
@@ -209,7 +228,7 @@ Deno.serve(async (req) => {
                   type: "whatsapp_message",
                   title: `New WhatsApp from ${senderName}`,
                   body: previewText,
-                  link: `/whatsapp-inbox`,
+                  link: waInboxLink,
                   lead_id: lead?.id || null,
                 }))
               );

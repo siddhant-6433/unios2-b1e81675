@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   GraduationCap, CheckCircle, Loader2, LogOut, MapPin, Pencil, ChevronDown, ChevronUp,
+  FileText, Receipt, Award, Clock, Plus, Wallet, ArrowLeft,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +24,9 @@ import { ReviewSubmit } from "@/components/apply/ReviewSubmit";
 import { SiblingDetails } from "@/components/apply/SiblingDetails";
 import { ParentQuestionnaire } from "@/components/apply/ParentQuestionnaire";
 import { PortalProvider, usePortal } from "@/components/apply/PortalContext";
+import { TokenFeePanel } from "@/components/applicant/TokenFeePanel";
+import { ApplicationPreview, type PreviewDoc } from "@/components/applicant/ApplicationPreview";
+import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
 
 // ─── OTP Login Screen ───
 function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: string) => void }) {
@@ -49,8 +53,65 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
   const [googleName, setGoogleName] = useState("");
   const [checkingSession, setCheckingSession] = useState(true);
 
-  // Check for existing Supabase session (e.g. after Google OAuth redirect)
+  // Check for ?token= magic link first; if present, redeem it and sign the user in.
+  // Falls through to the normal session/OTP flow on any failure.
+  const hasMagicToken = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("token");
   useEffect(() => {
+    const url = new URL(window.location.href);
+    const magicToken = url.searchParams.get("token");
+    if (!magicToken) return;
+
+    (async () => {
+      try {
+        // NOTE: do NOT call supabase.auth.signOut() here. Supabase auth state
+        // lives in localStorage which is SHARED across all tabs on the same
+        // origin — signing out here would log the staff member out of their
+        // /applications dashboard tab too. The checkSession useEffect already
+        // skips when `hasMagicToken` is true, so contamination isn't a concern.
+
+        const { data, error } = await supabase.functions.invoke("redeem-apply-link", {
+          body: { token: magicToken },
+        });
+        if (error) {
+          // supabase-js wraps the response body on error.context — extract the
+          // server-side message instead of the generic "non-2xx status code".
+          let detail = error.message;
+          try {
+            const ctx = (error as any).context;
+            const body = typeof ctx?.json === "function" ? await ctx.json() : (ctx?.body ? JSON.parse(ctx.body) : null);
+            if (body?.error) detail = body.error;
+          } catch {}
+          throw new Error(detail);
+        }
+        if (data?.error) throw new Error(data.error);
+        if (!data?.phone) throw new Error("Invalid link response");
+
+        // Strip the token from the URL so refreshing doesn't try to re-redeem.
+        url.searchParams.delete("token");
+        window.history.replaceState({}, "", url.toString());
+
+        // Mirror the OTP login flow: just hand phone+name to onAuthenticated.
+        // The apply portal is session-less for applicants — RLS on `applications`
+        // already permits anon writes scoped by phone.
+        onAuthenticated(data.phone, data.name || "Applicant");
+      } catch (err: any) {
+        toast({
+          title: "Login link expired or invalid",
+          description: err?.message || "Please use phone OTP to log in.",
+          variant: "destructive",
+        });
+        // Fall through to OTP login by stripping the token
+        url.searchParams.delete("token");
+        window.history.replaceState({}, "", url.toString());
+      }
+    })();
+  }, []);
+
+  // Check for existing Supabase session (e.g. after Google OAuth redirect).
+  // Skip when a magic-link token is in the URL — that flow handles auth itself
+  // and we don't want a stale admin session in the same browser to win the race.
+  useEffect(() => {
+    if (hasMagicToken) { setCheckingSession(false); return; }
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
@@ -670,6 +731,193 @@ function captureUtmSource(): string {
   }
 }
 
+/* ─── Application Dashboard ─── */
+type DashboardApp = {
+  id: string;
+  application_id: string;
+  lead_id: string | null;
+  full_name: string | null;
+  status: string;
+  payment_status: string | null;
+  fee_amount: number | null;
+  course_selections: any[];
+  form_pdf_url: string | null;
+  fee_receipt_url: string | null;
+  phone: string;
+  email: string | null;
+  created_at: string;
+};
+
+function statusBadge(status: string, paymentStatus: string | null) {
+  if (status === "approved") return { label: "Approved", className: "bg-green-100 text-green-700", Icon: CheckCircle };
+  if (status === "submitted" || status === "under_review") return { label: status === "submitted" ? "Submitted" : "Under Review", className: "bg-emerald-100 text-emerald-700", Icon: CheckCircle };
+  if (status === "rejected") return { label: "Rejected", className: "bg-red-100 text-red-700", Icon: Clock };
+  if (paymentStatus === "paid") return { label: "Fee Paid · Continue", className: "bg-blue-100 text-blue-700", Icon: Clock };
+  return { label: "Draft · In Progress", className: "bg-amber-100 text-amber-700", Icon: Clock };
+}
+
+function ApplicationDashboardView({
+  apps, leadName, offerLetters, openAppId, setOpenAppId, onContinue, onStartNew, onLogout,
+}: {
+  apps: any[];
+  leadName: string;
+  offerLetters: Record<string, { letter_url: string | null; approval_status: string }>;
+  openAppId: string | null;
+  setOpenAppId: (id: string | null) => void;
+  onContinue: (app: any) => void;
+  onStartNew: () => void;
+  onLogout: () => void;
+}) {
+  const portal = usePortal();
+  // Which app's fee-receipt dialog is open. Builds the same modern receipt
+  // the student gets via email — single canonical format.
+  const [receiptApp, setReceiptApp] = useState<any | null>(null);
+  const buildReceiptData = (a: any): ReceiptData => {
+    const nameIsEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.full_name || "");
+    const courses = (a.course_selections as any[]) || [];
+    return {
+      type: "application_fee",
+      application_id: a.application_id,
+      applicant_name: nameIsEmail ? undefined : a.full_name,
+      phone: a.phone,
+      email: a.email || (nameIsEmail ? a.full_name : undefined),
+      amount: Number(a.fee_amount || 0),
+      payment_ref: a.payment_ref,
+      // Best signal of when the payment cleared. submitted_at is closest if
+      // present, else fall back to row updated_at, else now.
+      payment_date: a.submitted_at || a.updated_at || new Date().toISOString(),
+      institution_name: portal.name,
+      campus_name: courses[0]?.campus_name,
+      logo: portal.logo,
+      primaryColor: portal.primaryColor,
+    };
+  };
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Lightweight header — keep parity with the editor's header but no progress bar */}
+      <header className="border-b border-border bg-card">
+        <div className="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between gap-3">
+          {portal.logo ? (
+            <img src={portal.logo} alt={portal.name} className="h-8 sm:h-10 w-auto object-contain" />
+          ) : (
+            <div className="flex items-center gap-2">
+              <GraduationCap className="h-5 w-5 text-primary" />
+              <span className="text-sm font-semibold text-foreground">{portal.name}</span>
+            </div>
+          )}
+          <Button variant="ghost" size="sm" onClick={onLogout} className="gap-1.5 shrink-0"><LogOut className="h-4 w-4" /> Logout</Button>
+        </div>
+      </header>
+
+      <main className="max-w-3xl mx-auto px-6 py-8 space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Welcome, {leadName}</h1>
+          <p className="text-sm text-muted-foreground mt-1">Here are all your applications. Pick one to view details, continue editing, or pay your token fee.</p>
+        </div>
+
+        <div className="space-y-4">
+          {apps.map((app) => {
+            const a = app as DashboardApp;
+            const courses = (a.course_selections || []).map((c: any) => c.course_name).filter(Boolean);
+            const badge = statusBadge(a.status, a.payment_status);
+            const offer = a.lead_id ? offerLetters[a.lead_id] : undefined;
+            const hasOffer = offer?.approval_status === "approved" && offer.letter_url;
+            const isDraft = a.status === "draft";
+            const isPaid = a.payment_status === "paid";
+            const isOpen = openAppId === a.id;
+            return (
+              <Card key={a.id} className="border-border/60 shadow-none overflow-hidden">
+                <CardContent className="p-5 space-y-3">
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-sm font-bold text-primary">{a.application_id}</span>
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium ${badge.className}`}>
+                          <badge.Icon className="h-3 w-3" />{badge.label}
+                        </span>
+                      </div>
+                      <p className="text-sm text-foreground mt-2">
+                        {courses.length > 0 ? courses.join(", ") : <span className="text-muted-foreground italic">No course selected yet</span>}
+                      </p>
+                      {a.fee_amount != null && a.fee_amount > 0 && (
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Application fee: <span className="font-medium text-foreground">₹{a.fee_amount.toLocaleString("en-IN")}</span>
+                          {isPaid && <span className="ml-1 text-green-600">· Paid</span>}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {isDraft ? (
+                      <Button size="sm" className="gap-1.5" onClick={() => onContinue(a)}>
+                        <Pencil className="h-3.5 w-3.5" /> Continue Editing
+                      </Button>
+                    ) : (
+                      <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onContinue(a)}>
+                        <CheckCircle className="h-3.5 w-3.5" /> View Submission
+                      </Button>
+                    )}
+                    {a.form_pdf_url && (
+                      <Button size="sm" variant="outline" className="gap-1.5" asChild>
+                        <a href={a.form_pdf_url} target="_blank" rel="noreferrer">
+                          <FileText className="h-3.5 w-3.5" /> Application PDF
+                        </a>
+                      </Button>
+                    )}
+                    {isPaid && (
+                      <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setReceiptApp(a)}>
+                        <Receipt className="h-3.5 w-3.5" /> Fee Receipt
+                      </Button>
+                    )}
+                    {hasOffer && (
+                      <Button size="sm" variant="outline" className="gap-1.5" asChild>
+                        <a href={offer!.letter_url!} target="_blank" rel="noreferrer">
+                          <Award className="h-3.5 w-3.5" /> Offer Letter
+                        </a>
+                      </Button>
+                    )}
+                    {hasOffer && (
+                      <Button
+                        size="sm"
+                        variant={isOpen ? "secondary" : "default"}
+                        className="gap-1.5"
+                        onClick={() => setOpenAppId(isOpen ? null : a.id)}
+                      >
+                        <Wallet className="h-3.5 w-3.5" /> {isOpen ? "Hide Token Fee" : "Pay Token Fee"}
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* Inline TokenFeePanel — only mounts when expanded so its
+                      DB queries don't fire for unrelated cards. */}
+                  {isOpen && hasOffer && (
+                    <TokenFeePanel
+                      applicationId={a.application_id}
+                      applicantName={a.full_name || ""}
+                      applicantPhone={a.phone}
+                      applicantEmail={a.email}
+                    />
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+
+        <Button variant="outline" className="w-full gap-2" onClick={onStartNew}>
+          <Plus className="h-4 w-4" /> Start a new application
+        </Button>
+      </main>
+
+      {receiptApp && (
+        <ReceiptDialog data={buildReceiptData(receiptApp)} onClose={() => setReceiptApp(null)} />
+      )}
+    </div>
+  );
+}
+
 const ApplyPortal = () => {
   const { toast } = useToast();
   const portal = usePortal();
@@ -686,6 +934,11 @@ const ApplyPortal = () => {
     setAuthed(false);
     setApp(null);
     setSubmitted(false);
+    setAppsList(null);
+    setDashboardOpenAppId(null);
+    setOfferLetters({});
+    setPreviewDocs([]);
+    setHasDashboard(false);
   };
 
   const [app, setApp] = useState<ApplicationData | null>(null);
@@ -693,6 +946,17 @@ const ApplyPortal = () => {
   const [saving, setSaving] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [showCourseSelector, setShowCourseSelector] = useState(true);
+  // Dashboard listing all applications for the authenticated phone in this portal.
+  // Shown when ≥1 non-draft app exists OR there are multiple apps. From here the
+  // user can continue editing a draft, view PDFs, view the offer letter, or pay
+  // the token fee — i.e. everything the student would normally need post-submit.
+  const [appsList, setAppsList] = useState<any[] | null>(null);
+  const [dashboardOpenAppId, setDashboardOpenAppId] = useState<string | null>(null);
+  const [offerLetters, setOfferLetters] = useState<Record<string, { letter_url: string | null; approval_status: string }>>({});
+  // Uploaded docs for the currently-previewed submission (loaded on demand).
+  const [previewDocs, setPreviewDocs] = useState<PreviewDoc[]>([]);
+  // Whether the dashboard exists to go back to (i.e. multiple apps OR any non-draft).
+  const [hasDashboard, setHasDashboard] = useState(false);
 
   const steps = isSchool ? SCHOOL_STEPS : DEFAULT_STEPS;
   const totalSteps = steps.length;
@@ -702,51 +966,111 @@ const ApplyPortal = () => {
     setLeadName(name);
     setAuthed(true);
 
-    // Fetch all drafts for this phone to find the one matching the current portal
+    // Fetch ALL applications for this phone (any status) so already-submitted
+    // / under-review / approved apps load correctly. The submitted-state UI
+    // (line ~1081) handles displaying them — without this we'd silently start
+    // a fresh draft on top of an existing submitted application.
     const { data: existingApps } = await supabase
       .from("applications")
       .select("*")
       .eq("phone", phoneVal)
-      .eq("status", "draft")
       .order("created_at", { ascending: false });
 
-    // Find the one that belongs to this portal
-    const existingApp = existingApps?.find(app => {
+    // Pick apps belonging to this portal. There can be multiple — e.g. a
+    // submitted app + a new draft.
+    const portalApps = (existingApps || []).filter(app => {
       const flags = (app.flags as string[]) || [];
       return flags.includes(`portal:${portal.id}`);
     });
 
-    if (existingApp) {
-      const appData: ApplicationData = {
-        ...DEFAULT_APPLICATION,
-        ...existingApp,
-        course_selections: (existingApp.course_selections as any) || [],
-        address: (existingApp.address as any) || {},
-        father: (existingApp.father as any) || {},
-        mother: (existingApp.mother as any) || {},
-        guardian: (existingApp.guardian as any) || {},
-        academic_details: (existingApp.academic_details as any) || {},
-        result_status: (existingApp.result_status as any) || {},
-        extracurricular: (existingApp.extracurricular as any) || {},
-        school_details: (existingApp.school_details as any) || {},
-        completed_sections: (existingApp.completed_sections as any) || DEFAULT_APPLICATION.completed_sections,
-        flags: (existingApp.flags as string[]) || [],
-      } as ApplicationData;
-
-      setApp(appData);
-      if (appData.dob) setChildDob(appData.dob);
-      setShowCourseSelector(false);
-
-      if (existingApp.status === 'submitted') {
-        setSubmitted(true);
-        return;
+    // When ≥1 non-draft application exists, OR multiple apps exist, show the
+    // dashboard so the student can pick what to do (continue, view PDFs,
+    // pay token fee, view offer letter, or start a new one).
+    const hasNonDraft = portalApps.some(a => a.status !== "draft");
+    if (hasNonDraft || portalApps.length > 1) {
+      setAppsList(portalApps);
+      setHasDashboard(true);
+      // Pre-fetch approved offer letters for the leads behind these apps so the
+      // dashboard can surface "View Offer Letter" without an extra round-trip.
+      const leadIds = [...new Set(portalApps.map((a: any) => a.lead_id).filter(Boolean))];
+      if (leadIds.length > 0) {
+        const { data: letters } = await supabase
+          .from("offer_letters")
+          .select("lead_id, letter_url, approval_status, created_at")
+          .in("lead_id", leadIds)
+          .order("created_at", { ascending: false });
+        const byLead: Record<string, { letter_url: string | null; approval_status: string }> = {};
+        (letters || []).forEach((l: any) => {
+          if (!byLead[l.lead_id]) byLead[l.lead_id] = { letter_url: l.letter_url, approval_status: l.approval_status };
+        });
+        setOfferLetters(byLead);
       }
-
-      const stepKeys = steps.map(s => s.key);
-      const cs = appData.completed_sections as Record<string, boolean>;
-      const firstIncomplete = stepKeys.findIndex(k => !cs[k]);
-      setStep(firstIncomplete >= 0 ? firstIncomplete : totalSteps - 1);
+      setShowCourseSelector(false);
+      return;
     }
+
+    // Only one app and it's a draft → load straight into the editor (continue
+    // editing, current behaviour).
+    const existingApp = portalApps[0];
+    if (existingApp) {
+      loadAppIntoEditor(existingApp);
+    }
+  };
+
+  // Load a row from the dashboard into the step-by-step editor.
+  const loadAppIntoEditor = (existingApp: any) => {
+    const appData: ApplicationData = {
+      ...DEFAULT_APPLICATION,
+      ...existingApp,
+      course_selections: (existingApp.course_selections as any) || [],
+      address: (existingApp.address as any) || {},
+      father: (existingApp.father as any) || {},
+      mother: (existingApp.mother as any) || {},
+      guardian: (existingApp.guardian as any) || {},
+      academic_details: (existingApp.academic_details as any) || {},
+      result_status: (existingApp.result_status as any) || {},
+      extracurricular: (existingApp.extracurricular as any) || {},
+      school_details: (existingApp.school_details as any) || {},
+      completed_sections: (existingApp.completed_sections as any) || DEFAULT_APPLICATION.completed_sections,
+      flags: (existingApp.flags as string[]) || [],
+    } as ApplicationData;
+    setApp(appData);
+    if (appData.dob) setChildDob(appData.dob);
+    setShowCourseSelector(false);
+    setAppsList(null); // leave the dashboard
+    if (existingApp.status === 'submitted' || existingApp.status === 'under_review' || existingApp.status === 'approved') {
+      setSubmitted(true);
+      // Fetch uploaded documents for the preview view
+      setPreviewDocs([]);
+      supabase.functions
+        .invoke("list-app-docs", { body: { application_id: existingApp.application_id } })
+        .then(({ data }) => setPreviewDocs(((data as any)?.docs || []) as PreviewDoc[]))
+        .catch(() => setPreviewDocs([]));
+      return;
+    }
+    const stepKeys = steps.map(s => s.key);
+    const cs = appData.completed_sections as Record<string, boolean>;
+    const firstIncomplete = stepKeys.findIndex(k => !cs[k]);
+    setStep(firstIncomplete >= 0 ? firstIncomplete : totalSteps - 1);
+  };
+
+  // Return to the dashboard from a submitted/preview view (only available
+  // when the dashboard was previously shown — i.e. multiple apps).
+  const backToDashboard = () => {
+    setApp(null);
+    setSubmitted(false);
+    setPreviewDocs([]);
+    // Re-fetch the list so newly added/changed apps are reflected.
+    handleAuthenticated(phone, leadName);
+  };
+
+  // From dashboard → start a fresh new application
+  const startNewApplication = () => {
+    setAppsList(null);
+    setApp(null);
+    setSubmitted(false);
+    setShowCourseSelector(true);
+    setStep(0);
   };
 
   const handleCourseSelected = async (sessionId: string, selections: CourseSelection[], leadId: string | null) => {
@@ -759,6 +1083,16 @@ const ApplyPortal = () => {
 
     // If app already exists, update instead of insert
     if (app) {
+      // Check if courses actually changed
+      const oldCourseIds = (app.course_selections || []).map((s: any) => s.course_id).sort().join(",");
+      const newCourseIds = selections.map(s => s.course_id).sort().join(",");
+      const coursesChanged = oldCourseIds !== newCourseIds;
+
+      // Reset completed_sections when courses change (data stays, but tabs need re-validation)
+      const resetSections = coursesChanged
+        ? Object.fromEntries(Object.keys(app.completed_sections || {}).map(k => [k, false]))
+        : undefined;
+
       const { error } = await supabase
         .from("applications")
         .update({
@@ -766,6 +1100,7 @@ const ApplyPortal = () => {
           fee_amount: feeAmount,
           program_category: primaryCategory,
           session_id: sessionId,
+          ...(resetSections ? { completed_sections: resetSections } : {}),
         })
         .eq("id", app.id);
 
@@ -775,10 +1110,20 @@ const ApplyPortal = () => {
         return;
       }
 
-      setApp(prev => prev ? { ...prev, course_selections: selections, fee_amount: feeAmount, program_category: primaryCategory, session_id: sessionId } : prev);
+      setApp(prev => prev ? {
+        ...prev,
+        course_selections: selections,
+        fee_amount: feeAmount,
+        program_category: primaryCategory,
+        session_id: sessionId,
+        ...(resetSections ? { completed_sections: resetSections } : {}),
+      } : prev);
       setShowCourseSelector(false);
       setSaving(false);
-      toast({ title: "Course selections updated" });
+      toast({
+        title: "Course selections updated",
+        description: coursesChanged ? "Please review and save each section again." : undefined,
+      });
       return;
     }
 
@@ -1021,24 +1366,78 @@ const ApplyPortal = () => {
     );
   }
 
-  // ── Submitted ──
-  if (submitted && app) {
+  // ── Dashboard ── (multiple apps, or any non-draft → student picks what to do)
+  if (appsList) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-6">
-        <Card className="max-w-md w-full border-border/60 shadow-none">
-          <CardContent className="p-8 text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 mx-auto mb-4">
-              <CheckCircle className="h-8 w-8 text-primary" />
+      <ApplicationDashboardView
+        apps={appsList}
+        leadName={leadName}
+        offerLetters={offerLetters}
+        openAppId={dashboardOpenAppId}
+        setOpenAppId={setDashboardOpenAppId}
+        onContinue={loadAppIntoEditor}
+        onStartNew={startNewApplication}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
+  // ── Submitted (full preview) ──
+  if (submitted && app) {
+    const submittedBadge = app.status === "approved"
+      ? { label: "Approved", className: "bg-green-100 text-green-700" }
+      : app.status === "under_review"
+      ? { label: "Under Review", className: "bg-blue-100 text-blue-700" }
+      : { label: "Submitted", className: "bg-emerald-100 text-emerald-700" };
+
+    return (
+      <div className="min-h-screen bg-background">
+        <header className="border-b border-border bg-card">
+          <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3 min-w-0">
+              {hasDashboard && (
+                <Button variant="ghost" size="sm" onClick={backToDashboard} className="gap-1.5">
+                  <ArrowLeft className="h-4 w-4" /> Back to Dashboard
+                </Button>
+              )}
+              <div className="min-w-0">
+                <h1 className="text-lg font-bold text-foreground truncate">{app.full_name || "Application"}</h1>
+                <p className="text-xs font-mono text-primary">{app.application_id}</p>
+              </div>
             </div>
-            <h2 className="text-xl font-bold text-foreground">Application Submitted!</h2>
-            <p className="text-sm text-muted-foreground mt-2">Your application has been received.</p>
-            <p className="text-lg font-mono font-bold text-primary mt-1">{app.application_id}</p>
-            <p className="text-xs text-muted-foreground mt-4">Our admissions team will review your application and contact you shortly.</p>
-            <Button variant="outline" className="mt-6" onClick={handleLogout}>
-              <LogOut className="h-4 w-4 mr-2" /> Logout
-            </Button>
-          </CardContent>
-        </Card>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium ${submittedBadge.className}`}>
+                <CheckCircle className="h-3 w-3" />{submittedBadge.label}
+              </span>
+              {app.payment_status === "paid" && (
+                <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium bg-emerald-100 text-emerald-700">
+                  Paid
+                </span>
+              )}
+              {app.form_pdf_url && (
+                <a href={app.form_pdf_url} target="_blank" rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20">
+                  <FileText className="h-3.5 w-3.5" />Application PDF
+                </a>
+              )}
+              <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-1.5">
+                <LogOut className="h-4 w-4" /> Logout
+              </Button>
+            </div>
+          </div>
+        </header>
+
+        <main className="max-w-5xl mx-auto px-6 py-6 space-y-5">
+          <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4 flex items-start gap-3">
+            <CheckCircle className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-emerald-900">Your application has been received.</p>
+              <p className="text-xs text-emerald-700 mt-0.5">Our admissions team will review and contact you shortly. Below is a summary of what you submitted.</p>
+            </div>
+          </div>
+
+          <ApplicationPreview app={app} docs={previewDocs} />
+        </main>
       </div>
     );
   }

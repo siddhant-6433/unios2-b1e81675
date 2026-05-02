@@ -90,28 +90,73 @@ async function verifySignature(
 
 // ── HTML status page (mirrors easebuzz-payment) ─────────────────────────────
 
-function returnPage(title: string, message: string, isSuccess: boolean): Response {
+/** ICICI sprays its description across half a dozen possible field names depending
+ *  on which subsystem replied (PG core, BIN router, scheme rails). Pick the
+ *  longest non-empty one so we always surface the most informative text. */
+function bestDescription(fields: Record<string, any>): string {
+  const candidates = [
+    "respDescription", "responseDescription",
+    "detailedDescription", "detailedDesc",
+    "responseMessage", "respMessage",
+    "errorDescription", "failureReason",
+    "message",
+  ];
+  const found = candidates
+    .map(k => (fields[k] == null ? "" : String(fields[k]).trim()))
+    .filter(v => v.length > 0)
+    // Prefer longer text — short codes get superseded by full sentences.
+    .sort((a, b) => b.length - a.length);
+  return found[0] || "";
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]!));
+}
+
+function returnPage(
+  title: string,
+  message: string,
+  isSuccess: boolean,
+  technicalDetails?: Record<string, any>,
+): Response {
+  const detailsBlock = technicalDetails && Object.keys(technicalDetails).length > 0
+    ? `<details class="tech"><summary>Technical details</summary><pre>${escapeHtml(JSON.stringify(technicalDetails, null, 2))}</pre></details>`
+    : "";
   const html = `<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>${title}</title>
+<title>${escapeHtml(title)}</title>
 <style>
-body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8fafc}
-.card{background:white;border-radius:16px;padding:40px;text-align:center;max-width:360px;box-shadow:0 4px 24px rgba(0,0,0,0.08)}
+body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8fafc;padding:16px}
+.card{background:white;border-radius:16px;padding:40px;text-align:center;max-width:480px;width:100%;box-shadow:0 4px 24px rgba(0,0,0,0.08);box-sizing:border-box}
 .icon{font-size:48px;margin-bottom:16px}
 h2{margin:0 0 8px;font-size:18px;color:#0f172a}
-p{margin:0 0 24px;font-size:14px;color:#64748b}
+p{margin:0 0 24px;font-size:14px;color:#64748b;white-space:pre-wrap}
 button{background:#6366f1;color:white;border:none;border-radius:10px;padding:10px 24px;font-size:14px;cursor:pointer}
+.tech{margin-top:20px;text-align:left;background:#f1f5f9;border-radius:8px;padding:12px;font-size:12px}
+.tech summary{cursor:pointer;font-weight:500;color:#475569}
+.tech pre{margin:8px 0 0;padding:8px;background:#0f172a;color:#e2e8f0;border-radius:6px;overflow-x:auto;font-size:11px;line-height:1.5;white-space:pre-wrap;word-break:break-all}
 </style></head><body>
 <div class="card">
   <div class="icon">${isSuccess ? "✅" : "❌"}</div>
-  <h2>${title}</h2>
-  <p>${message}</p>
+  <h2>${escapeHtml(title)}</h2>
+  <p>${escapeHtml(message)}</p>
   <button onclick="window.close()">Close</button>
+  ${detailsBlock}
 </div>
 <script>try{window.opener&&window.opener.postMessage({icici_payment:"${isSuccess ? "success" : "failed"}"},"*")}catch(e){}</script>
 </body></html>`;
   return new Response(html, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
+}
+
+/** Build the full failure message from whatever ICICI returned, choosing the
+ *  best available description and keeping the response code visible for support. */
+function failureMessage(fields: Record<string, any>): string {
+  const code = String(fields.responseCode || fields.respCode || "unknown");
+  const desc = bestDescription(fields);
+  return desc
+    ? `Payment could not be completed (${code}: ${desc}). Please go back and try again.`
+    : `Payment could not be completed (${code}). Please go back and try again.`;
 }
 
 // ── Format YYYYMMDDHHMMSS in IST ────────────────────────────────────────────
@@ -182,7 +227,7 @@ Deno.serve(async (req) => {
 
       const merchantTxnNo = fields.merchantTxnNo || "";
       const responseCode  = fields.responseCode || "";
-      const respDesc      = fields.respDescription || "";
+      const respDesc      = bestDescription(fields);
       // ICICI's bank reference: `txnID` on payment response, `paymentID` on
       // some authorization variants. Use whichever's present.
       const pgTxnNo       = fields.txnID || fields.paymentID || "";
@@ -224,8 +269,9 @@ Deno.serve(async (req) => {
           isSuccess ? "Payment Successful" : "Payment Failed",
           isSuccess
             ? "Your payment has been received. The receipt has been emailed to you. You may close this window."
-            : `Payment could not be completed (${responseCode || "unknown"}: ${respDesc}). Please try again.`,
+            : failureMessage(fields),
           isSuccess,
+          isSuccess ? undefined : fields,
         );
       }
 
@@ -251,7 +297,7 @@ Deno.serve(async (req) => {
       }
 
       if (!isSuccess) {
-        return returnPage("Payment Failed", `Payment could not be completed (${responseCode || "unknown"}: ${respDesc}). Please go back and try again.`, false);
+        return returnPage("Payment Failed", failureMessage(fields), false, fields);
       }
 
       // Success but no addl* — log loudly so we can investigate.
@@ -299,8 +345,13 @@ Deno.serve(async (req) => {
       console.log(`[${FN_NAME}] initiateSale response:`, JSON.stringify(data));
 
       if (data.responseCode !== "R1000" || !data.redirectURI || !data.tranCtx) {
+        const desc = bestDescription(data);
+        const code = data.responseCode || data.respCode;
+        const errorMsg = desc
+          ? `${desc}${code ? ` (${code})` : ""}`
+          : `ICICI rejected the request${code ? ` (${code})` : ""}`;
         return new Response(
-          JSON.stringify({ error: data.respDescription || data.responseMessage || "Failed to initiate payment", raw: data }),
+          JSON.stringify({ error: errorMsg, raw: data }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
@@ -374,8 +425,13 @@ Deno.serve(async (req) => {
       if (data.responseCode !== "R1000" || !data.redirectURI || !data.tranCtx) {
         // Roll back the pending row so we don't leak intent rows.
         await admin.from("lead_payments").delete().eq("id", lp.id);
+        const desc = bestDescription(data);
+        const code = data.responseCode || data.respCode;
+        const errorMsg = desc
+          ? `${desc}${code ? ` (${code})` : ""}`
+          : `ICICI rejected the request${code ? ` (${code})` : ""}`;
         return new Response(
-          JSON.stringify({ error: data.respDescription || data.responseMessage || "Failed to initiate payment", raw: data }),
+          JSON.stringify({ error: errorMsg, raw: data }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }

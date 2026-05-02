@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { Search, Loader2, User, GraduationCap, X } from "lucide-react";
+import { Search, Loader2, User, GraduationCap, FileText, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 interface SearchResult {
-  type: "lead" | "student";
+  type: "lead" | "student" | "application";
   id: string;
   name: string;
   phone: string;
@@ -13,6 +13,7 @@ interface SearchResult {
   identifierLabel?: string;
   stage?: string;
   status?: string;
+  leadId?: string;
 }
 
 const stageLabels: Record<string, string> = {
@@ -61,12 +62,15 @@ export function HeaderSearch() {
     if (!q.trim()) { setResults([]); return; }
     setLoading(true);
 
-    const [leadsRes, studentsRes] = await Promise.all([
+    const [leadsRes, studentsRes, applicationsRes] = await Promise.all([
       supabase.from("leads").select("id, name, phone, application_id, pre_admission_no, admission_no, stage")
-        .or(`phone.ilike.%${q}%,name.ilike.%${q}%,application_id.ilike.%${q}%,email.ilike.%${q}%`)
+        .or(`phone.ilike.%${q}%,name.ilike.%${q}%,application_id.ilike.%${q}%,pre_admission_no.ilike.%${q}%,admission_no.ilike.%${q}%,email.ilike.%${q}%`)
         .limit(8),
       supabase.from("students").select("id, name, phone, admission_no, pre_admission_no, status")
-        .or(`phone.ilike.%${q}%,name.ilike.%${q}%,admission_no.ilike.%${q}%,email.ilike.%${q}%`)
+        .or(`phone.ilike.%${q}%,name.ilike.%${q}%,admission_no.ilike.%${q}%,pre_admission_no.ilike.%${q}%,email.ilike.%${q}%`)
+        .limit(5),
+      supabase.from("applications").select("id, application_id, lead_id, full_name, phone, status")
+        .ilike("application_id", `%${q}%`)
         .limit(5),
     ]);
 
@@ -77,6 +81,17 @@ export function HeaderSearch() {
         identifier: l.application_id || l.pre_admission_no || l.admission_no || undefined,
         identifierLabel: l.admission_no ? "AN" : l.pre_admission_no ? "PAN" : l.application_id ? "App" : undefined,
         stage: l.stage,
+      });
+    });
+    // Applications surfaced separately so an app lookup works even if the lead row
+    // doesn't have application_id populated yet. Skip ones we already showed via leads.
+    const seenLeadAppIds = new Set((leadsRes.data || []).map((l: any) => l.application_id).filter(Boolean));
+    (applicationsRes.data || []).forEach((a: any) => {
+      if (seenLeadAppIds.has(a.application_id)) return;
+      all.push({
+        type: "application", id: a.id, name: a.full_name || "(no name)", phone: a.phone || "",
+        identifier: a.application_id, identifierLabel: "App",
+        status: a.status, leadId: a.lead_id,
       });
     });
     (studentsRes.data || []).forEach(s => {
@@ -102,6 +117,12 @@ export function HeaderSearch() {
     setQuery("");
     setResults([]);
     if (r.type === "lead") navigate(`/admissions/${r.id}`);
+    else if (r.type === "application") {
+      // Prefer lead detail when the application is linked; otherwise land on the
+      // applications list which lets the user inspect docs and status.
+      if (r.leadId) navigate(`/admissions/${r.leadId}`);
+      else navigate(`/applications`);
+    }
     else navigate(`/students/${r.identifier || r.id}`);
   };
 
@@ -128,7 +149,7 @@ export function HeaderSearch() {
               type="text"
               value={query}
               onChange={e => handleInput(e.target.value)}
-              placeholder="Search leads, students, phone, email..."
+              placeholder="Search by name, phone, application no, PAN, AN..."
               className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
               autoFocus
             />
@@ -151,8 +172,14 @@ export function HeaderSearch() {
                   onClick={() => handleClick(r)}
                   className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-muted/50 transition-colors text-left"
                 >
-                  <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${r.type === "lead" ? "bg-blue-100 text-blue-600" : "bg-emerald-100 text-emerald-600"}`}>
-                    {r.type === "lead" ? <User className="h-3.5 w-3.5" /> : <GraduationCap className="h-3.5 w-3.5" />}
+                  <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                    r.type === "lead" ? "bg-blue-100 text-blue-600" :
+                    r.type === "application" ? "bg-amber-100 text-amber-600" :
+                    "bg-emerald-100 text-emerald-600"
+                  }`}>
+                    {r.type === "lead" ? <User className="h-3.5 w-3.5" /> :
+                     r.type === "application" ? <FileText className="h-3.5 w-3.5" /> :
+                     <GraduationCap className="h-3.5 w-3.5" />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">

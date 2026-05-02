@@ -99,6 +99,27 @@ export function isSubjectGroupSatisfied(group: string, studentSubjects: string[]
 }
 
 /**
+ * Detect entries in subject_prerequisites that describe a degree-level requirement
+ * (e.g., "Any Graduate", "Bachelor's Degree", "PG Degree") rather than a Class 12
+ * subject. These should NOT be matched against the applicant's Class 12 subjects —
+ * the `requires_graduation` + `graduation_min_marks` columns enforce the real
+ * degree requirement instead.
+ */
+export function isGraduationLevelPrereq(prereq: string): boolean {
+  const p = prereq.toLowerCase();
+  return (
+    p.includes('graduate') ||
+    p.includes('graduation') ||
+    p.includes('bachelor') ||
+    p.includes('degree') ||
+    p.includes('post graduate') ||
+    p.includes('postgraduate') ||
+    /\bug\b/.test(p) ||
+    /\bpg\b/.test(p)
+  );
+}
+
+/**
  * Parse mandatory individual subjects from prereq strings like "Any Stream (English Mandatory)".
  * Returns array of mandatory subject names.
  */
@@ -212,8 +233,14 @@ export function validateAcademicEligibility(
     }
   }
 
-  // Subject prerequisites — expanded group matching + mandatory subject parsing
-  if (rules.subjectPrerequisites && rules.subjectPrerequisites.length > 0) {
+  // Subject prerequisites — expanded group matching + mandatory subject parsing.
+  // Strip out graduation-level prereqs (e.g., "Any Graduate") — those describe
+  // the degree requirement, not Class 12 subjects, and are already enforced via
+  // requires_graduation + graduation_min_marks above.
+  const class12Prereqs = (rules.subjectPrerequisites || []).filter(
+    p => !isGraduationLevelPrereq(p)
+  );
+  if (class12Prereqs.length > 0) {
     const c12 = academicDetails?.class_12;
     const rawSubjects: string = typeof c12?.subjects === 'string' ? c12.subjects : '';
     const studentSubjects = rawSubjects
@@ -221,12 +248,12 @@ export function validateAcademicEligibility(
       .map((s: string) => s.trim())
       .filter(Boolean);
 
-    const anyStream = rules.subjectPrerequisites.some(
+    const anyStream = class12Prereqs.some(
       p => p.toLowerCase().includes('any stream') || p.toLowerCase() === 'any'
     );
 
     // Check mandatory subjects extracted from parenthetical (e.g., English Mandatory)
-    const mandatorySubjects = parseMandatorySubjects(rules.subjectPrerequisites);
+    const mandatorySubjects = parseMandatorySubjects(class12Prereqs);
     if (mandatorySubjects.length > 0 && c12) {
       if (studentSubjects.length === 0) {
         results.push({
@@ -250,11 +277,11 @@ export function validateAcademicEligibility(
 
     if (!anyStream && mandatorySubjects.length === 0) {
       if (c12 && studentSubjects.length > 0) {
-        const hasMatch = rules.subjectPrerequisites.some(prereq =>
+        const hasMatch = class12Prereqs.some(prereq =>
           isSubjectGroupSatisfied(prereq, studentSubjects)
         );
         if (!hasMatch) {
-          const groupLabels = rules.subjectPrerequisites.map(p => {
+          const groupLabels = class12Prereqs.map(p => {
             const expanded = SUBJECT_GROUP_MAP[p.toUpperCase()];
             return expanded ? `${p} (${expanded.join(', ')})` : p;
           });
@@ -267,7 +294,7 @@ export function validateAcademicEligibility(
       } else if (!c12 || studentSubjects.length === 0) {
         results.push({
           field: 'class_12',
-          message: `Please select your Class 12 subjects. Required: ${rules.subjectPrerequisites.join(' / ')}.`,
+          message: `Please select your Class 12 subjects. Required: ${class12Prereqs.join(' / ')}.`,
           type: 'error',
         });
       }
@@ -410,12 +437,23 @@ export function validateAcademicYears(
     });
   }
 
-  if (requiresGraduation && !isNaN(gradYear) && gradYear > sessionYear) {
-    results.push({
-      field: 'graduation_year',
-      message: `Graduation year must be ≤ ${sessionYear} for the ${sessionYear}-${(sessionYear + 1).toString().slice(-2)} session.`,
-      type: 'error',
-    });
+  if (!isNaN(gradYear)) {
+    // Graduation year can be up to sessionYear + 1 (future applicant for next session)
+    if (gradYear > sessionYear + 1) {
+      results.push({
+        field: 'graduation_year',
+        message: `Graduation year must be ≤ ${sessionYear + 1}.`,
+        type: 'error',
+      });
+    }
+    // Graduation year must be at least 1 year after class 12
+    if (!isNaN(c12Year) && gradYear < c12Year + 1) {
+      results.push({
+        field: 'graduation_year',
+        message: `Graduation year must be at least ${c12Year + 1} (one year after Class 12).`,
+        type: 'error',
+      });
+    }
   }
 
   return results;

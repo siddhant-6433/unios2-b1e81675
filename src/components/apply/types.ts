@@ -36,16 +36,27 @@ export interface ApplicationData {
     nationality?: string; id_type?: string; id_number?: string;
     education?: string; annual_income?: string; employer_name?: string;
     current_position?: string; marital_status?: string;
-    phone?: string; phone_mobile?: string; phone_home?: string; email?: string; occupation?: string;
+    phone?: string; phone_mobile?: string; phone_home?: string; email?: string;
+    occupation?: string; occupation_other?: string;
   };
   mother: {
     name?: string; first_name?: string; last_name?: string; dob?: string;
     nationality?: string; id_type?: string; id_number?: string;
     education?: string; annual_income?: string; employer_name?: string;
     current_position?: string; marital_status?: string;
-    phone?: string; phone_mobile?: string; phone_home?: string; email?: string; occupation?: string;
+    phone?: string; phone_mobile?: string; phone_home?: string; email?: string;
+    occupation?: string; occupation_other?: string;
   };
-  guardian: { name?: string; relationship?: string; phone?: string; email?: string };
+  guardian: {
+    name?: string;
+    relationship?: string;
+    relationship_other?: string;
+    phone?: string;
+    email?: string;
+    occupation?: string;
+    occupation_other?: string;
+    address?: { line1?: string; city?: string; state?: string; country?: string; pin_code?: string };
+  };
   apaar_id: string;
   pen_number: string;
   academic_details: {

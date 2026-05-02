@@ -6,7 +6,7 @@ import {
   BookOpen, BarChart3, FileText, Search, Shuffle, Handshake, PieChart,
   ChevronDown, Phone, Calendar, MessageSquare, Newspaper, Building2, School, ShieldCheck, Zap, Inbox,
   Globe, FolderOpen, Heart, Award, Target, GitMerge, Bot, Gift, AlertTriangle, Sparkles, Receipt,
-  Briefcase, CalendarOff, UserCheck, Fingerprint, PhoneCall,
+  Briefcase, CalendarOff, UserCheck, Fingerprint, PhoneCall, Send,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -44,14 +44,15 @@ const mainMenu: MenuItem[] = [
 
 const admissionSubMenu: MenuItem[] = [
   { title: "Lead Dashboard", url: "/admissions", icon: GraduationCap, permission: "leads:view" },
+  { title: "Applications", url: "/applications", icon: FileText, permission: "leads:view" },
+  { title: "Cloud Dialer", url: "/cloud-dialer", icon: PhoneCall, permission: "call_log:view" },
   { title: "WhatsApp", url: "/whatsapp-inbox", icon: MessageSquare, permission: "whatsapp:view" },
+  { title: "WA Outbound", url: "/whatsapp-inbox?mode=outbound", icon: Send, permission: "whatsapp:view" },
   { title: "Performance", url: "/counsellor-dashboard", icon: BarChart3, permission: "performance:view" },
   { title: "Lead Buckets", url: "/lead-buckets", icon: Inbox, permission: "lead_buckets:view" },
   { title: "Lead Allocation", url: "/lead-allocation", icon: Shuffle, permission: "lead_allocation:view" },
   { title: "Fresh Leads", url: "/fresh-leads", icon: Sparkles, permission: "call_log:view" },
   { title: "Pending Follow-ups", url: "/pending-followups", icon: AlertTriangle, permission: "call_log:view" },
-  { title: "Cloud Dialer", url: "/cloud-dialer", icon: PhoneCall, permission: "call_log:view" },
-  { title: "Applications", url: "/applications", icon: FileText, permission: "leads:view" },
   { title: "Call Log", url: "/call-log", icon: Phone, permission: "call_log:view" },
   { title: "AI Call Log", url: "/ai-call-log", icon: Bot, permission: "automation:view" },
   { title: "Automation", url: "/automation-rules", icon: Zap, permission: "automation:view" },
@@ -162,7 +163,8 @@ export function AppSidebar() {
     (async () => {
       const { data } = await supabase
         .from("whatsapp_conversations" as any)
-        .select("unread_count");
+        .select("unread_count")
+        .gt("unread_count", 0);
       if (data) {
         setWaUnread((data as any[]).reduce((sum: number, c: any) => sum + (c.unread_count || 0), 0));
       }
@@ -210,6 +212,7 @@ export function AppSidebar() {
         supabase
           .from("whatsapp_conversations" as any)
           .select("unread_count")
+          .gt("unread_count", 0)
           .then(({ data }) => {
             if (data) {
               setWaUnread((data as any[]).reduce((sum: number, c: any) => sum + (c.unread_count || 0), 0));
@@ -346,10 +349,18 @@ export function AppSidebar() {
                     </CollapsibleTrigger>
                     <CollapsibleContent>
                       <SidebarMenuSub>
-                        {visibleAdmission.map((item) => (
+                        {visibleAdmission.map((item) => {
+                          const isCloudDialer = item.url === "/cloud-dialer";
+                          const itemActiveClass = isCloudDialer
+                            ? "!bg-cyan-100 dark:!bg-cyan-900/30 !text-cyan-700 dark:!text-cyan-300 font-semibold"
+                            : activeClass;
+                          const itemBaseClass = isCloudDialer
+                            ? `${subLinkClass} text-cyan-700 dark:text-cyan-400`
+                            : subLinkClass;
+                          return (
                           <SidebarMenuSubItem key={item.title}>
                             <SidebarMenuSubButton asChild isActive={isActive(item.url)}>
-                              <NavLink to={item.url} className={subLinkClass} activeClassName={activeClass}>
+                              <NavLink to={item.url} className={itemBaseClass} activeClassName={itemActiveClass}>
                                 <item.icon className="h-3.5 w-3.5" />
                                 <span className="flex-1">{item.title}</span>
                                 {item.badge ? (
@@ -362,7 +373,8 @@ export function AppSidebar() {
                               </NavLink>
                             </SidebarMenuSubButton>
                           </SidebarMenuSubItem>
-                        ))}
+                          );
+                        })}
                       </SidebarMenuSub>
                     </CollapsibleContent>
                   </SidebarMenuItem>

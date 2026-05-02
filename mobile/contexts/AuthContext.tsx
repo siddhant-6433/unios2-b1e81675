@@ -21,6 +21,7 @@ interface Profile {
   phone: string;
   role: AppRole;
   campus_id: string | null;
+  employee_id: string | null;
 }
 
 interface AuthContextType {
@@ -75,7 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const [profileRes, roleRes] = await Promise.all([
         supabase.from('profiles')
-          .select('id, display_name, phone, avatar_url, campus, department, institution')
+          .select('id, display_name, phone, avatar_url, campus, department, institution, employee_id')
           .eq('user_id', userId)
           .single(),
         supabase.rpc('get_user_role', { _user_id: userId }),
@@ -91,6 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           phone: profileRes.data.phone || '',
           role: (roleRes.data as AppRole) || 'student',
           campus_id: profileRes.data.campus || null,
+          employee_id: (profileRes.data as any).employee_id || null,
         });
       }
       if (roleRes.data) setRole(roleRes.data as AppRole);

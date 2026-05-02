@@ -5,6 +5,7 @@ import { useCampus } from "@/contexts/CampusContext";
 import { Users, Search, GraduationCap, MapPin, ChevronRight, Loader2, UserPlus, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AddStudentDialog } from "@/components/admissions/AddStudentDialog";
+import { StudentDraftsPanel } from "@/components/admissions/StudentDraftsPanel";
 import { BulkStudentImportDialog } from "@/components/admissions/BulkStudentImportDialog";
 
 interface StudentRow {
@@ -24,6 +25,8 @@ const Students = () => {
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [resumeDraftId, setResumeDraftId] = useState<string | null>(null);
+  const [draftRefreshKey, setDraftRefreshKey] = useState(0);
   const { selectedCampusId } = useCampus();
 
   const fetchStudents = useCallback(async () => {
@@ -85,6 +88,11 @@ const Students = () => {
         </div>
       </div>
 
+      <StudentDraftsPanel
+        refreshKey={draftRefreshKey}
+        onResume={(id) => { setResumeDraftId(id); setAddOpen(true); }}
+      />
+
       <div className="relative max-w-sm">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <input type="text" placeholder="Search by name, admission no, course..."
@@ -124,7 +132,13 @@ const Students = () => {
         )}
       </div>
 
-      <AddStudentDialog open={addOpen} onOpenChange={setAddOpen} onSuccess={fetchStudents} />
+      <AddStudentDialog
+        open={addOpen}
+        onOpenChange={(o) => { setAddOpen(o); if (!o) setResumeDraftId(null); }}
+        onSuccess={() => { fetchStudents(); setDraftRefreshKey(k => k + 1); }}
+        resumeDraftId={resumeDraftId}
+        onDraftChange={() => setDraftRefreshKey(k => k + 1)}
+      />
       <BulkStudentImportDialog open={bulkOpen} onOpenChange={setBulkOpen} onSuccess={fetchStudents} />
     </div>
   );

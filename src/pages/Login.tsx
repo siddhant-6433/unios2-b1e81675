@@ -424,6 +424,12 @@ const Login = () => {
             {" "}and{" "}
             <a href="/privacy" className="underline hover:text-foreground transition-colors">Privacy Policy</a>.
           </p>
+
+          <div className="text-center pt-2">
+            <a href="/publisher-login" className="text-[11px] text-muted-foreground/70 hover:text-primary transition-colors">
+              Publisher Portal →
+            </a>
+          </div>
         </div>
       </div>
     </div>

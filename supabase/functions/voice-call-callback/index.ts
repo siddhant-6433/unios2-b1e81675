@@ -132,6 +132,46 @@ async function fetchPlivoRecording(callUuid: string, authId: string, authToken: 
 }
 
 /**
+ * Map Gemini's disposition to a terminal lead stage when warranted.
+ *   not_interested  → stage 'not_interested'   (lead said no)
+ *   wrong_number    → stage 'dnc'              (we shouldn't call this number again)
+ * Other dispositions (interested, callback_requested, no_answer, busy, voicemail,
+ * partial_conversation) leave the stage alone — handled by autoAssignCounsellor or
+ * the retry handler.
+ *
+ * Idempotent: skips if the lead is already in a terminal stage.
+ */
+async function applyDispositionToLeadStage(
+  db: any,
+  leadId: string,
+  disposition: string | null,
+): Promise<void> {
+  if (!disposition) return;
+  const stageFor: Record<string, string> = {
+    not_interested: "not_interested",
+    wrong_number: "dnc",
+  };
+  const targetStage = stageFor[disposition];
+  if (!targetStage) return;
+
+  const { data: lead } = await db.from("leads")
+    .select("id, stage")
+    .eq("id", leadId).single();
+  if (!lead) return;
+
+  const TERMINAL = new Set(["not_interested", "dnc", "rejected", "ineligible", "admitted"]);
+  if (TERMINAL.has(lead.stage)) return;
+
+  await db.from("leads").update({ stage: targetStage }).eq("id", leadId);
+  await db.from("lead_activities").insert({
+    lead_id: leadId,
+    type: "ai_call",
+    description: `AI call disposition: ${disposition} → lead marked ${targetStage}`,
+  });
+  console.log(`Lead ${leadId} stage updated to ${targetStage} (AI disposition: ${disposition})`);
+}
+
+/**
  * Auto-assign a counsellor to an unassigned lead using team-based round-robin.
  * Resolves the correct team from the lead's course department / campus:
  *   - Mirai campus → Mirai Admissions
@@ -339,7 +379,9 @@ Deno.serve(async (req) => {
                   description: `AI Call Summary: ${result.summary}${result.conversionProb != null ? ` (${result.conversionProb}% conversion)` : ""}`,
                 });
               }
-              // Auto-assign counsellor if interested
+              // Apply disposition → stage mapping (not_interested / wrong_number)
+              await applyDispositionToLeadStage(db, callRecord.lead_id, result.disposition);
+              // Auto-assign counsellor if interested / callback_requested
               await autoAssignCounsellor(db, callRecord.lead_id, result.disposition);
               console.log(`Gemini transcribe+summarize done for call ${callRecord.id}`);
             }).catch(e => console.error("Background transcription error:", e));
@@ -488,6 +530,7 @@ Deno.serve(async (req) => {
                   description: `AI Call Summary: ${result.summary}`,
                 });
               }
+              await applyDispositionToLeadStage(db, call.lead_id, result.disposition);
               await autoAssignCounsellor(db, call.lead_id, result.disposition);
             }
           }

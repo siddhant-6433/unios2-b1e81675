@@ -154,6 +154,9 @@ Deno.serve(async (req) => {
     const area         = p.area?.trim() || undefined;
     const sourceLeadId = p.leadid?.trim() || undefined;
     const prefix       = p.prefix?.trim() || undefined;
+    // JD's contract identifier — field name varies by subscription tier.
+    // Try the most-specific first.
+    const contractId   = (p.contract_id || p.contractid || p.branchid || p.parentid || "").trim() || undefined;
 
     const fullName = prefix ? `${prefix} ${name}`.trim() : name;
     if (!fullName) return errResp("Missing required field: name");
@@ -179,21 +182,25 @@ Deno.serve(async (req) => {
     // ── Duplicate check ───────────────────────────────────────────────────
     const { data: existing } = await supabase
       .from("leads")
-      .select("id, name, stage, source, secondary_source, tertiary_source, source_history")
+      .select("id, name, stage, source, secondary_source, tertiary_source, source_history, jd_contract_id")
       .eq("phone", normPhone)
       .limit(1)
       .maybeSingle();
 
     if (existing) {
       console.log(`Duplicate: ${existing.name} (${existing.stage})`);
+      const updates: Record<string, any> = {};
       // Track justdial as secondary/tertiary source
       if ((existing as any).source !== "justdial") {
-        const updates: Record<string, any> = {};
         const history = Array.isArray((existing as any).source_history) ? (existing as any).source_history : [];
-        history.push({ source: "justdial", timestamp: new Date().toISOString(), category });
+        history.push({ source: "justdial", timestamp: new Date().toISOString(), category, contract_id: contractId });
         updates.source_history = history;
         if (!(existing as any).secondary_source) updates.secondary_source = "justdial";
         else if (!(existing as any).tertiary_source) updates.tertiary_source = "justdial";
+      }
+      // Backfill contract id if we now have one and the row doesn't
+      if (contractId && !(existing as any).jd_contract_id) updates.jd_contract_id = contractId;
+      if (Object.keys(updates).length > 0) {
         await supabase.from("leads").update(updates).eq("id", existing.id);
       }
       return received();
@@ -301,6 +308,7 @@ Deno.serve(async (req) => {
         city:           city || null,
         area:           area || null,
         jd_category:    category || null,
+        jd_contract_id: contractId || null,
         notes:          notesParts.join(" | ").slice(0, 1000) || null,
         stage:          "new_lead",
         application_id: appId,

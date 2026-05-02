@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { ArrowRight, ArrowLeft, Loader2, CreditCard, CheckCircle, Shield, AlertCircle, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
-import { usePaymentGateways } from "@/hooks/usePaymentGateways";
+import { usePaymentGateways, type PaymentGateway } from "@/hooks/usePaymentGateways";
+import { useAuth } from "@/contexts/AuthContext";
 import { ApplicationData } from "./types";
 import { usePortal } from "./PortalContext";
 import { ReceiptDialog, ReceiptData } from "@/components/receipts/ReceiptDialog";
@@ -45,7 +46,24 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
     primaryColor: portal.primaryColor,
   };
 
-  const { portalGateways, loading: gwLoading } = usePaymentGateways();
+  const { portalGateways: dbGateways, loading: gwLoading } = usePaymentGateways();
+  const { role } = useAuth();
+  const isSuperAdmin = role === "super_admin";
+
+  // Super-admin-only ICICI test option, injected on top of the DB-driven list.
+  // Hidden from regular applicants until ICICI goes through full UAT sign-off
+  // and we flip its row in payment_gateway_config.
+  const portalGateways: PaymentGateway[] = useMemo(() => {
+    const hasIcici = dbGateways.some(g => g.gateway === "icici");
+    if (!isSuperAdmin || hasIcici) return dbGateways;
+    return [...dbGateways, {
+      gateway: "icici",
+      display_name: "ICICI (UAT — admin only)",
+      is_enabled_fee_collection: true,
+      is_enabled_portal_payment: true,
+    }];
+  }, [dbGateways, isSuperAdmin]);
+
   const [selectedGateway, setSelectedGateway] = useState<string | null>(null);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
@@ -77,15 +95,16 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
     setSdkReady(false);
     if (selectedGateway === "cashfree" && document.getElementById("cashfree-sdk")) setSdkReady(true);
     if (selectedGateway === "easebuzz") setSdkReady(true); // No SDK needed for popup approach
+    if (selectedGateway === "icici")    setSdkReady(true); // No SDK needed for popup approach
   }, [selectedGateway]);
 
   // Cleanup poll on unmount
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
-  // Listen for postMessage from EaseBuzz popup
+  // Listen for postMessage from popup gateway windows (Easebuzz, ICICI)
   useEffect(() => {
     const handler = (e: MessageEvent) => {
-      if (e.data?.eb_payment === "success") {
+      if (e.data?.eb_payment === "success" || e.data?.icici_payment === "success") {
         stopPolling();
         checkAndUpdatePayment();
       }
@@ -250,8 +269,83 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
     }
   };
 
+  // ── ICICI (popup + polling) — same shape as Easebuzz ───────────
+  const handlePayIcici = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      const nameParts = (data.full_name || "Applicant").trim().split(" ");
+      // ICICI's merchantTxnNo: alphanumeric only, max 20 chars per spec.
+      const txnid = `IC${data.application_id.replace(/[^a-zA-Z0-9]/g, "")}${Date.now()}`.replace(/[^a-zA-Z0-9]/g, "").slice(0, 20);
+
+      const { data: fnData, error: fnError } = await supabase.functions.invoke("icici-payment", {
+        body: {
+          action: "initiate",
+          application_id: data.application_id,
+          txnid,
+          amount: data.fee_amount,
+          firstname: nameParts[0],
+          email: data.email || undefined,
+          phone: data.phone,
+        },
+      });
+      // supabase-js puts the response body on fnError.context for non-2xx, not on fnData.
+      if (fnError) {
+        let detail = fnError.message;
+        try {
+          const ctx = (fnError as any).context;
+          const body = typeof ctx?.json === "function" ? await ctx.json() : (ctx?.body ? JSON.parse(ctx.body) : null);
+          if (body?.error) detail = body.error;
+          if (body?.raw?.responseDescription) detail += ` — ${body.raw.responseDescription}`;
+          if (body?.raw?.respDescription) detail += ` — ${body.raw.respDescription}`;
+        } catch (_) { /* keep generic msg */ }
+        throw new Error(detail);
+      }
+      if (fnData?.error) throw new Error(fnData.error);
+
+      const { pay_url } = fnData;
+      popupRef.current = window.open(pay_url, "icici_payment", "width=680,height=720,scrollbars=yes,resizable=yes");
+      if (!popupRef.current) throw new Error("Popup was blocked. Please allow popups for this site and try again.");
+
+      pollRef.current = setInterval(async () => {
+        if (popupRef.current?.closed) {
+          stopPolling();
+          // Check DB first (callback handler may have already updated it)
+          const { data: row } = await supabase
+            .from("applications")
+            .select("payment_status, payment_ref")
+            .eq("application_id", data.application_id)
+            .single();
+          if (row?.payment_status === "paid") {
+            onChange({ payment_status: "paid", payment_ref: row.payment_ref ?? undefined });
+            setLoading(false);
+            return;
+          }
+          // Fallback: ask ICICI directly via /command STATUS
+          try {
+            const { data: verifyData } = await supabase.functions.invoke("icici-payment", {
+              body: { action: "verify-payment", txnid },
+            });
+            if (verifyData?.status === "SUC" || verifyData?.raw?.responseCode === "0000" || verifyData?.raw?.responseCode === "000") {
+              await checkAndUpdatePayment();
+              return;
+            }
+          } catch (_) { /* ignore */ }
+          setError("Payment window was closed. If your payment was deducted, it will be confirmed shortly — or contact support.");
+          setLoading(false);
+          return;
+        }
+        await checkAndUpdatePayment();
+      }, 2000);
+    } catch (err: any) {
+      setError(err.message || "Something went wrong. Please try again.");
+      setLoading(false);
+    }
+  };
+
   const handlePay = () => {
     if (selectedGateway === "easebuzz") return handlePayEasebuzz();
+    if (selectedGateway === "icici")    return handlePayIcici();
     return handlePayCashfree();
   };
 
@@ -350,14 +444,14 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
               >
                 {loading ? (
                   <><Loader2 className="h-4 w-4 animate-spin" />
-                    {selectedGateway === "easebuzz" ? "Opening payment window…" : "Processing…"}
+                    {selectedGateway === "easebuzz" || selectedGateway === "icici" ? "Opening payment window…" : "Processing…"}
                   </>
                 ) : (
                   <><CreditCard className="h-4 w-4" /> Pay ₹{data.fee_amount.toLocaleString("en-IN")}</>
                 )}
               </Button>
 
-              {loading && selectedGateway === "easebuzz" && (
+              {loading && (selectedGateway === "easebuzz" || selectedGateway === "icici") && (
                 <p className="text-xs text-muted-foreground">
                   Complete payment in the popup window. Do not close this page.
                 </p>

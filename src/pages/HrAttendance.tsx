@@ -8,6 +8,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 
 interface AttendanceRecord {
   id: string;
@@ -37,27 +38,52 @@ const HrAttendance = () => {
   const fetchData = async () => {
     setLoading(true);
 
-    const [attRes, profilesRes] = await Promise.all([
-      supabase.from("employee_attendance")
-        .select("id, user_id, date, punch_in, punch_out, selfie_url, location_lat, location_lng, face_match_score, face_match_result, liveness_score")
-        .eq("date", date)
-        .order("punch_in", { ascending: false }),
-      supabase.from("profiles")
-        .select("user_id, display_name, phone, employee_id, user_roles!inner(role)")
-        .not("user_roles.role", "in", "(student,parent)")
-        .order("display_name"),
-    ]);
+    // 1. Attendance records for the day.
+    const attRes = await supabase.from("employee_attendance")
+      .select("id, user_id, date, punch_in, punch_out, selfie_url, location_lat, location_lng, face_match_score, face_match_result, liveness_score")
+      .eq("date", date)
+      .order("punch_in", { ascending: false });
 
-    setAllProfiles(profilesRes.data || []);
-    const profileMap = new Map((profilesRes.data || []).map((p: any) => [p.user_id, p]));
+    // 2. Profiles + roles for the users who actually punched — fetched in two
+    //    independent queries so a failure in one doesn't blank out the whole row.
+    //    The original combined select with embedded user_roles was returning empty
+    //    because of a non-existent column; splitting also makes diagnosis trivial
+    //    since each query stands on its own.
+    const punchedIds = Array.from(new Set((attRes.data || []).map((a: any) => a.user_id)));
+    const [punchedProfilesRes, punchedRolesRes] = punchedIds.length > 0
+      ? await Promise.all([
+          supabase.from("profiles").select("user_id, display_name").in("user_id", punchedIds),
+          supabase.from("user_roles").select("user_id, role").in("user_id", punchedIds),
+        ])
+      : [{ data: [] as any[] }, { data: [] as any[] }];
+
+    if (punchedProfilesRes.error) console.error("[HrAttendance] profiles fetch error:", punchedProfilesRes.error);
+    if (punchedRolesRes.error) console.error("[HrAttendance] user_roles fetch error:", punchedRolesRes.error);
+
+    // 3. Staff list for the Absent panel — role filter applies here only.
+    const allStaffRes = await supabase.from("profiles")
+      .select("user_id, display_name, phone, user_roles!inner(role)")
+      .not("user_roles.role", "in", "(student,parent)")
+      .order("display_name");
+
+    setAllProfiles(allStaffRes.data || []);
+    const profileMap = new Map((punchedProfilesRes.data || []).map((p: any) => [p.user_id, p]));
+    const roleMap = new Map<string, string>();
+    for (const r of (punchedRolesRes.data || []) as any[]) {
+      // Keep the first non-student/parent role if present, else any role.
+      const existing = roleMap.get(r.user_id);
+      if (!existing || existing === "student" || existing === "parent") {
+        roleMap.set(r.user_id, r.role);
+      }
+    }
 
     if (attRes.data) {
       setRecords(attRes.data.map((a: any) => {
-        const p = profileMap.get(a.user_id);
+        const p: any = profileMap.get(a.user_id);
         return {
           ...a,
           display_name: p?.display_name || "Unknown",
-          role: (p?.user_roles as any)?.[0]?.role || (p?.user_roles as any)?.role || "",
+          role: roleMap.get(a.user_id) || "",
         };
       }));
     }
@@ -154,7 +180,63 @@ const HrAttendance = () => {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         {r.selfie_url ? (
-                          <img src={r.selfie_url} alt="" className="h-8 w-8 rounded-full object-cover shrink-0" />
+                          <Dialog>
+                            <DialogTrigger asChild>
+                              <button
+                                className="shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-ring/40 transition-transform hover:scale-110"
+                                aria-label={`View ${r.display_name}'s punch-in photo`}
+                              >
+                                <img src={r.selfie_url} alt="" className="h-8 w-8 rounded-full object-cover" />
+                              </button>
+                            </DialogTrigger>
+                            <DialogContent className="max-w-md p-0 overflow-hidden max-h-[90vh] flex flex-col">
+                              <img
+                                src={r.selfie_url}
+                                alt={`${r.display_name} punch-in photo`}
+                                className="w-full max-h-[45vh] object-contain bg-black shrink-0"
+                              />
+                              <div className="overflow-y-auto">
+                              <div className="p-4 border-t border-border bg-card">
+                                <div className="font-semibold text-foreground">{r.display_name}</div>
+                                <div className="text-xs text-muted-foreground mt-1">
+                                  {new Date(r.date).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}
+                                  {" · "}{formatTime(r.punch_in)}
+                                  {r.punch_out ? ` → ${formatTime(r.punch_out)}` : ""}
+                                </div>
+                                {r.face_match_score !== null && (
+                                  <div className="text-xs text-muted-foreground mt-1">
+                                    Face match {r.face_match_score}%
+                                    {r.liveness_score !== null && ` · Liveness ${r.liveness_score}%`}
+                                  </div>
+                                )}
+                              </div>
+                              {r.location_lat !== null && r.location_lng !== null && (
+                                <div className="border-t border-border bg-card">
+                                  <div className="flex items-center gap-2 px-4 py-2 text-xs">
+                                    <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+                                    <span className="font-mono text-muted-foreground">
+                                      {r.location_lat.toFixed(6)}, {r.location_lng.toFixed(6)}
+                                    </span>
+                                    <a
+                                      href={`https://www.google.com/maps?q=${r.location_lat},${r.location_lng}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="ml-auto text-primary hover:underline"
+                                    >
+                                      Open in Maps ↗
+                                    </a>
+                                  </div>
+                                  <iframe
+                                    title={`${r.display_name} punch location`}
+                                    className="w-full h-40 border-0"
+                                    loading="lazy"
+                                    src={`https://www.openstreetmap.org/export/embed.html?bbox=${r.location_lng - 0.003},${r.location_lat - 0.003},${r.location_lng + 0.003},${r.location_lat + 0.003}&layer=mapnik&marker=${r.location_lat},${r.location_lng}`}
+                                  />
+                                </div>
+                              )}
+                              </div>
+                            </DialogContent>
+                          </Dialog>
                         ) : (
                           <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary shrink-0">
                             {r.display_name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}

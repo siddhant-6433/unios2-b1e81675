@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   Clock, AlertTriangle, CalendarCheck, Phone, MapPin, Loader2, Search,
-  ChevronLeft, ChevronRight, ExternalLink, X, Check,
+  ChevronLeft, ChevronRight, ExternalLink, X, Check, CalendarClock,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -69,11 +69,14 @@ const PendingFollowups = () => {
   // Visit closure dialogs
   const [completeDialog, setCompleteDialog] = useState<{ visitId: string; leadId: string; leadName: string } | null>(null);
   const [noShowDialog, setNoShowDialog] = useState<{ visitId: string; leadId: string; leadName: string; campusId: string | null } | null>(null);
+  const [rescheduleVisitDialog, setRescheduleVisitDialog] = useState<{ visitId: string; leadId: string; leadName: string } | null>(null);
+  const [newVisitDate, setNewVisitDate] = useState("");
   const [visitFeedback, setVisitFeedback] = useState("");
   const [followupDate, setFollowupDate] = useState("");
   const [followupAction, setFollowupAction] = useState<"followup" | "reschedule">("followup");
   const [rescheduleDate, setRescheduleDate] = useState("");
   const [saving, setSaving] = useState(false);
+  const [cloudCallingId, setCloudCallingId] = useState<string | null>(null);
   const { toast } = useToast();
 
   // Fetch counsellor options for reassignment (admins only)
@@ -387,6 +390,60 @@ const PendingFollowups = () => {
     fetchItems(); fetchCounts();
   };
 
+  const openRescheduleVisitDialog = (visitId: string, leadId: string, leadName: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    // Default new date = +2 days, rounded to local datetime-local format
+    setNewVisitDate(new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 16));
+    setRescheduleVisitDialog({ visitId, leadId, leadName });
+  };
+
+  const handleRescheduleVisit = async () => {
+    if (!rescheduleVisitDialog || !newVisitDate) return;
+    setSaving(true);
+    const newDateIso = new Date(newVisitDate).toISOString();
+    // Update the existing visit row in place — keeps the same campus + scheduler.
+    await supabase.from("campus_visits" as any)
+      .update({ visit_date: newDateIso, status: "scheduled" })
+      .eq("id", rescheduleVisitDialog.visitId);
+    // Bring the lead stage back to visit_scheduled so dashboards reflect reality.
+    await supabase.from("leads").update({ stage: "visit_scheduled" as any }).eq("id", rescheduleVisitDialog.leadId);
+    await supabase.from("lead_activities").insert({
+      lead_id: rescheduleVisitDialog.leadId, user_id: user?.id || null, type: "visit",
+      description: `Visit rescheduled to ${new Date(newDateIso).toLocaleString("en-IN")}`,
+    });
+    toast({ title: "Visit rescheduled", description: `New date: ${new Date(newDateIso).toLocaleDateString("en-IN")}` });
+    setSaving(false);
+    setRescheduleVisitDialog(null);
+    fetchItems(); fetchCounts();
+  };
+
+  const handleCloudCall = async (leadId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCloudCallingId(leadId);
+    try {
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      const { data, error } = await supabase.functions.invoke("manual-call", {
+        body: { lead_id: leadId, caller_user_id: currentUser?.id },
+        headers: { Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
+      });
+      if (error) {
+        let detail = error.message;
+        try {
+          const ctx = (error as any).context as Response | undefined;
+          if (ctx) { const raw = await ctx.text().catch(() => ""); try { detail = JSON.parse(raw)?.error || raw; } catch { detail = raw || error.message; } }
+        } catch {}
+        toast({ title: "Call Failed", description: detail, variant: "destructive" });
+      } else if (data?.error) {
+        toast({ title: "Call Failed", description: data.error, variant: "destructive" });
+      } else {
+        toast({ title: "Calling You", description: data?.message || "Pick up your phone to connect to the student." });
+      }
+    } catch (e: any) {
+      toast({ title: "Call Failed", description: e.message, variant: "destructive" });
+    }
+    setCloudCallingId(null);
+  };
+
   const toggleSelect = (leadId: string) => {
     setSelected(prev => {
       const next = new Set(prev);
@@ -600,6 +657,15 @@ const PendingFollowups = () => {
                             <button onClick={(e) => openNoShowDialog(r.id, r.lead_id, r.lead_name, null, e)}
                               className="rounded-lg bg-red-100 px-2 py-1 text-[10px] font-medium text-red-700 hover:bg-red-200 transition-colors"
                               title="Mark as no-show">No Show</button>
+                            <button onClick={(e) => openRescheduleVisitDialog(r.id, r.lead_id, r.lead_name, e)}
+                              className="rounded-lg bg-amber-100 p-1.5 text-amber-700 hover:bg-amber-200 transition-colors"
+                              title="Reschedule visit"><CalendarClock className="h-3.5 w-3.5" /></button>
+                            <button onClick={(e) => handleCloudCall(r.lead_id, e)}
+                              disabled={cloudCallingId === r.lead_id}
+                              className="rounded-lg bg-cyan-100 p-1.5 text-cyan-700 hover:bg-cyan-200 transition-colors disabled:opacity-60"
+                              title="Cloud call lead">
+                              {cloudCallingId === r.lead_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Phone className="h-3.5 w-3.5" />}
+                            </button>
                           </>
                         )}
                         {(tab === "overdue" || tab === "today" || tab === "upcoming") && (
@@ -698,6 +764,27 @@ const PendingFollowups = () => {
             <Button onClick={handleNoShowVisit} disabled={saving} variant="destructive" className="w-full">
               {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               {followupAction === "followup" ? "Mark No-Show & Schedule Call" : "Mark No-Show & Reschedule Visit"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reschedule Visit Dialog */}
+      <Dialog open={!!rescheduleVisitDialog} onOpenChange={o => { if (!o) setRescheduleVisitDialog(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Reschedule Visit: {rescheduleVisitDialog?.leadName}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-xs text-muted-foreground">Pick a new date and time. The lead's stage moves back to "Visit Scheduled".</p>
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">New Visit Date & Time <span className="text-red-500">*</span></label>
+              <input type="datetime-local" value={newVisitDate} onChange={e => setNewVisitDate(e.target.value)}
+                className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20" />
+            </div>
+            <Button onClick={handleRescheduleVisit} disabled={saving || !newVisitDate} className="w-full">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CalendarClock className="h-4 w-4 mr-2" />}
+              Reschedule Visit
             </Button>
           </div>
         </DialogContent>

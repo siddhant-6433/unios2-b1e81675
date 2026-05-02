@@ -27,6 +27,7 @@ import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
 import { ConvertToStudentDialog } from "@/components/admissions/ConvertToStudentDialog";
 import { SendWhatsAppDialog } from "@/components/leads/SendWhatsAppDialog";
 import { AddSecondaryCounsellorDialog } from "@/components/leads/AddSecondaryCounsellorDialog";
+import { ApplyMagicLinkButton } from "@/components/leads/ApplyMagicLinkButton";
 import { ScheduleVisitDialog } from "@/components/admissions/ScheduleVisitDialog";
 import { ScheduleFollowupDialog } from "@/components/admissions/ScheduleFollowupDialog";
 import { CallDispositionDialog, type CallDispositionData } from "@/components/admissions/CallDispositionDialog";
@@ -343,8 +344,23 @@ const LeadDetail = () => {
       setScorePopup({ points: totalPoints, label: totalLabel, visible: true });
     }
 
-    // 5. Chain to follow-up dialog if requested
-    if (data.schedule_followup) {
+    // 5. Save follow-up if date provided inline (no second dialog needed)
+    if (data.schedule_followup && data.followup_date) {
+      await supabase.from("lead_followups").insert({
+        lead_id: id,
+        user_id: user?.id,
+        scheduled_at: data.followup_date,
+        type: "call",
+        notes: `Follow-up after ${label}${data.notes ? `: ${data.notes}` : ""}`,
+        status: "pending",
+      });
+      await supabase.from("lead_activities").insert({
+        lead_id: id, user_id: profileId, type: "followup",
+        description: `Follow-up scheduled for ${new Date(data.followup_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`,
+      });
+      await fetchAll(true);
+    } else if (data.schedule_followup) {
+      // Fallback: open dialog only if no date was provided
       setShowFollowup(true);
     }
     // 6. Schedule visit inline if provided
@@ -868,7 +884,9 @@ const LeadDetail = () => {
           { icon: MapPin, label: "Visit", color: "text-violet-600 bg-violet-100 dark:bg-violet-900/30", action: () => setShowScheduleVisit(true) },
           { icon: Footprints, label: "Walk-in", color: "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30", action: () => setShowWalkinCompletion(true) },
           { icon: Mail, label: "Email", color: "text-sky-600 bg-sky-100 dark:bg-sky-900/30", action: () => setShowSendEmail(true) },
-          { icon: Bot, label: "AI Call", color: "text-amber-600 bg-amber-100 dark:bg-amber-900/30", action: triggerAiCall, disabled: aiCalling },
+          ...(role !== "counsellor" ? [{
+            icon: Bot, label: "AI Call", color: "text-amber-600 bg-amber-100 dark:bg-amber-900/30", action: triggerAiCall, disabled: aiCalling,
+          }] : []),
           { icon: UserCheck, label: "Interview", color: "text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30", action: () => setShowInterview(true) },
           {
             icon: FileText, label: "Offer",
@@ -934,6 +952,15 @@ const LeadDetail = () => {
             onTokenPaidOverride={() => setShowTokenOverride(true)}
           />
           <FuzzyDuplicateAlert leadId={lead.id} leadName={lead.name} leadPhone={lead.phone} leadEmail={lead.email} />
+          <Card className="border-border/60">
+            <CardContent className="p-4 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Apply Portal Access</h3>
+                <p className="text-[11px] text-muted-foreground mt-1">Send a one-click login link via WhatsApp.</p>
+              </div>
+              <ApplyMagicLinkButton leadId={lead.id} leadName={lead.name} leadPhone={lead.phone} />
+            </CardContent>
+          </Card>
           <Card className="border-border/60">
             <CardContent className="p-4 space-y-3">
               <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Fee Ledger</h3>
@@ -1376,6 +1403,11 @@ function ScheduledVisitsSection({ visits, campuses, courses, leadId, userId, onR
   const [followupType, setFollowupType] = useState<"call" | "visit">("call");
   const [followupDate, setFollowupDate] = useState("");
   const [saving, setSaving] = useState(false);
+  const [rescheduleDialog, setRescheduleDialog] = useState<{ visitId: string; currentDate: string } | null>(null);
+  const [rescheduleNewDate, setRescheduleNewDate] = useState("");
+  const [noShowDialog, setNoShowDialog] = useState<{ visitId: string; campusId: string | null } | null>(null);
+  const [noShowAction, setNoShowAction] = useState<"followup" | "reschedule">("followup");
+  const [noShowDate, setNoShowDate] = useState("");
 
   // Open walk-in dialog when triggered from parent
   useEffect(() => {
@@ -1491,50 +1523,22 @@ function ScheduledVisitsSection({ visits, campuses, courses, leadId, userId, onR
               </div>
               <div className="flex gap-1.5 shrink-0">
                 <button
-                  onClick={async () => {
-                    const newDateStr = prompt("Enter new date/time (YYYY-MM-DD HH:MM):", visitDate.toISOString().slice(0, 16));
-                    if (!newDateStr) return;
-                    const newDate = new Date(newDateStr);
-                    if (isNaN(newDate.getTime())) { toast({ title: "Invalid date", variant: "destructive" }); return; }
-                    await supabase.from("campus_visits").update({ visit_date: newDate.toISOString(), status: "scheduled" }).eq("id", v.id);
-                    await supabase.from("lead_activities").insert({
-                      lead_id: leadId, user_id: userId, type: "visit",
-                      description: `Visit rescheduled to ${newDate.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`,
-                    });
-                    toast({ title: "Visit rescheduled" });
-                    onRefresh();
-                  }}
+                  onClick={() => { setRescheduleDialog({ visitId: v.id, currentDate: v.visit_date }); setRescheduleNewDate(new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 16)); }}
                   className="rounded-lg border border-input bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted"
                 >Reschedule</button>
                 <button
-                  onClick={() => {
-                    setCompletingVisitId(v.id);
-                    setFollowupDate("");
-                    setFeedback("");
-                    setCourseInterest("");
-                    setExpectedAdmissionDate("");
-                  }}
+                  onClick={() => { setCompletingVisitId(v.id); setFollowupDate(""); setFeedback(""); setCourseInterest(""); setExpectedAdmissionDate(""); }}
                   className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-700"
                 >Mark Complete</button>
                 <button
-                  onClick={async () => {
-                    await supabase.from("campus_visits").update({ status: "no_show" }).eq("id", v.id);
-                    await supabase.from("lead_activities").insert({
-                      lead_id: leadId, user_id: userId, type: "visit", description: "Campus visit: student did not show up",
-                    });
-                    toast({ title: "Marked as no-show", description: "Schedule a follow-up to reschedule." });
-                    onRefresh();
-                  }}
+                  onClick={() => { setNoShowDialog({ visitId: v.id, campusId: v.campus_id }); setNoShowAction("followup"); setNoShowDate(""); }}
                   className="rounded-lg border border-amber-200 px-2.5 py-1 text-xs font-medium text-amber-600 hover:bg-amber-50"
                 >No Show</button>
                 <button
                   onClick={async () => {
                     await supabase.from("campus_visits").update({ status: "cancelled" }).eq("id", v.id);
-                    await supabase.from("lead_activities").insert({
-                      lead_id: leadId, user_id: userId, type: "visit", description: "Campus visit cancelled",
-                    });
-                    toast({ title: "Visit cancelled" });
-                    onRefresh();
+                    await supabase.from("lead_activities").insert({ lead_id: leadId, user_id: userId, type: "visit", description: "Campus visit cancelled" });
+                    toast({ title: "Visit cancelled" }); onRefresh();
                   }}
                   className="rounded-lg border border-red-200 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
                 >Cancel</button>
@@ -1636,6 +1640,93 @@ function ScheduledVisitsSection({ visits, campuses, courses, leadId, userId, onR
               {isWalkin ? "Save Walk-in & Schedule Follow-up" : "Complete & Schedule Follow-up"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reschedule Visit Dialog */}
+      <Dialog open={!!rescheduleDialog} onOpenChange={o => { if (!o) setRescheduleDialog(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Reschedule Visit</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-xs text-muted-foreground">Pick a new date and time for the campus visit.</p>
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">New Visit Date & Time <span className="text-red-500">*</span></label>
+              <input type="datetime-local" value={rescheduleNewDate} onChange={e => setRescheduleNewDate(e.target.value)}
+                className={inputCls} />
+            </div>
+            <Button className="w-full" disabled={saving || !rescheduleNewDate} onClick={async () => {
+              if (!rescheduleDialog || !rescheduleNewDate) return;
+              setSaving(true);
+              const newDate = new Date(rescheduleNewDate);
+              await supabase.from("campus_visits").update({ visit_date: newDate.toISOString(), status: "scheduled" }).eq("id", rescheduleDialog.visitId);
+              await supabase.from("lead_activities").insert({
+                lead_id: leadId, user_id: userId, type: "visit",
+                description: `Visit rescheduled to ${newDate.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`,
+              });
+              toast({ title: "Visit rescheduled" });
+              setSaving(false); setRescheduleDialog(null); onRefresh();
+            }}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Calendar className="h-4 w-4 mr-2" />}
+              Reschedule Visit
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* No Show Dialog */}
+      <Dialog open={!!noShowDialog} onOpenChange={o => { if (!o) setNoShowDialog(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>No-Show</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">Student didn't show up. Choose next action:</p>
+            <div className="flex gap-2">
+              <button onClick={() => setNoShowAction("followup")}
+                className={`flex-1 rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
+                  noShowAction === "followup" ? "border-primary bg-primary/10 text-primary" : "border-input text-muted-foreground hover:bg-muted"
+                }`}>Schedule Follow-up Call</button>
+              <button onClick={() => setNoShowAction("reschedule")}
+                className={`flex-1 rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
+                  noShowAction === "reschedule" ? "border-primary bg-primary/10 text-primary" : "border-input text-muted-foreground hover:bg-muted"
+                }`}>Reschedule Visit</button>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">
+                {noShowAction === "followup" ? "Follow-up Call Date" : "New Visit Date"} <span className="text-red-500">*</span>
+              </label>
+              <input type="datetime-local" value={noShowDate} onChange={e => setNoShowDate(e.target.value)} className={inputCls} />
+            </div>
+            <Button variant="destructive" className="w-full" disabled={saving || !noShowDate} onClick={async () => {
+              if (!noShowDialog || !noShowDate) return;
+              setSaving(true);
+              await supabase.from("campus_visits").update({ status: "no_show" } as any).eq("id", noShowDialog.visitId);
+              await supabase.from("lead_activities").insert({
+                lead_id: leadId, user_id: userId, type: "visit", description: "Campus visit: student did not show up",
+              });
+              if (noShowAction === "reschedule") {
+                await supabase.from("campus_visits").insert({
+                  lead_id: leadId, campus_id: noShowDialog.campusId,
+                  visit_date: new Date(noShowDate).toISOString(), status: "scheduled",
+                  scheduled_by: userId,
+                } as any);
+                await supabase.from("leads").update({ stage: "visit_scheduled" as any }).eq("id", leadId);
+                toast({ title: "No-show recorded", description: `Visit rescheduled for ${new Date(noShowDate).toLocaleDateString("en-IN")}` });
+              } else {
+                await supabase.from("lead_followups").insert({
+                  lead_id: leadId, scheduled_at: new Date(noShowDate).toISOString(),
+                  type: "call", notes: "No-show follow-up — call to reschedule or close", status: "pending",
+                } as any);
+                toast({ title: "No-show recorded", description: `Follow-up call scheduled for ${new Date(noShowDate).toLocaleDateString("en-IN")}` });
+              }
+              setSaving(false); setNoShowDialog(null); onRefresh();
+            }}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {noShowAction === "followup" ? "Mark No-Show & Schedule Call" : "Mark No-Show & Reschedule Visit"}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </>

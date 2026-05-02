@@ -15,6 +15,7 @@ interface Notification {
   link: string | null;
   is_read: boolean;
   created_at: string;
+  lead_id: string | null;
 }
 
 function timeAgo(dateStr: string): string {
@@ -87,11 +88,12 @@ export function WhatsAppPanel() {
     setLoading(false);
   }, [user?.id, isCounsellor, profile?.id]);
 
-  // Fetch unreplied WhatsApp conversations — scoped to counsellor's leads
+  // Fetch unreplied WhatsApp conversations — only those with unread > 0
   const fetchUnreplied = useCallback(async () => {
     let q = supabase
       .from("whatsapp_conversations" as any)
-      .select("unread_count");
+      .select("unread_count")
+      .gt("unread_count", 0);
     if (isCounsellor && profile?.id) {
       q = q.eq("counsellor_id", profile.id);
     }
@@ -144,7 +146,40 @@ export function WhatsAppPanel() {
       setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, is_read: true } : n));
       setUnreadNotifCount(prev => Math.max(0, prev - 1));
     }
-    if (notif.link) { setOpen(false); navigate(notif.link); }
+    setOpen(false);
+
+    // Deep-link: extract phone from link param, title, or lead lookup
+    // 1. Link already has ?phone= (new webhook format)
+    if (notif.link?.includes("phone=")) {
+      navigate(notif.link);
+      return;
+    }
+
+    // 2. Extract phone from title or body: "New WhatsApp from 919917149576"
+    const allText = `${notif.title || ""} ${notif.body || ""}`;
+    const phoneMatch = allText.match(/(91\d{10})/);
+    if (phoneMatch) {
+      navigate(`/whatsapp-inbox?phone=${phoneMatch[1]}`);
+      return;
+    }
+
+    // 3. Look up phone via lead_id using whatsapp_messages (not the view, avoids RLS issues)
+    if (notif.lead_id) {
+      const { data: msg } = await supabase
+        .from("whatsapp_messages" as any)
+        .select("phone")
+        .eq("lead_id", notif.lead_id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (msg?.phone) {
+        navigate(`/whatsapp-inbox?phone=${msg.phone}`);
+        return;
+      }
+    }
+
+    // 4. Fallback
+    navigate(notif.link || "/whatsapp-inbox");
   };
 
   const markAllRead = async () => {
@@ -196,9 +231,9 @@ export function WhatsAppPanel() {
         <PopoverTrigger asChild>
           <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-green-600 hover:text-green-700 hover:bg-green-50 relative">
             <WhatsAppIcon className="h-[18px] w-[18px]" />
-            {unreadNotifCount > 0 && (
+            {unrepliedCount > 0 && (
               <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-green-500 text-[9px] font-bold text-white px-1 ring-2 ring-card">
-                {unreadNotifCount > 99 ? "99+" : unreadNotifCount}
+                {unrepliedCount > 99 ? "99+" : unrepliedCount}
               </span>
             )}
           </Button>

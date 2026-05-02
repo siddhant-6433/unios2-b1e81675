@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, UserPlus, School, Users, Banknote, ChevronRight, ChevronLeft } from "lucide-react";
+import { Loader2, UserPlus, School, Users, Banknote, ChevronRight, ChevronLeft, Save } from "lucide-react";
 
 interface Campus      { id: string; name: string; }
 interface Institution { id: string; name: string; code: string; type: string; }
@@ -18,6 +18,10 @@ interface AddStudentDialogProps {
   onSuccess: () => void;
   /** Pre-select a campus. */
   defaultCampusId?: string;
+  /** Resume an existing draft instead of starting blank. */
+  resumeDraftId?: string | null;
+  /** Fired after a draft is saved/updated, so the parent can refresh its list. */
+  onDraftChange?: () => void;
 }
 
 type FeeVersion = "new_admission" | "existing_parent" | "standard";
@@ -44,7 +48,7 @@ function courseLabel(c: Course) {
 
 const STEPS = ["Student Details", "Parent / Guardian", "Programme & Session"];
 
-export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusId }: AddStudentDialogProps) {
+export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusId, resumeDraftId, onDraftChange }: AddStudentDialogProps) {
   const { user } = useAuth();
   const { toast } = useToast();
   const [step, setStep] = useState(0);
@@ -54,6 +58,13 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
   const [institutions,  setInstitutions]  = useState<Institution[]>([]);
   const [courses,       setCourses]       = useState<Course[]>([]);
   const [sessions,      setSessions]      = useState<Session[]>([]);
+
+  // Draft state — id is null until first auto-save persists; "saving" / "saved"
+  // surfaces a small status pill in the header so the user knows the form's safe.
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const [draftStatus, setDraftStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const draftIdRef = useRef<string | null>(null);
+  const skipNextAutosave = useRef(false);
 
   const [form, setForm] = useState({
     name: "", dob: "", gender: "", campus_id: defaultCampusId || "",
@@ -68,26 +79,88 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
-  // On open: reset + load campuses & sessions
+  // On open: reset + load campuses & sessions, OR load a draft if resuming.
   useEffect(() => {
     if (!open) return;
+
+    // Reset transient state regardless of mode.
     setStep(0);
-    setForm(f => ({
-      ...f, name: "", dob: "", gender: "", institution_id: "", course_id: "",
-      section: "", class_roll_no: "", school_admission_no: "",
-      father_name: "", father_phone: "", mother_name: "", mother_phone: "",
-      fee_version: "standard",
-      campus_id: defaultCampusId || f.campus_id,
-    }));
+    setDraftStatus("idle");
 
     Promise.all([
       supabase.from("campuses").select("id, name").order("name"),
       supabase.from("admission_sessions").select("id, name").eq("is_active", true),
     ]).then(([cam, ses]) => {
       if (cam.data) setAllCampuses(cam.data);
-      if (ses.data) { setSessions(ses.data); if (ses.data.length === 1) set("session_id", ses.data[0].id); }
+      if (ses.data) { setSessions(ses.data); if (ses.data.length === 1 && !resumeDraftId) set("session_id", ses.data[0].id); }
     });
-  }, [open, defaultCampusId]);
+
+    if (resumeDraftId) {
+      // Resume mode — load saved snapshot.
+      draftIdRef.current = resumeDraftId;
+      setDraftId(resumeDraftId);
+      skipNextAutosave.current = true; // don't immediately re-save what we just loaded
+      supabase.from("student_drafts")
+        .select("data, step")
+        .eq("id", resumeDraftId)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data?.data) setForm(prev => ({ ...prev, ...(data.data as any) }));
+          if (typeof data?.step === "number") setStep(data.step);
+        });
+    } else {
+      // Fresh dialog — clear any prior draft id and reset the form.
+      draftIdRef.current = null;
+      setDraftId(null);
+      setForm(f => ({
+        ...f, name: "", dob: "", gender: "", institution_id: "", course_id: "",
+        section: "", class_roll_no: "", school_admission_no: "",
+        father_name: "", father_phone: "", mother_name: "", mother_phone: "",
+        fee_version: "standard",
+        campus_id: defaultCampusId || f.campus_id,
+      }));
+    }
+  }, [open, defaultCampusId, resumeDraftId]);
+
+  // Debounced auto-save. Only kicks in once the user has typed a name — we
+  // don't want to litter the drafts table with empty rows. Each save is a
+  // single upsert; the row id is tracked in a ref so concurrent renders don't
+  // race.
+  useEffect(() => {
+    if (!open) return;
+    if (saving) return;
+    if (!form.name.trim()) return;
+    if (skipNextAutosave.current) { skipNextAutosave.current = false; return; }
+
+    const handle = setTimeout(async () => {
+      if (!user?.id) return;
+      setDraftStatus("saving");
+      const campus = allCampuses.find(c => c.id === form.campus_id);
+      const course = courses.find(c => c.id === form.course_id);
+      const payload = {
+        created_by: user.id,
+        data: form,
+        display_name: form.name.trim() || null,
+        campus_name: campus?.name || null,
+        course_name: course ? courseLabel(course) : null,
+        step,
+      };
+      const existing = draftIdRef.current;
+      if (existing) {
+        const { error } = await supabase.from("student_drafts").update(payload).eq("id", existing);
+        if (error) { setDraftStatus("idle"); console.error("[draft] update", error); return; }
+      } else {
+        const { data, error } = await supabase.from("student_drafts").insert(payload).select("id").single();
+        if (error) { setDraftStatus("idle"); console.error("[draft] insert", error); return; }
+        draftIdRef.current = data.id;
+        setDraftId(data.id);
+      }
+      setDraftStatus("saved");
+      onDraftChange?.();
+    }, 800);
+
+    return () => clearTimeout(handle);
+  }, [form, step, open, user?.id, allCampuses, courses, saving, onDraftChange]);
 
   // Campus changed → load institutions
   useEffect(() => {
@@ -164,6 +237,16 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
 
     setSaving(false);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+
+    // Promote the draft to "completed" so it drops out of the drafts list. We
+    // keep the row for audit (who created which student from which draft).
+    if (draftIdRef.current) {
+      await supabase.from("student_drafts")
+        .update({ completed_at: new Date().toISOString() })
+        .eq("id", draftIdRef.current);
+      onDraftChange?.();
+    }
+
     toast({ title: "Student added", description: `${form.name} has been added successfully.` });
     onOpenChange(false);
     onSuccess();
@@ -177,7 +260,18 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <UserPlus className="h-5 w-5" /> Add Student
+            <UserPlus className="h-5 w-5" />
+            {resumeDraftId ? "Resume Draft" : "Add Student"}
+            {draftStatus === "saving" && (
+              <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-normal text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" /> Saving draft…
+              </span>
+            )}
+            {draftStatus === "saved" && (
+              <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-normal text-emerald-600">
+                <Save className="h-3 w-3" /> Draft saved
+              </span>
+            )}
           </DialogTitle>
         </DialogHeader>
 

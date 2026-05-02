@@ -2,12 +2,13 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
+import { ApplyMagicLinkButton } from "@/components/leads/ApplyMagicLinkButton";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   FileText, Download, Eye, Loader2, Search, Filter, ExternalLink,
   CheckCircle, Clock, CreditCard, Upload, AlertCircle, ChevronDown, ChevronUp, X,
-  Sparkles, Send, Gift, Wallet, UserCheck, GraduationCap, Receipt,
+  Sparkles, Send, Gift, Wallet, UserCheck, GraduationCap, Receipt, RefreshCw,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -91,6 +92,8 @@ export default function Applications() {
   const [docs, setDocs] = useState<{ name: string; url: string }[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
   const [generatingPdfFor, setGeneratingPdfFor] = useState<string | null>(null);
+  const [bulkRegen, setBulkRegen] = useState<{ done: number; total: number } | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const generateFormPdf = async (app: AppRow) => {
     setGeneratingPdfFor(app.id);
@@ -109,6 +112,34 @@ export default function Applications() {
     } finally {
       setGeneratingPdfFor(null);
     }
+  };
+
+  const regenerateAll = async () => {
+    const eligible = (a: AppRow) => a.status === "submitted" || a.status === "under_review" || a.status === "approved";
+    const targets = selectedIds.size > 0
+      ? apps.filter(a => selectedIds.has(a.id) && eligible(a))
+      : apps.filter(eligible);
+    if (!targets.length) return;
+    const scope = selectedIds.size > 0 ? "selected" : "all";
+    if (!window.confirm(`Regenerate ${targets.length} ${scope} application form PDFs? This may take a few minutes.`)) return;
+    setBulkRegen({ done: 0, total: targets.length });
+    for (let i = 0; i < targets.length; i++) {
+      const app = targets[i];
+      try {
+        const { data, error } = await supabase.functions.invoke("generate-application-form", {
+          body: { application_id: app.application_id },
+        });
+        if (error) throw error;
+        const url = (data as any)?.form_pdf_url;
+        if (url) {
+          setApps(prev => prev.map(a => a.id === app.id ? { ...a, form_pdf_url: url } : a));
+        }
+      } catch (e) {
+        console.error(`bulk regen failed for ${app.application_id}:`, e);
+      }
+      setBulkRegen({ done: i + 1, total: targets.length });
+    }
+    setBulkRegen(null);
   };
 
   const generateFeeReceipt = async (app: AppRow) => {
@@ -240,26 +271,17 @@ export default function Applications() {
     setDocsLoading(true);
     setDocs([]);
 
-    const { data: files, error } = await supabase.storage
-      .from("application-documents")
-      .list(applicationId, { limit: 50 });
-
-    if (error || !files?.length) {
-      setDocs([]);
-      setDocsLoading(false);
-      return;
-    }
-
-    const docList = files
-      .filter(f => f.name && !f.name.startsWith("."))
-      .map(f => {
-        const { data: urlData } = supabase.storage
-          .from("application-documents")
-          .getPublicUrl(`${applicationId}/${f.name}`);
-        return { name: f.name, url: urlData.publicUrl };
+    try {
+      const { data, error } = await supabase.functions.invoke("list-app-docs", {
+        body: { application_id: applicationId },
       });
-
-    setDocs(docList);
+      if (error) throw error;
+      const list = ((data as any)?.docs || []) as { name: string; url: string }[];
+      setDocs(list);
+    } catch (e) {
+      console.error("list-app-docs failed:", e);
+      setDocs([]);
+    }
     setDocsLoading(false);
   };
 
@@ -285,6 +307,17 @@ export default function Applications() {
           <p className="text-sm text-muted-foreground mt-1">{isCounsellor ? "Applications for your assigned leads" : "All online applications with payment and document status"}</p>
         </div>
         <div className="flex items-center gap-2">
+          {!isCounsellor && (
+            <button onClick={regenerateAll} disabled={!!bulkRegen}
+              className="flex items-center gap-1.5 rounded-lg border border-input bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted/50 disabled:opacity-50">
+              {bulkRegen ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+              {bulkRegen
+                ? `Regenerating ${bulkRegen.done}/${bulkRegen.total}`
+                : selectedIds.size > 0
+                  ? `Regenerate Selected (${selectedIds.size})`
+                  : "Regenerate All PDFs"}
+            </button>
+          )}
           <button onClick={() => setSortMode(sortMode === "nudge" ? "date" : "nudge")}
             className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
               sortMode === "nudge" ? "border-amber-300 bg-amber-50 text-amber-700" : "border-input bg-background text-muted-foreground hover:bg-muted/50"
@@ -367,8 +400,30 @@ export default function Applications() {
             <thead>
               <tr className="border-b border-border bg-muted/30">
                 <th className="px-4 py-2.5 text-left font-medium text-muted-foreground w-8"></th>
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">App ID</th>
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Name</th>
+                {!isCounsellor && (
+                  <th className="px-2 py-2.5 text-left font-medium text-muted-foreground w-8">
+                    <input
+                      type="checkbox"
+                      className="cursor-pointer accent-primary"
+                      title="Select all eligible"
+                      checked={(() => {
+                        const eligible = filtered.filter(a => a.status === "submitted" || a.status === "under_review" || a.status === "approved");
+                        return eligible.length > 0 && eligible.every(a => selectedIds.has(a.id));
+                      })()}
+                      onChange={(e) => {
+                        const eligible = filtered.filter(a => a.status === "submitted" || a.status === "under_review" || a.status === "approved");
+                        setSelectedIds(prev => {
+                          const next = new Set(prev);
+                          if (e.target.checked) eligible.forEach(a => next.add(a.id));
+                          else eligible.forEach(a => next.delete(a.id));
+                          return next;
+                        });
+                      }}
+                    />
+                  </th>
+                )}
+                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap min-w-[140px]">App ID</th>
+                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground max-w-[160px]">Name</th>
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Phone</th>
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Course</th>
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Progress</th>
@@ -395,11 +450,30 @@ export default function Applications() {
                         {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       </button>
                     </td>
-                    <td className="px-3 py-2.5">
+                    {!isCounsellor && (
+                      <td className="px-2 py-2.5">
+                        {(app.status === "submitted" || app.status === "under_review" || app.status === "approved") ? (
+                          <input
+                            type="checkbox"
+                            className="cursor-pointer accent-primary"
+                            checked={selectedIds.has(app.id)}
+                            onChange={(e) => {
+                              setSelectedIds(prev => {
+                                const next = new Set(prev);
+                                if (e.target.checked) next.add(app.id);
+                                else next.delete(app.id);
+                                return next;
+                              });
+                            }}
+                          />
+                        ) : null}
+                      </td>
+                    )}
+                    <td className="px-3 py-2.5 whitespace-nowrap">
                       <span className="font-mono text-xs text-primary">{app.application_id}</span>
                     </td>
-                    <td className="px-3 py-2.5">
-                      <span className={`font-medium ${app.full_name === "Applicant" ? "text-muted-foreground italic" : "text-foreground"}`}>
+                    <td className="px-3 py-2.5 max-w-[160px]">
+                      <span className={`font-medium block truncate ${app.full_name === "Applicant" ? "text-muted-foreground italic" : "text-foreground"}`} title={app.full_name || ""}>
                         {app.full_name || "—"}
                       </span>
                     </td>
@@ -436,54 +510,83 @@ export default function Applications() {
                       {new Date(app.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })}
                     </td>
                     <td className="px-3 py-2.5">
-                      <div className="flex items-center gap-1">
+                      <div className="inline-flex items-center rounded-lg border border-border bg-card overflow-hidden divide-x divide-border">
                         {app.lead_id && (
                           <a href={`/admissions/${app.lead_id}`} target="_blank" rel="noreferrer"
-                            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-primary" title="Open Lead">
+                            className="p-1.5 hover:bg-muted text-muted-foreground hover:text-primary transition-colors" title="Open Lead">
                             <ExternalLink className="h-3.5 w-3.5" />
                           </a>
                         )}
-                        {/* Application form PDF — view if generated, generate-on-demand otherwise (submitted apps only) */}
+
+                        {/* Application Form PDF — single button: open if exists, else generate-on-demand */}
                         {app.form_pdf_url ? (
                           <a href={app.form_pdf_url} target="_blank" rel="noreferrer"
-                            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-primary" title="View Application Form PDF">
+                            className="p-1.5 hover:bg-muted text-muted-foreground hover:text-primary transition-colors" title="View Application Form PDF">
                             <FileText className="h-3.5 w-3.5" />
                           </a>
-                        ) : (app.status === "submitted" || app.status === "under_review" || app.status === "approved") && (
-                          <button onClick={() => generateFormPdf(app)}
-                            disabled={generatingPdfFor === app.id}
-                            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-primary disabled:opacity-50"
+                        ) : (app.status === "submitted" || app.status === "under_review" || app.status === "approved") ? (
+                          <button onClick={() => generateFormPdf(app)} disabled={generatingPdfFor === app.id}
+                            className="p-1.5 hover:bg-muted text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
                             title="Generate Application Form PDF">
                             {generatingPdfFor === app.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
                           </button>
-                        )}
-                        {/* Application fee receipt — only meaningful once payment is paid */}
+                        ) : null}
+
+                        {/* Fee Receipt — only after payment */}
                         {app.payment_status === "paid" && (
                           app.fee_receipt_url ? (
                             <a href={app.fee_receipt_url} target="_blank" rel="noreferrer"
-                              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-emerald-600" title="View Fee Receipt PDF">
+                              className="p-1.5 hover:bg-muted text-muted-foreground hover:text-emerald-600 transition-colors" title="View Fee Receipt">
                               <Receipt className="h-3.5 w-3.5" />
                             </a>
                           ) : (
-                            <button onClick={() => generateFeeReceipt(app)}
-                              disabled={generatingPdfFor === app.id}
-                              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-emerald-600 disabled:opacity-50"
-                              title="Generate Fee Receipt PDF">
+                            <button onClick={() => generateFeeReceipt(app)} disabled={generatingPdfFor === app.id}
+                              className="p-1.5 hover:bg-muted text-muted-foreground hover:text-emerald-600 transition-colors disabled:opacity-50"
+                              title="Generate Fee Receipt">
                               {generatingPdfFor === app.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Receipt className="h-3.5 w-3.5" />}
                             </button>
                           )
                         )}
+
+                        {/* Uploaded documents */}
                         <button onClick={() => fetchDocs(app.id, app.application_id)}
-                          className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-primary" title="View Documents">
+                          className="p-1.5 hover:bg-muted text-muted-foreground hover:text-primary transition-colors" title="View Uploaded Documents">
                           <Upload className="h-3.5 w-3.5" />
                         </button>
+
+                        {/* Student-side application view */}
+                        <a href={`/applications/${app.application_id}`} target="_blank" rel="noreferrer"
+                          className="p-1.5 hover:bg-muted text-muted-foreground hover:text-primary transition-colors" title="Open Student Application View">
+                          <Eye className="h-3.5 w-3.5" />
+                        </a>
+
+                        {/* View the apply portal AS the student (opens new tab) */}
+                        {app.lead_id && (
+                          <ApplyMagicLinkButton
+                            leadId={app.lead_id}
+                            leadName={app.full_name}
+                            leadPhone={app.phone}
+                            compact
+                            directOpen
+                          />
+                        )}
+
+                        {/* Generate + share a login link with the student (opens dialog) */}
+                        {app.lead_id && (
+                          <ApplyMagicLinkButton
+                            leadId={app.lead_id}
+                            leadName={app.full_name}
+                            leadPhone={app.phone}
+                            compact
+                          />
+                        )}
                       </div>
                     </td>
                   </tr>
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={isCounsellor ? 11 : 12} className="px-4 py-12 text-center text-muted-foreground">No applications found</td></tr>
+                <tr><td colSpan={isCounsellor ? 11 : 13} className="px-4 py-12 text-center text-muted-foreground">No applications found</td></tr>
               )}
             </tbody>
           </table>
@@ -504,10 +607,18 @@ export default function Applications() {
                 <h3 className="text-sm font-bold text-foreground">{app.application_id} — {app.full_name}</h3>
                 <div className="flex items-center gap-2">
                   {app.form_pdf_url ? (
-                    <a href={app.form_pdf_url} target="_blank" rel="noopener"
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20">
-                      <FileText className="h-3.5 w-3.5" /> Open Form PDF
-                    </a>
+                    <>
+                      <a href={app.form_pdf_url} target="_blank" rel="noopener"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20">
+                        <FileText className="h-3.5 w-3.5" /> Open Form PDF
+                      </a>
+                      <button onClick={() => generateFormPdf(app)} disabled={generatingPdfFor === app.id}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-primary hover:border-primary/30 hover:bg-primary/5 disabled:opacity-50"
+                        title="Regenerate Application Form PDF">
+                        {generatingPdfFor === app.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                        Regenerate
+                      </button>
+                    </>
                   ) : (app.status === "submitted" || app.status === "under_review" || app.status === "approved") && (
                     <button onClick={() => generateFormPdf(app)} disabled={generatingPdfFor === app.id}
                       className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">

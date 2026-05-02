@@ -346,7 +346,7 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
 
       <div>
         <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-          {isSchoolPortal ? "Select Grade" : "Add Course"}
+          {isSchoolPortal ? "Select Grade" : selections.length === 0 ? "Select Your Course" : "Add Another Course (Recommended)"}
         </label>
         <div className="flex gap-2">
           <select
@@ -355,7 +355,7 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
             className={`${inputCls} flex-1`}
             disabled={isSchoolPortal && schoolOptions.length > 1 && !selectedSchool}
           >
-            <option value="">{isSchoolPortal ? "Select grade to add" : "Select course to add"}</option>
+            <option value="">{isSchoolPortal ? "Select grade to add" : selections.length === 0 ? "Select course to add" : "Add another course preference..."}</option>
             {coursesByGroup.map(g => (
               <optgroup key={g.label} label={g.label}>
                 {g.courses.map((c: any) => {
@@ -426,6 +426,27 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
               </div>
             );
           })}
+
+          {/* Nudge to add more courses */}
+          {selections.length === 1 && !isSchoolPortal && (
+            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40">
+              <Info className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Add more courses to improve your chances!</p>
+                <p className="text-xs text-amber-700/70 dark:text-amber-400/70 mt-0.5">
+                  Add multiple course preferences in a single application. If your first preference is full, you'll automatically be considered for your next choice.
+                </p>
+              </div>
+            </div>
+          )}
+          {selections.length >= 2 && !isSchoolPortal && (
+            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40">
+              <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+              <p className="text-xs text-emerald-700 dark:text-emerald-400">
+                {selections.length} preferences selected — your chances of admission are higher with multiple choices.
+              </p>
+            </div>
+          )}
 
           <div className="flex items-center justify-between p-3 rounded-xl bg-primary/5 border border-primary/10">
             <span className="text-sm text-muted-foreground">Estimated Application Fee</span>

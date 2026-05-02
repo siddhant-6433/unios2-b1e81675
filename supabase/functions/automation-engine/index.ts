@@ -206,6 +206,13 @@ Deno.serve(async (req) => {
                   )
                 : [lead.name, courseName, lead.source || "website"];
 
+              // Build button_urls for templates with dynamic URL buttons
+              let buttonUrls: string[] | undefined;
+              if (action.template_key === "course_info_video") {
+                const campusQuery = encodeURIComponent((campusName || "NIMT Greater Noida").replace(/\s+/g, "+"));
+                buttonUrls = [campusQuery, "nimt"];
+              }
+
               await fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
                 method: "POST",
                 headers: {
@@ -217,8 +224,28 @@ Deno.serve(async (req) => {
                   phone: recipientPhone,
                   params,
                   lead_id: lead.id,
+                  ...(buttonUrls ? { button_urls: buttonUrls } : {}),
                 }),
               });
+
+              // Auto follow-up with course video for course_info_video template
+              if (action.template_key === "course_info_video" && !sendToCounsellor && lead.phone) {
+                const courseText = `${courseName} ${campusName}`.toLowerCase();
+                let videoUrl = "https://youtu.be/CyLpFGx67u4?si=7CepKXL3Dm2GfmaK"; // default
+                if (/beacon|bsa|cbse|grade/.test(courseText)) videoUrl = "https://www.instagram.com/reel/DXuOmFMkVXQ/";
+                else if (/mirai|mes|pyp|myp|ib|montessori/.test(courseText)) videoUrl = "https://www.instagram.com/p/DXMsuIBgYwF/";
+
+                await fetch(`${supabaseUrl}/functions/v1/whatsapp-reply`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceRoleKey}` },
+                  body: JSON.stringify({
+                    phone: lead.phone,
+                    message: `🎥 Watch our campus video: ${videoUrl}`,
+                    lead_id: lead.id,
+                  }),
+                }).catch(() => {});
+              }
+
               executedActions.push({ type: "send_whatsapp", template: action.template_key, recipient: sendToCounsellor ? "counsellor" : "lead" });
               break;
             }

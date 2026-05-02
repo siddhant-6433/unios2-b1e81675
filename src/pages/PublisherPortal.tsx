@@ -11,8 +11,41 @@ import {
 import {
   Loader2, Users, TrendingUp, CheckCircle, Clock,
   Search, ChevronRight, ArrowUpRight, Activity, Phone, PhoneOff,
-  BookOpen, MapPin, BarChart3,
+  BookOpen, MapPin, BarChart3, Calendar,
 } from "lucide-react";
+import {
+  startOfDay, endOfDay, startOfYesterday, endOfYesterday,
+  startOfWeek, endOfWeek, startOfMonth, endOfMonth, subMonths,
+} from "date-fns";
+
+type DatePreset = "today" | "yesterday" | "this_week" | "this_month" | "last_month" | "all" | "custom";
+
+const DATE_PRESET_LABELS: Record<DatePreset, string> = {
+  today: "Today",
+  yesterday: "Yesterday",
+  this_week: "This Week",
+  this_month: "This Month",
+  last_month: "Last Month",
+  all: "All Time",
+  custom: "Custom",
+};
+
+function dateRangeFor(preset: DatePreset, customStart?: string, customEnd?: string): [Date | null, Date | null] {
+  const now = new Date();
+  switch (preset) {
+    case "today":      return [startOfDay(now), endOfDay(now)];
+    case "yesterday":  return [startOfYesterday(), endOfYesterday()];
+    case "this_week":  return [startOfWeek(now, { weekStartsOn: 1 }), endOfWeek(now, { weekStartsOn: 1 })];
+    case "this_month": return [startOfMonth(now), endOfMonth(now)];
+    case "last_month": { const lm = subMonths(now, 1); return [startOfMonth(lm), endOfMonth(lm)]; }
+    case "custom":     return [
+      customStart ? startOfDay(new Date(customStart)) : null,
+      customEnd   ? endOfDay(new Date(customEnd))     : null,
+    ];
+    case "all":
+    default:           return [null, null];
+  }
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -36,6 +69,7 @@ interface PublisherLead {
   ai_called: boolean;
   ai_called_at: string | null;
   manually_called: boolean;
+  jd_contract_id: string | null;
 }
 
 interface LeadActivity {
@@ -132,6 +166,10 @@ export default function PublisherPortal() {
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState("all");
   const [aiFilter, setAiFilter] = useState("all"); // "all" | "called" | "not_called"
+  const [datePreset, setDatePreset] = useState<DatePreset>("all");
+  const [customStart, setCustomStart] = useState<string>("");
+  const [customEnd, setCustomEnd] = useState<string>("");
+  const [contractFilter, setContractFilter] = useState<string>("all");
 
   const [avgAiCallMs, setAvgAiCallMs] = useState<number | null>(null);
   const [avgManualCallMs, setAvgManualCallMs] = useState<number | null>(null);
@@ -194,11 +232,11 @@ export default function PublisherPortal() {
       let page = 0;
       let fetchErr = null;
       while (true) {
-        const { data: batch, error } = await supabase
+        const { data: batch, error } = await (supabase as any)
           .from("leads")
           .select(`
             id, name, phone, email, stage, city, state, created_at,
-            ai_called, ai_called_at,
+            ai_called, ai_called_at, jd_contract_id,
             courses!left(name),
             campuses!left(name)
           `)
@@ -247,6 +285,7 @@ export default function PublisherPortal() {
           campus_name: l.campuses?.name ?? "—",
           city: l.city ?? null,
           state: l.state ?? null,
+          jd_contract_id: l.jd_contract_id ?? null,
         }));
         setLeads(mapped);
 
@@ -311,24 +350,41 @@ export default function PublisherPortal() {
     })();
   }, [selectedLead?.id]);
 
+  // Date-scoped lead set — drives stats, breakdowns, and the table.
+  // Avg AI/manual response cards keep their own fixed 3-day window above.
+  const [dateStart, dateEnd] = dateRangeFor(datePreset, customStart, customEnd);
+  const dateScopedLeads = leads.filter(l => {
+    if (!dateStart && !dateEnd) return true;
+    const t = new Date(l.created_at).getTime();
+    if (dateStart && t < dateStart.getTime()) return false;
+    if (dateEnd   && t > dateEnd.getTime())   return false;
+    return true;
+  });
+
   // Derived stats
-  const total = leads.length;
-  const admitted = leads.filter(l => l.stage === "admitted").length;
-  const inProgress = leads.filter(l =>
+  const total = dateScopedLeads.length;
+  const admitted = dateScopedLeads.filter(l => l.stage === "admitted").length;
+  const inProgress = dateScopedLeads.filter(l =>
     ["application_in_progress", "application_fee_paid", "application_submitted",
      "counsellor_call", "visit_scheduled", "interview", "offer_sent",
      "token_paid", "pre_admitted"].includes(l.stage)
   ).length;
   const conversionRate = total > 0 ? Math.round((admitted / total) * 100) : 0;
 
-  const filtered = leads.filter(l => {
+  // Distinct contract IDs in the current date-scoped set, sorted for the dropdown.
+  const contractIds = Array.from(
+    new Set(dateScopedLeads.map(l => l.jd_contract_id).filter((c): c is string => !!c))
+  ).sort();
+
+  const filtered = dateScopedLeads.filter(l => {
     const q = search.toLowerCase();
     const matchSearch = !q || l.name.toLowerCase().includes(q) ||
       l.phone.includes(q) || (l.email?.toLowerCase().includes(q) ?? false) ||
       l.course_name.toLowerCase().includes(q);
     const matchStage = stageFilter === "all" || l.stage === stageFilter;
     const matchAi = aiFilter === "all" || (aiFilter === "called" ? l.ai_called : !l.ai_called);
-    return matchSearch && matchStage && matchAi;
+    const matchContract = contractFilter === "all" || l.jd_contract_id === contractFilter;
+    return matchSearch && matchStage && matchAi && matchContract;
   });
 
   if (loading) {
@@ -388,7 +444,7 @@ export default function PublisherPortal() {
           <div className="flex items-center gap-2 flex-wrap">
             <select
               value={impersonatingId}
-              onChange={e => { setImpersonatingId(e.target.value); setSearch(""); setStageFilter("all"); setAiFilter("all"); setAvgAiCallMs(null); setAvgManualCallMs(null); }}
+              onChange={e => { setImpersonatingId(e.target.value); setSearch(""); setStageFilter("all"); setAiFilter("all"); setDatePreset("all"); setCustomStart(""); setCustomEnd(""); setContractFilter("all"); setAvgAiCallMs(null); setAvgManualCallMs(null); }}
               className="rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
             >
               <option value="">— Switch Publisher —</option>
@@ -494,7 +550,7 @@ export default function PublisherPortal() {
       {/* Stage Breakdown */}
       {(() => {
         const stageCounts = Object.entries(STAGE_LABELS)
-          .map(([key, label]) => ({ key, label, count: leads.filter(l => l.stage === key).length }))
+          .map(([key, label]) => ({ key, label, count: dateScopedLeads.filter(l => l.stage === key).length }))
           .filter(s => s.count > 0)
           .sort((a, b) => b.count - a.count);
         if (stageCounts.length === 0) return null;
@@ -542,7 +598,7 @@ export default function PublisherPortal() {
         const courseInterested = new Map<string, number>();
         const interestStages = new Set(["counsellor_call","visit_scheduled","interview","offer_sent","token_paid","pre_admitted","admitted","application_in_progress","application_fee_paid","application_submitted"]);
 
-        leads.forEach(l => {
+        dateScopedLeads.forEach(l => {
           const c = l.course_name || "—";
           if (!courseMap.has(c)) courseMap.set(c, new Map());
           const stages = courseMap.get(c)!;
@@ -556,7 +612,7 @@ export default function PublisherPortal() {
           if (interestStages.has(l.stage)) courseInterested.set(c, (courseInterested.get(c) || 0) + 1);
         });
 
-        const activeStages = Array.from(new Set(leads.map(l => l.stage)));
+        const activeStages = Array.from(new Set(dateScopedLeads.map(l => l.stage)));
         const pipelineStages = ["application_in_progress","application_fee_paid","application_submitted","counsellor_call","visit_scheduled","interview","offer_sent","token_paid","pre_admitted","admitted"];
 
         // Build rows with computed values
@@ -686,7 +742,7 @@ export default function PublisherPortal() {
         const stateMap = new Map<string, GeoData>();
         const interestStages = new Set(["counsellor_call","visit_scheduled","interview","offer_sent","token_paid","pre_admitted","admitted","application_in_progress","application_fee_paid","application_submitted"]);
 
-        leads.forEach(l => {
+        dateScopedLeads.forEach(l => {
           const lead = l as any;
           const city = lead.city || null;
           const state = lead.state || null;
@@ -767,7 +823,7 @@ export default function PublisherPortal() {
       })()}
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
+      <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-start sm:items-center">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <input
@@ -777,6 +833,37 @@ export default function PublisherPortal() {
             className="w-full rounded-xl border border-input bg-card pl-9 pr-4 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
           />
         </div>
+        <div className="relative">
+          <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+          <select
+            value={datePreset}
+            onChange={e => setDatePreset(e.target.value as DatePreset)}
+            className="rounded-xl border border-input bg-card pl-8 pr-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+          >
+            {(Object.entries(DATE_PRESET_LABELS) as [DatePreset, string][]).map(([key, label]) => (
+              <option key={key} value={key}>{label}</option>
+            ))}
+          </select>
+        </div>
+        {datePreset === "custom" && (
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={customStart}
+              max={customEnd || undefined}
+              onChange={e => setCustomStart(e.target.value)}
+              className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+            />
+            <span className="text-xs text-muted-foreground">to</span>
+            <input
+              type="date"
+              value={customEnd}
+              min={customStart || undefined}
+              onChange={e => setCustomEnd(e.target.value)}
+              className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+            />
+          </div>
+        )}
         <select
           value={stageFilter}
           onChange={e => setStageFilter(e.target.value)}
@@ -796,6 +883,17 @@ export default function PublisherPortal() {
           <option value="called">AI Called</option>
           <option value="not_called">Not Called</option>
         </select>
+        {contractIds.length > 0 && (
+          <select
+            value={contractFilter}
+            onChange={e => setContractFilter(e.target.value)}
+            className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+            title="JustDial contract ID"
+          >
+            <option value="all">All Contracts</option>
+            {contractIds.map(c => <option key={c} value={c}>Contract {c}</option>)}
+          </select>
+        )}
       </div>
 
       {/* Leads table */}
@@ -903,6 +1001,12 @@ export default function PublisherPortal() {
                     <span className="text-muted-foreground">Campus</span>
                     <span className="font-medium">{selectedLead.campus_name}</span>
                   </div>
+                  {selectedLead.jd_contract_id && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Contract ID</span>
+                      <span className="font-mono text-xs">{selectedLead.jd_contract_id}</span>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Lead Received</span>
                     <span className="font-medium">

@@ -10,7 +10,7 @@ import {
   Phone, MessageSquare, ChevronRight, Plus, Search, Filter, Upload,
   Eye, Calendar, MoreHorizontal, Users, TrendingUp, ArrowUpRight,
   Bot, UserCheck, MapPin, FileText, CheckCircle, XCircle, Clock, Loader2,
-  Trash2, ArrowRightLeft, Send, Flag, Inbox
+  Trash2, ArrowRightLeft, Send, Flag, Inbox, Gift, Shield, CreditCard
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +28,7 @@ import { CounsellorScoreBadge } from "@/components/admissions/CounsellorScoreBad
 import { InactivityAlertBanner } from "@/components/admissions/InactivityAlertBanner";
 import { HotEngagedLeads } from "@/components/admissions/HotEngagedLeads";
 import { CounsellorOnboarding } from "@/components/onboarding/CounsellorOnboarding";
+import { CloudDialerNudge } from "@/components/admissions/CloudDialerNudge";
 import { useTatDefaults } from "@/hooks/useTatDefaults";
 import { LEAD_SOURCES, SOURCE_LABELS, SOURCE_BADGE_COLORS } from "@/config/leadSources";
 import {
@@ -512,6 +513,9 @@ const Admissions = () => {
   const [feePaid, setFeePaid] = useState(0);
   const [appSubmitted, setAppSubmitted] = useState(0);
   const [admitted, setAdmitted] = useState(0);
+  const [offerSent, setOfferSent] = useState(0);
+  const [tokenPaid, setTokenPaid] = useState(0);
+  const [preAdmitted, setPreAdmitted] = useState(0);
 
   // Followup & visit counts fetched from DB
   const [pendingFollowups, setPendingFollowups] = useState(0);
@@ -537,7 +541,7 @@ const Admissions = () => {
         leadIds = (myLeads || []).map((l: any) => l.id);
         if (leadIds.length === 0) {
           setNewLeads(0); setTodayLeads(0); setAppStarted(0); setFeePaid(0);
-          setAppSubmitted(0); setAdmitted(0);
+          setAppSubmitted(0); setAdmitted(0); setOfferSent(0); setTokenPaid(0); setPreAdmitted(0);
           setPendingFollowups(0); setTodayFollowups(0); setOverdueFollowups(0);
           setUpcomingVisits(0); setCompletedVisits(0);
           return;
@@ -584,7 +588,7 @@ const Admissions = () => {
       const [
         pendingRes, todayFuRes, overdueRes, upVisitRes, compVisitRes,
         newLeadRes, todayLeadRes, appStartedRes, appSubmittedRes, admittedRes,
-        feePaidCount,
+        feePaidCount, offerSentRes, tokenPaidRes, preAdmittedRes,
       ] = await Promise.all([
         applyLeadFilter(supabase.from("lead_followups").select("id", { count: "exact", head: true }).eq("status", "pending")),
         applyLeadFilter(supabase.from("lead_followups").select("id", { count: "exact", head: true }).eq("status", "pending").gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd)),
@@ -598,6 +602,9 @@ const Admissions = () => {
         buildStageQ(["application_submitted", "offer_sent", "token_paid", "pre_admitted"]),
         buildStageQ(["admitted"]),
         buildFeePaidQ(),
+        buildStageQ(["offer_sent"]),
+        buildStageQ(["token_paid"]),
+        buildStageQ(["pre_admitted"]),
       ]);
 
       setPendingFollowups(pendingRes.count || 0);
@@ -619,6 +626,9 @@ const Admissions = () => {
       setFeePaid(feePaidCount);
       setAppSubmitted(appSubmittedRes.count || 0);
       setAdmitted(admittedRes.count || 0);
+      setOfferSent(offerSentRes.count || 0);
+      setTokenPaid(tokenPaidRes.count || 0);
+      setPreAdmitted(preAdmittedRes.count || 0);
     })();
   }, [selectedCampusId, role, profile?.id]);
 
@@ -630,12 +640,15 @@ const Admissions = () => {
     { label: "Completed Visits", value: completedVisits, sub: "Campus visits done", icon: CheckCircle, iconBg: "bg-pastel-green", filterStage: "", link: "", action: "completed_visits" },
   ];
 
-  // Row 2: Application stages
+  // Row 2: Application funnel
   const appStats = [
-    { label: "Applications Started", value: appStarted, sub: "In progress or beyond", icon: FileText, iconBg: "bg-pastel-blue", filterStage: "application_in_progress,application_fee_paid,application_submitted,offer_sent,token_paid,pre_admitted", action: "" },
-    { label: "Fee Paid", value: feePaid, sub: "Application fee received", icon: CheckCircle, iconBg: "bg-pastel-green", filterStage: "", action: "fee_paid" },
-    { label: "Waiting for Offer", value: appSubmitted, sub: "Fully submitted", icon: TrendingUp, iconBg: "bg-pastel-mint", filterStage: "application_submitted,offer_sent,token_paid,pre_admitted", action: "" },
-    { label: "Admitted", value: admitted, sub: "Fully admitted students", icon: UserCheck, iconBg: "bg-pastel-purple", filterStage: "admitted", action: "" },
+    { label: "In Progress", value: appStarted, sub: "Draft applications", icon: FileText, iconBg: "bg-pastel-blue", filterStage: "application_in_progress", action: "", link: "/applications" },
+    { label: "Fee Paid", value: feePaid, sub: "Application fee received", icon: CheckCircle, iconBg: "bg-pastel-green", filterStage: "", action: "fee_paid", link: "/applications" },
+    { label: "Submitted", value: appSubmitted, sub: "Fully submitted", icon: TrendingUp, iconBg: "bg-pastel-mint", filterStage: "application_submitted", action: "", link: "/applications" },
+    { label: "Offer Sent", value: offerSent, sub: "Awaiting response", icon: Gift, iconBg: "bg-pastel-yellow", filterStage: "offer_sent", action: "" },
+    { label: "Token Paid", value: tokenPaid, sub: "Seat confirmed", icon: CreditCard, iconBg: "bg-pastel-orange", filterStage: "token_paid", action: "" },
+    { label: "Pre-Admitted", value: preAdmitted, sub: "PAN/AN pending", icon: Shield, iconBg: "bg-pastel-purple", filterStage: "pre_admitted", action: "" },
+    { label: "Admitted", value: admitted, sub: "Fully admitted", icon: UserCheck, iconBg: "bg-pastel-green", filterStage: "admitted", action: "" },
   ];
 
   if (loading) {
@@ -648,6 +661,8 @@ const Admissions = () => {
     <div className="space-y-6 animate-fade-in">
       {/* First-time onboarding for counsellors */}
       {role === "counsellor" && <CounsellorOnboarding />}
+      {/* Productivity nudge — auto-hides if they're already using the cloud dialer */}
+      {role === "counsellor" && <CloudDialerNudge />}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Admissions CRM</h1>

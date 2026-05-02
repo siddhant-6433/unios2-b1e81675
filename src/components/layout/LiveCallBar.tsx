@@ -44,6 +44,8 @@ export function LiveCallBar() {
   const [calls, setCalls] = useState<ActiveCall[]>([]);
   const [now, setNow] = useState(Date.now());
   const tickRef = useRef<number | null>(null);
+  const seenInboundRef = useRef<Set<string>>(new Set());
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Admins/TLs see all calls; counsellors see only their own inbound calls
   const isAdmin = role === "super_admin" || role === "admission_head" || role === "campus_admin" || isTeamLeader;
@@ -132,11 +134,41 @@ export function LiveCallBar() {
       });
 
       setCalls(mapped);
+
+      // Alert for NEW inbound calls (ring + browser notification)
+      const newInbound = mapped.filter(c => c.call_type === "inbound" && c.status === "calling" && !seenInboundRef.current.has(c.call_uuid));
+      for (const ic of newInbound) {
+        seenInboundRef.current.add(ic.call_uuid);
+
+        // Play ring sound
+        if (!audioRef.current) {
+          audioRef.current = new Audio("data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQ==");
+          audioRef.current.loop = true;
+        }
+        audioRef.current.play().catch(() => {});
+
+        // Browser notification
+        if ("Notification" in window && Notification.permission === "granted") {
+          new Notification(`Incoming call from ${ic.lead_name}`, {
+            body: `${ic.lead_phone} — ${ic.lead_stage || "Lead"}`,
+            icon: "/favicon.ico",
+            tag: ic.call_uuid,
+          });
+        } else if ("Notification" in window && Notification.permission === "default") {
+          Notification.requestPermission();
+        }
+      }
+
+      // Stop ring when no more inbound ringing calls
+      if (!mapped.some(c => c.call_type === "inbound" && c.status === "calling") && audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
     };
 
     fetchActiveCalls();
     const interval = setInterval(fetchActiveCalls, 5000);
-    return () => clearInterval(interval);
+    return () => { clearInterval(interval); if (audioRef.current) { audioRef.current.pause(); } };
   }, [canView]);
 
   // Tick every second to update elapsed times
@@ -154,6 +186,7 @@ export function LiveCallBar() {
   if (!canView || calls.length === 0) return null;
 
   return (
+    <>
     <div className={`border-b border-border px-5 py-1.5 ${
       hasInbound ? "bg-amber-50/50 dark:bg-amber-950/10" : "bg-emerald-50/50 dark:bg-emerald-950/10"
     }`}>
@@ -220,5 +253,28 @@ export function LiveCallBar() {
         })}
       </div>
     </div>
+
+    {/* Floating incoming call popup for counsellors */}
+    {calls.filter(c => c.call_type === "inbound" && c.status === "calling").map(ic => (
+      <div key={`popup-${ic.call_uuid}`} className="fixed bottom-6 right-6 z-50 animate-bounce-slow">
+        <a href={`/admissions/${ic.lead_id}`} target="_blank" rel="noreferrer"
+          className="flex items-center gap-4 rounded-2xl border-2 border-amber-400 bg-white dark:bg-card shadow-2xl px-5 py-4 min-w-[320px] hover:shadow-3xl transition-shadow">
+          <div className="relative">
+            <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center">
+              <PhoneIncoming className="h-6 w-6 text-amber-600 animate-pulse" />
+            </div>
+            <span className="absolute -top-1 -right-1 w-3 h-3 bg-amber-500 rounded-full animate-ping" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide">Incoming Call</p>
+            <p className="text-base font-bold text-foreground truncate">{ic.lead_name}</p>
+            <p className="text-xs text-muted-foreground">{ic.lead_phone} · {formatTime(Math.floor((now - new Date(ic.created_at).getTime()) / 1000))}</p>
+          </div>
+        </a>
+      </div>
+    ))}
+
+    <style>{`@keyframes bounce-slow{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}`}</style>
+    </>
   );
 }

@@ -47,11 +47,10 @@ export default function PunchScreen() {
   const [geofences, setGeofences] = useState<Geofence[]>([]);
   const [matchedCampus, setMatchedCampus] = useState<Geofence | null>(null);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [selfieUri, setSelfieUri] = useState<string | null>(null);
   const [faceRegistered, setFaceRegistered] = useState<'none' | 'pending' | 'approved'>('none');
-  const [faceImageUrl, setFaceImageUrl] = useState<string | null>(null);
   const [regPhotos, setRegPhotos] = useState<string[]>([]);
   const [regStep, setRegStep] = useState(0);
+  const [faceMatchResult, setFaceMatchResult] = useState<{ match: boolean; confidence: number; reason: string } | null>(null);
   const cameraRef = useRef<CameraView>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
@@ -74,7 +73,6 @@ export default function PunchScreen() {
     }
     if (faceReg.status === 'pending') {
       setFaceRegistered('pending');
-      setFaceImageUrl(faceReg.image_url);
       setStep('face_pending');
       return;
     }
@@ -84,7 +82,6 @@ export default function PunchScreen() {
       return;
     }
     setFaceRegistered('approved');
-    setFaceImageUrl(faceReg.image_url);
 
     // 2. Fetch geofences
     const [campusRes, customRes] = await Promise.all([
@@ -152,42 +149,47 @@ export default function PunchScreen() {
     }
   };
 
-  // ── Upload photo to S3 via edge function ──
+  // ── Upload photo to S3 via presigned URL ──
   const uploadSelfie = async (uri: string, folder: string): Promise<string | null> => {
     try {
       const filename = `${user?.id}/${folder}/${Date.now()}.jpg`;
-
-      const formData = new FormData();
-      formData.append('file', {
-        uri,
-        name: `${Date.now()}.jpg`,
-        type: 'image/jpeg',
-      } as any);
-      formData.append('key', filename);
-      formData.append('bucket', 'unios-selfies');
-
       const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
       const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
       const session = (await supabase.auth.getSession()).data.session;
       const token = session?.access_token || supabaseKey;
 
-      const res = await fetch(
-        `${supabaseUrl}/functions/v1/s3-upload`,
-        {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}` },
-          body: formData,
-        }
-      );
+      // Step 1: Get presigned upload URL from our edge function
+      const presignRes = await fetch(`${supabaseUrl}/functions/v1/s3-upload`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ key: filename, bucket: 'unios-selfies' }),
+      });
 
-      if (!res.ok) {
-        const errText = await res.text();
-        console.error('[Punch] S3 upload error:', res.status, errText);
+      if (!presignRes.ok) {
+        console.error('[Punch] Presign error:', presignRes.status);
+        return null;
+      }
+      const { presigned_url, url: publicUrl } = await presignRes.json();
+
+      // Step 2: Read the file and upload directly to S3
+      const fileRes = await fetch(uri);
+      const blob = await fileRes.blob();
+
+      const uploadRes = await fetch(presigned_url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'image/jpeg' },
+        body: blob,
+      });
+
+      if (!uploadRes.ok) {
+        console.error('[Punch] S3 PUT error:', uploadRes.status);
         return null;
       }
 
-      const data = await res.json();
-      return data.url || null;
+      return publicUrl;
     } catch (err) {
       console.error('[Punch] Upload exception:', err);
       return null;
@@ -230,7 +232,6 @@ export default function PunchScreen() {
       }
 
       setStep('submitting');
-      setSelfieUri(updatedPhotos[0]);
 
       const urls: string[] = [];
       for (const uri of updatedPhotos) {
@@ -331,45 +332,11 @@ export default function PunchScreen() {
 
       setMatchedCampus(closestCampus);
       setStep('location_ok');
-      setTimeout(() => startSelfiePunch(), 800);
+      // Skip the separate selfie capture step. The AWS Liveness check captures a
+      // verified live frame and uploads it server-side as the attendance selfie.
+      setTimeout(() => startLivenessCheck(), 800);
     } catch {
       setErrorMsg('Could not determine your location. Make sure GPS is enabled.');
-      setStep('error');
-    }
-  };
-
-  // ── Selfie for Punch ──
-  const startSelfiePunch = async () => {
-    if (!cameraPermission?.granted) {
-      const { granted } = await requestCameraPermission();
-      if (!granted) {
-        setErrorMsg('Camera access is required for attendance. Go to Settings > UniOs > Camera.');
-        setStep('error');
-        return;
-      }
-    }
-    setStep('selfie');
-  };
-
-  const capturePunchSelfie = async () => {
-    if (!cameraRef.current) {
-      setErrorMsg('Camera not available. Please restart the app.');
-      setStep('error');
-      return;
-    }
-    try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.5 });
-      if (!photo?.uri) {
-        setErrorMsg('Failed to capture photo. Try again.');
-        setStep('error');
-        return;
-      }
-      console.log('[Punch] Photo captured:', photo.uri.slice(0, 60));
-      setSelfieUri(photo.uri);
-      submitPunch(photo.uri);
-    } catch (err: any) {
-      console.error('[Punch] Camera error:', err);
-      setErrorMsg('Camera error: ' + (err?.message || 'Unknown error'));
       setStep('error');
     }
   };
@@ -399,168 +366,42 @@ export default function PunchScreen() {
       console.log('[Liveness] Result:', JSON.stringify(data).slice(0, 200));
 
       if (data.type === 'liveness_result') {
-        if (data.is_live) {
-          // Liveness passed — proceed with punch
-          console.log(`[Liveness] PASSED: ${data.confidence}%`);
+        const passed = data.passed ?? (data.is_live && data.face_matched !== false);
+        if (passed) {
+          console.log(`[Liveness] PASSED: live=${data.confidence}%, match=${data.match_similarity}%, selfie=${data.selfie_url ? 'uploaded' : 'missing'}`);
+          setFaceMatchResult({
+            match: true,
+            confidence: data.match_similarity || 0,
+            reason: data.match_reason || 'Live face verified',
+          });
           setStep('submitting');
-          finalizePunch(data.confidence);
-        } else {
+          finalizePunch(data.confidence, data.match_similarity, data.selfie_url);
+        } else if (!data.is_live) {
           setErrorMsg(`Liveness check failed (${data.confidence}%). Please try again with your real face.`);
+          setStep('error');
+        } else {
+          // Live face confirmed, but identity does not match the registered employee.
+          setErrorMsg(data.match_reason || 'Live face does not match your registered face. The person doing the liveness check must be the registered employee.');
           setStep('error');
         }
       } else if (data.type === 'liveness_error') {
         setErrorMsg(`Liveness error: ${data.error}`);
         setStep('error');
       } else if (data.type === 'liveness_cancel') {
-        setStep('selfie');
+        // No selfie step in the punch flow anymore — re-run the location check.
+        checkLocation();
       }
     } catch (e) {
       console.error('[Liveness] Parse error:', e);
     }
   };
 
-  // ── Submit Punch ──
-  const [faceMatchResult, setFaceMatchResult] = useState<{ match: boolean; confidence: number; reason: string } | null>(null);
-
-  const [pendingSelfieUrl, setPendingSelfieUrl] = useState<string | null>(null);
-
-  const submitPunch = async (photoUri: string | null) => {
-    setStep('submitting');
-    const debugLog: string[] = [];
-    try {
-      const today = new Date().toISOString().slice(0, 10);
-      const now = new Date().toISOString();
-
-      debugLog.push(`photoUri: ${photoUri ? 'YES' : 'NULL'}`);
-      debugLog.push(`isPunchedIn: ${isPunchedIn}`);
-
-      // Step 1: Upload selfie
-      let selfieUrl: string | null = null;
-      if (photoUri) {
-        debugLog.push('Uploading selfie...');
-        selfieUrl = await uploadSelfie(photoUri, 'punches');
-        debugLog.push(`Upload: ${selfieUrl ? 'OK' : 'FAILED'}`);
-
-        if (!selfieUrl) {
-          setErrorMsg('Failed to upload selfie. Check your internet.');
-          setStep('error');
-          return;
-        }
-      } else {
-        setErrorMsg('No photo was captured.');
-        setStep('error');
-        return;
-      }
-
-      // Step 2: Face match (AWS Rekognition SearchFacesByImage)
-      if (!isPunchedIn && selfieUrl) {
-        debugLog.push('Calling face-match...');
-        try {
-          const { data: matchData, error: matchError } = await supabase.functions.invoke('face-match', {
-            body: {
-              punch_image_url: selfieUrl,
-              user_id: user?.id,
-            },
-          });
-
-          debugLog.push(`Response: ${JSON.stringify(matchData || matchError?.message || 'empty').slice(0, 100)}`);
-
-          if (matchError) {
-            debugLog.push(`Match error: ${matchError.message}`);
-            const msg = matchError.message?.toLowerCase() || '';
-            if (msg.includes('no face') || msg.includes('invalidparameterexception')) {
-              setErrorMsg('No face detected in photo. Please take a clear selfie with your face visible.');
-            } else {
-              setErrorMsg(`Face verification failed: ${matchError.message}`);
-            }
-            setStep('error');
-            return;
-          }
-
-          if (matchData?.error) {
-            debugLog.push(`Match API error: ${matchData.error}`);
-            const msg = (matchData.error as string).toLowerCase();
-            if (msg.includes('no face') || msg.includes('invalidparameterexception')) {
-              setErrorMsg('No face detected in photo. Please take a clear selfie with your face visible.');
-            } else {
-              setErrorMsg(`Face verification failed: ${matchData.error}`);
-            }
-            setStep('error');
-            return;
-          }
-
-          setFaceMatchResult(matchData);
-          debugLog.push(`Match: ${matchData.match}, Confidence: ${matchData.confidence}%`);
-
-          if (!matchData.match) {
-            const reason = matchData.reason?.toLowerCase() || '';
-            if (reason.includes('no face')) {
-              setErrorMsg('No face detected in photo. Please take a clear selfie with your face visible.');
-            } else {
-              setErrorMsg(`Face does not match (${matchData.confidence}%). ${matchData.reason || 'Try better lighting.'}`);
-            }
-            setStep('error');
-            return;
-          }
-
-          // Step 3: Face matched — now do AWS Rekognition Liveness check
-          debugLog.push('Face matched. Starting AWS liveness check...');
-          setPendingSelfieUrl(selfieUrl);
-          startLivenessCheck();
-          return; // Liveness WebView will call finalizePunch on success
-        } catch (faceErr: any) {
-          debugLog.push(`Match exception: ${faceErr?.message}`);
-          const msg = faceErr?.message?.toLowerCase() || '';
-          if (msg.includes('no face') || msg.includes('invalidparameterexception')) {
-            setErrorMsg('No face detected in photo. Please take a clear selfie with your face visible.');
-          } else {
-            setErrorMsg(`Face verification error: ${faceErr?.message || 'Unknown error'}`);
-          }
-          setStep('error');
-          return;
-        }
-      } else {
-        debugLog.push(`SKIPPED face match. selfieUrl=${!!selfieUrl}, faceImageUrl=${!!faceImageUrl}`);
-      }
-
-      if (isPunchedIn) {
-        const { error } = await supabase
-          .from('employee_attendance')
-          .update({ punch_out: now })
-          .eq('user_id', user?.id)
-          .eq('date', today);
-        if (error) throw error;
-        setPunchOutTime(now);
-        setIsPunchedIn(false);
-      } else {
-        const { error } = await supabase
-          .from('employee_attendance')
-          .insert({
-            user_id: user?.id,
-            campus_id: matchedCampus && !matchedCampus.isCustom ? matchedCampus.campusId : null,
-            geofence_location_id: matchedCampus?.isCustom ? matchedCampus.campusId : null,
-            date: today,
-            punch_in: now,
-            selfie_url: selfieUrl,
-            location_lat: userLocation?.lat,
-            location_lng: userLocation?.lng,
-            face_match_score: faceMatchResult?.confidence || null,
-            face_match_result: faceMatchResult ? (faceMatchResult.match ? 'match' : 'no_match') : null,
-          });
-        if (error) throw error;
-        setPunchTime(now);
-        setIsPunchedIn(true);
-      }
-      setStep('done');
-    } catch (err: any) {
-      debugLog.push(`Exception: ${err?.message}`);
-      setErrorMsg((err?.message || 'Failed to record attendance.') + '\n\nDebug:\n' + debugLog.join('\n'));
-      setStep('error');
-    }
-  };
-
-  // Called after AWS Rekognition Liveness passes
-  const finalizePunch = async (livenessConfidence?: number) => {
+  // Called after AWS Rekognition Liveness passes (with identity match).
+  const finalizePunch = async (
+    livenessConfidence?: number,
+    matchSimilarity?: number,
+    selfieUrl?: string | null,
+  ) => {
     try {
       const today = new Date().toISOString().slice(0, 10);
       const now = new Date().toISOString();
@@ -572,12 +413,12 @@ export default function PunchScreen() {
           geofence_location_id: matchedCampus?.isCustom ? matchedCampus.campusId : null,
           date: today,
           punch_in: now,
-          selfie_url: pendingSelfieUrl,
+          selfie_url: selfieUrl ?? null,
           location_lat: userLocation?.lat,
           location_lng: userLocation?.lng,
-          face_match_score: faceMatchResult?.confidence || null,
-          face_match_result: faceMatchResult ? (faceMatchResult.match ? 'match' : 'no_match') : null,
-          liveness_score: livenessConfidence || null,
+          face_match_score: matchSimilarity ?? null,
+          face_match_result: 'match',
+          liveness_score: livenessConfidence ?? null,
         });
       if (error) throw error;
       setPunchTime(now);
@@ -589,7 +430,7 @@ export default function PunchScreen() {
     }
   };
 
-  const handleRetry = () => { setErrorMsg(null); setSelfieUri(null); checkLocation(); };
+  const handleRetry = () => { setErrorMsg(null); checkLocation(); };
   const handlePunchOut = () => {
     Alert.alert('Punch Out', 'Are you sure you want to punch out?', [
       { text: 'Cancel', style: 'cancel' },
@@ -703,27 +544,21 @@ export default function PunchScreen() {
           </View>
           <Text style={styles.mainText}>On Campus</Text>
           <Text style={styles.subText}>{matchedCampus?.campusName}</Text>
-          <Text style={styles.subText}>Preparing camera...</Text>
+          <Text style={styles.subText}>Starting attendance check...</Text>
         </View>
       )}
 
-      {/* Selfie capture (for both face reg and punch) */}
+      {/* Selfie capture — face registration only. Punch flow goes straight to liveness. */}
       {step === 'selfie' && (
         <View style={styles.cameraContainer}>
           <CameraView ref={cameraRef} style={styles.camera} facing="front" />
           <View style={styles.cameraOverlay}>
-            {isFaceRegMode ? (
-              <>
-                <View style={styles.regStepBadge}>
-                  <Text style={styles.regStepBadgeText}>Photo {regStep + 1} of 3</Text>
-                </View>
-                <Text style={styles.cameraText}>{REG_PROMPTS[regStep]}</Text>
-              </>
-            ) : (
-              <Text style={styles.cameraText}>Quick selfie for attendance</Text>
-            )}
+            <View style={styles.regStepBadge}>
+              <Text style={styles.regStepBadgeText}>Photo {regStep + 1} of 3</Text>
+            </View>
+            <Text style={styles.cameraText}>{REG_PROMPTS[regStep]}</Text>
             <View style={styles.cameraCircle} />
-            {isFaceRegMode && regPhotos.length > 0 && (
+            {regPhotos.length > 0 && (
               <View style={styles.regPreviewRow}>
                 {regPhotos.map((uri, i) => (
                   <Image key={i} source={{ uri }} style={styles.regPreviewThumb} />
@@ -732,13 +567,11 @@ export default function PunchScreen() {
             )}
             <TouchableOpacity
               style={styles.captureButton}
-              onPress={isFaceRegMode ? captureFaceRegistration : capturePunchSelfie}
+              onPress={captureFaceRegistration}
               activeOpacity={0.7}
             >
               <Camera size={24} color="#fff" />
-              <Text style={styles.captureText}>
-                {isFaceRegMode ? `Capture ${regStep + 1}/3` : 'Punch In'}
-              </Text>
+              <Text style={styles.captureText}>Capture {regStep + 1}/3</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -814,7 +647,11 @@ export default function PunchScreen() {
           )}
 
           <Text style={styles.subText}>
-            {profile?.display_name} — {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })}
+            {profile?.display_name || user?.email || 'Employee'}
+            {profile?.employee_id ? `  ·  ${profile.employee_id}` : ''}
+          </Text>
+          <Text style={[styles.subText, { fontSize: 12, marginTop: -4 }]}>
+            {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })}
           </Text>
 
           {isPunchedIn && (
@@ -828,7 +665,6 @@ export default function PunchScreen() {
             <TouchableOpacity style={styles.primaryButton} onPress={() => {
               // Reset state for a new punch cycle
               setFaceMatchResult(null);
-              setSelfieUri(null);
               setPunchTime(null);
               setPunchOutTime(null);
               checkLocation();

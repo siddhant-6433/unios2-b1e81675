@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
@@ -9,20 +9,28 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   MessageSquare, Search, Send, Loader2, User, Clock, ExternalLink, ArrowLeft,
-  FileDown, AlertTriangle, LayoutTemplate, X, Check, ChevronDown, Zap, Ban,
+  FileDown, AlertTriangle, LayoutTemplate, X, Check, ChevronDown, Zap, Ban, Settings,
 } from "lucide-react";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
 
 interface Conversation {
   phone: string;
   lead_id: string | null;
   lead_name: string | null;
   lead_stage: string | null;
+  lead_person_role: string | null;
+  course_name: string | null;
   last_message: string | null;
   last_direction: string;
   last_message_at: string;
   unread_count: number;
   counsellor_id: string | null;
   counsellor_name: string | null;
+  has_inbound: boolean;
+  business_phone_number_id: string | null;
+  business_phone_number: string | null;
 }
 
 interface Message {
@@ -51,6 +59,7 @@ const QUICK_REPLIES = [
   { label: "Counsellor connect", text: "Our counsellor will connect with you shortly. Thank you for your patience!" },
   { label: "Documents needed", text: "For admission, please keep these documents ready:\n📄 10th & 12th marksheets\n📄 Aadhaar card\n📄 Passport-size photo\n📄 Transfer certificate" },
   { label: "Thank you", text: "Thank you for reaching out! 😊 Feel free to contact us anytime if you have more questions." },
+  { label: "Campus video", text: "🎥 Here's a look at our campus and facilities:\nhttps://youtu.be/CyLpFGx67u4?si=7CepKXL3Dm2GfmaK" },
 ];
 
 const INBOX_TEMPLATES = [
@@ -159,10 +168,23 @@ const INBOX_TEMPLATES = [
 const isAdminRole = (role: string | null | undefined) =>
   role === "super_admin" || role === "admission_head" || role === "campus_admin";
 
+const ALLOWED_ROLES = new Set(["super_admin", "campus_admin", "principal", "admission_head", "counsellor"]);
+
 const WhatsAppInbox = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { user, role, profile } = useAuth();
+  const [searchParams] = useSearchParams();
+  const isOutboundMode = searchParams.get("mode") === "outbound";
+  const phoneParam = searchParams.get("phone");
+
+  if (role && !ALLOWED_ROLES.has(role)) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh] text-muted-foreground">
+        <p>You don't have access to the WhatsApp Inbox.</p>
+      </div>
+    );
+  }
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedPhone, setSelectedPhone] = useState<string | null>(null);
@@ -174,7 +196,11 @@ const WhatsAppInbox = () => {
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [sendingTemplate, setSendingTemplate] = useState(false);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
-  const [inboxTab, setInboxTab] = useState<"leads" | "staff" | "all">("leads");
+  const [inboxTab, setInboxTab] = useState<"all" | "leads" | "staff" | "jobs" | "other">("all");
+  // Multi-number inbox: which business number's conversations to show.
+  // "primary" = the most-used phone_number_id + legacy NULL rows; any other
+  // distinct phone_number_id is shown as its own inbox.
+  const [businessNumber, setBusinessNumber] = useState<string>("primary");
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
   const [staffConvs, setStaffConvs] = useState<Conversation[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -186,34 +212,108 @@ const WhatsAppInbox = () => {
   const [unrepliedByCC, setUnrepliedByCC] = useState<{ id: string; name: string; count: number }[]>([]);
   const [unrepliedPanelOpen, setUnrepliedPanelOpen] = useState(true);
 
+  // Backfill dialog state
+  const [backfillOpen, setBackfillOpen] = useState(false);
+  const [bfPrimaryPnid, setBfPrimaryPnid] = useState("");
+  const [bfPrimaryNumber, setBfPrimaryNumber] = useState("");
+  const [bfSecondaryPnid, setBfSecondaryPnid] = useState("");
+  const [bfSecondaryNumber, setBfSecondaryNumber] = useState("");
+  const [bfRunning, setBfRunning] = useState(false);
+  const [bfResult, setBfResult] = useState<any>(null);
+
+  // Multi-inbox: rank pnids by message count → most-used is "primary".
+  const { primaryPnid, otherInboxes } = (() => {
+    const counts = new Map<string, { label: string; n: number }>();
+    for (const c of conversations) {
+      if (!c.business_phone_number_id) continue;
+      const key = c.business_phone_number_id;
+      const cur = counts.get(key) || { label: c.business_phone_number || key, n: 0 };
+      cur.n += 1;
+      counts.set(key, cur);
+    }
+    const sorted = [...counts.entries()].sort((a, b) => b[1].n - a[1].n);
+    return {
+      primaryPnid: sorted[0]?.[0] || null as string | null,
+      otherInboxes: sorted.slice(1).map(([id, v]) => ({ id, label: v.label })),
+    };
+  })();
+  const hasOtherInbox = otherInboxes.length > 0;
+
+  // Pre-fill backfill form when dialog opens, using detected pnids if any
+  const openBackfill = () => {
+    setBfResult(null);
+    setBfPrimaryPnid(prev => prev || (primaryPnid ?? ""));
+    setBfPrimaryNumber(prev => prev || (conversations.find(c => c.business_phone_number_id === primaryPnid)?.business_phone_number ?? ""));
+    setBfSecondaryPnid(prev => prev || (otherInboxes[0]?.id ?? ""));
+    setBfSecondaryNumber(prev => prev || (otherInboxes[0]?.label ?? ""));
+    setBackfillOpen(true);
+  };
+
+  const runBackfill = async () => {
+    if (!bfPrimaryPnid || !bfSecondaryPnid) {
+      toast({ title: "Both phone_number_ids are required", variant: "destructive" });
+      return;
+    }
+    if (bfPrimaryPnid === bfSecondaryPnid) {
+      toast({ title: "Primary and secondary IDs must differ", variant: "destructive" });
+      return;
+    }
+    setBfRunning(true);
+    setBfResult(null);
+    const { data, error } = await (supabase.rpc as any)("backfill_wa_inboxes_heuristic", {
+      primary_pnid: bfPrimaryPnid,
+      primary_number: bfPrimaryNumber || null,
+      secondary_pnid: bfSecondaryPnid,
+      secondary_number: bfSecondaryNumber || null,
+    });
+    setBfRunning(false);
+    if (error) {
+      toast({ title: "Backfill failed", description: error.message, variant: "destructive" });
+      return;
+    }
+    setBfResult(data);
+    toast({ title: "Backfill complete", description: `Primary: ${data?.primary_threads ?? 0} threads · Secondary: ${data?.secondary_threads ?? 0} threads` });
+  };
+
+  const matchesInbox = (c: Conversation) => {
+    if (businessNumber === "primary") {
+      return !c.business_phone_number_id || c.business_phone_number_id === primaryPnid;
+    }
+    return c.business_phone_number_id === businessNumber;
+  };
+
   // Fetch conversations + build staff list
   useEffect(() => {
     (async () => {
-      // Use a higher limit (or none) when filtered to a specific counsellor/unassigned
-      // so unreplied conversations beyond position 50 aren't missed
-      const isFilteredView = role === "counsellor" || counsellorFilter !== "all";
+      // Fetch ALL conversations in batches (Supabase caps at 1000 per query)
+      let allConvData: any[] = [];
+      let offset = 0;
+      const BATCH = 1000;
+      while (true) {
+        let q = supabase
+          .from("whatsapp_conversations" as any)
+          .select("*")
+          .order("last_message_at", { ascending: false })
+          .range(offset, offset + BATCH - 1);
 
-      let convQuery = supabase
-        .from("whatsapp_conversations" as any)
-        .select("*")
-        .order("last_message_at", { ascending: false });
-
-      if (!isFilteredView) convQuery = (convQuery as any).limit(50);
-
-      // Counsellors only see conversations for their assigned leads
-      if (role === "counsellor" && profile?.id) {
-        convQuery = convQuery.eq("counsellor_id", profile.id);
-      } else if (isAdminRole(role)) {
-        // Apply counsellor filter for admins
-        if (counsellorFilter === "unassigned") {
-          convQuery = (convQuery as any).is("counsellor_id", null);
-        } else if (counsellorFilter !== "all") {
-          convQuery = convQuery.eq("counsellor_id", counsellorFilter);
+        if (role === "counsellor" && profile?.id) {
+          q = q.eq("counsellor_id", profile.id);
+        } else if (isAdminRole(role)) {
+          if (counsellorFilter === "unassigned") {
+            q = (q as any).is("counsellor_id", null);
+          } else if (counsellorFilter !== "all") {
+            q = q.eq("counsellor_id", counsellorFilter);
+          }
         }
+
+        const { data } = await q;
+        if (!data || (data as any[]).length === 0) break;
+        allConvData = [...allConvData, ...(data as any[])];
+        if ((data as any[]).length < BATCH) break; // last page
+        offset += BATCH;
       }
 
-      const { data } = await convQuery;
-      if (data) setConversations(data as any);
+      setConversations(allConvData);
 
       // Fetch ALL staff/counsellor profiles with phone numbers
       const { data: staffProfiles } = await supabase
@@ -229,14 +329,15 @@ const WhatsAppInbox = () => {
       const staffUserIds = new Set((staffRoles || []).map((r: any) => r.user_id));
       const nameMap: Record<string, string> = {};
       const syntheticConvs: Conversation[] = [];
-      const existingPhones = new Set((data || []).map((c: any) => c.phone));
+      const existingPhones = new Set(allConvData.map((c: any) => c.phone));
 
       for (const p of (staffProfiles || [])) {
         if (!p.phone || !staffUserIds.has(p.user_id)) continue;
         const digits = p.phone.replace(/\D/g, "");
         if (p.display_name) nameMap[digits] = p.display_name;
 
-        // If no existing conversation for this staff, create a synthetic one
+        // Only create synthetic entries for staff with NO existing conversation
+        // (staff who already have a conversation in the DB are shown from allConvData)
         if (!existingPhones.has(digits)) {
           syntheticConvs.push({
             phone: digits,
@@ -245,7 +346,7 @@ const WhatsAppInbox = () => {
             lead_stage: null,
             last_message: null,
             last_direction: "outbound",
-            last_message_at: new Date().toISOString(),
+            last_message_at: "1970-01-01T00:00:00Z", // no messages yet — sort to bottom
             unread_count: 0,
             counsellor_id: null,
             counsellor_name: null,
@@ -314,32 +415,69 @@ const WhatsAppInbox = () => {
     })();
   }, [role, counsellorList]);
 
+  // Auto-select conversation from URL param (notification deep-link)
+  const phoneFromUrl = searchParams.get("phone");
+  const [deepLinkNotFound, setDeepLinkNotFound] = useState(false);
+  useEffect(() => {
+    if (!phoneFromUrl || conversations.length === 0) return;
+    setDeepLinkNotFound(false);
+    const normalized = phoneFromUrl.replace(/\D/g, "");
+    const allSearchable = [...conversations, ...staffConvs];
+    const match = allSearchable.find(c => c.phone === normalized || c.phone === phoneFromUrl);
+    if (match) {
+      if (match.has_inbound === false && !isOutboundMode) {
+        navigate(`/whatsapp-inbox?mode=outbound&phone=${normalized}`, { replace: true });
+        return;
+      }
+      setSelectedPhone(match.phone);
+      setInboxTab("all");
+    } else {
+      setDeepLinkNotFound(true);
+    }
+  }, [searchParams, conversations.length, staffConvs.length]);
+
   // Fetch messages for selected conversation
   useEffect(() => {
     if (!selectedPhone) { setMessages([]); return; }
     (async () => {
-      const { data } = await supabase
+      // Pick the active business pnid for filtering. "primary" matches the
+      // most-used pnid + legacy NULL rows; otherwise exact match.
+      const activePnid = businessNumber === "primary" ? primaryPnid : businessNumber;
+
+      let q = supabase
         .from("whatsapp_messages" as any)
-        .select("id, direction, content, message_type, status, template_key, media_url, created_at")
+        .select("id, direction, content, message_type, status, template_key, media_url, created_at, business_phone_number_id")
         .eq("phone", selectedPhone)
         .order("created_at", { ascending: true })
         .limit(200);
+      if (businessNumber === "primary") {
+        if (activePnid) q = (q as any).or(`business_phone_number_id.is.null,business_phone_number_id.eq.${activePnid}`);
+      } else {
+        q = q.eq("business_phone_number_id", businessNumber);
+      }
+      const { data } = await q;
       if (data) setMessages(data as any);
 
-      // Mark as read
-      await supabase
+      // Mark as read (scoped to the active inbox so the other inbox keeps its unread count)
+      let upd = supabase
         .from("whatsapp_messages" as any)
         .update({ is_read: true, read_at: new Date().toISOString() } as any)
         .eq("phone", selectedPhone)
         .eq("direction", "inbound")
         .eq("is_read", false);
+      if (businessNumber === "primary") {
+        if (activePnid) upd = (upd as any).or(`business_phone_number_id.is.null,business_phone_number_id.eq.${activePnid}`);
+      } else {
+        upd = upd.eq("business_phone_number_id", businessNumber);
+      }
+      await upd;
 
       // Update local unread count
       setConversations(prev =>
         prev.map(c => c.phone === selectedPhone ? { ...c, unread_count: 0 } : c)
       );
     })();
-  }, [selectedPhone]);
+  }, [selectedPhone, businessNumber, primaryPnid]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -516,19 +654,49 @@ const WhatsAppInbox = () => {
   const selectedConv = conversations.find(c => c.phone === selectedPhone);
 
   // Resolve display name: lead name > staff name > phone
-  const getDisplayName = (c: Conversation) => c.lead_name || staffNames[c.phone] || c.phone;
+  // Course name → short acronym: "Bachelor of Business Administration (BBA)" → "BBA"
+  const courseAcronym = (name: string | null) => {
+    if (!name) return null;
+    // Extract text in parentheses first: "Bachelor of Physiotherapy (BPT)" → "BPT"
+    const paren = name.match(/\(([^)]+)\)/);
+    if (paren) return paren[1];
+    // Fallback: first letters of major words
+    return name.split(/\s+/).filter(w => w.length > 2 && w[0] === w[0].toUpperCase()).map(w => w[0]).join("").slice(0, 4) || name.slice(0, 6);
+  };
+
+  // Format phone: strip 91 prefix for Indian numbers, keep ISD for others
+  const formatPhone = (phone: string) => {
+    const digits = phone.replace(/\D/g, "");
+    if (digits.startsWith("91") && digits.length === 12) return digits.slice(2);
+    return phone;
+  };
+  const getDisplayName = (c: Conversation) => c.lead_name || staffNames[c.phone] || formatPhone(c.phone);
   const isStaffConv = (c: Conversation) => !c.lead_id && !!staffNames[c.phone];
 
   // Combine real conversations + synthetic staff entries
   const allStaffPhones = new Set(Object.keys(staffNames));
-  const allConvs = inboxTab === "staff"
+  const allConvs = (inboxTab === "staff"
     ? [...conversations.filter(c => !c.lead_id && allStaffPhones.has(c.phone)), ...staffConvs]
-    : conversations;
+    : conversations).filter(matchesInbox);
 
-  const filtered = allConvs.filter(c => {
+  const NON_ADMISSION_ROLES = new Set(["job_applicant", "vendor", "other"]);
+  const isOtherCategory = (c: Conversation) => c.lead_person_role && NON_ADMISSION_ROLES.has(c.lead_person_role);
+
+  // Apply mode filter (inbox vs outbound) to get the working set
+  const modeFiltered = allConvs.filter(c => {
+    if (isOutboundMode) return c.has_inbound === false;
+    // Inbox: only conversations with at least one inbound message
+    // Synthetic staff entries (no real messages yet, has_inbound undefined) are excluded
+    return c.has_inbound === true;
+  });
+
+  const filtered = modeFiltered.filter(c => {
     // Tab filter
-    if (inboxTab === "leads" && !c.lead_id) return false;
-    if (inboxTab === "staff" && !allStaffPhones.has(c.phone)) return false;
+    if (inboxTab === "all") { /* show everything */ }
+    else if (inboxTab === "leads" && (!c.lead_id || isOtherCategory(c))) return false;
+    else if (inboxTab === "staff" && !allStaffPhones.has(c.phone)) return false;
+    else if (inboxTab === "jobs" && c.lead_person_role !== "job_applicant") return false;
+    else if (inboxTab === "other" && c.lead_person_role !== "vendor" && c.lead_person_role !== "other") return false;
     // Unreplied-only mode (activated by clicking breakdown pill)
     if (unrepliedOnly && c.unread_count === 0) return false;
     // Search
@@ -537,16 +705,19 @@ const WhatsAppInbox = () => {
       return getDisplayName(c).toLowerCase().includes(q) || c.phone.includes(q);
     }
     return true;
-  }).sort((a, b) => {
-    const aUnread = a.unread_count > 0 ? 1 : 0;
-    const bUnread = b.unread_count > 0 ? 1 : 0;
-    if (bUnread !== aUnread) return bUnread - aUnread;
-    return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime();
-  });
+  }).sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime());
 
-  const leadConvCount = conversations.filter(c => c.lead_id).length;
-  const staffConvCount = allStaffPhones.size;
-  const totalUnread = conversations.reduce((s, c) => s + c.unread_count, 0);
+  const totalUnreadMsgs = modeFiltered.reduce((s, c) => s + c.unread_count, 0);
+  const totalUnrepliedConvs = modeFiltered.filter(c => c.unread_count > 0).length;
+
+  const leadConvs = modeFiltered.filter(c => c.lead_id && !isOtherCategory(c));
+  const leadUnreplied = leadConvs.filter(c => c.unread_count > 0).length;
+  const staffConvs2 = [...modeFiltered.filter(c => !c.lead_id && allStaffPhones.has(c.phone)), ...staffConvs];
+  const staffUnreplied = staffConvs2.filter(c => c.unread_count > 0).length;
+  const jobConvs = modeFiltered.filter(c => c.lead_person_role === "job_applicant");
+  const jobUnreplied = jobConvs.filter(c => c.unread_count > 0).length;
+  const otherConvs = modeFiltered.filter(c => c.lead_person_role === "vendor" || c.lead_person_role === "other");
+  const otherUnreplied = otherConvs.filter(c => c.unread_count > 0).length;
 
   const formatTime = (iso: string) => {
     const d = new Date(iso);
@@ -569,15 +740,10 @@ const WhatsAppInbox = () => {
     return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
   };
 
-  // Build grouped conversation list: unread section first, then by date
+  // Build grouped conversation list by date (most recent first, like WhatsApp)
   const groupedConvs: { label: string; items: Conversation[] }[] = [];
-  const unreadConvs = filtered.filter(c => c.unread_count > 0);
-  const readConvs = filtered.filter(c => c.unread_count === 0);
-  if (unreadConvs.length > 0) {
-    groupedConvs.push({ label: `Unread (${unreadConvs.length})`, items: unreadConvs });
-  }
   const dateGroups: Record<string, Conversation[]> = {};
-  for (const c of readConvs) {
+  for (const c of filtered) {
     const label = getConvDateLabel(c.last_message_at);
     if (!dateGroups[label]) dateGroups[label] = [];
     dateGroups[label].push(c);
@@ -601,34 +767,77 @@ const WhatsAppInbox = () => {
 
   return (
     <div className="animate-fade-in">
-      <div className="mb-4">
-        <h1 className="text-2xl font-bold text-foreground">WhatsApp Inbox</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {totalUnread > 0 ? `${totalUnread} unread message${totalUnread !== 1 ? "s" : ""}` : "All messages read"}
-        </p>
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">{isOutboundMode ? "WhatsApp Outbound" : "WhatsApp Inbox"}</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            {isOutboundMode
+              ? `${filtered.length} outbound-only conversation${filtered.length !== 1 ? "s" : ""} (no reply received)`
+              : totalUnreadMsgs > 0 || totalUnrepliedConvs > 0
+                ? `${totalUnreadMsgs} unread message${totalUnreadMsgs !== 1 ? "s" : ""} · ${totalUnrepliedConvs} unreplied conversation${totalUnrepliedConvs !== 1 ? "s" : ""}`
+                : "All caught up"}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {hasOtherInbox && (
+            <select
+              value={businessNumber}
+              onChange={e => { setBusinessNumber(e.target.value); setSelectedPhone(null); }}
+              className="rounded-lg border border-input bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/50"
+              title="Select inbox"
+            >
+              <option value="primary">Primary Inbox</option>
+              {otherInboxes.map(o => (
+                <option key={o.id} value={o.id}>+{o.label}</option>
+              ))}
+            </select>
+          )}
+          {isAdminRole(role) && (
+            <button
+              onClick={openBackfill}
+              className="flex items-center gap-1.5 rounded-lg border border-input bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted/50"
+              title="Classify older messages by inbox"
+            >
+              <Settings className="h-3 w-3" />Backfill Inboxes
+            </button>
+          )}
+          <button
+            onClick={() => navigate(isOutboundMode ? "/whatsapp-inbox" : "/whatsapp-inbox?mode=outbound")}
+            className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+              isOutboundMode
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-input bg-background text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            }`}
+          >
+            {isOutboundMode ? <MessageSquare className="h-3 w-3" /> : <Send className="h-3 w-3" />}
+            {isOutboundMode ? "Switch to Inbox" : "View Outbound"}
+          </button>
+        </div>
       </div>
 
       <Card className="border-border/60 shadow-none overflow-hidden">
         <div className="flex h-[calc(100vh-180px)]">
           {/* Conversation list */}
           <div className={`w-full sm:w-80 lg:w-96 border-r border-border flex flex-col ${selectedPhone ? "hidden sm:flex" : "flex"}`}>
-            {/* Tab filter */}
-            <div className="flex border-b border-border">
+            {/* Filter pills */}
+            <div className="flex flex-wrap gap-1 px-3 py-2 border-b border-border">
               {([
-                { key: "leads" as const, label: "Leads", count: leadConvCount },
-                { key: "staff" as const, label: "Staff", count: staffConvCount },
-                { key: "all" as const, label: "All", count: conversations.length },
+                { key: "all" as const, label: "All", count: modeFiltered.length, unreplied: totalUnrepliedConvs, color: "bg-primary/10 text-primary border-primary/30" },
+                { key: "leads" as const, label: "Admission", count: leadConvs.length, unreplied: leadUnreplied, color: "bg-blue-50 text-blue-700 border-blue-200" },
+                { key: "staff" as const, label: "Staff", count: staffConvs2.length, unreplied: staffUnreplied, color: "bg-violet-50 text-violet-700 border-violet-200" },
+                { key: "jobs" as const, label: "Jobs", count: jobConvs.length, unreplied: jobUnreplied, color: "bg-purple-50 text-purple-700 border-purple-200" },
+                { key: "other" as const, label: "Other", count: otherConvs.length, unreplied: otherUnreplied, color: "bg-amber-50 text-amber-700 border-amber-200" },
               ]).map((t) => (
                 <button
                   key={t.key}
                   onClick={() => setInboxTab(t.key)}
-                  className={`flex-1 py-2 text-[11px] font-medium transition-colors border-b-2 ${
-                    inboxTab === t.key
-                      ? "border-primary text-primary"
-                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  className={`rounded-full px-2.5 py-0.5 text-[10px] font-medium border transition-colors ${
+                    inboxTab === t.key ? `${t.color} ring-1 ring-current` : "bg-muted/50 text-muted-foreground border-transparent hover:bg-muted"
                   }`}
                 >
-                  {t.label} ({t.count})
+                  {t.label} {t.count}{t.unreplied > 0 && (
+                    <span className="ml-0.5 inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-green-500 px-0.5 text-[8px] font-bold text-white">{t.unreplied}</span>
+                  )}
                 </button>
               ))}
             </div>
@@ -710,12 +919,8 @@ const WhatsAppInbox = () => {
               ) : (
                 groupedConvs.map((group) => (
                   <div key={group.label}>
-                    {/* Date / Unread section header */}
-                    <div className={`sticky top-0 z-10 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide border-b border-border/30 ${
-                      group.label.startsWith("Unread")
-                        ? "bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400"
-                        : "bg-muted/60 backdrop-blur-sm text-muted-foreground"
-                    }`}>
+                    {/* Date section header */}
+                    <div className="sticky top-0 z-10 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide border-b border-border/30 bg-muted/60 backdrop-blur-sm text-muted-foreground">
                       {group.label}
                     </div>
                     {group.items.map((c) => (
@@ -733,13 +938,28 @@ const WhatsAppInbox = () => {
                               {isStaffConv(c) && (
                                 <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-violet-300 text-violet-600 dark:text-violet-400">Staff</Badge>
                               )}
+                              {c.lead_id && (!c.lead_person_role || c.lead_person_role === "lead" || c.lead_person_role === "applicant") && !isStaffConv(c) && (
+                                <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-blue-300 text-blue-600">Admission</Badge>
+                              )}
+                              {c.lead_person_role === "job_applicant" && (
+                                <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-purple-300 text-purple-600">Job</Badge>
+                              )}
+                              {c.lead_person_role === "vendor" && (
+                                <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-amber-300 text-amber-600">Vendor</Badge>
+                              )}
+                              {c.lead_person_role === "other" && (
+                                <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-gray-300 text-gray-500">Other</Badge>
+                              )}
                               {c.unread_count > 0 && (
                                 <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-green-500 px-1 text-[9px] font-bold text-white">
                                   {c.unread_count}
                                 </span>
                               )}
                             </div>
-                            <p className="text-[10px] text-muted-foreground">{c.phone}</p>
+                            <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                              {formatPhone(c.phone)}
+                              {c.course_name && <span className="px-1 rounded bg-blue-50 text-blue-600 text-[8px] font-medium">{courseAcronym(c.course_name)}</span>}
+                            </p>
                             <p className={`text-xs truncate mt-0.5 ${c.unread_count > 0 ? "font-medium text-foreground/80" : "text-muted-foreground"}`}>
                               {c.last_direction === "outbound" ? <span className="text-muted-foreground">You: </span> : ""}{(c.last_message || "[media]").replace(/\\n/g, " ")}
                             </p>
@@ -762,7 +982,14 @@ const WhatsAppInbox = () => {
               <div className="flex-1 flex items-center justify-center text-muted-foreground">
                 <div className="text-center">
                   <MessageSquare className="h-12 w-12 mx-auto mb-3 opacity-30" />
-                  <p className="text-sm">Select a conversation</p>
+                  {deepLinkNotFound ? (
+                    <div className="text-center">
+                      <p className="text-sm font-medium text-foreground">Conversation not found</p>
+                      <p className="text-xs text-muted-foreground mt-1">No messages found for {phoneFromUrl}. The message may have been unsupported (poll, location, etc.)</p>
+                    </div>
+                  ) : (
+                    <p className="text-sm">Select a conversation</p>
+                  )}
                 </div>
               </div>
             ) : (
@@ -776,8 +1003,17 @@ const WhatsAppInbox = () => {
                     <User className="h-4 w-4 text-primary" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-foreground truncate">{selectedConv?.lead_name || selectedPhone}</p>
-                    <p className="text-[10px] text-muted-foreground">{selectedPhone}</p>
+                    <p className="text-sm font-semibold text-foreground truncate">{selectedConv?.lead_name || (selectedPhone ? formatPhone(selectedPhone) : "")}</p>
+                    <p className="text-[10px] text-muted-foreground flex items-center gap-1.5">
+                      {selectedPhone ? formatPhone(selectedPhone) : ""}
+                      {selectedConv?.course_name && (
+                        <span
+                          className="px-1.5 py-0 rounded bg-blue-100 text-blue-700 text-[9px] font-semibold cursor-pointer hover:bg-blue-200 transition-colors"
+                          title={`${selectedConv.course_name} — click to copy`}
+                          onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(selectedConv.course_name!); toast({ title: "Copied", description: selectedConv.course_name }); }}
+                        >{courseAcronym(selectedConv.course_name)}</span>
+                      )}
+                    </p>
                   </div>
                   {selectedConv?.lead_id && (
                     <Button variant="ghost" size="sm" className="gap-1 text-xs" onClick={() => navigate(`/admissions/${selectedConv.lead_id}`)}>
@@ -804,6 +1040,71 @@ const WhatsAppInbox = () => {
                       <Ban className="h-3 w-3" /> Mark DNC
                     </Button>
                   )}
+                </div>
+                {/* Category bar — visible for all conversations */}
+                <div className="flex items-center gap-1 px-3 py-1 border-b border-border bg-muted/20">
+                  <span className="text-[9px] text-muted-foreground mr-1 shrink-0">Mark as:</span>
+                  {([
+                    { value: "lead", label: "Admission", color: "border-blue-300 bg-blue-50 text-blue-700", activeColor: "ring-2 ring-blue-400 bg-blue-100" },
+                    { value: "job_applicant", label: "Job Applicant", color: "border-purple-300 bg-purple-50 text-purple-700", activeColor: "ring-2 ring-purple-400 bg-purple-100" },
+                    { value: "vendor", label: "Vendor", color: "border-amber-300 bg-amber-50 text-amber-700", activeColor: "ring-2 ring-amber-400 bg-amber-100" },
+                    { value: "other", label: "Other", color: "border-gray-300 bg-gray-50 text-gray-600", activeColor: "ring-2 ring-gray-400 bg-gray-100" },
+                  ] as const).map(cat => {
+                    const currentRole = selectedConv?.lead_person_role || "lead";
+                    const isActive = currentRole === cat.value;
+                    return (
+                      <button key={cat.value}
+                        onClick={async () => {
+                          if (!selectedPhone) return;
+                          let leadId = selectedConv?.lead_id;
+
+                          // Create a lead if one doesn't exist
+                          if (!leadId) {
+                            const { data: newLead } = await supabase.from("leads").insert({
+                              phone: selectedPhone.startsWith("+") ? selectedPhone : `+${selectedPhone}`,
+                              name: selectedConv?.lead_name || selectedPhone,
+                              source: "whatsapp",
+                              stage: cat.value === "lead" ? "new_lead" : "not_interested",
+                              person_role: cat.value,
+                            } as any).select("id").single();
+                            if (newLead) {
+                              leadId = newLead.id;
+                              // Link conversation to lead
+                              await supabase.from("whatsapp_messages" as any)
+                                .update({ lead_id: leadId })
+                                .eq("phone", selectedPhone.replace(/\D/g, ""));
+                            }
+                          } else {
+                            await supabase.from("leads").update({ person_role: cat.value, category_locked: true } as any).eq("id", leadId);
+                          }
+
+                          setConversations(prev => prev.map(c =>
+                            c.phone === selectedPhone ? { ...c, lead_person_role: cat.value, lead_id: leadId || c.lead_id } : c
+                          ));
+
+                          // Log training data for learning model
+                          const inboundMsgs = messages
+                            .filter(m => m.direction === "inbound" && m.content && m.content !== "[unsupported]")
+                            .map(m => m.content)
+                            .join(" ");
+                          if (inboundMsgs) {
+                            supabase.rpc("log_category_training" as any, {
+                              _category: cat.value,
+                              _message_text: inboundMsgs,
+                              _phone: selectedPhone,
+                            }).catch(() => {}); // non-blocking
+                          }
+
+                          toast({ title: "Categorized", description: `Marked as ${cat.label}` });
+                        }}
+                        className={`px-2 py-0.5 rounded-md border text-[10px] font-medium transition-all ${
+                          isActive ? `${cat.color} ${cat.activeColor}` : `${cat.color} opacity-50 hover:opacity-100`
+                        }`}
+                      >
+                        {cat.label}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 {/* Messages */}
@@ -1024,6 +1325,66 @@ const WhatsAppInbox = () => {
           </div>
         </div>
       </Card>
+
+      {/* Inbox backfill dialog */}
+      <Dialog open={backfillOpen} onOpenChange={setBackfillOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Settings className="h-4 w-4" />Backfill Older Messages by Inbox
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p className="text-xs text-muted-foreground">
+              For threads still untagged, threads where UniOs ever sent a message go to <strong>primary</strong>;
+              the rest are assumed to be on the <strong>secondary</strong> number (AiSensy etc.).
+              Already-tagged threads aren't touched.
+            </p>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-foreground">Primary phone_number_id</label>
+              <input
+                value={bfPrimaryPnid} onChange={e => setBfPrimaryPnid(e.target.value)}
+                placeholder="e.g. 1234567890123"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-mono"
+              />
+              <input
+                value={bfPrimaryNumber} onChange={e => setBfPrimaryNumber(e.target.value)}
+                placeholder="Display number, e.g. +91 90000 00000"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-foreground">Secondary phone_number_id (AiSensy)</label>
+              <input
+                value={bfSecondaryPnid} onChange={e => setBfSecondaryPnid(e.target.value)}
+                placeholder="e.g. 9876543210987"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-mono"
+              />
+              <input
+                value={bfSecondaryNumber} onChange={e => setBfSecondaryNumber(e.target.value)}
+                placeholder="Display number"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+              />
+            </div>
+
+            {bfResult && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+                <div className="font-semibold mb-1">Done</div>
+                <div>Primary: {bfResult.primary_threads ?? 0} threads · {bfResult.primary_messages ?? 0} messages</div>
+                <div>Secondary: {bfResult.secondary_threads ?? 0} threads · {bfResult.secondary_messages ?? 0} messages</div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setBackfillOpen(false)} disabled={bfRunning}>Close</Button>
+            <Button onClick={runBackfill} disabled={bfRunning}>
+              {bfRunning && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}Run Backfill
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

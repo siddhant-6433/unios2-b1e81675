@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
-import { ArrowRight, ArrowLeft, Loader2, AlertTriangle, Info, CheckCircle, XCircle, ChevronDown, Plus, Trash2 } from "lucide-react";
+import { ArrowRight, ArrowLeft, Loader2, AlertTriangle, Info, CheckCircle, XCircle, ChevronDown, Plus, Trash2, BookOpen, GraduationCap, BookText, ClipboardCheck } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -47,9 +48,10 @@ const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text
 
 const SESSION_YEAR = 2026; // TODO: derive from active session
 
-/** Generate year options descending from maxYear (or current year) down to dobYear */
-function getYearOptions(dobYear?: number, maxYear?: number): number[] {
-  const start = Math.max(1926, dobYear || 1926);
+/** Generate year options descending from maxYear (or current year) down to max(dobYear, minYear) */
+function getYearOptions(dobYear?: number, maxYear?: number, minYear?: number): number[] {
+  const dobFloor = Math.max(1926, dobYear || 1926);
+  const start = minYear !== undefined ? Math.max(dobFloor, minYear) : dobFloor;
   const end = maxYear !== undefined ? maxYear : new Date().getFullYear();
   const years: number[] = [];
   for (let y = end; y >= start; y--) years.push(y);
@@ -152,14 +154,15 @@ function StatusBadge({ type, label }: { type: 'error' | 'warning' | 'info' | 'pa
 }
 
 /* ── Year Select Dropdown ─────────────────────────── */
-function YearSelect({ value, onChange, dobYear, maxYear, yearError }: {
+function YearSelect({ value, onChange, dobYear, maxYear, minYear, yearError }: {
   value: string;
   onChange: (v: string) => void;
   dobYear?: number;
   maxYear?: number;
+  minYear?: number;
   yearError?: string;
 }) {
-  const years = useMemo(() => getYearOptions(dobYear, maxYear), [dobYear, maxYear]);
+  const years = useMemo(() => getYearOptions(dobYear, maxYear, minYear), [dobYear, maxYear, minYear]);
   return (
     <div>
       <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Year</label>
@@ -191,6 +194,7 @@ function AcademicBlock({
   validationErrors,
   yearError,
   maxYear,
+  minYear,
   removable,
   onRemove,
   dobYear,
@@ -205,6 +209,7 @@ function AcademicBlock({
   validationErrors?: ValidationResult[];
   yearError?: string;
   maxYear?: number;
+  minYear?: number;
   removable?: boolean;
   onRemove?: () => void;
   dobYear?: number;
@@ -238,16 +243,33 @@ function AcademicBlock({
     }
   };
 
+  // Visual variant per section so Class 10 / Class 12 / Graduation are clearly
+  // distinct on the page.
+  const isClass10 = prefix === 'class_10';
+  const isClass12 = prefix === 'class_12';
+  const variant = isGradBlock
+    ? { Icon: GraduationCap, accent: 'border-violet-500',  iconColor: 'text-violet-600',  bg: 'bg-violet-50/60'  }
+    : isClass12
+    ? { Icon: BookText,      accent: 'border-emerald-500', iconColor: 'text-emerald-600', bg: 'bg-emerald-50/60' }
+    : isClass10
+    ? { Icon: BookOpen,      accent: 'border-blue-500',    iconColor: 'text-blue-600',    bg: 'bg-blue-50/60'    }
+    : { Icon: BookOpen,      accent: 'border-border',      iconColor: 'text-muted-foreground', bg: 'bg-muted/30' };
+  const { Icon, accent, iconColor, bg } = variant;
+
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+    <section className={`rounded-2xl border border-border bg-card overflow-hidden border-l-4 ${accent}`}>
+      <header className={`px-4 py-3 ${bg} flex items-center justify-between`}>
+        <div className="flex items-center gap-2.5">
+          <Icon className={`h-5 w-5 ${iconColor}`} />
+          <h3 className="text-base font-semibold text-foreground">{title}</h3>
+        </div>
         {removable && onRemove && (
           <Button variant="ghost" size="sm" onClick={onRemove} className="text-destructive hover:text-destructive h-7 px-2">
             <Trash2 className="h-3.5 w-3.5 mr-1" /> Remove
           </Button>
         )}
-      </div>
+      </header>
+      <div className="p-4 space-y-3">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {isGradBlock ? (
           <>
@@ -332,6 +354,7 @@ function AcademicBlock({
           onChange={v => update('year', v)}
           dobYear={dobYear}
           maxYear={maxYear}
+          minYear={minYear}
           yearError={yearError}
         />
         <div>
@@ -426,7 +449,8 @@ function AcademicBlock({
           )}
         </div>
       )}
-    </div>
+      </div>
+    </section>
   );
 }
 
@@ -443,17 +467,34 @@ function EntranceExamSection({
   exams,
   onChange,
   courseExamNames,
+  recommendedExamNames = [],
 }: {
   exams: EntranceExam[];
   onChange: (exams: EntranceExam[]) => void;
   courseExamNames: string[];
+  /** Optional/preferred exams shown as quick-add chips above the list. */
+  recommendedExamNames?: string[];
 }) {
-  // Auto-populate from course rules on first render
+  // Reconcile auto-populated exams with current course requirements:
+  // - drop non-custom entries that aren't required by any currently-selected course
+  //   (e.g. user picked B.Sc Nursing earlier, switched to MBA → CNET should go away)
+  // - add any new required exams that aren't already in the list
+  // - preserve user-added custom exams (is_custom === true) untouched
   useEffect(() => {
-    if (exams.length === 0 && courseExamNames.length > 0) {
-      onChange(courseExamNames.map(name => ({ exam_name: name, status: 'yet_to_appear' })));
+    const currentNames = new Set(courseExamNames);
+    const customExams = exams.filter(e => e.is_custom);
+    const keptAuto = exams
+      .filter(e => !e.is_custom && currentNames.has(e.exam_name));
+    const existingAutoNames = new Set(keptAuto.map(e => e.exam_name));
+    const newAuto = courseExamNames
+      .filter(n => !existingAutoNames.has(n))
+      .map(name => ({ exam_name: name, status: 'yet_to_appear' as const }));
+    const reconciled = [...keptAuto, ...newAuto, ...customExams];
+    // Avoid useless re-renders if nothing changed
+    if (JSON.stringify(reconciled) !== JSON.stringify(exams)) {
+      onChange(reconciled);
     }
-  }, [courseExamNames.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [courseExamNames.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateExam = (idx: number, field: string, val: string) => {
     const updated = [...exams];
@@ -469,11 +510,49 @@ function EntranceExamSection({
     onChange(exams.filter((_, i) => i !== idx));
   };
 
-  if (courseExamNames.length === 0 && exams.length === 0) return null;
+  // Recommended exams the user hasn't already added (chips offer quick-add)
+  const existingExamNames = new Set(exams.map(e => e.exam_name));
+  const recommendedAvailable = recommendedExamNames.filter(n => !existingExamNames.has(n));
+
+  const addRecommended = (name: string) => {
+    // Mark as is_custom so the reconciliation effect preserves it (it's NOT
+    // auto-derived from a required rule) and so the user can remove it.
+    onChange([...exams, { exam_name: name, status: 'yet_to_appear', is_custom: true }]);
+  };
 
   return (
-    <div className="space-y-3">
-      <h3 className="text-sm font-semibold text-foreground">Entrance Exams</h3>
+    <section className="rounded-2xl border border-border bg-card overflow-hidden border-l-4 border-amber-500">
+      <header className="px-4 py-3 bg-amber-50/60 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <ClipboardCheck className="h-5 w-5 text-amber-600" />
+          <h3 className="text-base font-semibold text-foreground">Entrance Exams</h3>
+        </div>
+      </header>
+      <div className="p-4 space-y-3">
+      {recommendedAvailable.length > 0 && (
+        <div className="rounded-xl bg-amber-50/40 border border-amber-200/60 p-3">
+          <p className="text-xs font-medium text-amber-900 mb-2">
+            Recommended for your selected courses (optional — add if you've taken any):
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {recommendedAvailable.map(name => (
+              <button
+                key={name}
+                type="button"
+                onClick={() => addRecommended(name)}
+                className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white px-3 py-1 text-[11px] font-medium text-amber-900 hover:bg-amber-100 transition-colors"
+              >
+                <Plus className="h-3 w-3" /> {name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {exams.length === 0 && recommendedAvailable.length === 0 && courseExamNames.length === 0 && (
+        <p className="text-xs text-muted-foreground">
+          No entrance exam is required for your selected courses. You can still add any exam you have taken below.
+        </p>
+      )}
       {exams.map((ex, idx) => (
         <Card key={idx} className="border-border/60 shadow-none">
           <CardContent className="p-4 space-y-3">
@@ -536,7 +615,8 @@ function EntranceExamSection({
       <Button variant="outline" size="sm" onClick={addCustomExam} className="gap-2 text-xs">
         <Plus className="h-3.5 w-3.5" /> Add Other Exam
       </Button>
-    </div>
+      </div>
+    </section>
   );
 }
 
@@ -672,16 +752,34 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
     }
   }, [data.course_selections]);
 
-  // Deduplicated entrance exam names from course rules
+  // Split a slash- or comma-separated entrance_exam_name string into individual
+  // exam names. Used because some rules read "CAT / MAT / UPSEE / GMAT".
+  const splitExamNames = (s: string) => s.split(/[,/]/).map(n => n.trim()).filter(Boolean);
+
+  // Deduplicated REQUIRED entrance exam names (auto-populated, not removable).
   const courseExamNames = useMemo(() => {
     const names = new Set<string>();
     Object.values(courseRules).forEach(r => {
       if (r.entranceExamRequired && r.entranceExamName) {
-        r.entranceExamName.split(',').map(n => n.trim()).filter(Boolean).forEach(n => names.add(n));
+        splitExamNames(r.entranceExamName).forEach(n => names.add(n));
       }
     });
     return Array.from(names);
   }, [courseRules]);
+
+  // Recommended (optional) entrance exams — shown as quick-add chips so the
+  // applicant can declare scores if they have one. Excludes any name already
+  // in the required set.
+  const recommendedExamNames = useMemo(() => {
+    const required = new Set(courseExamNames);
+    const names = new Set<string>();
+    Object.values(courseRules).forEach(r => {
+      if (!r.entranceExamRequired && r.entranceExamName) {
+        splitExamNames(r.entranceExamName).forEach(n => { if (!required.has(n)) names.add(n); });
+      }
+    });
+    return Array.from(names);
+  }, [courseRules, courseExamNames]);
 
   // Deduplicated subject-wise marks requirements across all course preferences
   const requiredSubjectMarks = useMemo(() => {
@@ -737,7 +835,9 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
   const missingClass10 = !isSchool && isClass12Filled && !isClass10Filled;
   const missingClass12 = !isSchool && isGradFilled && !isClass12Filled;
 
-  const hasBlockingErrors = allCoursesHaveErrors || hasYearErrors || missingClass10 || missingClass12;
+  // For PG/MBA courses, graduation details are mandatory
+  const missingGraduation = anyRequiresGrad && !isGradFilled;
+  const hasBlockingErrors = allCoursesHaveErrors || hasYearErrors || missingClass10 || missingClass12 || missingGraduation;
 
   const showGraduation = needsGraduation || Object.values(courseRules).some(r => r.requiresGraduation);
 
@@ -803,7 +903,26 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
           updateAcademic={updateAcademic}
           courseSelections={data.course_selections || []}
         />) : (
-        <>
+        <div className="space-y-8">
+          {missingClass10 && (
+            <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20 flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+              <p className="text-xs text-destructive font-medium">Class 10 details are required since you have added Class 12 details.</p>
+            </div>
+          )}
+          <AcademicBlock
+            title="Class 10"
+            prefix="class_10"
+            academic={academic}
+            onChange={updateAcademic}
+            yearError={yearErrorMap['class_10_year']}
+            dobYear={dobYear}
+            maxYear={
+              academic?.class_12?.year
+                ? parseInt(academic.class_12.year, 10) - 2
+                : undefined
+            }
+          />
           {missingClass12 && (
             <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20 flex items-start gap-2">
               <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
@@ -821,23 +940,9 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
             yearError={yearErrorMap['class_12_year']}
             dobYear={dobYear}
             maxYear={SESSION_YEAR}
-          />
-          {missingClass10 && (
-            <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20 flex items-start gap-2">
-              <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
-              <p className="text-xs text-destructive font-medium">Class 10 details are required since you have added Class 12 details.</p>
-            </div>
-          )}
-          <AcademicBlock
-            title="Class 10"
-            prefix="class_10"
-            academic={academic}
-            onChange={updateAcademic}
-            yearError={yearErrorMap['class_10_year']}
-            dobYear={dobYear}
-            maxYear={
-              academic?.class_12?.year
-                ? parseInt(academic.class_12.year, 10) - 2
+            minYear={
+              academic?.class_10?.year
+                ? parseInt(academic.class_10.year, 10) + 2
                 : undefined
             }
           />
@@ -881,6 +986,13 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
 
           {/* Graduation — required for PG/professional */}
           {showGraduation && (
+            <>
+            {missingGraduation && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                Graduation details are required for this course. Please fill in your degree, university, year and marks.
+              </div>
+            )}
             <AcademicBlock
               title="Graduation"
               prefix="graduation"
@@ -890,20 +1002,32 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
               showDegreeSelector
               validationErrors={firstCourseResults}
               yearError={yearErrorMap['graduation_year']}
+              maxYear={SESSION_YEAR + 1}
               dobYear={dobYear}
             />
+            {parseInt(graduation.year) === SESSION_YEAR + 1 && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 text-blue-700 text-xs">
+                <Info className="h-3.5 w-3.5 shrink-0" />
+                Graduation in {SESSION_YEAR + 1}: your application will be considered for the {SESSION_YEAR + 1}-{(SESSION_YEAR + 2).toString().slice(-2)} session.
+              </div>
+            )}
+            </>
           )}
 
           {/* Optional Graduation for UG courses */}
           {isUG && !showGraduation && (
-            <Collapsible open={showOptionalGrad} onOpenChange={setShowOptionalGrad}>
-              <CollapsibleTrigger asChild>
-                <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-foreground">
-                  <ChevronDown className={`h-4 w-4 transition-transform ${showOptionalGrad ? 'rotate-180' : ''}`} />
-                  Add Graduation Details (Optional — e.g., to explain gap years)
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="mt-3">
+            <div className="space-y-3">
+              <div className="rounded-2xl border border-border bg-muted/20 px-4 py-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <GraduationCap className="h-5 w-5 text-violet-600" />
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Add Graduation Details</p>
+                    <p className="text-[11px] text-muted-foreground">Optional — useful to explain gap years or showcase prior degrees.</p>
+                  </div>
+                </div>
+                <Switch checked={showOptionalGrad} onCheckedChange={setShowOptionalGrad} aria-label="Toggle optional graduation details" />
+              </div>
+              {showOptionalGrad && (
                 <AcademicBlock
                   title="Graduation (Optional)"
                   prefix="graduation"
@@ -913,8 +1037,8 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
                   showDegreeSelector
                   dobYear={dobYear}
                 />
-              </CollapsibleContent>
-            </Collapsible>
+              )}
+            </div>
           )}
 
           {/* Additional qualifications for PG/LLB */}
@@ -946,9 +1070,10 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
               exams={entranceExams}
               onChange={updateEntranceExams}
               courseExamNames={courseExamNames}
+              recommendedExamNames={recommendedExamNames}
             />
           )}
-        </>
+        </div>
       )}
 
       {(allCoursesHaveErrors || hasYearErrors) && (

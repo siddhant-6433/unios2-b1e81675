@@ -98,6 +98,8 @@ Deno.serve(async (req) => {
 
     const { template_key, phone, params, lead_id, header_video_url, button_urls } = await req.json();
 
+    const admin = createClient(supabaseUrl, serviceRoleKey);
+
     // Block sends to DNC leads
     if (lead_id) {
       const { data: leadCheck } = await admin.from("leads").select("stage").eq("id", lead_id).single();

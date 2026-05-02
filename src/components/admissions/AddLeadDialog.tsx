@@ -25,7 +25,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
 
   const [form, setForm] = useState({
     name: "", phone: "", email: "", guardian_name: "", guardian_phone: "",
-    source: "website" as string, course_id: "", campus_id: "", counsellor_id: "", notes: "",
+    source: "" as string, course_id: "", campus_id: "", counsellor_id: "", notes: "",
   });
 
   const filteredCampuses = getCampusesForCourse(form.course_id || null);
@@ -49,8 +49,8 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
   };
 
   const handleSubmit = async () => {
-    if (!form.name.trim() || !form.phone.trim()) {
-      toast({ title: "Required", description: "Name and phone are required", variant: "destructive" });
+    if (!form.name.trim() || !form.phone.trim() || !form.source) {
+      toast({ title: "Required", description: "Name, phone and source are required", variant: "destructive" });
       return;
     }
     setSaving(true);
@@ -81,7 +81,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
         });
       }
       toast({ title: "Lead added" });
-      setForm({ name: "", phone: "", email: "", guardian_name: "", guardian_phone: "", source: "website", course_id: "", campus_id: "", counsellor_id: "", notes: "" });
+      setForm({ name: "", phone: "", email: "", guardian_name: "", guardian_phone: "", source: "", course_id: "", campus_id: "", counsellor_id: "", notes: "" });
       onOpenChange(false);
       onSuccess();
     }
@@ -123,8 +123,9 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess }: AddLeadDialogPr
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Source</label>
-              <select value={form.source} onChange={e => setForm(p => ({ ...p, source: e.target.value }))} className={inputCls}>
+              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Source <span className="text-destructive">*</span></label>
+              <select value={form.source} onChange={e => setForm(p => ({ ...p, source: e.target.value }))} className={`${inputCls} ${!form.source ? "text-muted-foreground" : ""}`}>
+                <option value="">Select source *</option>
                 {LEAD_SOURCES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
               </select>
             </div>

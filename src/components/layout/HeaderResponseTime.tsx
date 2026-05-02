@@ -36,10 +36,10 @@ async function fetchManualMedian(threeDaysAgo: string, counsellorId: string | nu
     .order("created_at", { ascending: true });
 
   if (counsellorId) {
-    const { data: myLeads } = await supabase.from("leads").select("id").eq("counsellor_id", counsellorId);
+    const { data: myLeads } = await supabase.from("leads").select("id").eq("counsellor_id", counsellorId).limit(500);
     const ids = (myLeads ?? []).map((l: any) => l.id);
     if (ids.length === 0) return null;
-    callQuery = callQuery.in("lead_id", ids);
+    callQuery = callQuery.in("lead_id", ids.slice(0, 200)); // limit to avoid URL overflow
   }
 
   const { data: callActs } = await callQuery;
@@ -51,9 +51,14 @@ async function fetchManualMedian(threeDaysAgo: string, counsellorId: string | nu
   });
 
   const leadIds = Object.keys(firstCallMap);
-  const { data: leadDates } = await supabase.from("leads").select("id, created_at").in("id", leadIds);
+
+  // Batch fetch to avoid URL-too-long errors (Supabase GET has ~8KB URL limit)
   const createdMap: Record<string, number> = {};
-  (leadDates ?? []).forEach((l: any) => { createdMap[l.id] = new Date(l.created_at).getTime(); });
+  for (let i = 0; i < leadIds.length; i += 50) {
+    const batch = leadIds.slice(i, i + 50);
+    const { data: leadDates } = await supabase.from("leads").select("id, created_at").in("id", batch);
+    (leadDates ?? []).forEach((l: any) => { createdMap[l.id] = new Date(l.created_at).getTime(); });
+  }
 
   const delays = leadIds
     .map(id => firstCallMap[id] - (createdMap[id] ?? firstCallMap[id]))

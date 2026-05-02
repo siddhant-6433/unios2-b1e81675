@@ -73,10 +73,31 @@ function DobPicker({ value, onChange, disabled }: { value: string; onChange: (v:
   );
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PIN_RE = /^\d{6}$/;
+
 export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Props) {
   const address = data.address || {};
   const isSchool = data.program_category === 'school';
   const isIndian = isIndianNationality(data.nationality);
+
+  const [showErrors, setShowErrors] = useState(false);
+
+  // Validation predicates — these mirror the on-screen `*` markers.
+  const missing = {
+    full_name: !data.full_name?.trim(),
+    gender: !data.gender,
+    dob: !data.dob,
+    nationality: !data.nationality,
+    category: !data.category,
+    email: !data.email || !EMAIL_RE.test(data.email),
+    line1: !address.line1?.trim(),
+    city: !address.city?.trim(),
+    state: !address.state?.trim(),
+    country: !address.country?.trim(),
+    pin: isIndian ? !PIN_RE.test((address.pin_code || '').trim()) : !address.pin_code?.trim(),
+  };
+  const hasMissing = Object.values(missing).some(Boolean);
 
   // Fetch DB-driven eligibility rules for age validation
   const [mergedRule, setMergedRule] = useState<EligibilityRule | undefined>(undefined);
@@ -109,12 +130,14 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
       <fieldset disabled={readOnly} className={readOnly ? "pointer-events-none opacity-75" : ""}>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Full Name *</label>
-          <input value={data.full_name} onChange={e => onChange({ full_name: e.target.value })} className={inputCls} />
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Full Name <span className="text-destructive">*</span></label>
+          <input value={data.full_name} onChange={e => onChange({ full_name: e.target.value })}
+            className={`${inputCls} ${showErrors && missing.full_name ? 'border-destructive' : ''}`} />
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Gender</label>
-          <select value={data.gender} onChange={e => onChange({ gender: e.target.value })} className={inputCls}>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Gender <span className="text-destructive">*</span></label>
+          <select value={data.gender} onChange={e => onChange({ gender: e.target.value })}
+            className={`${inputCls} ${showErrors && missing.gender ? 'border-destructive' : ''}`}>
             <option value="">Select</option>
             <option value="Male">Male</option>
             <option value="Female">Female</option>
@@ -123,9 +146,12 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-            Date of Birth {isSchool ? '*' : ''}
+            Date of Birth <span className="text-destructive">*</span>
           </label>
           <DobPicker value={data.dob} onChange={v => onChange({ dob: v })} disabled={readOnly} />
+          {showErrors && missing.dob && (
+            <p className="mt-1 text-[11px] text-destructive">Date of birth is required.</p>
+          )}
           {dobWarning && (
             <div className="mt-1.5 flex items-start gap-1.5 text-destructive">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
@@ -134,7 +160,7 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
           )}
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nationality</label>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nationality <span className="text-destructive">*</span></label>
           <select
             value={data.nationality || 'Indian'}
             onChange={e => {
@@ -146,7 +172,7 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
                 passport_number: nat !== 'Indian' ? data.passport_number : '',
               });
             }}
-            className={inputCls}
+            className={`${inputCls} ${showErrors && missing.nationality ? 'border-destructive' : ''}`}
           >
             {NATIONALITIES.map(n => (
               <option key={n.value} value={n.value}>{n.label}</option>
@@ -154,8 +180,9 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
           </select>
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Category</label>
-          <select value={data.category} onChange={e => onChange({ category: e.target.value })} className={inputCls}>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Category <span className="text-destructive">*</span></label>
+          <select value={data.category} onChange={e => onChange({ category: e.target.value })}
+            className={`${inputCls} ${showErrors && missing.category ? 'border-destructive' : ''}`}>
             <option value="">Select</option>
             {["General", "OBC", "SC", "ST", "EWS"].map(c => <option key={c} value={c}>{c}</option>)}
           </select>
@@ -191,8 +218,12 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
           <PhoneInput value={data.phone} onChange={() => {}} disabled />
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email</label>
-          <input type="email" value={data.email} onChange={e => onChange({ email: e.target.value })} className={inputCls} />
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email <span className="text-destructive">*</span></label>
+          <input type="email" value={data.email} onChange={e => onChange({ email: e.target.value })}
+            className={`${inputCls} ${showErrors && missing.email ? 'border-destructive' : ''}`} />
+          {showErrors && missing.email && (
+            <p className="mt-1 text-[11px] text-destructive">A valid email address is required.</p>
+          )}
         </div>
       </div>
 
@@ -211,34 +242,58 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
       </div>
 
       {/* Address */}
-      <h3 className="text-sm font-semibold text-foreground mt-2">Address</h3>
+      <h3 className="text-sm font-semibold text-foreground mt-2">Address <span className="text-destructive">*</span></h3>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="sm:col-span-2">
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Address Line</label>
-          <input value={address.line1 || ''} onChange={e => onChange({ address: { ...address, line1: e.target.value } })} className={inputCls} />
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Address Line <span className="text-destructive">*</span></label>
+          <input value={address.line1 || ''} onChange={e => onChange({ address: { ...address, line1: e.target.value } })}
+            className={`${inputCls} ${showErrors && missing.line1 ? 'border-destructive' : ''}`} />
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">City</label>
-          <input value={address.city || ''} onChange={e => onChange({ address: { ...address, city: e.target.value } })} className={inputCls} />
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">City <span className="text-destructive">*</span></label>
+          <input value={address.city || ''} onChange={e => onChange({ address: { ...address, city: e.target.value } })}
+            className={`${inputCls} ${showErrors && missing.city ? 'border-destructive' : ''}`} />
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">State</label>
-          <input value={address.state || ''} onChange={e => onChange({ address: { ...address, state: e.target.value } })} className={inputCls} />
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">State <span className="text-destructive">*</span></label>
+          <input value={address.state || ''} onChange={e => onChange({ address: { ...address, state: e.target.value } })}
+            className={`${inputCls} ${showErrors && missing.state ? 'border-destructive' : ''}`} />
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Country</label>
-          <input value={address.country || 'India'} onChange={e => onChange({ address: { ...address, country: e.target.value } })} className={inputCls} />
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Country <span className="text-destructive">*</span></label>
+          <input value={address.country || 'India'} onChange={e => onChange({ address: { ...address, country: e.target.value } })}
+            className={`${inputCls} ${showErrors && missing.country ? 'border-destructive' : ''}`} />
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">PIN Code</label>
-          <input value={address.pin_code || ''} onChange={e => onChange({ address: { ...address, pin_code: e.target.value.replace(/\D/g, '').slice(0, 6) } })} className={inputCls} />
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">PIN Code <span className="text-destructive">*</span></label>
+          <input value={address.pin_code || ''} onChange={e => onChange({ address: { ...address, pin_code: e.target.value.replace(/\D/g, '').slice(0, 6) } })}
+            className={`${inputCls} ${showErrors && missing.pin ? 'border-destructive' : ''}`} />
+          {showErrors && missing.pin && isIndian && (
+            <p className="mt-1 text-[11px] text-destructive">Enter a valid 6-digit PIN code.</p>
+          )}
         </div>
       </div>
+
+      {showErrors && hasMissing && (
+        <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20 flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+          <p className="text-xs text-destructive font-medium">
+            Please fill all required fields marked with <span className="font-bold">*</span> before continuing.
+          </p>
+        </div>
+      )}
 
       </fieldset>
 
       <div className="flex justify-end">
-        <Button onClick={onNext} disabled={saving || !data.full_name.trim() || !!dobWarning} className="gap-2">
+        <Button
+          onClick={() => {
+            if (hasMissing) { setShowErrors(true); return; }
+            onNext();
+          }}
+          disabled={saving || !!dobWarning}
+          className="gap-2"
+        >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
           Save & Continue
         </Button>

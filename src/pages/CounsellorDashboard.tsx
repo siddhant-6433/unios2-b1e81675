@@ -358,7 +358,7 @@ const CounsellorDashboard = () => {
   useEffect(() => {
     (async () => {
       const [statsRes, overdueRes, tatRes, teamRes] = await Promise.all([
-        supabase.from("counsellor_performance_stats" as any).select("*"),
+        supabase.rpc("get_counsellor_performance_stats" as any),
         supabase.from("overdue_followups" as any).select("*").limit(100),
         supabase.from("counsellor_tat_defaults" as any).select("*"),
         supabase.from("team_leader_defaults_summary" as any).select("*"),
@@ -840,9 +840,7 @@ const CounsellorDashboard = () => {
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase
-        .from("counsellor_leaderboard" as any)
-        .select("*");
+      const { data } = await supabase.rpc("get_counsellor_leaderboard" as any);
       if (data) setLeaderboard(data);
     })();
   }, []);
@@ -876,6 +874,8 @@ const CounsellorDashboard = () => {
           visits_scheduled: s.visits_scheduled || 0,
           conversions: s.conversions || 0,
           followups_overdue: s.followups_overdue || 0,
+          applications: s.applications || 0,
+          applications_paid: s.applications_paid || 0,
           score,
           weekly_score: lb.weekly_score || 0,
           monthly_score: lb.monthly_score || 0,
@@ -1057,6 +1057,7 @@ const CounsellorDashboard = () => {
                     <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Leads</th>
                     <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Calls</th>
                     <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Conversions</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-violet-600 uppercase tracking-wide">Apps</th>
                     <th className="px-4 py-3 text-center text-[10px] font-semibold text-orange-600 uppercase tracking-wide" title="New leads not contacted within SLA">New Due</th>
                     <th className="px-4 py-3 text-center text-[10px] font-semibold text-amber-600 uppercase tracking-wide" title="Overdue follow-ups">F/U Due</th>
                     <th className="px-4 py-3 text-center text-[10px] font-semibold text-blue-600 uppercase tracking-wide" title="Application stage check-ins overdue">Check-ins</th>
@@ -1085,6 +1086,14 @@ const CounsellorDashboard = () => {
                       <td className="px-4 py-3 text-center font-medium text-foreground">{s.total_calls}</td>
                       <td className="px-4 py-3 text-center">
                         <span className="font-bold text-primary">{s.conversions}</span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {s.applications > 0 ? (
+                          <span className="text-xs">
+                            <span className="font-semibold text-violet-700">{s.applications_paid}</span>
+                            <span className="text-muted-foreground">/{s.applications}</span>
+                          </span>
+                        ) : <span className="text-[10px] text-muted-foreground">0</span>}
                       </td>
                       <td className="px-4 py-3 text-center">
                         {tat && tat.new_leads_overdue > 0 ? (
@@ -1126,7 +1135,7 @@ const CounsellorDashboard = () => {
                     );
                   })}
                   {ranked.length === 0 && (
-                    <tr><td colSpan={13} className="px-4 py-8 text-center text-sm text-muted-foreground">No counsellor data available</td></tr>
+                    <tr><td colSpan={14} className="px-4 py-8 text-center text-sm text-muted-foreground">No counsellor data available</td></tr>
                   )}
                 </tbody>
               </table>

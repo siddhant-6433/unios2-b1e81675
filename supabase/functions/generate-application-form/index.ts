@@ -298,16 +298,23 @@ async function newPage(ctx: Ctx) {
     const badgeX = ctx.width - ctx.margin - badgeW;
     const badgeY = ctx.height - 18; // top edge of pill, 18pt down from page edge
     const badgeColor = rgb(0.20, 0.69, 0.39);
-    const radius = Math.min(18, badgeH / 2);
+    const radius = 10;
 
-    // Pill: a rectangle plus two end-circles.
+    // Rounded rectangle = horizontal core + vertical core + 4 corner circles.
     ctx.page.drawRectangle({
       x: badgeX + radius, y: badgeY - badgeH,
       width: badgeW - radius * 2, height: badgeH,
       color: badgeColor,
     });
-    ctx.page.drawCircle({ x: badgeX + radius,           y: badgeY - badgeH / 2, size: radius, color: badgeColor });
-    ctx.page.drawCircle({ x: badgeX + badgeW - radius,  y: badgeY - badgeH / 2, size: radius, color: badgeColor });
+    ctx.page.drawRectangle({
+      x: badgeX, y: badgeY - badgeH + radius,
+      width: badgeW, height: badgeH - radius * 2,
+      color: badgeColor,
+    });
+    ctx.page.drawCircle({ x: badgeX + radius,          y: badgeY - radius,           size: radius, color: badgeColor });
+    ctx.page.drawCircle({ x: badgeX + badgeW - radius, y: badgeY - radius,           size: radius, color: badgeColor });
+    ctx.page.drawCircle({ x: badgeX + radius,          y: badgeY - badgeH + radius,  size: radius, color: badgeColor });
+    ctx.page.drawCircle({ x: badgeX + badgeW - radius, y: badgeY - badgeH + radius,  size: radius, color: badgeColor });
 
     // Centre each line horizontally inside the pill.
     let textY = badgeY - padY - sizeSm + 2;
@@ -653,14 +660,15 @@ Deno.serve(async (req) => {
     const path = `applications/${app.application_id}.pdf`;
     const { error: upErr } = await admin.storage
       .from("application-documents")
-      .upload(path, out, { contentType: "application/pdf", upsert: true });
+      .upload(path, out, { contentType: "application/pdf", upsert: true, cacheControl: "no-cache, max-age=0" });
     if (upErr) {
       return new Response(JSON.stringify({ error: upErr.message }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
     const { data: pub } = admin.storage.from("application-documents").getPublicUrl(path);
-    const formUrl = pub?.publicUrl || path;
+    const baseUrl = pub?.publicUrl || path;
+    const formUrl = `${baseUrl}?v=${Date.now()}`;
     await admin.from("applications").update({ form_pdf_url: formUrl }).eq("id", app.id);
 
     return new Response(JSON.stringify({ ok: true, form_pdf_url: formUrl }), {

@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Send, Loader2, ArrowRight, Phone, StickyNote, Bot, MapPin, Clock, Plus, MessageSquare, Link2,
   CalendarCheck, FileText, UserCheck, GraduationCap, Mail, ClipboardList, Edit,
-  Globe, MousePointer, Flame,
+  Globe, MousePointer, Flame, CheckCircle,
 } from "lucide-react";
 import { DocumentChecklist } from "@/components/leads/DocumentChecklist";
 import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
@@ -181,6 +181,11 @@ const ACTIVITY_CONFIG: Record<string, {
     icon: <MapPin className="h-3.5 w-3.5" />,
     bg: "bg-purple-500 text-white",
     getTitle: () => "Campus visit",
+  },
+  visit_completed: {
+    icon: <CheckCircle className="h-3.5 w-3.5" />,
+    bg: "bg-emerald-600 text-white",
+    getTitle: () => "Visit Completed",
   },
   followup: {
     icon: <CalendarCheck className="h-3.5 w-3.5" />,

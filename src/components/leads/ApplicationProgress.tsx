@@ -23,6 +23,7 @@ import { ExtracurricularDetails } from "@/components/apply/ExtracurricularDetail
 import { DocumentUpload } from "@/components/apply/DocumentUpload";
 import { PortalProvider } from "@/components/apply/PortalContext";
 import type { ApplicationData } from "@/components/apply/types";
+import { ApplyMagicLinkButton } from "@/components/leads/ApplyMagicLinkButton";
 
 interface ApplicationRow {
   id: string;
@@ -229,10 +230,21 @@ export function ApplicationProgress({ leadId, leadPhone, applicationId, canImper
             {statusBadge}
             <span className="text-[10px] text-muted-foreground whitespace-nowrap ml-auto">{completedCount}/{steps.length} done</span>
             {canImpersonate && (
-              <Button variant="outline" size="sm" className="h-6 gap-1 text-[10px] px-2 shrink-0" onClick={() => setShowPreview(true)}>
-                <Eye className="h-3 w-3" />
-                View / Edit
-              </Button>
+              <>
+                <Button variant="outline" size="sm" className="h-6 gap-1 text-[10px] px-2 shrink-0" onClick={() => setShowPreview(true)}>
+                  <Eye className="h-3 w-3" />
+                  View / Edit
+                </Button>
+                {leadId && (
+                  <ApplyMagicLinkButton
+                    leadId={leadId}
+                    leadName={null}
+                    leadPhone={leadPhone || null}
+                    compact
+                    directOpen
+                  />
+                )}
+              </>
             )}
           </div>
           {stepperRow}

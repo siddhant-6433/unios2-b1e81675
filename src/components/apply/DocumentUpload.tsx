@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { ArrowRight, ArrowLeft, Loader2, Upload, CheckCircle, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -107,10 +107,11 @@ function getRequiredDocs(
   return base;
 }
 
-function DocCard({ doc, uploading, uploaded, onUpload, disabled }: {
+function DocCard({ doc, uploading, uploaded, uploadedUrl, onUpload, disabled }: {
   doc: DocSpec;
   uploading: string | null;
   uploaded: Record<string, boolean>;
+  uploadedUrl?: string;
   onUpload: (key: string, file: File) => void;
   disabled?: boolean;
 }) {
@@ -119,34 +120,42 @@ function DocCard({ doc, uploading, uploaded, onUpload, disabled }: {
   const isUploaded = uploaded[doc.key];
 
   return (
-    <Card className={`border-border/60 shadow-none ${doc.required ? '' : 'border-dashed'}`}>
-      <CardContent className="p-5 text-center">
+    <Card className={`border-border/60 shadow-none ${isUploaded ? 'border-emerald-200 bg-emerald-50/30 dark:bg-emerald-950/10' : doc.required ? '' : 'border-dashed'}`}>
+      <CardContent className="p-4 text-center">
         {isUploaded ? (
-          <CheckCircle className="h-6 w-6 text-primary mx-auto mb-2" />
+          <CheckCircle className="h-5 w-5 text-emerald-600 mx-auto mb-1.5" />
         ) : isUploading ? (
-          <Loader2 className="h-6 w-6 text-muted-foreground animate-spin mx-auto mb-2" />
+          <Loader2 className="h-5 w-5 text-muted-foreground animate-spin mx-auto mb-1.5" />
         ) : (
-          <FileText className="h-6 w-6 text-muted-foreground/40 mx-auto mb-2" />
+          <Upload className="h-5 w-5 text-muted-foreground/40 mx-auto mb-1.5" />
         )}
         <h4 className="text-sm font-semibold text-foreground">
           {doc.label} {doc.required && <span className="text-destructive">*</span>}
         </h4>
-        <p className="text-xs text-muted-foreground mt-0.5">{doc.desc}</p>
-        <Button
-          variant="outline"
-          size="sm"
-          type="button"
-          className="mt-3 text-xs"
-          disabled={isUploading || disabled}
-          onClick={() => inputRef.current?.click()}
-        >
-          {isUploaded ? 'Re-upload' : 'Choose File'}
-        </Button>
+        <p className="text-[10px] text-muted-foreground mt-0.5">{isUploaded ? "Uploaded successfully" : doc.desc}</p>
+        <div className="flex items-center justify-center gap-2 mt-2">
+          {isUploaded && uploadedUrl && (
+            <a href={uploadedUrl} target="_blank" rel="noreferrer"
+              className="inline-flex items-center gap-1 text-[10px] font-medium text-primary hover:underline">
+              <FileText className="h-3 w-3" /> View
+            </a>
+          )}
+          <Button
+            variant={isUploaded ? "ghost" : "outline"}
+            size="sm"
+            type="button"
+            className={`text-xs ${isUploaded ? "text-muted-foreground" : ""}`}
+            disabled={isUploading || disabled}
+            onClick={() => inputRef.current?.click()}
+          >
+            {isUploading ? "Uploading..." : isUploaded ? 'Re-upload' : 'Choose File'}
+          </Button>
+        </div>
         <input
           ref={inputRef}
           type="file"
           className="hidden"
-          accept=".pdf,.jpg,.jpeg,.png"
+          accept=".pdf,.jpg,.jpeg,.png,.webp"
           onChange={e => {
             const file = e.target.files?.[0];
             if (file) onUpload(doc.key, file);
@@ -161,22 +170,50 @@ function DocCard({ doc, uploading, uploaded, onUpload, disabled }: {
 export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnly }: Props) {
   const { toast } = useToast();
   const [uploaded, setUploaded] = useState<Record<string, boolean>>({});
+  const [uploadedUrls, setUploadedUrls] = useState<Record<string, string>>({});
   const [uploading, setUploading] = useState<string | null>(null);
   const docs = getRequiredDocs(
-    data.program_category, 
+    data.program_category,
     data.academic_details as Record<string, any>,
     data.course_selections
   );
 
+  // Check for existing uploads on mount
+  useEffect(() => {
+    if (!data.application_id) return;
+    (async () => {
+      const { data: files } = await supabase.storage.from('application-documents').list(data.application_id, { limit: 50 });
+      if (files?.length) {
+        const found: Record<string, boolean> = {};
+        const urls: Record<string, string> = {};
+        for (const f of files) {
+          if (!f.name || f.name.startsWith('.')) continue;
+          // Extract doc key from filename: "class_10_marksheet-filename.pdf" → "class_10_marksheet"
+          const dashIdx = f.name.indexOf('-');
+          const key = dashIdx > 0 ? f.name.substring(0, dashIdx) : f.name;
+          found[key] = true;
+          const { data: urlData } = supabase.storage.from('application-documents').getPublicUrl(`${data.application_id}/${f.name}`);
+          urls[key] = urlData.publicUrl;
+        }
+        setUploaded(prev => ({ ...prev, ...found }));
+        setUploadedUrls(prev => ({ ...prev, ...urls }));
+      }
+    })();
+  }, [data.application_id]);
+
   const handleUpload = async (docKey: string, file: File) => {
     setUploading(docKey);
-    const path = `${data.application_id}/${docKey}-${file.name}`;
+    // Sanitize filename: replace spaces and special chars with underscores
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const path = `${data.application_id}/${docKey}-${safeName}`;
     const { error } = await supabase.storage.from('application-documents').upload(path, file, { upsert: true });
 
     if (error) {
       toast({ title: 'Upload failed', description: error.message, variant: 'destructive' });
     } else {
       setUploaded(prev => ({ ...prev, [docKey]: true }));
+      const { data: urlData } = supabase.storage.from('application-documents').getPublicUrl(path);
+      setUploadedUrls(prev => ({ ...prev, [docKey]: urlData.publicUrl }));
       toast({ title: `${docKey.replace(/_/g, ' ')} uploaded` });
     }
     setUploading(null);
@@ -209,6 +246,7 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
             doc={doc}
             uploading={uploading}
             uploaded={uploaded}
+            uploadedUrl={uploadedUrls[doc.key]}
             onUpload={handleUpload}
             disabled={readOnly}
           />

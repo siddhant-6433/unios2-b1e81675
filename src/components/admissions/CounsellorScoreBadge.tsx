@@ -19,11 +19,8 @@ export function CounsellorScoreBadge() {
   useEffect(() => {
     if (!profile?.id || role !== "counsellor") return;
     (async () => {
-      const { data } = await supabase
-        .from("counsellor_leaderboard" as any)
-        .select("*")
-        .eq("counsellor_id", profile.id)
-        .single();
+      const { data: allData } = await supabase.rpc("get_counsellor_leaderboard" as any);
+      const data = (allData || []).find((r: any) => r.counsellor_id === profile.id);
       if (data) setScore(data as any);
     })();
 
@@ -37,12 +34,11 @@ export function CounsellorScoreBadge() {
         filter: `counsellor_id=eq.${profile.id}`,
       }, () => {
         // Refetch score
-        supabase
-          .from("counsellor_leaderboard" as any)
-          .select("*")
-          .eq("counsellor_id", profile.id)
-          .single()
-          .then(({ data }) => { if (data) setScore(data as any); });
+        supabase.rpc("get_counsellor_leaderboard" as any)
+          .then(({ data: allData }: any) => {
+            const found = (allData || []).find((r: any) => r.counsellor_id === profile.id);
+            if (found) setScore(found as any);
+          });
       })
       .subscribe();
 

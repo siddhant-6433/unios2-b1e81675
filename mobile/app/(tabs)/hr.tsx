@@ -100,7 +100,7 @@ function TimeSection({ userId }: { userId: string }) {
       {attendance.length > 0 && (
         <View style={styles.listCard}>
           {attendance.slice(0, 5).map((a: any) => (
-            <View key={a.date} style={styles.logRow}>
+            <View key={a.id ?? `${a.date}-${a.punch_in ?? ''}`} style={styles.logRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.logDate}>
                   {new Date(a.date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}
