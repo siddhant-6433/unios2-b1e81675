@@ -40,6 +40,7 @@ import AutomationRules from "./pages/AutomationRules";
 import ConsultantPortal from "./pages/ConsultantPortal";
 import PublisherPortal from "./pages/PublisherPortal";
 import PublisherLogin from "./pages/PublisherLogin";
+import PublisherAnalytics from "./pages/PublisherAnalytics";
 import ConsultantGuide from "./pages/ConsultantGuide";
 import TemplateManager from "./pages/TemplateManager";
 import FeeStructures from "./pages/FeeStructures";
@@ -187,6 +188,7 @@ const App = () => (
                       <Route path="/automation-rules" element={<AutomationRules />} />
                       <Route path="/consultant-portal" element={<ConsultantPortal />} />
                       <Route path="/publisher-portal" element={<PublisherPortal />} />
+                      <Route path="/publisher-analytics" element={<PublisherAnalytics />} />
                       <Route path="/consultant-guide" element={<ConsultantGuide />} />
                       <Route path="/template-manager" element={<TemplateManager />} />
                       <Route path="/fee-structures" element={<FeeStructures />} />

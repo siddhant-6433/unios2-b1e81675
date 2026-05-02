@@ -201,18 +201,33 @@ const Admissions = () => {
   const canFilterByCounsellor = role === "super_admin" || role === "admission_head" || role === "campus_admin" || isTeamLeader;
   const [notCalledIds, setNotCalledIds] = useState<Set<string> | null>(null);
   const [pendingNotCalledFilter, setPendingNotCalledFilter] = useState<string | null>(null);
+  const [fromDate, setFromDate] = useState<string>("");
+  const [toDate, setToDate] = useState<string>("");
 
-  // Read URL params on mount — store in ref to survive re-renders
+  // Read URL params on mount — store in ref to survive re-renders.
+  // Supports drill-down from external dashboards (e.g. Publisher Analytics):
+  //   ?source=salahlo&stage=admitted,token_paid&from=2026-04-01&to=2026-04-30
   const urlParamsRead = useRef(false);
   useEffect(() => {
     if (urlParamsRead.current) return;
     const counsellorParam = searchParams.get("counsellor");
-    const notCalledParam = searchParams.get("not_called");
-    if (!counsellorParam) return;
+    const notCalledParam  = searchParams.get("not_called");
+    const sourceParam     = searchParams.get("source");
+    const stageParam      = searchParams.get("stage");
+    const fromParam       = searchParams.get("from");
+    const toParam         = searchParams.get("to");
+
+    const anyParam = counsellorParam || sourceParam || stageParam || fromParam || toParam;
+    if (!anyParam) return;
     urlParamsRead.current = true;
-    setCounsellorFilter(counsellorParam);
     setView("list");
-    if (notCalledParam === "true") {
+
+    if (counsellorParam) setCounsellorFilter(counsellorParam);
+    if (sourceParam)     setSourceFilter(sourceParam);
+    if (stageParam)      setStageFilter(stageParam);
+    if (fromParam)       setFromDate(fromParam);
+    if (toParam)         setToDate(toParam);
+    if (notCalledParam === "true" && counsellorParam) {
       setPendingNotCalledFilter(counsellorParam);
     }
   }, [searchParams]);
@@ -494,7 +509,20 @@ const Admissions = () => {
       || (counsellorFilter === "unassigned" ? !l.counsellor_id : l.counsellor_id === counsellorFilter);
     const matchesNotCalled = !notCalledIds || notCalledIds.has(l.id);
     const matchesAction = !actionLeadIds || actionLeadIds.has(l.id);
-    return matchesSearch && matchesStage && matchesSource && matchesRole && matchesTemp && matchesInactive && matchesFollowup && matchesVisit && matchesCounsellor && matchesNotCalled && matchesAction;
+    // Date-range filter (URL ?from=YYYY-MM-DD&to=YYYY-MM-DD or in-page state)
+    let matchesDate = true;
+    if (fromDate || toDate) {
+      const t = new Date(l.created_at).getTime();
+      if (fromDate) {
+        const from = new Date(`${fromDate}T00:00:00`).getTime();
+        if (t < from) matchesDate = false;
+      }
+      if (matchesDate && toDate) {
+        const to = new Date(`${toDate}T23:59:59.999`).getTime();
+        if (t > to) matchesDate = false;
+      }
+    }
+    return matchesSearch && matchesStage && matchesSource && matchesRole && matchesTemp && matchesInactive && matchesFollowup && matchesVisit && matchesCounsellor && matchesNotCalled && matchesAction && matchesDate;
   });
 
   const filteredCount = filtered.length;
@@ -502,7 +530,7 @@ const Admissions = () => {
   const paginatedLeads = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // Reset page when filters change
-  useEffect(() => { setPage(1); }, [stageFilter, sourceFilter, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds]);
+  useEffect(() => { setPage(1); }, [stageFilter, sourceFilter, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, fromDate, toDate]);
 
   const totalLeads = leads.length;
 

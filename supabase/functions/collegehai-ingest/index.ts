@@ -191,10 +191,54 @@ Deno.serve(async (req) => {
       if (campus) campus_id = campus.id;
     }
 
-    // ── Generate application ID ──────────────────────────────────────────
-    const appId = `APP-${new Date().getFullYear().toString().slice(-2)}-${
-      String(Math.floor(Math.random() * 9000) + 1000)
-    }`;
+    // ── Duplicate detection — add secondary/tertiary source if exists ────
+    const { data: existingLead } = await supabase
+      .from("leads")
+      .select("id, name, phone, source, stage, secondary_source, tertiary_source, source_history")
+      .eq("phone", normPhone)
+      .limit(1)
+      .maybeSingle();
+
+    if (existingLead) {
+      const newSource = "collegehai";
+      const currentSource = existingLead.source;
+      const currentSecondary = existingLead.secondary_source;
+
+      // Track as secondary/tertiary source if not already present
+      if (newSource !== currentSource && newSource !== currentSecondary && newSource !== existingLead.tertiary_source) {
+        const updates: Record<string, any> = {};
+        const history = Array.isArray(existingLead.source_history) ? existingLead.source_history : [];
+        history.push({ source: newSource, timestamp: new Date().toISOString(), data: `CollegeHai lead_id: ${sourceLeadId || "N/A"}` });
+        updates.source_history = history;
+
+        if (!currentSecondary) {
+          updates.secondary_source = newSource;
+        } else if (!existingLead.tertiary_source) {
+          updates.tertiary_source = newSource;
+        }
+
+        await supabase.from("leads").update(updates).eq("id", existingLead.id);
+
+        await supabase.from("lead_activities").insert({
+          lead_id: existingLead.id,
+          type: "lead_created",
+          description: `Duplicate lead from CollegeHai — added as ${!currentSecondary ? "secondary" : "tertiary"} source`,
+        });
+      }
+
+      console.log(`Duplicate phone ${normPhone} → existing lead ${existingLead.id}, source tracked`);
+      return json({
+        status: "duplicate",
+        message: `Lead already exists: ${existingLead.name} (${existingLead.stage}). CollegeHai source tracked.`,
+        lead_id: existingLead.id,
+      }, 200);
+    }
+
+    // ── Generate unique application ID ───────────────────────────────────
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let appId = "";
+    for (let i = 0; i < 6; i++) appId += chars[Math.floor(Math.random() * chars.length)];
+    appId = `APP-${new Date().getFullYear().toString().slice(-2)}-${appId}`;
 
     // ── Insert lead ──────────────────────────────────────────────────────
     const { data: lead, error } = await supabase
@@ -212,12 +256,6 @@ Deno.serve(async (req) => {
         notes:            notes?.slice(0, 1000) || null,
         stage:            "new_lead",
         application_id:   appId,
-        application_progress: {
-          personal_details:     false,
-          education_details:    false,
-          application_fee_paid: false,
-          documents_uploaded:   false,
-        },
       })
       .select("id, name, phone, source, stage, application_id")
       .single();

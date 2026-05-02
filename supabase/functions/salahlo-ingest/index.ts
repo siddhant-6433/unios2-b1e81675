@@ -195,7 +195,7 @@ Deno.serve(async (req) => {
 
     // ── Generate application ID ──────────────────────────────────────────
     const appId = `APP-${new Date().getFullYear().toString().slice(-2)}-${
-      String(Math.floor(Math.random() * 9000) + 1000)
+      (() => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let s = ""; for (let i = 0; i < 6; i++) s += c[Math.floor(Math.random() * c.length)]; return s; })()
     }`;
 
     // ── Insert lead ──────────────────────────────────────────────────────

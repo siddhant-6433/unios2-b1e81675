@@ -62,6 +62,7 @@ const admissionSubMenu: MenuItem[] = [
   { title: "My Leads", url: "/consultant-portal", icon: Users, permission: "consultant_portal:view", hideForSuperAdmin: true },
   { title: "Publisher Leads", url: "/publisher-portal", icon: Users, permission: "publisher_portal:view", hideForSuperAdmin: true },
   { title: "Publisher Portal", url: "/publisher-portal", icon: Users, permission: "user_management:view" },
+  { title: "Publisher Analytics", url: "/publisher-analytics", icon: PieChart, permission: "user_management:view" },
   { title: "Analytics", url: "/admission-analytics", icon: PieChart, permission: "analytics:view" },
 ];
 
