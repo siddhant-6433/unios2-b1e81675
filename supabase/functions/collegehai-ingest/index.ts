@@ -235,10 +235,6 @@ Deno.serve(async (req) => {
     }
 
     // ── Generate unique application ID ───────────────────────────────────
-    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    let appId = "";
-    for (let i = 0; i < 6; i++) appId += chars[Math.floor(Math.random() * chars.length)];
-    appId = `APP-${new Date().getFullYear().toString().slice(-2)}-${appId}`;
 
     // ── Insert lead ──────────────────────────────────────────────────────
     const { data: lead, error } = await supabase
@@ -255,9 +251,8 @@ Deno.serve(async (req) => {
         state:            body.state || null,
         notes:            notes?.slice(0, 1000) || null,
         stage:            "new_lead",
-        application_id:   appId,
       })
-      .select("id, name, phone, source, stage, application_id")
+      .select("id, name, phone, source, stage")
       .single();
 
     if (error) {

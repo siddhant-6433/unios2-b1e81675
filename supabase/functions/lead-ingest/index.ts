@@ -374,7 +374,6 @@ Deno.serve(async (req) => {
     // ── Insert lead ──
 
     // Generate application ID
-    const appId = `APP-${new Date().getFullYear().toString().slice(-2)}-${String(Math.floor(Math.random() * 9000) + 1000)}`;
 
     const { data: lead, error } = await supabase
       .from("leads")
@@ -395,15 +394,9 @@ Deno.serve(async (req) => {
         notes: parsed.notes?.slice(0, 1000) || null,
         stage: "new_lead",
         skip_ai_call: skipAiCallSources.includes(leadSource),
-        application_id: appId,
-        application_progress: {
-          personal_details: false,
-          education_details: false,
-          application_fee_paid: false,
-          documents_uploaded: false,
         },
       })
-      .select("id, name, phone, source, stage, application_id")
+      .select("id, name, phone, source, stage")
       .single();
 
     if (error) {

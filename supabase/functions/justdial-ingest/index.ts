@@ -291,7 +291,6 @@ Deno.serve(async (req) => {
     }
 
     // ── Insert lead ───────────────────────────────────────────────────────
-    const appId = `APP-${new Date().getFullYear().toString().slice(-2)}-${
       (() => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let s = ""; for (let i = 0; i < 6; i++) s += c[Math.floor(Math.random() * c.length)]; return s; })()
     }`;
 
@@ -311,12 +310,6 @@ Deno.serve(async (req) => {
         jd_contract_id: contractId || null,
         notes:          notesParts.join(" | ").slice(0, 1000) || null,
         stage:          "new_lead",
-        application_id: appId,
-        application_progress: {
-          personal_details:     false,
-          education_details:    false,
-          application_fee_paid: false,
-          documents_uploaded:   false,
         },
       })
       .select("id, name, phone, source, stage")

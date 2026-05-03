@@ -141,8 +141,17 @@ Deno.serve(async (req) => {
         .filter(lid => activeSet.has(lid))
         .map(lid => ({ lead_id: lid, status: "pending", scheduled_at: new Date(Date.now() + 4 * 3600000).toISOString() }));
     }
+    // Defense in depth: even though we already filtered out leads with pending
+    // entries, a race could let a row sneak in between our check and insert.
+    // The partial unique index on (lead_id) WHERE status='pending' will reject
+    // those — swallow the unique-violation (23505) so the rest of the batch
+    // still lands.
     for (let i = 0; i < retryInserts.length; i += 100) {
-      await db.from("ai_call_queue").insert(retryInserts.slice(i, i + 100));
+      const batch = retryInserts.slice(i, i + 100);
+      const { error } = await db.from("ai_call_queue").insert(batch);
+      if (error && error.code !== "23505") {
+        console.error("[ai-call-failed-handler] queue insert error:", error);
+      }
     }
     retries = retryInserts.length;
 

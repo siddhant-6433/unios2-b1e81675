@@ -379,7 +379,13 @@ Deno.serve(async (req) => {
                 status: "pending",
                 scheduled_at: scheduledAt,
               });
-              if (qErr) {
+              // 23505 = unique violation from the partial unique index on
+              // (lead_id) WHERE status='pending' — lead is already queued,
+              // not an error.
+              if (qErr && (qErr as any).code === "23505") {
+                console.log(`AI call already pending for ${lead.name} — skipping enqueue`);
+                executedActions.push({ type: "ai_call", result: "already_pending" });
+              } else if (qErr) {
                 console.error("AI call queue insert failed:", qErr.message);
                 executedActions.push({ type: "ai_call", result: `queue_error: ${qErr.message}` });
               } else {

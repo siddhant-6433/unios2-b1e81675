@@ -57,21 +57,40 @@ Deno.serve(async (req) => {
 
     // Insert into queue table — cron picks up 5 per minute
     // Stagger 12s apart so 5 fit within each 1-minute cron window
-    const queueRows = validIds.map((id: string, i: number) => ({
+    // The `(lead_id) WHERE status='pending'` partial unique index would
+    // reject the entire batch if even one lead already has a pending row.
+    // Filter those out first so the remaining insert is conflict-free.
+    let alreadyQueuedSkipped = 0;
+    let insertIds = validIds as string[];
+    if (validIds.length > 0) {
+      const { data: existing } = await db
+        .from("ai_call_queue" as any)
+        .select("lead_id")
+        .eq("status", "pending")
+        .in("lead_id", validIds);
+      const pending = new Set((existing || []).map((r: any) => r.lead_id));
+      insertIds = validIds.filter((id: string) => !pending.has(id));
+      alreadyQueuedSkipped = validIds.length - insertIds.length;
+    }
+
+    const queueRows = insertIds.map((id: string, i: number) => ({
       lead_id: id,
       status: "pending",
       scheduled_at: new Date(Date.now() + i * 12000).toISOString(),
       requested_by: user.id,
     }));
 
-    const { error: qErr } = await db.from("ai_call_queue" as any).insert(queueRows);
-    if (qErr) return json({ error: `Queue insert failed: ${qErr.message}` }, 500);
+    if (queueRows.length > 0) {
+      const { error: qErr } = await db.from("ai_call_queue" as any).insert(queueRows);
+      if (qErr) return json({ error: `Queue insert failed: ${qErr.message}` }, 500);
+    }
 
     return json({
       success: true,
-      queued: validIds.length,
-      skipped,
-      message: `${validIds.length} AI calls queued. They will be processed every 30 seconds.`,
+      queued: insertIds.length,
+      skipped: skipped + alreadyQueuedSkipped,
+      already_pending: alreadyQueuedSkipped,
+      message: `${insertIds.length} AI calls queued${alreadyQueuedSkipped ? ` (${alreadyQueuedSkipped} already pending)` : ""}.`,
     });
   } catch (err: any) {
     return json({ error: err.message }, 500);
