@@ -17,6 +17,27 @@
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="NIMT UniOs">
     <meta name="twitter:description" content="Student Lifecycle Management">
+
+    <!-- Google Analytics — apply portal only.
+         The same SPA also serves the internal CRM (uni.nimt.ac.in); we don't
+         want to count staff sessions in the apply.nimt.ac.in property. -->
+    <script>
+      (function () {
+        if (window.location.hostname !== "apply.nimt.ac.in") return;
+        var s = document.createElement("script");
+        s.async = true;
+        s.src = "https://www.googletagmanager.com/gtag/js?id=G-MKHMKH1DE9";
+        document.head.appendChild(s);
+        window.dataLayer = window.dataLayer || [];
+        window.gtag = function () { window.dataLayer.push(arguments); };
+        window.gtag("js", new Date());
+        window.gtag("config", "G-MKHMKH1DE9", {
+          // linker.domains keeps the same client_id when users navigate from
+          // nimt.ac.in / miraischool.in / school.nimt.ac.in into apply
+          linker: { domains: ["nimt.ac.in", "miraischool.in", "school.nimt.ac.in"] }
+        });
+      })();
+    </script>
   </head>
 
   <body>

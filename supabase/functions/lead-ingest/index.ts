@@ -252,6 +252,25 @@ Deno.serve(async (req) => {
 
     const normPhone = normalisePhone(parsed.phone);
 
+    // GA4 attribution context — passed by all 3 marketing sites and the
+    // apply portal in the request body. Independent of source-specific
+    // parsers since these fields are universal. The ga-conversions DB
+    // trigger reads them later to fire generate_lead / purchase /
+    // admission_confirmed events into the right GA4 property.
+    const attribution = {
+      ga_client_id:  body.ga_client_id  || null,
+      ga_session_id: body.ga_session_id || null,
+      gclid:         body.gclid         || null,
+      utm_source:    body.utm_source    || null,
+      utm_medium:    body.utm_medium    || null,
+      utm_campaign:  body.utm_campaign  || null,
+      utm_term:      body.utm_term      || null,
+      utm_content:   body.utm_content   || null,
+      landing_page:  body.landing_page  || null,
+      referrer:      body.referrer      || null,
+      origin_domain: body.origin_domain || null,
+    };
+
     // Supabase client (service role for inserts)
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -394,7 +413,7 @@ Deno.serve(async (req) => {
         notes: parsed.notes?.slice(0, 1000) || null,
         stage: "new_lead",
         skip_ai_call: skipAiCallSources.includes(leadSource),
-        },
+        ...attribution,
       })
       .select("id, name, phone, source, stage")
       .single();

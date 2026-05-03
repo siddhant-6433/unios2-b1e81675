@@ -27,6 +27,7 @@ import { PortalProvider, usePortal } from "@/components/apply/PortalContext";
 import { TokenFeePanel } from "@/components/applicant/TokenFeePanel";
 import { ApplicationPreview, type PreviewDoc } from "@/components/applicant/ApplicationPreview";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
+import { captureAttribution } from "@/lib/analytics";
 
 // ─── OTP Login Screen ───
 function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: string) => void }) {
@@ -1159,8 +1160,15 @@ const ApplyPortal = () => {
     }
 
     // Create/link lead via SECURITY DEFINER RPC (bypasses RLS restrictions on
-    // the authenticated applicant, who has no staff role)
+    // the authenticated applicant, who has no staff role).
+    // Attribution params (gclid, utm_*, _ga client_id, hostname) are captured
+    // from cookies + URL so the ga-conversions DB trigger can later fire
+    // generate_lead / purchase / admission_confirmed events back to the
+    // originating GA4 property via Measurement Protocol. Server-side is the
+    // single source of truth — we don't fire these events browser-side because
+    // GA has no transaction_id on generate_lead, so dual fires would double-count.
     let resolvedLeadId = leadId;
+    const attribution = captureAttribution();
     const { data: upsertedLeadId, error: leadErr } = await supabase.rpc(
       "upsert_application_lead" as any,
       {
@@ -1171,6 +1179,7 @@ const ApplyPortal = () => {
         _campus_id: selections[0]?.campus_id ?? null,
         _application_id: appId,
         _source: leadSource,
+        ...attribution,
       }
     );
     if (leadErr) {
