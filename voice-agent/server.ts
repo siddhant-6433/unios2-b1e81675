@@ -1265,7 +1265,12 @@ Deno.serve({ port: PORT }, async (req) => {
     const callId = `inbound-${crypto.randomUUID().slice(0, 8)}`;
     const host = req.headers.get("host") || url.host;
     const wsProtocol = host.includes("localhost") ? "ws" : "wss";
-    const PLIVO_PHONE_NUMBER = Deno.env.get("PLIVO_PHONE_NUMBER") || "";
+    // The number the lead actually dialed — use that as the callerId when
+    // forwarding to the counsellor so they see which DID was called (AI
+    // primary, AI backup, or the dialer number if a lead happened to ring it).
+    // Falls back to the configured AI primary if Plivo didn't pass `To`.
+    const PLIVO_PHONE_NUMBER = (params.To as string) ||
+      Deno.env.get("PLIVO_AI_PHONE_NUMBER") || "";
 
     console.log(`[${callId}] Inbound call from ${callerPhone}`);
 
@@ -1832,7 +1837,10 @@ Deno.serve({ port: PORT }, async (req) => {
   if (path.startsWith("/bridge-answer/")) {
     const callId = path.split("/bridge-answer/")[1];
     const studentPhone = url.searchParams.get("student") || "";
-    const PLIVO_PHONE_NUMBER = Deno.env.get("PLIVO_PHONE_NUMBER") || "";
+    // Cloud dialer number — what the student sees as caller-id when the
+    // counsellor's leg bridges them in. Kept distinct from the AI agent's
+    // number so inbound returns route to the right answer flow.
+    const PLIVO_PHONE_NUMBER = Deno.env.get("PLIVO_DIALER_PHONE_NUMBER") || "";
     const recordingCallbackUrl = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/voice-call-callback` : "";
     const host = req.headers.get("host") || url.host;
     const statusUrl = `https://${host}/bridge-status/${callId}`;

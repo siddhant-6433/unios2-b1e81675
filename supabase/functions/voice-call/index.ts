@@ -5,7 +5,7 @@
  *   - outbound: Initiate an AI outbound call to a lead via Plivo
  *   - status:   Check call status
  *
- * Env vars: PLIVO_AUTH_ID, PLIVO_AUTH_TOKEN, PLIVO_PHONE_NUMBER,
+ * Env vars: PLIVO_AUTH_ID, PLIVO_AUTH_TOKEN, PLIVO_AI_PHONE_NUMBER, PLIVO_AI_BACKUP_PHONE_NUMBER,
  *           VOICE_AGENT_URL (public URL of voice-agent server),
  *           SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
  */
@@ -31,13 +31,18 @@ Deno.serve(async (req) => {
   try {
     const PLIVO_AUTH_ID = Deno.env.get("PLIVO_AUTH_ID");
     const PLIVO_AUTH_TOKEN = Deno.env.get("PLIVO_AUTH_TOKEN");
-    const PLIVO_PHONE_NUMBER = Deno.env.get("PLIVO_PHONE_NUMBER"); // Your Plivo Indian number
+    // AI outbound number (primary) — dedicated to this function so the cloud
+    // dialer's caller-id stays separate.
+    const PLIVO_AI_PHONE_NUMBER = Deno.env.get("PLIVO_AI_PHONE_NUMBER");
+    // Backup HA number — used if the primary fails (Plivo non-2xx or fetch error).
+    // Optional: when unset, no failover is attempted.
+    const PLIVO_AI_BACKUP_PHONE_NUMBER = Deno.env.get("PLIVO_AI_BACKUP_PHONE_NUMBER");
     const VOICE_AGENT_URL = Deno.env.get("VOICE_AGENT_URL"); // e.g. https://voice.nimt.ac.in
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    if (!PLIVO_AUTH_ID || !PLIVO_AUTH_TOKEN || !PLIVO_PHONE_NUMBER || !VOICE_AGENT_URL) {
-      return json({ error: "Voice calling not configured. Set PLIVO_AUTH_ID, PLIVO_AUTH_TOKEN, PLIVO_PHONE_NUMBER, VOICE_AGENT_URL." }, 503);
+    if (!PLIVO_AUTH_ID || !PLIVO_AUTH_TOKEN || !PLIVO_AI_PHONE_NUMBER || !VOICE_AGENT_URL) {
+      return json({ error: "Voice calling not configured. Set PLIVO_AUTH_ID, PLIVO_AUTH_TOKEN, PLIVO_AI_PHONE_NUMBER, VOICE_AGENT_URL." }, 503);
     }
 
     // Auth: accept service role JWT (cron/queue) OR anon key (manual button).
@@ -133,8 +138,8 @@ Deno.serve(async (req) => {
       // Callback URL for recording — points to our voice-call-callback function
       const recordingCallbackUrl = `${supabaseUrl}/functions/v1/voice-call-callback`;
 
-      const plivoPayload: Record<string, any> = {
-        from: PLIVO_PHONE_NUMBER,
+      const buildPayload = (fromNumber: string): Record<string, any> => ({
+        from: fromNumber,
         to: phone,
         answer_url: answerUrl,
         answer_method: "POST",
@@ -146,23 +151,40 @@ Deno.serve(async (req) => {
         machine_detection_time: "5000",
         machine_detection_url: statusUrl,
         machine_detection_method: "POST",
-      };
-
-      console.log("Plivo call payload:", JSON.stringify({ ...plivoPayload, from: "***", to: phone.slice(-4) }));
-
-      const plivoRes = await fetch(plivoUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: "Basic " + btoa(`${PLIVO_AUTH_ID}:${PLIVO_AUTH_TOKEN}`),
-        },
-        body: JSON.stringify(plivoPayload),
       });
 
-      const plivoResult = await plivoRes.json();
-      console.log("Plivo response:", JSON.stringify(plivoResult));
+      // Try primary AI number first; on Plivo non-2xx OR network error, retry
+      // once with the backup HA number (if configured). This protects against
+      // single-number outages (Plivo throttling, carrier-side rejection of a
+      // specific DID, billing pause on one number, etc.).
+      const tryPlace = async (fromNumber: string) => {
+        const payload = buildPayload(fromNumber);
+        console.log("Plivo call payload:", JSON.stringify({ ...payload, from: fromNumber.slice(-4), to: phone.slice(-4) }));
+        const res = await fetch(plivoUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Basic " + btoa(`${PLIVO_AUTH_ID}:${PLIVO_AUTH_TOKEN}`),
+          },
+          body: JSON.stringify(payload),
+        });
+        const json = await res.json().catch(() => ({}));
+        return { ok: res.ok, status: res.status, body: json };
+      };
 
-      if (!plivoRes.ok) {
+      let attempt = await tryPlace(PLIVO_AI_PHONE_NUMBER!).catch((e) => ({ ok: false, status: 0, body: { error: String(e) } }));
+      let usedFromNumber = PLIVO_AI_PHONE_NUMBER!;
+
+      if (!attempt.ok && PLIVO_AI_BACKUP_PHONE_NUMBER && PLIVO_AI_BACKUP_PHONE_NUMBER !== PLIVO_AI_PHONE_NUMBER) {
+        console.warn(`Primary Plivo number ${PLIVO_AI_PHONE_NUMBER!.slice(-4)} failed (status=${attempt.status}); failing over to backup`);
+        attempt = await tryPlace(PLIVO_AI_BACKUP_PHONE_NUMBER).catch((e) => ({ ok: false, status: 0, body: { error: String(e) } }));
+        usedFromNumber = PLIVO_AI_BACKUP_PHONE_NUMBER;
+      }
+
+      const plivoResult = attempt.body as any;
+      console.log("Plivo response:", JSON.stringify(plivoResult), `(from=${usedFromNumber.slice(-4)})`);
+
+      if (!attempt.ok) {
         console.error("Plivo call error:", plivoResult);
         return json({ error: plivoResult?.error || "Failed to initiate call" }, 502);
       }

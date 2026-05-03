@@ -35,12 +35,14 @@ Deno.serve(async (req) => {
   try {
     const PLIVO_AUTH_ID = Deno.env.get("PLIVO_AUTH_ID");
     const PLIVO_AUTH_TOKEN = Deno.env.get("PLIVO_AUTH_TOKEN");
-    const PLIVO_PHONE_NUMBER = Deno.env.get("PLIVO_PHONE_NUMBER");
+    // Cloud-dialer caller-id — separate from the AI agent's number so leads
+    // can tell whether they're being called by an AI vs a human counsellor.
+    const PLIVO_DIALER_PHONE_NUMBER = Deno.env.get("PLIVO_DIALER_PHONE_NUMBER");
     const VOICE_AGENT_URL = Deno.env.get("VOICE_AGENT_URL");
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    if (!PLIVO_AUTH_ID || !PLIVO_AUTH_TOKEN || !PLIVO_PHONE_NUMBER || !VOICE_AGENT_URL) {
+    if (!PLIVO_AUTH_ID || !PLIVO_AUTH_TOKEN || !PLIVO_DIALER_PHONE_NUMBER || !VOICE_AGENT_URL) {
       return json({ error: "Calling not configured. Contact admin." }, 503);
     }
 
@@ -113,7 +115,7 @@ Deno.serve(async (req) => {
     const hangupUrl = `${VOICE_AGENT_URL}/bridge-hangup/${callId}`;
 
     const plivoPayload = {
-      from: PLIVO_PHONE_NUMBER,
+      from: PLIVO_DIALER_PHONE_NUMBER,
       to: counsellorPhone,
       answer_url: answerUrl,
       answer_method: "GET",
