@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Bot, Search, Loader2, CheckCircle, Play, AlertCircle, ChevronLeft, ChevronRight, Calendar,
 } from "lucide-react";
+import { AiCallQueueStatus } from "@/components/admissions/AiCallQueueStatus";
 
 interface AiCallRecord {
   id: string;
@@ -210,6 +211,9 @@ const AiCallLog = () => {
         <h1 className="text-2xl font-bold text-foreground">AI Call Log</h1>
         <p className="text-sm text-muted-foreground mt-1">All AI-initiated calls with recordings and assessments</p>
       </div>
+
+      {/* Live queue status — auto-refreshes every 20s */}
+      <AiCallQueueStatus />
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
