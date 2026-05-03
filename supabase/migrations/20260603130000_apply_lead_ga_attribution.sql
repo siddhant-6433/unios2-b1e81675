@@ -8,6 +8,11 @@
 -- caller omit it when the apply portal is hosted on the canonical
 -- apply.nimt.ac.in domain.
 
+-- Drop the previous 7-param signature first; CREATE OR REPLACE only matches
+-- on identical signatures and would otherwise leave the old overload behind,
+-- making the trailing GRANT EXECUTE ambiguous.
+DROP FUNCTION IF EXISTS public.upsert_application_lead(text, text, text, uuid, uuid, text, text);
+
 CREATE OR REPLACE FUNCTION public.upsert_application_lead(
   _name text,
   _phone text,
@@ -99,4 +104,7 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.upsert_application_lead TO authenticated, anon, service_role;
+GRANT EXECUTE ON FUNCTION public.upsert_application_lead(
+  text, text, text, uuid, uuid, text, text,
+  text, text, text, text, text, text, text, text, text, text, text
+) TO authenticated, anon, service_role;
