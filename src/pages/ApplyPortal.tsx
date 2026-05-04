@@ -1323,6 +1323,12 @@ const ApplyPortal = () => {
     // storage (fire-and-forget). Application form is generated for every
     // submission; fee receipt is generated only when the application fee
     // is already paid (typical flow: pay fee then submit).
+    //
+    // After PDFs are kicked off, fire the lifecycle notification so the
+    // applicant gets WhatsApp confirmation and counsellor / TL / super_admin
+    // get the internal email. Brief delay so the form-PDF generator has a
+    // chance to populate applications.form_pdf_url before notify-event
+    // looks it up — keeps the WA button URL non-empty for most cases.
     supabase.functions.invoke("generate-application-form", {
       body: { application_id: app.application_id },
     }).catch(() => {});
@@ -1330,6 +1336,17 @@ const ApplyPortal = () => {
       supabase.functions.invoke("generate-application-fee-receipt", {
         body: { application_id: app.application_id },
       }).catch(() => {});
+    }
+    if (app.lead_id) {
+      setTimeout(() => {
+        supabase.functions.invoke("notify-event", {
+          body: {
+            event: "app_submitted",
+            lead_id: app.lead_id,
+            context: { application_id: app.application_id },
+          },
+        }).catch(() => {});
+      }, 4000);
     }
   };
 

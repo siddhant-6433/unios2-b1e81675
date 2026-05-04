@@ -42,6 +42,23 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   // Body params: name, admission_no. The claim URL is passed as the dynamic suffix
   // for the template's URL button (button_urls=[claim_url]).
   student_portal_invite: { name: "student_portal_invite", params: ["student_name", "admission_no"] },
+
+  // ── Lifecycle notifications (5 events) ────────────────────────────────
+  // Each requires a matching template in Meta Business Manager. Until
+  // approved there, sends fail gracefully and the trigger logs the URL
+  // for manual delivery via lead_activities.
+
+  // 1. Application submitted — confirms receipt, attaches form PDF as button URL.
+  application_submitted:  { name: "application_submitted",  params: ["student_name", "application_id"] },
+  // 2. Application fee paid — receipt + form PDF link.
+  app_fee_receipt:        { name: "app_fee_receipt",        params: ["student_name", "amount", "application_id"] },
+  // 3. Offer letter issued — offer PDF + magic-link to accept & pay token.
+  // button_urls = [offer_pdf_url, magic_pay_url]
+  offer_letter_issued:    { name: "offer_letter_issued",    params: ["student_name", "course_name", "net_fee", "deadline"] },
+  // 4. PAN issued — nudge to pay balance for AN. magic_pay_url for one-tap.
+  pan_nudge_balance:      { name: "pan_nudge_balance",      params: ["student_name", "pre_admission_no", "balance_amount"] },
+  // 5. Token / other fee paid — receipt PDF link.
+  payment_receipt:        { name: "payment_receipt",        params: ["student_name", "amount", "receipt_no"] },
 };
 
 Deno.serve(async (req) => {
@@ -212,6 +229,11 @@ Deno.serve(async (req) => {
       staff_welcome: "Welcome to NIMT Educational Institutions, {{1}}!\n\nYou have been added as {{2}} at {{3}}.\n\nPlease check your email for login details.\n\nFor any assistance, contact the admin office.",
       student_welcome: "Congratulations {{1}}!\n\nWelcome to NIMT Educational Institutions.\n\nAdmission No: {{2}}\nCourse: {{3}}\nCampus: {{4}}\n\nYou can access the student portal at https://uni.nimt.ac.in\n\nWe wish you a great academic journey ahead!",
       student_portal_invite: "Welcome {{1}}! Your admission (AN: {{2}}) is confirmed. Tap the button below to access the Student Portal — fees, attendance, notices, and more.",
+      application_submitted: "Hi {{1}}, your application ({{2}}) has been received. Please pay the application fee to begin processing. The completed form PDF is attached for your records.",
+      app_fee_receipt: "Hi {{1}}, we've received your application fee of ₹{{2}}. Application: {{3}}. Receipt PDF is attached. Our admissions team will reach out for the next steps.",
+      offer_letter_issued: "Congratulations {{1}}! You have been offered admission to {{2}}. Net fee: ₹{{3}}. Please accept by {{4}}. Tap below to view the offer letter and pay your token fee online.",
+      pan_nudge_balance: "Hi {{1}}, your pre-admission number is {{2}}. Pay the balance of ₹{{3}} to confirm enrollment and receive your Admission Number. Tap below to pay online.",
+      payment_receipt: "Dear {{1}}, payment of ₹{{2}} received. Receipt no: {{3}}. The receipt PDF is attached for your records.",
       applicant_welcome: "Hi {{1}}, thank you for starting your application at NIMT Educational Institutions!\n\nYour Application ID: {{2}}\nCourse: {{3}}\n\nComplete your application at https://uni.nimt.ac.in/apply/nimt/\n\nOur admissions team is here to help. Feel free to reach out anytime!",
       ai_call_course_info: "Hi {{1}}, thank you for speaking with us about {{2}} at NIMT Educational Institutions! 🎓\n\n🏫 Campus: {{3}}\n\n📄 Course Details: {{4}}\n📝 Apply Now: {{5}}\n\nFor questions, reply to this message or call our admissions team.\n\nWe look forward to welcoming you!",
     };
