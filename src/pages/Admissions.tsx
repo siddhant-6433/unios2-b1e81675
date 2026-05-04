@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { AddLeadDialog } from "@/components/admissions/AddLeadDialog";
+import { LeadDraftsPanel } from "@/components/admissions/LeadDraftsPanel";
 import { BulkLeadImportDialog } from "@/components/admissions/BulkLeadImportDialog";
 import { TransferLeadDialog } from "@/components/admissions/TransferLeadDialog";
 import { BulkWhatsAppDialog } from "@/components/admissions/BulkWhatsAppDialog";
@@ -173,6 +174,8 @@ const Admissions = () => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddLead, setShowAddLead] = useState(false);
+  const [resumeDraftId, setResumeDraftId] = useState<string | undefined>();
+  const [draftsRefreshKey, setDraftsRefreshKey] = useState(0);
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [inactiveIds, setInactiveIds] = useState<Set<string> | null>(null);
   const [followupLeadIds, setFollowupLeadIds] = useState<Set<string> | null>(null);
@@ -699,9 +702,15 @@ const Admissions = () => {
         <div className="flex items-center gap-3">
           {role === "counsellor" && <CounsellorScoreBadge />}
           <Button variant="outline" onClick={() => setShowBulkImport(true)} className="gap-2"><Upload className="h-4 w-4" />Import CSV</Button>
-          <Button onClick={() => setShowAddLead(true)} className="gap-2"><Plus className="h-4 w-4" />Add Lead</Button>
+          <Button onClick={() => { setResumeDraftId(undefined); setShowAddLead(true); }} className="gap-2"><Plus className="h-4 w-4" />Add Lead</Button>
         </div>
       </div>
+
+      {/* Resumable lead drafts (autosaved from AddLeadDialog) */}
+      <LeadDraftsPanel
+        refreshKey={draftsRefreshKey}
+        onResume={(id) => { setResumeDraftId(id); setShowAddLead(true); }}
+      />
 
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
@@ -1417,7 +1426,13 @@ const Admissions = () => {
         </>
       )}
 
-      <AddLeadDialog open={showAddLead} onOpenChange={setShowAddLead} onSuccess={fetchLeads} />
+      <AddLeadDialog
+        open={showAddLead}
+        onOpenChange={(o) => { setShowAddLead(o); if (!o) setResumeDraftId(undefined); }}
+        onSuccess={fetchLeads}
+        resumeDraftId={resumeDraftId}
+        onDraftChange={() => setDraftsRefreshKey(k => k + 1)}
+      />
       <BulkLeadImportDialog open={showBulkImport} onOpenChange={setShowBulkImport} onSuccess={fetchLeads} />
 
       {/* Bulk WhatsApp */}

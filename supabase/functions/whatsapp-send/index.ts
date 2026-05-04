@@ -38,6 +38,10 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   post_call_feedback: { name: "post_interaction_feedback", params: ["student_name", "interaction_text"] },
   post_visit_feedback: { name: "post_interaction_feedback", params: ["student_name", "interaction_text"] },
   counsellor_followup_overdue: { name: "counsellor_followup_overdue", params: ["lead_name", "followup_date"] },
+  // Sent when AN issues — gives student a one-click link to claim StudentPortal access.
+  // Body params: name, admission_no. The claim URL is passed as the dynamic suffix
+  // for the template's URL button (button_urls=[claim_url]).
+  student_portal_invite: { name: "student_portal_invite", params: ["student_name", "admission_no"] },
 };
 
 Deno.serve(async (req) => {
@@ -207,6 +211,7 @@ Deno.serve(async (req) => {
       callback_scheduled: "Dear {{1}}, thank you for your time regarding {{2}} at NIMT Educational Institutions. As per your request, a counsellor from the admissions office will reach out to you at a suitable time. If you need to reschedule or have any queries, please reply to this message. We are happy to assist you.",
       staff_welcome: "Welcome to NIMT Educational Institutions, {{1}}!\n\nYou have been added as {{2}} at {{3}}.\n\nPlease check your email for login details.\n\nFor any assistance, contact the admin office.",
       student_welcome: "Congratulations {{1}}!\n\nWelcome to NIMT Educational Institutions.\n\nAdmission No: {{2}}\nCourse: {{3}}\nCampus: {{4}}\n\nYou can access the student portal at https://uni.nimt.ac.in\n\nWe wish you a great academic journey ahead!",
+      student_portal_invite: "Welcome {{1}}! Your admission (AN: {{2}}) is confirmed. Tap the button below to access the Student Portal — fees, attendance, notices, and more.",
       applicant_welcome: "Hi {{1}}, thank you for starting your application at NIMT Educational Institutions!\n\nYour Application ID: {{2}}\nCourse: {{3}}\n\nComplete your application at https://uni.nimt.ac.in/apply/nimt/\n\nOur admissions team is here to help. Feel free to reach out anytime!",
       ai_call_course_info: "Hi {{1}}, thank you for speaking with us about {{2}} at NIMT Educational Institutions! 🎓\n\n🏫 Campus: {{3}}\n\n📄 Course Details: {{4}}\n📝 Apply Now: {{5}}\n\nFor questions, reply to this message or call our admissions team.\n\nWe look forward to welcoming you!",
     };
