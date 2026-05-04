@@ -830,7 +830,10 @@ function ApplicationDashboardView({
             const courses = (a.course_selections || []).map((c: any) => c.course_name).filter(Boolean);
             const badge = statusBadge(a.status, a.payment_status);
             const offer = a.lead_id ? offerLetters[a.lead_id] : undefined;
-            const hasOffer = offer?.approval_status === "approved" && offer.letter_url;
+            // An offer is "live" (token fee payable) the moment it's approved —
+            // PDF generation is asynchronous and shouldn't block payment.
+            const hasApprovedOffer = offer?.approval_status === "approved";
+            const hasLetterPdf = hasApprovedOffer && !!offer.letter_url;
             const isDraft = a.status === "draft";
             const isPaid = a.payment_status === "paid";
             const isOpen = openAppId === a.id;
@@ -879,14 +882,20 @@ function ApplicationDashboardView({
                         <Receipt className="h-3.5 w-3.5" /> Fee Receipt
                       </Button>
                     )}
-                    {hasOffer && (
+                    {hasLetterPdf && (
                       <Button size="sm" variant="outline" className="gap-1.5" asChild>
                         <a href={offer!.letter_url!} target="_blank" rel="noreferrer">
                           <Award className="h-3.5 w-3.5" /> Offer Letter
                         </a>
                       </Button>
                     )}
-                    {hasOffer && (
+                    {hasApprovedOffer && !hasLetterPdf && (
+                      <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Offer letter being prepared…
+                      </span>
+                    )}
+                    {hasApprovedOffer && (
                       <Button
                         size="sm"
                         variant={isOpen ? "secondary" : "default"}
@@ -900,7 +909,7 @@ function ApplicationDashboardView({
 
                   {/* Inline TokenFeePanel — only mounts when expanded so its
                       DB queries don't fire for unrelated cards. */}
-                  {isOpen && hasOffer && (
+                  {isOpen && hasApprovedOffer && (
                     <TokenFeePanel
                       applicationId={a.application_id}
                       applicantName={a.full_name || ""}
@@ -1000,6 +1009,21 @@ const ApplyPortal = () => {
       const hasAnyPortalFlag = flags.some((f: string) => f.startsWith("portal:"));
       return !hasAnyPortalFlag;
     });
+
+    // Self-heal: any matched app whose flags don't yet carry the portal tag
+    // gets it added so future visits don't rely on the unflagged-fallback
+    // branch above. Fire-and-forget — the dashboard render doesn't depend on
+    // this completing. RLS on applications permits anon writes scoped by phone.
+    const needsTag = portalApps.filter(a => {
+      const f = (a.flags as string[]) || [];
+      return !f.includes(`portal:${portal.id}`);
+    });
+    if (needsTag.length > 0) {
+      void Promise.all(needsTag.map(a => {
+        const merged = [...((a.flags as string[]) || []), `portal:${portal.id}`];
+        return supabase.from("applications").update({ flags: merged }).eq("id", a.id);
+      })).catch(e => console.error("portal-flag self-heal failed:", e));
+    }
 
     // When ≥1 non-draft application exists, OR multiple apps exist, show the
     // dashboard so the student can pick what to do (continue, view PDFs,

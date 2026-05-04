@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Component, ReactNode, useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";

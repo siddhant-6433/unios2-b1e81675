@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, FileText, Plus, Gift, CheckCircle, XCircle, ShieldCheck } from "lucide-react";
+import { Loader2, FileText, Plus, Gift, CheckCircle, XCircle, ShieldCheck, RefreshCw, ExternalLink } from "lucide-react";
 
 interface OfferLetterDialogProps {
   open: boolean;
@@ -49,12 +49,63 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ total_fee: "", scholarship_amount: "0", acceptance_deadline: "", session_id: "" });
   const [sessions, setSessions] = useState<SessionOption[]>([]);
+  // Which offer's PDF is showing in the right-hand preview pane.
+  const [selectedOfferId, setSelectedOfferId] = useState<string | null>(null);
+  // Tracks an in-flight generate-offer-letter call so the preview pane can
+  // show a spinner instead of an empty placeholder while waiting.
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  // Bumped after every regenerate so the iframe url changes (?v=<n>) and the
+  // browser actually fetches the new bytes — the storage path is reused on
+  // upsert, so without this the cached PDF stays on screen.
+  const [pdfBust, setPdfBust] = useState<number>(() => Date.now());
 
   const fetchOffers = async () => {
     setLoading(true);
     const { data } = await supabase.from("offer_letters").select("*").eq("lead_id", leadId).order("created_at", { ascending: false });
-    if (data) setOffers(data);
+    if (data) {
+      setOffers(data);
+      // Auto-select most recent offer with a letter, falling back to most
+      // recent overall, so the preview pane is never empty when offers exist.
+      setSelectedOfferId(prev => {
+        if (prev && data.some(o => o.id === prev)) return prev;
+        const withPdf = data.find(o => !!o.letter_url);
+        return withPdf?.id || data[0]?.id || null;
+      });
+    }
     setLoading(false);
+  };
+
+  // Trigger PDF regeneration and poll until letter_url updates (or 20s elapse).
+  // Used both as a "Generate PDF" call when letter_url is null and as a manual
+  // "Regenerate" action when staff want to refresh an existing letter.
+  const regeneratePdf = async (offerId: string) => {
+    setRegeneratingId(offerId);
+    try {
+      const { error } = await supabase.functions.invoke("generate-offer-letter", {
+        body: { offer_letter_id: offerId },
+      });
+      if (error) {
+        toast({ title: "Couldn't generate PDF", description: error.message, variant: "destructive" });
+        return;
+      }
+      // Poll for the freshly written letter_url. The generator updates the row
+      // synchronously, so usually one fetch is enough; we poll for resilience.
+      for (let i = 0; i < 6; i++) {
+        await new Promise(r => setTimeout(r, 1500));
+        const { data } = await supabase.from("offer_letters").select("*").eq("id", offerId).single();
+        if (data?.letter_url) {
+          await fetchOffers();
+          // Bump cache-bust so the iframe re-fetches even though the URL
+          // path didn't change (upsert overwrites in place).
+          setPdfBust(Date.now());
+          toast({ title: "PDF ready" });
+          return;
+        }
+      }
+      toast({ title: "Still preparing", description: "PDF is taking longer than usual — refresh in a minute." });
+    } finally {
+      setRegeneratingId(null);
+    }
   };
 
   useEffect(() => { if (open) fetchOffers(); }, [open]);
@@ -112,10 +163,11 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
           ? `Offer letter issued: ₹${(totalFee - scholarship).toLocaleString("en-IN")} (Scholarship: ₹${scholarship.toLocaleString("en-IN")})`
           : `Offer letter submitted for principal approval: ₹${(totalFee - scholarship).toLocaleString("en-IN")}`,
       });
-      // If approved on create, generate the PDF immediately. The trigger
-      // already mirrored session_id and recomputed token_amount on the lead.
+      // If approved on create, generate the PDF immediately and poll for it
+      // so the preview pane lights up without needing a manual refresh.
       if (autoApproved && insertedOffer?.id) {
-        supabase.functions.invoke("generate-offer-letter", { body: { offer_letter_id: insertedOffer.id } }).catch(() => {});
+        setSelectedOfferId(insertedOffer.id);
+        regeneratePdf(insertedOffer.id).catch(() => {});
       }
 
       toast({
@@ -156,7 +208,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
         description: `Offer letter approved by ${role === "principal" ? "principal" : "super admin"}`,
       });
       // Fire the PDF generator now that the offer is officially approved.
-      supabase.functions.invoke("generate-offer-letter", { body: { offer_letter_id: offerId } }).catch(() => {});
+      setSelectedOfferId(offerId);
+      regeneratePdf(offerId).catch(() => {});
     } else {
       await supabase.from("lead_activities").insert({
         lead_id: leadId, user_id: user?.id || null, type: "offer",
@@ -196,14 +249,18 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     rejected: "bg-red-100 text-red-700 border-red-200",
   };
 
+  const selectedOffer = offers.find(o => o.id === selectedOfferId) || null;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="max-w-6xl w-[95vw] h-[90vh] p-0 gap-0 flex flex-col">
+        <DialogHeader className="px-5 pt-5 pb-3 border-b border-border shrink-0">
           <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5" /> Offer Letters — {leadName}</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 mt-2">
+        <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-[minmax(360px,420px)_1fr]">
+          {/* ─── Left: list + new-offer form ─── */}
+          <div className="overflow-y-auto px-5 py-4 space-y-4 border-b md:border-b-0 md:border-r border-border">
           {!showForm && (
             <Button onClick={() => setShowForm(true)} size="sm" className="gap-1.5"><Plus className="h-4 w-4" />New Offer</Button>
           )}
@@ -272,8 +329,13 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                 const isApprovedOffer = approvalStatus === "approved";
                 const isRejected = approvalStatus === "rejected";
 
+                const isSelected = selectedOfferId === offer.id;
                 return (
-                  <Card key={offer.id} className="border-border/60">
+                  <Card
+                    key={offer.id}
+                    onClick={() => setSelectedOfferId(offer.id)}
+                    className={`cursor-pointer transition-all ${isSelected ? "border-primary ring-2 ring-primary/20 bg-primary/5" : "border-border/60 hover:border-border"}`}
+                  >
                     <CardContent className="p-4">
                       <div className="flex items-start justify-between gap-2">
                         <div>
@@ -292,22 +354,10 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                           )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground flex-wrap">
+                      <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground flex-wrap">
                         <span>Issued: {new Date(offer.created_at).toLocaleDateString("en-IN")}</span>
                         {offer.acceptance_deadline && <span>Deadline: {new Date(offer.acceptance_deadline).toLocaleDateString("en-IN")}</span>}
                         {offer.accepted_at && <span>Accepted: {new Date(offer.accepted_at).toLocaleDateString("en-IN")}</span>}
-                        {offer.letter_url && (
-                          <a href={offer.letter_url} target="_blank" rel="noopener" className="text-primary hover:underline">Download PDF</a>
-                        )}
-                        {!offer.letter_url && offer.approval_status === "approved" && (
-                          <button
-                            onClick={async () => {
-                              await supabase.functions.invoke("generate-offer-letter", { body: { offer_letter_id: offer.id } });
-                              setTimeout(fetchOffers, 1500);
-                            }}
-                            className="text-primary hover:underline"
-                          >Generate PDF</button>
-                        )}
                       </div>
                       {offer.rejection_reason && (
                         <p className="text-xs text-destructive mt-1">Rejection: {offer.rejection_reason}</p>
@@ -315,7 +365,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
 
                       {/* Principal / Super admin approve/reject buttons */}
                       {isPending && isApprover && (
-                        <div className="flex gap-2 mt-3">
+                        <div className="flex gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
                           <Button size="sm" className="text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700" onClick={() => decideOffer(offer.id, "approved")}>
                             <CheckCircle className="h-3 w-3" /> Approve Offer
                           </Button>
@@ -330,7 +380,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
 
                       {/* Mark as accepted/rejected by student (only for approved offers in "issued" state) */}
                       {isApprovedOffer && offer.status === "issued" && (
-                        <div className="flex gap-2 mt-3">
+                        <div className="flex gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
                           <Button size="sm" variant="outline" className="text-xs" onClick={() => updateOfferStatus(offer.id, "accepted")}>Mark Accepted</Button>
                           <Button size="sm" variant="outline" className="text-xs text-destructive" onClick={() => updateOfferStatus(offer.id, "rejected")}>Mark Rejected</Button>
                         </div>
@@ -341,6 +391,90 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
               })}
             </div>
           )}
+          </div>
+
+          {/* ─── Right: PDF preview pane ─── */}
+          <div className="flex flex-col bg-muted/20 min-h-[400px]">
+            <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-b border-border bg-card shrink-0">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                {selectedOffer ? `Preview · ₹${selectedOffer.net_fee.toLocaleString("en-IN")}` : "Preview"}
+              </p>
+              {selectedOffer && (
+                <div className="flex items-center gap-1.5">
+                  {selectedOffer.letter_url && (
+                    <Button size="sm" variant="ghost" className="text-xs h-7 gap-1.5" asChild>
+                      <a href={selectedOffer.letter_url} target="_blank" rel="noopener">
+                        <ExternalLink className="h-3 w-3" /> Open
+                      </a>
+                    </Button>
+                  )}
+                  {selectedOffer.approval_status === "approved" && (
+                    <Button
+                      size="sm" variant="ghost" className="text-xs h-7 gap-1.5"
+                      onClick={() => regeneratePdf(selectedOffer.id)}
+                      disabled={regeneratingId === selectedOffer.id}
+                    >
+                      {regeneratingId === selectedOffer.id
+                        ? <Loader2 className="h-3 w-3 animate-spin" />
+                        : <RefreshCw className="h-3 w-3" />}
+                      Regenerate
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="flex-1 min-h-0 relative">
+              {!selectedOffer ? (
+                <div className="absolute inset-0 flex items-center justify-center text-center px-6">
+                  <div className="text-muted-foreground">
+                    <FileText className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                    <p className="text-sm">No offer selected.</p>
+                    <p className="text-xs mt-1">Issue a new offer to see its PDF preview here.</p>
+                  </div>
+                </div>
+              ) : selectedOffer.letter_url ? (
+                <iframe
+                  // Key bump forces React to fully remount the iframe element,
+                  // which triggers a fresh fetch. The stored PDF carries
+                  // `cache-control: no-cache` so the browser revalidates and
+                  // picks up the regenerated bytes even though the URL path
+                  // didn't change (storage upload is upsert-in-place).
+                  key={`${selectedOffer.id}:${pdfBust}`}
+                  src={selectedOffer.letter_url}
+                  title="Offer letter preview"
+                  className="absolute inset-0 w-full h-full border-0"
+                />
+              ) : selectedOffer.approval_status === "approved" ? (
+                <div className="absolute inset-0 flex items-center justify-center text-center px-6">
+                  <div className="space-y-3">
+                    <FileText className="h-10 w-10 mx-auto text-muted-foreground/40" />
+                    <p className="text-sm text-foreground font-medium">PDF not generated yet</p>
+                    <p className="text-xs text-muted-foreground max-w-xs mx-auto">
+                      The offer is approved but the letter PDF wasn't created. Generate it now to share with the student.
+                    </p>
+                    <Button
+                      size="sm"
+                      onClick={() => regeneratePdf(selectedOffer.id)}
+                      disabled={regeneratingId === selectedOffer.id}
+                      className="gap-1.5"
+                    >
+                      {regeneratingId === selectedOffer.id
+                        ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating…</>
+                        : <><FileText className="h-3.5 w-3.5" /> Generate PDF</>}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center text-center px-6">
+                  <div className="text-muted-foreground">
+                    <ShieldCheck className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                    <p className="text-sm">Awaiting approval</p>
+                    <p className="text-xs mt-1">PDF will be generated once the offer is approved.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
