@@ -23,41 +23,15 @@
  */
 
 import {
-  CheckCircle2, Circle, AlertCircle, FileCheck2,
+  CheckCircle2, AlertCircle, FileCheck2,
   CreditCard, ShieldCheck, Gift, Coins, GraduationCap, ArrowRight, Loader2,
 } from "lucide-react";
+import { computeStages, type LifecycleInput, type Stage, type StageState } from "@/lib/admissionLifecycle";
 
-interface DocCounts { total: number; verified: number; rejected: number; pending: number; }
-
-export interface LifecycleProps {
-  app: {
-    status: string;
-    payment_status: string | null;
-    approved_at: string | null;
-    rejection_reason: string | null;
-  } | null;
-  lead: { id: string; pre_admission_no?: string | null; admission_no?: string | null } | null;
-  /** Whether application has a linked lead at all. False when lead was deleted. */
-  hasLead: boolean;
-  /** Sum of confirmed application_fee payments. */
-  appFeePaid: number;
-  /** Whether at least one offer_letters row exists for this lead. */
-  hasOffer: boolean;
-  /** Document review counts. */
-  docs: DocCounts;
+export interface LifecycleProps extends LifecycleInput {
   /** Suggested action triggers for the call-to-action slot. */
   onApprove?: () => void;
   onIssueOffer?: () => void;
-}
-
-type StageState = "done" | "current" | "future" | "blocked";
-
-interface Stage {
-  key: string;
-  label: string;
-  Icon: typeof CheckCircle2;
-  state: StageState;
-  hint?: string;
 }
 
 export function AdmissionLifecycleStepper(p: LifecycleProps) {
@@ -131,45 +105,6 @@ function Connector({ from, to }: { from: StageState; to: StageState }) {
       <div className={`h-0.5 w-full ${filled ? "bg-emerald-400" : "bg-border"}`} />
     </div>
   );
-}
-
-// ── Stage computation ────────────────────────────────────────────────
-
-function computeStages(p: LifecycleProps): Stage[] {
-  const a = p.app;
-  if (!a) return [];
-
-  const isSubmitted   = a.status !== "draft";
-  const isFeePaid     = (a.payment_status === "paid") || p.appFeePaid > 0;
-  const allDocsReviewed = p.docs.total === 0 || (p.docs.pending === 0);
-  const isApproved    = a.status === "approved";
-  const isRejectedApp = a.status === "rejected";
-  const hasOffer      = p.hasOffer;
-  const hasPan        = !!p.lead?.pre_admission_no;
-  const hasAn         = !!p.lead?.admission_no;
-  const docsBlocked   = p.docs.rejected > 0 && !isRejectedApp;
-
-  // Resolve state for each stage in order. The first non-done stage is the
-  // "current" one; everything after it is "future" (unless explicitly blocked).
-  const raw: Array<Pick<Stage, "key" | "label" | "Icon"> & { hint?: string; isDone: boolean; isBlocked?: boolean }> = [
-    { key: "submitted", label: "Submitted",     Icon: FileCheck2, isDone: isSubmitted,    hint: a.status },
-    { key: "fee",       label: "Fee Paid",      Icon: CreditCard, isDone: isFeePaid,      hint: p.appFeePaid > 0 ? `₹${p.appFeePaid.toLocaleString("en-IN")}` : undefined },
-    { key: "docs",      label: "Docs Reviewed", Icon: ShieldCheck, isDone: allDocsReviewed && !docsBlocked, isBlocked: docsBlocked, hint: p.docs.total > 0 ? `${p.docs.verified}/${p.docs.total} verified` : "no docs" },
-    { key: "approved",  label: isRejectedApp ? "Rejected" : "Approved",  Icon: ShieldCheck, isDone: isApproved, isBlocked: isRejectedApp, hint: isApproved && a.approved_at ? "✓" : isRejectedApp ? "—" : undefined },
-    { key: "offer",     label: "Offer Issued",  Icon: Gift, isDone: hasOffer },
-    { key: "token",     label: "Token → PAN",   Icon: Coins, isDone: hasPan, hint: p.lead?.pre_admission_no || undefined },
-    { key: "admitted",  label: "Admitted",      Icon: GraduationCap, isDone: hasAn, hint: p.lead?.admission_no || undefined },
-  ];
-
-  let foundCurrent = false;
-  return raw.map(r => {
-    let state: StageState;
-    if (r.isBlocked) state = "blocked";
-    else if (r.isDone) state = "done";
-    else if (!foundCurrent) { state = "current"; foundCurrent = true; }
-    else state = "future";
-    return { key: r.key, label: r.label, Icon: r.Icon, state, hint: r.hint };
-  });
 }
 
 // ── Next-action computation ──────────────────────────────────────────

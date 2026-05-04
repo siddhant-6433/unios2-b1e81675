@@ -1,14 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { ApplyMagicLinkButton } from "@/components/leads/ApplyMagicLinkButton";
+import { MiniLifecycleStepper } from "@/components/admissions/MiniLifecycleStepper";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   FileText, Download, Eye, Loader2, Search, Filter, ExternalLink,
   CheckCircle, Clock, CreditCard, Upload, AlertCircle, ChevronDown, ChevronUp, X,
-  Sparkles, Send, Gift, Wallet, UserCheck, GraduationCap, Receipt, RefreshCw,
+  Sparkles, Send, Gift, Wallet, UserCheck, GraduationCap, Receipt, RefreshCw, ClipboardCheck,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -169,20 +170,45 @@ export default function Applications() {
         .order("created_at", { ascending: false });
       const rows = data || [];
 
-      // Batch-fetch counsellor names + lead stage via leads → profiles
+      // Batch-fetch counsellor names + lead stage + lifecycle data via
+      // leads → profiles → offer_letters → application_doc_reviews.
       const leadIds = [...new Set(rows.map((a: any) => a.lead_id).filter(Boolean))];
+      const appIdsForReview = rows.map((a: any) => a.application_id).filter(Boolean);
       const counsellorMap: Record<string, string> = {};
       const leadStageMap: Record<string, string> = {};
       const leadCounsellorIdMap: Record<string, string> = {};
+      const leadPanMap: Record<string, string | null> = {};
+      const leadAnMap: Record<string, string | null> = {};
+      const leadOfferMap: Record<string, boolean> = {};
+      const appFeePaidMap: Record<string, number> = {};
+      const appDocCountsMap: Record<string, { total: number; verified: number; rejected: number; pending: number }> = {};
       if (leadIds.length > 0) {
+        // Offer-letter existence — one row per lead is enough to flag.
+        const { data: offers } = await supabase.from("offer_letters")
+          .select("lead_id")
+          .in("lead_id", leadIds);
+        (offers || []).forEach((o: any) => { leadOfferMap[o.lead_id] = true; });
+
+        // Confirmed application_fee payments — sum per lead.
+        const { data: pmts } = await supabase.from("lead_payments")
+          .select("lead_id, amount")
+          .in("lead_id", leadIds)
+          .eq("type", "application_fee")
+          .eq("status", "confirmed");
+        (pmts || []).forEach((p: any) => {
+          appFeePaidMap[p.lead_id] = (appFeePaidMap[p.lead_id] || 0) + Number(p.amount || 0);
+        });
+
         for (let i = 0; i < leadIds.length; i += 50) {
           const batch = leadIds.slice(i, i + 50);
           const { data: leads } = await supabase.from("leads")
-            .select("id, counsellor_id, stage")
+            .select("id, counsellor_id, stage, pre_admission_no, admission_no")
             .in("id", batch);
           (leads || []).forEach((l: any) => {
             leadStageMap[l.id] = l.stage;
             leadCounsellorIdMap[l.id] = l.counsellor_id;
+            leadPanMap[l.id] = l.pre_admission_no;
+            leadAnMap[l.id] = l.admission_no;
           });
           const counsellorIds = [...new Set((leads || []).map((l: any) => l.counsellor_id).filter(Boolean))];
           if (counsellorIds.length > 0) {
@@ -200,11 +226,35 @@ export default function Applications() {
         }
       }
 
+      // Document review counts per application — used by the mini lifecycle
+      // stepper. One round-trip; harmless if zero rows.
+      if (appIdsForReview.length > 0) {
+        const { data: reviews } = await supabase.from("application_doc_reviews" as any)
+          .select("application_id, status")
+          .in("application_id", appIdsForReview);
+        (reviews || []).forEach((r: any) => {
+          if (!appDocCountsMap[r.application_id]) {
+            appDocCountsMap[r.application_id] = { total: 0, verified: 0, rejected: 0, pending: 0 };
+          }
+          const c = appDocCountsMap[r.application_id];
+          c.total++;
+          if (r.status === "verified") c.verified++;
+          else if (r.status === "rejected") c.rejected++;
+          else c.pending++;
+        });
+      }
+
       let mapped = rows.map((a: any) => ({
         ...a,
         counsellor_name: counsellorMap[a.lead_id] || "",
         lead_stage: leadStageMap[a.lead_id] || "",
         lead_counsellor_id: leadCounsellorIdMap[a.lead_id] || "",
+        // Lifecycle inputs the MiniLifecycleStepper consumes
+        lead_pre_admission_no: leadPanMap[a.lead_id] || null,
+        lead_admission_no: leadAnMap[a.lead_id] || null,
+        has_offer: !!leadOfferMap[a.lead_id],
+        app_fee_paid: appFeePaidMap[a.lead_id] || 0,
+        doc_counts: appDocCountsMap[a.application_id] || { total: 0, verified: 0, rejected: 0, pending: 0 },
       }));
 
       // Counsellor scoping: only show applications for their leads
@@ -426,10 +476,8 @@ export default function Applications() {
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground max-w-[160px]">Name</th>
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Phone</th>
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Course</th>
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Progress</th>
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Payment</th>
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Status</th>
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Lead Stage</th>
+                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Form</th>
+                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground" title="Submission → Fee → Docs → Approved → Offer → Token → Admitted">Lifecycle</th>
                 {!isCounsellor && <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Counsellor</th>}
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Date</th>
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Actions</th>
@@ -443,8 +491,14 @@ export default function Applications() {
                 const tc = totalCount(app.completed_sections);
                 const progressPct = tc > 0 ? Math.round((cc / tc) * 100) : 0;
 
+                const courseList = app.course_selections || [];
+                const cs = app.completed_sections || {};
+                // Columns dropped 2 (was Payment + Status + Lead Stage = 3 cols → now 1 Lifecycle col).
+                const expandColSpan = isCounsellor ? 9 : 11;
+
                 return (
-                  <tr key={app.id} className="border-b border-border/40 hover:bg-muted/20">
+                  <Fragment key={app.id}>
+                  <tr className="border-b border-border/40 hover:bg-muted/20">
                     <td className="px-4 py-2.5">
                       <button onClick={() => setExpandedId(isExpanded ? null : app.id)} className="text-muted-foreground hover:text-foreground">
                         {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -479,38 +533,51 @@ export default function Applications() {
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground text-xs">{app.phone}</td>
                     <td className="px-3 py-2.5 text-xs text-foreground max-w-[200px] truncate">{courses || "—"}</td>
+                    {/* Form-fill progress (sections completed in apply portal) */}
                     <td className="px-3 py-2.5">
                       <div className="flex items-center gap-2">
-                        <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
+                        <div className="w-14 h-1.5 bg-muted rounded-full overflow-hidden">
                           <div className={`h-full rounded-full ${progressPct === 100 ? "bg-emerald-500" : progressPct > 0 ? "bg-blue-500" : "bg-gray-300"}`}
                             style={{ width: `${progressPct}%` }} />
                         </div>
-                        <span className="text-[10px] text-muted-foreground">{cc}/{tc}</span>
+                        <span className="text-[10px] text-muted-foreground tabular-nums">{cc}/{tc}</span>
                       </div>
                     </td>
+                    {/* Mini lifecycle stepper — replaces separate Payment / Status / Lead Stage */}
                     <td className="px-3 py-2.5">
-                      <Badge className={`text-[10px] border-0 ${PAYMENT_BADGE[app.payment_status || "pending"] || "bg-gray-100 text-gray-600"}`}>
-                        {app.payment_status === "paid" ? `Paid${app.fee_amount ? ` ₹${app.fee_amount}` : ""}` : app.payment_status || "pending"}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <Badge className={`text-[10px] border-0 ${STATUS_BADGE[app.status] || "bg-gray-100 text-gray-600"}`}>
-                        {app.status}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {app.lead_stage ? (
-                        <Badge className={`text-[9px] border-0 ${LEAD_STAGE_BADGE[app.lead_stage] || "bg-gray-100 text-gray-600"}`}>
-                          {LEAD_STAGE_LABELS[app.lead_stage] || app.lead_stage}
-                        </Badge>
-                      ) : <span className="text-[10px] text-muted-foreground">—</span>}
+                      <MiniLifecycleStepper
+                        app={{ status: app.status, payment_status: app.payment_status }}
+                        lead={app.lead_id ? {
+                          id: app.lead_id,
+                          pre_admission_no: app.lead_pre_admission_no,
+                          admission_no: app.lead_admission_no,
+                        } : null}
+                        hasLead={!!app.lead_id}
+                        appFeePaid={app.app_fee_paid}
+                        hasOffer={app.has_offer}
+                        docs={app.doc_counts}
+                      />
                     </td>
                     {!isCounsellor && <td className="px-3 py-2.5 text-xs text-muted-foreground">{app.counsellor_name || "—"}</td>}
                     <td className="px-3 py-2.5 text-[10px] text-muted-foreground">
                       {new Date(app.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })}
                     </td>
                     <td className="px-3 py-2.5">
-                      <div className="inline-flex items-center rounded-lg border border-border bg-card overflow-hidden divide-x divide-border">
+                      <div className="inline-flex items-center gap-2">
+                        {/* Prominent Process CTA — only for actionable statuses */}
+                        {(app.status === "submitted" || app.status === "under_review") && (
+                          <a
+                            href={`/applications/${app.application_id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 whitespace-nowrap"
+                            title="Verify documents, approve / reject, issue offer"
+                          >
+                            <ClipboardCheck className="h-3.5 w-3.5" />
+                            Process
+                          </a>
+                        )}
+                        <div className="inline-flex items-center rounded-lg border border-border bg-card overflow-hidden divide-x divide-border">
                         {app.lead_id && (
                           <a href={`/admissions/${app.lead_id}`} target="_blank" rel="noreferrer"
                             className="p-1.5 hover:bg-muted text-muted-foreground hover:text-primary transition-colors" title="Open Lead">
@@ -554,11 +621,13 @@ export default function Applications() {
                           <Upload className="h-3.5 w-3.5" />
                         </button>
 
-                        {/* Student-side application view */}
-                        <a href={`/applications/${app.application_id}`} target="_blank" rel="noreferrer"
-                          className="p-1.5 hover:bg-muted text-muted-foreground hover:text-primary transition-colors" title="Open Student Application View">
-                          <Eye className="h-3.5 w-3.5" />
-                        </a>
+                        {/* Application review (admin) — small icon variant for non-actionable statuses */}
+                        {!(app.status === "submitted" || app.status === "under_review") && (
+                          <a href={`/applications/${app.application_id}`} target="_blank" rel="noreferrer"
+                            className="p-1.5 hover:bg-muted text-muted-foreground hover:text-primary transition-colors" title="Open application review">
+                            <ClipboardCheck className="h-3.5 w-3.5" />
+                          </a>
+                        )}
 
                         {/* View the apply portal AS the student (opens new tab) */}
                         {app.lead_id && (
@@ -580,9 +649,126 @@ export default function Applications() {
                             compact
                           />
                         )}
+                        </div>
                       </div>
                     </td>
                   </tr>
+
+                  {/* Expanded details — rendered inline below the clicked row */}
+                  {isExpanded && (
+                    <tr className="border-b border-border/40">
+                      <td colSpan={expandColSpan} className="p-0 bg-primary/5">
+                        <div className="border-l-4 border-primary/30 p-5 animate-fade-in">
+                          <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
+                            <h3 className="text-sm font-bold text-foreground">{app.application_id} — {app.full_name}</h3>
+                            <div className="flex items-center gap-2">
+                              {app.form_pdf_url ? (
+                                <>
+                                  <a href={app.form_pdf_url} target="_blank" rel="noopener"
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20">
+                                    <FileText className="h-3.5 w-3.5" /> Open Form PDF
+                                  </a>
+                                  <button onClick={() => generateFormPdf(app)} disabled={generatingPdfFor === app.id}
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-primary hover:border-primary/30 hover:bg-primary/5 disabled:opacity-50"
+                                    title="Regenerate Application Form PDF">
+                                    {generatingPdfFor === app.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                                    Regenerate
+                                  </button>
+                                </>
+                              ) : (app.status === "submitted" || app.status === "under_review" || app.status === "approved") && (
+                                <button onClick={() => generateFormPdf(app)} disabled={generatingPdfFor === app.id}
+                                  className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+                                  {generatingPdfFor === app.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                                  Generate Form PDF
+                                </button>
+                              )}
+                              <Button variant="ghost" size="sm" onClick={() => setExpandedId(null)}><X className="h-3.5 w-3.5" /></Button>
+                            </div>
+                          </div>
+
+                          {/* Inline PDF preview when available */}
+                          {app.form_pdf_url && (
+                            <div className="mb-4 rounded-xl border border-border overflow-hidden bg-white" style={{ height: 600 }}>
+                              <iframe src={app.form_pdf_url} title="Application form preview" className="w-full h-full" />
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-xs">
+                            {/* Personal Details */}
+                            <div>
+                              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Personal Details</p>
+                              <div className="space-y-1">
+                                <p><span className="text-muted-foreground">Name:</span> <span className="font-medium">{app.full_name}</span></p>
+                                <p><span className="text-muted-foreground">Phone:</span> <span className="font-medium">{app.phone}</span></p>
+                                <p><span className="text-muted-foreground">Email:</span> <span className="font-medium">{app.email || "—"}</span></p>
+                                <p><span className="text-muted-foreground">DOB:</span> <span className="font-medium">{app.dob || "—"}</span></p>
+                                <p><span className="text-muted-foreground">Gender:</span> <span className="font-medium capitalize">{app.gender || "—"}</span></p>
+                                <p><span className="text-muted-foreground">Category:</span> <span className="font-medium">{app.category || "—"}</span></p>
+                                {app.address?.city && <p><span className="text-muted-foreground">City:</span> <span className="font-medium">{app.address.city}, {app.address.state}</span></p>}
+                              </div>
+                            </div>
+
+                            {/* Course & Payment */}
+                            <div>
+                              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Course Selections</p>
+                              <div className="space-y-1.5">
+                                {courseList.map((c: any, i: number) => (
+                                  <div key={i} className="flex items-center gap-1.5">
+                                    <span className="text-[9px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">{i + 1}</span>
+                                    <span className="font-medium">{c.course_name}</span>
+                                    {c.campus_name && <span className="text-muted-foreground">· {c.campus_name}</span>}
+                                  </div>
+                                ))}
+                                {courseList.length === 0 && <p className="text-muted-foreground">No courses selected</p>}
+                              </div>
+
+                              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2 mt-4">Payment</p>
+                              <div className="space-y-1">
+                                <p><span className="text-muted-foreground">Status:</span> <Badge className={`text-[10px] border-0 ml-1 ${PAYMENT_BADGE[app.payment_status || "pending"]}`}>{app.payment_status || "pending"}</Badge></p>
+                                {app.fee_amount && <p><span className="text-muted-foreground">Amount:</span> <span className="font-medium">₹{app.fee_amount.toLocaleString("en-IN")}</span></p>}
+                                {app.payment_ref && <p><span className="text-muted-foreground">Ref:</span> <span className="font-mono text-[10px]">{app.payment_ref}</span></p>}
+                              </div>
+                            </div>
+
+                            {/* Section Progress */}
+                            <div>
+                              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Section Progress</p>
+                              <div className="space-y-1.5">
+                                {Object.entries(cs).map(([key, done]) => (
+                                  <div key={key} className="flex items-center gap-2">
+                                    {done ? <CheckCircle className="h-3.5 w-3.5 text-emerald-500" /> : <AlertCircle className="h-3.5 w-3.5 text-amber-400" />}
+                                    <span className={`capitalize ${done ? "text-foreground" : "text-muted-foreground"}`}>{key.replace(/_/g, " ")}</span>
+                                  </div>
+                                ))}
+                              </div>
+
+                              <div className="mt-4 flex gap-2">
+                                <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => fetchDocs(app.id, app.application_id)}>
+                                  <Upload className="h-3 w-3 mr-1" />Documents
+                                </Button>
+                                {app.lead_id && (
+                                  <a href={`/admissions/${app.lead_id}`} target="_blank" rel="noreferrer">
+                                    <Button size="sm" variant="outline" className="text-xs h-7">
+                                      <ExternalLink className="h-3 w-3 mr-1" />Lead Page
+                                    </Button>
+                                  </a>
+                                )}
+                              </div>
+
+                              {app.flags?.length ? (
+                                <div className="mt-3 flex flex-wrap gap-1">
+                                  {app.flags.filter(f => !(f === "payment_pending" && app.payment_status === "paid")).map((f, i) => (
+                                    <Badge key={i} className="text-[9px] border-0 bg-gray-100 text-gray-600">{f}</Badge>
+                                  ))}
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
               {filtered.length === 0 && (
@@ -592,126 +778,6 @@ export default function Applications() {
           </table>
         </div>
       </Card>
-
-      {/* Expanded row details rendered below the table for simplicity */}
-      {expandedId && (() => {
-        const app = apps.find(a => a.id === expandedId);
-        if (!app) return null;
-        const courses = app.course_selections || [];
-        const cs = app.completed_sections || {};
-
-        return (
-          <Card className="border-primary/30 shadow-none bg-primary/5 animate-fade-in">
-            <CardContent className="p-5">
-              <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
-                <h3 className="text-sm font-bold text-foreground">{app.application_id} — {app.full_name}</h3>
-                <div className="flex items-center gap-2">
-                  {app.form_pdf_url ? (
-                    <>
-                      <a href={app.form_pdf_url} target="_blank" rel="noopener"
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20">
-                        <FileText className="h-3.5 w-3.5" /> Open Form PDF
-                      </a>
-                      <button onClick={() => generateFormPdf(app)} disabled={generatingPdfFor === app.id}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-primary hover:border-primary/30 hover:bg-primary/5 disabled:opacity-50"
-                        title="Regenerate Application Form PDF">
-                        {generatingPdfFor === app.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                        Regenerate
-                      </button>
-                    </>
-                  ) : (app.status === "submitted" || app.status === "under_review" || app.status === "approved") && (
-                    <button onClick={() => generateFormPdf(app)} disabled={generatingPdfFor === app.id}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-                      {generatingPdfFor === app.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
-                      Generate Form PDF
-                    </button>
-                  )}
-                  <Button variant="ghost" size="sm" onClick={() => setExpandedId(null)}><X className="h-3.5 w-3.5" /></Button>
-                </div>
-              </div>
-
-              {/* Inline PDF preview when available */}
-              {app.form_pdf_url && (
-                <div className="mb-4 rounded-xl border border-border overflow-hidden bg-white" style={{ height: 600 }}>
-                  <iframe src={app.form_pdf_url} title="Application form preview" className="w-full h-full" />
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-xs">
-                {/* Personal Details */}
-                <div>
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Personal Details</p>
-                  <div className="space-y-1">
-                    <p><span className="text-muted-foreground">Name:</span> <span className="font-medium">{app.full_name}</span></p>
-                    <p><span className="text-muted-foreground">Phone:</span> <span className="font-medium">{app.phone}</span></p>
-                    <p><span className="text-muted-foreground">Email:</span> <span className="font-medium">{app.email || "—"}</span></p>
-                    <p><span className="text-muted-foreground">DOB:</span> <span className="font-medium">{app.dob || "—"}</span></p>
-                    <p><span className="text-muted-foreground">Gender:</span> <span className="font-medium capitalize">{app.gender || "—"}</span></p>
-                    <p><span className="text-muted-foreground">Category:</span> <span className="font-medium">{app.category || "—"}</span></p>
-                    {app.address?.city && <p><span className="text-muted-foreground">City:</span> <span className="font-medium">{app.address.city}, {app.address.state}</span></p>}
-                  </div>
-                </div>
-
-                {/* Course & Payment */}
-                <div>
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Course Selections</p>
-                  <div className="space-y-1.5">
-                    {courses.map((c: any, i: number) => (
-                      <div key={i} className="flex items-center gap-1.5">
-                        <span className="text-[9px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">{i + 1}</span>
-                        <span className="font-medium">{c.course_name}</span>
-                        {c.campus_name && <span className="text-muted-foreground">· {c.campus_name}</span>}
-                      </div>
-                    ))}
-                    {courses.length === 0 && <p className="text-muted-foreground">No courses selected</p>}
-                  </div>
-
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2 mt-4">Payment</p>
-                  <div className="space-y-1">
-                    <p><span className="text-muted-foreground">Status:</span> <Badge className={`text-[10px] border-0 ml-1 ${PAYMENT_BADGE[app.payment_status || "pending"]}`}>{app.payment_status || "pending"}</Badge></p>
-                    {app.fee_amount && <p><span className="text-muted-foreground">Amount:</span> <span className="font-medium">₹{app.fee_amount.toLocaleString("en-IN")}</span></p>}
-                    {app.payment_ref && <p><span className="text-muted-foreground">Ref:</span> <span className="font-mono text-[10px]">{app.payment_ref}</span></p>}
-                  </div>
-                </div>
-
-                {/* Section Progress */}
-                <div>
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Section Progress</p>
-                  <div className="space-y-1.5">
-                    {Object.entries(cs).map(([key, done]) => (
-                      <div key={key} className="flex items-center gap-2">
-                        {done ? <CheckCircle className="h-3.5 w-3.5 text-emerald-500" /> : <AlertCircle className="h-3.5 w-3.5 text-amber-400" />}
-                        <span className={`capitalize ${done ? "text-foreground" : "text-muted-foreground"}`}>{key.replace(/_/g, " ")}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="mt-4 flex gap-2">
-                    <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => fetchDocs(app.id, app.application_id)}>
-                      <Upload className="h-3 w-3 mr-1" />Documents
-                    </Button>
-                    {app.lead_id && (
-                      <a href={`/admissions/${app.lead_id}`} target="_blank" rel="noreferrer">
-                        <Button size="sm" variant="outline" className="text-xs h-7">
-                          <ExternalLink className="h-3 w-3 mr-1" />Lead Page
-                        </Button>
-                      </a>
-                    )}
-                  </div>
-
-                  {app.flags?.length ? (
-                    <div className="mt-3 flex flex-wrap gap-1">
-                      {app.flags.filter(f => !(f === "payment_pending" && app.payment_status === "paid")).map((f, i) => (
-                        <Badge key={i} className="text-[9px] border-0 bg-gray-100 text-gray-600">{f}</Badge>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        );
-      })()}
 
       {/* Documents Dialog */}
       <Dialog open={!!docsDialog} onOpenChange={() => setDocsDialog(null)}>

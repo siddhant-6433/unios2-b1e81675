@@ -8,6 +8,7 @@ import { ArrowLeft, FileText, Loader2, CheckCircle2, XCircle, Clock, AlertCircle
 import { ApplicationPreview, type PreviewDoc } from "@/components/applicant/ApplicationPreview";
 import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
 import { AdmissionLifecycleStepper } from "@/components/admissions/AdmissionLifecycleStepper";
+import { DocReviewPanel } from "@/components/admissions/DocReviewPanel";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -343,59 +344,10 @@ export default function AdminApplicationView() {
         </div>
       )}
 
-      <ApplicationPreview app={app} docs={docs} />
+      {/* Document review wizard — preview each doc inline + side actions */}
+      <DocReviewPanel docs={docs} reviews={reviews} onSetStatus={setDocStatus} />
 
-      {/* Per-document verification controls */}
-      {docs.length > 0 && (
-        <div className="rounded-xl border border-border bg-card overflow-hidden">
-          <div className="px-4 py-3 border-b border-border bg-muted/40">
-            <h3 className="text-sm font-semibold">Document verification</h3>
-            <p className="text-[11px] text-muted-foreground">
-              Mark each document Verified or Rejected. Rejected documents block AN issuance until resolved.
-            </p>
-          </div>
-          <ul className="divide-y divide-border">
-            {docs.map((doc) => {
-              const review = reviews[doc.path];
-              const status = review?.status ?? "pending";
-              return (
-                <li key={doc.path} className="px-4 py-3 flex items-center gap-3 flex-wrap">
-                  <div className="min-w-0 flex-1">
-                    <a href={doc.url} target="_blank" rel="noreferrer"
-                      className="text-sm font-medium text-foreground hover:text-primary truncate inline-flex items-center gap-1.5">
-                      <FileText className="h-3.5 w-3.5 shrink-0" />{doc.name}
-                    </a>
-                    {review?.notes && (
-                      <p className="text-[11px] text-muted-foreground mt-0.5">Note: {review.notes}</p>
-                    )}
-                  </div>
-                  <DocStatusPill status={status} />
-                  <div className="flex items-center gap-1.5">
-                    <Button
-                      size="sm" variant={status === "verified" ? "default" : "outline"}
-                      className={status === "verified" ? "" : "text-emerald-700 border-emerald-200 hover:bg-emerald-50"}
-                      onClick={() => setDocStatus(doc, "verified")}
-                    >
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      size="sm" variant={status === "rejected" ? "destructive" : "outline"}
-                      className={status === "rejected" ? "" : "text-rose-700 border-rose-200 hover:bg-rose-50"}
-                      onClick={() => {
-                        const note = prompt("Why is this document rejected? (visible to internal staff)");
-                        if (note === null) return;
-                        setDocStatus(doc, "rejected", note || null);
-                      }}
-                    >
-                      <XCircle className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
+      <ApplicationPreview app={app} docs={docs} />
 
       {/* Offer Letter dialog — opens after approval */}
       {lead?.id && (
@@ -410,19 +362,5 @@ export default function AdminApplicationView() {
         />
       )}
     </div>
-  );
-}
-
-function DocStatusPill({ status }: { status: DocStatus }) {
-  const map = {
-    verified: { Icon: CheckCircle2, label: "Verified", cls: "bg-emerald-50 text-emerald-700" },
-    rejected: { Icon: XCircle,      label: "Rejected", cls: "bg-rose-50 text-rose-700" },
-    pending:  { Icon: Clock,        label: "Pending",  cls: "bg-amber-50 text-amber-700" },
-  } as const;
-  const { Icon, label, cls } = map[status];
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${cls}`}>
-      <Icon className="h-3 w-3" />{label}
-    </span>
   );
 }
