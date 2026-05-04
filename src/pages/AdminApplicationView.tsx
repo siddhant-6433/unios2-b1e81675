@@ -4,9 +4,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, FileText, Loader2, CheckCircle2, XCircle, Clock, AlertCircle } from "lucide-react";
+import { ArrowLeft, FileText, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Gift } from "lucide-react";
 import { ApplicationPreview, type PreviewDoc } from "@/components/applicant/ApplicationPreview";
+import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
+import { AdmissionLifecycleStepper } from "@/components/admissions/AdmissionLifecycleStepper";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 
 type DocStatus = "pending" | "verified" | "rejected";
 
@@ -22,13 +25,18 @@ export default function AdminApplicationView() {
   const navigate = useNavigate();
   const { toast } = useToast();
 
+  const { role } = useAuth();
   const [loading, setLoading] = useState(true);
   const [app, setApp] = useState<any | null>(null);
+  const [lead, setLead] = useState<{ id: string; name: string; course_id: string | null; campus_id: string | null; pre_admission_no: string | null; admission_no: string | null } | null>(null);
+  const [hasOffer, setHasOffer] = useState(false);
+  const [appFeePaid, setAppFeePaid] = useState(0);
   const [docs, setDocs] = useState<PreviewDoc[]>([]);
   const [reviews, setReviews] = useState<Record<string, DocReview>>({});
   const [decisionBusy, setDecisionBusy] = useState(false);
   const [rejectionReason, setRejectionReason] = useState("");
   const [showRejectionInput, setShowRejectionInput] = useState(false);
+  const [showOfferLetter, setShowOfferLetter] = useState(false);
 
   const refresh = async () => {
     if (!applicationId) return;
@@ -45,6 +53,30 @@ export default function AdminApplicationView() {
     const map: Record<string, DocReview> = {};
     (reviewRows as DocReview[] | null || []).forEach(r => { map[r.file_path] = r; });
     setReviews(map);
+
+    // Pull lead's course/campus IDs — needed by OfferLetterDialog. course_selections
+    // on the application only has names, so we read them from the linked lead.
+    // Also pulls PAN/AN for the lifecycle stepper.
+    if (appRow?.lead_id) {
+      const [{ data: leadRow }, { data: offerRows }, { data: pmtRows }] = await Promise.all([
+        supabase.from("leads")
+          .select("id, name, course_id, campus_id, pre_admission_no, admission_no")
+          .eq("id", appRow.lead_id).maybeSingle(),
+        supabase.from("offer_letters").select("id").eq("lead_id", appRow.lead_id).limit(1),
+        supabase.from("lead_payments")
+          .select("amount,type,status")
+          .eq("lead_id", appRow.lead_id)
+          .eq("type", "application_fee")
+          .eq("status", "confirmed"),
+      ]);
+      setLead(leadRow as any);
+      setHasOffer(!!(offerRows && offerRows.length));
+      setAppFeePaid((pmtRows || []).reduce((sum, p: any) => sum + Number(p.amount || 0), 0));
+    } else {
+      setLead(null);
+      setHasOffer(false);
+      setAppFeePaid(0);
+    }
     setLoading(false);
   };
 
@@ -168,7 +200,16 @@ export default function AdminApplicationView() {
     <div className="p-5 space-y-5 animate-fade-in max-w-5xl mx-auto">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
+          <Button variant="ghost" size="sm" onClick={() => {
+            // Prefer history when there's something to go back to;
+            // fall back to /applications when this page was opened directly
+            // (e.g. via target="_blank" from the Applications list).
+            if (window.history.length > 1 && document.referrer && new URL(document.referrer).origin === window.location.origin) {
+              navigate(-1);
+            } else {
+              navigate("/applications");
+            }
+          }}>
             <ArrowLeft className="h-4 w-4 mr-1.5" />Back
           </Button>
           <div>
@@ -187,6 +228,18 @@ export default function AdminApplicationView() {
           )}
         </div>
       </div>
+
+      {/* Lifecycle stepper — visual journey from submission → admission */}
+      <AdmissionLifecycleStepper
+        app={app}
+        lead={lead}
+        hasLead={!!app.lead_id && !!lead}
+        appFeePaid={appFeePaid}
+        hasOffer={hasOffer}
+        docs={counts}
+        onApprove={app.status === "submitted" ? () => decideApplication("approved") : undefined}
+        onIssueOffer={app.status === "approved" && !hasOffer && lead?.id ? () => setShowOfferLetter(true) : undefined}
+      />
 
       {/* Review summary + application-level decision */}
       {(app.status === "submitted" || decided) && (
@@ -230,6 +283,28 @@ export default function AdminApplicationView() {
                 </Button>
               </div>
             )}
+            {decided && app.status === "approved" && (() => {
+              const canIssueOffer = !!lead?.id && (
+                role === "super_admin" || role === "principal" || role === "counsellor" ||
+                role === "admission_head" || role === "campus_admin"
+              );
+              const reason = !lead?.id
+                ? "No lead linked to this application"
+                : !canIssueOffer
+                ? "You do not have permission to issue offers"
+                : undefined;
+              return (
+                <Button
+                  size="sm"
+                  onClick={() => setShowOfferLetter(true)}
+                  disabled={!canIssueOffer}
+                  title={reason}
+                  className="bg-teal-600 hover:bg-teal-700 text-white"
+                >
+                  <Gift className="h-3.5 w-3.5 mr-1.5" />Issue Offer Letter
+                </Button>
+              );
+            })()}
           </div>
 
           {showRejectionInput && !decided && (
@@ -320,6 +395,19 @@ export default function AdminApplicationView() {
             })}
           </ul>
         </div>
+      )}
+
+      {/* Offer Letter dialog — opens after approval */}
+      {lead?.id && (
+        <OfferLetterDialog
+          open={showOfferLetter}
+          onOpenChange={setShowOfferLetter}
+          leadId={lead.id}
+          leadName={lead.name || app.full_name}
+          courseId={lead.course_id}
+          campusId={lead.campus_id}
+          onSuccess={() => { setShowOfferLetter(false); refresh(); }}
+        />
       )}
     </div>
   );
