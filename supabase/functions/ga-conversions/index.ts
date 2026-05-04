@@ -63,14 +63,25 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "method not allowed" }, 405);
   }
 
-  // Auth: either service-role JWT (DB trigger via pg_net) or shared internal key
+  // Auth: accept either x-internal-key OR any JWT with role=service_role.
+  // The role-based check is format-agnostic — survives Supabase's migration
+  // from legacy eyJ... JWTs to new sb_secret_... tokens, which broke a
+  // direct string-equality check against SUPABASE_SERVICE_ROLE_KEY.
   const authHeader = req.headers.get("authorization") ?? "";
   const internalKey = req.headers.get("x-internal-key") ?? "";
   const expectedInternal = Deno.env.get("GA_RELAY_INTERNAL_KEY") ?? "";
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-  const okAuth =
-    (expectedInternal && internalKey === expectedInternal) ||
-    (serviceRoleKey && authHeader === `Bearer ${serviceRoleKey}`);
+
+  let okAuth = expectedInternal && internalKey === expectedInternal;
+  if (!okAuth && authHeader.startsWith("Bearer ")) {
+    const token = authHeader.slice(7);
+    try {
+      const [, payloadB64] = token.split(".");
+      if (payloadB64) {
+        const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
+        if (payload?.role === "service_role") okAuth = true;
+      }
+    } catch { /* malformed token — leave okAuth false */ }
+  }
   if (!okAuth) return json({ ok: false, error: "unauthorized" }, 401);
 
   let body: RelayBody;
