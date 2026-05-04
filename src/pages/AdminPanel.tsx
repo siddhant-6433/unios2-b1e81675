@@ -381,6 +381,8 @@ const AdminPanel = () => {
         </div>
       </div>
 
+      {isSuperAdmin && <VoiceProviderCard />}
+
       <Tabs defaultValue={searchParams.get("tab") || "users"} className="w-full">
         <TabsList className="bg-transparent border-b border-border rounded-none p-0 h-auto gap-0 w-full justify-start">
           <TabsTrigger value="users" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2.5 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
@@ -920,6 +922,65 @@ const AdminPanel = () => {
     </div>
   );
 };
+
+// Voice agent provider toggle — flips the AI call backend between
+// Gemini Live native-audio and the cascaded Sarvam STT → Gemini text →
+// Sarvam TTS path. Switching is instant (the voice-agent's in-memory
+// cache has a 30s TTL).
+function VoiceProviderCard() {
+  const { toast } = useToast();
+  const [provider, setProvider] = useState<"gemini" | "sarvam" | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    (supabase.rpc("get_voice_agent_provider" as any) as any).then(({ data }: any) => {
+      setProvider((data === "sarvam" ? "sarvam" : "gemini"));
+    });
+  }, []);
+
+  const flip = async (next: "gemini" | "sarvam") => {
+    if (next === provider) return;
+    setSaving(true);
+    const { error } = await supabase.rpc("set_voice_agent_provider" as any, { _provider: next });
+    setSaving(false);
+    if (error) {
+      toast({ title: "Couldn't change provider", description: error.message, variant: "destructive" });
+      return;
+    }
+    setProvider(next);
+    toast({ title: `Voice provider switched to ${next}`, description: "New calls land on the new engine within ~30s." });
+  };
+
+  if (!provider) return null;
+
+  return (
+    <div className="rounded-2xl border border-border bg-card p-4 flex items-center gap-4 flex-wrap">
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-foreground">AI Voice Agent backend</p>
+        <p className="text-[12px] text-muted-foreground mt-0.5">
+          <span className="font-medium">Gemini Live</span> = end-to-end native audio (lower latency, less resilient).
+          <span className="font-medium"> Sarvam</span> = STT + Gemini text + TTS (higher latency, more resilient, Indian-language native voices).
+        </p>
+      </div>
+      <div className="inline-flex rounded-xl border border-border bg-muted/40 p-1">
+        <button
+          disabled={saving}
+          onClick={() => flip("gemini")}
+          className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${provider === "gemini" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+        >
+          Gemini Live
+        </button>
+        <button
+          disabled={saving}
+          onClick={() => flip("sarvam")}
+          className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${provider === "sarvam" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+        >
+          Sarvam
+        </button>
+      </div>
+    </div>
+  );
+}
 
 const SummaryCard = ({ label, value, bg }: { label: string; value: number; bg: string }) => (
   <div className="rounded-xl bg-card card-shadow p-4 flex items-center gap-3">

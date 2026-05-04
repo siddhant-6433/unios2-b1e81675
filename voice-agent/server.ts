@@ -22,6 +22,10 @@
 
 import { mulawToGeminiPcm, geminiPcmToMulaw } from "./audio-utils.ts";
 import { buildSystemInstruction, VOICE_AGENT_TOOLS, type CallContext } from "./scripts.ts";
+import {
+  mulawBase64ToPcm16, pcm16ToMulawBase64, rmsEnergy,
+  sarvamSTT, sarvamTTS,
+} from "./sarvam.ts";
 
 const PORT = parseInt(Deno.env.get("PORT") || "8000");
 const GOOGLE_AI_API_KEY = Deno.env.get("GOOGLE_AI_API_KEY") || "";
@@ -1058,6 +1062,30 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
         configAcked = true;
         geminiReady = true;
         console.log(`[${callId}] Gemini ready — caller audio now flowing`);
+
+        // Kick off the model's first turn explicitly.
+        //
+        // Without this, the native-audio model sits silent waiting for VAD
+        // to detect "user speech end" — but on a freshly-connected Plivo
+        // RTP carrier line there's constant low-level noise, so VAD thinks
+        // the caller is mid-utterance forever. Result: the model keeps
+        // sending {interrupted:true} + {turnComplete:true} with no content.
+        //
+        // The fix is a single clientContent text turn that nudges the
+        // model to produce its first response (the greeting from the
+        // system instruction). After this kickoff, normal VAD takes over.
+        try {
+          const kickoff = {
+            clientContent: {
+              turns: [{ role: "user", parts: [{ text: callCtx.direction === "inbound" ? "(call connected)" : "(starting outbound call)" }] }],
+              turnComplete: true,
+            },
+          };
+          geminiWs.send(JSON.stringify(kickoff));
+          console.log(`[${callId}] Sent kickoff clientContent to trigger greeting`);
+        } catch (e: any) {
+          console.error(`[${callId}] Failed to send kickoff:`, e?.message || e);
+        }
         return;
       }
 
@@ -1398,6 +1426,14 @@ Deno.serve({ port: PORT }, async (req) => {
       toolCallsMade: [{ name: "inbound_meta", args: { counsellorUserId, counsellorName, counsellorPhone, plivoCallUUID }, result: null }],
     });
 
+    // Compute business-hours BEFORE inserting the call record so we can flag
+    // off-hours inbounds for next-day counsellor follow-up via the missed-
+    // calls queue. (The full routing decision uses the same `inBusinessHours`
+    // value below.)
+    const istHourEarly = parseInt(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata", hour: "2-digit", hour12: false }).match(/\d+/)?.[0] || "0", 10);
+    const istDayEarly  = new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata", weekday: "short" });
+    const offHours = !((istHourEarly >= 9 && istHourEarly < 20) && istDayEarly !== "Sun");
+
     // Create ai_call_records entry for real-time tracking (LiveCallBar, timeline)
     if (leadId && SUPABASE_URL) {
       await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records`, {
@@ -1409,7 +1445,9 @@ Deno.serve({ port: PORT }, async (req) => {
           status: "initiated",
           call_type: "inbound",
           caller_user_id: counsellorUserId || null,
-          summary: `Inbound call from ${leadName || callerPhone}${counsellorName ? ` → routing to ${counsellorName}` : ""}`,
+          summary: `Inbound call from ${leadName || callerPhone}${counsellorName ? ` → routing to ${counsellorName}` : offHours ? ` → AI agent (off-hours, flagged for follow-up)` : ""}`,
+          needs_followup: offHours,
+          followup_reason: offHours ? `Inbound at ${istHourEarly}:00 IST ${istDayEarly} — outside business hours (9 AM-8 PM IST, Mon-Sat)` : null,
         }),
       }).catch(e => console.error(`[${callId}] ai_call_records insert failed:`, e.message));
     }
@@ -1426,15 +1464,27 @@ Deno.serve({ port: PORT }, async (req) => {
     //
     //  - Dialer number (PLIVO_DIALER_PHONE_NUMBER) or any other DID
     //    → ring assigned counsellor first (20s) then fall back to AI.
-    //      This preserves the original "sticky inbound" behaviour for
-    //      the cloud-dialer DID, which is primarily an outbound caller-id
-    //      but can receive return calls too.
-    const dialedTo = (params.To as string || "").replace(/[^0-9+]/g, "");
-    const aiPrimary = (Deno.env.get("PLIVO_AI_PHONE_NUMBER") || "").replace(/[^0-9+]/g, "");
-    const aiBackup  = (Deno.env.get("PLIVO_AI_BACKUP_PHONE_NUMBER") || "").replace(/[^0-9+]/g, "");
+    //      ONLY during business hours (9 AM-8 PM IST, Mon-Sat). Outside
+    //      that window, no counsellor is on duty so every inbound goes
+    //      straight to the AI agent, and the call is flagged for
+    //      next-day counsellor follow-up via the missed-calls queue.
+    //
+    // Phone normalisation: Plivo strips the leading + from params.To
+    // (so "918035374903" arrives) but our env vars store with the +
+    // ("+918035374903"). Without normalising both sides to digits-only,
+    // no DID ever matched and every call fell through to the counsellor
+    // branch — the bug behind "AI primary number rings counsellor".
+    const onlyDigits = (s: string) => (s || "").replace(/\D/g, "");
+    const dialedTo  = onlyDigits(params.To as string);
+    const aiPrimary = onlyDigits(Deno.env.get("PLIVO_AI_PHONE_NUMBER") || "");
+    const aiBackup  = onlyDigits(Deno.env.get("PLIVO_AI_BACKUP_PHONE_NUMBER") || "");
     const isAiInboundNumber = !!dialedTo && (dialedTo === aiPrimary || dialedTo === aiBackup);
 
-    if (!isAiInboundNumber && leadId && counsellorPhone) {
+    const istHour = parseInt(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata", hour: "2-digit", hour12: false }).match(/\d+/)?.[0] || "0", 10);
+    const istDay  = new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata", weekday: "short" });
+    const inBusinessHours = (istHour >= 9 && istHour < 20) && istDay !== "Sun";
+
+    if (!isAiInboundNumber && inBusinessHours && leadId && counsellorPhone) {
       const aiUrl = `https://${host}/answer/inbound-ai/${callId}`;
 
       console.log(`[${callId}] Inbound to dialer DID ${dialedTo} → ringing counsellor ${counsellorName} (${counsellorPhone})`);
@@ -1442,7 +1492,7 @@ Deno.serve({ port: PORT }, async (req) => {
       const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Record recordSession="true" redirect="false" maxLength="3600"${recordingCallbackUrl ? ` callbackUrl="${recordingCallbackUrl}" callbackMethod="POST"` : ""} />
-  <Speak voice="WOMAN">Connecting you to your counsellor. Please hold.</Speak>
+  <Speak voice="Polly.Kajal">Connecting you to your counsellor. Please hold.</Speak>
   <Dial callerId="${PLIVO_PHONE_NUMBER}" action="${aiUrl}" method="POST" timeout="20" hangupOnStar="true">
     <Number>${counsellorPhone}</Number>
   </Dial>
@@ -1459,7 +1509,8 @@ Deno.serve({ port: PORT }, async (req) => {
   <Stream streamTimeout="600" keepCallAlive="true" bidirectional="true" contentType="audio/x-mulaw;rate=8000">${wsUrl}</Stream>
 </Response>`;
 
-    console.log(`[${callId}] Inbound from ${callerPhone} to ${dialedTo || "?"} (AI DID=${isAiInboundNumber}) → AI agent. lead: ${leadName || "unknown"}`);
+    const reason = isAiInboundNumber ? "AI DID" : !inBusinessHours ? "outside business hours" : !counsellorPhone ? "no counsellor assigned" : "fallthrough";
+    console.log(`[${callId}] Inbound from ${callerPhone} to ${dialedTo || "?"} (${reason}, IST hour=${istHour}, day=${istDay}) → AI agent. lead: ${leadName || "unknown"}`);
     return new Response(xml, { headers: { "Content-Type": "application/xml" } });
   }
 
@@ -1932,7 +1983,7 @@ Deno.serve({ port: PORT }, async (req) => {
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Record recordSession="true" redirect="false" maxLength="3600"${recordingCallbackUrl ? ` callbackUrl="${recordingCallbackUrl}" callbackMethod="POST"` : ""} />
-  <Speak voice="WOMAN">Connecting you to the student now.</Speak>
+  <Speak voice="Polly.Kajal">Connecting you to the student now.</Speak>
   <Dial callerId="${PLIVO_PHONE_NUMBER}" action="${statusUrl}" method="POST" machineDetection="true" machineDetectionTime="5000">
     <Number statusCallbackUrl="${bStatusUrl}" statusCallbackMethod="POST">${studentPhone}</Number>
   </Dial>
@@ -2110,14 +2161,24 @@ Deno.serve({ port: PORT }, async (req) => {
     return new Response("OK");
   }
 
-  // WebSocket upgrade for Plivo audio stream
+  // WebSocket upgrade for Plivo audio stream — dispatches to either the
+  // Gemini Live native-audio handler or the Sarvam cascaded handler based
+  // on the dashboard-configurable provider toggle in _app_config.
   if (path.startsWith("/ws/")) {
     const callId = path.split("/ws/")[1];
     const upgrade = req.headers.get("upgrade")?.toLowerCase();
 
     if (upgrade === "websocket") {
       const { socket, response } = Deno.upgradeWebSocket(req);
-      handlePlivoStream(socket, callId);
+      // Resolve provider on connect — default to gemini so any config glitch
+      // falls back to the proven Live agent. Fire-and-forget; the handler
+      // takes the socket once we know which engine to use.
+      (async () => {
+        const provider = await getVoiceProvider();
+        console.log(`[${callId}] Dispatching to voice provider: ${provider}`);
+        if (provider === "sarvam") handlePlivoStreamSarvam(socket, callId);
+        else handlePlivoStream(socket, callId);
+      })();
       return response;
     }
 
@@ -2126,5 +2187,260 @@ Deno.serve({ port: PORT }, async (req) => {
 
   return new Response("Not found", { status: 404 });
 });
+
+// ─── Voice provider toggle (read from _app_config, in-memory cached) ──
+
+let cachedProvider: { value: "gemini" | "sarvam"; expiresAt: number } | null = null;
+async function getVoiceProvider(): Promise<"gemini" | "sarvam"> {
+  if (cachedProvider && Date.now() < cachedProvider.expiresAt) return cachedProvider.value;
+  let val: "gemini" | "sarvam" = "gemini";
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/_app_config?key=eq.voice_agent_provider&select=value`,
+      { headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` } },
+    );
+    const rows = await res.json().catch(() => []);
+    const v = rows?.[0]?.value;
+    if (v === "sarvam" || v === "gemini") val = v;
+  } catch (e) {
+    console.warn(`[provider] _app_config lookup failed, defaulting to gemini:`, (e as Error).message);
+  }
+  // 30-second TTL so dashboard changes propagate quickly
+  cachedProvider = { value: val, expiresAt: Date.now() + 30_000 };
+  return val;
+}
+
+// ─── Sarvam cascaded pipeline (STT → Gemini text → TTS) ──────────────
+//
+// Runs whenever _app_config.voice_agent_provider = 'sarvam'. Mirrors the
+// Gemini Live handler's call lifecycle (context lookup, transcript
+// accumulation, tool calls, disposition close-out) but routes audio
+// through Sarvam STT/TTS with a Gemini text-completion brain in between.
+//
+// Latency budget per turn: ~700-1200ms (STT 200-400ms, Gemini text
+// 200-500ms, TTS 200-400ms). Higher than Gemini Live's ~400-600ms native
+// audio, but more resilient — a single provider outage doesn't kill calls.
+
+const SARVAM_API_KEY = Deno.env.get("SARVAM_API_KEY") || "";
+const GEMINI_API_KEY_FOR_TEXT = Deno.env.get("GEMINI_API_KEY") || "";
+const SARVAM_TTS_SPEAKER = Deno.env.get("SARVAM_TTS_SPEAKER") || "ritu";
+
+// VAD tuning for Plivo's mulaw 8kHz stream. Each Plivo frame is 160 samples
+// (20ms). 50 silence frames after at least 8 voice frames = "end of utterance"
+// at ~1s of silence.
+const VAD_RMS_THRESHOLD = 700;
+const MIN_VOICE_FRAMES = 8;     // ~160ms of speech to count as a real utterance
+const END_SILENCE_FRAMES = 50;  // ~1s of silence ends the turn
+
+// Gemini text-API content shape — matches the REST request body precisely
+// so we can append both user/model text turns AND function calls / responses
+// to keep multi-turn tool conversations coherent.
+interface GeminiContent {
+  role: "user" | "model";
+  parts: Array<
+    | { text: string }
+    | { functionCall: { name: string; args: Record<string, any> } }
+    | { functionResponse: { name: string; response: Record<string, any> } }
+  >;
+}
+
+const TERMINAL_DISPOSITIONS = new Set(["voicemail", "not_interested", "wrong_number", "do_not_contact", "not_answered"]);
+
+function handlePlivoStreamSarvam(plivoWs: WebSocket, callId: string) {
+  const callCtx = activeCallContexts.get(callId);
+  if (!callCtx) {
+    console.error(`[${callId}] No call context found for Sarvam handler`);
+    plivoWs.close();
+    return;
+  }
+
+  const history: GeminiContent[] = [];
+  let utteranceBuffer: number[] = []; // Int16 samples for current utterance
+  let voiceFrames = 0;
+  let silenceFrames = 0;
+  let aiSpeaking = false; // gate STT while we're playing TTS back
+  let plivoStreamId: string | null = null;
+  let lastUserText = "";
+
+  const sendTtsToPlivo = async (text: string) => {
+    aiSpeaking = true;
+    const pcm = await sarvamTTS({
+      apiKey: SARVAM_API_KEY,
+      text,
+      speaker: SARVAM_TTS_SPEAKER,
+      languageCode: "en-IN",
+    });
+    if (!pcm || !plivoStreamId) { aiSpeaking = false; return; }
+    // Chunk PCM into 160-sample (20ms) frames, encode mulaw, send to Plivo
+    for (let i = 0; i < pcm.length; i += 160) {
+      const frame = pcm.subarray(i, Math.min(i + 160, pcm.length));
+      const mulawB64 = pcm16ToMulawBase64(frame);
+      try {
+        plivoWs.send(JSON.stringify({
+          event: "playAudio",
+          media: { contentType: "audio/x-mulaw", sampleRate: 8000, payload: mulawB64 },
+        }));
+      } catch { break; }
+      // Pace at ~real-time so Plivo's jitter buffer doesn't overflow
+      await new Promise(r => setTimeout(r, 18));
+    }
+    aiSpeaking = false;
+  };
+
+  // One round-trip to Gemini text-gen with the current history. Returns the
+  // raw model `parts` array so the caller can decide what to do (speak text,
+  // execute tools, both).
+  const callGemini = async (): Promise<any[]> => {
+    const systemPrompt = buildSystemInstruction(callCtx);
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY_FOR_TEXT}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents: history,
+          tools: [{ functionDeclarations: VOICE_AGENT_TOOLS }],
+          generationConfig: { temperature: 0.4, maxOutputTokens: 300 },
+        }),
+      },
+    );
+    if (!res.ok) {
+      console.error(`[${callId}] Gemini text gen ${res.status}: ${await res.text().catch(() => "")}`);
+      return [];
+    }
+    const data = await res.json();
+    return data?.candidates?.[0]?.content?.parts || [];
+  };
+
+  // Drives the model turn loop: speak any text, execute any tool calls,
+  // feed results back, repeat until the model returns no more tool calls.
+  // Honours terminal-disposition auto-hangup like the Gemini Live path does.
+  const runModelTurn = async () => {
+    let safety = 0;
+    while (safety++ < 5) {
+      const parts = await callGemini();
+      if (!parts.length) return;
+
+      // Persist the model turn into history exactly as returned (text + any
+      // function calls together) so the next loop iteration sees the right
+      // tool-call → tool-response pairing.
+      history.push({ role: "model", parts });
+
+      // Speak any text content
+      const textParts = parts.filter((p: any) => typeof p.text === "string" && p.text.trim());
+      const spokenText = textParts.map((p: any) => p.text).join(" ").trim();
+      if (spokenText) {
+        console.log(`[${callId}] AI said (sarvam): ${spokenText}`);
+        callCtx.aiTranscript.push(spokenText);
+        await sendTtsToPlivo(spokenText);
+      }
+
+      // Execute any tool calls in parallel and feed results back
+      const fnCalls = parts.filter((p: any) => p.functionCall).map((p: any) => p.functionCall);
+      if (!fnCalls.length) return; // model done — wait for next user utterance
+
+      console.log(`[${callId}] Tool calls (sarvam):`, fnCalls.map((fc: any) => fc.name));
+      const responses = await Promise.all(fnCalls.map(async (fc: any) => {
+        const result = await executeTool(fc.name, fc.args || {}, callCtx);
+        callCtx.toolCallsMade.push({ name: fc.name, args: fc.args, result });
+        return { name: fc.name, response: result };
+      }));
+
+      // Append tool results as a "user" turn with functionResponse parts —
+      // this is how Gemini's REST API expects multi-turn tool conversations.
+      history.push({
+        role: "user",
+        parts: responses.map(r => ({ functionResponse: { name: r.name, response: r.response } })),
+      });
+
+      // Auto-hangup on terminal disposition — mirrors the Gemini Live path.
+      const dispositionCall = fnCalls.find((fc: any) => fc.name === "set_call_disposition");
+      if (dispositionCall && TERMINAL_DISPOSITIONS.has(dispositionCall.args?.disposition)) {
+        const delay = dispositionCall.args.disposition === "voicemail" ? 3000 : 5000;
+        console.log(`[${callId}] Terminal disposition "${dispositionCall.args.disposition}" — auto-hangup in ${delay / 1000}s`);
+        setTimeout(() => {
+          console.log(`[${callId}] Auto-hangup: closing Plivo (sarvam)`);
+          if (plivoWs.readyState === WebSocket.OPEN) plivoWs.close();
+        }, delay);
+        return;
+      }
+      // Loop: model gets to react to the tool results in the next iteration
+    }
+    console.warn(`[${callId}] Sarvam tool-loop hit safety cap (5 iterations)`);
+  };
+
+  const processUtterance = async () => {
+    if (utteranceBuffer.length === 0) return;
+    const pcm = new Int16Array(utteranceBuffer);
+    utteranceBuffer = [];
+    voiceFrames = 0;
+    silenceFrames = 0;
+
+    aiSpeaking = true; // gate further STT until we're done responding
+    try {
+      const stt = await sarvamSTT({ apiKey: SARVAM_API_KEY, pcm, languageCode: "unknown" });
+      if (!stt?.transcript) return;
+      const userText = stt.transcript.trim();
+      if (!userText || userText === lastUserText) return;
+      lastUserText = userText;
+
+      console.log(`[${callId}] Caller said (sarvam): ${userText}`);
+      callCtx.callerTranscript.push(userText);
+      history.push({ role: "user", parts: [{ text: userText }] });
+      await runModelTurn();
+    } finally {
+      aiSpeaking = false;
+    }
+  };
+
+  plivoWs.onopen = () => {
+    console.log(`[${callId}] Plivo WS open (sarvam)`);
+  };
+
+  plivoWs.onmessage = async (event) => {
+    try {
+      const msg = JSON.parse(event.data as string);
+      if (msg.event === "start") {
+        plivoStreamId = msg.start?.streamId;
+        console.log(`[${callId}] Plivo stream started (sarvam), streamId: ${plivoStreamId}`);
+        // Greet first — kickoff trick to nudge the model into producing the
+        // greeting from the system instruction without waiting for caller speech.
+        history.push({ role: "user", parts: [{ text: "(call connected — greet me now)" }] });
+        await runModelTurn();
+        return;
+      }
+      if (msg.event !== "media" || !msg.media?.payload || aiSpeaking) return;
+
+      const pcm = mulawBase64ToPcm16(msg.media.payload);
+      const energy = rmsEnergy(pcm);
+
+      if (energy >= VAD_RMS_THRESHOLD) {
+        voiceFrames++;
+        silenceFrames = 0;
+        for (let i = 0; i < pcm.length; i++) utteranceBuffer.push(pcm[i]);
+      } else {
+        silenceFrames++;
+        if (voiceFrames > 0) {
+          // accumulate trailing silence too — STT does better with a small
+          // tail than with a hard cutoff at the last voiced frame
+          for (let i = 0; i < pcm.length; i++) utteranceBuffer.push(pcm[i]);
+        }
+        if (voiceFrames >= MIN_VOICE_FRAMES && silenceFrames >= END_SILENCE_FRAMES) {
+          await processUtterance();
+        }
+      }
+    } catch (e) {
+      console.error(`[${callId}] Sarvam handler error:`, (e as Error).message);
+    }
+  };
+
+  plivoWs.onclose = () => {
+    console.log(`[${callId}] Plivo WS closed (sarvam) — turns: ${history.length}`);
+  };
+  plivoWs.onerror = (e) => {
+    console.error(`[${callId}] Plivo WS error (sarvam):`, e);
+  };
+}
 
 console.log(`🎙️ NIMT Voice Agent Server running on port ${PORT}`);

@@ -18,6 +18,7 @@ import LeadBuckets from "./pages/LeadBuckets";
 import CallLog from "./pages/CallLog";
 import AiCallLog from "./pages/AiCallLog";
 import CloudDialer from "./pages/CloudDialer";
+import MissedCalls from "./pages/MissedCalls";
 import Applications from "./pages/Applications";
 import AdminApplicationView from "./pages/AdminApplicationView";
 import PendingFollowups from "./pages/PendingFollowups";
@@ -168,6 +169,7 @@ const App = () => (
                       <Route path="/call-log" element={<CallLog />} />
                       <Route path="/ai-call-log" element={<AiCallLog />} />
                       <Route path="/cloud-dialer" element={<CloudDialer />} />
+                      <Route path="/missed-calls" element={<MissedCalls />} />
                       <Route path="/applications" element={<Applications />} />
                       <Route path="/applications/:applicationId" element={<AdminApplicationView />} />
                       <Route path="/referrals" element={<StudentReferrals />} />

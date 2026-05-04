@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -9,7 +10,7 @@ import {
   Phone, PhoneOff, Pause, Play, SkipForward, Clock,
   Loader2, CheckCircle, XCircle, PhoneMissed, Users, BarChart3,
   Calendar, AlertCircle, Volume2, Pencil, Check, X, Search,
-  FileText, PhoneIncoming,
+  FileText, PhoneIncoming, PhoneMissed, ArrowRight,
 } from "lucide-react";
 import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
 
@@ -166,6 +167,8 @@ const getCourseNudges = (courseName: string): string[] => {
 
 export default function CloudDialer() {
   const { user, role, profile } = useAuth();
+  const navigate = useNavigate();
+  const [missedCount, setMissedCount] = useState(0);
   const { toast } = useToast();
   const isCounsellor = role === "counsellor";
   const counsellorDisplayName = profile?.display_name || "Counsellor";
@@ -777,8 +780,47 @@ export default function CloudDialer() {
 
   if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
 
+  // Pending missed-callback count — shows a priority banner so the
+  // counsellor knows to clear yesterday's off-hours queue first.
+  useEffect(() => {
+    let cancelled = false;
+    const fetchMissedCount = async () => {
+      let q = (supabase.from("ai_call_records" as any) as any)
+        .select("id, lead_id, leads!inner(counsellor_id)", { count: "exact", head: true })
+        .eq("needs_followup", true)
+        .is("followup_done_at", null);
+      if (role === "counsellor" && profile?.id) {
+        q = q.eq("leads.counsellor_id", profile.id);
+      }
+      const { count } = await q;
+      if (!cancelled) setMissedCount(count || 0);
+    };
+    fetchMissedCount();
+    const id = setInterval(fetchMissedCount, 60_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [role, profile?.id]);
+
   return (
     <div className="h-[calc(100vh-64px)] flex flex-col">
+      {/* Missed-call priority banner — sits above the dialer header */}
+      {missedCount > 0 && (
+        <button
+          onClick={() => navigate("/missed-calls")}
+          className="flex items-center gap-3 px-6 py-2 bg-amber-50 dark:bg-amber-950/20 border-b border-amber-200 hover:bg-amber-100/70 transition-colors text-left"
+        >
+          <PhoneMissed className="h-4 w-4 text-amber-600 shrink-0 animate-pulse" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">
+              {missedCount} missed callback{missedCount === 1 ? "" : "s"} pending — call these first
+            </p>
+            <p className="text-[11px] text-amber-700 dark:text-amber-200/80">
+              Inbound calls received outside business hours. The lead is waiting.
+            </p>
+          </div>
+          <ArrowRight className="h-4 w-4 text-amber-600 shrink-0" />
+        </button>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-card">
         <div className="flex items-center gap-3">
