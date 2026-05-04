@@ -56,14 +56,19 @@ const activeCallContexts = new Map<string, ActiveCall>();
  * Execute a tool call from Gemini against Supabase.
  */
 const MIRAI_CAMPUS_ID = "c0000002-0000-0000-0000-000000000001";
+const BEACON_CAMPUS_ID = "9bb6b4cc-c992-4af1-b9d3-384537a510c8";
 
 /**
  * Assigns a lead to a counsellor via round-robin within the appropriate team:
- *   Mirai campus  → "Mirai Admissions"
- *   School campus → "NSAEII Admissions"
- *   College       → "Grn Counselling"
+ *   Mirai campus            → "Mirai Admissions"
+ *   Beacon / school campus  → "NSAE II Admissions"
+ *   Education department    → "Grn BEd Admissions"
+ *   Law department          → "Grn Law Admissions"
+ *   Management department   → "Grn Mgmt Faculty Admissions"
+ *   Anything else / fallback → "Grn Counselling"
  *
  * Skips if the lead already has a counsellor assigned.
+ * Notifies the assigned counsellor (in-app notification + activity feed).
  * Returns the assigned profile id or null.
  */
 async function assignLeadRoundRobin(leadId: string): Promise<string | null> {
@@ -73,9 +78,8 @@ async function assignLeadRoundRobin(leadId: string): Promise<string | null> {
     Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
   };
 
-  // Fetch lead campus + institution type, and whether already assigned
   const ldRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}&select=counsellor_id,campus_id,campuses:campus_id(institutions:institution_id(type))`,
+    `${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}&select=id,name,counsellor_id,campus_id,course_id,campuses:campus_id(institutions:institution_id(type)),courses:course_id(department_id,departments:department_id(name))`,
     { headers: h },
   );
   const ld = (await ldRes.json().catch(() => []))?.[0];
@@ -83,39 +87,52 @@ async function assignLeadRoundRobin(leadId: string): Promise<string | null> {
   if (ld.counsellor_id) return ld.counsellor_id; // already assigned — skip
 
   const instType = (ld.campuses as any)?.institutions?.type;
-  let teamName: string;
+  const dept = ((ld.courses as any)?.departments as any)?.name || "";
+
+  let teamName = "Grn Counselling";
   if (ld.campus_id === MIRAI_CAMPUS_ID) {
     teamName = "Mirai Admissions";
-  } else if (instType === "school") {
-    teamName = "NSAEII Admissions";
-  } else {
-    teamName = "Grn Counselling";
+  } else if (ld.campus_id === BEACON_CAMPUS_ID || instType === "school") {
+    teamName = "NSAE II Admissions";
+  } else if (dept === "Education") {
+    teamName = "Grn BEd Admissions";
+  } else if (dept === "Law") {
+    teamName = "Grn Law Admissions";
+  } else if (dept === "Management") {
+    teamName = "Grn Mgmt Faculty Admissions";
   }
 
-  // Fetch team members
-  const teamRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/teams?name=eq.${encodeURIComponent(teamName)}&select=id,team_members(user_id)&limit=1`,
-    { headers: h },
-  );
-  const team = (await teamRes.json().catch(() => []))?.[0];
-  const memberUserIds: string[] = (team?.team_members || []).map((m: any) => m.user_id);
+  async function fetchTeamMembers(name: string): Promise<string[]> {
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/teams?name=eq.${encodeURIComponent(name)}&select=id,team_members(user_id)&limit=1`,
+      { headers: h },
+    );
+    const t = (await r.json().catch(() => []))?.[0];
+    return (t?.team_members || []).map((m: any) => m.user_id);
+  }
+
+  let memberUserIds = await fetchTeamMembers(teamName);
+  if (memberUserIds.length === 0 && teamName !== "Grn Counselling") {
+    console.warn(`[RoundRobin] Team "${teamName}" missing/empty for lead ${leadId} — falling back to Grn Counselling`);
+    teamName = "Grn Counselling";
+    memberUserIds = await fetchTeamMembers(teamName);
+  }
   if (memberUserIds.length === 0) {
     console.warn(`[RoundRobin] No members in team "${teamName}" for lead ${leadId}`);
     return null;
   }
 
-  // Resolve user_ids → profile ids
   const profRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/profiles?user_id=in.(${memberUserIds.join(",")})&select=id`,
+    `${SUPABASE_URL}/rest/v1/profiles?user_id=in.(${memberUserIds.join(",")})&select=id,user_id,display_name`,
     { headers: h },
   );
-  const profiles: { id: string }[] = await profRes.json().catch(() => []);
+  const profiles: { id: string; user_id: string; display_name: string }[] = await profRes.json().catch(() => []);
+  if (profiles.length === 0) return null;
   const profileIds = profiles.map(p => p.id);
-  if (profileIds.length === 0) return null;
 
-  // Round-robin: pick the counsellor with fewest active leads
+  // Round-robin: pick counsellor with fewest active leads
   const lcRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/leads?counsellor_id=in.(${profileIds.join(",")})&stage=not.in.(admitted,rejected,not_interested)&select=counsellor_id`,
+    `${SUPABASE_URL}/rest/v1/leads?counsellor_id=in.(${profileIds.join(",")})&stage=not.in.(admitted,rejected,not_interested,ineligible,dnc)&select=counsellor_id`,
     { headers: h },
   );
   const activeLeads: { counsellor_id: string }[] = await lcRes.json().catch(() => []);
@@ -124,23 +141,44 @@ async function assignLeadRoundRobin(leadId: string): Promise<string | null> {
   for (const l of activeLeads) {
     if (countMap[l.counsellor_id] !== undefined) countMap[l.counsellor_id]++;
   }
-  const sorted = Object.entries(countMap).sort((a, b) => a[1] - b[1]);
-  const assignedProfileId = sorted[0]?.[0] ?? null;
-  if (!assignedProfileId) return null;
+  const chosen = profiles.slice().sort((a, b) => (countMap[a.id] || 0) - (countMap[b.id] || 0))[0];
+  if (!chosen) return null;
 
-  // Assign on lead
   await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}`, {
     method: "PATCH",
     headers: { ...h, Prefer: "return=minimal" },
-    body: JSON.stringify({ counsellor_id: assignedProfileId }),
+    body: JSON.stringify({ counsellor_id: chosen.id, stage: "counsellor_call" }),
   });
 
-  console.log(`[RoundRobin] Lead ${leadId} → team "${teamName}", counsellor ${assignedProfileId}`);
+  // Notify the assigned counsellor (in-app feed). notifications.user_id FKs auth.users(id),
+  // so we pass profiles.user_id — NOT profiles.id.
+  fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
+    method: "POST",
+    headers: { ...h, Prefer: "return=minimal" },
+    body: JSON.stringify({
+      user_id: chosen.user_id,
+      type: "lead_assigned",
+      title: `New lead assigned: ${ld.name || "Unknown"}`,
+      body: `Auto-assigned from AI call (${teamName}). Follow up soon.`,
+      link: `/admissions/${leadId}`,
+      lead_id: leadId,
+    }),
+  }).catch(() => {});
+  fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
+    method: "POST",
+    headers: { ...h, Prefer: "return=minimal" },
+    body: JSON.stringify({
+      lead_id: leadId,
+      type: "system",
+      description: `Auto-assigned to ${chosen.display_name} (${teamName}) after AI call`,
+    }),
+  }).catch(() => {});
 
-  // Fire lead_assigned automation (async)
+  console.log(`[RoundRobin] Lead ${leadId} → team "${teamName}", counsellor ${chosen.display_name} (${chosen.id})`);
+
   fireAutomation("lead_assigned", leadId).catch(() => {});
 
-  return assignedProfileId;
+  return chosen.id;
 }
 
 /** Fire the automation engine for a trigger event */
@@ -1287,6 +1325,7 @@ Deno.serve({ port: PORT }, async (req) => {
     let counsellorPhone = "";
     let counsellorName = "";
     let counsellorUserId = "";
+    let lastOutboundCallAt: string | undefined;
     try {
       const phone = callerPhone.replace(/[^0-9]/g, "").slice(-10);
       if (phone) {
@@ -1316,6 +1355,16 @@ Deno.serve({ port: PORT }, async (req) => {
               counsellorUserId = profiles[0].user_id || "";
             }
           }
+
+          // Look up most recent outbound AI call to this lead (within last 24h) so Navya
+          // can open the callback by referencing it instead of a generic greeting.
+          const sinceIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+          const recentRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/ai_call_records?lead_id=eq.${leadId}&call_type=eq.ai&created_at=gte.${sinceIso}&order=created_at.desc&limit=1&select=created_at`,
+            { headers: dbHeaders },
+          );
+          const recent = (await recentRes.json().catch(() => []))?.[0];
+          if (recent?.created_at) lastOutboundCallAt = recent.created_at;
         }
       }
     } catch (e) {
@@ -1329,6 +1378,7 @@ Deno.serve({ port: PORT }, async (req) => {
       courseName,
       campusName,
       calledNumber: params.To || "",
+      lastOutboundCallAt,
       callerTranscript: [],
       aiTranscript: [],
       toolCallsMade: [{ name: "inbound_meta", args: { counsellorUserId, counsellorName, counsellorPhone, plivoCallUUID }, result: null }],
@@ -1353,11 +1403,27 @@ Deno.serve({ port: PORT }, async (req) => {
     const recordingCallbackUrl = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/voice-call-callback` : "";
     const hangupUrl = `https://${host}/inbound-hangup/${callId}`;
 
-    // If lead has an assigned counsellor → ring counsellor first, then fall back to AI
-    if (leadId && counsellorPhone) {
+    // Routing decision based on which DID the lead dialed:
+    //
+    //  - AI primary (PLIVO_AI_PHONE_NUMBER) or its HA backup
+    //    → answer with the AI agent immediately. This is the dedicated
+    //      inbound number leads call after seeing it on a marketing
+    //      landing page or a previous AI outbound; they expect the AI.
+    //
+    //  - Dialer number (PLIVO_DIALER_PHONE_NUMBER) or any other DID
+    //    → ring assigned counsellor first (20s) then fall back to AI.
+    //      This preserves the original "sticky inbound" behaviour for
+    //      the cloud-dialer DID, which is primarily an outbound caller-id
+    //      but can receive return calls too.
+    const dialedTo = (params.To as string || "").replace(/[^0-9+]/g, "");
+    const aiPrimary = (Deno.env.get("PLIVO_AI_PHONE_NUMBER") || "").replace(/[^0-9+]/g, "");
+    const aiBackup  = (Deno.env.get("PLIVO_AI_BACKUP_PHONE_NUMBER") || "").replace(/[^0-9+]/g, "");
+    const isAiInboundNumber = !!dialedTo && (dialedTo === aiPrimary || dialedTo === aiBackup);
+
+    if (!isAiInboundNumber && leadId && counsellorPhone) {
       const aiUrl = `https://${host}/answer/inbound-ai/${callId}`;
 
-      console.log(`[${callId}] Routing inbound from ${leadName} to counsellor ${counsellorName} (${counsellorPhone})`);
+      console.log(`[${callId}] Inbound to dialer DID ${dialedTo} → ringing counsellor ${counsellorName} (${counsellorPhone})`);
 
       const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -1371,7 +1437,7 @@ Deno.serve({ port: PORT }, async (req) => {
       return new Response(xml, { headers: { "Content-Type": "application/xml" } });
     }
 
-    // No assigned counsellor or no phone → go straight to AI agent
+    // AI inbound DID, OR no counsellor assigned → straight to AI agent.
     const wsUrl = `${wsProtocol}://${host}/ws/${callId}`;
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -1379,7 +1445,7 @@ Deno.serve({ port: PORT }, async (req) => {
   <Stream streamTimeout="600" keepCallAlive="true" bidirectional="true" contentType="audio/x-mulaw;rate=8000">${wsUrl}</Stream>
 </Response>`;
 
-    console.log(`[${callId}] Inbound from ${callerPhone}, no counsellor → AI agent. lead: ${leadName || "unknown"}`);
+    console.log(`[${callId}] Inbound from ${callerPhone} to ${dialedTo || "?"} (AI DID=${isAiInboundNumber}) → AI agent. lead: ${leadName || "unknown"}`);
     return new Response(xml, { headers: { "Content-Type": "application/xml" } });
   }
 
