@@ -43,17 +43,24 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
 
-  // Auth — accept any JWT with role=service_role
+  // Auth — accept service-role token in either format (legacy eyJ JWT
+  // OR new sb_secret_ opaque). String-equality covers both; JWT decode
+  // is a safety net for tokens whose env-form was rotated.
   const auth = req.headers.get("authorization") ?? "";
   if (!auth.startsWith("Bearer ")) return json({ error: "unauthorized" }, 401);
-  try {
-    const [, payloadB64] = auth.slice(7).split(".");
-    if (!payloadB64) throw new Error("malformed token");
-    const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
-    if (payload?.role !== "service_role") throw new Error("not service role");
-  } catch {
-    return json({ error: "unauthorized" }, 401);
+  const token = auth.slice(7);
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  let okAuth = !!(serviceRoleKey && token === serviceRoleKey);
+  if (!okAuth) {
+    try {
+      const [, payloadB64] = token.split(".");
+      if (payloadB64) {
+        const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
+        if (payload?.role === "service_role") okAuth = true;
+      }
+    } catch { /* malformed token */ }
   }
+  if (!okAuth) return json({ error: "unauthorized" }, 401);
 
   let body: NotifyBody;
   try { body = await req.json(); } catch { return json({ error: "invalid json" }, 400); }
@@ -75,26 +82,38 @@ Deno.serve(async (req) => {
   // Counsellor + their team leader + all super_admins.
   // Returns deduped lowercase email list. `which` controls which group
   // to include (events 3+4 only notify the applicant).
+  //
+  // IMPORTANT join semantics:
+  //   leads.counsellor_id   → profiles.id  (NOT auth.users.id)
+  //   team_members.user_id  → auth.users.id
+  //   teams.leader_id       → profiles.id  (per existing RLS policies)
+  //
+  // So the team-leader chain needs counsellor profile.user_id first.
   const resolveEmails = async (which: { counsellor: boolean; leader: boolean; super_admin: boolean }): Promise<string[]> => {
     const emails = new Set<string>();
+    let counsellorUserId: string | null = null;
 
-    if (which.counsellor && lead.counsellor_id) {
-      const { data } = await db.from("profiles").select("email").eq("id", lead.counsellor_id).maybeSingle();
-      if (data?.email) emails.add(String(data.email).toLowerCase());
+    if ((which.counsellor || which.leader) && lead.counsellor_id) {
+      const { data } = await db
+        .from("profiles")
+        .select("email, user_id")
+        .eq("id", lead.counsellor_id)
+        .maybeSingle();
+      if (which.counsellor && data?.email) emails.add(String(data.email).toLowerCase());
+      counsellorUserId = (data?.user_id as string) ?? null;
     }
 
-    if (which.leader && lead.counsellor_id) {
-      // counsellor profile → team_members → teams.leader_id → leader profile email
+    if (which.leader && counsellorUserId) {
       const { data: tm } = await db
         .from("team_members")
         .select("team_id")
-        .eq("profile_id", lead.counsellor_id);
+        .eq("user_id", counsellorUserId);
       const teamIds = (tm || []).map((r: any) => r.team_id);
       if (teamIds.length) {
         const { data: teams } = await db.from("teams").select("leader_id").in("id", teamIds);
-        const leaderIds = (teams || []).map((t: any) => t.leader_id).filter(Boolean);
-        if (leaderIds.length) {
-          const { data: leaders } = await db.from("profiles").select("email").in("id", leaderIds);
+        const leaderProfileIds = (teams || []).map((t: any) => t.leader_id).filter(Boolean);
+        if (leaderProfileIds.length) {
+          const { data: leaders } = await db.from("profiles").select("email").in("id", leaderProfileIds);
           (leaders || []).forEach((l: any) => l.email && emails.add(String(l.email).toLowerCase()));
         }
       }
@@ -172,7 +191,12 @@ Deno.serve(async (req) => {
       const { data: app } = await db
         .from("applications").select("application_id, form_pdf_url, full_name, phone, email")
         .eq("application_id", application_id).maybeSingle();
-      const formPdf = app?.form_pdf_url || "";
+      // CRM application detail page — fallback when form_pdf_url isn't yet
+      // populated (PDF generator runs in parallel with notify-event and
+      // may not have stored the URL by the time this email fires). Staff
+      // can open the CRM page and download the PDF inline from there.
+      const appDetailUrl = `${CRM_BASE}/applications/${application_id}`;
+      const formPdf = app?.form_pdf_url || appDetailUrl;
 
       // PDF templates use a static URL button to the apply portal —
       // applicant authenticates there to retrieve the actual signed PDF.
@@ -188,7 +212,9 @@ Deno.serve(async (req) => {
         phone: lead.phone || app?.phone || "", email: lead.email || app?.email || "",
         form_pdf_url: formPdf, lead_url: leadUrl,
       };
-      await Promise.all(recipients.map(e => sendEmail("application-submitted-internal", e, vars)));
+      // Serialise (Resend free-tier rate limit is 2/sec; 4 parallel sends
+      // get throttled). Small delay between recipients keeps us well under.
+      for (const e of recipients) { await sendEmail("application-submitted-internal", e, vars); await new Promise(r => setTimeout(r, 300)); }
       break;
     }
 
@@ -203,7 +229,9 @@ Deno.serve(async (req) => {
       const { data: app } = await db
         .from("applications").select("application_id, fee_receipt_url, full_name")
         .eq("lead_id", lead.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
-      const receiptUrl = pmt?.receipt_url || app?.fee_receipt_url || "";
+      // Fallback chain: lead_payments.receipt_url → applications.fee_receipt_url
+      // → CRM lead page where staff can re-issue/view the receipt.
+      const receiptUrl = pmt?.receipt_url || app?.fee_receipt_url || leadUrl;
 
       await sendWhatsApp("app_fee_receipt",
         [lead.name || "Student", String(pmt?.amount ?? ""), app?.application_id || ""],
@@ -218,7 +246,7 @@ Deno.serve(async (req) => {
         payment_ref: pmt?.transaction_ref || pmt?.receipt_no || "",
         receipt_url: receiptUrl, lead_url: leadUrl,
       };
-      await Promise.all(recipients.map(e => sendEmail("app-fee-paid-internal", e, vars)));
+      for (const e of recipients) { await sendEmail("app-fee-paid-internal", e, vars); await new Promise(r => setTimeout(r, 300)); }
       break;
     }
 
@@ -308,9 +336,9 @@ Deno.serve(async (req) => {
         receipt_no: pmt.receipt_no || "",
         payment_ref: pmt.transaction_ref || "",
         payment_date: pmt.payment_date ? new Date(pmt.payment_date).toLocaleString("en-IN") : "",
-        receipt_url: pmt.receipt_url || "", lead_url: leadUrl,
+        receipt_url: pmt.receipt_url || leadUrl, lead_url: leadUrl,
       };
-      await Promise.all(recipients.map(e => sendEmail("payment-received-internal", e, vars)));
+      for (const e of recipients) { await sendEmail("payment-received-internal", e, vars); await new Promise(r => setTimeout(r, 300)); }
       break;
     }
 

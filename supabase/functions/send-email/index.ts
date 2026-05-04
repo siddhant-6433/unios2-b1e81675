@@ -22,22 +22,51 @@ Deno.serve(async (req) => {
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // Auth
+    // Auth: accept either a logged-in user JWT OR a service-role JWT (for
+    // server-side relays like notify-event). Service-role tokens don't have
+    // an associated auth.users row so getUser() fails on them — decode the
+    // payload and check role explicitly to short-circuit.
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user }, error: authError } = await userClient.auth.getUser();
-    if (authError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    let user: { id: string | null } | null = null;
+    let isServiceRole = false;
+    const token = authHeader.slice(7);
+
+    // Two paths to recognise service-role auth:
+    //  (a) Legacy eyJ... JWT: decode payload, check role claim.
+    //  (b) New sb_secret_... opaque key: direct string-equality vs env.
+    if (token === serviceRoleKey) {
+      isServiceRole = true;
+      user = { id: null };
+    } else {
+      try {
+        const [, payloadB64] = token.split(".");
+        if (payloadB64) {
+          const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
+          if (payload?.role === "service_role") {
+            isServiceRole = true;
+            user = { id: null };
+          }
+        }
+      } catch { /* fall through to user-token path */ }
+    }
+
+    if (!isServiceRole) {
+      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
       });
+      const { data, error: authError } = await userClient.auth.getUser();
+      if (authError || !data?.user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      user = { id: data.user.id };
     }
 
     const { template_slug, to_email, variables, lead_id, custom_subject, custom_body, cc } = await req.json();
@@ -98,8 +127,10 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Get profile id
-    const { data: profile } = await admin.from("profiles").select("id").eq("user_id", user.id).single();
+    // Get profile id (skipped for service-role calls — no associated user)
+    const { data: profile } = user?.id
+      ? await admin.from("profiles").select("id").eq("user_id", user.id).single()
+      : { data: null };
 
     // Inject email open tracking pixel
     const trackingBaseUrl = `${supabaseUrl}/functions/v1/track-engagement`;
@@ -148,11 +179,11 @@ Deno.serve(async (req) => {
       sent_at: success ? new Date().toISOString() : null,
     }).select("id").single();
 
-    // Log activity
+    // Log activity (user_id null for service-role / system-initiated sends)
     if (lead_id) {
       await admin.from("lead_activities").insert({
         lead_id,
-        user_id: user.id,
+        user_id: user?.id ?? null,
         type: "email",
         description: `Email ${success ? "sent" : "failed"}: ${subject}`,
       });
