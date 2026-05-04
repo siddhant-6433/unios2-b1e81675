@@ -1454,13 +1454,63 @@ const ApplyPortal = () => {
         </header>
 
         <main className="max-w-5xl mx-auto px-6 py-6 space-y-5">
-          <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4 flex items-start gap-3">
-            <CheckCircle className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-semibold text-emerald-900">Your application has been received.</p>
-              <p className="text-xs text-emerald-700 mt-0.5">Our admissions team will review and contact you shortly. Below is a summary of what you submitted.</p>
-            </div>
-          </div>
+          {(() => {
+            // Banner reflects actual lifecycle state, not just "submitted".
+            // Order matters — rejected wins, then approved (paid vs unpaid),
+            // then plain submitted (paid vs unpaid).
+            const paid = app.payment_status === "paid";
+            const status = app.status;
+            const rejectionReason = (app as any).rejection_reason as string | undefined;
+
+            if (status === "rejected") {
+              return (
+                <div className="rounded-2xl bg-rose-50 border border-rose-200 p-4 flex items-start gap-3">
+                  <CheckCircle className="h-5 w-5 text-rose-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-rose-900">Application not accepted.</p>
+                    <p className="text-xs text-rose-700 mt-0.5">
+                      {rejectionReason || "The admissions team has declined this application. Please contact us for next steps."}
+                    </p>
+                  </div>
+                </div>
+              );
+            }
+
+            if (status === "approved") {
+              return (
+                <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4 flex items-start gap-3">
+                  <CheckCircle className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-emerald-900">
+                      {paid ? "Application approved and fee paid." : "Application approved."}
+                    </p>
+                    <p className="text-xs text-emerald-700 mt-0.5">
+                      {paid
+                        ? "An offer letter and next-step instructions will follow shortly. Below is a summary of your application."
+                        : "Please complete your application fee payment to proceed. Below is a summary of your application."}
+                    </p>
+                  </div>
+                </div>
+              );
+            }
+
+            // status === 'submitted' (or anything else past draft)
+            return (
+              <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4 flex items-start gap-3">
+                <CheckCircle className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-emerald-900">
+                    {paid ? "Application submitted and fee paid." : "Your application has been received."}
+                  </p>
+                  <p className="text-xs text-emerald-700 mt-0.5">
+                    {paid
+                      ? "Our admissions team is reviewing your application. Below is a summary of what you submitted."
+                      : "Our admissions team will review and contact you shortly. Below is a summary of what you submitted."}
+                  </p>
+                </div>
+              </div>
+            );
+          })()}
 
           <ApplicationPreview app={app} docs={previewDocs} />
         </main>
