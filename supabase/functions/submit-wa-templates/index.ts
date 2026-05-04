@@ -120,6 +120,34 @@ const TEMPLATES = [
     ],
   },
   {
+    name: "doc_rejected",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Hi {{1}}, your uploaded document \"{{2}}\" needs attention. Reason: {{3}}. Please re-upload a corrected version in the apply portal so your admission can proceed.",
+        example: { body_text: [["Rahul Sharma", "Class 12 Marksheet", "Photo unclear, please rescan"]] },
+      },
+      {
+        type: "BUTTONS",
+        buttons: [{ type: "URL", text: "Re-upload in Portal", url: "https://uni.nimt.ac.in/apply" }],
+      },
+    ],
+  },
+  {
+    name: "application_rejected",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Dear {{1}}, after review we are unable to proceed with your application {{2}}. Reason: {{3}}. Please contact our admissions office if you'd like to discuss alternatives.",
+        example: { body_text: [["Rahul Sharma", "APP-26-AB12", "Eligibility criteria not met for selected programme"]] },
+      },
+    ],
+  },
+  {
     name: "payment_receipt",
     category: "UTILITY",
     language: "en",

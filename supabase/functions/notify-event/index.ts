@@ -28,7 +28,7 @@ const corsHeaders = {
 const APPLY_PORTAL_BASE = Deno.env.get("APPLY_PORTAL_BASE") || "https://uni.nimt.ac.in/apply";
 const CRM_BASE = Deno.env.get("CRM_BASE") || "https://uni.nimt.ac.in";
 
-type EventName = "app_submitted" | "app_fee_paid" | "offer_issued" | "pan_issued" | "payment_received";
+type EventName = "app_submitted" | "app_fee_paid" | "offer_issued" | "pan_issued" | "payment_received" | "doc_rejected" | "application_rejected";
 
 interface NotifyBody {
   event: EventName;
@@ -311,6 +311,30 @@ Deno.serve(async (req) => {
         receipt_url: pmt.receipt_url || "", lead_url: leadUrl,
       };
       await Promise.all(recipients.map(e => sendEmail("payment-received-internal", e, vars)));
+      break;
+    }
+
+    // 6. DOCUMENT REJECTED — applicant gets WA telling them which doc + why
+    case "doc_rejected": {
+      const file_path = (body.context?.file_path as string) || "";
+      const reason = (body.context?.reason as string) || "Please contact admissions for details.";
+      // Filename is the bit after the last "/" in the storage path
+      const docName = file_path.split("/").pop() || "uploaded document";
+
+      await sendWhatsApp("doc_rejected",
+        [lead.name || "Student", docName, reason],
+      );
+      break;
+    }
+
+    // 7. APPLICATION REJECTED — applicant gets WA with rejection reason
+    case "application_rejected": {
+      const application_id = (body.context?.application_id as string) || "";
+      const reason = (body.context?.reason as string) || "Please contact admissions for details.";
+
+      await sendWhatsApp("application_rejected",
+        [lead.name || "Student", application_id, reason],
+      );
       break;
     }
 

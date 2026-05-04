@@ -1,3 +1,16 @@
+/**
+ * Generic WhatsApp template inspector.
+ *
+ * Returns name + status + category + body for templates matching ?q= (case
+ * insensitive substring on the template name). No query → returns all up
+ * to Meta's page limit. Use to monitor approval status (PENDING / APPROVED
+ * / REJECTED) of any template, not just the call-template subset this
+ * function originally checked.
+ *
+ * Curl:
+ *   curl "$SB_URL/functions/v1/check-call-template?q=offer" -H "Authorization: Bearer $SR_KEY"
+ */
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -8,15 +21,35 @@ Deno.serve(async (req) => {
   try {
     const wabaId = Deno.env.get("WHATSAPP_WABA_ID");
     const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
-    const res = await fetch(`https://graph.facebook.com/v21.0/${wabaId}/message_templates?limit=100&access_token=${waToken}`);
+    const url = new URL(req.url);
+    const q = (url.searchParams.get("q") || "").toLowerCase();
+
+    const res = await fetch(`https://graph.facebook.com/v21.0/${wabaId}/message_templates?limit=200&access_token=${waToken}`);
     const data = await res.json();
-    const templates = (data.data || []).map((t: any) => ({ name: t.name, status: t.status, category: t.category }));
-    const target = ["counsellor_call_lead", "counsellor_new_lead"];
-    const filtered = templates.filter((t: any) => target.includes(t.name));
-    return new Response(JSON.stringify({ templates: filtered }), {
+    const all = (data.data || []) as any[];
+
+    const filtered = q
+      ? all.filter(t => (t.name || "").toLowerCase().includes(q))
+      : all;
+
+    const trimmed = filtered.map(t => ({
+      name: t.name,
+      status: t.status,
+      category: t.category,
+      language: t.language,
+      components: (t.components || []).map((c: any) => ({
+        type: c.type,
+        text: c.text,
+        buttons: c.buttons,
+      })),
+    }));
+
+    return new Response(JSON.stringify({ count: trimmed.length, templates: trimmed }, null, 2), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 });

@@ -57,6 +57,11 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   offer_letter_issued:    { name: "offer_letter_issued",    params: ["student_name", "course_name", "net_fee", "deadline"] },
   // 4. PAN issued — nudge to pay balance for AN. magic_pay_url for one-tap.
   pan_nudge_balance:      { name: "pan_nudge_balance",      params: ["student_name", "pre_admission_no", "balance_amount"] },
+  // 6. Document rejected — student must re-upload. URL button to apply portal.
+  doc_rejected:           { name: "doc_rejected",           params: ["student_name", "doc_name", "reason"] },
+  // 7. Application rejected — admin declined the whole application.
+  application_rejected:   { name: "application_rejected",   params: ["student_name", "application_id", "reason"] },
+
   // 5. Token / other fee paid — uses the pre-existing APPROVED template
   // in Meta whose body is:
   //   "Hi {{1}}, we've received your payment of ₹{{3}} towards {{2}}.
@@ -242,6 +247,8 @@ Deno.serve(async (req) => {
       offer_letter_issued: "Congratulations {{1}}! You have been offered admission to {{2}}. Net fee: ₹{{3}}. Please accept by {{4}}. Tap below to view the offer letter and pay your token fee online.",
       pan_nudge_balance: "Hi {{1}}, your pre-admission number is {{2}}. Pay the balance of ₹{{3}} to confirm enrollment and receive your Admission Number. Tap below to pay online.",
       payment_receipt: "Dear {{1}}, payment of ₹{{2}} received. Receipt no: {{3}}. The receipt PDF is attached for your records.",
+      doc_rejected: "Hi {{1}}, your uploaded document \"{{2}}\" needs attention. Reason: {{3}}. Please re-upload a corrected version in the apply portal so your admission can proceed.",
+      application_rejected: "Dear {{1}}, after review we are unable to proceed with your application {{2}}. Reason: {{3}}. Please contact our admissions office if you'd like to discuss alternatives.",
       applicant_welcome: "Hi {{1}}, thank you for starting your application at NIMT Educational Institutions!\n\nYour Application ID: {{2}}\nCourse: {{3}}\n\nComplete your application at https://uni.nimt.ac.in/apply/nimt/\n\nOur admissions team is here to help. Feel free to reach out anytime!",
       ai_call_course_info: "Hi {{1}}, thank you for speaking with us about {{2}} at NIMT Educational Institutions! 🎓\n\n🏫 Campus: {{3}}\n\n📄 Course Details: {{4}}\n📝 Apply Now: {{5}}\n\nFor questions, reply to this message or call our admissions team.\n\nWe look forward to welcoming you!",
     };
