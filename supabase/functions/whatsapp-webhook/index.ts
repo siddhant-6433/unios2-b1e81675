@@ -155,8 +155,14 @@ Deno.serve(async (req) => {
             continue;
           }
 
-          // Insert message
-          await admin.from("whatsapp_messages").insert({
+          // Defer-flag: when true, the LLM classifier will fire the reply once
+          // it knows whether this is admission / job / vendor — the webhook's
+          // immediate AI-reply dispatch below is skipped to avoid pitching
+          // admissions to a likely job applicant.
+          let shouldDeferAiReply = false;
+
+          // Insert message — capture id for downstream classification queue
+          const { data: insertedMsg } = await admin.from("whatsapp_messages").insert({
             lead_id: lead?.id || null,
             wa_message_id: waMessageId,
             direction: "inbound",
@@ -169,7 +175,8 @@ Deno.serve(async (req) => {
             assigned_to: lead?.counsellor_id || null,
             business_phone_number_id: businessPnId,
             business_phone_number: businessNumber,
-          });
+          }).select("id").single();
+          const inboundMessageId: string | null = insertedMsg?.id || null;
 
           // Log activity if lead found
           if (lead?.id) {
@@ -188,13 +195,52 @@ Deno.serve(async (req) => {
             });
 
             // Auto-categorize lead based on message content (job applicant, vendor, etc.)
+            // If regex returns 'lead' AND the message contains a possible non-admission
+            // signal, defer the AI knowledge-base reply behind LLM classification.
+            // Otherwise reply immediately as today (fast path for normal admission queries).
             if (content && msgType === "text") {
-              await admin.rpc("auto_categorize_lead_from_message", {
-                _lead_id: lead.id,
-                _message_text: content,
-              }).catch(() => {}); // non-critical, don't block
+              try {
+                const { data: catResult } = await admin.rpc("auto_categorize_lead_from_message", {
+                  _lead_id: lead.id,
+                  _message_text: content,
+                });
+
+                if (catResult === "lead" && content.trim().length >= 6) {
+                  const { data: ambig } = await admin.rpc("wa_message_might_be_non_admission", {
+                    _text: content,
+                  });
+                  if (ambig === true) {
+                    const { data: queueId } = await admin.rpc("enqueue_wa_classification", {
+                      _lead_id: lead.id,
+                      _message_id: inboundMessageId,
+                      _phone: normalizedPhone,
+                      _content: content,
+                      _dispatch_reply: true,
+                    });
+                    if (queueId) {
+                      // Fire classifier immediately (cron is the safety net for retries).
+                      // Classifier will invoke whatsapp-ai-reply itself once it knows the
+                      // intent — so we set a flag to skip the immediate AI reply below.
+                      shouldDeferAiReply = true;
+                      const supaUrl = Deno.env.get("SUPABASE_URL")!;
+                      const supaKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+                      fetch(`${supaUrl}/functions/v1/wa-classify-message`, {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                          Authorization: `Bearer ${supaKey}`,
+                        },
+                        body: JSON.stringify({ queue_id: queueId, dispatch_reply: true }),
+                      }).catch((e) => console.error("classify dispatch error:", e));
+                    }
+                  }
+                }
+              } catch (_e) {
+                // non-critical, don't block webhook
+              }
             }
           }
+
 
           // Insert in-app notification for assigned counsellor or all admins
           const senderName = lead?.name || phone;
@@ -438,7 +484,7 @@ Deno.serve(async (req) => {
           }
 
           // ── AI Knowledge Base reply (handles everything not matched above) ──
-          if (!feedbackHandled && !keywordMatched && msgType === "text" && content) {
+          if (!feedbackHandled && !keywordMatched && !shouldDeferAiReply && msgType === "text" && content) {
             try {
               // Map menu number selections to explicit intent so AI gives a rich answer
               const MENU_CONTEXT: Record<string, string> = {

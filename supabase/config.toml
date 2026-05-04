@@ -98,3 +98,11 @@ verify_jwt = false
 
 [functions.provision-student-fees]
 verify_jwt = false
+
+# Public endpoint hit by anonymous applicants opening a magic link.
+# JWT verification at the gateway breaks the redeem flow whenever the browser
+# carries a stale/expired/malformed session JWT (the gateway returns 401
+# UNAUTHORIZED_LEGACY_JWT before the function even runs). The function does
+# its own auth via the time-bound token in the request body — no JWT needed.
+[functions.redeem-apply-link]
+verify_jwt = false

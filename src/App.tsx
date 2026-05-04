@@ -59,6 +59,7 @@ import HrDashboard from "./pages/HrDashboard";
 import HrAttendance from "./pages/HrAttendance";
 import HrLeaveManagement from "./pages/HrLeaveManagement";
 import HrEmployeeDirectory from "./pages/HrEmployeeDirectory";
+import HrJobApplicants from "./pages/HrJobApplicants";
 import FeeCollections from "./pages/FeeCollections";
 import ParentPortal from "./pages/ParentPortal";
 import StudentPortalPage from "./pages/StudentPortal";
@@ -177,6 +178,7 @@ const App = () => (
                       <Route path="/finance" element={<Finance />} />
                       <Route path="/collections" element={<FeeCollections />} />
                       <Route path="/hr" element={<HrDashboard />} />
+                      <Route path="/hr-job-applicants" element={<HrJobApplicants />} />
                       <Route path="/hr-attendance" element={<HrAttendance />} />
                       <Route path="/hr-leave" element={<HrLeaveManagement />} />
                       <Route path="/hr-directory" element={<HrEmployeeDirectory />} />

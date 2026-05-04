@@ -6,7 +6,7 @@ import {
   BookOpen, BarChart3, FileText, Search, Shuffle, Handshake, PieChart,
   ChevronDown, Phone, Calendar, MessageSquare, Newspaper, Building2, School, ShieldCheck, Zap, Inbox,
   Globe, FolderOpen, Heart, Award, Target, GitMerge, Bot, Gift, AlertTriangle, Sparkles, Receipt,
-  Briefcase, CalendarOff, UserCheck, Fingerprint, PhoneCall, Send,
+  Briefcase, CalendarOff, UserCheck, Fingerprint, PhoneCall, Send, UserPlus,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -80,6 +80,7 @@ const ibAcademicsSubMenu: MenuItem[] = [
 
 const hrSubMenu: MenuItem[] = [
   { title: "HR Overview", url: "/hr", icon: Briefcase, permission: "hr:view" },
+  { title: "Job Applicants", url: "/hr-job-applicants", icon: UserPlus, permission: "hr:view" },
   { title: "Attendance", url: "/hr-attendance", icon: Fingerprint, permission: "hr:view" },
   { title: "Leave Mgmt", url: "/hr-leave", icon: CalendarOff, permission: "hr:view" },
   { title: "Directory", url: "/hr-directory", icon: Users, permission: "hr:view" },

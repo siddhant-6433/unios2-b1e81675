@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X, KeyRound, Trash2, UserCheck
+  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X, KeyRound, Trash2, UserCheck, Lock, LockOpen
 } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -59,6 +59,7 @@ interface UserWithRole {
   role_id: string | null;
   last_sign_in_at: string | null;
   profile_updated_at: string | null;
+  login_disabled: boolean;
 }
 
 function timeAgo(dateStr: string): string {
@@ -75,7 +76,7 @@ function timeAgo(dateStr: string): string {
 }
 
 const AdminPanel = () => {
-  const { role, realRole, isImpersonating, startImpersonating, hasPermission, loading: authLoading, roleLoaded } = useAuth();
+  const { user: authUser, role, realRole, isImpersonating, startImpersonating, hasPermission, loading: authLoading, roleLoaded } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [users, setUsers] = useState<UserWithRole[]>([]);
@@ -95,6 +96,8 @@ const AdminPanel = () => {
   const [deleteTarget, setDeleteTarget] = useState<{ userId: string; name: string } | null>(null);
   const [permTarget, setPermTarget] = useState<{ userId: string; name: string; role: string | null } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [disableTarget, setDisableTarget] = useState<{ userId: string; name: string; nextDisabled: boolean } | null>(null);
+  const [togglingLogin, setTogglingLogin] = useState(false);
   const [linkingPubId, setLinkingPubId] = useState<string | null>(null);
   const [linkUserId, setLinkUserId] = useState<string>("");
   const [linking, setLinking] = useState(false);
@@ -106,7 +109,7 @@ const AdminPanel = () => {
     try {
       const { data: profiles, error: profileError } = await supabase
         .from("profiles")
-        .select("user_id, display_name, email, phone, campus, updated_at")
+        .select("user_id, display_name, email, phone, campus, updated_at, login_disabled")
         .order("created_at", { ascending: false });
 
       if (profileError) {
@@ -139,6 +142,7 @@ const AdminPanel = () => {
           role_id: userRole?.id ?? null,
           last_sign_in_at: authMap[p.user_id] || null,
           profile_updated_at: p.updated_at || null,
+          login_disabled: !!p.login_disabled,
         };
       });
 
@@ -282,6 +286,40 @@ const AdminPanel = () => {
       toast({ title: "Delete failed", description: err.message, variant: "destructive" });
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleToggleLogin = async () => {
+    if (!disableTarget) return;
+    setTogglingLogin(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("toggle-user-login", {
+        body: { user_id: disableTarget.userId, disabled: disableTarget.nextDisabled },
+      });
+      if (error) {
+        let message = error.message;
+        try {
+          const text = await (error as any)?.context?.text?.();
+          if (text) {
+            try { const body = JSON.parse(text); if (body?.error) message = body.error; }
+            catch { message = text.slice(0, 200); }
+          }
+        } catch {}
+        throw new Error(message);
+      }
+      if (data?.error) throw new Error(data.error);
+      toast({
+        title: disableTarget.nextDisabled ? "Login disabled" : "Login enabled",
+        description: disableTarget.nextDisabled
+          ? `${disableTarget.name} can no longer sign in. Active sessions revoked.`
+          : `${disableTarget.name} can sign in again.`,
+      });
+      setDisableTarget(null);
+      await fetchUsers();
+    } catch (err: any) {
+      toast({ title: "Action failed", description: err.message, variant: "destructive" });
+    } finally {
+      setTogglingLogin(false);
     }
   };
 
@@ -643,7 +681,14 @@ const AdminPanel = () => {
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-3">
                               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary shrink-0">{initials}</div>
-                              <p className="font-medium text-foreground">{user.display_name || "Unnamed"}</p>
+                              <div className="flex flex-col gap-0.5">
+                                <p className="font-medium text-foreground">{user.display_name || "Unnamed"}</p>
+                                {user.login_disabled && (
+                                  <span className="inline-flex items-center gap-1 self-start rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                                    <Lock className="h-2.5 w-2.5" /> Login disabled
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </td>
                           <td className="px-4 py-3">
@@ -730,6 +775,21 @@ const AdminPanel = () => {
                                       <Shield className="h-3.5 w-3.5" />
                                     </button>
                                   )}
+                                  {isSuperAdmin && user.role !== "super_admin" && user.user_id !== authUser?.id && (
+                                    <button onClick={() => setDisableTarget({
+                                      userId: user.user_id,
+                                      name: user.display_name || "Unnamed",
+                                      nextDisabled: !user.login_disabled,
+                                    })}
+                                      className={user.login_disabled
+                                        ? "rounded-lg bg-emerald-500/10 p-1.5 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                                        : "rounded-lg bg-amber-500/10 p-1.5 text-amber-700 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"}
+                                      title={user.login_disabled ? "Enable login" : "Disable login"}>
+                                      {user.login_disabled
+                                        ? <LockOpen className="h-3.5 w-3.5" />
+                                        : <Lock className="h-3.5 w-3.5" />}
+                                    </button>
+                                  )}
                                   {isSuperAdmin && user.role !== "super_admin" && (
                                     <button onClick={() => setDeleteTarget({ userId: user.user_id, name: user.display_name || "Unnamed" })}
                                       className="rounded-lg bg-destructive/10 p-1.5 text-destructive hover:bg-destructive/20 transition-colors"
@@ -786,6 +846,34 @@ const AdminPanel = () => {
                   >
                     {deleting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                     Delete User
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+
+            <AlertDialog open={!!disableTarget} onOpenChange={(o) => !o && setDisableTarget(null)}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>
+                    {disableTarget?.nextDisabled ? "Disable login for" : "Enable login for"} "{disableTarget?.name}"?
+                  </AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {disableTarget?.nextDisabled
+                      ? "The user won't be able to sign in. Active sessions will be revoked immediately. Their assignments, history, and data stay intact and you can re-enable any time."
+                      : "The user will be able to sign in again with their existing credentials."}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={togglingLogin}>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleToggleLogin}
+                    disabled={togglingLogin}
+                    className={disableTarget?.nextDisabled
+                      ? "bg-amber-600 text-white hover:bg-amber-700"
+                      : "bg-emerald-600 text-white hover:bg-emerald-700"}
+                  >
+                    {togglingLogin && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                    {disableTarget?.nextDisabled ? "Disable login" : "Enable login"}
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>

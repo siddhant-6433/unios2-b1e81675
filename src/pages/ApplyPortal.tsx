@@ -70,19 +70,26 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
         // /applications dashboard tab too. The checkSession useEffect already
         // skips when `hasMagicToken` is true, so contamination isn't a concern.
 
-        const { data, error } = await supabase.functions.invoke("redeem-apply-link", {
-          body: { token: magicToken },
+        // Call the edge function via raw fetch instead of supabase.functions.invoke.
+        // The SDK consumes the response body when constructing FunctionsHttpError,
+        // so we can never read the server-side error message from a non-2xx — the
+        // user just sees the generic "Edge Function returned a non-2xx status code".
+        // Raw fetch lets us read the JSON body directly and surface the real reason
+        // (e.g. "This link has expired. Ask your counsellor for a new one.").
+        const supaUrl = (supabase as any).supabaseUrl as string;
+        const supaKey = (supabase as any).supabaseKey as string;
+        const res = await fetch(`${supaUrl}/functions/v1/redeem-apply-link`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: supaKey,
+            Authorization: `Bearer ${supaKey}`,
+          },
+          body: JSON.stringify({ token: magicToken }),
         });
-        if (error) {
-          // supabase-js wraps the response body on error.context — extract the
-          // server-side message instead of the generic "non-2xx status code".
-          let detail = error.message;
-          try {
-            const ctx = (error as any).context;
-            const body = typeof ctx?.json === "function" ? await ctx.json() : (ctx?.body ? JSON.parse(ctx.body) : null);
-            if (body?.error) detail = body.error;
-          } catch {}
-          throw new Error(detail);
+        const data = await res.json().catch(() => ({} as any));
+        if (!res.ok) {
+          throw new Error(data?.error || `Login failed (HTTP ${res.status}). Please ask your counsellor for a new link or use phone OTP.`);
         }
         if (data?.error) throw new Error(data.error);
         if (!data?.phone) throw new Error("Invalid link response");
@@ -98,7 +105,7 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
       } catch (err: any) {
         toast({
           title: "Login link expired or invalid",
-          description: err?.message || "Please use phone OTP to log in.",
+          description: err?.message || "Please ask your counsellor for a new link, or use phone OTP.",
           variant: "destructive",
         });
         // Fall through to OTP login by stripping the token
@@ -979,9 +986,19 @@ const ApplyPortal = () => {
 
     // Pick apps belonging to this portal. There can be multiple — e.g. a
     // submitted app + a new draft.
+    //
+    // Three cases:
+    //   1) flags includes `portal:${portal.id}` → match
+    //   2) flags has NO `portal:*` entry at all → legacy/test/manually-inserted
+    //      app from before the flagging logic existed; show it (better to surface
+    //      the existing submitted application than silently start a fresh draft
+    //      on top of it).
+    //   3) flags has a `portal:*` for a DIFFERENT portal → don't match.
     const portalApps = (existingApps || []).filter(app => {
       const flags = (app.flags as string[]) || [];
-      return flags.includes(`portal:${portal.id}`);
+      if (flags.includes(`portal:${portal.id}`)) return true;
+      const hasAnyPortalFlag = flags.some((f: string) => f.startsWith("portal:"));
+      return !hasAnyPortalFlag;
     });
 
     // When ≥1 non-draft application exists, OR multiple apps exist, show the

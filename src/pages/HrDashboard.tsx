@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useCampus } from "@/contexts/CampusContext";
 import {
   Users, Clock, CalendarOff, UserCheck, AlertTriangle,
-  CheckCircle, Loader2, ChevronRight, Fingerprint, TrendingUp,
+  CheckCircle, Loader2, ChevronRight, Fingerprint, TrendingUp, UserPlus,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +25,7 @@ const HrDashboard = () => {
     pendingLeaves: 0,
     pendingFaceRegs: 0,
     absentToday: 0,
+    newJobApplicants: 0,
   });
   const [weeklyAttendance, setWeeklyAttendance] = useState<any[]>([]);
   const [recentPunches, setRecentPunches] = useState<any[]>([]);
@@ -35,7 +36,7 @@ const HrDashboard = () => {
     setLoading(true);
     const today = new Date().toISOString().slice(0, 10);
 
-    const [employeesRes, punchRes, leaveRes, pendingLeaveRes, faceRes] = await Promise.all([
+    const [employeesRes, punchRes, leaveRes, pendingLeaveRes, faceRes, jobAppRes] = await Promise.all([
       supabase.from("profiles").select("user_id, display_name, role", { count: "exact" })
         .not("role", "in", "(student,parent)"),
       supabase.from("employee_attendance").select("user_id, punch_in, punch_out, selfie_url")
@@ -46,6 +47,8 @@ const HrDashboard = () => {
         .eq("status", "pending"),
       supabase.from("employee_face_registrations").select("id", { count: "exact" })
         .eq("status", "pending"),
+      supabase.from("job_applicants" as any).select("id", { count: "exact", head: true })
+        .eq("status", "new"),
     ]);
 
     const totalEmployees = employeesRes.count || 0;
@@ -59,6 +62,7 @@ const HrDashboard = () => {
       pendingLeaves: pendingLeaveRes.count || 0,
       pendingFaceRegs: faceRes.count || 0,
       absentToday: Math.max(0, totalEmployees - punchedIn - onLeave),
+      newJobApplicants: jobAppRes.count || 0,
     });
 
     // Enrich punches with profile names
@@ -115,7 +119,7 @@ const HrDashboard = () => {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4">
         {[
           { label: "Total Staff", value: stats.totalEmployees, icon: Users, bg: "bg-pastel-blue", href: "/hr-directory" },
           { label: "Punched In", value: stats.punchedInToday, icon: CheckCircle, bg: "bg-pastel-green", href: "/hr-attendance" },
@@ -123,6 +127,7 @@ const HrDashboard = () => {
           { label: "Absent", value: stats.absentToday, icon: AlertTriangle, bg: "bg-pastel-red", href: "/hr-attendance" },
           { label: "Pending Leaves", value: stats.pendingLeaves, icon: Clock, bg: "bg-pastel-orange", href: "/hr-leave" },
           { label: "Face Pending", value: stats.pendingFaceRegs, icon: UserCheck, bg: "bg-pastel-purple", href: "#face-approvals" },
+          { label: "New Applicants", value: stats.newJobApplicants, icon: UserPlus, bg: "bg-pastel-pink", href: "/hr-job-applicants" },
         ].map((s) => (
           <Link key={s.label} to={s.href} className="block">
             <Card className="border-border/60 shadow-none hover:shadow-sm transition-shadow cursor-pointer">

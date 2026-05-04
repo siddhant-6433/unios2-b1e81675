@@ -14,6 +14,20 @@ export interface CallContext {
   calledNumber?: string;
   institutionType?: string;
   courseCode?: string;
+  /** ISO timestamp of the most recent outbound AI call to this lead (within the last 24h). */
+  lastOutboundCallAt?: string;
+}
+
+/** Convert a timestamp to a natural-language phrase like "a few minutes" or "a couple of hours". */
+function describeTimeSince(iso?: string): string | null {
+  if (!iso) return null;
+  const minutes = Math.max(0, (Date.now() - new Date(iso).getTime()) / 60000);
+  if (!Number.isFinite(minutes) || minutes > 24 * 60) return null;
+  if (minutes < 30) return "a few minutes";
+  if (minutes < 90) return "about an hour";
+  if (minutes < 5 * 60) return "a couple of hours";
+  if (minutes < 12 * 60) return "a few hours";
+  return "earlier today";
 }
 
 /** Detect institution type from course code */
@@ -140,12 +154,22 @@ CRITICAL RULES FOR INBOUND:
 - Pause after EVERY question. Wait at least 5 seconds for a response before saying anything else.
 
 FLOW:
-${ctx.leadName && !isPlaceholder
-  ? `1. "Hello ${firstName}! Thank you for calling ${persona.org}. Main ${persona.name} hoon. Kaise help kar sakti hoon?" → STOP. Wait for response.
-2. You already know their name and course interest. Ask what specific information they need → get_course_info if needed.`
-  : `1. "Thank you for calling ${persona.org}! Main ${persona.name} hoon. Aapka naam bata dijiye?" → STOP. Wait for name. Call update_lead_info with name.
+${(() => {
+  if (!ctx.leadName || isPlaceholder) {
+    return `1. "Thank you for calling ${persona.org}! Main ${persona.name} hoon. Aapka naam bata dijiye?" → STOP. Wait for name. Call update_lead_info with name.
 2. "Aap konse course mein interested hain?" → STOP. Wait. → get_course_info.
-3. Confirm: "Aap jis number se call kar rahe hain, kya isi par WhatsApp details bhej dein?" → if yes, use the caller's phone. If different number, ask and call update_lead_info.`}
+3. Confirm: "Aap jis number se call kar rahe hain, kya isi par WhatsApp details bhej dein?" → if yes, use the caller's phone. If different number, ask and call update_lead_info.`;
+  }
+  const timePhrase = describeTimeSince(ctx.lastOutboundCallAt);
+  if (timePhrase) {
+    // This is a callback — open by referencing the prior outbound call so the lead has context.
+    return `1. "Hi ${firstName}, I called you ${timePhrase} back regarding your admission enquiry${ctx.courseName ? ` received for ${ctx.courseName}` : ""}. I can go ahead and explain the details about this if you want." → STOP. Wait for response.
+2. If they say yes / haan / go ahead → call get_course_info("${ctx.courseName || "their course"}") and share details in parts.
+   If they ask a specific question instead → answer that first, then offer to continue with course details.`;
+  }
+  return `1. "Hello ${firstName}! Thank you for calling ${persona.org}. Main ${persona.name} hoon. Kaise help kar sakti hoon?" → STOP. Wait for response.
+2. You already know their name and course interest. Ask what specific information they need → get_course_info if needed.`;
+})()}
 ${hasCourse ? "" : `\nIf caller mentions a course → call get_course_info immediately.`}
 4. Share course info in parts. After covering details, offer next steps:
    A. ONLINE APPLY: "Aap online apply kar sakte hain, main link WhatsApp par bhej deti hoon." → send_whatsapp_to_lead(apply_link).

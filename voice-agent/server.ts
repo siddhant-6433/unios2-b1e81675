@@ -29,7 +29,13 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_KEY") || "";
 // Key for calling Supabase Edge Functions — VOICE_AGENT_KEY is a dedicated shared secret
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("VOICE_AGENT_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || SUPABASE_SERVICE_KEY;
-const GEMINI_MODEL = "gemini-3.1-flash-live-preview";
+// ⚠️  DO NOT swap to gemini-3.1-flash-live-preview or any *-flash-live-preview
+// variant. They connect, return setupComplete, transcribe caller audio — and
+// then close with WS 1008 ("Operation is not implemented") the moment Gemini
+// is asked to GENERATE audio. They are text/half-cascade only.
+// The native-audio model below supports audio in AND audio out via
+// BidiGenerateContent. Confirmed via Cloud Run logs, April 2026.
+const GEMINI_MODEL = "gemini-2.5-flash-native-audio-latest";
 
 /** Placeholder names that indicate the real name is unknown */
 const PLACEHOLDER_NAMES = new Set([
@@ -950,13 +956,21 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
         model: `models/${GEMINI_MODEL}`,
         generationConfig: {
           responseModalities: ["AUDIO"],
+          // ⚠️  speechConfig field landmines for the native-audio model:
+          //   - languageCode → WS 1007 "Unsupported language code 'en-IN' for model
+          //     models/gemini-2.5-flash-native-audio-latest". Native-audio models
+          //     auto-detect language from user speech; languageCode is for the
+          //     half-cascade live-preview models only. Confirmed via Cloud Run
+          //     logs 2026-05-04. DO NOT add it back.
+          //   - startOfSpeechSensitivity / endOfSpeechSensitivity → also WS 1007
+          //     when placed inside automaticActivityDetection (valid keys there
+          //     are only disabled / prefixPaddingMs / silenceDurationMs).
           speechConfig: {
             voiceConfig: {
               prebuiltVoiceConfig: {
                 voiceName: "Kore",
               },
             },
-            languageCode: "en-IN",
           },
         },
         realtimeInputConfig: {

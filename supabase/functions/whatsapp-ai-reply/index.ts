@@ -256,7 +256,7 @@ Deno.serve(async (req) => {
     const normalizedPhone = phone.replace(/[^0-9]/g, "");
     const { data: existingLeads } = await admin
       .from("leads")
-      .select("id, name, course_id")
+      .select("id, name, course_id, person_role")
       .or(`phone.eq.${normalizedPhone},phone.eq.${normalizedPhone.replace(/^91/, "+91")},phone.eq.+${normalizedPhone}`)
       .limit(1);
 
@@ -264,6 +264,46 @@ Deno.serve(async (req) => {
     let leadId = existingLead?.id || null;
     const hasName = !!(existingLead?.name && existingLead.name.trim().length > 1);
     const hasCourse = !!(existingLead?.course_id || course_interest);
+
+    // ── Short-circuit: don't pitch admissions to job applicants / vendors ────
+    // Send a single templated reply instead and let HR / procurement take over.
+    if (existingLead && (existingLead.person_role === "job_applicant" || existingLead.person_role === "vendor")) {
+      const role = existingLead.person_role;
+      const reply = role === "job_applicant"
+        ? "Thanks for writing to NIMT. You've been forwarded to our HR team — they will get in touch about openings shortly. For urgent queries email careers@nimt.ac.in."
+        : "Thanks for your message. You've been forwarded to our procurement team. For business enquiries please email procurement@nimt.ac.in with your company profile.";
+      try {
+        const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
+        const pnId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+        const waPhone = phone.replace(/[^0-9]/g, "");
+        const sendRes = await fetch(`https://graph.facebook.com/v21.0/${pnId}/messages`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${waToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messaging_product: "whatsapp", to: waPhone, type: "text", text: { body: reply },
+          }),
+        });
+        if (sendRes.ok) {
+          const sendResult = await sendRes.json();
+          await admin.from("whatsapp_messages").insert({
+            lead_id: leadId,
+            wa_message_id: sendResult?.messages?.[0]?.id || null,
+            direction: "outbound",
+            phone,
+            message_type: "text",
+            content: reply,
+            status: "sent",
+            is_read: true,
+            template_key: role === "job_applicant" ? "hr_handoff" : "procurement_handoff",
+          });
+        }
+      } catch (e) {
+        console.error("Job/vendor handoff reply error:", e);
+      }
+      return new Response(JSON.stringify({ skipped: true, reason: `person_role=${role}` }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // Auto-create lead if doesn't exist
     if (!leadId) {

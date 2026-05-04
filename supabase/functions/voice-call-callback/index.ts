@@ -235,7 +235,7 @@ async function autoAssignCounsellor(
   if (!members?.length) return;
 
   const userIds = members.map((m: any) => m.user_id);
-  const { data: profiles } = await db.from("profiles").select("id, display_name").in("user_id", userIds);
+  const { data: profiles } = await db.from("profiles").select("id, user_id, display_name").in("user_id", userIds);
   if (!profiles?.length) return;
 
   // ── Round-robin: fewest active leads first ──
@@ -276,8 +276,9 @@ async function autoAssignCounsellor(
     description: `Auto-assigned to ${chosen.display_name} (${teamName}) after AI call (${disposition})`,
   });
 
+  // notifications.user_id FKs auth.users(id), so pass profiles.user_id — NOT profiles.id.
   await db.from("notifications").insert({
-    user_id: chosen.id,
+    user_id: chosen.user_id,
     type: "lead_assigned",
     title: `New lead assigned: ${lead.name || "Unknown"}`,
     body: `AI call outcome: ${disposition}. Follow up within 30 minutes.`,
