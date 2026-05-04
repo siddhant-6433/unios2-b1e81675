@@ -55,8 +55,12 @@ export function LiveCallBar() {
     if (!canView) return;
 
     const fetchActiveCalls = async () => {
-      // Get manual + inbound calls with status=initiated (created in last 30 min)
-      const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      // Get manual + inbound calls with status=initiated (created in last 7 min).
+      // Real calls finish in well under that; anything older is almost certainly
+      // stuck (Plivo webhook never landed). Server-side reconciler flips them to
+      // 'failed' at the 10-min mark — the 7-min display cutoff guarantees the
+      // popup never outlives the next reconciler tick (cron runs every 5 min).
+      const cutoff = new Date(Date.now() - 7 * 60 * 1000).toISOString();
       let query = supabase
         .from("ai_call_records" as any)
         .select("id, call_uuid, lead_id, student_connected_at, disposition, created_at, caller_user_id, call_type")
