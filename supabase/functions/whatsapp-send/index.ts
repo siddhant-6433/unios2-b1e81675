@@ -57,8 +57,16 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   offer_letter_issued:    { name: "offer_letter_issued",    params: ["student_name", "course_name", "net_fee", "deadline"] },
   // 4. PAN issued — nudge to pay balance for AN. magic_pay_url for one-tap.
   pan_nudge_balance:      { name: "pan_nudge_balance",      params: ["student_name", "pre_admission_no", "balance_amount"] },
-  // 5. Token / other fee paid — receipt PDF link.
-  payment_receipt:        { name: "payment_receipt",        params: ["student_name", "amount", "receipt_no"] },
+  // 5. Token / other fee paid — uses the pre-existing APPROVED template
+  // in Meta whose body is:
+  //   "Hi {{1}}, we've received your payment of ₹{{3}} towards {{2}}.
+  //    Receipt No: {{4}}
+  //    Download: {{5}}
+  //    NIMT Educational Institutions"
+  // Note the unusual order (amount is {{3}}, type is {{2}}) — preserved
+  // here because the template is already approved and we don't want to
+  // submit a divergent variant.
+  payment_receipt:        { name: "payment_receipt",        params: ["student_name", "payment_type", "amount", "receipt_no", "download_url"] },
 };
 
 Deno.serve(async (req) => {

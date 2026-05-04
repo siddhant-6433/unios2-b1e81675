@@ -144,7 +144,10 @@ Deno.serve(async (req) => {
 
   // Mints a multi-use apply-portal magic token for "accept offer / pay
   // token / pay balance" CTAs. 30-day expiry — student may take a while.
-  const mintApplyMagicLink = async (): Promise<string> => {
+  // Returns BOTH the token (for WhatsApp button URL params, where Meta
+  // only substitutes the {{1}} suffix of the template URL) AND the full
+  // URL (for body text or other channels).
+  const mintApplyMagicLink = async (): Promise<{ token: string; url: string }> => {
     const expires = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
     const { data } = await db.from("apply_magic_tokens").insert({
       lead_id: lead.id,
@@ -152,7 +155,8 @@ Deno.serve(async (req) => {
       email: lead.email,
       expires_at: expires,
     }).select("token").single();
-    return `${APPLY_PORTAL_BASE}?token=${data?.token ?? ""}`;
+    const token = String(data?.token ?? "");
+    return { token, url: `${APPLY_PORTAL_BASE}?token=${token}` };
   };
 
   const courseName = (lead.courses as any)?.name || "your programme";
@@ -170,9 +174,11 @@ Deno.serve(async (req) => {
         .eq("application_id", application_id).maybeSingle();
       const formPdf = app?.form_pdf_url || "";
 
+      // PDF templates use a static URL button to the apply portal —
+      // applicant authenticates there to retrieve the actual signed PDF.
+      // No button_urls passed (template button has no {{1}} placeholder).
       await sendWhatsApp("application_submitted",
         [lead.name || app?.full_name || "Student", application_id],
-        formPdf ? [formPdf] : undefined,
       );
 
       const recipients = await resolveEmails({ counsellor: true, leader: true, super_admin: true });
@@ -201,7 +207,6 @@ Deno.serve(async (req) => {
 
       await sendWhatsApp("app_fee_receipt",
         [lead.name || "Student", String(pmt?.amount ?? ""), app?.application_id || ""],
-        receiptUrl ? [receiptUrl] : undefined,
       );
 
       const recipients = await resolveEmails({ counsellor: true, leader: true, super_admin: true });
@@ -227,18 +232,18 @@ Deno.serve(async (req) => {
         .eq("id", offer_id).maybeSingle();
       if (!offer) break;
 
-      const payLink = await mintApplyMagicLink();
-      const buttons: string[] = [];
-      if (offer.letter_url) buttons.push(offer.letter_url);
-      buttons.push(payLink);
+      const { token: payToken } = await mintApplyMagicLink();
 
       const deadline = offer.acceptance_deadline
         ? new Date(offer.acceptance_deadline).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
         : "the deadline";
 
+      // Single URL button — Meta substitutes the {{1}} suffix only, so we
+      // pass just the token. The template URL is
+      // https://uni.nimt.ac.in/apply?token={{1}}
       await sendWhatsApp("offer_letter_issued",
         [lead.name || "Student", courseName, String(offer.net_fee ?? ""), deadline],
-        buttons,
+        [payToken],
       );
       break;
     }
@@ -255,10 +260,12 @@ Deno.serve(async (req) => {
       const paid = Number((status as any)?.total_paid || 0);
       const balance = Math.max(0, Math.round(targetTwentyFive - paid));
 
-      const payLink = await mintApplyMagicLink();
+      const { token: payToken } = await mintApplyMagicLink();
+      // Pass token only — Meta substitutes the {{1}} suffix of the
+      // template URL https://uni.nimt.ac.in/apply?token={{1}}
       await sendWhatsApp("pan_nudge_balance",
         [lead.name || "Student", pre_admission_no, balance.toLocaleString("en-IN")],
-        [payLink],
+        [payToken],
       );
       break;
     }
@@ -273,9 +280,23 @@ Deno.serve(async (req) => {
         .eq("id", payment_id).maybeSingle();
       if (!pmt) break;
 
+      // Existing approved template has 5 positional params:
+      //   {{1}} student name, {{2}} payment type label,
+      //   {{3}} amount, {{4}} receipt no, {{5}} download URL.
+      const TYPE_LABEL: Record<string, string> = {
+        application_fee:  "Application Fee",
+        token_fee:        "Token Fee",
+        registration_fee: "Registration Fee",
+        other:            "Other Charges",
+      };
       await sendWhatsApp("payment_receipt",
-        [lead.name || "Student", String(pmt.amount), pmt.receipt_no || ""],
-        pmt.receipt_url ? [pmt.receipt_url] : undefined,
+        [
+          lead.name || "Student",
+          TYPE_LABEL[pmt.type as string] || pmt.type || "Fee",
+          String(pmt.amount),
+          pmt.receipt_no || "",
+          pmt.receipt_url || "",
+        ],
       );
 
       const recipients = await resolveEmails({ counsellor: false, leader: false, super_admin: true });
