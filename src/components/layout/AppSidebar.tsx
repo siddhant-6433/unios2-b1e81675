@@ -28,7 +28,7 @@ type AppRole =
   | "data_entry" | "office_admin" | "office_assistant" | "hostel_warden" | "consultant" | "student" | "parent"
   | "ib_coordinator";
 
-type MenuItem = { title: string; url: string; icon: any; permission?: string; badge?: number; hideForSuperAdmin?: boolean };
+type MenuItem = { title: string; url: string; icon: any; permission?: string; anyPermission?: string[]; badge?: number; hideForSuperAdmin?: boolean };
 
 const mainMenu: MenuItem[] = [
   { title: "Overview", url: "/", icon: LayoutDashboard, permission: "dashboard:view" },
@@ -88,11 +88,18 @@ const hrSubMenu: MenuItem[] = [
 ];
 
 const managementMenu: MenuItem[] = [
-  { title: "Campuses & Courses", url: "/admin?tab=course-campus", icon: Building2, permission: "campuses_courses:view" },
+  // Single consolidated entry for the /admin page. AdminPanel renders its own
+  // tab strip (Campuses & Courses, User Management, Permissions, …) so we
+  // don't need separate sidebar links for each tab. Visible to anyone with
+  // permission to access at least one of the tabs.
+  {
+    title: "Admin Panel",
+    url: "/admin",
+    icon: ShieldCheck,
+    anyPermission: ["campuses_courses:view", "user_management:view", "permissions:view"],
+  },
   { title: "Documents", url: "/documents", icon: FileText, permission: "documents:view" },
   { title: "Alumni Verification", url: "/alumni-verifications", icon: ShieldCheck, permission: "alumni_verification:view" },
-  { title: "User Management", url: "/admin", icon: ShieldCheck, permission: "user_management:view" },
-  { title: "Permissions", url: "/admin?tab=permissions", icon: ShieldCheck, permission: "permissions:view" },
 ];
 
 const roleLabels: Record<string, string> = {
@@ -120,11 +127,22 @@ export function AppSidebar() {
 
   const { can } = usePermissions();
   const canSee = (item: MenuItem) => {
-    if (!item.permission) return true;
     // When impersonating, always show User Management so admin can navigate back
     if (isImpersonating && realRole === "super_admin" && item.url === "/admin") return true;
     // Role-specific portals: hide from super_admin when not impersonating
     if (item.hideForSuperAdmin && realRole === "super_admin" && !isImpersonating) return false;
+    // anyPermission: show if the user has at least one of the listed perms.
+    // Used by consolidated entries like "Admin Panel" that fold multiple
+    // tabs (course-campus / user-management / permissions) into a single
+    // sidebar link, where accountants might have only user_management
+    // and counsellors might have only campuses_courses.
+    if (item.anyPermission && item.anyPermission.length > 0) {
+      return item.anyPermission.some(p => {
+        const [mod, act] = p.split(":");
+        return can(mod, act);
+      });
+    }
+    if (!item.permission) return true;
     const [mod, act] = item.permission.split(":");
     return can(mod, act);
   };
@@ -164,13 +182,14 @@ export function AppSidebar() {
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase
-        .from("whatsapp_conversations" as any)
-        .select("unread_count")
-        .gt("unread_count", 0);
-      if (data) {
-        setWaUnread((data as any[]).reduce((sum: number, c: any) => sum + (c.unread_count || 0), 0));
-      }
+      // Direct count via idx_wa_messages_unread instead of the
+      // whatsapp_conversations view — see WhatsAppPanel for context.
+      const { count } = await supabase
+        .from("whatsapp_messages")
+        .select("id", { count: "exact", head: true })
+        .eq("direction", "inbound")
+        .eq("is_read", false);
+      setWaUnread(count || 0);
     })();
     fetchNewLeadCount();
     fetchPendingApprovals();
@@ -205,6 +224,10 @@ export function AppSidebar() {
       setPendingFollowupCount(count || 0);
     })();
 
+    // Realtime-driven refresh, debounced so a burst of messages doesn't
+    // hammer the DB. Uses direct count (see fetchUnreplied above) instead of
+    // the slow whatsapp_conversations view.
+    let waDebounce: ReturnType<typeof setTimeout> | null = null;
     const waChannel = supabase
       .channel("wa-unread-sidebar")
       .on("postgres_changes" as any, {
@@ -212,15 +235,15 @@ export function AppSidebar() {
         schema: "public",
         table: "whatsapp_messages",
       }, () => {
-        supabase
-          .from("whatsapp_conversations" as any)
-          .select("unread_count")
-          .gt("unread_count", 0)
-          .then(({ data }) => {
-            if (data) {
-              setWaUnread((data as any[]).reduce((sum: number, c: any) => sum + (c.unread_count || 0), 0));
-            }
-          });
+        if (waDebounce) clearTimeout(waDebounce);
+        waDebounce = setTimeout(() => {
+          supabase
+            .from("whatsapp_messages")
+            .select("id", { count: "exact", head: true })
+            .eq("direction", "inbound")
+            .eq("is_read", false)
+            .then(({ count }) => setWaUnread(count || 0));
+        }, 1500);
       })
       .subscribe();
 

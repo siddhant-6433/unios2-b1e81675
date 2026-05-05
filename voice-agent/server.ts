@@ -24,7 +24,7 @@ import { mulawToGeminiPcm, geminiPcmToMulaw } from "./audio-utils.ts";
 import { buildSystemInstruction, VOICE_AGENT_TOOLS, type CallContext } from "./scripts.ts";
 import {
   mulawBase64ToPcm16, pcm16ToMulawBase64, rmsEnergy,
-  sarvamSTT, sarvamTTS,
+  sarvamSTT, sarvamTTS, detectSarvamLanguageCode,
 } from "./sarvam.ts";
 
 const PORT = parseInt(Deno.env.get("PORT") || "8000");
@@ -252,6 +252,134 @@ function extractVisitDateFromTranscript(aiLines: string[]): string | null {
   return null;
 }
 
+/**
+ * Parse a callback time out of a free-text transcript ("after 4 PM today",
+ * "kal subah", "shaam ko 6 baje", "in 2 hours", etc.). Returns an ISO 8601
+ * datetime in Asia/Kolkata, or null if no clear time can be extracted.
+ *
+ * Used by reconcilePostCall as a fallback when the AI captured a callback
+ * promise in conversation but didn't pass followup_date to the disposition
+ * tool. Conservative — only returns a time when the regex match is high
+ * confidence; ambiguous text yields null and the caller falls back to a
+ * generic "+30min" so the operator at least sees a follow-up.
+ */
+function extractCallbackTimeFromTranscript(text: string): string | null {
+  if (!text) return null;
+  const lc = text.toLowerCase();
+
+  // ── Build today/tomorrow anchors in IST ──
+  const istOffsetMs = 5.5 * 60 * 60 * 1000;
+  const nowUtc = Date.now();
+  const istNow = new Date(nowUtc + istOffsetMs);
+  const istTodayY = istNow.getUTCFullYear();
+  const istTodayM = istNow.getUTCMonth();
+  const istTodayD = istNow.getUTCDate();
+  const istTodayHour = istNow.getUTCHours();
+
+  /** Build an ISO timestamp for IST date+hour+minute. */
+  const istIso = (y: number, m: number, d: number, hh: number, mm = 0): string => {
+    // Convert IST wall-clock back to UTC by subtracting the IST offset, then
+    // append the IST timezone marker so consumers parse it back to the same
+    // wall-clock time.
+    const utcMs = Date.UTC(y, m, d, hh, mm) - istOffsetMs;
+    const dt = new Date(utcMs);
+    const pad = (n: number) => n.toString().padStart(2, "0");
+    return `${y}-${pad(m + 1)}-${pad(d)}T${pad(hh)}:${pad(mm)}:00+05:30`;
+  };
+
+  // Day-of-part defaults (used when "morning / afternoon / evening" is mentioned)
+  const partOfDayHour = (s: string): number | null => {
+    if (/\b(morning|subah|subha)\b/.test(s)) return 10;
+    if (/\b(afternoon|dopahar|noon)\b/.test(s)) return 14;
+    if (/\b(evening|shaam|sham)\b/.test(s)) return 17;
+    if (/\b(night|raat)\b/.test(s)) return 19;
+    return null;
+  };
+
+  // ── 1. Explicit clock time + same-day or tomorrow context ──
+  // "after 4 pm today", "8 baje shaam ko", "16:00 kal", "9 am tomorrow"
+  const clockRe = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?\b/i;
+  const dayCtxRe = /\b(today|aaj|tomorrow|kal|parso|day after)\b/;
+
+  const ctxMatch = lc.match(dayCtxRe);
+  const clockMatch = lc.match(clockRe);
+
+  if (clockMatch) {
+    let hh = parseInt(clockMatch[1], 10);
+    const mm = clockMatch[2] ? parseInt(clockMatch[2], 10) : 0;
+    const ampm = (clockMatch[3] || "").replace(/\./g, "").toLowerCase();
+    if (hh >= 0 && hh <= 23 && mm >= 0 && mm < 60) {
+      // Disambiguate AM/PM: if explicit, trust it; else assume PM for hours
+      // 1-11 unless the surrounding text mentions morning/subah.
+      if (ampm === "pm" && hh < 12) hh += 12;
+      else if (ampm === "am" && hh === 12) hh = 0;
+      else if (!ampm && hh >= 1 && hh <= 11) {
+        const isMorning = /\b(morning|subah|subha|am)\b/.test(lc);
+        if (!isMorning) hh += 12;
+      }
+
+      let y = istTodayY, m = istTodayM, d = istTodayD;
+      if (ctxMatch) {
+        const ctx = ctxMatch[1];
+        if (/tomorrow|kal/.test(ctx)) {
+          const t = new Date(Date.UTC(istTodayY, istTodayM, istTodayD + 1));
+          y = t.getUTCFullYear(); m = t.getUTCMonth(); d = t.getUTCDate();
+        } else if (/parso|day after/.test(ctx)) {
+          const t = new Date(Date.UTC(istTodayY, istTodayM, istTodayD + 2));
+          y = t.getUTCFullYear(); m = t.getUTCMonth(); d = t.getUTCDate();
+        }
+      } else {
+        // No day context — if the requested clock time has already passed
+        // today (in IST), bump to tomorrow.
+        if (hh < istTodayHour) {
+          const t = new Date(Date.UTC(istTodayY, istTodayM, istTodayD + 1));
+          y = t.getUTCFullYear(); m = t.getUTCMonth(); d = t.getUTCDate();
+        }
+      }
+      return istIso(y, m, d, hh, mm);
+    }
+  }
+
+  // ── 2. "after N hours / minutes" relative — handles both English and
+  // Hindi/Hinglish phrasings: "in 2 hours", "after 30 minutes", "baad mein
+  // 30 minutes", "30 minutes mein", "do ghante mein".
+  const relUnit = "(hour|hr|hrs|hours|minute|min|mins|minutes|ghante|ghanta|minat)";
+  const relRegexes = [
+    new RegExp(`\\b(?:in|after|baad)(?:\\s+mein)?\\s+(\\d{1,2})\\s*${relUnit}\\b`, "i"),
+    new RegExp(`\\b(\\d{1,2})\\s*${relUnit}\\s+(?:mein|me|baad)\\b`, "i"),
+  ];
+  for (const re of relRegexes) {
+    const m = lc.match(re);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      const unit = m[2];
+      const ms = /min|minat/.test(unit) ? n * 60 * 1000 : n * 60 * 60 * 1000;
+      return new Date(Date.now() + ms).toISOString();
+    }
+  }
+
+  // ── 3. "tomorrow" / "kal" + part-of-day, no specific clock time ──
+  if (/\b(tomorrow|kal)\b/.test(lc)) {
+    const hh = partOfDayHour(lc) ?? 10;
+    const t = new Date(Date.UTC(istTodayY, istTodayM, istTodayD + 1));
+    return istIso(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate(), hh);
+  }
+
+  // ── 4. Same-day part-of-day ("call me in the evening" etc.) ──
+  const part = partOfDayHour(lc);
+  if (part !== null) {
+    let y = istTodayY, m = istTodayM, d = istTodayD;
+    if (part <= istTodayHour) {
+      // That part has already passed today; bump to tomorrow.
+      const t = new Date(Date.UTC(istTodayY, istTodayM, istTodayD + 1));
+      y = t.getUTCFullYear(); m = t.getUTCMonth(); d = t.getUTCDate();
+    }
+    return istIso(y, m, d, part);
+  }
+
+  return null;
+}
+
 /** Detect promises made in the AI transcript and cross-reference with tools actually called. */
 interface ReconcileResult {
   templateKey: string;
@@ -334,21 +462,32 @@ async function reconcilePostCall(
     }
   }
 
-  // 2. Callback promised but request_human_callback not called → create followup
+  // 2. Callback promised but no followup landed at a specific time → create one.
+  // Try to extract the time the caller actually requested from BOTH the AI
+  // transcript and the caller transcript ("after 4 PM", "kal subah", etc.).
+  // Only fall back to "+30min" when no time was mentioned at all.
   if (callbackPromised && !callbackDone) {
+    const fullText = aiText + " " + callerText;
+    const extractedAt = extractCallbackTimeFromTranscript(fullText);
+    const fallbackAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    const scheduledAt = extractedAt || fallbackAt;
+    const reasonNote = extractedAt
+      ? `🤖 Post-call reconciliation: callback followup created from transcript-extracted time (${scheduledAt}).`
+      : `🤖 Post-call reconciliation: callback followup created at +30min — no specific time was mentioned in the conversation.`;
+
     await fetch(`${SUPABASE_URL}/rest/v1/lead_followups`, {
       method: "POST", headers: { ...dbHeaders, Prefer: "return=minimal" },
       body: JSON.stringify({
-        lead_id: leadId, scheduled_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
-        type: "call", notes: "🤖 Post-call reconciliation: AI promised human callback but didn't call the tool.", status: "pending",
+        lead_id: leadId, scheduled_at: scheduledAt,
+        type: "call", notes: reasonNote, status: "pending",
       }),
     });
     await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, {
       method: "POST", headers: { ...dbHeaders, Prefer: "return=minimal" },
-      body: JSON.stringify({ lead_id: leadId, content: "🤖 Post-call reconciliation: Human callback followup created — AI promised but didn't call request_human_callback." }),
+      body: JSON.stringify({ lead_id: leadId, content: reasonNote }),
     });
     await assignLeadRoundRobin(leadId);
-    actions.push("callback_followup_created");
+    actions.push(extractedAt ? `callback_followup_created:${scheduledAt}` : "callback_followup_created");
   }
 
   // ── Determine WhatsApp template (priority: visit > callback > course_info) ──
@@ -696,6 +835,33 @@ async function executeTool(
           }
         }
 
+        // Guard: call_back / callback_requested REQUIRES followup_date so the
+        // callback gets scheduled at the time the caller actually requested,
+        // not a generic "+2h" fallback. Reject the tool call so the AI
+        // re-asks the caller and tries again with the captured time.
+        if (args.disposition === "call_back" || args.disposition === "callback_requested") {
+          const fd = (args.followup_date || "").toString().trim();
+          if (!fd) {
+            return {
+              success: false,
+              message:
+                "Cannot set call_back without followup_date. Ask the caller exactly when they want to be called back " +
+                "(specific time today, tomorrow morning/afternoon/evening, or a clock time), confirm aloud, " +
+                "then call set_call_disposition again with followup_date in ISO 8601 Asia/Kolkata format " +
+                "(e.g. '2026-05-05T16:00:00+05:30').",
+            };
+          }
+          // Light parse-check: reject obviously-malformed strings.
+          if (isNaN(new Date(fd.includes("T") ? fd : `${fd}T10:00:00+05:30`).getTime())) {
+            return {
+              success: false,
+              message:
+                "followup_date is not a valid ISO date/datetime. Use 'YYYY-MM-DDTHH:MM:SS+05:30' " +
+                "(e.g. '2026-05-05T16:00:00+05:30') or just 'YYYY-MM-DD' for date-only.",
+            };
+          }
+        }
+
         // Update ai_call_records with disposition
         if (callCtx.callLogId) {
           await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?id=eq.${callCtx.callLogId}`, {
@@ -741,10 +907,21 @@ async function executeTool(
           }),
         });
 
-        // Assign counsellor via round-robin for actionable dispositions
+        // Assign counsellor via round-robin for actionable dispositions, then
+        // resolve the user_id so the followup we create can be owned by them
+        // (and therefore picked up by the counsellor-reminders cron).
         const needsAssignment = ["interested", "callback_requested", "call_back", "partial_conversation"].includes(args.disposition);
+        let dispCounsellorUserId: string | null = null;
         if (needsAssignment) {
-          await assignLeadRoundRobin(callCtx.leadId);
+          let counsellorProfileId = await assignLeadRoundRobin(callCtx.leadId);
+          if (!counsellorProfileId) {
+            const r = await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${callCtx.leadId}&select=counsellor_id`, { headers });
+            counsellorProfileId = (await r.json().catch(() => []))?.[0]?.counsellor_id || null;
+          }
+          if (counsellorProfileId) {
+            const pr = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${counsellorProfileId}&select=user_id`, { headers });
+            dispCounsellorUserId = (await pr.json().catch(() => []))?.[0]?.user_id || null;
+          }
         }
 
         // Always schedule a counsellor follow-up for actionable dispositions
@@ -768,13 +945,14 @@ async function executeTool(
             headers: { ...headers, Prefer: "return=minimal" },
             body: JSON.stringify({
               lead_id: callCtx.leadId,
+              user_id: dispCounsellorUserId,
               scheduled_at: followupDate,
               type: "call",
               notes: `🤖 AI call outcome: ${args.disposition.replace(/_/g, " ")}. ${args.notes || "Counsellor follow-up required."}`,
               status: "pending",
             }),
           });
-          console.log(`[Followup] Scheduled for ${callCtx.leadId}: ${args.disposition} → ${followupDate}`);
+          console.log(`[Followup] Scheduled for ${callCtx.leadId}: ${args.disposition} → ${followupDate} (user=${dispCounsellorUserId || "unassigned"})`);
         }
 
         // Mark do_not_contact
@@ -907,19 +1085,102 @@ async function executeTool(
       }
 
       case "request_human_callback": {
-        // Create a notification for admission team
-        const body = {
-          lead_id: callCtx.leadId || null,
-          content: `🤖 AI Call requested human callback: ${args.reason}${args.preferred_time ? ` (Preferred: ${args.preferred_time})` : ""}`,
-        };
-        if (callCtx.leadId) {
-          await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, {
+        if (!callCtx.leadId) return { success: false, message: "No lead ID for this call" };
+
+        // 1) Resolve a counsellor: existing assignment, else round-robin pick.
+        const ldRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/leads?id=eq.${callCtx.leadId}&select=id,name,phone,counsellor_id,course_id,courses:course_id(name)`,
+          { headers },
+        );
+        const ld = (await ldRes.json().catch(() => []))?.[0];
+        if (!ld) return { success: false, message: "Lead not found" };
+
+        let counsellorProfileId: string | null = ld.counsellor_id;
+        if (!counsellorProfileId) {
+          counsellorProfileId = await assignLeadRoundRobin(callCtx.leadId);
+        }
+
+        // notifications.user_id and lead_followups.user_id both reference
+        // auth.users(id) — i.e. profiles.user_id, NOT profiles.id.
+        let counsellorUserId: string | null = null;
+        if (counsellorProfileId) {
+          const pRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/profiles?id=eq.${counsellorProfileId}&select=user_id`,
+            { headers },
+          );
+          counsellorUserId = (await pRes.json().catch(() => []))?.[0]?.user_id || null;
+        }
+
+        // 2) Schedule the followup. Default = +2 hours unless caller hinted a time.
+        let scheduledAt: string;
+        if (args.preferred_time && /^\d{4}-\d{2}-\d{2}/.test(args.preferred_time)) {
+          scheduledAt = args.preferred_time.includes("T")
+            ? args.preferred_time
+            : `${args.preferred_time}T10:00:00+05:30`;
+        } else {
+          scheduledAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+        }
+
+        await fetch(`${SUPABASE_URL}/rest/v1/lead_followups`, {
+          method: "POST",
+          headers: { ...headers, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            lead_id: callCtx.leadId,
+            user_id: counsellorUserId, // null is OK if no counsellor available
+            scheduled_at: scheduledAt,
+            type: "callback",
+            notes: `🤖 Callback requested from AI call: ${args.reason || ""}${args.preferred_time ? ` (Preferred: ${args.preferred_time})` : ""}`.trim(),
+            status: "pending",
+          }),
+        });
+
+        // 3) Bell notification for the counsellor (if assigned).
+        if (counsellorUserId) {
+          fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
             method: "POST",
             headers: { ...headers, Prefer: "return=minimal" },
-            body: JSON.stringify(body),
-          });
+            body: JSON.stringify({
+              user_id: counsellorUserId,
+              type: "callback_requested",
+              title: `Callback requested: ${ld.name || "lead"}`,
+              body: `${args.reason || "AI call requested human callback"}${args.preferred_time ? ` — preferred: ${args.preferred_time}` : ""}`,
+              link: `/admissions/${callCtx.leadId}`,
+              lead_id: callCtx.leadId,
+            }),
+          }).catch(() => {});
         }
-        return { success: true, message: "Human callback requested" };
+
+        // 4) Server-side WA confirmation to the lead so they know we'll call back.
+        if (ld.phone) {
+          const courseName = (ld.courses as any)?.name || callCtx.courseName || "your enquiry";
+          fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+            body: JSON.stringify({
+              template_key: "callback_scheduled",
+              phone: ld.phone,
+              params: [ld.name || "there", courseName],
+              lead_id: callCtx.leadId,
+            }),
+          }).catch((e) => console.error(`[request_human_callback] WA send failed:`, e?.message));
+        }
+
+        // 5) Audit note for the timeline.
+        fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, {
+          method: "POST",
+          headers: { ...headers, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            lead_id: callCtx.leadId,
+            content: `🤖 AI Call requested human callback: ${args.reason}${args.preferred_time ? ` (Preferred: ${args.preferred_time})` : ""}`,
+          }),
+        }).catch(() => {});
+
+        return {
+          success: true,
+          assigned_counsellor: counsellorProfileId,
+          scheduled_at: scheduledAt,
+          whatsapp_sent: !!ld.phone,
+        };
       }
 
       default:
@@ -983,6 +1244,12 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
             silenceDurationMs: 1500,
           },
         },
+        // Surface STT for both sides into serverContent so we can log what
+        // the caller said and what Gemini said — invaluable for debugging
+        // why a tool call did/didn't fire. Native-audio model has no separate
+        // text channel otherwise.
+        inputAudioTranscription: {},
+        outputAudioTranscription: {},
         systemInstruction: {
           parts: [{ text: buildSystemInstruction(callCtx) }],
         },
@@ -1426,13 +1693,32 @@ Deno.serve({ port: PORT }, async (req) => {
       toolCallsMade: [{ name: "inbound_meta", args: { counsellorUserId, counsellorName, counsellorPhone, plivoCallUUID }, result: null }],
     });
 
-    // Compute business-hours BEFORE inserting the call record so we can flag
-    // off-hours inbounds for next-day counsellor follow-up via the missed-
-    // calls queue. (The full routing decision uses the same `inBusinessHours`
-    // value below.)
+    // Routing pre-compute: do this BEFORE the ai_call_records insert so the
+    // record reflects who is *actually* handling the call (counsellor vs AI),
+    // not just the lead's assigned counsellor. The LiveCallBar uses
+    // caller_user_id=null on a call_type='inbound' row as the signal to render
+    // "AI Agent" instead of "Unknown"; without this fix the bar would always
+    // show the lead's counsellor even when the AI is actually picking up
+    // (AI DID, off-hours, no counsellor).
+    const onlyDigitsEarly = (s: string) => (s || "").replace(/\D/g, "");
+    const dialedToEarly  = onlyDigitsEarly(params.To as string);
+    const aiPrimaryEarly = onlyDigitsEarly(Deno.env.get("PLIVO_AI_PHONE_NUMBER") || "");
+    const aiBackupEarly  = onlyDigitsEarly(Deno.env.get("PLIVO_AI_BACKUP_PHONE_NUMBER") || "");
+    const isAiInboundNumberEarly = !!dialedToEarly && (dialedToEarly === aiPrimaryEarly || dialedToEarly === aiBackupEarly);
+
     const istHourEarly = parseInt(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata", hour: "2-digit", hour12: false }).match(/\d+/)?.[0] || "0", 10);
     const istDayEarly  = new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata", weekday: "short" });
     const offHours = !((istHourEarly >= 9 && istHourEarly < 20) && istDayEarly !== "Sun");
+
+    // Will the AI actually handle this call from the start? True when:
+    //   - Lead dialed an AI-dedicated DID, OR
+    //   - It's outside business hours, OR
+    //   - The lead has no assigned counsellor (or no counsellor phone), OR
+    //   - There's no lead at all (cold caller, not in DB)
+    // When this is true, the call goes straight to the AI <Stream> below and
+    // no counsellor leg is ever attempted.
+    const aiHandlesFromStart =
+      isAiInboundNumberEarly || offHours || !counsellorPhone || !leadId;
 
     // Create ai_call_records entry for real-time tracking (LiveCallBar, timeline)
     if (leadId && SUPABASE_URL) {
@@ -1444,8 +1730,13 @@ Deno.serve({ port: PORT }, async (req) => {
           plivo_call_uuid: plivoCallUUID,
           status: "initiated",
           call_type: "inbound",
-          caller_user_id: counsellorUserId || null,
-          summary: `Inbound call from ${leadName || callerPhone}${counsellorName ? ` → routing to ${counsellorName}` : offHours ? ` → AI agent (off-hours, flagged for follow-up)` : ""}`,
+          // null = AI is handling. counsellor_user_id = counsellor's phone is ringing.
+          caller_user_id: aiHandlesFromStart ? null : counsellorUserId,
+          summary: `Inbound call from ${leadName || callerPhone}${
+            aiHandlesFromStart
+              ? ` → AI agent${offHours ? " (off-hours, flagged for follow-up)" : isAiInboundNumberEarly ? " (AI DID)" : ""}`
+              : ` → routing to ${counsellorName}`
+          }`,
           needs_followup: offHours,
           followup_reason: offHours ? `Inbound at ${istHourEarly}:00 IST ${istDayEarly} — outside business hours (9 AM-8 PM IST, Mon-Sat)` : null,
         }),
@@ -1581,6 +1872,17 @@ Deno.serve({ port: PORT }, async (req) => {
     // Counsellor didn't answer → log missed call + create followup, then connect to AI
     if (leadId && SUPABASE_URL) {
       const dbH = { "Content-Type": "application/json", apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
+
+      // Hand the active ai_call_records row over to "AI handling" so the
+      // LiveCallBar header updates from the counsellor's name to "AI Agent"
+      // on the next 5-second poll. caller_user_id=null is the bar's signal.
+      await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
+        method: "PATCH", headers: { ...dbH, Prefer: "return=minimal" },
+        body: JSON.stringify({
+          caller_user_id: null,
+          summary: `Inbound call from ${callCtx?.leadName || "student"} → ${counsellorName} didn't answer, AI took over`,
+        }),
+      }).catch(() => {});
 
       // Log missed inbound call
       await fetch(`${SUPABASE_URL}/rest/v1/call_logs`, {
@@ -2170,15 +2472,15 @@ Deno.serve({ port: PORT }, async (req) => {
 
     if (upgrade === "websocket") {
       const { socket, response } = Deno.upgradeWebSocket(req);
-      // Resolve provider on connect — default to gemini so any config glitch
-      // falls back to the proven Live agent. Fire-and-forget; the handler
-      // takes the socket once we know which engine to use.
-      (async () => {
-        const provider = await getVoiceProvider();
-        console.log(`[${callId}] Dispatching to voice provider: ${provider}`);
-        if (provider === "sarvam") handlePlivoStreamSarvam(socket, callId);
-        else handlePlivoStream(socket, callId);
-      })();
+      // Provider must resolve SYNCHRONOUSLY so the handler attaches
+      // onmessage before Plivo sends the "start" event. Earlier we awaited
+      // the _app_config lookup here and lost the start event entirely
+      // (handler attached too late) — handlers only saw subsequent media
+      // events and never set plivoStreamId.
+      const provider = getVoiceProviderSync();
+      console.log(`[${callId}] Dispatching to voice provider: ${provider}`);
+      if (provider === "sarvam") handlePlivoStreamSarvam(socket, callId);
+      else handlePlivoStream(socket, callId);
       return response;
     }
 
@@ -2188,12 +2490,14 @@ Deno.serve({ port: PORT }, async (req) => {
   return new Response("Not found", { status: 404 });
 });
 
-// ─── Voice provider toggle (read from _app_config, in-memory cached) ──
+// ─── Voice provider toggle (sync read, refreshed in background) ──────
+//
+// MUST be sync so the WS handler can dispatch before Plivo's first event
+// arrives. We pre-fetch on startup and then refresh every 30s in the
+// background; reads from getVoiceProviderSync() return the cached value.
 
-let cachedProvider: { value: "gemini" | "sarvam"; expiresAt: number } | null = null;
-async function getVoiceProvider(): Promise<"gemini" | "sarvam"> {
-  if (cachedProvider && Date.now() < cachedProvider.expiresAt) return cachedProvider.value;
-  let val: "gemini" | "sarvam" = "gemini";
+let providerCache: "gemini" | "sarvam" = "gemini";
+async function refreshProviderCache() {
   try {
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/_app_config?key=eq.voice_agent_provider&select=value`,
@@ -2201,14 +2505,16 @@ async function getVoiceProvider(): Promise<"gemini" | "sarvam"> {
     );
     const rows = await res.json().catch(() => []);
     const v = rows?.[0]?.value;
-    if (v === "sarvam" || v === "gemini") val = v;
+    if (v === "sarvam" || v === "gemini") providerCache = v;
   } catch (e) {
-    console.warn(`[provider] _app_config lookup failed, defaulting to gemini:`, (e as Error).message);
+    console.warn(`[provider] _app_config refresh failed:`, (e as Error).message);
   }
-  // 30-second TTL so dashboard changes propagate quickly
-  cachedProvider = { value: val, expiresAt: Date.now() + 30_000 };
-  return val;
 }
+function getVoiceProviderSync(): "gemini" | "sarvam" { return providerCache; }
+// Warm the cache on boot, then refresh every 30s — dashboard toggle
+// propagates within that window.
+refreshProviderCache();
+setInterval(refreshProviderCache, 30_000);
 
 // ─── Sarvam cascaded pipeline (STT → Gemini text → TTS) ──────────────
 //
@@ -2222,7 +2528,10 @@ async function getVoiceProvider(): Promise<"gemini" | "sarvam"> {
 // audio, but more resilient — a single provider outage doesn't kill calls.
 
 const SARVAM_API_KEY = Deno.env.get("SARVAM_API_KEY") || "";
-const GEMINI_API_KEY_FOR_TEXT = Deno.env.get("GEMINI_API_KEY") || "";
+// Reuse the same key the Gemini Live path uses — Cloud Run env has it under
+// GOOGLE_AI_API_KEY, with GEMINI_API_KEY as a fallback for any environment
+// that named it that way.
+const GEMINI_API_KEY_FOR_TEXT = Deno.env.get("GOOGLE_AI_API_KEY") || Deno.env.get("GEMINI_API_KEY") || "";
 const SARVAM_TTS_SPEAKER = Deno.env.get("SARVAM_TTS_SPEAKER") || "ritu";
 
 // VAD tuning for Plivo's mulaw 8kHz stream. Each Plivo frame is 160 samples
@@ -2264,27 +2573,36 @@ function handlePlivoStreamSarvam(plivoWs: WebSocket, callId: string) {
 
   const sendTtsToPlivo = async (text: string) => {
     aiSpeaking = true;
-    const pcm = await sarvamTTS({
-      apiKey: SARVAM_API_KEY,
-      text,
-      speaker: SARVAM_TTS_SPEAKER,
-      languageCode: "en-IN",
-    });
-    if (!pcm || !plivoStreamId) { aiSpeaking = false; return; }
-    // Chunk PCM into 160-sample (20ms) frames, encode mulaw, send to Plivo
-    for (let i = 0; i < pcm.length; i += 160) {
-      const frame = pcm.subarray(i, Math.min(i + 160, pcm.length));
-      const mulawB64 = pcm16ToMulawBase64(frame);
-      try {
-        plivoWs.send(JSON.stringify({
-          event: "playAudio",
-          media: { contentType: "audio/x-mulaw", sampleRate: 8000, payload: mulawB64 },
-        }));
-      } catch { break; }
-      // Pace at ~real-time so Plivo's jitter buffer doesn't overflow
-      await new Promise(r => setTimeout(r, 18));
+    try {
+      // Pick TTS phonetics from the dominant script in the response so
+      // Devanagari isn't read with English-India phonemes (and vice versa).
+      const langCode = detectSarvamLanguageCode(text);
+      const pcm = await sarvamTTS({
+        apiKey: SARVAM_API_KEY,
+        text,
+        speaker: SARVAM_TTS_SPEAKER,
+        languageCode: langCode,
+      });
+      if (!pcm) {
+        console.warn(`[${callId}] sarvam-tts returned empty pcm`);
+        return;
+      }
+      if (plivoWs.readyState !== WebSocket.OPEN) return;
+      // Send the full mulaw payload in one playAudio event — Plivo handles
+      // pacing on its side. Chunking into 20ms frames + sleep delays caused
+      // the audio to never reach the caller in our earlier attempt.
+      const mulawB64 = pcm16ToMulawBase64(pcm);
+      plivoWs.send(JSON.stringify({
+        event: "playAudio",
+        media: { contentType: "audio/x-mulaw", sampleRate: 8000, payload: mulawB64 },
+      }));
+      console.log(`[${callId}] Sent ${pcm.length} samples (${mulawB64.length} mulaw bytes) to Plivo`);
+      // Hold the speaking flag for roughly the audio duration (8kHz → 0.125ms/sample)
+      // so STT doesn't try to transcribe our own TTS bleed.
+      await new Promise(r => setTimeout(r, Math.min(15000, (pcm.length / 8000) * 1000 + 200)));
+    } finally {
+      aiSpeaking = false;
     }
-    aiSpeaking = false;
   };
 
   // One round-trip to Gemini text-gen with the current history. Returns the

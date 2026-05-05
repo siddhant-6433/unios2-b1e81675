@@ -146,8 +146,15 @@ const LeadDetail = () => {
 
   const fetchAll = async (silent = false) => {
     if (!silent) setLoading(true);
-    const [leadRes, notesRes, followupsRes, visitsRes, activitiesRes, campusesRes, callLogsRes, coursesRes, profileRes] = await Promise.all([
-      supabase.from("leads").select("*").eq("id", id).single(),
+    // All queries fire in parallel, but render unblocks as soon as the lead
+    // row arrives — no need to wait for notes/timeline/call-logs/etc to
+    // finish before showing the lead card. The secondary data hydrates in
+    // the background and child components re-render when their state lands.
+    // Embedded course/campus/counsellor save 3 follow-up round-trips.
+    const leadP = supabase.from("leads")
+      .select("*, lead_course:course_id(name,duration_years,type), lead_campus:campus_id(name,city,state), lead_counsellor:counsellor_id(display_name)")
+      .eq("id", id).single();
+    const secondaryP = Promise.all([
       supabase.from("lead_notes").select("*").eq("lead_id", id).order("created_at", { ascending: false }).limit(50),
       supabase.from("lead_followups").select("*").eq("lead_id", id).order("scheduled_at", { ascending: true }).limit(30),
       supabase.from("campus_visits").select("*").eq("lead_id", id).order("visit_date", { ascending: false }).limit(20),
@@ -157,29 +164,27 @@ const LeadDetail = () => {
       supabase.from("courses").select("id, name"),
       user?.id ? supabase.from("profiles").select("id").eq("user_id", user.id).single() : Promise.resolve({ data: null }),
     ]);
-    if (profileRes.data) setProfileId((profileRes.data as any).id);
+
+    const leadRes = await leadP;
     if (leadRes.data) {
-      setLead(leadRes.data);
-      if (leadRes.data.counsellor_id) {
-        const { data } = await supabase.from("profiles").select("display_name").eq("id", leadRes.data.counsellor_id).single();
-        setCounsellorName(data?.display_name || undefined);
-      } else {
-        setCounsellorName(undefined);
-      }
-      if (leadRes.data.course_id) {
-        const { data } = await supabase.from("courses").select("name, duration_years, type").eq("id", leadRes.data.course_id).single();
-        setCourseName(data?.name || undefined);
-        setCourseDuration(data?.duration_years || undefined);
-        setCourseType(data?.type || undefined);
-      }
-      if (leadRes.data.campus_id) {
-        const { data } = await supabase.from("campuses").select("name, city, state").eq("id", leadRes.data.campus_id).single();
-        setCampusName(data?.name || undefined);
-        setCampusCity(data?.city ? (data.state ? `${data.city}, ${data.state}` : data.city) : undefined);
-      } else {
-        setCampusCity(undefined);
-      }
+      const ld: any = leadRes.data;
+      setLead(ld);
+      const lc = ld.lead_counsellor;
+      setCounsellorName(lc?.display_name || undefined);
+      const cs = ld.lead_course;
+      setCourseName(cs?.name || undefined);
+      setCourseDuration(cs?.duration_years || undefined);
+      setCourseType(cs?.type || undefined);
+      const cp = ld.lead_campus;
+      setCampusName(cp?.name || undefined);
+      setCampusCity(cp?.city ? (cp.state ? `${cp.city}, ${cp.state}` : cp.city) : undefined);
     }
+    setLoading(false);
+
+    // Background hydration — list states are initialised to [] so children
+    // render empty placeholders immediately and re-render when data lands.
+    const [notesRes, followupsRes, visitsRes, activitiesRes, campusesRes, callLogsRes, coursesRes, profileRes] = await secondaryP;
+    if (profileRes.data) setProfileId((profileRes.data as any).id);
     if (notesRes.data) setNotes(notesRes.data);
     if (followupsRes.data) setFollowups(followupsRes.data);
     if (visitsRes.data) setVisits(visitsRes.data);
@@ -187,7 +192,6 @@ const LeadDetail = () => {
     if (campusesRes.data) setCampuses(campusesRes.data);
     if (callLogsRes.data) setCallLogs(callLogsRes.data);
     if (coursesRes.data) setCourses(coursesRes.data);
-    setLoading(false);
   };
 
   const addNote = async () => {
@@ -647,7 +651,6 @@ const LeadDetail = () => {
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       const { data, error } = await supabase.functions.invoke("voice-call", {
         body: { action: "outbound", lead_id: id, caller_user_id: currentUser?.id },
-        headers: { Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
       });
 
       if (error) {
@@ -679,7 +682,6 @@ const LeadDetail = () => {
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       const { data, error } = await supabase.functions.invoke("manual-call", {
         body: { lead_id: id, caller_user_id: currentUser?.id },
-        headers: { Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
       });
       if (error) {
         let detail = error.message;

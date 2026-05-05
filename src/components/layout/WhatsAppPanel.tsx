@@ -88,19 +88,26 @@ export function WhatsAppPanel() {
     setLoading(false);
   }, [user?.id, isCounsellor, profile?.id]);
 
-  // Fetch unreplied WhatsApp conversations — only those with unread > 0
+  // Fetch unreplied count directly from whatsapp_messages instead of the
+  // whatsapp_conversations view. The view does DISTINCT ON + 2 LATERAL count
+  // subqueries across 16K+ messages and was hitting the 8s statement timeout
+  // when every tab + every realtime message refired it. The partial index
+  // idx_wa_messages_unread (direction='inbound' AND is_read=false) answers a
+  // direct head-count in milliseconds.
   const fetchUnreplied = useCallback(async () => {
     let q = supabase
-      .from("whatsapp_conversations" as any)
-      .select("unread_count")
-      .gt("unread_count", 0);
+      .from("whatsapp_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("direction", "inbound")
+      .eq("is_read", false);
     if (isCounsellor && profile?.id) {
-      q = q.eq("counsellor_id", profile.id);
+      const { data: myLeads } = await supabase
+        .from("leads").select("id").eq("counsellor_id", profile.id);
+      if (!myLeads?.length) { setUnrepliedCount(0); return; }
+      q = q.in("lead_id", myLeads.map((l: any) => l.id));
     }
-    const { data } = await q;
-    if (data) {
-      setUnrepliedCount((data as any[]).reduce((sum, c) => sum + (c.unread_count || 0), 0));
-    }
+    const { count } = await q;
+    setUnrepliedCount(count || 0);
   }, [isCounsellor, profile?.id]);
 
   useEffect(() => {
@@ -127,11 +134,18 @@ export function WhatsAppPanel() {
       })
       .subscribe();
 
+    // Debounce realtime refetch — bursts of inbound messages would
+    // otherwise refire fetchUnreplied dozens of times per second across
+    // every open tab.
+    let waDebounce: ReturnType<typeof setTimeout> | null = null;
     const waChannel = supabase
       .channel("wa-conversations-header")
       .on("postgres_changes" as any, {
         event: "*", schema: "public", table: "whatsapp_messages",
-      }, fetchUnreplied)
+      }, () => {
+        if (waDebounce) clearTimeout(waDebounce);
+        waDebounce = setTimeout(fetchUnreplied, 1500);
+      })
       .subscribe();
 
     return () => {

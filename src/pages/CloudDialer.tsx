@@ -10,7 +10,7 @@ import {
   Phone, PhoneOff, Pause, Play, SkipForward, Clock,
   Loader2, CheckCircle, XCircle, PhoneMissed, Users, BarChart3,
   Calendar, AlertCircle, Volume2, Pencil, Check, X, Search,
-  FileText, PhoneIncoming, PhoneMissed, ArrowRight,
+  FileText, PhoneIncoming, ArrowRight,
 } from "lucide-react";
 import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
 
@@ -522,7 +522,6 @@ export default function CloudDialer() {
     try {
       const { data, error } = await supabase.functions.invoke("manual-call", {
         body: { lead_id: currentLead.id, caller_user_id: user.id },
-        headers: { Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
       });
 
       if (error || data?.error) {

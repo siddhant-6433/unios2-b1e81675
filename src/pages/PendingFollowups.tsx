@@ -424,7 +424,6 @@ const PendingFollowups = () => {
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       const { data, error } = await supabase.functions.invoke("manual-call", {
         body: { lead_id: leadId, caller_user_id: currentUser?.id },
-        headers: { Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
       });
       if (error) {
         let detail = error.message;
