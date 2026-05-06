@@ -120,10 +120,10 @@ async function provisionStudent(
   studentId: string,
   forceReprovision: boolean,
 ): Promise<number> {
-  // 1. Fetch student
+  // 1. Fetch student (incl. lead_id so we can look up approved offer waivers).
   const { data: student, error: sErr } = await db
     .from("students")
-    .select("id, course_id, student_type, transport_required, transport_zone, hostel_type, fee_structure_version, session_id")
+    .select("id, lead_id, course_id, student_type, transport_required, transport_zone, hostel_type, fee_structure_version, session_id")
     .eq("id", studentId)
     .single();
 
@@ -233,7 +233,7 @@ async function provisionStudent(
       fee_code_id: item.fee_code_id,
       fee_structure_item_id: item.id,
       term: term,
-      total_amount: item.amount,
+      total_amount: Number(item.amount),
       paid_amount: 0,
       concession: 0,
       due_date: dueDate,
@@ -242,6 +242,63 @@ async function provisionStudent(
   });
 
   if (rows.length === 0) return 0;
+
+  // 7a. Apply approved offer waivers (year-wise) to matching ledger rows.
+  // Each waiver is keyed by term ('year_1', 'year_2', ...). If the fee
+  // structure has a row with the exact same term, the waiver lands there.
+  // If multiple rows share the term, the waiver is distributed proportionally
+  // by total_amount so no single line item ends up with a negative balance.
+  if (student.lead_id) {
+    const { data: latestOffer } = await db
+      .from("offer_letters")
+      .select("id")
+      .eq("lead_id", student.lead_id)
+      .eq("approval_status", "approved")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (latestOffer?.id) {
+      const { data: waiverRows } = await db
+        .from("offer_waivers")
+        .select("term, amount")
+        .eq("offer_letter_id", latestOffer.id)
+        .eq("status", "approved");
+
+      const waivers = (waiverRows || []) as { term: string; amount: number }[];
+      // Sum waivers per term in case there are multiple approved waivers for the same year.
+      const waiverByTerm = new Map<string, number>();
+      for (const w of waivers) {
+        waiverByTerm.set(w.term, (waiverByTerm.get(w.term) || 0) + Number(w.amount || 0));
+      }
+
+      for (const [term, totalWaiver] of waiverByTerm) {
+        const matching = rows.filter((r: any) => r.term === term && r.total_amount > 0);
+        if (matching.length === 0) {
+          console.warn(`[provision-student-fees] Waiver for term '${term}' (₹${totalWaiver}) has no matching ledger rows for student ${studentId}; skipping.`);
+          continue;
+        }
+        const sumTotal = matching.reduce((s: number, r: any) => s + Number(r.total_amount), 0);
+        if (sumTotal <= 0) continue;
+
+        // Cap the waiver at the matching rows' combined total so concession
+        // never exceeds total_amount on any row.
+        const cappedWaiver = Math.min(totalWaiver, sumTotal);
+
+        let allocated = 0;
+        for (let i = 0; i < matching.length; i++) {
+          const isLast = i === matching.length - 1;
+          // Round per-row, then put any rounding remainder onto the last row
+          // so concession sums match cappedWaiver exactly.
+          const share = isLast
+            ? cappedWaiver - allocated
+            : Math.round((Number(matching[i].total_amount) / sumTotal) * cappedWaiver);
+          matching[i].concession = (matching[i].concession || 0) + share;
+          allocated += share;
+        }
+      }
+    }
+  }
 
   // 8. Insert, skipping duplicates (same student + fee_code + term)
   // Check existing entries

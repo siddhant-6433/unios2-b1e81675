@@ -802,130 +802,190 @@ function ApplicationDashboardView({
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Lightweight header — keep parity with the editor's header but no progress bar */}
-      <header className="border-b border-border bg-card">
-        <div className="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between gap-3">
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white border-b border-gray-100 sticky top-0 z-10">
+        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
           {portal.logo ? (
-            <img src={portal.logo} alt={portal.name} className="h-8 sm:h-10 w-auto object-contain" />
+            <img src={portal.logo} alt={portal.name} className="h-8 w-auto object-contain" />
           ) : (
             <div className="flex items-center gap-2">
-              <GraduationCap className="h-5 w-5 text-primary" />
-              <span className="text-sm font-semibold text-foreground">{portal.name}</span>
+              <GraduationCap className="h-5 w-5 text-blue-600" />
+              <span className="text-sm font-bold text-gray-900">{portal.name}</span>
             </div>
           )}
-          <Button variant="ghost" size="sm" onClick={onLogout} className="gap-1.5 shrink-0"><LogOut className="h-4 w-4" /> Logout</Button>
+          <button onClick={onLogout} className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors px-2 py-1.5 rounded-lg hover:bg-gray-100">
+            <LogOut className="h-3.5 w-3.5" /> Sign out
+          </button>
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-6 py-8 space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Welcome, {leadName}</h1>
-          <p className="text-sm text-muted-foreground mt-1">Here are all your applications. Pick one to view details, continue editing, or pay your token fee.</p>
+      <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
+
+        {/* Welcome strip */}
+        <div className="rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white px-5 py-4 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-widest text-blue-200 mb-0.5">Welcome back</p>
+            <h1 className="text-xl font-bold leading-tight">{leadName || "Applicant"}</h1>
+            <p className="text-sm text-blue-100 mt-0.5">Your admission journey at {portal.name}</p>
+          </div>
+          <GraduationCap className="h-10 w-10 text-blue-300/60 shrink-0" />
         </div>
 
-        <div className="space-y-4">
-          {apps.map((app) => {
-            const a = app as DashboardApp;
-            const courses = (a.course_selections || []).map((c: any) => c.course_name).filter(Boolean);
-            const badge = statusBadge(a.status, a.payment_status);
-            const offer = a.lead_id ? offerLetters[a.lead_id] : undefined;
-            // An offer is "live" (token fee payable) the moment it's approved —
-            // PDF generation is asynchronous and shouldn't block payment.
-            const hasApprovedOffer = offer?.approval_status === "approved";
-            const hasLetterPdf = hasApprovedOffer && !!offer.letter_url;
-            const isDraft = a.status === "draft";
-            const isPaid = a.payment_status === "paid";
-            const isOpen = openAppId === a.id;
-            return (
-              <Card key={a.id} className="border-border/60 shadow-none overflow-hidden">
-                <CardContent className="p-5 space-y-3">
-                  <div className="flex items-start justify-between gap-3 flex-wrap">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono text-sm font-bold text-primary">{a.application_id}</span>
-                        <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium ${badge.className}`}>
-                          <badge.Icon className="h-3 w-3" />{badge.label}
-                        </span>
-                      </div>
-                      <p className="text-sm text-foreground mt-2">
-                        {courses.length > 0 ? courses.join(", ") : <span className="text-muted-foreground italic">No course selected yet</span>}
+        {/* Application cards */}
+        {apps.map((app) => {
+          const a = app as DashboardApp;
+          const courses = (a.course_selections || []).map((c: any) => c.course_name).filter(Boolean);
+          const offer = a.lead_id ? offerLetters[a.lead_id] : undefined;
+          const hasApprovedOffer = offer?.approval_status === "approved";
+          const hasLetterPdf = hasApprovedOffer && !!offer.letter_url;
+          const isDraft = a.status === "draft";
+          const isPaid = a.payment_status === "paid";
+          const isUnderReview = a.status === "submitted" || a.status === "under_review";
+          const isOpen = openAppId === a.id;
+
+          // Card accent colour by state
+          const accentClass = hasApprovedOffer
+            ? "border-blue-200 bg-white"
+            : isUnderReview
+            ? "border-emerald-200 bg-white"
+            : "border-gray-200 bg-white";
+
+          return (
+            <div key={a.id} className={`rounded-2xl border shadow-sm overflow-hidden ${accentClass}`}>
+
+              {/* Coloured top stripe for approved offers */}
+              {hasApprovedOffer && (
+                <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2.5 flex items-center gap-2">
+                  <Award className="h-4 w-4 text-yellow-300 shrink-0" />
+                  <span className="text-xs font-bold text-white tracking-wide">Offer Approved · Action Required</span>
+                </div>
+              )}
+              {isUnderReview && !hasApprovedOffer && (
+                <div className="bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-2.5 flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4 text-white shrink-0" />
+                  <span className="text-xs font-bold text-white tracking-wide">Application Submitted · Under Review</span>
+                </div>
+              )}
+              {isDraft && (
+                <div className="bg-gradient-to-r from-amber-400 to-orange-400 px-4 py-2.5 flex items-center gap-2">
+                  <Pencil className="h-4 w-4 text-white shrink-0" />
+                  <span className="text-xs font-bold text-white tracking-wide">Draft · Complete your application</span>
+                </div>
+              )}
+
+              <div className="p-4 space-y-3">
+                {/* App ID + course */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <span className="font-mono text-xs font-bold text-gray-400">{a.application_id}</span>
+                    <p className="text-base font-bold text-gray-900 mt-0.5 leading-tight">
+                      {courses.length > 0 ? courses.join(", ") : <span className="text-gray-400 italic font-normal text-sm">No course selected yet</span>}
+                    </p>
+                    {a.fee_amount != null && a.fee_amount > 0 && (
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        Application fee ₹{Number(a.fee_amount).toLocaleString("en-IN")}
+                        {isPaid && <span className="ml-1.5 text-green-600 font-medium">· Paid</span>}
                       </p>
-                      {a.fee_amount != null && a.fee_amount > 0 && (
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          Application fee: <span className="font-medium text-foreground">₹{a.fee_amount.toLocaleString("en-IN")}</span>
-                          {isPaid && <span className="ml-1 text-green-600">· Paid</span>}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    {isDraft ? (
-                      <Button size="sm" className="gap-1.5" onClick={() => onContinue(a)}>
-                        <Pencil className="h-3.5 w-3.5" /> Continue Editing
-                      </Button>
-                    ) : (
-                      <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onContinue(a)}>
-                        <CheckCircle className="h-3.5 w-3.5" /> View Submission
-                      </Button>
-                    )}
-                    {a.form_pdf_url && (
-                      <Button size="sm" variant="outline" className="gap-1.5" asChild>
-                        <a href={a.form_pdf_url} target="_blank" rel="noreferrer">
-                          <FileText className="h-3.5 w-3.5" /> Application PDF
-                        </a>
-                      </Button>
-                    )}
-                    {isPaid && (
-                      <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setReceiptApp(a)}>
-                        <Receipt className="h-3.5 w-3.5" /> Fee Receipt
-                      </Button>
-                    )}
-                    {hasLetterPdf && (
-                      <Button size="sm" variant="outline" className="gap-1.5" asChild>
-                        <a href={offer!.letter_url!} target="_blank" rel="noreferrer">
-                          <Award className="h-3.5 w-3.5" /> Offer Letter
-                        </a>
-                      </Button>
-                    )}
-                    {hasApprovedOffer && !hasLetterPdf && (
-                      <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        Offer letter being prepared…
-                      </span>
-                    )}
-                    {hasApprovedOffer && (
-                      <Button
-                        size="sm"
-                        variant={isOpen ? "secondary" : "default"}
-                        className="gap-1.5"
-                        onClick={() => setOpenAppId(isOpen ? null : a.id)}
-                      >
-                        <Wallet className="h-3.5 w-3.5" /> {isOpen ? "Hide Token Fee" : "Pay Token Fee"}
-                      </Button>
                     )}
                   </div>
+                </div>
 
-                  {/* Inline TokenFeePanel — only mounts when expanded so its
-                      DB queries don't fire for unrelated cards. */}
-                  {isOpen && hasApprovedOffer && (
-                    <TokenFeePanel
-                      applicationId={a.application_id}
-                      applicantName={a.full_name || ""}
-                      applicantPhone={a.phone}
-                      applicantEmail={a.email}
-                    />
+                {/* What happens next hint */}
+                {isUnderReview && !hasApprovedOffer && (
+                  <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2.5 text-xs text-emerald-700">
+                    Our admissions team is reviewing your application. You'll be notified once an offer is issued.
+                  </div>
+                )}
+                {isDraft && (
+                  <div className="rounded-xl bg-amber-50 border border-amber-100 px-3 py-2.5 text-xs text-amber-800">
+                    Your application is incomplete. Continue editing to submit it for review.
+                  </div>
+                )}
+
+                {/* Action buttons */}
+                <div className="flex flex-wrap gap-2">
+                  {isDraft ? (
+                    <button
+                      onClick={() => onContinue(a)}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700 active:scale-95 transition-all"
+                    >
+                      <Pencil className="h-3.5 w-3.5" /> Continue Editing
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => onContinue(a)}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 active:scale-95 transition-all"
+                    >
+                      <FileText className="h-3.5 w-3.5" /> View Application
+                    </button>
                   )}
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+                  {a.form_pdf_url && (
+                    <a
+                      href={a.form_pdf_url} target="_blank" rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 active:scale-95 transition-all"
+                    >
+                      <FileText className="h-3.5 w-3.5" /> PDF
+                    </a>
+                  )}
+                  {isPaid && (
+                    <button
+                      onClick={() => setReceiptApp(a)}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 active:scale-95 transition-all"
+                    >
+                      <Receipt className="h-3.5 w-3.5" /> Receipt
+                    </button>
+                  )}
+                  {hasLetterPdf && (
+                    <a
+                      href={offer!.letter_url!} target="_blank" rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100 active:scale-95 transition-all"
+                    >
+                      <Award className="h-3.5 w-3.5" /> Offer Letter
+                    </a>
+                  )}
+                  {hasApprovedOffer && !hasLetterPdf && (
+                    <span className="inline-flex items-center gap-1.5 rounded-xl border border-gray-100 bg-gray-50 px-3.5 py-2 text-xs text-gray-400">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Letter preparing…
+                    </span>
+                  )}
+                  {hasApprovedOffer && (
+                    <button
+                      onClick={() => setOpenAppId(isOpen ? null : a.id)}
+                      className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-all active:scale-95 ${
+                        isOpen
+                          ? "border border-gray-200 bg-gray-100 text-gray-700"
+                          : "bg-blue-600 text-white hover:bg-blue-700 shadow-sm shadow-blue-200"
+                      }`}
+                    >
+                      <Wallet className="h-3.5 w-3.5" />
+                      {isOpen ? "Hide Details" : "Pay Token Fee"}
+                    </button>
+                  )}
+                </div>
 
-        <Button variant="outline" className="w-full gap-2" onClick={onStartNew}>
+                {/* Token fee panel */}
+                {isOpen && hasApprovedOffer && (
+                  <TokenFeePanel
+                    applicationId={a.application_id}
+                    leadId={a.lead_id}
+                    applicantName={a.full_name || ""}
+                    applicantPhone={a.phone}
+                    applicantEmail={a.email}
+                  />
+                )}
+              </div>
+            </div>
+          );
+        })}
+
+        {/* Start new */}
+        <button
+          onClick={onStartNew}
+          className="w-full rounded-2xl border-2 border-dashed border-gray-200 py-4 text-sm font-semibold text-gray-400 hover:border-blue-300 hover:text-blue-500 hover:bg-blue-50/30 transition-all flex items-center justify-center gap-2"
+        >
           <Plus className="h-4 w-4" /> Start a new application
-        </Button>
+        </button>
       </main>
 
       {receiptApp && (
@@ -940,14 +1000,44 @@ const ApplyPortal = () => {
   const portal = usePortal();
   const isSchool = portal.programCategories.includes("school");
 
+  const PORTAL_AUTH_KEY = `portal_auth_${portal.id}`;
+  const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
   const [authed, setAuthed] = useState(false);
   const [phone, setPhone] = useState("");
   const [leadName, setLeadName] = useState("");
   const [childDob, setChildDob] = useState("");
   const [leadSource] = useState<string>(() => captureUtmSource());
+  // True while we're checking localStorage for a saved session — prevents
+  // flashing the OTP login screen before we know if the user is already in.
+  const [restoringSession, setRestoringSession] = useState(true);
+
+  // Restore persisted session on mount
+  useEffect(() => {
+    const hasMagicToken = new URLSearchParams(window.location.search).has("token");
+    if (hasMagicToken) {
+      // Let the magic-token flow in OtpLogin handle auth; don't compete with it.
+      setRestoringSession(false);
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(PORTAL_AUTH_KEY);
+      if (raw) {
+        const { phone: p, name: n, expiresAt } = JSON.parse(raw);
+        if (p && expiresAt && expiresAt > Date.now()) {
+          handleAuthenticated(p, n || "Applicant").finally(() => setRestoringSession(false));
+          return;
+        }
+      }
+    } catch { /* ignore malformed data */ }
+    localStorage.removeItem(PORTAL_AUTH_KEY);
+    setRestoringSession(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    localStorage.removeItem(PORTAL_AUTH_KEY);
     setAuthed(false);
     setApp(null);
     setSubmitted(false);
@@ -970,6 +1060,14 @@ const ApplyPortal = () => {
   const [appsList, setAppsList] = useState<any[] | null>(null);
   const [dashboardOpenAppId, setDashboardOpenAppId] = useState<string | null>(null);
   const [offerLetters, setOfferLetters] = useState<Record<string, { letter_url: string | null; approval_status: string }>>({});
+
+  // Auto-open the token fee panel for whichever app has an approved offer,
+  // but only if the user hasn't manually toggled something already.
+  useEffect(() => {
+    if (!appsList || dashboardOpenAppId) return;
+    const approvedApp = appsList.find(a => a.lead_id && offerLetters[a.lead_id]?.approval_status === "approved");
+    if (approvedApp) setDashboardOpenAppId(approvedApp.id);
+  }, [appsList, offerLetters]);
   // Uploaded docs for the currently-previewed submission (loaded on demand).
   const [previewDocs, setPreviewDocs] = useState<PreviewDoc[]>([]);
   // Whether the dashboard exists to go back to (i.e. multiple apps OR any non-draft).
@@ -982,6 +1080,14 @@ const ApplyPortal = () => {
     setPhone(phoneVal);
     setLeadName(name);
     setAuthed(true);
+    // Persist so refreshes don't log the user out (TTL: 7 days)
+    try {
+      localStorage.setItem(PORTAL_AUTH_KEY, JSON.stringify({
+        phone: phoneVal,
+        name,
+        expiresAt: Date.now() + SESSION_TTL_MS,
+      }));
+    } catch { /* storage quota exceeded or private mode — non-fatal */ }
 
     // Fetch ALL applications for this phone (any status) so already-submitted
     // / under-review / approved apps load correctly. The submitted-state UI
@@ -1032,15 +1138,11 @@ const ApplyPortal = () => {
     if (hasNonDraft || portalApps.length > 1) {
       setAppsList(portalApps);
       setHasDashboard(true);
-      // Pre-fetch approved offer letters for the leads behind these apps so the
-      // dashboard can surface "View Offer Letter" without an extra round-trip.
-      const leadIds = [...new Set(portalApps.map((a: any) => a.lead_id).filter(Boolean))];
-      if (leadIds.length > 0) {
-        const { data: letters } = await supabase
-          .from("offer_letters")
-          .select("lead_id, letter_url, approval_status, created_at")
-          .in("lead_id", leadIds)
-          .order("created_at", { ascending: false });
+      // Pre-fetch approved offer letters for the leads behind these apps.
+      // Uses a SECURITY DEFINER RPC so the anon applicant key can read them
+      // (offer_letters table is staff-only via RLS).
+      if (phoneVal) {
+        const { data: letters } = await (supabase as any).rpc("get_applicant_offers_by_phone", { _phone: phoneVal });
         const byLead: Record<string, { letter_url: string | null; approval_status: string }> = {};
         (letters || []).forEach((l: any) => {
           if (!byLead[l.lead_id]) byLead[l.lead_id] = { letter_url: l.letter_url, approval_status: l.approval_status };
@@ -1406,6 +1508,15 @@ const ApplyPortal = () => {
     const ok = await saveSection(saveable, sectionKey);
     if (ok) setStep(nextStep);
   };
+
+  // ── Restoring session from localStorage ──
+  if (restoringSession) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   // ── Not logged in ──
   if (!authed) {

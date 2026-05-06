@@ -20,6 +20,42 @@
 
 const SARVAM_BASE = "https://api.sarvam.ai";
 
+// ─── Language detection for TTS routing ─────────────────────────────
+//
+// Sarvam Bulbul reads text using the phonetics of the requested
+// target_language_code. Hardcoding en-IN butchers any Devanagari output
+// from the LLM; hi-IN does the opposite for Latin text. Detect by Unicode
+// block to pick the right phonetic engine per response.
+
+const SCRIPT_RANGES: Array<[string, RegExp]> = [
+  ["hi-IN", /[ऀ-ॿ]/g], // Devanagari (Hindi/Marathi)
+  ["bn-IN", /[ঀ-৿]/g], // Bengali
+  ["gu-IN", /[઀-૿]/g], // Gujarati
+  ["pa-IN", /[਀-੿]/g], // Gurmukhi (Punjabi)
+  ["ta-IN", /[஀-௿]/g], // Tamil
+  ["te-IN", /[ఀ-౿]/g], // Telugu
+  ["kn-IN", /[ಀ-೿]/g], // Kannada
+  ["ml-IN", /[ഀ-ൿ]/g], // Malayalam
+  ["od-IN", /[଀-୿]/g], // Odia
+];
+
+/** Pick a Sarvam target_language_code based on dominant script in the text. */
+export function detectSarvamLanguageCode(text: string): string {
+  if (!text) return "en-IN";
+  let bestLang = "en-IN";
+  let bestCount = 0;
+  // Threshold: any single Indic script with >5 chars beats Latin default.
+  // Mixed Hinglish in Latin (e.g. "Aap kaise hain") stays en-IN.
+  for (const [lang, re] of SCRIPT_RANGES) {
+    const count = (text.match(re) || []).length;
+    if (count > bestCount && count >= 5) {
+      bestCount = count;
+      bestLang = lang;
+    }
+  }
+  return bestLang;
+}
+
 // ─── G.711 μ-law (mulaw) <-> linear PCM 16-bit ──────────────────────
 
 /** Decode one mulaw byte to a signed 16-bit linear PCM sample. */
@@ -135,7 +171,7 @@ export async function sarvamSTT(opts: {
   const wav = pcmToWav(opts.pcm, 8000);
   const fd = new FormData();
   fd.append("file", new Blob([wav], { type: "audio/wav" }), "utterance.wav");
-  fd.append("model", "saarika:v2");
+  fd.append("model", "saarika:v2.5");
   fd.append("language_code", opts.languageCode || "unknown"); // unknown → auto-detect
   fd.append("with_timestamps", "false");
 
@@ -183,12 +219,11 @@ export async function sarvamTTS(opts: SarvamTTSOpts): Promise<Int16Array | null>
       inputs: [opts.text],
       target_language_code: opts.languageCode || "en-IN",
       speaker: opts.speaker,
-      model: "bulbul:v2",
+      model: "bulbul:v3",
       speech_sample_rate: 8000,
       enable_preprocessing: true,
-      pitch: 0,
+      // pitch + loudness are not supported by bulbul:v3 — only `pace` is.
       pace: 1,
-      loudness: 1.2,
     }),
   });
   if (!res.ok) {

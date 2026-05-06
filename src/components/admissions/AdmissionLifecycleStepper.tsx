@@ -42,8 +42,13 @@ export function AdmissionLifecycleStepper(p: LifecycleProps) {
 
   return (
     <div className="rounded-2xl border border-border bg-gradient-to-b from-background to-muted/30 p-4 md:p-5 space-y-4">
-      {/* Stepper */}
-      <div className="flex items-stretch gap-1 overflow-x-auto -mx-1 px-1">
+      {/* Stepper.
+          NOTE on padding: `overflow-x-auto` forces overflow-y to clip too
+          (CSS doesn't allow x:auto + y:visible). The current-state nodes
+          use `ring-2 ring-offset-1 animate-pulse`, which extends ~4px
+          above/below the 40px circle — without vertical padding the ring
+          gets cropped at the top. `py-2` gives the rings breathing room. */}
+      <div className="flex items-stretch gap-1 overflow-x-auto -mx-1 px-1 py-2">
         {stages.map((s, i) => {
           const isLast = i === stages.length - 1;
           return (

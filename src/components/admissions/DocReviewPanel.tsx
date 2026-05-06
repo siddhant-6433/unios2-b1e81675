@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
   CheckCircle2, XCircle, Clock, ChevronLeft, ChevronRight,
-  ExternalLink, RefreshCw, FileText, Image as ImageIcon,
+  ExternalLink, RefreshCw, FileText, Image as ImageIcon, GraduationCap,
 } from "lucide-react";
 import type { PreviewDoc } from "@/components/applicant/ApplicationPreview";
 
@@ -31,14 +31,27 @@ export interface DocReview {
   reviewed_at: string | null;
 }
 
+export interface DocReviewCourseInfo {
+  name: string;
+  code: string | null;
+  durationYears: number | null;
+  eligibility: string | null;
+  entranceExam: string | null;
+  entranceMandatory: boolean | null;
+}
+
 interface Props {
   docs: PreviewDoc[];
   reviews: Record<string, DocReview>;
   /** Parent persists the change, then echoes it back via the `reviews` prop. */
   onSetStatus: (doc: PreviewDoc, next: DocStatus, notes?: string) => Promise<void> | void;
+  /** Course the applicant has applied for — surfaced so the reviewer can
+   *  cross-check the uploaded documents against the course's eligibility
+   *  before clearing the application for offer-letter generation. */
+  courseInfo?: DocReviewCourseInfo | null;
 }
 
-export function DocReviewPanel({ docs, reviews, onSetStatus }: Props) {
+export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo }: Props) {
   const [activeIdx, setActiveIdx] = useState(0);
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
@@ -122,6 +135,38 @@ export function DocReviewPanel({ docs, reviews, onSetStatus }: Props) {
           {counts.pending > 0 && <CountChip Icon={Clock} cls="bg-amber-50 text-amber-700">{counts.pending} pending</CountChip>}
         </div>
       </div>
+
+      {/* Applied-for course context — helps the reviewer match docs to
+          eligibility without leaving the page. */}
+      {courseInfo && (
+        <div className="px-4 py-2.5 border-b border-border bg-blue-50/40 dark:bg-blue-950/20 flex items-start gap-2.5">
+          <GraduationCap className="h-4 w-4 text-blue-700 dark:text-blue-300 mt-0.5 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold text-foreground">
+              Applied for: {courseInfo.name}
+              {courseInfo.code && (
+                <span className="ml-1.5 text-[10px] font-mono text-muted-foreground">({courseInfo.code})</span>
+              )}
+              {courseInfo.durationYears && (
+                <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">· {courseInfo.durationYears} {courseInfo.durationYears === 1 ? "year" : "years"}</span>
+              )}
+            </p>
+            {courseInfo.eligibility ? (
+              <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">
+                <span className="font-medium text-foreground/80">Eligibility:</span> {courseInfo.eligibility}
+              </p>
+            ) : (
+              <p className="text-[11px] text-muted-foreground/70 italic mt-0.5">No eligibility criteria recorded for this course.</p>
+            )}
+            {courseInfo.entranceExam && (
+              <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">
+                <span className="font-medium text-foreground/80">Entrance:</span> {courseInfo.entranceExam}
+                {courseInfo.entranceMandatory ? " (mandatory)" : " (optional)"}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Body: sidebar list + main preview + action panel */}
       <div className="grid grid-cols-1 md:grid-cols-[180px_1fr_240px] gap-0">

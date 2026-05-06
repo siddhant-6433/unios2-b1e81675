@@ -343,6 +343,10 @@ interface BuildOpts {
   // Resolved separately from applications table — leads.application_id is
   // often null for leads created via the SQL/test path.
   applicationId: string | null;
+  // Approved year-wise waivers attached to this offer. Rendered as
+  // deduction rows in the fee table; the displayed Net Offer Fee is
+  // recomputed to subtract these from the post-scholarship total.
+  waivers: { term: string; amount: number }[];
 }
 
 async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
@@ -419,13 +423,27 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
   if (opts.totalCourseFee > 0) {
     feeRows.push({ label: "Total Programme Fee", amount: fmtINR(opts.totalCourseFee), bold: true });
   }
-  if ((opts.offer.scholarship_amount || 0) > 0) {
-    feeRows.push({ label: "Scholarship Awarded", amount: "- " + fmtINR(opts.offer.scholarship_amount || 0) });
-    // offer.net_fee is the amount the institution has offered to charge for
-    // this offer (typically first-year less scholarship). Labelled as "Net
-    // Offer Fee" rather than "Net Programme Fee" since it doesn't always
-    // equal the programme total minus scholarship.
-    feeRows.push({ label: "Net Offer Fee", amount: fmtINR(opts.offer.net_fee), bold: true, highlight: true });
+  const scholarship = Number(opts.offer.scholarship_amount || 0);
+  const waiverTotal = opts.waivers.reduce((s, w) => s + Number(w.amount || 0), 0);
+  if (scholarship > 0) {
+    feeRows.push({ label: "Scholarship Awarded", amount: "- " + fmtINR(scholarship) });
+  }
+  for (const w of opts.waivers) {
+    const yearLabel = w.term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+    feeRows.push({ label: `${yearLabel} Waiver`, amount: "- " + fmtINR(w.amount) });
+  }
+  if (scholarship > 0 || waiverTotal > 0) {
+    // Net Offer Fee — programme total minus scholarship minus all approved
+    // waivers. Anchored to the canonical totalCourseFee (sum of year items
+    // from the active fee structure) rather than the legacy offer.net_fee
+    // column, which historically held arbitrary form values that may not
+    // equal the programme total. Falls back to offer.net_fee only when no
+    // year items are available (e.g., fee structure missing).
+    const programmeBase = opts.totalCourseFee > 0
+      ? opts.totalCourseFee
+      : Number(opts.offer.total_fee || 0);
+    const computedNet = Math.max(0, programmeBase - scholarship - waiverTotal);
+    feeRows.push({ label: "Net Offer Fee", amount: fmtINR(computedNet), bold: true, highlight: true });
   }
   drawFeeTable(ctx, feeRows);
 
@@ -564,7 +582,8 @@ Deno.serve(async (req) => {
       .from("offer_letters")
       .select(`
         id, total_fee, scholarship_amount, net_fee, approval_status,
-        acceptance_deadline, created_at, lead_id, course_id, campus_id, session_id,
+        token_fee_amount, acceptance_deadline, created_at,
+        lead_id, course_id, campus_id, session_id,
         leads:lead_id ( id, name, phone, email, application_id, pre_admission_no, token_amount ),
         courses:course_id ( name, duration_years ),
         campuses:campus_id ( name, address )
@@ -634,6 +653,43 @@ Deno.serve(async (req) => {
       _lead_id: offer.lead_id, _doc_type: "offer_letter",
     });
 
+    // Approved year-wise waivers attached to this offer. Sorted by term
+    // so Year 1 renders before Year 2 in the fee table.
+    const { data: waiverRows } = await admin
+      .from("offer_waivers")
+      .select("term, amount")
+      .eq("offer_letter_id", offer_letter_id)
+      .eq("status", "approved")
+      .order("term", { ascending: true });
+    const waivers = (waiverRows || []).map((w: any) => ({
+      term: String(w.term || ""),
+      amount: Number(w.amount || 0),
+    }));
+
+    // Token fee on the PDF: this is the amount the candidate must pay to
+    // confirm the seat and get their Admission Number — i.e. 25% of the
+    // post-scholarship + post-waiver Year-1 fee, floored at ₹5,000.
+    //
+    //   1. If the offer carries an explicit token_fee_amount (set when the
+    //      counsellor used the new offer-letter form), use that verbatim.
+    //   2. Otherwise compute the 25% default from yearItems + scholarship +
+    //      approved Year-1 waivers, so legacy offers that pre-date the
+    //      token-fee engine still render the right number.
+    //   3. As a final fallback (no fee structure at all), fall back to the
+    //      legacy leads.token_amount.
+    let tokenAmount = Number((offer as any)?.token_fee_amount ?? 0);
+    if (!tokenAmount || tokenAmount <= 0) {
+      const y1Total = yearItems.find(it => it.term === "year_1")?.total ?? 0;
+      const scholarship = Number(offer.scholarship_amount || 0);
+      const y1Waivers = waivers
+        .filter(w => w.term === "year_1")
+        .reduce((s, w) => s + Number(w.amount || 0), 0);
+      const postY1 = Math.max(0, y1Total - scholarship - y1Waivers);
+      tokenAmount = postY1 > 0
+        ? Math.max(Math.round(postY1 * 0.25), 5000)
+        : Number(lead?.token_amount || 0);
+    }
+
     const pdfBytes = await buildOfferPdf({
       offer,
       lead,
@@ -642,9 +698,10 @@ Deno.serve(async (req) => {
       yearItems,
       branding,
       totalCourseFee,
-      tokenAmount: Number(lead?.token_amount || 0),
+      tokenAmount,
       sessionName,
       applicationId,
+      waivers,
     });
 
     const path = `offer-letters/${offer.lead_id}/${offer.id}.pdf`;

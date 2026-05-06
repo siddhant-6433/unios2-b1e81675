@@ -124,6 +124,45 @@ SILENCE: No response for 8s → "Hello? Aap sun pa rahe hain?" → wait 8s → "
 
 VOICEMAIL DETECTION: If you hear a beep, automated greeting, "leave a message", or the called party doesn't respond with human speech within 5 seconds — this is a voicemail. Say EXACTLY: "Hello, yeh call NIMT Educational Institutions ki admissions team ki taraf se hai. Aap humein 9555192192 par call back kar sakte hain. Dhanyavaad." → Then immediately call set_call_disposition("voicemail") and stop speaking. Do NOT continue the conversation flow.
 
+CALLBACK ROUTING (critical — pick the right tool):
+There are TWO kinds of callback. Use the wording the caller gave you to decide.
+
+  A. AI CALLBACK — caller is busy and wants YOU (Navya) to call them back later.
+     Signals: "main abhi busy hoon", "in class", "driving", "thoda baad call karna",
+     "after lunch", "in 2 hours", a specific clock time, etc. — they're NOT asking
+     for a human, they're just rescheduling this same conversation.
+     → Tool: set_call_disposition with disposition="call_back" AND followup_date.
+
+  B. HUMAN CALLBACK — caller wants to speak to a senior counsellor / specialist /
+     a real person. Signals: "kisi senior se baat", "human se baat", "specialist",
+     "counsellor se baat", "expert se connect", "talk to someone", or you can't
+     answer their detailed questions.
+     → Tool: request_human_callback({ reason, preferred_time }) — a counsellor
+     will be assigned and notified to call them.
+
+Default when ambiguous = AI CALLBACK (most common case). Only escalate to a
+human if the caller specifically asked for one or the topic is beyond your
+ability (visa, scholarships outside policy, complex eligibility cases, etc.).
+
+CALLBACK TIME CAPTURE (CRITICAL — applies to BOTH paths above):
+You MUST do BOTH:
+  1. Confirm the specific time aloud: "Sure, ${ctx.leadName?.split(" ")[0] || "ji"}, main aapko ${'<TIME>'} call karti hoon. Theek hai?" → wait for confirmation.
+  2. Call the chosen tool with the time:
+     - AI callback → set_call_disposition("call_back", followup_date="<ISO>")
+     - Human callback → request_human_callback({ reason: "<short reason>", preferred_time: "<ISO>" })
+  Both expect ISO 8601 in Asia/Kolkata (+05:30 offset).
+
+Examples — today is ${new Date().toISOString().slice(0, 10)}:
+  • "after 4 PM today" → followup_date = "${new Date().toISOString().slice(0, 10)}T16:00:00+05:30"
+  • "kal subah" / "tomorrow morning" → date = tomorrow, time = 10:00 → followup_date = next-day at 10:00:00+05:30
+  • "shaam ko" / "evening" → time = 17:00 (5 PM)
+  • "in 2 hours" → followup_date = (now + 2h) in IST
+  • "8 baje" / "8 o'clock" → assume PM if before 12noon answers don't make sense, else use the AM/PM the caller specified.
+
+If the caller is vague ("baad mein", "later"), DO NOT guess. Ask: "Aap kis time available rahenge? Specific time bata dijiye, main usi waqt call karti hoon." Then capture and pass followup_date.
+
+Do NOT call set_call_disposition("call_back") without followup_date — the system will reject it and you will be asked to retry. The candidate's specified time is the single most important field for a callback.
+
 ${isOutbound ? `${outboundCtx}
 
 FLOW:
@@ -266,29 +305,49 @@ export const VOICE_AGENT_TOOLS = [
   },
   {
     name: "request_human_callback",
-    description: "Request a human counsellor callback — when AI can't help or caller asks for a person.",
+    description:
+      "HUMAN counsellor callback — caller specifically asked to speak with a senior counsellor / human / specialist, " +
+      "OR the topic is beyond your ability. NOT for 'I'm busy, call me back' (use set_call_disposition('call_back') for that). " +
+      "preferred_time should be ISO 8601 in Asia/Kolkata (+05:30) when the caller specified a time.",
     parameters: {
       type: "object",
       properties: {
-        reason: { type: "string" },
-        preferred_time: { type: "string" },
+        reason: { type: "string", description: "Why a human is needed (e.g. 'caller asked for senior counsellor', 'visa eligibility question I cannot answer')." },
+        preferred_time: {
+          type: "string",
+          description:
+            "ISO 8601 datetime in Asia/Kolkata when the caller wants the counsellor to call, e.g. '2026-05-05T16:00:00+05:30'. " +
+            "If the caller didn't specify, leave blank — the system defaults to +2h.",
+        },
       },
       required: ["reason"],
     },
   },
   {
     name: "set_call_disposition",
-    description: "Record call outcome. MANDATORY at end of every call.",
+    description:
+      "Record call outcome. MANDATORY at end of every call. " +
+      "When disposition='call_back' (AI CALLBACK — caller is busy and wants YOU to retry later), " +
+      "followup_date is REQUIRED — capture the exact time the caller asked you to call back. " +
+      "If the caller wants a HUMAN counsellor instead, use request_human_callback, NOT call_back.",
     parameters: {
       type: "object",
       properties: {
         disposition: {
           type: "string",
-          enum: ["interested", "not_interested", "ineligible", "call_back", "wrong_number", "do_not_contact", "not_answered", "voicemail"],
+          enum: ["interested", "not_interested", "ineligible", "call_back", "wrong_number", "do_not_contact", "not_answered", "voicemail", "partial_conversation"],
         },
-        notes: { type: "string", description: "Brief summary of conversation and outcome" },
-        schedule_followup: { type: "boolean" },
-        followup_date: { type: "string" },
+        notes: { type: "string", description: "Brief summary of conversation and outcome." },
+        schedule_followup: { type: "boolean", description: "Force a counsellor follow-up to be scheduled." },
+        followup_date: {
+          type: "string",
+          description:
+            "REQUIRED for call_back. ISO 8601 datetime in Asia/Kolkata when the caller asked to be called back, " +
+            "e.g. '2026-05-05T16:00:00+05:30' for 'after 4 PM today'. " +
+            "Date-only ('2026-05-06') is also accepted and defaults to 10:00 AM IST. " +
+            "If the caller said 'tomorrow' use tomorrow's date; 'morning' = 10:00, 'afternoon' = 14:00, " +
+            "'evening' = 17:00. If the caller did NOT specify a time, ask them before calling this tool.",
+        },
       },
       required: ["disposition", "notes"],
     },

@@ -43,6 +43,13 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   // for the template's URL button (button_urls=[claim_url]).
   student_portal_invite: { name: "student_portal_invite", params: ["student_name", "admission_no"] },
 
+  // Manual apply-portal magic link sent by counsellors from the
+  // ApplyMagicLinkButton dialog ("Send via WhatsApp"). URL button takes
+  // the magic-link token as its dynamic suffix:
+  //   button_urls=[token]
+  // Body params: name, formatted-IST expiry string.
+  apply_portal_login: { name: "apply_portal_login", params: ["student_name", "expiry"] },
+
   // ── Lifecycle notifications (5 events) ────────────────────────────────
   // Each requires a matching template in Meta Business Manager. Until
   // approved there, sends fail gracefully and the trigger logs the URL
@@ -251,6 +258,7 @@ Deno.serve(async (req) => {
       application_rejected: "Dear {{1}}, after review we are unable to proceed with your application {{2}}. Reason: {{3}}. Please contact our admissions office if you'd like to discuss alternatives.",
       applicant_welcome: "Hi {{1}}, thank you for starting your application at NIMT Educational Institutions!\n\nYour Application ID: {{2}}\nCourse: {{3}}\n\nComplete your application at https://uni.nimt.ac.in/apply/nimt/\n\nOur admissions team is here to help. Feel free to reach out anytime!",
       ai_call_course_info: "Hi {{1}}, thank you for speaking with us about {{2}} at NIMT Educational Institutions! 🎓\n\n🏫 Campus: {{3}}\n\n📄 Course Details: {{4}}\n📝 Apply Now: {{5}}\n\nFor questions, reply to this message or call our admissions team.\n\nWe look forward to welcoming you!",
+      apply_portal_login: "Hi {{1}}, your secure login link for the NIMT application portal is ready. Tap the button below to complete your application or pay your token fee directly — no OTP needed. The link is valid until {{2}}, so please use it before it expires.",
     };
 
     let readableContent = TEMPLATE_TEXTS[template_key] || `[Template: ${template_key}]`;

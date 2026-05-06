@@ -163,6 +163,40 @@ const TEMPLATES = [
       },
     ],
   },
+  // Magic-link login for the apply portal — sent when staff hands a lead
+  // a one-tap entry to their application (no OTP required for the lead).
+  // Body params: name, expiry (formatted IST string).
+  // URL button suffix: the magic-link token.
+  // Send call from frontend:
+  //   whatsapp-send {
+  //     template_key: "apply_portal_login",
+  //     params: [name, expiry_str],
+  //     button_urls: [token],
+  //     phone, lead_id,
+  //   }
+  {
+    name: "apply_portal_login",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        // Meta rejects bodies where a variable sits at the very end (subcode
+        // 2388299), so the {{2}} expiry is followed by substantive text.
+        text: "Hi {{1}}, your secure login link for the NIMT application portal is ready. Tap the button below to complete your application or pay your token fee directly — no OTP needed. The link is valid until {{2}}, so please use it before it expires.",
+        example: { body_text: [["Rahul Sharma", "12 May 2026, 3:34 pm"]] },
+      },
+      {
+        type: "BUTTONS",
+        buttons: [{
+          type: "URL",
+          text: "Open Apply Portal",
+          url: "https://uni.nimt.ac.in/apply?token={{1}}",
+          example: ["https://uni.nimt.ac.in/apply?token=251fe6ea-b0a2-4bf0-beb5-3b2205bc3f39"],
+        }],
+      },
+    ],
+  },
 ];
 
 Deno.serve(async (req) => {
@@ -177,6 +211,22 @@ Deno.serve(async (req) => {
       });
     }
 
+    const body = await req.json().catch(() => ({}));
+    const action = body?.action || "submit";
+
+    // ── status: list current state (name → status) for all templates ──
+    if (action === "status") {
+      const namesParam = body?.names ? `&name=${(body.names as string[]).join(",")}` : "";
+      const res = await fetch(
+        `https://graph.facebook.com/v21.0/${wabaId}/message_templates?fields=name,status,category,id&limit=200${namesParam}&access_token=${waToken}`
+      );
+      const data = await res.json();
+      const summary = (data?.data || []).map((t: any) => ({ name: t.name, status: t.status, category: t.category, id: t.id }));
+      return new Response(JSON.stringify({ count: summary.length, templates: summary }, null, 2), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const url = `https://graph.facebook.com/v21.0/${wabaId}/message_templates?access_token=${waToken}`;
     const results: Record<string, any> = {};
 
@@ -187,8 +237,8 @@ Deno.serve(async (req) => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(tpl),
         });
-        const body = await res.json();
-        results[tpl.name] = { ok: res.ok, status: res.status, body };
+        const result = await res.json();
+        results[tpl.name] = { ok: res.ok, status: res.status, body: result };
       } catch (e: any) {
         results[tpl.name] = { ok: false, error: e.message };
       }

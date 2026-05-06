@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, FileText, Plus, Gift, CheckCircle, XCircle, ShieldCheck, RefreshCw, ExternalLink } from "lucide-react";
+import { Loader2, FileText, Plus, Gift, CheckCircle, XCircle, ShieldCheck, RefreshCw, ExternalLink, Pencil, Coins, Trash2 } from "lucide-react";
 
 interface OfferLetterDialogProps {
   open: boolean;
@@ -37,6 +37,20 @@ interface OfferLetter {
 
 interface SessionOption { id: string; name: string; is_active: boolean }
 
+interface OfferWaiver {
+  id: string;
+  offer_letter_id: string;
+  term: string;
+  amount: number;
+  reason: string | null;
+  status: "pending" | "approved" | "rejected";
+  requested_by_name: string | null;
+  requested_by_role: string | null;
+  approved_by_name: string | null;
+  rejection_reason: string | null;
+  created_at: string;
+}
+
 export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, courseId, campusId, onSuccess }: OfferLetterDialogProps) {
   const { user, role } = useAuth();
   const { toast } = useToast();
@@ -47,8 +61,36 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ total_fee: "", scholarship_amount: "0", acceptance_deadline: "", session_id: "" });
+  // Note: scholarship is no longer collected here — discounts are applied as
+  // waivers after the offer is issued. Total fee is also no longer typed by
+  // the user — it comes directly from the published fee_structure for the
+  // selected course + session.
+  const [form, setForm] = useState({ acceptance_deadline: "", session_id: "", token_fee_amount: "" });
+  const [tokenFeeEdited, setTokenFeeEdited] = useState(false);
   const [sessions, setSessions] = useState<SessionOption[]>([]);
+  // First-year fee for the picked session — used to default + floor the token fee.
+  const [firstYearFee, setFirstYearFee] = useState<number>(0);
+  // Term keys present in the active fee structure (e.g. ['year_1', 'year_2']) —
+  // drives the year picker in the Add-Waiver inline form.
+  const [availableTerms, setAvailableTerms] = useState<string[]>([]);
+  // Per-year totals from the active fee structure, used for the summary card
+  // at offer-creation time and for stamping offer.total_fee.
+  const [yearTotals, setYearTotals] = useState<{ term: string; total: number }[]>([]);
+  // offer_id → waivers list, fetched alongside offers.
+  const [waiversByOffer, setWaiversByOffer] = useState<Record<string, OfferWaiver[]>>({});
+  // Which offer's add-waiver inline form is currently visible.
+  const [addingWaiverFor, setAddingWaiverFor] = useState<string | null>(null);
+  const [waiverForm, setWaiverForm] = useState<{ term: string; amount: string; reason: string }>({
+    term: "year_1", amount: "", reason: "",
+  });
+  const [waiverSaving, setWaiverSaving] = useState(false);
+  const [waiverDecidingId, setWaiverDecidingId] = useState<string | null>(null);
+  // Pre-issuance waivers — collected in the new-offer form and bulk-inserted
+  // right after the offer row is created, so staff don't have to add them post-hoc.
+  const [preWaivers, setPreWaivers] = useState<{ term: string; amount: number; reason: string }[]>([]);
+  const [showPreWaiverForm, setShowPreWaiverForm] = useState(false);
+  const [preWaiverForm, setPreWaiverForm] = useState<{ term: string; amount: string; reason: string }>({ term: "year_1", amount: "", reason: "" });
+  const [deletingOfferId, setDeletingOfferId] = useState<string | null>(null);
   // Which offer's PDF is showing in the right-hand preview pane.
   const [selectedOfferId, setSelectedOfferId] = useState<string | null>(null);
   // Tracks an in-flight generate-offer-letter call so the preview pane can
@@ -71,13 +113,30 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
         const withPdf = data.find(o => !!o.letter_url);
         return withPdf?.id || data[0]?.id || null;
       });
+
+      // Pull all waivers for these offers in one round-trip, then group by offer.
+      const offerIds = data.map(o => o.id);
+      if (offerIds.length > 0) {
+        const { data: waiverRows } = await supabase
+          .from("offer_waivers")
+          .select("id, offer_letter_id, term, amount, reason, status, requested_by_name, requested_by_role, approved_by_name, rejection_reason, created_at")
+          .in("offer_letter_id", offerIds)
+          .order("created_at", { ascending: true });
+        const grouped: Record<string, OfferWaiver[]> = {};
+        for (const w of (waiverRows || []) as OfferWaiver[]) {
+          (grouped[w.offer_letter_id] ||= []).push(w);
+        }
+        setWaiversByOffer(grouped);
+      } else {
+        setWaiversByOffer({});
+      }
     }
     setLoading(false);
   };
 
-  // Trigger PDF regeneration and poll until letter_url updates (or 20s elapse).
-  // Used both as a "Generate PDF" call when letter_url is null and as a manual
-  // "Regenerate" action when staff want to refresh an existing letter.
+  // Trigger PDF regeneration. The edge function is fully synchronous — it
+  // generates, uploads, and updates letter_url before returning — so we just
+  // await the invoke, refresh state, and bump the cache-bust token.
   const regeneratePdf = async (offerId: string) => {
     setRegeneratingId(offerId);
     try {
@@ -88,21 +147,11 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
         toast({ title: "Couldn't generate PDF", description: error.message, variant: "destructive" });
         return;
       }
-      // Poll for the freshly written letter_url. The generator updates the row
-      // synchronously, so usually one fetch is enough; we poll for resilience.
-      for (let i = 0; i < 6; i++) {
-        await new Promise(r => setTimeout(r, 1500));
-        const { data } = await supabase.from("offer_letters").select("*").eq("id", offerId).single();
-        if (data?.letter_url) {
-          await fetchOffers();
-          // Bump cache-bust so the iframe re-fetches even though the URL
-          // path didn't change (upsert overwrites in place).
-          setPdfBust(Date.now());
-          toast({ title: "PDF ready" });
-          return;
-        }
-      }
-      toast({ title: "Still preparing", description: "PDF is taking longer than usual — refresh in a minute." });
+      await fetchOffers();
+      // Bump so the ?cb= param on the iframe src changes, forcing the browser
+      // to fetch the newly uploaded bytes rather than returning a 304.
+      setPdfBust(Date.now());
+      toast({ title: "PDF ready" });
     } finally {
       setRegeneratingId(null);
     }
@@ -123,10 +172,95 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       });
   }, [showForm]);
 
+  // Resolve the first-year fee + the list of available year terms for the
+  // picked course+session pair. firstYearFee drives token-fee defaults;
+  // availableTerms drives the year picker in the Add-Waiver form.
+  useEffect(() => {
+    if (!courseId) { setFirstYearFee(0); setAvailableTerms([]); setYearTotals([]); return; }
+    // For waiver picker, use the offer's session if any are loaded; otherwise
+    // fall back to form.session_id (when the new-offer form is open).
+    const sessionId = form.session_id || (offers.find(o => !!o.session_id)?.session_id || "");
+    if (!sessionId) { setFirstYearFee(0); setAvailableTerms([]); setYearTotals([]); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("fee_structures")
+        .select("id, fee_structure_items ( term, amount )")
+        .eq("course_id", courseId)
+        .eq("session_id", sessionId)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (cancelled) return;
+      const items: any[] = (data as any)?.fee_structure_items ?? [];
+      // Sum per year_N term so we have both Year-1 (for token math) and the
+      // full per-year breakdown (for the summary card + offer.total_fee).
+      const byTerm = new Map<string, number>();
+      for (const it of items) {
+        const t = String(it?.term || "");
+        if (!/^year_\d+$/.test(t)) continue;
+        byTerm.set(t, (byTerm.get(t) || 0) + Number(it?.amount || 0));
+      }
+      const sorted = Array.from(byTerm.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([term, total]) => ({ term, total }));
+      const y1 = byTerm.get("year_1") || 0;
+      setFirstYearFee(y1);
+      setYearTotals(sorted);
+      setAvailableTerms(sorted.length ? sorted.map(s => s.term) : ["year_1"]);
+    })().catch(() => { setFirstYearFee(0); setAvailableTerms([]); setYearTotals([]); });
+    return () => { cancelled = true; };
+  }, [courseId, form.session_id, offers]);
+
+  // Programme total = sum of year_N items from the published fee structure.
+  // This is the canonical source of truth for the offer's "total fee" — the
+  // form no longer asks the user to type it.
+  const programmeTotal = yearTotals.reduce((sum, y) => sum + y.total, 0);
+
+  // Default the token fee to 25% of Year-1 whenever inputs change AND the
+  // user hasn't manually edited the field. Floor at max(10% of Year-1, ₹5K).
+  // Waivers are added AFTER the offer exists, so at creation time we anchor
+  // to the raw Year-1 fee — once a waiver is approved later, the token
+  // threshold (lead_fee_status.token_required) drops accordingly.
+  const tokenFloor = firstYearFee > 0
+    ? Math.max(Math.round(firstYearFee * 0.10), 5000)
+    : 5000;
+  const tokenDefault = firstYearFee > 0
+    ? Math.max(Math.round(firstYearFee * 0.25), tokenFloor)
+    : 0;
+
+  useEffect(() => {
+    if (!showForm || tokenFeeEdited) return;
+    if (firstYearFee <= 0) return;
+    setForm(p => ({ ...p, token_fee_amount: String(tokenDefault) }));
+  }, [showForm, tokenFeeEdited, firstYearFee, tokenDefault]);
+
   const handleCreate = async () => {
-    const totalFee = Number(form.total_fee);
-    const scholarship = Number(form.scholarship_amount) || 0;
-    if (!totalFee || totalFee <= 0) { toast({ title: "Error", description: "Enter valid total fee", variant: "destructive" }); return; }
+    // Total fee is auto-derived from the published fee structure — no user input.
+    const totalFee = programmeTotal;
+    if (!totalFee || totalFee <= 0) {
+      toast({
+        title: "No fee structure published",
+        description: "The selected course + session doesn't have an active fee structure with year-wise items. Publish one in Course & Campus master before issuing offers.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate token fee — fall back to the computed default when the user
+    // hasn't typed anything explicitly.
+    const tokenFeeNum = Number(form.token_fee_amount || tokenDefault || 0);
+    if (!tokenFeeNum || tokenFeeNum <= 0) {
+      toast({ title: "Token fee required", description: "Enter the token fee for this offer.", variant: "destructive" });
+      return;
+    }
+    if (tokenFeeNum < tokenFloor) {
+      toast({
+        title: "Token fee below minimum",
+        description: `Token fee cannot be lower than ₹${tokenFloor.toLocaleString("en-IN")} (the greater of 10% of Year-1 fee and ₹5,000).`,
+        variant: "destructive",
+      });
+      return;
+    }
 
     setSaving(true);
     // If super_admin or principal issues directly, it's auto-approved.
@@ -139,8 +273,14 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     const { data: insertedOffer, error } = await supabase.from("offer_letters").insert({
       lead_id: leadId,
       total_fee: totalFee,
-      scholarship_amount: scholarship,
-      net_fee: totalFee - scholarship,
+      // Scholarship is no longer collected at offer creation — apply
+      // discounts via year-wise waivers (with super-admin approval). We
+      // persist 0 so legacy code paths reading scholarship_amount get a
+      // sensible value.
+      scholarship_amount: 0,
+      net_fee: totalFee,
+      token_fee_amount: tokenFeeNum,
+      token_fee_user_edited: tokenFeeEdited,
       acceptance_deadline: form.acceptance_deadline || null,
       course_id: courseId,
       campus_id: campusId,
@@ -153,21 +293,32 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
 
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); }
     else {
+      // Bulk-insert any pre-issuance waivers the user staged in the form.
+      if (insertedOffer?.id && preWaivers.length > 0) {
+        await supabase.from("offer_waivers").insert(
+          preWaivers.map(w => ({
+            offer_letter_id: insertedOffer.id,
+            term: w.term,
+            amount: w.amount,
+            reason: w.reason || null,
+          })) as any
+        );
+      }
       // Only advance lead stage if the offer is approved (not pending)
       if (autoApproved) {
-        await supabase.from("leads").update({ stage: "offer_sent" as any, offer_amount: totalFee - scholarship }).eq("id", leadId);
+        await supabase.from("leads").update({ stage: "offer_sent" as any, offer_amount: totalFee }).eq("id", leadId);
       }
       await supabase.from("lead_activities").insert({
         lead_id: leadId, user_id: user?.id || null, type: "offer",
         description: autoApproved
-          ? `Offer letter issued: ₹${(totalFee - scholarship).toLocaleString("en-IN")} (Scholarship: ₹${scholarship.toLocaleString("en-IN")})`
-          : `Offer letter submitted for principal approval: ₹${(totalFee - scholarship).toLocaleString("en-IN")}`,
+          ? `Offer letter issued: ₹${totalFee.toLocaleString("en-IN")}`
+          : `Offer letter submitted for principal approval: ₹${totalFee.toLocaleString("en-IN")}`,
       });
       // If approved on create, generate the PDF immediately and poll for it
       // so the preview pane lights up without needing a manual refresh.
       if (autoApproved && insertedOffer?.id) {
         setSelectedOfferId(insertedOffer.id);
-        regeneratePdf(insertedOffer.id).catch(() => {});
+        await regeneratePdf(insertedOffer.id);
       }
 
       toast({
@@ -175,7 +326,11 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
         description: autoApproved ? "PDF will be ready in a few seconds." : "Principal will review and approve this offer.",
       });
       setShowForm(false);
-      setForm({ total_fee: "", scholarship_amount: "0", acceptance_deadline: "", session_id: "" });
+      setForm({ acceptance_deadline: "", session_id: "", token_fee_amount: "" });
+      setTokenFeeEdited(false);
+      setPreWaivers([]);
+      setShowPreWaiverForm(false);
+      setPreWaiverForm({ term: "year_1", amount: "", reason: "" });
       fetchOffers();
       onSuccess();
     }
@@ -220,6 +375,105 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     toast({ title: decision === "approved" ? "Offer approved" : "Offer rejected" });
     fetchOffers();
     onSuccess();
+  };
+
+  const handleAddWaiver = async (offerId: string) => {
+    const amt = Number(waiverForm.amount);
+    if (!amt || amt <= 0) {
+      toast({ title: "Enter a valid waiver amount", variant: "destructive" });
+      return;
+    }
+    if (!waiverForm.term) {
+      toast({ title: "Pick a year for this waiver", variant: "destructive" });
+      return;
+    }
+    setWaiverSaving(true);
+    try {
+      const { error } = await supabase.from("offer_waivers").insert({
+        offer_letter_id: offerId,
+        term: waiverForm.term,
+        amount: amt,
+        reason: waiverForm.reason || null,
+      } as any);
+      if (error) throw error;
+      toast({
+        title: isSuperAdmin ? "Waiver applied" : "Waiver requested",
+        description: isSuperAdmin
+          ? "Auto-approved (super admin) and applied to this offer."
+          : "Sent to super admin for approval.",
+      });
+      setAddingWaiverFor(null);
+      setWaiverForm({ term: availableTerms[0] || "year_1", amount: "", reason: "" });
+      await fetchOffers();
+      // If super admin auto-approved, regenerate the PDF so the new waiver
+      // shows up in the preview immediately.
+      if (isSuperAdmin) await regeneratePdf(offerId);
+      // NOTE: deliberately not calling onSuccess() — the parent closes the
+      // dialog when onSuccess fires, which would dump the user mid-flow.
+      // Waivers are a contained dialog action; the lead-level state in the
+      // parent is unaffected.
+    } catch (e: any) {
+      toast({ title: "Couldn't add waiver", description: e.message, variant: "destructive" });
+    } finally {
+      setWaiverSaving(false);
+    }
+  };
+
+  const handleDecideWaiver = async (
+    waiver: OfferWaiver,
+    decision: "approved" | "rejected",
+  ) => {
+    if (!isSuperAdmin) return;
+    let rejectionReason: string | undefined;
+    if (decision === "rejected") {
+      const r = window.prompt("Reason for rejection (optional):");
+      rejectionReason = r || undefined;
+    }
+    setWaiverDecidingId(waiver.id);
+    try {
+      const { data, error } = await supabase.functions.invoke("decide-offer-waiver", {
+        body: { waiver_id: waiver.id, decision, rejection_reason: rejectionReason },
+      });
+      if (error) {
+        let message = error.message;
+        try {
+          const text = await (error as any)?.context?.text?.();
+          if (text) {
+            try { const body = JSON.parse(text); if (body?.error) message = body.error; }
+            catch { message = text.slice(0, 200); }
+          }
+        } catch {}
+        throw new Error(message);
+      }
+      if (data?.error) throw new Error(data.error);
+      toast({ title: decision === "approved" ? "Waiver approved" : "Waiver rejected" });
+      await fetchOffers();
+      // Regenerate so the PDF reflects the newly approved waiver.
+      if (decision === "approved") regeneratePdf(waiver.offer_letter_id).catch(() => {});
+      // NOTE: deliberately not calling onSuccess() — see handleAddWaiver.
+    } catch (e: any) {
+      toast({ title: "Action failed", description: e.message, variant: "destructive" });
+    } finally {
+      setWaiverDecidingId(null);
+    }
+  };
+
+  const handleDeleteOffer = async (offerId: string) => {
+    if (!isSuperAdmin) return;
+    if (!window.confirm("Permanently delete this offer letter? This cannot be undone.")) return;
+    setDeletingOfferId(offerId);
+    try {
+      const { error } = await supabase.from("offer_letters").delete().eq("id", offerId);
+      if (error) throw error;
+      if (selectedOfferId === offerId) setSelectedOfferId(null);
+      toast({ title: "Offer letter deleted" });
+      await fetchOffers();
+      onSuccess();
+    } catch (e: any) {
+      toast({ title: "Couldn't delete offer", description: e.message, variant: "destructive" });
+    } finally {
+      setDeletingOfferId(null);
+    }
   };
 
   const updateOfferStatus = async (offerId: string, status: string) => {
@@ -268,22 +522,191 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
           {showForm && (
             <Card className="border-border/60">
               <CardContent className="p-4 space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-medium text-muted-foreground mb-1">Total Fee (₹) *</label>
-                    <input type="number" value={form.total_fee} onChange={e => setForm(p => ({ ...p, total_fee: e.target.value }))} className={inputCls} placeholder="100000" />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-medium text-muted-foreground mb-1">Scholarship (₹)</label>
-                    <input type="number" value={form.scholarship_amount} onChange={e => setForm(p => ({ ...p, scholarship_amount: e.target.value }))} className={inputCls} />
-                  </div>
+                {/* Programme fee summary — read-only, sourced directly from the
+                    published fee_structure for the selected course + session.
+                    The offer's total_fee is stamped from this on submit; the
+                    user no longer types it. */}
+                <div>
+                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Programme Fee</label>
+                  {yearTotals.length > 0 ? (
+                    <div className="rounded-xl border border-border/60 bg-muted/30 p-3 text-xs space-y-1">
+                      {yearTotals.map(y => (
+                        <div key={y.term} className="flex items-center justify-between">
+                          <span className="text-muted-foreground">{y.term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}</span>
+                          <span className="text-foreground tabular-nums">₹{y.total.toLocaleString("en-IN")}</span>
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between pt-1 border-t border-border/40 font-semibold">
+                        <span>Total Programme Fee</span>
+                        <span className="tabular-nums">₹{programmeTotal.toLocaleString("en-IN")}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+                      No active fee structure published for this course + session. Publish one in Course & Campus master before issuing.
+                    </div>
+                  )}
+                  <p className="mt-1.5 text-[10px] text-muted-foreground/70 leading-relaxed">
+                    Sourced from the published fee structure for the selected session. Add year-wise discounts (scholarship, sibling, alumni, hardship etc.) as waivers below before issuing.
+                  </p>
                 </div>
-                {form.total_fee && (
-                  <div className="flex items-center gap-2 p-3 rounded-xl bg-pastel-green">
-                    <Gift className="h-4 w-4 text-foreground/70" />
-                    <span className="text-sm font-semibold text-foreground">Net Fee: ₹{(Number(form.total_fee) - Number(form.scholarship_amount || 0)).toLocaleString("en-IN")}</span>
+
+                {/* Pre-issuance waivers — staged locally, inserted after offer creation */}
+                {yearTotals.length > 0 && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-[11px] font-medium text-muted-foreground">Waivers / Discounts</label>
+                      {!showPreWaiverForm && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowPreWaiverForm(true);
+                            setPreWaiverForm({ term: availableTerms[0] || "year_1", amount: "", reason: "" });
+                          }}
+                          className="text-[11px] text-primary hover:underline"
+                        >
+                          + Add Waiver
+                        </button>
+                      )}
+                    </div>
+
+                    {preWaivers.length > 0 && (
+                      <div className="space-y-1 mb-2">
+                        {preWaivers.map((w, i) => (
+                          <div key={i} className="flex items-center justify-between rounded-md border border-border/50 bg-background/50 px-2 py-1.5 text-xs">
+                            <span className="text-muted-foreground">{w.term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}</span>
+                            <span className="font-medium">−₹{w.amount.toLocaleString("en-IN")}</span>
+                            {w.reason && <span className="text-muted-foreground truncate max-w-[80px]">{w.reason}</span>}
+                            <button
+                              type="button"
+                              onClick={() => setPreWaivers(prev => prev.filter((_, j) => j !== i))}
+                              className="text-destructive hover:text-destructive/70 text-[10px] font-medium"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ))}
+                        {(() => {
+                          const totalWaiver = preWaivers.reduce((s, w) => s + w.amount, 0);
+                          const netFee = programmeTotal - totalWaiver;
+                          return (
+                            <div className="flex items-center justify-between px-2 py-1 text-xs font-semibold border-t border-border/40 pt-1.5 mt-1">
+                              <span>Net Programme Fee</span>
+                              <span className="tabular-nums text-emerald-700">₹{netFee.toLocaleString("en-IN")}</span>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
+
+                    {showPreWaiverForm && (
+                      <div className="rounded-md border border-primary/30 bg-primary/5 p-2 space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Year</label>
+                            <select
+                              value={preWaiverForm.term}
+                              onChange={e => setPreWaiverForm(p => ({ ...p, term: e.target.value }))}
+                              className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+                            >
+                              {availableTerms.map(t => (
+                                <option key={t} value={t}>{t.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Amount (₹)</label>
+                            <input
+                              type="number"
+                              value={preWaiverForm.amount}
+                              onChange={e => setPreWaiverForm(p => ({ ...p, amount: e.target.value }))}
+                              className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+                              placeholder="10000"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Reason (optional)</label>
+                          <input
+                            value={preWaiverForm.reason}
+                            onChange={e => setPreWaiverForm(p => ({ ...p, reason: e.target.value }))}
+                            className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+                            placeholder="Sibling discount, alumni, etc."
+                          />
+                        </div>
+                        {!isSuperAdmin && (
+                          <p className="text-[10px] text-amber-700">
+                            This waiver will need super admin approval before it reflects on the offer letter.
+                          </p>
+                        )}
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="text-xs h-7"
+                            onClick={() => {
+                              const amt = Number(preWaiverForm.amount);
+                              if (!amt || amt <= 0) {
+                                toast({ title: "Enter a valid waiver amount", variant: "destructive" });
+                                return;
+                              }
+                              setPreWaivers(prev => [...prev, { term: preWaiverForm.term, amount: amt, reason: preWaiverForm.reason }]);
+                              setShowPreWaiverForm(false);
+                              setPreWaiverForm({ term: availableTerms[0] || "year_1", amount: "", reason: "" });
+                            }}
+                          >
+                            Add
+                          </Button>
+                          <Button type="button" size="sm" variant="outline" className="text-xs h-7" onClick={() => setShowPreWaiverForm(false)}>
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
+
+                {/* Token fee — defaults to 25% of Year-1, editable but floored at
+                    max(10% of Year-1, ₹5,000). The pencil icon flips edit mode;
+                    the field is read-only otherwise to discourage casual changes. */}
+                <div>
+                  <label className="flex items-center justify-between text-[11px] font-medium text-muted-foreground mb-1">
+                    <span className="inline-flex items-center gap-1.5">
+                      <Coins className="h-3 w-3" /> Token Fee (₹)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setTokenFeeEdited(e => !e)}
+                      className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/10"
+                      title={tokenFeeEdited ? "Reset to default" : "Edit token fee"}
+                    >
+                      <Pencil className="h-2.5 w-2.5" />
+                      {tokenFeeEdited ? "Reset" : "Edit"}
+                    </button>
+                  </label>
+                  <input
+                    type="number"
+                    value={form.token_fee_amount}
+                    readOnly={!tokenFeeEdited}
+                    onChange={e => setForm(p => ({ ...p, token_fee_amount: e.target.value }))}
+                    className={`${inputCls} ${!tokenFeeEdited ? "bg-muted/40 cursor-default" : ""}`}
+                    placeholder={tokenDefault > 0 ? String(tokenDefault) : "—"}
+                  />
+                  <p className="mt-1 text-[10px] text-muted-foreground/70 leading-relaxed">
+                    {firstYearFee > 0 ? (
+                      tokenFeeEdited ? (
+                        <>
+                          Minimum <span className="font-semibold text-foreground">₹{tokenFloor.toLocaleString("en-IN")}</span> —
+                          the greater of 10% of Year-1 fee (₹{firstYearFee.toLocaleString("en-IN")}) and ₹5,000.
+                        </>
+                      ) : (
+                        <>Default = 25% of Year-1 fee (₹{firstYearFee.toLocaleString("en-IN")}). Click Edit to override.</>
+                      )
+                    ) : (
+                      <>Pick a course + session above to compute the default.</>
+                    )}
+                  </p>
+                </div>
                 <div>
                   <label className="block text-[11px] font-medium text-muted-foreground mb-1">
                     Academic Session <span className="text-destructive">*</span>
@@ -308,10 +731,11 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                   <input type="date" value={form.acceptance_deadline} onChange={e => setForm(p => ({ ...p, acceptance_deadline: e.target.value }))} className={inputCls} />
                 </div>
                 <div className="flex gap-2">
-                  <Button onClick={handleCreate} disabled={saving} size="sm" className="gap-1.5">
+                  <Button onClick={handleCreate} disabled={saving || programmeTotal <= 0} size="sm" className="gap-1.5"
+                    title={programmeTotal <= 0 ? "Publish a fee structure for this course + session first" : undefined}>
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Issue Offer
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => setShowForm(false)}>Cancel</Button>
+                  <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setPreWaivers([]); setShowPreWaiverForm(false); setPreWaiverForm({ term: "year_1", amount: "", reason: "" }); }}>Cancel</Button>
                 </div>
               </CardContent>
             </Card>
@@ -340,7 +764,12 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <p className="text-lg font-bold text-foreground">₹{offer.net_fee.toLocaleString("en-IN")}</p>
-                          <p className="text-xs text-muted-foreground">Total: ₹{offer.total_fee.toLocaleString("en-IN")} · Scholarship: ₹{(offer.scholarship_amount || 0).toLocaleString("en-IN")}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Total: ₹{offer.total_fee.toLocaleString("en-IN")}
+                            {(waiversByOffer[offer.id]?.filter(w => w.status === "approved").length || 0) > 0 && (
+                              <> · {waiversByOffer[offer.id]!.filter(w => w.status === "approved").length} waiver{waiversByOffer[offer.id]!.filter(w => w.status === "approved").length === 1 ? "" : "s"} applied</>
+                            )}
+                          </p>
                         </div>
                         <div className="flex flex-col items-end gap-1">
                           {approvalStatus !== "approved" && (
@@ -352,6 +781,19 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                           {isApprovedOffer && (
                             <Badge className={`text-[10px] border-0 ${statusColors[offer.status] || "bg-muted"}`}>{offer.status}</Badge>
                           )}
+                          {isSuperAdmin && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleDeleteOffer(offer.id); }}
+                              disabled={deletingOfferId === offer.id}
+                              className="mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                              title="Delete offer letter"
+                            >
+                              {deletingOfferId === offer.id
+                                ? <Loader2 className="h-3 w-3 animate-spin" />
+                                : <Trash2 className="h-3 w-3" />}
+                              Delete
+                            </button>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground flex-wrap">
@@ -362,6 +804,139 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                       {offer.rejection_reason && (
                         <p className="text-xs text-destructive mt-1">Rejection: {offer.rejection_reason}</p>
                       )}
+
+                      {/* Year-wise waivers — visible only on approved offers,
+                          since waivers attached to a pending/rejected offer
+                          have no real meaning yet. */}
+                      {isApprovedOffer && (() => {
+                        const offerWaivers = waiversByOffer[offer.id] || [];
+                        const isAdding = addingWaiverFor === offer.id;
+                        return (
+                          <div className="mt-3 pt-3 border-t border-border/40 space-y-1.5" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-between">
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Waivers</p>
+                              {!isAdding && (
+                                <button
+                                  onClick={() => {
+                                    setAddingWaiverFor(offer.id);
+                                    setWaiverForm({ term: availableTerms[0] || "year_1", amount: "", reason: "" });
+                                  }}
+                                  className="text-[11px] text-primary hover:underline"
+                                >
+                                  + Add Waiver
+                                </button>
+                              )}
+                            </div>
+
+                            {offerWaivers.length === 0 && !isAdding && (
+                              <p className="text-[11px] text-muted-foreground italic">No waivers on this offer.</p>
+                            )}
+
+                            {offerWaivers.map(w => {
+                              const yearLabel = w.term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+                              const statusCls =
+                                w.status === "approved"  ? "bg-emerald-100 text-emerald-700 border-emerald-200" :
+                                w.status === "rejected"  ? "bg-red-100 text-red-700 border-red-200" :
+                                                           "bg-amber-100 text-amber-700 border-amber-200";
+                              return (
+                                <div key={w.id} className="rounded-md border border-border/50 bg-background/50 p-2 text-xs space-y-1">
+                                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-semibold">{yearLabel}</span>
+                                      <span className="text-foreground/70">−₹{Number(w.amount).toLocaleString("en-IN")}</span>
+                                      <Badge className={`text-[9px] border ${statusCls}`}>{w.status}</Badge>
+                                    </div>
+                                    {w.status === "pending" && isSuperAdmin && (
+                                      <div className="flex gap-1">
+                                        <button
+                                          disabled={waiverDecidingId === w.id}
+                                          onClick={() => handleDecideWaiver(w, "approved")}
+                                          className="rounded bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-0.5 text-[10px] font-semibold disabled:opacity-50"
+                                        >
+                                          Approve
+                                        </button>
+                                        <button
+                                          disabled={waiverDecidingId === w.id}
+                                          onClick={() => handleDecideWaiver(w, "rejected")}
+                                          className="rounded border border-destructive/30 text-destructive hover:bg-destructive/10 px-2 py-0.5 text-[10px] font-semibold disabled:opacity-50"
+                                        >
+                                          Reject
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                  {(w.reason || w.requested_by_name || w.approved_by_name || w.rejection_reason) && (
+                                    <div className="text-[10px] text-muted-foreground space-y-0.5">
+                                      {w.reason && <div>Reason: {w.reason}</div>}
+                                      {w.requested_by_name && (
+                                        <div>Requested by {w.requested_by_name}{w.requested_by_role ? ` (${w.requested_by_role})` : ""}</div>
+                                      )}
+                                      {w.status === "approved" && w.approved_by_name && (
+                                        <div className="text-emerald-700">Approved by {w.approved_by_name}</div>
+                                      )}
+                                      {w.status === "rejected" && w.rejection_reason && (
+                                        <div className="text-destructive">Rejection: {w.rejection_reason}</div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+
+                            {isAdding && (
+                              <div className="rounded-md border border-primary/30 bg-primary/5 p-2 space-y-2">
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div>
+                                    <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Year</label>
+                                    <select
+                                      value={waiverForm.term}
+                                      onChange={e => setWaiverForm(p => ({ ...p, term: e.target.value }))}
+                                      className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+                                    >
+                                      {availableTerms.map(t => (
+                                        <option key={t} value={t}>{t.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Amount (₹)</label>
+                                    <input
+                                      type="number"
+                                      value={waiverForm.amount}
+                                      onChange={e => setWaiverForm(p => ({ ...p, amount: e.target.value }))}
+                                      className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+                                      placeholder="10000"
+                                    />
+                                  </div>
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Reason (optional)</label>
+                                  <input
+                                    value={waiverForm.reason}
+                                    onChange={e => setWaiverForm(p => ({ ...p, reason: e.target.value }))}
+                                    className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+                                    placeholder="Sibling discount, alumni, etc."
+                                  />
+                                </div>
+                                {!isSuperAdmin && (
+                                  <p className="text-[10px] text-amber-700">
+                                    This waiver will need super admin approval before it appears on the offer letter.
+                                  </p>
+                                )}
+                                <div className="flex gap-2">
+                                  <Button size="sm" className="text-xs h-7" disabled={waiverSaving} onClick={() => handleAddWaiver(offer.id)}>
+                                    {waiverSaving && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
+                                    {isSuperAdmin ? "Apply Waiver" : "Request Waiver"}
+                                  </Button>
+                                  <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => setAddingWaiverFor(null)}>
+                                    Cancel
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {/* Principal / Super admin approve/reject buttons */}
                       {isPending && isApprover && (
@@ -378,11 +953,19 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                         </div>
                       )}
 
-                      {/* Mark as accepted/rejected by student (only for approved offers in "issued" state) */}
+                      {/* Mark as accepted/rejected by student (only for approved offers in "issued" state).
+                          Admins record the candidate's response here when the candidate has
+                          communicated it verbally / over WhatsApp / in writing — i.e. these
+                          buttons act on the candidate's behalf, before any payment is captured. */}
                       {isApprovedOffer && offer.status === "issued" && (
-                        <div className="flex gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
-                          <Button size="sm" variant="outline" className="text-xs" onClick={() => updateOfferStatus(offer.id, "accepted")}>Mark Accepted</Button>
-                          <Button size="sm" variant="outline" className="text-xs text-destructive" onClick={() => updateOfferStatus(offer.id, "rejected")}>Mark Rejected</Button>
+                        <div className="mt-3 pt-3 border-t border-border/40" onClick={(e) => e.stopPropagation()}>
+                          <p className="text-[10px] text-muted-foreground mb-2 leading-snug">
+                            Record the candidate's response on their behalf — use these when the candidate has confirmed acceptance or declined the offer outside the payment flow (call, WhatsApp, in person). Token-fee payment auto-confirms acceptance regardless.
+                          </p>
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="outline" className="text-xs" onClick={() => updateOfferStatus(offer.id, "accepted")}>Mark Accepted (on behalf)</Button>
+                            <Button size="sm" variant="outline" className="text-xs text-destructive" onClick={() => updateOfferStatus(offer.id, "rejected")}>Mark Rejected (on behalf)</Button>
+                          </div>
                         </div>
                       )}
                     </CardContent>
@@ -440,7 +1023,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                   // picks up the regenerated bytes even though the URL path
                   // didn't change (storage upload is upsert-in-place).
                   key={`${selectedOffer.id}:${pdfBust}`}
-                  src={selectedOffer.letter_url}
+                  src={`${selectedOffer.letter_url}?cb=${pdfBust}`}
                   title="Offer letter preview"
                   className="absolute inset-0 w-full h-full border-0"
                 />

@@ -103,6 +103,7 @@ export default function LeadBuckets() {
   const [leads, setLeads] = useState<BucketLead[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [courseFilter, setCourseFilter] = useState<string>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Bucket counts
@@ -163,6 +164,28 @@ export default function LeadBuckets() {
   useEffect(() => { fetchCounts(); }, [selectedCampusId]);
   useEffect(() => { fetchLeads(); }, [activeBucket, schoolFilter, selectedCampusId]);
 
+  // Reset course filter when the bucket / school sub-filter changes — a
+  // course relevant in the college bucket is rarely relevant in the school
+  // bucket and vice versa, so an unintended carry-over would silently
+  // produce an empty list.
+  useEffect(() => { setCourseFilter("all"); }, [activeBucket, schoolFilter]);
+
+  // Course options derived from the currently loaded leads so the dropdown
+  // only ever shows courses that actually have unassigned leads in the
+  // active bucket. Sorted by descending count so the busiest courses
+  // appear first.
+  const courseOptions = (() => {
+    const counts = new Map<string, number>();
+    for (const l of leads) {
+      const name = (l.course_name || "").trim();
+      if (!name || name === "—") continue;
+      counts.set(name, (counts.get(name) || 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name, count]) => ({ name, count }));
+  })();
+
   useEffect(() => {
     if (!isAdminRole) return;
     (async () => {
@@ -188,6 +211,7 @@ export default function LeadBuckets() {
   }, [isAdminRole]);
 
   const filtered = leads.filter((l) => {
+    if (courseFilter !== "all" && (l.course_name || "") !== courseFilter) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return l.name.toLowerCase().includes(q) || (l.course_name || "").toLowerCase().includes(q);
@@ -356,16 +380,34 @@ export default function LeadBuckets() {
         </div>
       )}
 
-      {/* Search */}
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <input
-          type="text"
-          placeholder="Search by name or course..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-        />
+      {/* Search + course filter */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="Search by name or course..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+          />
+        </div>
+        <select
+          value={courseFilter}
+          onChange={(e) => setCourseFilter(e.target.value)}
+          className="rounded-xl border border-input bg-card py-2.5 px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 max-w-xs"
+          title="Filter by course"
+        >
+          <option value="all">All courses ({leads.length})</option>
+          {courseOptions.map(c => (
+            <option key={c.name} value={c.name}>{c.name} ({c.count})</option>
+          ))}
+        </select>
+        {courseFilter !== "all" && (
+          <Button variant="ghost" size="sm" className="h-9 px-2 text-xs" onClick={() => setCourseFilter("all")}>
+            Clear course
+          </Button>
+        )}
       </div>
 
       {/* Table */}

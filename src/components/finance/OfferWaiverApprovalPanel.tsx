@@ -1,0 +1,265 @@
+import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Loader2, CheckCircle, XCircle, Tag } from "lucide-react";
+
+const statusBadge: Record<string, string> = {
+  pending:  "bg-amber-100 text-amber-700",
+  approved: "bg-success/10 text-success",
+  rejected: "bg-destructive/10 text-destructive",
+};
+
+const termLabel = (t: string) =>
+  t.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+interface Waiver {
+  id: string;
+  offer_letter_id: string;
+  term: string;
+  amount: number;
+  reason: string | null;
+  status: string;
+  requested_by_name: string | null;
+  requested_by_role: string | null;
+  approved_by_name: string | null;
+  rejection_reason: string | null;
+  created_at: string;
+  lead_name: string;
+  lead_id: string;
+  course_name: string | null;
+}
+
+export function OfferWaiverApprovalPanel() {
+  const { role } = useAuth();
+  const { toast } = useToast();
+  const [waivers, setWaivers] = useState<Waiver[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [processing, setProcessing] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "approved" | "rejected">("pending");
+
+  const isSuperAdmin = role === "super_admin";
+
+  useEffect(() => { fetchWaivers(); }, []);
+
+  const fetchWaivers = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("offer_waivers")
+      .select(`
+        id, offer_letter_id, term, amount, reason, status,
+        requested_by_name, requested_by_role, approved_by_name,
+        rejection_reason, created_at,
+        offer_letters!offer_letter_id (
+          lead_id,
+          leads!lead_id ( name ),
+          offer_letter_courses:applications!lead_id ( courses!course_id ( name ) )
+        )
+      `)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      toast({ title: "Failed to load waivers", description: error.message, variant: "destructive" });
+    } else {
+      setWaivers((data || []).map((w: any) => ({
+        id: w.id,
+        offer_letter_id: w.offer_letter_id,
+        term: w.term,
+        amount: Number(w.amount),
+        reason: w.reason,
+        status: w.status,
+        requested_by_name: w.requested_by_name,
+        requested_by_role: w.requested_by_role,
+        approved_by_name: w.approved_by_name,
+        rejection_reason: w.rejection_reason,
+        created_at: w.created_at,
+        lead_name: w.offer_letters?.leads?.name || "—",
+        lead_id: w.offer_letters?.lead_id || "",
+        course_name:
+          w.offer_letters?.offer_letter_courses?.[0]?.courses?.name || null,
+      })));
+    }
+    setLoading(false);
+  };
+
+  const handleDecide = async (waiver: Waiver, decision: "approved" | "rejected") => {
+    if (!isSuperAdmin) return;
+    let rejection_reason: string | undefined;
+    if (decision === "rejected") {
+      const r = window.prompt("Reason for rejection (optional):");
+      if (r === null) return; // user cancelled
+      rejection_reason = r || undefined;
+    }
+    setProcessing(waiver.id);
+    try {
+      const { data, error } = await supabase.functions.invoke("decide-offer-waiver", {
+        body: { waiver_id: waiver.id, decision, rejection_reason },
+      });
+      if (error) {
+        let msg = error.message;
+        try {
+          const t = await (error as any)?.context?.text?.();
+          if (t) { try { const b = JSON.parse(t); if (b?.error) msg = b.error; } catch { msg = t.slice(0, 200); } }
+        } catch {}
+        throw new Error(msg);
+      }
+      if (data?.error) throw new Error(data.error);
+      toast({ title: decision === "approved" ? "Waiver approved" : "Waiver rejected" });
+      fetchWaivers();
+    } catch (e: any) {
+      toast({ title: "Action failed", description: e.message, variant: "destructive" });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const filtered = statusFilter === "all" ? waivers : waivers.filter(w => w.status === statusFilter);
+  const pendingCount = waivers.filter(w => w.status === "pending").length;
+
+  if (loading) {
+    return <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Tag className="h-5 w-5 text-muted-foreground" />
+          <h3 className="text-base font-semibold text-foreground">Offer Waivers</h3>
+          {pendingCount > 0 && (
+            <Badge className="bg-amber-100 text-amber-700 border-amber-200">{pendingCount} pending</Badge>
+          )}
+        </div>
+        <div className="flex items-center gap-1 rounded-lg border border-input bg-card p-1">
+          {(["pending", "approved", "rejected", "all"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(s)}
+              className={`rounded-md px-3 py-1 text-xs font-medium transition-colors capitalize ${
+                statusFilter === s
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {!isSuperAdmin && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          Only super admins can approve or reject waivers. You can view all requests here.
+        </div>
+      )}
+
+      {filtered.length === 0 ? (
+        <Card className="border-border/60 shadow-none">
+          <CardContent className="py-12 text-center text-muted-foreground">
+            No {statusFilter === "all" ? "" : statusFilter} waiver requests
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="border-border/60 shadow-none overflow-hidden">
+          <CardContent className="p-0">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/50">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Applicant</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Course</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Term</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">Waiver Amount</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Reason</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Requested By</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Date</th>
+                  {isSuperAdmin && (
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Actions</th>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((w) => (
+                  <tr key={w.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+                    <td className="px-4 py-3 font-medium text-foreground">{w.lead_name}</td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground max-w-[160px] truncate" title={w.course_name || undefined}>
+                      {w.course_name || "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge className="bg-pastel-blue text-foreground/70 border-0 text-[10px]">
+                        {termLabel(w.term)}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-foreground">
+                      ₹{w.amount.toLocaleString("en-IN")}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground max-w-[200px] truncate" title={w.reason || undefined}>
+                      {w.reason || "—"}
+                      {w.status === "rejected" && w.rejection_reason && (
+                        <span className="block text-destructive/80 mt-0.5">
+                          Rejected: {w.rejection_reason}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                      <span>{w.requested_by_name || "—"}</span>
+                      {w.requested_by_role && (
+                        <span className="block capitalize text-[10px] text-muted-foreground/60">
+                          {w.requested_by_role.replace("_", " ")}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge className={`text-[10px] font-medium border-0 capitalize ${statusBadge[w.status] || "bg-muted"}`}>
+                        {w.status}
+                      </Badge>
+                      {w.status !== "pending" && w.approved_by_name && (
+                        <div className="text-[10px] text-muted-foreground/60 mt-0.5">
+                          by {w.approved_by_name}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                      {new Date(w.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                    </td>
+                    {isSuperAdmin && (
+                      <td className="px-4 py-3">
+                        {w.status === "pending" ? (
+                          <div className="flex items-center gap-1">
+                            <Button
+                              size="sm" variant="ghost"
+                              className="h-7 px-2 text-success hover:text-success hover:bg-success/10"
+                              disabled={processing === w.id}
+                              onClick={() => handleDecide(w, "approved")}
+                            >
+                              {processing === w.id
+                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                : <CheckCircle className="h-3.5 w-3.5" />}
+                            </Button>
+                            <Button
+                              size="sm" variant="ghost"
+                              className="h-7 px-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+                              disabled={processing === w.id}
+                              onClick={() => handleDecide(w, "rejected")}
+                            >
+                              <XCircle className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}

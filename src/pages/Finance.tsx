@@ -5,7 +5,7 @@ import {
   Search, Filter, IndianRupee, Download, Plus, CreditCard,
   FileText, BarChart3, AlertTriangle, CheckCircle, Clock,
   ArrowUpRight, ChevronRight, MoreHorizontal, Receipt, Wallet, Loader2,
-  Globe, HandCoins,
+  Globe, HandCoins, Tag, TimerOff,
 } from "lucide-react";
 import TransactionHistoryPanel from "@/components/admin/TransactionHistoryPanel";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
@@ -15,6 +15,8 @@ import { Button } from "@/components/ui/button";
 import { FeeStructureViewer } from "@/components/finance/FeeStructureViewer";
 import { ConcessionApprovalPanel } from "@/components/finance/ConcessionApprovalPanel";
 import { FinanceOverview } from "@/components/finance/FinanceOverview";
+import { OfferWaiverApprovalPanel } from "@/components/finance/OfferWaiverApprovalPanel";
+import { LateFeeConfigPanel } from "@/components/finance/LateFeeConfigPanel";
 
 const statusStyles: Record<string, string> = {
   paid: "bg-pastel-green text-foreground/80",
@@ -34,27 +36,30 @@ const modeBadge: Record<string, string> = {
 };
 
 const Finance = () => {
-  const [tab, setTab] = useState<"ledger" | "receipts" | "online-transactions" | "structures" | "concessions" | "reports">("ledger");
+  const [tab, setTab] = useState<"ledger" | "receipts" | "online-transactions" | "structures" | "concessions" | "waivers" | "late-fees" | "reports">("ledger");
   const [search, setSearch] = useState("");
   const [ledger, setLedger] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [structures, setStructures] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
+  const [pendingWaiverCount, setPendingWaiverCount] = useState(0);
   const { selectedCampusId } = useCampus();
 
   useEffect(() => { fetchAll(); }, [selectedCampusId]);
 
   const fetchAll = async () => {
     setLoading(true);
-    const [ledgerRes, paymentsRes, structRes] = await Promise.all([
+    const [ledgerRes, paymentsRes, structRes, waiverRes] = await Promise.all([
       supabase.from("fee_ledger").select("*, students:student_id(name, admission_no, pre_admission_no, campus_id), fee_codes:fee_code_id(code, name, category)").order("due_date", { ascending: true }).limit(200),
       supabase.from("payments").select("*, students:student_id(name, admission_no, campus_id), profiles!recorded_by(display_name)").order("paid_at", { ascending: false }).limit(500),
       supabase.from("fee_structures").select("*, courses:course_id(name), admission_sessions:session_id(name), fee_structure_items(*, fee_codes:fee_code_id(code, name, category))").order("created_at", { ascending: false }).limit(200),
+      supabase.from("offer_waivers").select("id", { count: "exact", head: true }).eq("status", "pending"),
     ]);
     if (ledgerRes.data) setLedger(ledgerRes.data);
     if (paymentsRes.data) setPayments(paymentsRes.data);
     if (structRes.data) setStructures(structRes.data);
+    setPendingWaiverCount(waiverRes.count ?? 0);
     setLoading(false);
   };
 
@@ -77,12 +82,14 @@ const Finance = () => {
   const paidCount = filteredLedger.filter((f: any) => f.status === "paid").length;
 
   const tabs = [
-    { id: "ledger" as const,               label: "Fee Ledger",          icon: FileText },
-    { id: "receipts" as const,             label: "Receipts",            icon: CreditCard },
-    { id: "online-transactions" as const,  label: "Online Transactions", icon: Globe },
-    { id: "structures" as const,           label: "Fee Structures",      icon: Wallet },
-    { id: "concessions" as const,         label: "Concessions",         icon: HandCoins },
-    { id: "reports" as const,              label: "Reports",             icon: BarChart3 },
+    { id: "ledger" as const,               label: "Fee Ledger",          icon: FileText,   badge: 0 },
+    { id: "receipts" as const,             label: "Receipts",            icon: CreditCard, badge: 0 },
+    { id: "online-transactions" as const,  label: "Online",              icon: Globe,      badge: 0 },
+    { id: "structures" as const,           label: "Structures",          icon: Wallet,     badge: 0 },
+    { id: "concessions" as const,          label: "Concessions",         icon: HandCoins,  badge: 0 },
+    { id: "waivers" as const,              label: "Offer Waivers",       icon: Tag,        badge: pendingWaiverCount },
+    { id: "late-fees" as const,            label: "Late Fees",           icon: TimerOff,   badge: 0 },
+    { id: "reports" as const,              label: "Reports",             icon: BarChart3,  badge: 0 },
   ];
 
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
@@ -125,11 +132,16 @@ const Finance = () => {
         ))}
       </div>
 
-      <div className="flex items-center gap-1 rounded-xl border border-input bg-card p-1 w-fit">
+      <div className="flex flex-wrap items-center gap-1 rounded-xl border border-input bg-card p-1 w-fit">
         {tabs.map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)}
-            className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${tab === t.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+            className={`relative flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${tab === t.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
             <t.icon className="h-4 w-4" />{t.label}
+            {t.badge > 0 && (
+              <span className={`ml-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${tab === t.id ? "bg-white/20 text-white" : "bg-amber-100 text-amber-700"}`}>
+                {t.badge}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -269,6 +281,10 @@ const Finance = () => {
       )}
 
       {tab === "concessions" && <ConcessionApprovalPanel />}
+
+      {tab === "waivers" && <OfferWaiverApprovalPanel />}
+
+      {tab === "late-fees" && <LateFeeConfigPanel />}
 
       {tab === "reports" && <FinanceOverview />}
     </div>

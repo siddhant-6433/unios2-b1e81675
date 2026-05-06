@@ -340,6 +340,7 @@ export default function Applications() {
     draft: apps.filter(a => a.status === "draft").length,
     paid: apps.filter(a => a.payment_status === "paid").length,
     submitted: apps.filter(a => a.status === "submitted").length,
+    approved_pending_offer: apps.filter(a => a.lead_stage === "application_approved").length,
     offer_sent: apps.filter(a => a.lead_stage === "offer_sent").length,
     token_paid: apps.filter(a => a.lead_stage === "token_paid").length,
     pre_admitted: apps.filter(a => a.lead_stage === "pre_admitted").length,
@@ -377,40 +378,59 @@ export default function Applications() {
         </div>
       </div>
 
-      {/* Stats — Row 1: Application funnel */}
+      {/* Stats — Row 1: Application funnel.
+          Reference-inspired card shape: soft canvas border, larger rounded-2xl
+          shell, generous padding, prominent value, tinted icon chip in a
+          softly-rounded square. Layout/data/click behaviour unchanged. */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {([
-          { key: "total", label: "Total", count: stats.total, icon: FileText, iconBg: "bg-blue-100", iconColor: "text-blue-600", ring: "ring-blue-400",
+          { key: "total", label: "Total", count: stats.total, icon: FileText, iconBg: "bg-blue-100", iconColor: "text-blue-600", tint: "bg-blue-50/40", ring: "ring-blue-400",
             active: paymentFilter === "all" && statusFilter === "all" && !stageFilter, onClick: () => { setPaymentFilter("all"); setStatusFilter("all"); setStageFilter(null); } },
-          { key: "draft", label: "In Progress", count: stats.draft, icon: Clock, iconBg: "bg-amber-100", iconColor: "text-amber-600", ring: "ring-amber-400",
+          { key: "draft", label: "In Progress", count: stats.draft, icon: Clock, iconBg: "bg-amber-100", iconColor: "text-amber-600", tint: "bg-amber-50/40", ring: "ring-amber-400",
             active: statusFilter === "draft", onClick: () => { setStatusFilter(statusFilter === "draft" ? "all" : "draft"); setPaymentFilter("all"); setStageFilter(null); } },
-          { key: "paid", label: "Paid", count: stats.paid, icon: CreditCard, iconBg: "bg-emerald-100", iconColor: "text-emerald-600", ring: "ring-emerald-400",
+          { key: "paid", label: "Paid", count: stats.paid, icon: CreditCard, iconBg: "bg-emerald-100", iconColor: "text-emerald-600", tint: "bg-emerald-50/40", ring: "ring-emerald-400",
             active: paymentFilter === "paid", onClick: () => { setPaymentFilter(paymentFilter === "paid" ? "all" : "paid"); setStatusFilter("all"); setStageFilter(null); } },
-          { key: "submitted", label: "Submitted", count: stats.submitted, icon: CheckCircle, iconBg: "bg-violet-100", iconColor: "text-violet-600", ring: "ring-violet-400",
+          { key: "submitted", label: "Submitted", count: stats.submitted, icon: CheckCircle, iconBg: "bg-violet-100", iconColor: "text-violet-600", tint: "bg-violet-50/40", ring: "ring-violet-400",
             active: statusFilter === "submitted", onClick: () => { setStatusFilter(statusFilter === "submitted" ? "all" : "submitted"); setPaymentFilter("all"); setStageFilter(null); } },
         ]).map(s => (
-          <Card key={s.key} className={`border-border/60 shadow-none cursor-pointer hover:bg-muted/30 ${s.active ? `ring-2 ${s.ring}` : ""}`} onClick={s.onClick}>
-            <CardContent className="p-3 flex items-center gap-3">
-              <div className={`w-9 h-9 rounded-lg ${s.iconBg} flex items-center justify-center`}><s.icon className={`h-4 w-4 ${s.iconColor}`} /></div>
-              <div><p className="text-xl font-bold text-foreground">{s.count}</p><p className="text-[10px] text-muted-foreground">{s.label}</p></div>
+          <Card key={s.key}
+            className={`rounded-2xl border-border/40 shadow-none cursor-pointer transition-all hover:shadow-sm ${s.active ? `${s.tint} ring-2 ${s.ring}` : "bg-card hover:bg-muted/30"}`}
+            onClick={s.onClick}
+          >
+            <CardContent className="p-4 flex items-center gap-3.5">
+              <div className={`w-10 h-10 rounded-xl ${s.iconBg} flex items-center justify-center shrink-0`}>
+                <s.icon className={`h-[18px] w-[18px] ${s.iconColor}`} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-2xl font-bold text-foreground leading-none tracking-tight">{s.count}</p>
+                <p className="text-[11px] text-muted-foreground mt-1.5">{s.label}</p>
+              </div>
             </CardContent>
           </Card>
         ))}
       </div>
 
       {/* Stats — Row 2: Post-submission pipeline */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {([
-          { key: "offer_sent", label: "Offer Sent", count: stats.offer_sent, icon: Gift, iconBg: "bg-teal-100", iconColor: "text-teal-600", ring: "ring-teal-400" },
-          { key: "token_paid", label: "Token Paid", count: stats.token_paid, icon: Wallet, iconBg: "bg-cyan-100", iconColor: "text-cyan-600", ring: "ring-cyan-400" },
-          { key: "pre_admitted", label: "Pre-Admitted", count: stats.pre_admitted, icon: UserCheck, iconBg: "bg-indigo-100", iconColor: "text-indigo-600", ring: "ring-indigo-400" },
-          { key: "admitted", label: "Admitted", count: stats.admitted, icon: GraduationCap, iconBg: "bg-green-100", iconColor: "text-green-600", ring: "ring-green-400" },
+          { key: "application_approved", label: "Pending Offer", count: stats.approved_pending_offer, icon: ClipboardCheck, iconBg: "bg-orange-100", iconColor: "text-orange-600", tint: "bg-orange-50/40", ring: "ring-orange-400" },
+          { key: "offer_sent", label: "Offer Sent", count: stats.offer_sent, icon: Gift, iconBg: "bg-teal-100", iconColor: "text-teal-600", tint: "bg-teal-50/40", ring: "ring-teal-400" },
+          { key: "token_paid", label: "Token Paid", count: stats.token_paid, icon: Wallet, iconBg: "bg-cyan-100", iconColor: "text-cyan-600", tint: "bg-cyan-50/40", ring: "ring-cyan-400" },
+          { key: "pre_admitted", label: "Pre-Admitted", count: stats.pre_admitted, icon: UserCheck, iconBg: "bg-indigo-100", iconColor: "text-indigo-600", tint: "bg-indigo-50/40", ring: "ring-indigo-400" },
+          { key: "admitted", label: "Admitted", count: stats.admitted, icon: GraduationCap, iconBg: "bg-green-100", iconColor: "text-green-600", tint: "bg-green-50/40", ring: "ring-green-400" },
         ]).map(s => (
-          <Card key={s.key} className={`border-border/60 shadow-none cursor-pointer hover:bg-muted/30 ${stageFilter === s.key ? `ring-2 ${s.ring}` : ""}`}
-            onClick={() => { setStageFilter(stageFilter === s.key ? null : s.key); setPaymentFilter("all"); setStatusFilter("all"); }}>
-            <CardContent className="p-3 flex items-center gap-3">
-              <div className={`w-9 h-9 rounded-lg ${s.iconBg} flex items-center justify-center`}><s.icon className={`h-4 w-4 ${s.iconColor}`} /></div>
-              <div><p className="text-xl font-bold text-foreground">{s.count}</p><p className="text-[10px] text-muted-foreground">{s.label}</p></div>
+          <Card key={s.key}
+            className={`rounded-2xl border-border/40 shadow-none cursor-pointer transition-all hover:shadow-sm ${stageFilter === s.key ? `${s.tint} ring-2 ${s.ring}` : "bg-card hover:bg-muted/30"}`}
+            onClick={() => { setStageFilter(stageFilter === s.key ? null : s.key); setPaymentFilter("all"); setStatusFilter("all"); }}
+          >
+            <CardContent className="p-4 flex items-center gap-3.5">
+              <div className={`w-10 h-10 rounded-xl ${s.iconBg} flex items-center justify-center shrink-0`}>
+                <s.icon className={`h-[18px] w-[18px] ${s.iconColor}`} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-2xl font-bold text-foreground leading-none tracking-tight">{s.count}</p>
+                <p className="text-[11px] text-muted-foreground mt-1.5">{s.label}</p>
+              </div>
             </CardContent>
           </Card>
         ))}
@@ -476,8 +496,12 @@ export default function Applications() {
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground max-w-[160px]">Name</th>
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Phone</th>
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Course</th>
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Form</th>
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground" title="Submission → Fee → Docs → Approved → Offer → Token → Admitted">Lifecycle</th>
+                {/* Form-fill progress is meaningless on the Submitted tab — every
+                    row is 7/7 by definition — so we drop the column there. */}
+                {statusFilter !== "submitted" && (
+                  <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Form</th>
+                )}
+                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground min-w-[420px]" title="Submission → Fee → Docs → Approved → Offer → Token → Admitted">Lifecycle</th>
                 {!isCounsellor && <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Counsellor</th>}
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Date</th>
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Actions</th>
@@ -493,8 +517,11 @@ export default function Applications() {
 
                 const courseList = app.course_selections || [];
                 const cs = app.completed_sections || {};
-                // Columns dropped 2 (was Payment + Status + Lead Stage = 3 cols → now 1 Lifecycle col).
-                const expandColSpan = isCounsellor ? 9 : 11;
+                // Columns: chevron + (checkbox if !counsellor) + appId + name + phone + course
+                // + (form if !submitted-tab) + lifecycle + (counsellor if !counsellor) + date + actions.
+                // Adjust expandColSpan when the Form column is hidden on the Submitted tab.
+                const formColShown = statusFilter !== "submitted";
+                const expandColSpan = (isCounsellor ? 9 : 11) - (formColShown ? 0 : 1);
 
                 return (
                   <Fragment key={app.id}>
@@ -533,19 +560,22 @@ export default function Applications() {
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground text-xs">{app.phone}</td>
                     <td className="px-3 py-2.5 text-xs text-foreground max-w-[200px] truncate">{courses || "—"}</td>
-                    {/* Form-fill progress (sections completed in apply portal) */}
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center gap-2">
-                        <div className="w-14 h-1.5 bg-muted rounded-full overflow-hidden">
-                          <div className={`h-full rounded-full ${progressPct === 100 ? "bg-emerald-500" : progressPct > 0 ? "bg-blue-500" : "bg-gray-300"}`}
-                            style={{ width: `${progressPct}%` }} />
+                    {/* Form-fill progress (sections completed in apply portal) — hidden on Submitted tab. */}
+                    {statusFilter !== "submitted" && (
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <div className="w-14 h-1.5 bg-muted rounded-full overflow-hidden">
+                            <div className={`h-full rounded-full ${progressPct === 100 ? "bg-emerald-500" : progressPct > 0 ? "bg-blue-500" : "bg-gray-300"}`}
+                              style={{ width: `${progressPct}%` }} />
+                          </div>
+                          <span className="text-[10px] text-muted-foreground tabular-nums">{cc}/{tc}</span>
                         </div>
-                        <span className="text-[10px] text-muted-foreground tabular-nums">{cc}/{tc}</span>
-                      </div>
-                    </td>
-                    {/* Mini lifecycle stepper — replaces separate Payment / Status / Lead Stage */}
+                      </td>
+                    )}
+                    {/* Lifecycle stepper — labeled variant so each stage is readable at a glance. */}
                     <td className="px-3 py-2.5">
                       <MiniLifecycleStepper
+                        showLabels
                         app={{ status: app.status, payment_status: app.payment_status }}
                         lead={app.lead_id ? {
                           id: app.lead_id,
@@ -564,92 +594,33 @@ export default function Applications() {
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="inline-flex items-center gap-2">
-                        {/* Prominent Process CTA — only for actionable statuses */}
-                        {(app.status === "submitted" || app.status === "under_review") && (
-                          <a
-                            href={`/applications/${app.application_id}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 whitespace-nowrap"
-                            title="Verify documents, approve / reject, issue offer"
-                          >
-                            <ClipboardCheck className="h-3.5 w-3.5" />
-                            Process
-                          </a>
-                        )}
-                        <div className="inline-flex items-center rounded-lg border border-border bg-card overflow-hidden divide-x divide-border">
-                        {app.lead_id && (
-                          <a href={`/admissions/${app.lead_id}`} target="_blank" rel="noreferrer"
-                            className="p-1.5 hover:bg-muted text-muted-foreground hover:text-primary transition-colors" title="Open Lead">
-                            <ExternalLink className="h-3.5 w-3.5" />
-                          </a>
-                        )}
+                        {/* Single "View" CTA — opens AdminApplicationView, which is the
+                            unified surface for the application PDF, fee receipt,
+                            uploaded documents, lifecycle, and admin actions
+                            (approve / reject, issue offer letter, etc.).
+                            Replaces the previous icon-cluster of separate
+                            doc / receipt / open-lead links. */}
+                        <a
+                          href={`/applications/${app.application_id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 whitespace-nowrap"
+                          title="View application — PDF, receipt, uploaded documents, and admin actions"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          View
+                        </a>
 
-                        {/* Application Form PDF — single button: open if exists, else generate-on-demand */}
-                        {app.form_pdf_url ? (
-                          <a href={app.form_pdf_url} target="_blank" rel="noreferrer"
-                            className="p-1.5 hover:bg-muted text-muted-foreground hover:text-primary transition-colors" title="View Application Form PDF">
-                            <FileText className="h-3.5 w-3.5" />
-                          </a>
-                        ) : (app.status === "submitted" || app.status === "under_review" || app.status === "approved") ? (
-                          <button onClick={() => generateFormPdf(app)} disabled={generatingPdfFor === app.id}
-                            className="p-1.5 hover:bg-muted text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
-                            title="Generate Application Form PDF">
-                            {generatingPdfFor === app.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-                          </button>
-                        ) : null}
-
-                        {/* Fee Receipt — only after payment */}
-                        {app.payment_status === "paid" && (
-                          app.fee_receipt_url ? (
-                            <a href={app.fee_receipt_url} target="_blank" rel="noreferrer"
-                              className="p-1.5 hover:bg-muted text-muted-foreground hover:text-emerald-600 transition-colors" title="View Fee Receipt">
-                              <Receipt className="h-3.5 w-3.5" />
-                            </a>
-                          ) : (
-                            <button onClick={() => generateFeeReceipt(app)} disabled={generatingPdfFor === app.id}
-                              className="p-1.5 hover:bg-muted text-muted-foreground hover:text-emerald-600 transition-colors disabled:opacity-50"
-                              title="Generate Fee Receipt">
-                              {generatingPdfFor === app.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Receipt className="h-3.5 w-3.5" />}
-                            </button>
-                          )
-                        )}
-
-                        {/* Uploaded documents */}
-                        <button onClick={() => fetchDocs(app.id, app.application_id)}
-                          className="p-1.5 hover:bg-muted text-muted-foreground hover:text-primary transition-colors" title="View Uploaded Documents">
-                          <Upload className="h-3.5 w-3.5" />
-                        </button>
-
-                        {/* Application review (admin) — small icon variant for non-actionable statuses */}
-                        {!(app.status === "submitted" || app.status === "under_review") && (
-                          <a href={`/applications/${app.application_id}`} target="_blank" rel="noreferrer"
-                            className="p-1.5 hover:bg-muted text-muted-foreground hover:text-primary transition-colors" title="Open application review">
-                            <ClipboardCheck className="h-3.5 w-3.5" />
-                          </a>
-                        )}
-
-                        {/* View the apply portal AS the student (opens new tab) */}
+                        {/* Send a one-click login link to the apply portal so the
+                            student can resume / complete their application or pay
+                            the token fee. */}
                         {app.lead_id && (
                           <ApplyMagicLinkButton
                             leadId={app.lead_id}
                             leadName={app.full_name}
                             leadPhone={app.phone}
-                            compact
-                            directOpen
                           />
                         )}
-
-                        {/* Generate + share a login link with the student (opens dialog) */}
-                        {app.lead_id && (
-                          <ApplyMagicLinkButton
-                            leadId={app.lead_id}
-                            leadName={app.full_name}
-                            leadPhone={app.phone}
-                            compact
-                          />
-                        )}
-                        </div>
                       </div>
                     </td>
                   </tr>

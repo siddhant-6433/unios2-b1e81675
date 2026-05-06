@@ -15,12 +15,21 @@ const buttonVariants = cva(
         secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
+        // ── Reference-inspired pill variants (opt-in, additive) ──
+        // Filled: jet-black hero CTAs (e.g. "+ Create new …", "Send"). Use
+        //   <Button variant="pill" size="pill"> for the canonical look.
+        pill: "bg-foreground text-background hover:bg-foreground/90 rounded-full shadow-sm",
+        // Outline: soft-edged secondary pill against the cream canvas
+        //   (e.g. month chips, "Filter" pills). Tints to muted on hover.
+        "pill-outline": "border border-border bg-card text-foreground hover:bg-muted rounded-full",
       },
       size: {
         default: "h-10 px-4 py-2",
         sm: "h-9 rounded-md px-3",
         lg: "h-11 rounded-md px-8",
         icon: "h-10 w-10",
+        // Slightly tighter pill sizing — matches the reference proportions
+        pill: "h-9 px-5 text-[13px] font-semibold",
       },
     },
     defaultVariants: {

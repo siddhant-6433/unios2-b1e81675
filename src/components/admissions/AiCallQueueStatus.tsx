@@ -182,18 +182,21 @@ function StatCard({ label, value, rawValue, sub, Icon, iconBg, iconColor, muted 
   /** Dim the value text — used to signal historical / paused metrics */
   muted?: boolean;
 }) {
+  // Reference-inspired stat-card shape: rounded-2xl shell, generous
+  // padding, larger tinted icon chip, hero-sized value with the optional
+  // sub line tucked underneath.
   return (
-    <Card className="border-border/60 shadow-none">
-      <CardContent className="p-3 flex items-start gap-3">
-        <div className={`w-9 h-9 rounded-lg ${iconBg} flex items-center justify-center shrink-0`}>
-          <Icon className={`h-4 w-4 ${iconColor}`} />
+    <Card className="rounded-2xl border-border/40 shadow-none transition-all hover:shadow-sm">
+      <CardContent className="p-4 flex items-start gap-3.5">
+        <div className={`w-10 h-10 rounded-xl ${iconBg} flex items-center justify-center shrink-0`}>
+          <Icon className={`h-[18px] w-[18px] ${iconColor}`} />
         </div>
         <div className="min-w-0">
-          <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">{label}</p>
-          <p className={`text-xl font-bold tabular-nums truncate ${muted ? "text-muted-foreground" : "text-foreground"}`}>
+          <p className={`text-2xl font-bold tabular-nums truncate leading-none tracking-tight ${muted ? "text-muted-foreground" : "text-foreground"}`}>
             {rawValue ?? (value ?? 0).toLocaleString("en-IN")}
           </p>
-          {sub && <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{sub}</p>}
+          <p className="text-[11px] text-muted-foreground mt-1.5">{label}</p>
+          {sub && <p className="text-[10px] text-muted-foreground/80 mt-0.5 truncate">{sub}</p>}
         </div>
       </CardContent>
     </Card>

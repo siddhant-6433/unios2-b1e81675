@@ -6,12 +6,15 @@
 
 @layer base {
   :root {
-    /* ── Surface hierarchy ── */
-    /* Base surface: #faf9fb */
-    --background: 270 20% 98%;
+    /* ── Surface hierarchy ──
+       Warm cream palette inspired by the reference UIs — surfaces sit on a
+       neutral-warm canvas instead of the previous cool lavender. Brand
+       primary, foreground, destructive and chart tokens are unchanged so
+       no contrast/legibility regressions. */
+    --background: 30 14% 97%;
     --foreground: 224 47% 11%;
 
-    /* surface_container_lowest: #ffffff (cards, content areas) */
+    /* Cards stay pure white so they pop slightly above the warmer canvas */
     --card: 0 0% 100%;
     --card-foreground: 224 47% 11%;
 
@@ -24,28 +27,30 @@
     --primary: 224 100% 39%;
     --primary-foreground: 0 0% 100%;
 
-    /* Secondary: surface_container_high — for secondary buttons & chips */
-    --secondary: 270 9% 93%;
+    /* Secondary: warm-tinted neutral for chips & secondary buttons */
+    --secondary: 30 10% 93%;
     --secondary-foreground: 224 47% 11%;
 
-    /* Muted: surface_container_low — #f4f3f5 */
-    --muted: 270 9% 96%;
+    /* Muted: subtle warm panel tone */
+    --muted: 30 10% 95%;
     --muted-foreground: 220 13% 46%;
 
-    /* Accent: same as secondary for hover states */
-    --accent: 270 9% 91%;
+    /* Accent: hover surfaces */
+    --accent: 30 10% 93%;
     --accent-foreground: 224 47% 11%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    /* Ghost border — outline_variant, very subtle */
-    --border: 270 9% 88%;
-    --input: 270 9% 96%;
+    /* Ghost border — outline_variant, very subtle, warmed */
+    --border: 30 10% 90%;
+    --input: 30 10% 95%;
     --ring: 224 100% 39%;
 
-    /* ROUND_EIGHT = 8px max for containers */
-    --radius: 0.5rem;
+    /* Container radius bumped 8px → 12px for the softer card shape in
+       the reference. Affects rounded-sm/md/lg only; rounded-xl+ keep
+       their Tailwind defaults so badges and pills don't get over-rounded. */
+    --radius: 0.75rem;
 
     /* ── Warm secondary: #954919 — human accent (peach/orange) ── */
     --warm: 23 71% 34%;
@@ -53,14 +58,17 @@
     --warm-container: 23 80% 93%;
     --warm-on-container: 23 71% 25%;
 
-    /* ── Sidebar ── */
-    --sidebar-background: 0 0% 100%;
+    /* ── Sidebar ──
+       Slightly tinted off-white so it sits visually between the warmer
+       canvas and the white cards in the main pane. Active items become
+       white pills against this tint, matching the reference look. */
+    --sidebar-background: 30 13% 96%;
     --sidebar-foreground: 220 13% 46%;
     --sidebar-primary: 224 100% 39%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 270 9% 96%;
+    --sidebar-accent: 30 10% 95%;
     --sidebar-accent-foreground: 224 47% 11%;
-    --sidebar-border: 270 9% 93%;
+    --sidebar-border: 30 10% 91%;
     --sidebar-ring: 224 100% 39%;
 
     /* ── Pastel tokens ── */

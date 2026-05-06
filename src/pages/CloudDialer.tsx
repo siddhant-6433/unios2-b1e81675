@@ -233,32 +233,49 @@ export default function CloudDialer() {
       const todayEnd = todayStart + "T23:59:59";
 
       // Build queries — scoped to counsellor if counsellor role, unscoped for admin
-      let q1 = supabase.from("post_visit_pending_followups" as any).select("lead_id, lead_name, lead_phone").order("visit_date" as any, { ascending: true }).limit(50);
-      let q2 = supabase.from("lead_visits" as any).select("lead_id, leads:lead_id(name, phone)").eq("status", "scheduled").gte("visit_date", todayStart).order("visit_date", { ascending: true }).limit(50);
-      let q3 = supabase.from("overdue_followups" as any).select("lead_id, lead_name, lead_phone").order("scheduled_at" as any, { ascending: true }).limit(50);
-      let q4 = supabase.from("lead_followups").select("lead_id, leads!inner(id, name, phone, counsellor_id)").eq("status", "pending").gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd).order("scheduled_at", { ascending: true }).limit(50);
-      let q5 = supabase.from("leads").select("id, name, phone").eq("stage", "new_lead").is("first_contact_at", null).not("phone", "is", null).order("created_at", { ascending: true }).limit(50);
+      // q0: missed callbacks (top priority — AI inbound calls not yet actioned)
+      let q0 = (supabase.from("ai_call_records" as any) as any)
+        .select("lead_id, leads!inner(id, name, phone, counsellor_id)")
+        .eq("needs_followup", true)
+        .is("followup_done_at", null)
+        .order("created_at", { ascending: true })
+        .limit(500);
+      let q1 = supabase.from("post_visit_pending_followups" as any).select("lead_id, lead_name, lead_phone").order("visit_date" as any, { ascending: true }).limit(500);
+      let q2 = supabase.from("lead_visits" as any).select("lead_id, leads:lead_id(name, phone)").eq("status", "scheduled").gte("visit_date", todayStart).order("visit_date", { ascending: true }).limit(500);
+      let q3 = supabase.from("overdue_followups" as any).select("lead_id, lead_name, lead_phone").order("scheduled_at" as any, { ascending: true }).limit(500);
+      let q4 = supabase.from("lead_followups").select("lead_id, leads!inner(id, name, phone, counsellor_id)").eq("status", "pending").gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd).order("scheduled_at", { ascending: true }).limit(500);
+      let q5 = supabase.from("leads").select("id, name, phone").eq("stage", "new_lead").is("first_contact_at", null).not("phone", "is", null).order("created_at", { ascending: true }).limit(500);
 
       if (counsellorId) {
+        q0 = q0.eq("leads.counsellor_id", counsellorId);
         q1 = q1.eq("counsellor_id", counsellorId);
         q3 = q3.eq("counsellor_id", counsellorId);
-        q4 = supabase.from("lead_followups").select("lead_id, leads!inner(id, name, phone, counsellor_id)").eq("status", "pending").eq("leads.counsellor_id", counsellorId).gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd).order("scheduled_at", { ascending: true }).limit(50);
+        q4 = supabase.from("lead_followups").select("lead_id, leads!inner(id, name, phone, counsellor_id)").eq("status", "pending").eq("leads.counsellor_id", counsellorId).gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd).order("scheduled_at", { ascending: true }).limit(500);
         q5 = q5.eq("counsellor_id", counsellorId);
       }
 
-      const [r1, r2, r3, r4, r5] = await Promise.all([q1, q2, q3, q4, q5]);
+      const [r0, r1, r2, r3, r4, r5] = await Promise.all([q0, q1, q2, q3, q4, q5]);
 
       const seen = new Set<string>();
       const add = (items: {id:string;name:string;phone:string}[], bucket: string) => {
         items.forEach(l => { if (!seen.has(l.id) && l.phone) { seen.add(l.id); allLeads.push({ ...l, bucket }); } });
       };
 
+      // Deduplicate missed callbacks by lead_id (one lead may have multiple records)
+      const missedCallbacks = Array.from(
+        new Map((r0.data || []).map((r: any) => [r.lead_id, {
+          id: r.lead_id, name: (r.leads as any)?.name || "", phone: (r.leads as any)?.phone || "",
+        }])).values()
+      ).filter((l: any) => l.phone);
       const postVisit = (r1.data || []).map((r: any) => ({ id: r.lead_id, name: r.lead_name, phone: r.lead_phone }));
       const visitConf = (r2.data || []).map((r: any) => ({ id: r.lead_id, name: (r.leads as any)?.name || "", phone: (r.leads as any)?.phone || "" })).filter((l: any) => l.phone);
       const overdue = (r3.data || []).map((r: any) => ({ id: r.lead_id, name: r.lead_name, phone: r.lead_phone }));
       const todayFu = (r4.data || []).map((r: any) => ({ id: r.lead_id, name: (r.leads as any)?.name || "", phone: (r.leads as any)?.phone || "" }));
       const newLeads = (r5.data || []).map((r: any) => ({ id: r.id, name: r.name, phone: r.phone }));
 
+      // Missed callbacks go FIRST — highest priority
+      if (missedCallbacks.length) buckets.push({ key: "missed", label: "Missed Callbacks", color: "bg-red-600", count: missedCallbacks.length });
+      add(missedCallbacks, "Missed Callback");
       add(postVisit, "Post-Visit");
       add(visitConf, "Visit Checkin");
       add(overdue, "Overdue");
@@ -775,12 +792,11 @@ export default function CloudDialer() {
   const formatTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
   const formatGap = (h: number) => h >= 24 ? `${Math.floor(h / 24)}d` : `${h}h`;
 
-  // ── Render ────────────────────────────────────────────────────────────────
-
-  if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
-
   // Pending missed-callback count — shows a priority banner so the
   // counsellor knows to clear yesterday's off-hours queue first.
+  // Must be declared BEFORE the `if (loading) return …` early return below;
+  // moving it after the early return makes React see a different hook count
+  // between renders → "Rendered more hooks than during the previous render".
   useEffect(() => {
     let cancelled = false;
     const fetchMissedCount = async () => {
@@ -798,6 +814,10 @@ export default function CloudDialer() {
     const id = setInterval(fetchMissedCount, 60_000);
     return () => { cancelled = true; clearInterval(id); };
   }, [role, profile?.id]);
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
 
   return (
     <div className="h-[calc(100vh-64px)] flex flex-col">

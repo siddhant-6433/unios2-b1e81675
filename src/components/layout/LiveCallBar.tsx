@@ -120,6 +120,17 @@ export function LiveCallBar() {
       const mapped: ActiveCall[] = activeRecords.map((r: any) => {
         const lead = leadMap[r.lead_id] || {};
         const callStatus = r.student_connected_at ? "connected" : r.disposition ? "disposing" : "calling";
+        // Display rule for the right-hand "handler" name in the bar:
+        //   - manual outbound: caller_user_id = the counsellor who clicked Cloud Call
+        //   - inbound to counsellor: caller_user_id = the counsellor whose phone is ringing
+        //   - inbound handled by AI (AI DID, off-hours, no counsellor, or fallback after no-answer):
+        //     caller_user_id is null → show "AI Agent"
+        const isInbound = (r.call_type || "manual") === "inbound";
+        const handlerName = r.caller_user_id
+          ? (profileMap[r.caller_user_id] || "Unknown")
+          : isInbound
+            ? "AI Agent"
+            : "Unknown";
         return {
           id: r.id,
           call_uuid: r.call_uuid,
@@ -127,7 +138,7 @@ export function LiveCallBar() {
           lead_name: lead.name || "Unknown",
           lead_phone: lead.phone || "",
           lead_stage: lead.stage || "",
-          counsellor_name: profileMap[r.caller_user_id] || "Unknown",
+          counsellor_name: handlerName,
           call_type: r.call_type || "manual",
           status: callStatus,
           student_connected_at: r.student_connected_at,

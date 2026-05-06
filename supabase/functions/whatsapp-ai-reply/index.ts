@@ -185,7 +185,22 @@ At the very end of every response, include this JSON:
 {"query_type": "admission" | "non_admission", "confidence": 0.0 to 1.0}
 - "admission": questions about courses, fees, eligibility, placements, campus, hostel, scholarships, application process
 - "non_admission": general queries, complaints, feedback, job inquiries, vendor queries, alumni requests
-- confidence: 1.0 = answered from knowledge base, 0.5 = inferred, 0.0 = couldn't answer`;
+- confidence: 1.0 = answered from knowledge base, 0.5 = inferred, 0.0 = couldn't answer
+
+COURSE NOT OFFERED — CRITICAL RULE:
+If a student asks about a course that NIMT does NOT offer (e.g. MBBS, BDS, Engineering B.Tech/BE, Architecture, Agriculture, Veterinary, Film, Fashion, Hotel Management, Mass Communication, CA, CS, etc.):
+1. Clearly state that we do not currently offer that specific course.
+2. Suggest 2-3 relevant NIMT courses that might interest them based on their background or goals.
+3. Ask if any of those alternatives interest them.
+NEVER pretend NIMT offers a course it does not.
+
+DISINTEREST / DNC DETECTION:
+If the student's message clearly indicates they are no longer interested in admission (e.g. "not interested", "don't call me", "stop messaging", "I've already joined elsewhere", "nahi chahiye", "mat contact karo", "already admitted somewhere else"):
+- Include at the END of your response (as a separate JSON line):
+  {"action": "mark_not_interested"}
+If they want to be completely removed from contact (e.g. "remove me", "block", "stop", "DNC", "do not contact"):
+  {"action": "mark_dnc"}
+Only include the action JSON when you are highly confident about the student's intent.`;
 
   return `You are an AI admissions assistant for NIMT Educational Institutions (National Institute of Management and Technology). You help prospective students and parents with questions about admissions, courses, fees, campus, eligibility and more.
 
@@ -369,13 +384,14 @@ Deno.serve(async (req) => {
     }
 
     // ── Parse all JSON blocks from AI response ────────────────────────────
-    // Match any JSON object in the response (extracted info, classification, etc.)
-    const jsonBlocks = rawReply.match(/\{[^{}]*"(?:extracted_name|extracted_course|query_type|confidence)"[^{}]*\}/g) || [];
+    // Match any JSON object in the response (extracted info, classification, action, etc.)
+    const jsonBlocks = rawReply.match(/\{[^{}]*"(?:extracted_name|extracted_course|query_type|confidence|action)"[^{}]*\}/g) || [];
 
     let extractedName: string | null = null;
     let extractedCourse: string | null = null;
     let queryType = "admission";
     let confidence = 0.5;
+    let botAction: string | null = null;
 
     for (const block of jsonBlocks) {
       try {
@@ -384,6 +400,7 @@ Deno.serve(async (req) => {
         if (parsed.extracted_course) extractedCourse = parsed.extracted_course.trim().slice(0, 100);
         if (parsed.query_type) queryType = parsed.query_type;
         if (parsed.confidence !== undefined) confidence = parsed.confidence;
+        if (parsed.action) botAction = parsed.action;
       } catch { /* ignore parse errors */ }
     }
 
@@ -404,8 +421,17 @@ Deno.serve(async (req) => {
 
     // Clean AI reply — remove ALL JSON blocks
     const aiReply = rawReply
-      .replace(/\{[^{}]*"(?:extracted_name|extracted_course|query_type|confidence)"[^{}]*\}/g, "")
+      .replace(/\{[^{}]*"(?:extracted_name|extracted_course|query_type|confidence|action)"[^{}]*\}/g, "")
       .trim();
+
+    // ── Act on bot-detected signals ──────────────────────────────────────────
+    if (leadId && botAction === "mark_not_interested") {
+      await admin.from("leads").update({ stage: "not_interested" }).eq("id", leadId);
+      console.log("Bot auto-marked not_interested:", leadId);
+    } else if (leadId && botAction === "mark_dnc") {
+      await admin.from("leads").update({ stage: "dnc" }).eq("id", leadId);
+      console.log("Bot auto-marked dnc:", leadId);
+    }
 
     // ── Route non-admission queries to profile_queries ──────────────────────
     if (queryType === "non_admission" && leadId) {
@@ -466,7 +492,7 @@ Deno.serve(async (req) => {
       template_key: "ai_auto_reply",
     });
 
-    return new Response(JSON.stringify({ success: true, reply: aiReply, query_type: queryType }), {
+    return new Response(JSON.stringify({ success: true, reply: aiReply, query_type: queryType, action: botAction }), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err: any) {

@@ -88,10 +88,10 @@ export function AiCallLogsPanel() {
     <div className="space-y-4">
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label="Total AI Calls" value={String(totalCalls)} icon={<Bot className="h-4 w-4" />} bg="bg-pastel-blue" />
-        <StatCard label="Connected" value={String(completedCalls)} icon={<PhoneCall className="h-4 w-4" />} bg="bg-pastel-green" />
-        <StatCard label="Total Duration" value={`${Math.floor(totalDuration / 60)}m ${totalDuration % 60}s`} icon={<Clock className="h-4 w-4" />} bg="bg-pastel-orange" />
-        <StatCard label="Total Cost" value={`$${totalCost.toFixed(3)}`} icon={<Phone className="h-4 w-4" />} bg="bg-pastel-purple" />
+        <StatCard label="Total AI Calls" value={String(totalCalls)} icon={<Bot className="h-[18px] w-[18px] text-blue-600" />} bg="bg-pastel-blue" />
+        <StatCard label="Connected" value={String(completedCalls)} icon={<PhoneCall className="h-[18px] w-[18px] text-emerald-600" />} bg="bg-pastel-green" />
+        <StatCard label="Total Duration" value={`${Math.floor(totalDuration / 60)}m ${totalDuration % 60}s`} icon={<Clock className="h-[18px] w-[18px] text-orange-600" />} bg="bg-pastel-orange" />
+        <StatCard label="Total Cost" value={`$${totalCost.toFixed(3)}`} icon={<Phone className="h-[18px] w-[18px] text-violet-600" />} bg="bg-pastel-purple" />
       </div>
 
       {/* Call logs table */}
@@ -209,16 +209,19 @@ export function AiCallLogsPanel() {
   );
 }
 
+// Reference-inspired stat-card shape (matches the Applications page row):
+// rounded-2xl shell, generous padding, larger tinted icon chip, hero-sized
+// value with tight tracking and the label tucked below.
 function StatCard({ label, value, icon, bg }: { label: string; value: string; icon: React.ReactNode; bg: string }) {
   return (
-    <Card className="border-border/60 shadow-none">
-      <CardContent className="p-4 flex items-center gap-3">
-        <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${bg}`}>
+    <Card className="rounded-2xl border-border/40 shadow-none transition-all hover:shadow-sm">
+      <CardContent className="p-4 flex items-center gap-3.5">
+        <div className={`flex h-10 w-10 items-center justify-center rounded-xl shrink-0 ${bg}`}>
           {icon}
         </div>
-        <div>
-          <p className="text-[11px] text-muted-foreground">{label}</p>
-          <p className="text-lg font-bold text-foreground">{value}</p>
+        <div className="min-w-0">
+          <p className="text-2xl font-bold text-foreground leading-none tracking-tight">{value}</p>
+          <p className="text-[11px] text-muted-foreground mt-1.5">{label}</p>
         </div>
       </CardContent>
     </Card>

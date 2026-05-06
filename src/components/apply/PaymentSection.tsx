@@ -71,6 +71,22 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
   const cashfreeRef = useRef<any>(null);
   const popupRef    = useRef<Window | null>(null);
   const pollRef     = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Tracks how long the popup has been open. Used to render a "bank still
+  // processing — safe to cancel after 90s" reassurance card so users on a
+  // slow gateway (looking at you, ICICI UAT) don't think the page is stuck.
+  const [popupStartedAt, setPopupStartedAt] = useState<number | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (popupStartedAt == null) return;
+    const t = setInterval(() => setElapsed(Math.floor((Date.now() - popupStartedAt) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, [popupStartedAt]);
+
+  const cancelPaymentPopup = () => {
+    try { popupRef.current?.close(); } catch { /* ignore */ }
+    // The existing pollRef detects popup.closed and runs the verify+reconcile
+    // path, so we don't need to duplicate the settle logic here.
+  };
 
   // Auto-select single gateway
   useEffect(() => {
@@ -115,6 +131,8 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
 
   const stopPolling = () => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    setPopupStartedAt(null);
+    setElapsed(0);
   };
 
   const checkAndUpdatePayment = async () => {
@@ -224,6 +242,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
       if (!popupRef.current) {
         throw new Error("Popup was blocked. Please allow popups for this site and try again.");
       }
+      setPopupStartedAt(Date.now());
 
       // Poll Supabase every 2s for payment confirmation
       pollRef.current = setInterval(async () => {
@@ -306,6 +325,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
       const { pay_url } = fnData;
       popupRef.current = window.open(pay_url, "icici_payment", "width=680,height=720,scrollbars=yes,resizable=yes");
       if (!popupRef.current) throw new Error("Popup was blocked. Please allow popups for this site and try again.");
+      setPopupStartedAt(Date.now());
 
       pollRef.current = setInterval(async () => {
         if (popupRef.current?.closed) {
@@ -451,10 +471,30 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
                 )}
               </Button>
 
-              {loading && (selectedGateway === "easebuzz" || selectedGateway === "icici") && (
-                <p className="text-xs text-muted-foreground">
-                  Complete payment in the popup window. Do not close this page.
-                </p>
+              {loading && popupStartedAt != null && (selectedGateway === "easebuzz" || selectedGateway === "icici") && (
+                <div className="rounded-xl border border-border bg-muted/30 p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground">Complete payment in the popup window.</span>
+                      {elapsed > 0 && <> · <span className="font-mono">{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</span></>}
+                    </p>
+                    {elapsed >= 90 && (
+                      <Button size="sm" variant="outline" onClick={cancelPaymentPopup} className="text-xs h-7 gap-1.5">
+                        Cancel & Retry
+                      </Button>
+                    )}
+                  </div>
+                  {elapsed >= 90 && (
+                    <p className="text-[11px] text-amber-700 leading-relaxed">
+                      Bank is taking longer than usual. If your payment was deducted it will reconcile automatically within 5 minutes — you can safely cancel and retry, or wait it out.
+                    </p>
+                  )}
+                  {elapsed < 90 && elapsed >= 30 && (
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">
+                      Bank gateways can take up to 90 seconds for the OTP/3DS step. Hold tight.
+                    </p>
+                  )}
+                </div>
               )}
 
               <p className="text-xs text-muted-foreground">Secured by {activeGatewayName}</p>

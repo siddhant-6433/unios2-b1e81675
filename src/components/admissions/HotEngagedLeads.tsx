@@ -111,39 +111,50 @@ export function HotEngagedLeads({ profileId, isSuperAdmin, isTeamLeader }: Props
   }, [fetch]);
 
   return (
-    <Card className="rounded-xl border border-orange-200 dark:border-orange-800/40 bg-gradient-to-br from-orange-50 to-amber-50 dark:from-orange-950/20 dark:to-amber-950/20 shadow-sm">
-      <div className="flex items-center gap-2 px-4 pt-4 pb-2">
-        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-orange-100 dark:bg-orange-900/30">
-          <Flame className="h-3.5 w-3.5 text-orange-500" />
+    // Softer card shell — warm cream surface with a hairline orange tint,
+    // matched to the rest of the dashboard's reference-inspired theme.
+    // The bright orange-to-amber gradient was dropped because it was the
+    // loudest element on the page; flame icons + engagement bar still
+    // carry the "hot" semantics where they're meaningful.
+    <Card className="rounded-2xl border-border/40 bg-card shadow-none transition-all hover:shadow-sm">
+      <div className="flex items-center gap-2.5 px-5 pt-4 pb-2">
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-orange-100 dark:bg-orange-900/30">
+          <Flame className="h-[18px] w-[18px] text-orange-500" />
         </div>
-        <h3 className="text-sm font-semibold text-orange-900 dark:text-orange-300">
-          Hot Leads &mdash; Recently Active
-        </h3>
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-foreground leading-tight">
+            Hot Leads
+          </h3>
+          <p className="text-[11px] text-muted-foreground leading-tight">
+            Recently active on website, chat or email
+          </p>
+        </div>
       </div>
 
-      <CardContent className="px-4 pb-4 pt-1">
+      <CardContent className="px-3 pb-3 pt-1">
         {loading ? (
           <div className="space-y-2">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-12 animate-pulse rounded-lg bg-orange-100/50 dark:bg-orange-900/10" />
+              <div key={i} className="h-14 animate-pulse rounded-xl bg-muted/60" />
             ))}
           </div>
         ) : leads.length === 0 ? (
-          <p className="py-4 text-center text-xs text-muted-foreground">
+          <p className="py-6 text-center text-xs text-muted-foreground">
             No recently active leads
           </p>
         ) : (
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             {leads.map((lead) => (
               <button
                 key={lead.id}
                 onClick={() => navigate(`/admissions/${lead.id}`)}
-                className="group flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-orange-100/60 dark:hover:bg-orange-900/20"
+                className="group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-muted/60"
               >
-                {/* Flame intensity */}
+                {/* Flame intensity — sole carrier of the "hot" identity now
+                    that the card surface itself is neutral. */}
                 <div className="relative flex-shrink-0">
                   <Flame
-                    className={`h-4 w-4 ${
+                    className={`h-[18px] w-[18px] ${
                       lead.engagement_score >= 80
                         ? "text-red-500"
                         : lead.engagement_score >= 50
@@ -156,13 +167,13 @@ export function HotEngagedLeads({ profileId, isSuperAdmin, isTeamLeader }: Props
                 {/* Name + course + activity tag */}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
-                    <span className="truncate text-sm font-medium text-foreground group-hover:underline">
+                    <span className="truncate text-sm font-semibold text-foreground group-hover:underline">
                       {lead.name}
                     </span>
                     {lead.course_name && (
                       <Badge
                         variant="secondary"
-                        className="flex-shrink-0 border-0 bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300 text-[9px] px-1.5 py-0"
+                        className="flex-shrink-0 border-0 bg-muted text-muted-foreground text-[9px] px-1.5 py-0 font-medium"
                       >
                         {lead.course_name}
                       </Badge>
@@ -183,14 +194,14 @@ export function HotEngagedLeads({ profileId, isSuperAdmin, isTeamLeader }: Props
                   <span className="text-[10px] tabular-nums text-muted-foreground">
                     {timeAgo(lead.last_engaged_at)}
                   </span>
-                  <div className="flex items-center gap-1">
-                    <div className="h-1.5 w-12 overflow-hidden rounded-full bg-orange-200/60 dark:bg-orange-900/30">
+                  <div className="flex items-center gap-1.5">
+                    <div className="h-1.5 w-14 overflow-hidden rounded-full bg-muted">
                       <div
                         className={`h-full rounded-full transition-all ${engagementColor(lead.engagement_score)}`}
                         style={{ width: `${Math.min(lead.engagement_score, 100)}%` }}
                       />
                     </div>
-                    <span className="text-[9px] tabular-nums font-medium text-muted-foreground">
+                    <span className="text-[10px] tabular-nums font-semibold text-foreground/80 w-5 text-right">
                       {lead.engagement_score}
                     </span>
                   </div>

@@ -6,7 +6,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { PhoneInput } from "@/components/ui/phone-input";
 import { ApplicationData } from "./types";
 import { validateDobEligibility, fetchEligibilityRules, EligibilityRule } from "./eligibilityRules";
-import { getNationalityOptions, isIndianNationality } from "./countries";
+import { getNationalityOptions, isIndianNationality, COUNTRIES } from "./countries";
+import { INDIAN_STATES } from "./indianStates";
 
 interface Props {
   data: ApplicationData;
@@ -99,6 +100,26 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
   };
   const hasMissing = Object.values(missing).some(Boolean);
 
+  // Human-readable labels keyed by predicate name. Used by the summary error
+  // banner so the user sees exactly which fields are still empty instead of
+  // a generic "fill all required fields" message.
+  const FIELD_LABELS: Record<keyof typeof missing, string> = {
+    full_name: "Full Name",
+    gender: "Gender",
+    dob: "Date of Birth",
+    nationality: "Nationality",
+    category: "Category",
+    email: data.email && !EMAIL_RE.test(data.email) ? "Email (invalid format)" : "Email",
+    line1: "Address Line",
+    city: "City",
+    state: "State",
+    country: "Country",
+    pin: isIndian ? "PIN Code (6 digits)" : "PIN / ZIP Code",
+  };
+  const missingLabels: string[] = (Object.keys(missing) as Array<keyof typeof missing>)
+    .filter(k => missing[k])
+    .map(k => FIELD_LABELS[k]);
+
   // Fetch DB-driven eligibility rules for age validation
   const [mergedRule, setMergedRule] = useState<EligibilityRule | undefined>(undefined);
 
@@ -130,12 +151,16 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
       <fieldset disabled={readOnly} className={readOnly ? "pointer-events-none opacity-75" : ""}>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Full Name <span className="text-destructive">*</span></label>
+          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.full_name ? 'text-destructive' : 'text-muted-foreground'}`}>
+            Full Name <span className="text-destructive">*</span>
+          </label>
           <input value={data.full_name} onChange={e => onChange({ full_name: e.target.value })}
             className={`${inputCls} ${showErrors && missing.full_name ? 'border-destructive' : ''}`} />
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Gender <span className="text-destructive">*</span></label>
+          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.gender ? 'text-destructive' : 'text-muted-foreground'}`}>
+            Gender <span className="text-destructive">*</span>
+          </label>
           <select value={data.gender} onChange={e => onChange({ gender: e.target.value })}
             className={`${inputCls} ${showErrors && missing.gender ? 'border-destructive' : ''}`}>
             <option value="">Select</option>
@@ -145,7 +170,7 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
           </select>
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.dob ? 'text-destructive' : 'text-muted-foreground'}`}>
             Date of Birth <span className="text-destructive">*</span>
           </label>
           <DobPicker value={data.dob} onChange={v => onChange({ dob: v })} disabled={readOnly} />
@@ -160,7 +185,9 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
           )}
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nationality <span className="text-destructive">*</span></label>
+          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.nationality ? 'text-destructive' : 'text-muted-foreground'}`}>
+            Nationality <span className="text-destructive">*</span>
+          </label>
           <select
             value={data.nationality || 'Indian'}
             onChange={e => {
@@ -180,7 +207,9 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
           </select>
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Category <span className="text-destructive">*</span></label>
+          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.category ? 'text-destructive' : 'text-muted-foreground'}`}>
+            Category <span className="text-destructive">*</span>
+          </label>
           <select value={data.category} onChange={e => onChange({ category: e.target.value })}
             className={`${inputCls} ${showErrors && missing.category ? 'border-destructive' : ''}`}>
             <option value="">Select</option>
@@ -218,7 +247,9 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
           <PhoneInput value={data.phone} onChange={() => {}} disabled />
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email <span className="text-destructive">*</span></label>
+          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.email ? 'text-destructive' : 'text-muted-foreground'}`}>
+            Email <span className="text-destructive">*</span>
+          </label>
           <input type="email" value={data.email} onChange={e => onChange({ email: e.target.value })}
             className={`${inputCls} ${showErrors && missing.email ? 'border-destructive' : ''}`} />
           {showErrors && missing.email && (
@@ -245,27 +276,64 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
       <h3 className="text-sm font-semibold text-foreground mt-2">Address <span className="text-destructive">*</span></h3>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="sm:col-span-2">
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Address Line <span className="text-destructive">*</span></label>
+          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.line1 ? 'text-destructive' : 'text-muted-foreground'}`}>
+            Address Line <span className="text-destructive">*</span>
+          </label>
           <input value={address.line1 || ''} onChange={e => onChange({ address: { ...address, line1: e.target.value } })}
             className={`${inputCls} ${showErrors && missing.line1 ? 'border-destructive' : ''}`} />
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">City <span className="text-destructive">*</span></label>
+          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.city ? 'text-destructive' : 'text-muted-foreground'}`}>
+            City <span className="text-destructive">*</span>
+          </label>
           <input value={address.city || ''} onChange={e => onChange({ address: { ...address, city: e.target.value } })}
             className={`${inputCls} ${showErrors && missing.city ? 'border-destructive' : ''}`} />
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">State <span className="text-destructive">*</span></label>
-          <input value={address.state || ''} onChange={e => onChange({ address: { ...address, state: e.target.value } })}
-            className={`${inputCls} ${showErrors && missing.state ? 'border-destructive' : ''}`} />
+          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.state ? 'text-destructive' : 'text-muted-foreground'}`}>
+            State <span className="text-destructive">*</span>
+          </label>
+          {/* When country is India, restrict to the canonical 28+8 list. Falls back
+              to a free-text input for other countries since province/state names
+              vary widely. */}
+          {(address.country || 'India') === 'India' ? (
+            <select
+              value={address.state || ''}
+              onChange={e => onChange({ address: { ...address, state: e.target.value } })}
+              className={`${inputCls} ${showErrors && missing.state ? 'border-destructive' : ''}`}
+            >
+              <option value="">Select state</option>
+              {INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          ) : (
+            <input
+              value={address.state || ''}
+              onChange={e => onChange({ address: { ...address, state: e.target.value } })}
+              placeholder="State / Province / Region"
+              className={`${inputCls} ${showErrors && missing.state ? 'border-destructive' : ''}`}
+            />
+          )}
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Country <span className="text-destructive">*</span></label>
-          <input value={address.country || 'India'} onChange={e => onChange({ address: { ...address, country: e.target.value } })}
-            className={`${inputCls} ${showErrors && missing.country ? 'border-destructive' : ''}`} />
+          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.country ? 'text-destructive' : 'text-muted-foreground'}`}>
+            Country <span className="text-destructive">*</span>
+          </label>
+          <select
+            value={address.country || 'India'}
+            onChange={e => {
+              const newCountry = e.target.value;
+              // Reset state when switching country since the state list changes.
+              onChange({ address: { ...address, country: newCountry, state: newCountry === address.country ? address.state : '' } });
+            }}
+            className={`${inputCls} ${showErrors && missing.country ? 'border-destructive' : ''}`}
+          >
+            {COUNTRIES.map(c => <option key={c.name} value={c.name}>{c.flag} {c.name}</option>)}
+          </select>
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">PIN Code <span className="text-destructive">*</span></label>
+          <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.pin ? 'text-destructive' : 'text-muted-foreground'}`}>
+            PIN Code <span className="text-destructive">*</span>
+          </label>
           <input value={address.pin_code || ''} onChange={e => onChange({ address: { ...address, pin_code: e.target.value.replace(/\D/g, '').slice(0, 6) } })}
             className={`${inputCls} ${showErrors && missing.pin ? 'border-destructive' : ''}`} />
           {showErrors && missing.pin && isIndian && (
@@ -277,9 +345,16 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
       {showErrors && hasMissing && (
         <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20 flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
-          <p className="text-xs text-destructive font-medium">
-            Please fill all required fields marked with <span className="font-bold">*</span> before continuing.
-          </p>
+          <div className="text-xs text-destructive font-medium space-y-1">
+            <p>
+              {missingLabels.length === 1
+                ? "Please fill this required field:"
+                : `Please fill these ${missingLabels.length} required fields:`}
+            </p>
+            <ul className="list-disc pl-4 font-normal text-destructive/90">
+              {missingLabels.map(l => <li key={l}>{l}</li>)}
+            </ul>
+          </div>
         </div>
       )}
 

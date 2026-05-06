@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import {
   MessageSquare, Search, Send, Loader2, User, Clock, ExternalLink, ArrowLeft,
   FileDown, AlertTriangle, LayoutTemplate, X, Check, ChevronDown, Zap, Ban, Settings,
+  ThumbsDown, AlertOctagon, ThumbsUp, CalendarPlus, Bot, Cpu,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -211,6 +212,12 @@ const WhatsAppInbox = () => {
   const [unrepliedOnly, setUnrepliedOnly] = useState(false);
   const [unrepliedByCC, setUnrepliedByCC] = useState<{ id: string; name: string; count: number }[]>([]);
   const [unrepliedPanelOpen, setUnrepliedPanelOpen] = useState(true);
+
+  // Quick-action followup dialog
+  const [followupOpen, setFollowupOpen] = useState(false);
+  const [followupDate, setFollowupDate] = useState("");
+  const [followupNote, setFollowupNote] = useState("");
+  const [followupSaving, setFollowupSaving] = useState(false);
 
   // Backfill dialog state
   const [backfillOpen, setBackfillOpen] = useState(false);
@@ -653,6 +660,40 @@ const WhatsAppInbox = () => {
 
   const selectedConv = conversations.find(c => c.phone === selectedPhone);
 
+  const STAGE_WA_MESSAGES: Record<string, string> = {
+    not_interested:
+      "Thank you for your time! 😊 We understand you're not interested at the moment. Should you change your mind in the future, we'd love to help. Best wishes from Team NIMT! 🎓",
+    ineligible:
+      "Thank you for your interest in NIMT. Based on the details shared, you may not currently meet the eligibility criteria for your preferred programme. However, we offer many other courses that might be a great fit — feel free to reach out anytime. Best wishes! 😊",
+    new_lead:
+      "Great to hear from you! 🎉 Our counsellor will connect with you shortly to guide you through the admission process. You can also apply online at https://uni.nimt.ac.in/apply/nimt or call us at 📞 +91 9555192192.",
+  };
+
+  const markLeadStage = async (leadId: string, stage: string) => {
+    await supabase.from("leads").update({ stage: stage as any }).eq("id", leadId);
+    setConversations(prev => prev.map(c => c.lead_id === leadId ? { ...c, lead_stage: stage } : c));
+
+    const message = STAGE_WA_MESSAGES[stage];
+    if (!message || !selectedPhone) {
+      toast({ title: "Stage updated" });
+      return;
+    }
+
+    const { data: replyData, error: replyErr } = await supabase.functions.invoke("whatsapp-reply", {
+      body: { phone: selectedPhone, message, lead_id: leadId },
+    });
+
+    if (replyErr || replyData?.error) {
+      toast({
+        title: "Stage updated",
+        description: `WhatsApp send failed: ${replyData?.error || replyErr?.message || "unknown error"}`,
+        variant: "destructive",
+      });
+    } else {
+      toast({ title: "Stage updated", description: "WhatsApp notification sent." });
+    }
+  };
+
   // Resolve display name: lead name > staff name > phone
   // Course name → short acronym: "Bachelor of Business Administration (BBA)" → "BBA"
   const courseAcronym = (name: string | null) => {
@@ -1020,27 +1061,78 @@ const WhatsAppInbox = () => {
                       View Lead <ExternalLink className="h-3 w-3" />
                     </Button>
                   )}
-                  {selectedConv?.lead_id && (
+                  {selectedConv?.lead_id && selectedConv?.lead_stage !== "dnc" && (
                     <Button
                       variant="ghost" size="sm"
                       className="gap-1 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
                       onClick={async () => {
                         if (!selectedConv?.lead_id) return;
-                        await supabase.from("leads").update({ stage: "dnc" as any }).eq("id", selectedConv.lead_id);
-                        await supabase.functions.invoke("whatsapp-reply", {
+                        // Mark DNC first; then send the farewell with bypass_dnc
+                        // so the edge function's own DNC guard doesn't swallow it.
+                        const dncLeadId = selectedConv.lead_id;
+                        await supabase.from("leads").update({ stage: "dnc" as any }).eq("id", dncLeadId);
+                        const { data: replyData, error: replyErr } = await supabase.functions.invoke("whatsapp-reply", {
                           body: {
                             phone: selectedPhone,
                             message: "You have been added to our Do Not Contact list. We will not reach out to you via call or WhatsApp going forward. If this was a mistake, please reply START or call us at +91 9555192192.",
-                            lead_id: selectedConv.lead_id,
+                            lead_id: dncLeadId,
+                            bypass_dnc: true,
                           },
                         });
-                        toast({ title: "Lead marked DNC", description: "DNC notification sent via WhatsApp." });
+                        // Reflect new DNC status locally so composer disables immediately
+                        // without waiting for a view refetch.
+                        setConversations(prev => prev.map(c =>
+                          c.lead_id === dncLeadId ? { ...c, lead_stage: "dnc" } : c
+                        ));
+                        if (replyErr || replyData?.error) {
+                          toast({
+                            title: "Lead marked DNC",
+                            description: `Marked, but farewell send failed: ${replyData?.error || replyErr?.message || "unknown error"}`,
+                            variant: "destructive",
+                          });
+                        } else {
+                          toast({ title: "Lead marked DNC", description: "DNC notification sent via WhatsApp." });
+                        }
                       }}
                     >
                       <Ban className="h-3 w-3" /> Mark DNC
                     </Button>
                   )}
+                  {selectedConv?.lead_id && selectedConv?.lead_stage === "dnc" && (
+                    <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 px-2 py-1 rounded-md">
+                      <Ban className="h-3 w-3" /> DNC
+                    </span>
+                  )}
                 </div>
+                {/* Quick lead actions — only for lead conversations */}
+                {selectedConv?.lead_id && selectedConv?.lead_person_role !== "job_applicant" && selectedConv?.lead_person_role !== "vendor" && (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border bg-amber-50/40 dark:bg-amber-950/10 flex-wrap">
+                    <span className="text-[9px] text-muted-foreground mr-0.5 shrink-0">Quick:</span>
+                    {selectedConv?.lead_stage !== "not_interested" && (
+                      <button
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-red-200 bg-red-50 text-red-700 text-[10px] font-medium hover:bg-red-100 transition-colors"
+                        onClick={() => selectedConv?.lead_id && markLeadStage(selectedConv.lead_id, "not_interested")}
+                      ><ThumbsDown className="h-3 w-3" /> Not Interested</button>
+                    )}
+                    {selectedConv?.lead_stage !== "ineligible" && (
+                      <button
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-orange-200 bg-orange-50 text-orange-700 text-[10px] font-medium hover:bg-orange-100 transition-colors"
+                        onClick={() => selectedConv?.lead_id && markLeadStage(selectedConv.lead_id, "ineligible")}
+                      ><AlertOctagon className="h-3 w-3" /> Ineligible</button>
+                    )}
+                    {selectedConv?.lead_stage !== "new_lead" && selectedConv?.lead_stage !== "application_in_progress" && (
+                      <button
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-green-200 bg-green-50 text-green-700 text-[10px] font-medium hover:bg-green-100 transition-colors"
+                        onClick={() => selectedConv?.lead_id && markLeadStage(selectedConv.lead_id, "new_lead")}
+                      ><ThumbsUp className="h-3 w-3" /> Interested</button>
+                    )}
+                    <button
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-blue-200 bg-blue-50 text-blue-700 text-[10px] font-medium hover:bg-blue-100 transition-colors"
+                      onClick={() => { setFollowupDate(""); setFollowupNote(""); setFollowupOpen(true); }}
+                    ><CalendarPlus className="h-3 w-3" /> Create Followup</button>
+                  </div>
+                )}
+
                 {/* Category bar — visible for all conversations */}
                 <div className="flex items-center gap-1 px-3 py-1 border-b border-border bg-muted/20">
                   <span className="text-[9px] text-muted-foreground mr-1 shrink-0">Mark as:</span>
@@ -1163,6 +1255,17 @@ const WhatsAppInbox = () => {
                           <p className="text-sm whitespace-pre-wrap">{(m.content || `[${m.message_type}]`).replace(/\\n/g, "\n")}</p>
                         )}
                         <div className="flex items-center justify-end gap-1 mt-0.5">
+                          {m.direction === "outbound" && (() => {
+                            if (m.template_key === "ai_auto_reply") return (
+                              <span className="inline-flex items-center gap-0.5 text-[8px] opacity-50"><Bot className="h-2.5 w-2.5" /> Bot</span>
+                            );
+                            if (m.template_key) return (
+                              <span className="inline-flex items-center gap-0.5 text-[8px] opacity-50"><Cpu className="h-2.5 w-2.5" /> Auto</span>
+                            );
+                            return (
+                              <span className="text-[8px] opacity-40">Counsellor</span>
+                            );
+                          })()}
                           <span className="text-[9px] opacity-60">
                             {new Date(m.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}
                           </span>
@@ -1178,8 +1281,9 @@ const WhatsAppInbox = () => {
                   <div ref={messagesEndRef} />
                 </div>
 
-                {/* Template picker panel */}
-                {showTemplatePicker && (
+                {/* Template picker panel — hidden for DNC leads (composer
+                    section below renders the DNC banner instead) */}
+                {showTemplatePicker && selectedConv?.lead_stage !== "dnc" && (
                   <div className="border-t border-border bg-muted/30">
                     <div className="flex items-center justify-between px-4 py-2 border-b border-border/40">
                       <p className="text-xs font-semibold text-foreground">Send Template Message</p>
@@ -1240,8 +1344,8 @@ const WhatsAppInbox = () => {
                   </div>
                 )}
 
-                {/* Quick replies panel */}
-                {showQuickReplies && (
+                {/* Quick replies panel — hidden for DNC leads */}
+                {showQuickReplies && selectedConv?.lead_stage !== "dnc" && (
                   <div className="border-t border-border bg-muted/20 px-4 py-2">
                     <div className="flex items-center justify-between mb-2">
                       <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Quick Replies</p>
@@ -1267,6 +1371,24 @@ const WhatsAppInbox = () => {
                 {(() => {
                   const lastInbound = [...messages].reverse().find(m => m.direction === "inbound");
                   const withinWindow = lastInbound && (Date.now() - new Date(lastInbound.created_at).getTime()) < 24 * 60 * 60 * 1000;
+                  const isDnc = selectedConv?.lead_stage === "dnc";
+
+                  // DNC takes precedence over the 24h window — no messages of
+                  // any kind (free-form OR template) can go to a DNC lead.
+                  if (isDnc) {
+                    return (
+                      <div className="px-4 py-3 border-t border-border">
+                        <div className="flex items-start gap-2 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 px-3 py-2.5">
+                          <Ban className="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
+                          <div className="text-xs text-red-800 dark:text-red-300">
+                            <strong>This lead is on the Do Not Contact list.</strong>
+                            <p className="mt-0.5">No further messages can be sent — neither free-form replies nor templates. To resume contact, change the lead's stage from DNC.</p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+
                   return (
                     <div className="px-4 py-3 border-t border-border">
                       {!withinWindow && !showTemplatePicker && (
@@ -1325,6 +1447,66 @@ const WhatsAppInbox = () => {
           </div>
         </div>
       </Card>
+
+      {/* Create Followup dialog */}
+      <Dialog open={followupOpen} onOpenChange={setFollowupOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CalendarPlus className="h-4 w-4" /> Schedule Followup
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-foreground">Date &amp; Time</label>
+              <input
+                type="datetime-local"
+                value={followupDate}
+                onChange={e => setFollowupDate(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-foreground">Note (optional)</label>
+              <textarea
+                value={followupNote}
+                onChange={e => setFollowupNote(e.target.value)}
+                rows={2}
+                placeholder="e.g. Interested in MBA, wants fee details"
+                className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm resize-none"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setFollowupOpen(false)} disabled={followupSaving}>Cancel</Button>
+            <Button
+              disabled={!followupDate || followupSaving}
+              onClick={async () => {
+                if (!selectedConv?.lead_id || !followupDate) return;
+                setFollowupSaving(true);
+                try {
+                  await supabase.from("lead_followups" as any).insert({
+                    lead_id: selectedConv.lead_id,
+                    scheduled_at: new Date(followupDate).toISOString(),
+                    type: "whatsapp",
+                    notes: followupNote || "WhatsApp followup",
+                    status: "pending",
+                    assigned_to: selectedConv.counsellor_id || null,
+                  });
+                  toast({ title: "Followup scheduled", description: new Date(followupDate).toLocaleString("en-IN") });
+                  setFollowupOpen(false);
+                } catch (e: any) {
+                  toast({ title: "Couldn't save followup", description: e.message, variant: "destructive" });
+                } finally {
+                  setFollowupSaving(false);
+                }
+              }}
+            >
+              {followupSaving && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Inbox backfill dialog */}
       <Dialog open={backfillOpen} onOpenChange={setBackfillOpen}>

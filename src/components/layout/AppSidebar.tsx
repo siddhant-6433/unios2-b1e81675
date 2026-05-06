@@ -157,6 +157,8 @@ export function AppSidebar() {
   const [tatDefaults, setTatDefaults] = useState(0);
   // Pending followups count for sidebar badge
   const [pendingFollowupCount, setPendingFollowupCount] = useState(0);
+  // Missed callbacks count (ai_call_records needing followup)
+  const [missedCallbackCount, setMissedCallbackCount] = useState(0);
 
   const fetchNewLeadCount = () => {
     let query = supabase
@@ -224,6 +226,19 @@ export function AppSidebar() {
       setPendingFollowupCount(count || 0);
     })();
 
+    // Fetch missed callback count (AI inbound calls with needs_followup=true)
+    (async () => {
+      let q = (supabase.from("ai_call_records" as any) as any)
+        .select("id, leads!inner(counsellor_id)", { count: "exact", head: true })
+        .eq("needs_followup", true)
+        .is("followup_done_at", null);
+      if (role === "counsellor" && profile?.id) {
+        q = q.eq("leads.counsellor_id", profile.id);
+      }
+      const { count } = await q;
+      setMissedCallbackCount(count || 0);
+    })();
+
     // Realtime-driven refresh, debounced so a burst of messages doesn't
     // hammer the DB. Uses direct count (see fetchUnreplied above) instead of
     // the slow whatsapp_conversations view.
@@ -286,6 +301,7 @@ export function AppSidebar() {
     if (item.url === "/admissions" && newLeadCount > 0) return { ...item, badge: newLeadCount };
     if (item.url === "/counsellor-dashboard" && tatDefaults > 0) return { ...item, badge: tatDefaults };
     if (item.url === "/pending-followups" && pendingFollowupCount > 0) return { ...item, badge: pendingFollowupCount };
+    if (item.url === "/missed-calls" && missedCallbackCount > 0) return { ...item, badge: missedCallbackCount };
     return item;
   }
   );
@@ -299,9 +315,12 @@ export function AppSidebar() {
   // IB Academics only shows when Mirai campus is selected (or "all" for super_admin)
   const isMiraiContext = selectedCampusId === "all" || campuses.find(c => c.id === selectedCampusId)?.name?.toLowerCase().includes("mirai");
 
-  const linkClass = "gap-3 rounded-lg px-3 py-2 text-[13px] font-medium text-sidebar-foreground/70 transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
-  const activeClass = "!bg-sidebar-accent !text-sidebar-accent-foreground font-semibold";
-  const subLinkClass = "gap-2.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium text-sidebar-foreground/70 transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
+  // Reference-inspired sidebar items: soft hover background, active item
+  // becomes a white pill with a subtle shadow that pops against the tinted
+  // sidebar canvas. No DOM/structure change — just className tuning.
+  const linkClass = "gap-3 rounded-xl px-3 py-2 text-[13px] font-medium text-sidebar-foreground/70 transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
+  const activeClass = "!bg-card !text-foreground font-semibold ring-1 ring-sidebar-border shadow-[0_1px_2px_hsl(220_13%_46%/0.08)]";
+  const subLinkClass = "gap-2.5 rounded-xl px-3 py-1.5 text-[12.5px] font-medium text-sidebar-foreground/70 transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
@@ -391,7 +410,9 @@ export function AppSidebar() {
                                 <span className="flex-1">{item.title}</span>
                                 {item.badge ? (
                                   <span className={`flex h-[18px] min-w-[18px] items-center justify-center rounded-full text-[9px] font-bold text-white px-1 ${
-                                    item.url === "/whatsapp-inbox" ? "bg-green-500" : "bg-primary"
+                                    item.url === "/whatsapp-inbox" ? "bg-green-500"
+                                    : item.url === "/missed-calls" ? "bg-red-500"
+                                    : "bg-primary"
                                   }`}>
                                     {item.badge > 99 ? "99+" : item.badge}
                                   </span>

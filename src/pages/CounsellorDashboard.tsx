@@ -956,16 +956,19 @@ const CounsellorDashboard = () => {
         <p className="text-sm text-muted-foreground mt-1">Team activity, conversions & overdue follow-ups</p>
       </div>
 
-      {/* Summary cards */}
+      {/* Summary cards — reference-inspired stat-card shape (rounded-2xl,
+          softer border, larger tinted icon chip, hero number with tight
+          tracking). Vertical layout preserved because 6-up packs better
+          this way. */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {summaryCards.map((card) => (
-          <Card key={card.label} className="border-border/60 shadow-none">
+          <Card key={card.label} className="rounded-2xl border-border/40 shadow-none transition-all hover:shadow-sm">
             <CardContent className="p-4">
-              <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${card.color} mb-2`}>
-                <card.icon className={`h-4 w-4 ${card.iconColor}`} />
+              <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${card.color} mb-3`}>
+                <card.icon className={`h-[18px] w-[18px] ${card.iconColor}`} />
               </div>
-              <p className="text-2xl font-bold text-foreground">{card.value}</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">{card.label}</p>
+              <p className="text-2xl font-bold text-foreground leading-none tracking-tight">{card.value}</p>
+              <p className="text-[11px] text-muted-foreground mt-1.5">{card.label}</p>
             </CardContent>
           </Card>
         ))}
@@ -1207,13 +1210,13 @@ const CounsellorDashboard = () => {
               { label: "Not Called", value: breakdownTotals.not_called, icon: PhoneOff, color: breakdownTotals.not_called > 0 ? "bg-red-100 dark:bg-red-900/30" : "bg-muted", iconColor: breakdownTotals.not_called > 0 ? "text-red-600" : "text-muted-foreground" },
               { label: "Admitted", value: breakdownTotals.admitted, icon: UserCheck, color: "bg-emerald-100 dark:bg-emerald-900/30", iconColor: "text-emerald-600" },
             ].map((c) => (
-              <Card key={c.label} className="border-border/60 shadow-none">
-                <CardContent className="p-3">
-                  <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${c.color} mb-1.5`}>
-                    <c.icon className={`h-3.5 w-3.5 ${c.iconColor}`} />
+              <Card key={c.label} className="rounded-2xl border-border/40 shadow-none transition-all hover:shadow-sm">
+                <CardContent className="p-4">
+                  <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${c.color} mb-3`}>
+                    <c.icon className={`h-[18px] w-[18px] ${c.iconColor}`} />
                   </div>
-                  <p className="text-xl font-bold text-foreground">{c.value}</p>
-                  <p className="text-[10px] text-muted-foreground">{c.label}</p>
+                  <p className="text-2xl font-bold text-foreground leading-none tracking-tight">{c.value}</p>
+                  <p className="text-[11px] text-muted-foreground mt-1.5">{c.label}</p>
                 </CardContent>
               </Card>
             ))}

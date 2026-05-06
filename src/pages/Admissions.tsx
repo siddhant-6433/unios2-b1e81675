@@ -701,8 +701,8 @@ const Admissions = () => {
         </div>
         <div className="flex items-center gap-3">
           {role === "counsellor" && <CounsellorScoreBadge />}
-          <Button variant="outline" onClick={() => setShowBulkImport(true)} className="gap-2"><Upload className="h-4 w-4" />Import CSV</Button>
-          <Button onClick={() => { setResumeDraftId(undefined); setShowAddLead(true); }} className="gap-2"><Plus className="h-4 w-4" />Add Lead</Button>
+          <Button variant="pill-outline" size="pill" onClick={() => setShowBulkImport(true)} className="gap-2"><Upload className="h-4 w-4" />Import CSV</Button>
+          <Button variant="pill" size="pill" onClick={() => { setResumeDraftId(undefined); setShowAddLead(true); }} className="gap-2"><Plus className="h-4 w-4" />Add Lead</Button>
         </div>
       </div>
 
@@ -769,7 +769,7 @@ const Admissions = () => {
           return (
             <Card
               key={stat.label}
-              className={`border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer ${isActive ? "ring-2 ring-primary/40 bg-primary/5" : ""}`}
+              className={`rounded-2xl border-border/40 shadow-none hover:shadow-sm transition-all cursor-pointer ${isActive ? "ring-2 ring-primary/40 bg-primary/5" : ""}`}
               onClick={async () => {
                 if (stat.action === "followups") {
                   if (followupLeadIds) { setFollowupLeadIds(null); setPage(1); return; }
@@ -828,15 +828,15 @@ const Admissions = () => {
                 }
               }}
             >
-              <CardContent className="p-3">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <div className={`flex h-6 w-6 items-center justify-center rounded-md ${stat.iconBg} shrink-0`}>
-                    <stat.icon className="h-3.5 w-3.5 text-foreground/70" />
+              <CardContent className="p-3.5">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <div className={`flex h-7 w-7 items-center justify-center rounded-lg ${stat.iconBg} shrink-0`}>
+                    <stat.icon className="h-[15px] w-[15px] text-foreground/70" />
                   </div>
                   <span className="text-[10px] font-semibold text-muted-foreground truncate leading-tight">{stat.label}</span>
                 </div>
-                <p className="text-xl font-bold text-foreground">{stat.value}</p>
-                <p className="text-[10px] text-primary font-medium truncate">{stat.sub}</p>
+                <p className="text-xl font-bold text-foreground leading-none tracking-tight">{stat.value}</p>
+                <p className="text-[10px] text-primary font-medium truncate mt-1">{stat.sub}</p>
               </CardContent>
             </Card>
           );

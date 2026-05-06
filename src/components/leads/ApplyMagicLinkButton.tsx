@@ -111,15 +111,45 @@ export function ApplyMagicLinkButton({ leadId, leadName, leadPhone, compact = fa
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const sendWhatsApp = () => {
+  const [sendingWa, setSendingWa] = useState(false);
+
+  const sendWhatsApp = async () => {
     if (!generated || !leadPhone) return;
-    const expiry = new Date(generated.expiresAt).toLocaleString("en-IN", {
-      day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true,
-    });
-    const message = `Hi ${leadName || "there"}, here is your secure login link for the NIMT application portal. You can complete your application and pay the token fee directly:\n\n${generated.url}\n\nThis link is valid until ${expiry}.`;
-    const phoneDigits = leadPhone.replace(/\D/g, "");
-    const url = `https://wa.me/${phoneDigits}?text=${encodeURIComponent(message)}`;
-    window.open(url, "_blank");
+    setSendingWa(true);
+    try {
+      const expiry = new Date(generated.expiresAt).toLocaleString("en-IN", {
+        day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true,
+      });
+      // Extract the token from the magic-link URL — the apply_portal_login
+      // template's URL button has a fixed prefix (https://uni.nimt.ac.in/apply?token=)
+      // and takes the token as its dynamic suffix.
+      const tokenMatch = generated.url.match(/[?&]token=([^&]+)/);
+      const token = tokenMatch?.[1];
+      if (!token) {
+        toast({ title: "Couldn't parse token from link", variant: "destructive" });
+        return;
+      }
+      const { data, error } = await supabase.functions.invoke("whatsapp-send", {
+        body: {
+          template_key: "apply_portal_login",
+          phone: leadPhone,
+          params: [leadName || "there", expiry],
+          button_urls: [token],
+          lead_id: leadId,
+        },
+      });
+      if (error) throw new Error(await extractFnError(error));
+      if (data?.error) throw new Error(data.error);
+      toast({ title: "Apply link sent on WhatsApp", description: `Delivered to ${leadPhone}.` });
+    } catch (err: any) {
+      toast({
+        title: "Couldn't send via WhatsApp",
+        description: err.message || "Template may still be pending Meta approval — try again in a few minutes.",
+        variant: "destructive",
+      });
+    } finally {
+      setSendingWa(false);
+    }
   };
 
   const reset = () => {
@@ -229,10 +259,12 @@ export function ApplyMagicLinkButton({ leadId, leadName, leadPhone, compact = fa
               </div>
 
               <div className="grid grid-cols-2 gap-2">
-                <Button variant="outline" onClick={copy}>
+                <Button variant="pill-outline" size="pill" onClick={copy}>
                   {copied ? <><Check className="h-4 w-4" /> Copied</> : <><Copy className="h-4 w-4" /> Copy</>}
                 </Button>
-                <Button onClick={sendWhatsApp} className="bg-green-600 hover:bg-green-700">
+                {/* WhatsApp brand green is preserved by overriding bg/hover via
+                    className while keeping the pill shape from variant="pill". */}
+                <Button variant="pill" size="pill" onClick={sendWhatsApp} className="bg-green-600 hover:bg-green-700">
                   <MessageCircle className="h-4 w-4" /> Send via WhatsApp
                 </Button>
               </div>

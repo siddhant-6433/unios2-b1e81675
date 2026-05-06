@@ -423,18 +423,32 @@ Deno.serve(async (req) => {
       console.log(`[${FN_NAME}] initiate-lead-payment response:`, JSON.stringify(data));
 
       if (data.responseCode !== "R1000" || !data.redirectURI || !data.tranCtx) {
-        // Roll back the pending row so we don't leak intent rows.
-        await admin.from("lead_payments").delete().eq("id", lp.id);
+        // Mark the row as failed instead of deleting it. Keeping the row gives
+        // us an audit trail of every initiate attempt — useful for support
+        // ("did the user even try?") and for spotting MID/key issues that
+        // produce repeated failures. The reconciliation cron is safe to skip
+        // these (status='failed' is terminal).
         const desc = bestDescription(data);
         const code = data.responseCode || data.respCode;
         const errorMsg = desc
           ? `${desc}${code ? ` (${code})` : ""}`
           : `ICICI rejected the request${code ? ` (${code})` : ""}`;
+        await admin.from("lead_payments").update({
+          status: "failed",
+          transaction_ref: txnid,
+          notes: `ICICI initiate failed: ${errorMsg.slice(0, 400)}`,
+        } as any).eq("id", lp.id);
         return new Response(
           JSON.stringify({ error: errorMsg, raw: data }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
+      // Initiate succeeded — record the txnid on the row so reconciliation can
+      // re-query ICICI for this exact transaction later if the user never
+      // returns from the gateway.
+      await admin.from("lead_payments")
+        .update({ transaction_ref: txnid } as any)
+        .eq("id", lp.id);
       const payUrl = `${data.redirectURI}?tranCtx=${encodeURIComponent(data.tranCtx)}`;
       return new Response(JSON.stringify({ txnid, lead_payment_id: lp.id, pay_url: payUrl, tranCtx: data.tranCtx }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -523,6 +537,87 @@ Deno.serve(async (req) => {
       const { ok, data, raw } = await commandRequest(payload);
       return new Response(JSON.stringify({ raw: data, raw_text: ok ? undefined : raw }),
         { status: ok ? 200 : 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // ── Reconcile pending rows ───────────────────────────────────────────
+    // Cron-triggered. Sweeps lead_payments rows that have been stuck in
+    // 'pending' for >10 min — happens when the user closes the popup before
+    // ICICI's callback fires, when the network drops mid-redirect, or when
+    // ICICI's UAT just times out. For each stale row we ask ICICI's STATUS
+    // endpoint for the truth, then settle to confirmed / failed locally.
+    // Idempotent: re-running on already-settled rows is a no-op.
+    if (action === "reconcile-pending") {
+      const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+      const olderThan = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      const { data: stale, error: qErr } = await admin
+        .from("lead_payments")
+        .select("id, transaction_ref, lead_id, type, amount, created_at")
+        .eq("gateway", "icici")
+        .eq("status", "pending")
+        .not("transaction_ref", "is", null)
+        .lt("created_at", olderThan)
+        .order("created_at", { ascending: true })
+        .limit(50); // cap per-run blast radius
+      if (qErr) {
+        return new Response(JSON.stringify({ error: qErr.message }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      const results: Array<{ id: string; status: string; respCode?: string }> = [];
+      for (const row of stale || []) {
+        const txnid = row.transaction_ref as string;
+        if (!txnid) continue;
+
+        let outcome: "confirmed" | "failed" | "still_pending" = "still_pending";
+        let respCode = "";
+        try {
+          const { data } = await commandRequest({
+            merchantId:      mid,
+            aggregatorID:    aggId,
+            merchantTxnNo:   txnid,
+            originalTxnNo:   txnid,
+            transactionType: "STATUS",
+          });
+          respCode = data?.responseCode || "";
+          const txnStatus = (data?.txnStatus || "").toUpperCase();
+          const isSettled = respCode === "000" || respCode === "0000" || txnStatus === "SUC";
+          // ICICI returns specific failure codes for declined/aborted txns.
+          // R1000 means "still in flight" — leave the row pending and let
+          // the next cron run check again. Anything else terminal-ish we
+          // mark failed so the user can retry.
+          const isExplicitFail = !isSettled && respCode && respCode !== "R1000" && txnStatus !== "PENDING" && txnStatus !== "INI";
+
+          if (isSettled) {
+            const paymentRef = data?.txnID || data?.merchantTxnNo || txnid;
+            await admin.from("lead_payments").update({ status: "confirmed", transaction_ref: paymentRef }).eq("id", row.id);
+            outcome = "confirmed";
+            // Fire receipt generation so the candidate's email goes out the
+            // same way as a normal browser-callback success.
+            fetch(`${supabaseUrl}/functions/v1/generate-payment-receipt`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+              body: JSON.stringify({ lead_payment_id: row.id }),
+            }).catch((e) => console.error(`[${FN_NAME}] reconcile receipt invoke failed:`, e));
+          } else if (isExplicitFail) {
+            await admin.from("lead_payments").update({
+              status: "failed",
+              notes: `Reconciled via STATUS: ${(data?.respDescription || respCode || "declined").toString().slice(0, 400)}`,
+            } as any).eq("id", row.id);
+            outcome = "failed";
+          }
+        } catch (e: any) {
+          console.error(`[${FN_NAME}] reconcile error for ${row.id}:`, e?.message);
+        }
+        results.push({ id: row.id, status: outcome, respCode });
+      }
+
+      return new Response(JSON.stringify({
+        scanned: stale?.length || 0,
+        confirmed: results.filter(r => r.status === "confirmed").length,
+        failed:    results.filter(r => r.status === "failed").length,
+        still_pending: results.filter(r => r.status === "still_pending").length,
+        results,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     return new Response(JSON.stringify({ error: "Unknown action" }),

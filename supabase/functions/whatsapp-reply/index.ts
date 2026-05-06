@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { phone, message, lead_id } = await req.json();
+    const { phone, message, lead_id, bypass_dnc } = await req.json();
     if (!phone || !message) {
       return new Response(JSON.stringify({ error: "phone and message are required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -53,8 +53,10 @@ Deno.serve(async (req) => {
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
 
-    // Block sends to DNC leads
-    if (lead_id) {
+    // Block sends to DNC leads — except when the caller is explicitly the
+    // DNC farewell flow (Mark DNC button), which marks the lead DNC first
+    // and then needs to send the one final notification.
+    if (lead_id && !bypass_dnc) {
       const { data: leadCheck } = await admin.from("leads").select("stage").eq("id", lead_id).single();
       if (leadCheck?.stage === "dnc") {
         return new Response(JSON.stringify({ error: "Lead is DNC — message not sent" }), {

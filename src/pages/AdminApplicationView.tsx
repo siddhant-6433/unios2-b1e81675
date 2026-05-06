@@ -29,7 +29,11 @@ export default function AdminApplicationView() {
   const { role } = useAuth();
   const [loading, setLoading] = useState(true);
   const [app, setApp] = useState<any | null>(null);
-  const [lead, setLead] = useState<{ id: string; name: string; course_id: string | null; campus_id: string | null; pre_admission_no: string | null; admission_no: string | null } | null>(null);
+  const [lead, setLead] = useState<{
+    id: string; name: string; course_id: string | null; campus_id: string | null;
+    pre_admission_no: string | null; admission_no: string | null;
+    course?: { name: string; code: string | null; duration_years: number | null; eligibility: string | null; entrance_exam: string | null; entrance_mandatory: boolean | null } | null;
+  } | null>(null);
   const [hasOffer, setHasOffer] = useState(false);
   const [appFeePaid, setAppFeePaid] = useState(0);
   const [docs, setDocs] = useState<PreviewDoc[]>([]);
@@ -39,46 +43,59 @@ export default function AdminApplicationView() {
   const [showRejectionInput, setShowRejectionInput] = useState(false);
   const [showOfferLetter, setShowOfferLetter] = useState(false);
 
+  // Async load can throw on any of N round-trips — wrap so a transient failure
+  // shows a recoverable error instead of leaving the page in a permanent
+  // "loading" state (which renders as a spinner-then-blank).
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const refresh = async () => {
     if (!applicationId) return;
     setLoading(true);
-    const [{ data: appRow }, fnRes, { data: reviewRows }] = await Promise.all([
-      supabase.from("applications").select("*").eq("application_id", applicationId).maybeSingle(),
-      supabase.functions.invoke("list-app-docs", { body: { application_id: applicationId } }),
-      supabase.from("application_doc_reviews" as any)
-        .select("file_path, status, notes, reviewed_at")
-        .eq("application_id", applicationId),
-    ]);
-    setApp(appRow);
-    setDocs(((fnRes.data as any)?.docs || []) as PreviewDoc[]);
-    const map: Record<string, DocReview> = {};
-    (reviewRows as DocReview[] | null || []).forEach(r => { map[r.file_path] = r; });
-    setReviews(map);
-
-    // Pull lead's course/campus IDs — needed by OfferLetterDialog. course_selections
-    // on the application only has names, so we read them from the linked lead.
-    // Also pulls PAN/AN for the lifecycle stepper.
-    if (appRow?.lead_id) {
-      const [{ data: leadRow }, { data: offerRows }, { data: pmtRows }] = await Promise.all([
-        supabase.from("leads")
-          .select("id, name, course_id, campus_id, pre_admission_no, admission_no")
-          .eq("id", appRow.lead_id).maybeSingle(),
-        supabase.from("offer_letters").select("id").eq("lead_id", appRow.lead_id).limit(1),
-        supabase.from("lead_payments")
-          .select("amount,type,status")
-          .eq("lead_id", appRow.lead_id)
-          .eq("type", "application_fee")
-          .eq("status", "confirmed"),
+    setLoadError(null);
+    try {
+      const [{ data: appRow, error: appErr }, fnRes, { data: reviewRows }] = await Promise.all([
+        supabase.from("applications").select("*").eq("application_id", applicationId).maybeSingle(),
+        supabase.functions.invoke("list-app-docs", { body: { application_id: applicationId } }).catch((e: any) => ({ data: null, error: e })),
+        supabase.from("application_doc_reviews" as any)
+          .select("file_path, status, notes, reviewed_at")
+          .eq("application_id", applicationId),
       ]);
-      setLead(leadRow as any);
-      setHasOffer(!!(offerRows && offerRows.length));
-      setAppFeePaid((pmtRows || []).reduce((sum, p: any) => sum + Number(p.amount || 0), 0));
-    } else {
-      setLead(null);
-      setHasOffer(false);
-      setAppFeePaid(0);
+      if (appErr) throw appErr;
+      setApp(appRow);
+      setDocs(((fnRes?.data as any)?.docs || []) as PreviewDoc[]);
+      const map: Record<string, DocReview> = {};
+      (reviewRows as DocReview[] | null || []).forEach(r => { map[r.file_path] = r; });
+      setReviews(map);
+
+      // Pull lead's course/campus IDs — needed by OfferLetterDialog. course_selections
+      // on the application only has names, so we read them from the linked lead.
+      // Also pulls PAN/AN for the lifecycle stepper.
+      if (appRow?.lead_id) {
+        const [{ data: leadRow }, { data: offerRows }, { data: pmtRows }] = await Promise.all([
+          supabase.from("leads")
+            .select("id, name, course_id, campus_id, pre_admission_no, admission_no, course:course_id(name,code,duration_years,eligibility,entrance_exam,entrance_mandatory)")
+            .eq("id", appRow.lead_id).maybeSingle(),
+          supabase.from("offer_letters").select("id").eq("lead_id", appRow.lead_id).limit(1),
+          supabase.from("lead_payments")
+            .select("amount,type,status")
+            .eq("lead_id", appRow.lead_id)
+            .eq("type", "application_fee")
+            .eq("status", "confirmed"),
+        ]);
+        setLead(leadRow as any);
+        setHasOffer(!!(offerRows && offerRows.length));
+        setAppFeePaid((pmtRows || []).reduce((sum, p: any) => sum + Number(p.amount || 0), 0));
+      } else {
+        setLead(null);
+        setHasOffer(false);
+        setAppFeePaid(0);
+      }
+    } catch (e: any) {
+      console.error("[AdminApplicationView] refresh failed:", e);
+      setLoadError(e?.message || "Failed to load application");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => { refresh(); }, [applicationId]);
@@ -184,6 +201,22 @@ export default function AdminApplicationView() {
       </div>
     );
   }
+  if (loadError) {
+    return (
+      <div className="p-8 max-w-xl mx-auto">
+        <div className="rounded-lg border border-rose-200 bg-rose-50 p-4">
+          <p className="text-sm font-semibold text-rose-900">Couldn't load this application</p>
+          <p className="text-xs text-rose-800 mt-1">{loadError}</p>
+        </div>
+        <div className="mt-3 flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => refresh()}>Retry</Button>
+          <Button variant="ghost" size="sm" onClick={() => navigate("/applications")}>
+            <ArrowLeft className="h-4 w-4 mr-1.5" />Back to Applications
+          </Button>
+        </div>
+      </div>
+    );
+  }
   if (!app) {
     return (
       <div className="p-8">
@@ -230,17 +263,21 @@ export default function AdminApplicationView() {
         </div>
       </div>
 
-      {/* Lifecycle stepper — visual journey from submission → admission */}
-      <AdmissionLifecycleStepper
-        app={app}
-        lead={lead}
-        hasLead={!!app.lead_id && !!lead}
-        appFeePaid={appFeePaid}
-        hasOffer={hasOffer}
-        docs={counts}
-        onApprove={app.status === "submitted" ? () => decideApplication("approved") : undefined}
-        onIssueOffer={app.status === "approved" && !hasOffer && lead?.id ? () => setShowOfferLetter(true) : undefined}
-      />
+      {/* Lifecycle stepper — visual journey from submission → admission.
+          Wrapped in a section-level error boundary so a single broken stage
+          render doesn't white-screen the whole admin page. */}
+      <SectionErrorBoundary label="lifecycle stepper">
+        <AdmissionLifecycleStepper
+          app={app}
+          lead={lead}
+          hasLead={!!app.lead_id && !!lead}
+          appFeePaid={appFeePaid}
+          hasOffer={hasOffer}
+          docs={counts}
+          onApprove={app.status === "submitted" ? () => decideApplication("approved") : undefined}
+          onIssueOffer={app.status === "approved" && !hasOffer && lead?.id ? () => setShowOfferLetter(true) : undefined}
+        />
+      </SectionErrorBoundary>
 
       {/* Review summary + application-level decision */}
       {(app.status === "submitted" || decided) && (
@@ -266,8 +303,8 @@ export default function AdminApplicationView() {
             {!decided && (
               <div className="flex items-center gap-2">
                 <Button
-                  size="sm"
-                  variant="outline"
+                  variant="pill-outline"
+                  size="pill"
                   className="text-rose-700 border-rose-200 hover:bg-rose-50"
                   onClick={() => decideApplication("rejected")}
                   disabled={decisionBusy}
@@ -275,7 +312,8 @@ export default function AdminApplicationView() {
                   <XCircle className="h-3.5 w-3.5 mr-1.5" />Reject
                 </Button>
                 <Button
-                  size="sm"
+                  variant="pill"
+                  size="pill"
                   onClick={() => decideApplication("approved")}
                   disabled={decisionBusy || counts.rejected > 0}
                   title={counts.rejected > 0 ? "Resolve rejected documents first" : ""}
@@ -294,15 +332,19 @@ export default function AdminApplicationView() {
                 : !canIssueOffer
                 ? "You do not have permission to issue offers"
                 : undefined;
+              // Once an offer exists, this button switches to "View Offer Letter"
+              // — same dialog, but framed as a viewer (and lets the user manage
+              // waivers + see the PDF without re-issuing anything).
               return (
                 <Button
                   size="sm"
                   onClick={() => setShowOfferLetter(true)}
-                  disabled={!canIssueOffer}
-                  title={reason}
-                  className="bg-teal-600 hover:bg-teal-700 text-white"
+                  disabled={!canIssueOffer && !hasOffer}
+                  title={hasOffer ? undefined : reason}
+                  className={hasOffer ? "bg-blue-600 hover:bg-blue-700 text-white" : "bg-teal-600 hover:bg-teal-700 text-white"}
                 >
-                  <Gift className="h-3.5 w-3.5 mr-1.5" />Issue Offer Letter
+                  {hasOffer ? <FileText className="h-3.5 w-3.5 mr-1.5" /> : <Gift className="h-3.5 w-3.5 mr-1.5" />}
+                  {hasOffer ? "View Offer Letter" : "Issue Offer Letter"}
                 </Button>
               );
             })()}
@@ -344,8 +386,22 @@ export default function AdminApplicationView() {
         </div>
       )}
 
-      {/* Document review wizard — preview each doc inline + side actions */}
-      <DocReviewPanel docs={docs} reviews={reviews} onSetStatus={setDocStatus} />
+      {/* Document review wizard — preview each doc inline + side actions.
+          Course info is surfaced in the header so the verifier can sanity-check
+          that the uploaded docs match the eligibility for the applied course. */}
+      <DocReviewPanel
+        docs={docs}
+        reviews={reviews}
+        onSetStatus={setDocStatus}
+        courseInfo={lead?.course ? {
+          name: lead.course.name,
+          code: lead.course.code,
+          durationYears: lead.course.duration_years,
+          eligibility: lead.course.eligibility,
+          entranceExam: lead.course.entrance_exam,
+          entranceMandatory: lead.course.entrance_mandatory,
+        } : null}
+      />
 
       <ApplicationPreview app={app} docs={docs} />
 
@@ -363,4 +419,30 @@ export default function AdminApplicationView() {
       )}
     </div>
   );
+}
+
+/**
+ * Catches render-time crashes within a single section (e.g. the lifecycle
+ * stepper) so the rest of the admin page stays usable. Without this, a
+ * single null-deref inside one widget white-screens the whole route.
+ */
+class SectionErrorBoundary extends Component<{ label: string; children: ReactNode }, { error: Error | null }> {
+  constructor(props: { label: string; children: ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error) { console.error(`[AdminApplicationView/${this.props.label}]`, error); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs">
+          <p className="font-semibold text-amber-900">Couldn't render {this.props.label}.</p>
+          <p className="text-amber-800 mt-0.5">{this.state.error.message}</p>
+          <p className="text-amber-700/80 mt-1">The rest of the page is fine. Reload to retry, or check the console for details.</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }

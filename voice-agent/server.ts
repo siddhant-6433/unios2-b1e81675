@@ -463,23 +463,27 @@ async function reconcilePostCall(
   }
 
   // 2. Callback promised but no followup landed at a specific time → create one.
-  // Try to extract the time the caller actually requested from BOTH the AI
-  // transcript and the caller transcript ("after 4 PM", "kal subah", etc.).
-  // Only fall back to "+30min" when no time was mentioned at all.
+  // Distinguish AI callback (caller was busy, wants Navya to retry) vs human
+  // callback (caller asked for a senior counsellor / specialist) by scanning
+  // the transcript for human-counsellor signals. Default = ai_callback.
   if (callbackPromised && !callbackDone) {
     const fullText = aiText + " " + callerText;
     const extractedAt = extractCallbackTimeFromTranscript(fullText);
     const fallbackAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
     const scheduledAt = extractedAt || fallbackAt;
+    const wantsHuman = /senior\s*counsel|human\s*counsel|human\s*agent|expert\s*se|kisi\s*senior|specialist|counsell?or\s*se\s*baat/i.test(fullText);
+    const followupType = wantsHuman ? "human_callback" : "ai_callback";
+    const emoji = wantsHuman ? "👤" : "🤖";
+    const kindLabel = wantsHuman ? "Human-counsellor callback" : "AI callback";
     const reasonNote = extractedAt
-      ? `🤖 Post-call reconciliation: callback followup created from transcript-extracted time (${scheduledAt}).`
-      : `🤖 Post-call reconciliation: callback followup created at +30min — no specific time was mentioned in the conversation.`;
+      ? `${emoji} Post-call reconciliation: ${kindLabel} created from transcript-extracted time (${scheduledAt}).`
+      : `${emoji} Post-call reconciliation: ${kindLabel} created at +30min — no specific time was mentioned in the conversation.`;
 
     await fetch(`${SUPABASE_URL}/rest/v1/lead_followups`, {
       method: "POST", headers: { ...dbHeaders, Prefer: "return=minimal" },
       body: JSON.stringify({
         lead_id: leadId, scheduled_at: scheduledAt,
-        type: "call", notes: reasonNote, status: "pending",
+        type: followupType, notes: reasonNote, status: "pending",
       }),
     });
     await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, {
@@ -487,7 +491,7 @@ async function reconcilePostCall(
       body: JSON.stringify({ lead_id: leadId, content: reasonNote }),
     });
     await assignLeadRoundRobin(leadId);
-    actions.push(extractedAt ? `callback_followup_created:${scheduledAt}` : "callback_followup_created");
+    actions.push(extractedAt ? `${followupType}_created:${scheduledAt}` : `${followupType}_created`);
   }
 
   // ── Determine WhatsApp template (priority: visit > callback > course_info) ──
@@ -940,6 +944,13 @@ async function executeTool(
             followupDate = new Date(Date.now() + delayMs).toISOString();
           }
 
+          // Distinguish callback type:
+          //   - call_back / callback_requested → "ai_callback" — caller was busy
+          //     and asked Navya to call them back; the ai-call-batch will retry
+          //     at scheduled_at, or a counsellor can pick it up.
+          //   - everything else (interested / partial_conversation) → "call" —
+          //     a generic counsellor follow-up.
+          const isAiCallback = args.disposition === "call_back" || args.disposition === "callback_requested";
           await fetch(`${SUPABASE_URL}/rest/v1/lead_followups`, {
             method: "POST",
             headers: { ...headers, Prefer: "return=minimal" },
@@ -947,7 +958,7 @@ async function executeTool(
               lead_id: callCtx.leadId,
               user_id: dispCounsellorUserId,
               scheduled_at: followupDate,
-              type: "call",
+              type: isAiCallback ? "ai_callback" : "call",
               notes: `🤖 AI call outcome: ${args.disposition.replace(/_/g, " ")}. ${args.notes || "Counsellor follow-up required."}`,
               status: "pending",
             }),
@@ -1128,8 +1139,12 @@ async function executeTool(
             lead_id: callCtx.leadId,
             user_id: counsellorUserId, // null is OK if no counsellor available
             scheduled_at: scheduledAt,
-            type: "callback",
-            notes: `🤖 Callback requested from AI call: ${args.reason || ""}${args.preferred_time ? ` (Preferred: ${args.preferred_time})` : ""}`.trim(),
+            // "human_callback" — caller asked to speak with a senior counsellor.
+            // Distinct from "ai_callback" (caller is just busy and wants Navya
+            // to call them back later). Counsellor sees a clear human-callback
+            // task in their queue and gets a notification.
+            type: "human_callback",
+            notes: `👤 Human-counsellor callback requested via AI call: ${args.reason || ""}${args.preferred_time ? ` (Preferred: ${args.preferred_time})` : ""}`.trim(),
             status: "pending",
           }),
         });

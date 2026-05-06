@@ -997,18 +997,35 @@ const LeadDetail = () => {
                   const dt = new Date(f.scheduled_at);
                   const isOverdue = dt < new Date();
                   const isToday = dt.toDateString() === new Date().toDateString();
+                  // Distinguish AI-callback (Navya retries) from human-callback
+                  // (counsellor calls) so operators see at a glance who's
+                  // expected to make the call.
+                  const followupLabel =
+                    f.type === "ai_callback"     ? "AI Callback (Navya)" :
+                    f.type === "human_callback"  ? "Counsellor Callback" :
+                    f.type === "callback"        ? "Counsellor Callback" :       // legacy
+                    f.type === "call"            ? "Follow-up Call" :
+                    f.type === "visit"           ? "Follow-up Visit" :
+                                                   `Follow-up (${f.type})`;
+                  const isHumanCallback = f.type === "human_callback" || f.type === "callback";
+                  const isAiCallback = f.type === "ai_callback";
                   return (
                     <div key={f.id} className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm ${isOverdue ? "bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800/40" : "bg-white dark:bg-card border border-border/50"}`}>
-                      <div className={`flex h-7 w-7 items-center justify-center rounded-full shrink-0 ${isOverdue ? "bg-red-500" : isToday ? "bg-amber-500" : "bg-blue-500"} text-white`}>
+                      <div className={`flex h-7 w-7 items-center justify-center rounded-full shrink-0 ${
+                        isOverdue ? "bg-red-500" :
+                        isHumanCallback ? "bg-violet-500" :
+                        isAiCallback ? "bg-indigo-500" :
+                        isToday ? "bg-amber-500" : "bg-blue-500"
+                      } text-white`}>
                         <Phone className="h-3.5 w-3.5" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium text-foreground">
-                          {f.type === "call" ? "Follow-up Call" : f.type === "visit" ? "Follow-up Visit" : `Follow-up (${f.type})`}
-                        </p>
+                        <p className="text-xs font-medium text-foreground">{followupLabel}</p>
                         <p className={`text-[10px] ${isOverdue ? "text-red-600 font-semibold" : "text-muted-foreground"}`}>
                           {isOverdue ? "⚠️ Overdue — " : isToday ? "Today — " : ""}
                           {dt.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })}
+                          {" at "}
+                          {dt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}
                           {f.notes && ` · ${f.notes}`}
                         </p>
                       </div>
@@ -1203,7 +1220,9 @@ const LeadDetail = () => {
         onSchedule={addFollowup}
       />
 
-      {/* Call Disposition Dialog */}
+      {/* Call Disposition Dialog — onCallNow side-effect (WhatsApp template
+          send to the counsellor's own phone) was removed on user request.
+          The dialog's "Call Now" button still opens the tel: dialer. */}
       <CallDispositionDialog
         open={showCallDisposition}
         onOpenChange={setShowCallDisposition}
@@ -1212,40 +1231,6 @@ const LeadDetail = () => {
         campuses={campuses}
         defaultCampusId={lead.campus_id || undefined}
         onSubmit={logCallDisposition}
-        onCallNow={async () => {
-          if (!profile?.phone || !lead.phone) return;
-          const leadPhoneFormatted = lead.phone.startsWith("+") ? lead.phone : `+91${lead.phone.replace(/^91/, "")}`;
-          const { data, error } = await supabase.functions.invoke("whatsapp-send", {
-            body: {
-              template_key: "counsellor_call_lead",
-              phone: profile.phone,
-              params: [
-                profile.display_name || "Counsellor",
-                lead.name,
-                leadPhoneFormatted,
-                courseName || "N/A",
-              ],
-              button_urls: [lead.id],
-            },
-          });
-          if (error) {
-            let detail = error.message;
-            try {
-              if ((error as any).context?.json) {
-                const body = await (error as any).context.json();
-                detail = body?.error || detail;
-              }
-            } catch {}
-            // Ignore "template not approved yet" errors silently
-            if (!detail?.includes("132001") && !detail?.includes("does not exist in the translation")) {
-              toast({ title: "Tap-to-call WA failed", description: detail, variant: "destructive" });
-            }
-          } else if (data?.error) {
-            if (!data.error.includes("132001") && !data.error.includes("does not exist in the translation")) {
-              toast({ title: "Tap-to-call WA failed", description: data.error, variant: "destructive" });
-            }
-          }
-        }}
       />
 
       {/* Score animation popup */}
