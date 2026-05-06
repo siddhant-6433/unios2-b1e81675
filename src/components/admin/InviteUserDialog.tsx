@@ -126,15 +126,27 @@ const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublis
         }
       }
 
+      // Toast copy depends on which path was taken:
+      //  - reused existing user (role / password updated)
+      //  - direct create (admin supplied a password)
+      //  - email invite delivered
+      //  - email rate-limit fallback (created without email; user logs in
+      //    via WhatsApp OTP; the staff_welcome WA template was sent if
+      //    a phone was provided)
+      const fallback = data?.email_skipped_reason === "rate_limit";
       toast({
         title: data?.reused_existing
           ? "Existing user updated"
-          : password ? "User created" : "User invited",
+          : fallback
+            ? "User created (email rate-limited)"
+            : password ? "User created" : "User invited",
         description: data?.reused_existing
           ? `Reused existing account for ${email}: role set to ${role}${password ? ", password reset" : ""}.`
-          : password
-            ? `Account created for ${email}. They can log in immediately.`
-            : `Invite sent to ${email}. They'll receive an email to set up their account.`,
+          : fallback
+            ? `Supabase email quota hit. Account is active — they can log in via WhatsApp OTP using ${phone || "their phone number"}. The staff welcome WA was sent.`
+            : password
+              ? `Account created for ${email}. They can log in immediately.`
+              : `Invite sent to ${email}. They'll receive an email to set up their account.`,
       });
 
       setEmail("");

@@ -130,14 +130,83 @@ Deno.serve(async (req) => {
         newUser = data;
       }
     } else {
-      // Send email invite
-      const { data, error: inviteError } =
-        await adminClient.auth.admin.inviteUserByEmail(email, {
-          data: {
-            display_name: display_name || email,
-            full_name: display_name || email,
-          },
-        });
+      // Send email invite via Resend (custom flow) instead of Supabase Auth's
+      // built-in SMTP. The built-in path is throttled to 4-30 emails/hour and
+      // was blocking real invites. Resend has its own quota and our domain
+      // is verified there. Flow:
+      //   1. generateLink({ type: 'invite' }) — creates the user + signed
+      //      action link, but does NOT send any email itself.
+      //   2. Render the link into the new-user-welcome template (or inline
+      //      fallback) and POST it to Resend.
+      // If generateLink fails with a duplicate-user error we fall through
+      // to the existing exists-handler. If Resend itself is down we still
+      // ship the user but log the email failure (the WhatsApp staff_welcome
+      // below carries the same info).
+      const resendApiKey = Deno.env.get("RESEND_API_KEY");
+      const useResend = !!resendApiKey;
+
+      const { data, error: inviteError } = useResend
+        ? await adminClient.auth.admin.generateLink({
+            type: "invite",
+            email,
+            options: {
+              data: {
+                display_name: display_name || email,
+                full_name: display_name || email,
+              },
+            },
+          })
+        : await adminClient.auth.admin.inviteUserByEmail(email, {
+            data: {
+              display_name: display_name || email,
+              full_name: display_name || email,
+            },
+          });
+
+      // Send the email ourselves via Resend if we have a fresh action_link.
+      const actionLink: string | undefined = useResend
+        ? (data as any)?.properties?.action_link
+        : undefined;
+      if (useResend && actionLink && !inviteError) {
+        try {
+          const emailFrom = Deno.env.get("EMAIL_FROM") || "admissions@nimt.ac.in";
+          const roleLabel = role.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+          // Inline HTML — same visual language as the new-user-welcome
+          // template in email_templates, but with the invite CTA instead
+          // of an explicit password line.
+          const html = `<div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#0f172a">
+  <img src="https://raw.githubusercontent.com/siddhant-6433/unios2-b1e81675/main/src/assets/unios-logo.png" alt="UniOs" style="height:40px;margin-bottom:16px" />
+  <h2 style="margin:0 0 8px">Welcome to NIMT UniOs, ${display_name || email}</h2>
+  <p style="color:#475569;line-height:1.6;margin:0 0 16px">An account has been created for you as <strong>${roleLabel}</strong>${campus ? ` at <strong>${campus}</strong>` : ""}. Click the button below to set your password and sign in.</p>
+  <p style="margin:24px 0">
+    <a href="${actionLink}" style="display:inline-block;background:#0f172a;color:#fff;text-decoration:none;padding:12px 20px;border-radius:9999px;font-weight:600">Activate your account</a>
+  </p>
+  <p style="color:#94a3b8;font-size:12px;line-height:1.5;margin-top:24px">If the button doesn't work, paste this link into your browser:<br/><span style="word-break:break-all">${actionLink}</span></p>
+  <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0" />
+  <p style="color:#94a3b8;font-size:12px;margin:0">NIMT Educational Institutions — Admissions</p>
+</div>`;
+          const resendRes = await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${resendApiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              from: emailFrom,
+              to: [email],
+              subject: "Welcome to NIMT UniOs — Activate your account",
+              html,
+            }),
+          });
+          if (!resendRes.ok) {
+            const txt = await resendRes.text().catch(() => "");
+            console.error(`[invite-user] Resend send failed (${resendRes.status}):`, txt.slice(0, 300));
+          }
+        } catch (e) {
+          console.error("[invite-user] Resend dispatch error:", (e as Error).message);
+        }
+      }
+
       if (inviteError) {
         if (isAlreadyExistsError(inviteError.message)) {
           const existingId = await findExistingUserId();
@@ -149,6 +218,34 @@ Deno.serve(async (req) => {
           }
           newUser = { user: { id: existingId } };
           reusedExisting = true;
+        } else if (
+          // Supabase Auth rate-limits the built-in SMTP at 4-30/hr. When we
+          // hit that, fall back to creating the user without an email so
+          // the invite isn't blocked — they can still log in via WhatsApp
+          // OTP (the staff_welcome template fires below if phone is set).
+          /rate limit|too many requests|429/i.test(inviteError.message || "")
+        ) {
+          const tempPassword = `nimt-${crypto.randomUUID().slice(0, 12)}`;
+          const { data: created, error: createErr } = await adminClient.auth.admin.createUser({
+            email,
+            password: tempPassword,
+            email_confirm: true,
+            user_metadata: {
+              display_name: display_name || email,
+              full_name: display_name || email,
+            },
+          });
+          if (createErr) {
+            return new Response(JSON.stringify({
+              error: `Email rate-limited and fallback create failed: ${createErr.message}`,
+            }), {
+              status: 400,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          newUser = created;
+          // Surface to the client so the toast can mention the fallback.
+          (newUser as any)._email_skipped_reason = "rate_limit";
         } else {
           return new Response(JSON.stringify({ error: inviteError.message }), {
             status: 400,
@@ -357,7 +454,15 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ success: true, user_id: newUser.user.id, reused_existing: reusedExisting }),
+      JSON.stringify({
+        success: true,
+        user_id: newUser.user.id,
+        reused_existing: reusedExisting,
+        // Tell the client when the email channel was skipped so the toast
+        // can surface the right message ("invite sent" vs "email rate-
+        // limited, WhatsApp delivered").
+        email_skipped_reason: (newUser as any)?._email_skipped_reason || null,
+      }),
       {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
-import { AlertTriangle, Clock, MapPin, Phone, CalendarCheck, X, Sparkles, Inbox, Users } from "lucide-react";
+import { AlertTriangle, Clock, MapPin, Phone, CalendarCheck, Sparkles, Inbox, PhoneMissed } from "lucide-react";
 
 interface ActionItem {
   key: string;
@@ -21,7 +21,6 @@ export function GlobalActionBar() {
   const isTeamLeader = useIsTeamLeader();
   const [items, setItems] = useState<ActionItem[]>([]);
   const profileId = profile?.id || null;
-  // No dismiss button — bar auto-hides when no items
   const { counsellorFilter, setCounsellorFilter } = useCounsellorFilter();
   const [counsellorOptions, setCounsellorOptions] = useState<{ id: string; name: string }[]>([]);
   const isCounsellor = role === "counsellor";
@@ -29,122 +28,163 @@ export function GlobalActionBar() {
 
   useEffect(() => {
     if (!user?.id) return;
-
-    // Fetch counsellor list for filter
-    if (canFilterCounsellor) {
-      (async () => {
-        const { data: roleRows } = await supabase.from("user_roles").select("user_id").eq("role", "counsellor");
-        if (!roleRows?.length) return;
-        const { data: profs } = await supabase.from("profiles").select("id, display_name").in("user_id", roleRows.map(r => r.user_id));
-        if (profs) setCounsellorOptions(profs.map(p => ({ id: p.id, name: p.display_name || "Unnamed" })).sort((a, b) => a.name.localeCompare(b.name)));
-      })();
-    }
+    if (!canFilterCounsellor) return;
+    (async () => {
+      const { data: roleRows } = await supabase.from("user_roles").select("user_id").eq("role", "counsellor");
+      if (!roleRows?.length) return;
+      const { data: profs } = await supabase.from("profiles").select("id, display_name").in("user_id", roleRows.map(r => r.user_id));
+      if (profs) setCounsellorOptions(profs.map(p => ({ id: p.id, name: p.display_name || "Unnamed" })).sort((a, b) => a.name.localeCompare(b.name)));
+    })();
   }, [user?.id, canFilterCounsellor]);
 
   useEffect(() => {
-    if (!profileId && isCounsellor) return;
-    // Don't show for non-staff roles
     if (!role || ["student", "parent"].includes(role)) return;
+    if (!profileId && isCounsellor) return;
 
     const fetchCounts = async () => {
-      const today = new Date().toISOString().slice(0, 10);
-      const todayStart = `${today}T00:00:00+05:30`;
-      const todayEnd = `${today}T23:59:59+05:30`;
+      try {
+        const today = new Date().toISOString().slice(0, 10);
+        const todayStart = `${today}T00:00:00+05:30`;
+        const todayEnd   = `${today}T23:59:59+05:30`;
 
-      // For counsellors or when filter is active, scope to specific counsellor's leads
-      const effectiveProfileId = counsellorFilter !== "all" ? counsellorFilter : (isCounsellor ? profileId : null);
-      let myLeadIds: string[] | null = null;
-      if (effectiveProfileId) {
-        const { data: myLeads } = await supabase.from("leads").select("id").eq("counsellor_id", effectiveProfileId);
-        myLeadIds = (myLeads || []).map((l: any) => l.id);
-        if (!myLeadIds.length) { setItems([]); return; }
+        // Determine scope — counsellor filter or counsellor role
+        const effectiveProfileId = counsellorFilter !== "all"
+          ? counsellorFilter
+          : (isCounsellor ? profileId : null);
+
+        let myLeadIds: string[] | null = null;
+        if (effectiveProfileId) {
+          const { data: myLeads } = await supabase
+            .from("leads").select("id").eq("counsellor_id", effectiveProfileId);
+          myLeadIds = (myLeads || []).map((l: any) => l.id);
+          if (!myLeadIds.length) { setItems([]); return; }
+        }
+
+        const [
+          overdueRes, todayRes, freshRes, unassignedRes,
+          unclosedRes, confirmRes, postVisitRes, missedRes,
+        ] = await Promise.all([
+          // Overdue — use the VIEW (consistent with Admissions CRM, filters terminal stages)
+          (() => {
+            let q = (supabase.from("overdue_followups" as any) as any)
+              .select("id", { count: "exact", head: true });
+            if (effectiveProfileId) q = q.eq("counsellor_id", effectiveProfileId);
+            return q;
+          })(),
+
+          // Today's follow-ups
+          (() => {
+            let q = supabase.from("lead_followups")
+              .select("id", { count: "exact", head: true })
+              .eq("status", "pending")
+              .gte("scheduled_at", todayStart)
+              .lte("scheduled_at", todayEnd);
+            if (myLeadIds) q = q.in("lead_id", myLeadIds);
+            return q;
+          })(),
+
+          // Fresh leads (assigned but never contacted)
+          (() => {
+            let q = supabase.from("leads").select("id", { count: "exact", head: true })
+              .eq("stage", "new_lead" as any).is("first_contact_at", null);
+            if (effectiveProfileId) q = q.eq("counsellor_id", effectiveProfileId);
+            return q;
+          })(),
+
+          // Unassigned (admin/TL view only)
+          (() => {
+            if (isCounsellor || counsellorFilter !== "all") return Promise.resolve({ count: 0 });
+            return supabase.from("leads").select("id", { count: "exact", head: true })
+              .eq("stage", "new_lead" as any).is("counsellor_id", null);
+          })(),
+
+          // Unclosed campus visits (today)
+          (() => {
+            let q = (supabase.from("visits_unclosed_today" as any) as any)
+              .select("visit_id", { count: "exact", head: true });
+            if (effectiveProfileId) q = q.eq("counsellor_id", effectiveProfileId);
+            return q;
+          })(),
+
+          // Visits needing confirmation
+          (() => {
+            let q = (supabase.from("visits_needing_confirmation" as any) as any)
+              .select("visit_id", { count: "exact", head: true });
+            if (effectiveProfileId) q = q.eq("counsellor_id", effectiveProfileId);
+            return q;
+          })(),
+
+          // Post-visit pending follow-ups
+          (() => {
+            let q = (supabase.from("post_visit_pending_followups" as any) as any)
+              .select("visit_id", { count: "exact", head: true });
+            if (effectiveProfileId) q = q.eq("counsellor_id", effectiveProfileId);
+            return q;
+          })(),
+
+          // Missed callbacks (AI inbound not yet actioned)
+          (() => {
+            let q = (supabase.from("ai_call_records" as any) as any)
+              .select("id, leads!inner(counsellor_id)", { count: "exact", head: true })
+              .eq("needs_followup", true)
+              .is("followup_done_at", null);
+            if (effectiveProfileId) q = q.eq("leads.counsellor_id", effectiveProfileId);
+            return q;
+          })(),
+        ]);
+
+        const result: ActionItem[] = [];
+
+        const c = (r: any) => r?.count || 0;
+
+        if (c(missedRes) > 0) result.push({
+          key: "missed", label: "Missed Callbacks", count: c(missedRes),
+          icon: PhoneMissed, color: "text-white bg-red-600 border-red-700 animate-pulse",
+          url: "/missed-calls",
+        });
+        if (c(unassignedRes) > 0) result.push({
+          key: "unassigned", label: "Unassigned", count: c(unassignedRes),
+          icon: Inbox, color: "text-white bg-orange-500 border-orange-600 animate-pulse",
+          url: "/lead-buckets",
+        });
+        if (c(overdueRes) > 0) result.push({
+          key: "overdue", label: "Overdue Follow-ups", count: c(overdueRes),
+          icon: AlertTriangle, color: "text-red-600 bg-red-50 border-red-200",
+          url: "/pending-followups?tab=overdue",
+        });
+        if (c(todayRes) > 0) result.push({
+          key: "today", label: "Today's Follow-ups", count: c(todayRes),
+          icon: Clock, color: "text-amber-600 bg-amber-50 border-amber-200",
+          url: "/pending-followups?tab=today",
+        });
+        if (c(freshRes) > 0) result.push({
+          key: "fresh", label: "Fresh Leads", count: c(freshRes),
+          icon: Sparkles, color: "text-orange-600 bg-orange-50 border-orange-200",
+          url: "/fresh-leads",
+        });
+        if (c(postVisitRes) > 0) result.push({
+          key: "post_visit", label: "Post-Visit", count: c(postVisitRes),
+          icon: Phone, color: "text-amber-600 bg-amber-50 border-amber-200",
+          url: "/pending-followups?tab=post_visit",
+        });
+        if (c(unclosedRes) > 0) result.push({
+          key: "unclosed", label: "Visits to Close", count: c(unclosedRes),
+          icon: MapPin, color: "text-red-600 bg-red-50 border-red-200",
+          url: "/pending-followups?tab=unclosed_visits",
+        });
+        if (c(confirmRes) > 0) result.push({
+          key: "confirm", label: "Visit Confirmations", count: c(confirmRes),
+          icon: CalendarCheck, color: "text-purple-600 bg-purple-50 border-purple-200",
+          url: "/pending-followups?tab=visit_confirm",
+        });
+
+        setItems(result);
+      } catch (err) {
+        console.error("[GlobalActionBar] fetchCounts error:", err);
       }
-
-      const queries = await Promise.all([
-        // Overdue followups
-        (() => {
-          let q = supabase.from("lead_followups" as any).select("id", { count: "exact", head: true })
-            .eq("status", "pending").lt("scheduled_at", todayStart);
-          if (myLeadIds) q = q.in("lead_id", myLeadIds);
-          return q;
-        })(),
-        // Today's followups
-        (() => {
-          let q = supabase.from("lead_followups" as any).select("id", { count: "exact", head: true })
-            .eq("status", "pending").gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd);
-          if (myLeadIds) q = q.in("lead_id", myLeadIds);
-          return q;
-        })(),
-        // Fresh leads (assigned but not called)
-        (() => {
-          let q = supabase.from("leads").select("id", { count: "exact", head: true })
-            .eq("stage", "new_lead" as any).is("first_contact_at", null);
-          if (effectiveProfileId) q = q.eq("counsellor_id", effectiveProfileId);
-          return q;
-        })(),
-        // Unassigned leads bucket
-        (() => {
-          if (isCounsellor || counsellorFilter !== "all") return Promise.resolve({ count: 0 });
-          return supabase.from("leads").select("id", { count: "exact", head: true })
-            .eq("stage", "new_lead" as any).is("counsellor_id", null);
-        })(),
-        // Unclosed visits
-        (() => {
-          let q = supabase.from("visits_unclosed_today" as any).select("visit_id", { count: "exact", head: true });
-          if (effectiveProfileId) q = q.eq("counsellor_id", effectiveProfileId);
-          return q;
-        })(),
-        // Visit confirmations needed
-        (() => {
-          let q = supabase.from("visits_needing_confirmation" as any).select("visit_id", { count: "exact", head: true });
-          if (effectiveProfileId) q = q.eq("counsellor_id", effectiveProfileId);
-          return q;
-        })(),
-        // Post-visit followups
-        (() => {
-          let q = supabase.from("post_visit_pending_followups" as any).select("visit_id", { count: "exact", head: true });
-          if (effectiveProfileId) q = q.eq("counsellor_id", effectiveProfileId);
-          return q;
-        })(),
-      ]);
-
-      const result: ActionItem[] = [];
-      const [overdueRes, todayRes, freshRes, unassignedRes, unclosedRes, confirmRes, postVisitRes] = queries;
-
-      if ((freshRes.count || 0) > 0) result.push({
-        key: "fresh", label: isCounsellor ? "Fresh Leads" : "Fresh Leads", count: freshRes.count || 0,
-        icon: Sparkles, color: "text-orange-600 bg-orange-50 border-orange-200", url: "/fresh-leads",
-      });
-      if ((unassignedRes as any).count > 0) result.push({
-        key: "unassigned", label: "Unassigned", count: (unassignedRes as any).count || 0,
-        icon: Inbox, color: "text-white bg-red-500 border-red-600 animate-pulse", url: "/lead-buckets",
-      });
-      if ((overdueRes.count || 0) > 0) result.push({
-        key: "overdue", label: "Overdue Follow-ups", count: overdueRes.count || 0,
-        icon: AlertTriangle, color: "text-red-600 bg-red-50 border-red-200", url: "/pending-followups?tab=overdue",
-      });
-      if ((todayRes.count || 0) > 0) result.push({
-        key: "today", label: "Today's Follow-ups", count: todayRes.count || 0,
-        icon: Clock, color: "text-amber-600 bg-amber-50 border-amber-200", url: "/pending-followups?tab=today",
-      });
-      if ((unclosedRes.count || 0) > 0) result.push({
-        key: "unclosed", label: "Visits to Close", count: unclosedRes.count || 0,
-        icon: MapPin, color: "text-red-600 bg-red-50 border-red-200", url: "/pending-followups?tab=unclosed_visits",
-      });
-      if ((confirmRes.count || 0) > 0) result.push({
-        key: "confirm", label: "Visit Confirmations", count: confirmRes.count || 0,
-        icon: CalendarCheck, color: "text-purple-600 bg-purple-50 border-purple-200", url: "/pending-followups?tab=visit_confirm",
-      });
-      if ((postVisitRes.count || 0) > 0) result.push({
-        key: "post_visit", label: "Post-Visit Follow-ups", count: postVisitRes.count || 0,
-        icon: Phone, color: "text-amber-600 bg-amber-50 border-amber-200", url: "/pending-followups?tab=post_visit",
-      });
-
-      setItems(result);
     };
 
     fetchCounts();
-    // Refresh every 5 minutes
     const interval = setInterval(fetchCounts, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, [profileId, isCounsellor, role, counsellorFilter]);
@@ -153,7 +193,7 @@ export function GlobalActionBar() {
 
   return (
     <div className="border-b border-border bg-card/80 backdrop-blur-sm px-5 py-1.5">
-      <div className="flex items-center gap-2 overflow-x-auto">
+      <div className="flex items-center gap-2 overflow-x-auto scrollbar-none">
         {canFilterCounsellor && counsellorOptions.length > 0 && (
           <select
             value={counsellorFilter}
@@ -167,10 +207,13 @@ export function GlobalActionBar() {
           </select>
         )}
         {items.map(item => (
-          <button key={item.key} onClick={() => navigate(item.url)}
-            className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors hover:opacity-80 whitespace-nowrap ${item.color}`}>
+          <button
+            key={item.key}
+            onClick={() => navigate(item.url)}
+            className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors hover:opacity-80 whitespace-nowrap shrink-0 ${item.color}`}
+          >
             <item.icon className="h-3.5 w-3.5" />
-            <span className="font-bold">{item.count}</span>
+            <span className="font-bold">{item.count > 999 ? "999+" : item.count}</span>
             {item.label}
           </button>
         ))}
