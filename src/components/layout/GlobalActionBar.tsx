@@ -32,7 +32,7 @@ export function GlobalActionBar() {
     (async () => {
       const { data: roleRows } = await supabase.from("user_roles").select("user_id").eq("role", "counsellor");
       if (!roleRows?.length) return;
-      const { data: profs } = await supabase.from("profiles").select("id, display_name").in("user_id", roleRows.map(r => r.user_id));
+      const { data: profs } = await supabase.from("profiles").select("id, display_name").in("user_id", roleRows.map(r => r.user_id)).eq("login_disabled", false);
       if (profs) setCounsellorOptions(profs.map(p => ({ id: p.id, name: p.display_name || "Unnamed" })).sort((a, b) => a.name.localeCompare(b.name)));
     })();
   }, [user?.id, canFilterCounsellor]);

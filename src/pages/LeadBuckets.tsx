@@ -200,7 +200,8 @@ export default function LeadBuckets() {
       const { data: profiles } = await supabase
         .from("profiles")
         .select("id, display_name")
-        .in("user_id", userIds);
+        .in("user_id", userIds)
+        .eq("login_disabled", false);
       setCounsellors(
         (profiles || []).map((p: any) => ({
           id: p.id, // profiles.id — matches leads.counsellor_id FK

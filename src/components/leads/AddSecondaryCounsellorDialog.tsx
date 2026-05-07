@@ -30,8 +30,12 @@ export function AddSecondaryCounsellorDialog({ open, onOpenChange, leadId, leadN
 
   const fetchData = async () => {
     setLoading(true);
+    const { data: roleRows } = await supabase.from("user_roles").select("user_id").eq("role", "counsellor");
+    const userIds = (roleRows || []).map((r: any) => r.user_id);
     const [profilesRes, existingRes] = await Promise.all([
-      supabase.from("profiles").select("id, display_name"),
+      userIds.length > 0
+        ? supabase.from("profiles").select("id, display_name").in("user_id", userIds).eq("login_disabled", false)
+        : Promise.resolve({ data: [] }),
       supabase.from("lead_counsellors").select("*, profiles:counsellor_id(display_name)").eq("lead_id", leadId),
     ]);
     if (profilesRes.data) setCounsellors(profilesRes.data);

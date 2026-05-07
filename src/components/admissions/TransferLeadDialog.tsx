@@ -46,7 +46,8 @@ export function TransferLeadDialog({ open, onOpenChange, leadIds, leadNames, onS
       const { data: profiles } = await supabase
         .from("profiles")
         .select("id, display_name")
-        .in("user_id", userIds);
+        .in("user_id", userIds)
+        .eq("login_disabled", false);
       setCounsellors(profiles || []);
     }
     setFetching(false);

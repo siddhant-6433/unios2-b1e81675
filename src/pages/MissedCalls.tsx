@@ -22,7 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Phone, PhoneMissed, CheckCircle2, Loader2, ExternalLink,
-  Clock, MessageSquare, RefreshCw,
+  Clock, MessageSquare, RefreshCw, User,
 } from "lucide-react";
 
 interface MissedCall {
@@ -38,6 +38,7 @@ interface MissedCall {
   lead_phone: string;
   lead_stage: string;
   lead_counsellor_id: string | null;
+  counsellor_name: string;
   course_name: string;
 }
 
@@ -63,16 +64,18 @@ export default function MissedCalls() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [calls, setCalls] = useState<MissedCall[]>([]);
+  const [allCalls, setAllCalls] = useState<MissedCall[]>([]);
   const [loading, setLoading] = useState(true);
   const [callingId, setCallingId] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
+  const [counsellorFilter, setCounsellorFilter] = useState("all");
+  const [counsellorOptions, setCounsellorOptions] = useState<{ id: string; name: string }[]>([]);
 
   const isCounsellor = role === "counsellor";
   const canViewAll = role === "super_admin" || role === "admission_head" || role === "campus_admin" || role === "principal";
 
   const refresh = async () => {
     setLoading(true);
-    // Pull pending follow-ups, oldest first
     const { data: rows } = await supabase
       .from("ai_call_records" as any)
       .select("id, lead_id, call_uuid, created_at, followup_reason, summary, disposition, duration_seconds")
@@ -82,7 +85,7 @@ export default function MissedCalls() {
       .limit(200);
 
     const list = (rows as any[] | null) || [];
-    if (!list.length) { setCalls([]); setLoading(false); return; }
+    if (!list.length) { setCalls([]); setAllCalls([]); setLoading(false); return; }
 
     // Batch lead details
     const leadIds = [...new Set(list.map(r => r.lead_id).filter(Boolean))];
@@ -92,6 +95,25 @@ export default function MissedCalls() {
       .in("id", leadIds);
     const leadMap: Record<string, any> = {};
     (leads || []).forEach((l: any) => { leadMap[l.id] = l; });
+
+    // Fetch counsellor names for all unique counsellor_ids
+    const counsellorIds = [...new Set((leads || []).map((l: any) => l.counsellor_id).filter(Boolean))];
+    const counsellorMap: Record<string, string> = {};
+    if (counsellorIds.length) {
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, display_name")
+        .in("id", counsellorIds);
+      (profs || []).forEach((p: any) => { counsellorMap[p.id] = p.display_name || "Unknown"; });
+    }
+
+    // Build counsellor filter options from active counsellors in this list
+    if (canViewAll) {
+      const opts = counsellorIds
+        .map(id => ({ id, name: counsellorMap[id] || "Unknown" }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      setCounsellorOptions(opts);
+    }
 
     let mapped: MissedCall[] = list.map((r: any) => {
       const lead = leadMap[r.lead_id] || {};
@@ -108,6 +130,7 @@ export default function MissedCalls() {
         lead_phone: lead.phone || "—",
         lead_stage: lead.stage || "",
         lead_counsellor_id: lead.counsellor_id || null,
+        counsellor_name: lead.counsellor_id ? (counsellorMap[lead.counsellor_id] || "Unknown") : "Unassigned",
         course_name: (lead.courses as any)?.name || "",
       };
     });
@@ -117,9 +140,19 @@ export default function MissedCalls() {
       mapped = mapped.filter(c => c.lead_counsellor_id === profile.id);
     }
 
+    setAllCalls(mapped);
     setCalls(mapped);
     setLoading(false);
   };
+
+  // Apply counsellor filter client-side
+  useEffect(() => {
+    if (counsellorFilter === "all") {
+      setCalls(allCalls);
+    } else {
+      setCalls(allCalls.filter(c => c.lead_counsellor_id === counsellorFilter));
+    }
+  }, [counsellorFilter, allCalls]);
 
   useEffect(() => { refresh(); }, [profile?.id]);
 
@@ -154,6 +187,7 @@ export default function MissedCalls() {
       return;
     }
     setCalls(prev => prev.filter(c => c.id !== mc.id));
+    setAllCalls(prev => prev.filter(c => c.id !== mc.id));
   };
 
   return (
@@ -169,9 +203,23 @@ export default function MissedCalls() {
             The AI agent picked up — call these leads back today as top priority.
           </p>
         </div>
-        <Button size="sm" variant="outline" onClick={refresh} className="gap-1.5">
-          <RefreshCw className="h-3.5 w-3.5" />Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          {canViewAll && counsellorOptions.length > 0 && (
+            <select
+              value={counsellorFilter}
+              onChange={e => setCounsellorFilter(e.target.value)}
+              className="rounded-lg border border-input bg-card px-3 py-1.5 text-sm font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-ring/20"
+            >
+              <option value="all">All Counsellors</option>
+              {counsellorOptions.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          )}
+          <Button size="sm" variant="outline" onClick={refresh} className="gap-1.5">
+            <RefreshCw className="h-3.5 w-3.5" />Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Summary banner */}
@@ -234,6 +282,11 @@ export default function MissedCalls() {
                           <Clock className="h-3 w-3" />Called {formatTime(created)} · {relativeTime(created)}
                         </span>
                         {mc.course_name && <span>· {mc.course_name}</span>}
+                        {canViewAll && (
+                          <span className="inline-flex items-center gap-1 text-violet-600 dark:text-violet-400 font-medium">
+                            <User className="h-3 w-3" />{mc.counsellor_name}
+                          </span>
+                        )}
                       </div>
                       {mc.followup_reason && (
                         <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-1 italic">

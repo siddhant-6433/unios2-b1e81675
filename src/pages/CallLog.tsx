@@ -75,6 +75,8 @@ const CallLog = () => {
   const [dispositionFilter, setDispositionFilter] = useState("all");
   const [counsellorOptions, setCounsellorOptions] = useState<{ id: string; name: string }[]>([]);
 
+  const [playingId, setPlayingId] = useState<string | null>(null);
+
   // Stats (from full query, not paginated)
   const [totalCount, setTotalCount] = useState(0);
   const [stats, setStats] = useState({ total: 0, interested: 0, not_interested: 0, no_answer: 0, busy: 0, call_back: 0 });
@@ -139,6 +141,38 @@ const CallLog = () => {
         caller_user_id: r.user_id || "",
         counsellor_name: callerMap[r.user_id] || "Unknown",
       }));
+
+      // Cloud Call rows have no recording_url in call_logs — Plivo's recording
+      // callback only updates ai_call_records. Match by the 8-char call_uuid
+      // prefix embedded in the notes ("Cloud Call [a1b2c3d4]: ...").
+      const cloudLeadIds = [
+        ...new Set(
+          enriched
+            .filter(r => !r.recording_url && /Cloud Call \[[a-f0-9]{8}\]/.test(r.notes || ""))
+            .map(r => r.lead_id)
+        ),
+      ];
+      if (cloudLeadIds.length > 0) {
+        const { data: aiRecs } = await supabase
+          .from("ai_call_records" as any)
+          .select("call_uuid, recording_url")
+          .in("lead_id", cloudLeadIds)
+          .not("recording_url", "is", null);
+
+        const recByPrefix: Record<string, string> = {};
+        (aiRecs || []).forEach((rec: any) => {
+          if (rec.call_uuid && rec.recording_url) {
+            recByPrefix[rec.call_uuid.slice(0, 8)] = rec.recording_url;
+          }
+        });
+
+        enriched = enriched.map(r => {
+          if (r.recording_url) return r;
+          const m = (r.notes || "").match(/Cloud Call \[([a-f0-9]{8})\]/i);
+          if (m && recByPrefix[m[1]]) return { ...r, recording_url: recByPrefix[m[1]] };
+          return r;
+        });
+      }
 
       setRecords(enriched);
       setTotalCount(count || enriched.length);
@@ -342,13 +376,24 @@ const CallLog = () => {
                           {new Date(r.called_at || r.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}
                         </span>
                       </td>
-                      <td className="px-3 py-2.5 text-center">
+                      <td className="px-3 py-2.5 text-center" onClick={e => e.stopPropagation()}>
                         {r.recording_url ? (
-                          <a href={r.recording_url} target="_blank" rel="noopener noreferrer"
-                            onClick={e => e.stopPropagation()}
-                            className="text-primary hover:underline text-xs flex items-center justify-center gap-1">
-                            <Play className="h-3 w-3" /> Play
-                          </a>
+                          playingId === r.id ? (
+                            <audio
+                              src={r.recording_url}
+                              controls
+                              autoPlay
+                              className="h-7 w-44 max-w-full"
+                              onEnded={() => setPlayingId(null)}
+                            />
+                          ) : (
+                            <button
+                              onClick={() => setPlayingId(r.id)}
+                              className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary hover:bg-primary/20 transition-colors"
+                            >
+                              <Play className="h-3 w-3 fill-primary" /> Play
+                            </button>
+                          )
                         ) : <span className="text-[10px] text-muted-foreground">—</span>}
                       </td>
                     </tr>

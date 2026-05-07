@@ -49,6 +49,21 @@ const fmtDate = (d?: string | null) => {
   return dt.toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
 };
 
+function ordinal(n: number): string {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]);
+}
+
+const fmtDeadline = (d?: string | null) => {
+  if (!d) return "-";
+  const dt = new Date(d);
+  if (isNaN(dt.getTime())) return d;
+  const weekday = dt.toLocaleDateString("en-IN", { weekday: "long" });
+  const month   = dt.toLocaleDateString("en-IN", { month: "long" });
+  return `${weekday}, ${ordinal(dt.getDate())} ${month}`;
+};
+
 const COLORS = {
   border:    rgb(0.55, 0.55, 0.6),
   light:     rgb(0.85, 0.85, 0.88),
@@ -453,7 +468,7 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
   drawSection(ctx, "ADMISSION CONFIRMATION");
   drawKVGrid(ctx, [
     { label: "Token Fee Payable",   value: fmtINR(opts.tokenAmount || 0) },
-    { label: "Acceptance Deadline", value: fmtDate(opts.offer.acceptance_deadline) },
+    { label: "Acceptance Deadline", value: fmtDeadline(opts.offer.acceptance_deadline) },
     { label: "Pay Online",          value: "uni.nimt.ac.in" },
     { label: "Reference No.",       value: opts.applicationId || opts.lead.application_id || "-" },
   ]);

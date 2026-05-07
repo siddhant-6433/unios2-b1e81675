@@ -879,12 +879,12 @@ const LeadDetail = () => {
           : undefined;
 
         const actions = [
-          { icon: Phone, label: "Call", color: "text-blue-600 bg-blue-100 dark:bg-blue-900/30", action: () => setShowCallDisposition(true) },
+          ...(role !== "counsellor" ? [{ icon: Phone, label: "Call", color: "text-blue-600 bg-blue-100 dark:bg-blue-900/30", action: () => setShowCallDisposition(true) }] : []),
           { icon: Phone, label: "Cloud Call", color: "text-cyan-600 bg-cyan-100 dark:bg-cyan-900/30", action: triggerManualCall, disabled: manualCalling },
           { icon: MessageSquare, label: "WhatsApp", color: "text-green-600 bg-green-100 dark:bg-green-900/30", action: () => setShowWhatsApp(true) },
           { icon: Clock, label: "Follow Up", color: "text-orange-600 bg-orange-100 dark:bg-orange-900/30", action: () => setShowFollowup(true) },
-          { icon: MapPin, label: "Visit", color: "text-violet-600 bg-violet-100 dark:bg-violet-900/30", action: () => setShowScheduleVisit(true) },
-          { icon: Footprints, label: "Walk-in", color: "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30", action: () => setShowWalkinCompletion(true) },
+          { icon: MapPin, label: "Schedule Visit", color: "text-violet-600 bg-violet-100 dark:bg-violet-900/30", action: () => setShowScheduleVisit(true) },
+          { icon: Footprints, label: "Log Walk-In", color: "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30", action: () => setShowWalkinCompletion(true) },
           { icon: Mail, label: "Email", color: "text-sky-600 bg-sky-100 dark:bg-sky-900/30", action: () => setShowSendEmail(true) },
           ...(role !== "counsellor" ? [{
             icon: Bot, label: "AI Call", color: "text-amber-600 bg-amber-100 dark:bg-amber-900/30", action: triggerAiCall, disabled: aiCalling,
@@ -1112,6 +1112,7 @@ const LeadDetail = () => {
             visits={visits}
             campuses={campuses}
             courses={courses}
+            coursesByDepartment={coursesByDepartment}
             leadId={id!}
             userId={user?.id || null}
             onRefresh={() => fetchAll(true)}
@@ -1376,8 +1377,10 @@ const LeadDetail = () => {
 };
 
 // ── Scheduled Visits Section with Completion Dialog ──────────────────
-function ScheduledVisitsSection({ visits, campuses, courses, leadId, userId, onRefresh, showWalkin, onCloseWalkin }: {
-  visits: any[]; campuses: any[]; courses: any[]; leadId: string; userId: string | null; onRefresh: () => void;
+function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment, leadId, userId, onRefresh, showWalkin, onCloseWalkin }: {
+  visits: any[]; campuses: any[]; courses: any[];
+  coursesByDepartment: { department: string; courses: { id: string; name: string; code: string; institution_type: string }[] }[];
+  leadId: string; userId: string | null; onRefresh: () => void;
   showWalkin?: boolean; onCloseWalkin?: () => void;
 }) {
   const { toast } = useToast();
@@ -1386,10 +1389,17 @@ function ScheduledVisitsSection({ visits, campuses, courses, leadId, userId, onR
   const [walkinCampusId, setWalkinCampusId] = useState(campuses[0]?.id || "");
   const [feedback, setFeedback] = useState("");
   const [courseInterest, setCourseInterest] = useState("");
+  const [courseInterestId, setCourseInterestId] = useState("");
+  const [schoolAdmissionType, setSchoolAdmissionType] = useState("");
   const [expectedAdmissionDate, setExpectedAdmissionDate] = useState("");
   const [followupType, setFollowupType] = useState<"call" | "visit">("call");
   const [followupDate, setFollowupDate] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Detect if selected course is a school course
+  const selectedCourseIsSchool = coursesByDepartment
+    .flatMap(g => g.courses)
+    .find(c => c.id === courseInterestId)?.institution_type === "school";
   const [rescheduleDialog, setRescheduleDialog] = useState<{ visitId: string; currentDate: string } | null>(null);
   const [rescheduleNewDate, setRescheduleNewDate] = useState("");
   const [noShowDialog, setNoShowDialog] = useState<{ visitId: string; campusId: string | null } | null>(null);
@@ -1401,7 +1411,7 @@ function ScheduledVisitsSection({ visits, campuses, courses, leadId, userId, onR
     if (showWalkin) {
       setIsWalkin(true);
       setCompletingVisitId("walkin");
-      setFeedback(""); setCourseInterest(""); setExpectedAdmissionDate(""); setFollowupDate("");
+      setFeedback(""); setCourseInterest(""); setCourseInterestId(""); setSchoolAdmissionType(""); setExpectedAdmissionDate(""); setFollowupDate("");
       setWalkinCampusId(campuses[0]?.id || "");
     }
   }, [showWalkin]);
@@ -1428,6 +1438,7 @@ function ScheduledVisitsSection({ visits, campuses, courses, leadId, userId, onR
     const feedbackText = [
       feedback ? `Feedback: ${feedback}` : "",
       courseInterest ? `Course Interest: ${courseInterest}` : "",
+      schoolAdmissionType ? `Admission Type: ${schoolAdmissionType}` : "",
       expectedAdmissionDate ? `Expected Admission: ${expectedAdmissionDate}` : "",
     ].filter(Boolean).join("\n") || null;
 
@@ -1484,7 +1495,7 @@ function ScheduledVisitsSection({ visits, campuses, courses, leadId, userId, onR
     setSaving(false);
     setCompletingVisitId(null);
     setIsWalkin(false);
-    setFeedback(""); setCourseInterest(""); setExpectedAdmissionDate(""); setFollowupDate("");
+    setFeedback(""); setCourseInterest(""); setCourseInterestId(""); setSchoolAdmissionType(""); setExpectedAdmissionDate(""); setFollowupDate("");
     if (onCloseWalkin) onCloseWalkin();
     onRefresh();
   };
@@ -1536,7 +1547,7 @@ function ScheduledVisitsSection({ visits, campuses, courses, leadId, userId, onR
       </div>
 
       {/* Visit Completion Dialog */}
-      <Dialog open={!!completingVisitId} onOpenChange={(o) => { if (!o) { setCompletingVisitId(null); setIsWalkin(false); if (onCloseWalkin) onCloseWalkin(); } }}>
+      <Dialog open={!!completingVisitId} onOpenChange={(o) => { if (!o) { setCompletingVisitId(null); setIsWalkin(false); setCourseInterestId(""); setSchoolAdmissionType(""); if (onCloseWalkin) onCloseWalkin(); } }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -1562,11 +1573,38 @@ function ScheduledVisitsSection({ visits, campuses, courses, leadId, userId, onR
             </div>
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Course Interested In</label>
-              <select value={courseInterest} onChange={(e) => setCourseInterest(e.target.value)} className={inputCls}>
+              <select
+                value={courseInterestId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setCourseInterestId(id);
+                  const found = coursesByDepartment.flatMap(g => g.courses).find(c => c.id === id);
+                  setCourseInterest(found?.name || "");
+                  setSchoolAdmissionType("");
+                }}
+                className={inputCls}
+              >
                 <option value="">Select course</option>
-                {courses.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                {coursesByDepartment.map((group) => (
+                  <optgroup key={group.department} label={group.department}>
+                    {group.courses.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </optgroup>
+                ))}
               </select>
             </div>
+            {selectedCourseIsSchool && (
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Admission Type</label>
+                <select value={schoolAdmissionType} onChange={(e) => setSchoolAdmissionType(e.target.value)} className={inputCls}>
+                  <option value="">Select type</option>
+                  <option value="Day School">Day School</option>
+                  <option value="Day Boarding">Day Boarding</option>
+                  <option value="Boarding">Boarding</option>
+                </select>
+              </div>
+            )}
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Expected Date of Admission</label>
               <div

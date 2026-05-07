@@ -299,7 +299,9 @@ Deno.serve(async (req) => {
         );
       }
 
-      const txnid       = `LP-${lp.id.slice(0, 8)}-${Date.now()}`;
+      // EaseBuzz requires alphanumeric-only txnid (no hyphens). Use the first
+      // 8 hex chars of the UUID (no hyphens in this segment) + timestamp.
+      const txnid       = `LP${lp.id.slice(0, 8)}${Date.now()}`.slice(0, 50);
       const amountStr   = parseFloat(amount).toFixed(2);
       const emailStr    = email || "noreply@nimteducation.com";
       const productStr  = productinfo || (payment_type === "token_fee" ? "Token Fee" : "Fee Payment");

@@ -49,7 +49,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
       const { data: roles } = await supabase.from("user_roles").select("user_id").eq("role", "counsellor");
       if (!roles || roles.length === 0) { setCounsellors([]); return; }
       const userIds = roles.map((r: any) => r.user_id);
-      const { data: profiles } = await supabase.from("profiles").select("id, display_name").in("user_id", userIds);
+      const { data: profiles } = await supabase.from("profiles").select("id, display_name").in("user_id", userIds).eq("login_disabled", false);
       if (profiles) setCounsellors(profiles.filter((p: any) => p.display_name));
     })();
   }, [open]);

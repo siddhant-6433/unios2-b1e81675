@@ -216,23 +216,45 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   // form no longer asks the user to type it.
   const programmeTotal = yearTotals.reduce((sum, y) => sum + y.total, 0);
 
-  // Default the token fee to 25% of Year-1 whenever inputs change AND the
-  // user hasn't manually edited the field. Floor at max(10% of Year-1, ₹5K).
-  // Waivers are added AFTER the offer exists, so at creation time we anchor
-  // to the raw Year-1 fee — once a waiver is approved later, the token
-  // threshold (lead_fee_status.token_required) drops accordingly.
-  const tokenFloor = firstYearFee > 0
-    ? Math.max(Math.round(firstYearFee * 0.10), 5000)
+  /** Fee for a given term (e.g. 'year_1') from the active fee structure. */
+  const feeForTerm = (term: string): number =>
+    yearTotals.find(y => y.term === term)?.total ?? 0;
+
+  /** Sum of pre-issuance waivers already queued for the same term in the new-offer form. */
+  const preWaiverTotalForTerm = (term: string): number =>
+    preWaivers.filter(w => w.term === term).reduce((s, w) => s + Number(w.amount || 0), 0);
+
+  /** Sum of post-issuance waivers (approved + pending) on an offer for the same term. */
+  const offerWaiverTotalForTerm = (offerId: string, term: string): number =>
+    (waiversByOffer[offerId] || [])
+      .filter(w => w.term === term && (w.status === "approved" || w.status === "pending"))
+      .reduce((s, w) => s + Number(w.amount || 0), 0);
+
+  // Net Year-1 fee = gross Year-1 fee minus any year_1 waivers already
+  // staged in the pre-issuance waiver list. Token fee defaults/floor are
+  // anchored to this net figure so the candidate isn't asked to pay 25%
+  // of the full fee when they've been given a concession on Year 1.
+  const netFirstYearFee = Math.max(0, firstYearFee - preWaiverTotalForTerm("year_1"));
+
+  // Floor = greater of (10% of net Year-1, ₹5K). Always at least ₹5,000
+  // regardless of waivers — excess over Year-1 balance rolls forward to Year-2,
+  // Year-3, etc. at payment time (handled in provision-student-fees).
+  const tokenFloor = netFirstYearFee > 0
+    ? Math.max(Math.round(netFirstYearFee * 0.10), 5000)
     : 5000;
-  const tokenDefault = firstYearFee > 0
-    ? Math.max(Math.round(firstYearFee * 0.25), tokenFloor)
+  const tokenDefault = netFirstYearFee > 0
+    ? Math.max(Math.round(netFirstYearFee * 0.25), tokenFloor)
     : 0;
 
+  // Whenever the net Year-1 fee changes (waiver added/removed), always
+  // recalculate the token and clear edit mode — the basis has shifted so the
+  // old value is meaningless. The user can re-click Edit to customise after.
   useEffect(() => {
-    if (!showForm || tokenFeeEdited) return;
-    if (firstYearFee <= 0) return;
+    if (!showForm) return;
+    if (netFirstYearFee <= 0) return;
+    setTokenFeeEdited(false);
     setForm(p => ({ ...p, token_fee_amount: String(tokenDefault) }));
-  }, [showForm, tokenFeeEdited, firstYearFee, tokenDefault]);
+  }, [showForm, netFirstYearFee, tokenDefault]);
 
   const handleCreate = async () => {
     // Total fee is auto-derived from the published fee structure — no user input.
@@ -243,6 +265,11 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
         description: "The selected course + session doesn't have an active fee structure with year-wise items. Publish one in Course & Campus master before issuing offers.",
         variant: "destructive",
       });
+      return;
+    }
+
+    if (!form.acceptance_deadline) {
+      toast({ title: "Acceptance deadline required", description: "Set the date by which the candidate must accept this offer.", variant: "destructive" });
       return;
     }
 
@@ -385,6 +412,30 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     }
     if (!waiverForm.term) {
       toast({ title: "Pick a year for this waiver", variant: "destructive" });
+      return;
+    }
+    // Cap: a single year's waivers (approved + pending + this one) cannot
+    // exceed that year's published fee. Otherwise the offer goes negative
+    // and the candidate ends up "owing" zero or negative money for that year.
+    const yearFee = feeForTerm(waiverForm.term);
+    const existing = offerWaiverTotalForTerm(offerId, waiverForm.term);
+    const available = Math.max(0, yearFee - existing);
+    if (yearFee <= 0) {
+      toast({
+        title: "No fee published for this year",
+        description: `The active fee structure has no "${waiverForm.term.replace(/_/g, " ")}" line — can't apply a waiver against it.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    if (amt > available) {
+      toast({
+        title: "Waiver exceeds available fee",
+        description: existing > 0
+          ? `Year fee is ₹${yearFee.toLocaleString("en-IN")}; ₹${existing.toLocaleString("en-IN")} already waived (approved or pending). At most ₹${available.toLocaleString("en-IN")} more can be applied here.`
+          : `Year fee is ₹${yearFee.toLocaleString("en-IN")}. The waiver can't exceed that.`,
+        variant: "destructive",
+      });
       return;
     }
     setWaiverSaving(true);
@@ -614,16 +665,27 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                               ))}
                             </select>
                           </div>
-                          <div>
-                            <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Amount (₹)</label>
-                            <input
-                              type="number"
-                              value={preWaiverForm.amount}
-                              onChange={e => setPreWaiverForm(p => ({ ...p, amount: e.target.value }))}
-                              className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
-                              placeholder="10000"
-                            />
-                          </div>
+                          {(() => {
+                            const yearFee = feeForTerm(preWaiverForm.term);
+                            const existing = preWaiverTotalForTerm(preWaiverForm.term);
+                            const available = Math.max(0, yearFee - existing);
+                            return (
+                              <div>
+                                <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">
+                                  Amount (₹) <span className="text-muted-foreground/60">— max ₹{available.toLocaleString("en-IN")}</span>
+                                </label>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={available || undefined}
+                                  value={preWaiverForm.amount}
+                                  onChange={e => setPreWaiverForm(p => ({ ...p, amount: e.target.value }))}
+                                  className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+                                  placeholder="10000"
+                                />
+                              </div>
+                            );
+                          })()}
                         </div>
                         <div>
                           <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Reason (optional)</label>
@@ -648,6 +710,29 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                               const amt = Number(preWaiverForm.amount);
                               if (!amt || amt <= 0) {
                                 toast({ title: "Enter a valid waiver amount", variant: "destructive" });
+                                return;
+                              }
+                              // Cap against the year's published fee minus any waivers already
+                              // queued for the same term in this form.
+                              const yearFee = feeForTerm(preWaiverForm.term);
+                              const existing = preWaiverTotalForTerm(preWaiverForm.term);
+                              const available = Math.max(0, yearFee - existing);
+                              if (yearFee <= 0) {
+                                toast({
+                                  title: "No fee published for this year",
+                                  description: `The active fee structure has no "${preWaiverForm.term.replace(/_/g, " ")}" line.`,
+                                  variant: "destructive",
+                                });
+                                return;
+                              }
+                              if (amt > available) {
+                                toast({
+                                  title: "Waiver exceeds available fee",
+                                  description: existing > 0
+                                    ? `Year fee is ₹${yearFee.toLocaleString("en-IN")}; ₹${existing.toLocaleString("en-IN")} already added in this form. At most ₹${available.toLocaleString("en-IN")} more can be applied here.`
+                                    : `Year fee is ₹${yearFee.toLocaleString("en-IN")}. The waiver can't exceed that.`,
+                                  variant: "destructive",
+                                });
                                 return;
                               }
                               setPreWaivers(prev => [...prev, { term: preWaiverForm.term, amount: amt, reason: preWaiverForm.reason }]);
@@ -688,19 +773,29 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                     type="number"
                     value={form.token_fee_amount}
                     readOnly={!tokenFeeEdited}
+                    min={tokenFeeEdited ? tokenFloor : undefined}
                     onChange={e => setForm(p => ({ ...p, token_fee_amount: e.target.value }))}
                     className={`${inputCls} ${!tokenFeeEdited ? "bg-muted/40 cursor-default" : ""}`}
                     placeholder={tokenDefault > 0 ? String(tokenDefault) : "—"}
                   />
                   <p className="mt-1 text-[10px] text-muted-foreground/70 leading-relaxed">
-                    {firstYearFee > 0 ? (
+                    {netFirstYearFee > 0 ? (
                       tokenFeeEdited ? (
                         <>
                           Minimum <span className="font-semibold text-foreground">₹{tokenFloor.toLocaleString("en-IN")}</span> —
-                          the greater of 10% of Year-1 fee (₹{firstYearFee.toLocaleString("en-IN")}) and ₹5,000.
+                          the greater of 10% of net Year-1 fee and ₹5,000. Any excess over Year-1 balance rolls to Year-2.
+                          {firstYearFee !== netFirstYearFee && (
+                            <> Gross Year-1 is ₹{firstYearFee.toLocaleString("en-IN")}; Year-1 waiver of ₹{(firstYearFee - netFirstYearFee).toLocaleString("en-IN")} applied.</>
+                          )}
                         </>
                       ) : (
-                        <>Default = 25% of Year-1 fee (₹{firstYearFee.toLocaleString("en-IN")}). Click Edit to override.</>
+                        <>
+                          Default = 25% of net Year-1 fee (₹{netFirstYearFee.toLocaleString("en-IN")}) = ₹{tokenDefault.toLocaleString("en-IN")}.
+                          {firstYearFee !== netFirstYearFee && (
+                            <> Gross ₹{firstYearFee.toLocaleString("en-IN")} minus ₹{(firstYearFee - netFirstYearFee).toLocaleString("en-IN")} Year-1 waiver.</>
+                          )}
+                          {" "}Click Edit to override.
+                        </>
                       )
                     ) : (
                       <>Pick a course + session above to compute the default.</>
@@ -727,8 +822,17 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                   </p>
                 </div>
                 <div>
-                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Acceptance Deadline</label>
-                  <input type="date" value={form.acceptance_deadline} onChange={e => setForm(p => ({ ...p, acceptance_deadline: e.target.value }))} className={inputCls} />
+                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">
+                    Acceptance Deadline <span className="text-destructive">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={form.acceptance_deadline}
+                    onChange={e => setForm(p => ({ ...p, acceptance_deadline: e.target.value }))}
+                    className={`${inputCls} ${!form.acceptance_deadline ? "border-destructive/40" : ""}`}
+                    min={new Date().toISOString().slice(0, 10)}
+                  />
+                  <p className="mt-1 text-[10px] text-muted-foreground/70">Date by which the candidate must accept and pay the token fee.</p>
                 </div>
                 <div className="flex gap-2">
                   <Button onClick={handleCreate} disabled={saving || programmeTotal <= 0} size="sm" className="gap-1.5"
@@ -798,7 +902,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                       </div>
                       <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground flex-wrap">
                         <span>Issued: {new Date(offer.created_at).toLocaleDateString("en-IN")}</span>
-                        {offer.acceptance_deadline && <span>Deadline: {new Date(offer.acceptance_deadline).toLocaleDateString("en-IN")}</span>}
+                        {offer.acceptance_deadline && <span>Deadline: {(() => { const dt = new Date(offer.acceptance_deadline!); const ord = (n: number) => { const s = ["th","st","nd","rd"]; const v = n%100; return n+(s[(v-20)%10]??s[v]??s[0]); }; return `${dt.toLocaleDateString("en-IN",{weekday:"long"})}, ${ord(dt.getDate())} ${dt.toLocaleDateString("en-IN",{month:"long"})}`; })()}</span>}
                         {offer.accepted_at && <span>Accepted: {new Date(offer.accepted_at).toLocaleDateString("en-IN")}</span>}
                       </div>
                       {offer.rejection_reason && (
@@ -898,16 +1002,27 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                       ))}
                                     </select>
                                   </div>
-                                  <div>
-                                    <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Amount (₹)</label>
-                                    <input
-                                      type="number"
-                                      value={waiverForm.amount}
-                                      onChange={e => setWaiverForm(p => ({ ...p, amount: e.target.value }))}
-                                      className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
-                                      placeholder="10000"
-                                    />
-                                  </div>
+                                  {(() => {
+                                    const yearFee = feeForTerm(waiverForm.term);
+                                    const existing = offerWaiverTotalForTerm(offer.id, waiverForm.term);
+                                    const available = Math.max(0, yearFee - existing);
+                                    return (
+                                      <div>
+                                        <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">
+                                          Amount (₹) <span className="text-muted-foreground/60">— max ₹{available.toLocaleString("en-IN")}</span>
+                                        </label>
+                                        <input
+                                          type="number"
+                                          min={1}
+                                          max={available || undefined}
+                                          value={waiverForm.amount}
+                                          onChange={e => setWaiverForm(p => ({ ...p, amount: e.target.value }))}
+                                          className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+                                          placeholder="10000"
+                                        />
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                                 <div>
                                   <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Reason (optional)</label>

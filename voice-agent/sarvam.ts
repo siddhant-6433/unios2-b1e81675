@@ -197,10 +197,14 @@ export async function sarvamSTT(opts: {
 export interface SarvamTTSOpts {
   apiKey: string;
   text: string;
-  /** "ritu" | "simran" | "shubh" | "amol" | "vidya" | ... — picked on the dashboard. */
+  /** "suhani" | "anushka" | "vidya" | "manisha" | "shubh" | ... — admin-picked. */
   speaker: string;
   /** "en-IN" | "hi-IN" | "ta-IN" | ... */
   languageCode?: string;
+  /** TTS speed. 0.5–2.0; 1.0 is the natural default. Admin-tunable. */
+  pace?: number;
+  /** Bulbul model. "bulbul:v3" or "bulbul:v3-beta". Admin-tunable. */
+  model?: string;
 }
 
 /**
@@ -219,11 +223,14 @@ export async function sarvamTTS(opts: SarvamTTSOpts): Promise<Int16Array | null>
       inputs: [opts.text],
       target_language_code: opts.languageCode || "en-IN",
       speaker: opts.speaker,
-      model: "bulbul:v3",
+      // Admin-tunable model — defaults to bulbul:v3-beta (Sarvam's newest
+      // available) but can be flipped to bulbul:v3 if v3-beta misbehaves.
+      // bulbul:v4 isn't on the public endpoint yet (returns 400).
+      model: opts.model || "bulbul:v3-beta",
       speech_sample_rate: 8000,
       enable_preprocessing: true,
-      // pitch + loudness are not supported by bulbul:v3 — only `pace` is.
-      pace: 1,
+      // pitch + loudness aren't supported by Bulbul — only `pace` is.
+      pace: typeof opts.pace === "number" ? opts.pace : 1.0,
     }),
   });
   if (!res.ok) {

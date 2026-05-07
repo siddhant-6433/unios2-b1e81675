@@ -301,19 +301,61 @@ async function provisionStudent(
   }
 
   // 8. Insert, skipping duplicates (same student + fee_code + term)
-  // Check existing entries
-  const { data: existing } = await db
+  // Fetch existing entries with paid_amount so we can compute how much token
+  // credit is already applied when doing a partial provision (e.g. adding year_3
+  // after year_1 and year_2 already exist).
+  const { data: existingFull } = await db
     .from("fee_ledger")
-    .select("fee_code_id, term")
+    .select("fee_code_id, term, paid_amount")
     .eq("student_id", studentId);
 
   const existingSet = new Set(
-    (existing || []).map((e: any) => `${e.fee_code_id}::${e.term}`)
+    (existingFull || []).map((e: any) => `${e.fee_code_id}::${e.term}`)
   );
 
   const newRows = rows.filter(
     (r: any) => !existingSet.has(`${r.fee_code_id}::${r.term}`)
   );
+
+  // 8a. Credit confirmed token payments to new year_N rows sequentially.
+  // Rule: apply token to Year-1 first; any remainder goes to Year-2, then Year-3, etc.
+  // This handles the case where the token floor (₹5,000) exceeds the net Year-1
+  // balance after waivers — excess rolls forward rather than sitting unallocated.
+  if (student.lead_id && newRows.length > 0) {
+    const { data: toks } = await db
+      .from("lead_payments")
+      .select("amount")
+      .eq("lead_id", student.lead_id)
+      .eq("type", "token_fee")
+      .eq("status", "confirmed");
+
+    const totalToken = (toks || []).reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+
+    if (totalToken > 0) {
+      // Sum paid_amount already in existing year_N rows so we don't double-credit
+      // when this is a partial provision run (adding later years to an existing student).
+      const alreadyCredited = (existingFull || [])
+        .filter((r: any) => /^year_\d+$/.test(r.term))
+        .reduce((s: number, r: any) => s + Number(r.paid_amount || 0), 0);
+
+      let remaining = Math.max(0, totalToken - alreadyCredited);
+
+      // Apply to the new year_N rows in ascending term order.
+      const newYearRows = newRows
+        .filter((r: any) => /^year_\d+$/.test(r.term))
+        .sort((a: any, b: any) => a.term.localeCompare(b.term));
+
+      for (const row of newYearRows) {
+        if (remaining <= 0) break;
+        const netDue = Math.max(0, Number(row.total_amount) - Number(row.concession || 0));
+        if (netDue <= 0) continue;
+        const credit = Math.min(remaining, netDue);
+        row.paid_amount = credit;
+        if (credit >= netDue) row.status = "paid";
+        remaining -= credit;
+      }
+    }
+  }
 
   if (newRows.length === 0) return 0;
 

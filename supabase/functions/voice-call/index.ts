@@ -99,6 +99,19 @@ Deno.serve(async (req) => {
 
       const activeLead = refreshedLead || lead;
 
+      // Look up assigned counsellor's display name so the agent can name them
+      // concretely at close ("kal subah Pooja ji aapko personally call karengi"
+      // beats a vague "senior counsellor will reach out").
+      let assignedCounsellorName: string | null = null;
+      if (activeLead.counsellor_id) {
+        const { data: cprof } = await db
+          .from("profiles")
+          .select("display_name")
+          .eq("id", activeLead.counsellor_id)
+          .maybeSingle();
+        assignedCounsellorName = cprof?.display_name || null;
+      }
+
       // Generate a unique call ID
       const callId = crypto.randomUUID();
 
@@ -112,6 +125,7 @@ Deno.serve(async (req) => {
         campusName: (activeLead.campuses as any)?.name || null,
         leadSource: activeLead.source,
         guardianName: activeLead.guardian_name,
+        assignedCounsellorName,
       };
 
       const ctxRes = await fetch(`${VOICE_AGENT_URL}/context/${callId}`, {

@@ -26,6 +26,7 @@ import {
   mulawBase64ToPcm16, pcm16ToMulawBase64, rmsEnergy,
   sarvamSTT, sarvamTTS, detectSarvamLanguageCode,
 } from "./sarvam.ts";
+import { elevenLabsTTS } from "./elevenlabs.ts";
 
 const PORT = parseInt(Deno.env.get("PORT") || "8000");
 const GOOGLE_AI_API_KEY = Deno.env.get("GOOGLE_AI_API_KEY") || "";
@@ -611,13 +612,40 @@ async function executeTool(
   try {
     switch (toolName) {
       case "get_course_info": {
-        // Fetch course with department → institution → campus chain
-        const res = await fetch(
-          `${SUPABASE_URL}/rest/v1/courses?name=ilike.*${encodeURIComponent(args.course_name)}*&select=id,name,code,duration_years,type,eligibility,entrance_exam,entrance_mandatory,departments(name,institutions(name,type,campuses(name,city,state)))`,
-          { headers },
-        );
-        const courses = await res.json();
-        if (!courses?.length) return { found: false, message: "No course found matching that name. Try a different name." };
+        // The cascade addendum tells the LLM to spell course names with
+        // periods for pronunciation ("B.Sc. Nursing"), and the LLM
+        // sometimes passes that dotted form as the tool arg too. The
+        // courses table stores them without dots ("BSc Nursing"), so a
+        // raw ilike never matches. Defensive normalisation:
+        //   1) try the cleaned (no-dot, collapsed-space) name
+        //   2) fall back to the last meaningful token (usually the field
+        //      — "Nursing", "Pharmacy", "Administration") so even a
+        //      garbled query gets a reasonable hit instead of a flat miss.
+        const rawName = String(args.course_name || "");
+        const cleaned = rawName.replace(/\./g, "").replace(/\s+/g, " ").trim();
+        const lastWord = cleaned.split(/\s+/).filter(Boolean).pop() || cleaned;
+
+        const tryFetch = async (term: string) => {
+          const r = await fetch(
+            `${SUPABASE_URL}/rest/v1/courses?name=ilike.*${encodeURIComponent(term)}*&select=id,name,code,duration_years,type,eligibility,entrance_exam,entrance_mandatory,departments(name,institutions(name,type,campuses(name,city,state)))`,
+            { headers },
+          );
+          return (await r.json().catch(() => [])) as any[];
+        };
+
+        let courses: any[] = await tryFetch(cleaned);
+        if (!courses?.length && lastWord && lastWord.length >= 3 && lastWord !== cleaned) {
+          console.log(`[get_course_info] Fallback search "${cleaned}" → "${lastWord}"`);
+          courses = await tryFetch(lastWord);
+        }
+        if (!courses?.length) {
+          return {
+            found: false,
+            queried: rawName,
+            normalised: cleaned,
+            message: `No course found matching "${rawName}". Try the field name (e.g. Nursing, Pharmacy, MBA, BBA, BSc Nursing, BTech).`,
+          };
+        }
 
         const course = courses[0];
         const dept = course.departments;
@@ -1095,6 +1123,122 @@ async function executeTool(
         return { success: true, updated_fields: Object.keys(updates) };
       }
 
+      case "transfer_to_human_agent": {
+        // Live hot-transfer using Plivo's "redirect-call-to-new-XML" API.
+        // Resolve the right counsellor (existing assignment, else round-
+        // robin), get their phone, then POST to Plivo's Call Update
+        // endpoint pointing at /transfer-bridge/{callId} which returns
+        // <Dial><Number>{counsellor_phone}</Number></Dial>. Plivo bridges
+        // the legs and the AI agent leaves the call.
+        //
+        // If no counsellor is reachable, fall through to a scheduled
+        // request_human_callback so the caller never gets dropped.
+        const PLIVO_AUTH_ID = Deno.env.get("PLIVO_AUTH_ID");
+        const PLIVO_AUTH_TOKEN = Deno.env.get("PLIVO_AUTH_TOKEN");
+        if (!PLIVO_AUTH_ID || !PLIVO_AUTH_TOKEN) {
+          return { success: false, message: "Plivo not configured — falling back to scheduled callback." };
+        }
+        if (!callCtx.leadId) return { success: false, message: "No lead ID for this call" };
+        if (!callCtx.plivoCallUuid) return { success: false, message: "No active Plivo call UUID — cannot redirect." };
+
+        // Resolve counsellor (assigned, or round-robin pick) and their phone
+        let counsellorProfileId: string | null = null;
+        const ldRow = await fetch(
+          `${SUPABASE_URL}/rest/v1/leads?id=eq.${callCtx.leadId}&select=counsellor_id,name`,
+          { headers },
+        ).then(r => r.json()).catch(() => []);
+        const lead = ldRow?.[0];
+        counsellorProfileId = lead?.counsellor_id || null;
+        if (!counsellorProfileId) {
+          counsellorProfileId = await assignLeadRoundRobin(callCtx.leadId);
+        }
+        if (!counsellorProfileId) {
+          console.warn(`[${callCtx.leadId}] transfer_to_human_agent: no counsellor available, falling back to callback`);
+          // Fall through to the scheduled-callback path below by simulating
+          // the request_human_callback args + reusing its handler. Cleanest
+          // to just inline a minimal version here.
+          return { success: false, fallback: "request_human_callback", message: "No counsellor available for live transfer — please use request_human_callback instead." };
+        }
+
+        const profRow = await fetch(
+          `${SUPABASE_URL}/rest/v1/profiles?id=eq.${counsellorProfileId}&select=user_id,phone,display_name`,
+          { headers },
+        ).then(r => r.json()).catch(() => []);
+        const counsellor = profRow?.[0];
+        if (!counsellor?.phone) {
+          return { success: false, fallback: "request_human_callback", message: "Counsellor has no phone on profile — please use request_human_callback." };
+        }
+
+        // Normalise the counsellor phone: strip non-digits, ensure 91 prefix
+        let counsellorPhone = String(counsellor.phone).replace(/[^0-9+]/g, "");
+        if (counsellorPhone.startsWith("+")) counsellorPhone = counsellorPhone.slice(1);
+        if (counsellorPhone.length === 10) counsellorPhone = `91${counsellorPhone}`;
+
+        // Stash the bridge target on the call context so the
+        // /transfer-bridge/{callId} XML handler can read it back.
+        (callCtx as any).bridgeTo = {
+          phone: counsellorPhone,
+          name: counsellor.display_name || "counsellor",
+          reason: args.reason || "live transfer requested by caller",
+        };
+
+        // Build the redirect URL Plivo will hit on the live call
+        const VOICE_AGENT_URL = Deno.env.get("VOICE_AGENT_URL") || "";
+        const bridgeUrl = `${VOICE_AGENT_URL}/transfer-bridge/${callCtx.callLogId || callCtx.plivoCallUuid}`;
+
+        // Plivo Call Update API: POST /Account/{auth_id}/Call/{call_uuid}/
+        // Body: { url, method } — Plivo fetches this URL and replaces the
+        // current call's XML with whatever it returns.
+        const auth = btoa(`${PLIVO_AUTH_ID}:${PLIVO_AUTH_TOKEN}`);
+        const plivoRes = await fetch(
+          `https://api.plivo.com/v1/Account/${PLIVO_AUTH_ID}/Call/${callCtx.plivoCallUuid}/`,
+          {
+            method: "POST",
+            headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ url: bridgeUrl, method: "GET" }),
+          },
+        );
+        if (!plivoRes.ok) {
+          const errBody = await plivoRes.text().catch(() => "");
+          console.error(`[transfer_to_human] Plivo redirect failed ${plivoRes.status}: ${errBody.slice(0, 200)}`);
+          return { success: false, fallback: "request_human_callback", message: `Live transfer failed (${plivoRes.status}). Please use request_human_callback instead.` };
+        }
+
+        // Audit trail in lead_activities
+        await fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
+          method: "POST",
+          headers: { ...headers, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            lead_id: callCtx.leadId,
+            type: "system",
+            description: `🤖 Live transfer to counsellor ${counsellor.display_name || ""}: ${args.reason || ""}`,
+          }),
+        }).catch(() => {});
+
+        // Bell notification for the counsellor so they know who they're getting
+        if (counsellor.user_id) {
+          fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
+            method: "POST",
+            headers: { ...headers, Prefer: "return=minimal" },
+            body: JSON.stringify({
+              user_id: counsellor.user_id,
+              type: "callback_requested",
+              title: `Live transfer incoming: ${lead?.name || "lead"}`,
+              body: args.reason || "AI agent transferring an active caller to you now.",
+              link: `/admissions/${callCtx.leadId}`,
+              lead_id: callCtx.leadId,
+            }),
+          }).catch(() => {});
+        }
+
+        console.log(`[${callCtx.plivoCallUuid}] transfer_to_human_agent → ${counsellor.display_name} (${counsellorPhone})`);
+        return {
+          success: true,
+          transferred_to: counsellor.display_name || "counsellor",
+          message: "Caller is being connected to a human counsellor now.",
+        };
+      }
+
       case "request_human_callback": {
         if (!callCtx.leadId) return { success: false, message: "No lead ID for this call" };
 
@@ -1230,10 +1374,14 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
   geminiWs.onopen = () => {
     console.log(`[${callId}] Gemini WS connected, sending setup`);
 
-    // Send BidiGenerateContent setup as first message
+    // Send BidiGenerateContent setup as first message.
+    // model + voice come from admin settings; falling back to env GEMINI_MODEL
+    // if the cache hasn't populated yet on cold start.
+    const liveSettings = getVoiceSettings();
+    const liveModel = liveSettings.geminiModel || GEMINI_MODEL;
     const setup = {
       setup: {
-        model: `models/${GEMINI_MODEL}`,
+        model: `models/${liveModel}`,
         generationConfig: {
           responseModalities: ["AUDIO"],
           // ⚠️  speechConfig field landmines for the native-audio model:
@@ -1248,15 +1396,21 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
           speechConfig: {
             voiceConfig: {
               prebuiltVoiceConfig: {
-                voiceName: "Kore",
+                // Admin-controlled voice. 7 options: Aoede / Charon /
+                // Fenrir / Kore / Leda / Puck / Zephyr — each with very
+                // different timbre. Default Aoede (measured female).
+                voiceName: liveSettings.geminiVoice,
               },
             },
           },
         },
         realtimeInputConfig: {
           automaticActivityDetection: {
-            prefixPaddingMs: 300,
-            silenceDurationMs: 1500,
+            prefixPaddingMs: liveSettings.geminiPrefixPaddingMs,
+            // Read from admin-controlled settings (default 1500ms).
+            // Lower = snappier replies, higher = safer (no self-interrupt
+            // on Hindi pauses). Tunable from /admin → AI Voice Agent card.
+            silenceDurationMs: getVoiceSettings().geminiSilenceMs,
           },
         },
         // Surface STT for both sides into serverContent so we can log what
@@ -1273,7 +1427,7 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
         }],
       },
     };
-    console.log(`[${callId}] Sending Gemini setup for model: models/${GEMINI_MODEL}`);
+    console.log(`[${callId}] Sending Gemini setup for model: models/${liveModel}`);
     geminiWs.send(JSON.stringify(setup));
   };
 
@@ -1689,6 +1843,45 @@ Deno.serve({ port: PORT }, async (req) => {
           );
           const recent = (await recentRes.json().catch(() => []))?.[0];
           if (recent?.created_at) lastOutboundCallAt = recent.created_at;
+        } else {
+          // Unknown caller — create a fresh lead row so the conversation has
+          // somewhere to attach followups, dispositions, and notes. Without
+          // this, an inbound call from a number not in CRM produced a
+          // silent ghost call that disappeared. Source = "whatsapp" is the
+          // default catch-all for inbound voice (matches existing channel).
+          const phoneE164 = `+91${phone}`;
+          const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/leads`, {
+            method: "POST",
+            headers: { ...dbHeaders, Prefer: "return=representation" },
+            body: JSON.stringify({
+              name: `Inbound caller ${phone.slice(-4)}`, // Navya updates via update_lead_info
+              phone: phoneE164,
+              source: "inbound_call",
+              stage: "new_lead",
+              notes: `Auto-created on inbound AI call ${callId}`,
+            }),
+          });
+          if (insertRes.ok) {
+            const created = await insertRes.json().catch(() => []);
+            if (created?.[0]?.id) {
+              leadId = created[0].id;
+              leadName = created[0].name || "";
+              console.log(`[${callId}] Auto-created lead ${leadId} for inbound caller ${phoneE164}`);
+              // Seed an activity entry so the call shows up in the lead's timeline.
+              fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
+                method: "POST",
+                headers: { ...dbHeaders, Prefer: "return=minimal" },
+                body: JSON.stringify({
+                  lead_id: leadId,
+                  type: "system",
+                  description: `🤖 Auto-created from inbound AI call (${phoneE164}). Navya is qualifying.`,
+                }),
+              }).catch(() => {});
+            }
+          } else {
+            const errBody = await insertRes.text().catch(() => "");
+            console.error(`[${callId}] Inbound auto-lead-create failed (${insertRes.status}): ${errBody.slice(0, 200)}`);
+          }
         }
       }
     } catch (e) {
@@ -1703,8 +1896,13 @@ Deno.serve({ port: PORT }, async (req) => {
       campusName,
       calledNumber: params.To || "",
       lastOutboundCallAt,
+      assignedCounsellorName: counsellorName || undefined,
       callerTranscript: [],
       aiTranscript: [],
+      // plivoCallUuid is needed by transfer_to_human_agent for the live
+      // redirect-call REST API. Without this set, the transfer tool
+      // silently fails with "No active Plivo call UUID".
+      plivoCallUuid: plivoCallUUID || undefined,
       toolCallsMade: [{ name: "inbound_meta", args: { counsellorUserId, counsellorName, counsellorPhone, plivoCallUUID }, result: null }],
     });
 
@@ -2006,6 +2204,21 @@ Deno.serve({ port: PORT }, async (req) => {
     // Always use wss:// in production (Cloud Run terminates TLS at load balancer, so url.protocol is http)
     const wsProtocol = host.includes("localhost") ? "ws" : "wss";
 
+    // Capture Plivo's real CallUUID and stash it on callCtx so the
+    // transfer_to_human_agent tool can use it later. CallUUID arrives
+    // via form body on POST or query string on GET — check both.
+    let plivoCallUuid: string | undefined = url.searchParams.get("CallUUID") || undefined;
+    if (!plivoCallUuid && req.method === "POST") {
+      try {
+        const body = await req.clone().formData();
+        plivoCallUuid = (body.get("CallUUID") as string) || undefined;
+      } catch { /* not form-encoded — ignore */ }
+    }
+    if (plivoCallUuid) {
+      const ctx = activeCallContexts.get(callId);
+      if (ctx) ctx.plivoCallUuid = plivoCallUuid;
+    }
+
     const recordingCallbackUrl = SUPABASE_URL
       ? `${SUPABASE_URL}/functions/v1/voice-call-callback`
       : "";
@@ -2016,7 +2229,7 @@ Deno.serve({ port: PORT }, async (req) => {
   <Stream streamTimeout="600" keepCallAlive="true" bidirectional="true" contentType="audio/x-mulaw;rate=8000">${wsUrl}</Stream>
 </Response>`;
 
-    console.log(`[${callId}] Answer URL hit, returning XML`);
+    console.log(`[${callId}] Answer URL hit (plivoCallUuid=${plivoCallUuid || "?"}), returning XML`);
     return new Response(xml, {
       headers: { "Content-Type": "application/xml" },
     });
@@ -2260,6 +2473,41 @@ Deno.serve({ port: PORT }, async (req) => {
     return new Response("OK");
   }
 
+  // ── Live transfer to human agent (called by transfer_to_human_agent tool)
+  // The tool stashes { phone, name, reason } on the active call context
+  // and tells Plivo's Call Update API to redirect to this URL. Plivo
+  // fetches it and replaces the live call's XML with whatever we return —
+  // here, a <Speak>+<Dial> that bridges the caller to the counsellor's
+  // phone. AI agent's WS gets dropped naturally when the call XML changes.
+  if (path.startsWith("/transfer-bridge/")) {
+    const key = path.split("/transfer-bridge/")[1];
+    // The key is whatever the tool used — typically callLogId, falling back
+    // to plivoCallUuid. Try both lookups.
+    const ctx = activeCallContexts.get(key)
+      || Array.from(activeCallContexts.values()).find(c => (c as any).bridgeTo && (c.callLogId === key || c.plivoCallUuid === key));
+    const bridge = (ctx as any)?.bridgeTo as { phone: string; name: string; reason: string } | undefined;
+    if (!bridge?.phone) {
+      console.error(`[transfer-bridge] No bridge target for key=${key}`);
+      // Hang up gracefully rather than leaving the caller in limbo
+      return new Response(
+        `<?xml version="1.0" encoding="UTF-8"?><Response><Speak voice="Polly.Kajal" language="en-IN">We're unable to connect you to a counsellor right now. Please try again shortly.</Speak><Hangup/></Response>`,
+        { headers: { "Content-Type": "application/xml" } },
+      );
+    }
+    console.log(`[transfer-bridge ${key}] Dialing ${bridge.name} at ${bridge.phone}`);
+    const callerId = Deno.env.get("PLIVO_DIALER_PHONE_NUMBER")
+      || Deno.env.get("PLIVO_PHONE_NUMBER")
+      || "";
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Speak voice="Polly.Kajal" language="en-IN">Connecting you to ${bridge.name} now. Please hold.</Speak>
+  <Dial timeout="30" callerId="${callerId}">
+    <Number>${bridge.phone}</Number>
+  </Dial>
+</Response>`;
+    return new Response(xml, { headers: { "Content-Type": "application/xml" } });
+  }
+
   // ── Manual Call: Bridge counsellor ↔ student ──────────────────────────────
   // POST /bridge-context/{callId} — store bridge call metadata
   if (path.startsWith("/bridge-context/") && req.method === "POST") {
@@ -2495,6 +2743,17 @@ Deno.serve({ port: PORT }, async (req) => {
       const provider = getVoiceProviderSync();
       console.log(`[${callId}] Dispatching to voice provider: ${provider}`);
       if (provider === "sarvam") handlePlivoStreamSarvam(socket, callId);
+      else if (provider === "plivo") {
+        // Plivo Voice AI Agents normally ingest at the answer-URL XML
+        // stage (with their own Connect verb), not over our /ws handler.
+        // If the answer URL didn't route to Plivo and we somehow ended
+        // up here, that means the Plivo integration isn't fully wired
+        // up — fall back to the working Gemini path so the call doesn't
+        // die. See voice-agent/PLIVO_INTEGRATION.md for the missing
+        // steps (REST agent setup, webhook URL, Connect verb XML).
+        console.warn(`[${callId}] Provider=plivo but reached /ws handler — Plivo agent not wired into answer URL yet. Falling back to gemini.`);
+        handlePlivoStream(socket, callId);
+      }
       else handlePlivoStream(socket, callId);
       return response;
     }
@@ -2511,7 +2770,16 @@ Deno.serve({ port: PORT }, async (req) => {
 // arrives. We pre-fetch on startup and then refresh every 30s in the
 // background; reads from getVoiceProviderSync() return the cached value.
 
-let providerCache: "gemini" | "sarvam" = "gemini";
+// Three valid providers:
+//   "gemini" — Gemini Live native-audio over our own WS handler (default)
+//   "sarvam" — Cascaded STT (Sarvam Saarika) → Gemini text → TTS (Bulbul)
+//   "plivo"  — Plivo Voice AI Agents (managed stack: Plivo runs STT/TTS/
+//              VAD/turn-detection; we expose a webhook for tool calls).
+//              Scaffolded behind a feature flag — handler logs a warning
+//              and falls back to "gemini" until the integration is
+//              completed (see voice-agent/PLIVO_INTEGRATION.md).
+type VoiceProvider = "gemini" | "sarvam" | "plivo";
+let providerCache: VoiceProvider = "gemini";
 async function refreshProviderCache() {
   try {
     const res = await fetch(
@@ -2520,16 +2788,87 @@ async function refreshProviderCache() {
     );
     const rows = await res.json().catch(() => []);
     const v = rows?.[0]?.value;
-    if (v === "sarvam" || v === "gemini") providerCache = v;
+    if (v === "sarvam" || v === "gemini" || v === "plivo") providerCache = v;
   } catch (e) {
     console.warn(`[provider] _app_config refresh failed:`, (e as Error).message);
   }
 }
-function getVoiceProviderSync(): "gemini" | "sarvam" { return providerCache; }
+function getVoiceProviderSync(): VoiceProvider { return providerCache; }
 // Warm the cache on boot, then refresh every 30s — dashboard toggle
 // propagates within that window.
 refreshProviderCache();
 setInterval(refreshProviderCache, 30_000);
+
+// ─── Voice-agent tunable settings (admin-controlled) ─────────────────
+//
+// Same pattern as providerCache: keep a SYNC-readable cache, refresh in
+// the background. Set in admin panel via set_voice_agent_settings RPC,
+// read here via _app_config.voice_agent_settings (JSON-encoded blob).
+//
+// Defaults match the migration so a missing row degrades safely.
+type VoiceSettings = {
+  geminiSilenceMs: number;
+  sarvamFillerThresholdMs: number;
+  sarvamPace: number;
+  sarvamSpeaker: string;
+  sarvamBulbulModel: string;
+  geminiVoice: string;
+  geminiModel: string;
+  geminiPrefixPaddingMs: number;
+  cascadeMaxTokens: number;
+  cascadeTemperature: number;
+  cascadeLangOverride: "auto" | "hi-IN" | "en-IN";
+  cascadeTtsProvider: "sarvam" | "elevenlabs";
+  elevenLabsVoiceId: string;
+};
+const VOICE_SETTINGS_DEFAULT: VoiceSettings = {
+  geminiSilenceMs: 1500,
+  sarvamFillerThresholdMs: 700,
+  sarvamPace: 1.0,
+  sarvamSpeaker: "priya",
+  sarvamBulbulModel: "bulbul:v3-beta",
+  geminiVoice: "Aoede",
+  geminiModel: "gemini-2.5-flash-native-audio-latest",
+  geminiPrefixPaddingMs: 300,
+  cascadeMaxTokens: 150,
+  cascadeTemperature: 0.4,
+  cascadeLangOverride: "auto",
+  cascadeTtsProvider: "sarvam",
+  elevenLabsVoiceId: "",
+};
+let voiceSettingsCache: VoiceSettings = { ...VOICE_SETTINGS_DEFAULT };
+async function refreshVoiceSettingsCache() {
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/_app_config?key=eq.voice_agent_settings&select=value`,
+      { headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` } },
+    );
+    const rows = await res.json().catch(() => []);
+    const raw = rows?.[0]?.value;
+    if (!raw) return;
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    voiceSettingsCache = {
+      geminiSilenceMs:           Number(parsed.gemini_silence_ms          ?? VOICE_SETTINGS_DEFAULT.geminiSilenceMs),
+      sarvamFillerThresholdMs:   Number(parsed.sarvam_filler_threshold_ms ?? VOICE_SETTINGS_DEFAULT.sarvamFillerThresholdMs),
+      sarvamPace:                Number(parsed.sarvam_pace                ?? VOICE_SETTINGS_DEFAULT.sarvamPace),
+      sarvamSpeaker:             String(parsed.sarvam_speaker             ?? VOICE_SETTINGS_DEFAULT.sarvamSpeaker),
+      sarvamBulbulModel:         String(parsed.sarvam_bulbul_model        ?? VOICE_SETTINGS_DEFAULT.sarvamBulbulModel),
+      geminiVoice:               String(parsed.gemini_voice               ?? VOICE_SETTINGS_DEFAULT.geminiVoice),
+      geminiModel:               String(parsed.gemini_model               ?? VOICE_SETTINGS_DEFAULT.geminiModel),
+      geminiPrefixPaddingMs:     Number(parsed.gemini_prefix_padding_ms   ?? VOICE_SETTINGS_DEFAULT.geminiPrefixPaddingMs),
+      cascadeMaxTokens:          Number(parsed.cascade_max_tokens         ?? VOICE_SETTINGS_DEFAULT.cascadeMaxTokens),
+      cascadeTemperature:        Number(parsed.cascade_temperature        ?? VOICE_SETTINGS_DEFAULT.cascadeTemperature),
+      cascadeLangOverride:       (["auto","hi-IN","en-IN"].includes(parsed.cascade_lang_override) ? parsed.cascade_lang_override : "auto") as VoiceSettings["cascadeLangOverride"],
+      cascadeTtsProvider:        (parsed.cascade_tts_provider === "elevenlabs" ? "elevenlabs" : "sarvam") as VoiceSettings["cascadeTtsProvider"],
+      elevenLabsVoiceId:         String(parsed.elevenlabs_voice_id ?? VOICE_SETTINGS_DEFAULT.elevenLabsVoiceId),
+    };
+  } catch (e) {
+    console.warn(`[voice-settings] refresh failed, using defaults:`, (e as Error).message);
+  }
+}
+function getVoiceSettings(): VoiceSettings { return voiceSettingsCache; }
+refreshVoiceSettingsCache();
+setInterval(refreshVoiceSettingsCache, 30_000);
 
 // ─── Sarvam cascaded pipeline (STT → Gemini text → TTS) ──────────────
 //
@@ -2543,11 +2882,15 @@ setInterval(refreshProviderCache, 30_000);
 // audio, but more resilient — a single provider outage doesn't kill calls.
 
 const SARVAM_API_KEY = Deno.env.get("SARVAM_API_KEY") || "";
+const ELEVENLABS_API_KEY = Deno.env.get("ELEVENLABS_API_KEY") || "";
 // Reuse the same key the Gemini Live path uses — Cloud Run env has it under
 // GOOGLE_AI_API_KEY, with GEMINI_API_KEY as a fallback for any environment
 // that named it that way.
 const GEMINI_API_KEY_FOR_TEXT = Deno.env.get("GOOGLE_AI_API_KEY") || Deno.env.get("GEMINI_API_KEY") || "";
-const SARVAM_TTS_SPEAKER = Deno.env.get("SARVAM_TTS_SPEAKER") || "ritu";
+// Bulbul v3-beta speaker. Valid speakers for v3-beta differ from v3:
+// aditya, ritu, ashutosh, priya, neha, rahul, pooja, rohan, simran, kavya.
+// "priya" = warm female default. Override via env var or admin UI.
+const SARVAM_TTS_SPEAKER = Deno.env.get("SARVAM_TTS_SPEAKER") || "priya";
 
 // VAD tuning for Plivo's mulaw 8kHz stream. Each Plivo frame is 160 samples
 // (20ms). 50 silence frames after at least 8 voice frames = "end of utterance"
@@ -2570,6 +2913,86 @@ interface GeminiContent {
 
 const TERMINAL_DISPOSITIONS = new Set(["voicemail", "not_interested", "wrong_number", "do_not_contact", "not_answered"]);
 
+// ─── Sarvam filler-ack cache ────────────────────────────────────────
+// The cascade (STT → text Gemini → TTS) takes 2-5 s of dead silence after
+// the caller stops speaking. To mask that, we keep a small bank of short
+// pre-cached acknowledgement clips. After STT completes, we start a 700 ms
+// race timer; if the LLM hasn't responded by then, we play ONE filler
+// (rotated to avoid sounding robotic). If the LLM finishes first, no
+// filler plays at all — short replies stay snappy.
+const FILLER_TEXTS = [
+  "जी,",
+  "हम्म, ek second.",
+  "अच्छा,",
+];
+const fillerMulawCache: (string | null)[] = FILLER_TEXTS.map(() => null);
+let fillerWarming = false;
+let fillerRotation = 0;
+// Track the (speaker, pace, model) tuple used for the cache so we know
+// when to re-render. Set when warming completes; compared on each call.
+let fillerCacheSig: string | null = null;
+function currentFillerSig(): string {
+  const s = getVoiceSettings();
+  // Include provider + voiceId so the cache invalidates when the admin
+  // switches between Sarvam and ElevenLabs (or changes the EL voice).
+  return `${s.cascadeTtsProvider}|${s.elevenLabsVoiceId}|${s.sarvamSpeaker}|${s.sarvamPace}|${s.sarvamBulbulModel}`;
+}
+async function warmFillerCache(): Promise<void> {
+  if (fillerWarming || !SARVAM_API_KEY) return;
+  // Settings changed since last warm — wipe the cache so we re-render
+  // with the new speaker/pace/model the admin selected.
+  const sig = currentFillerSig();
+  if (fillerCacheSig && fillerCacheSig !== sig) {
+    for (let i = 0; i < fillerMulawCache.length; i++) fillerMulawCache[i] = null;
+    fillerCacheSig = null;
+  }
+  if (fillerMulawCache.every(c => c !== null)) return;
+  fillerWarming = true;
+  try {
+    const settings = getVoiceSettings();
+    const useElevenForFiller = settings.cascadeTtsProvider === "elevenlabs"
+      && !!ELEVENLABS_API_KEY
+      && !!settings.elevenLabsVoiceId;
+    for (let i = 0; i < FILLER_TEXTS.length; i++) {
+      if (fillerMulawCache[i]) continue;
+      const pcm = useElevenForFiller
+        ? await elevenLabsTTS({
+            apiKey: ELEVENLABS_API_KEY,
+            text: FILLER_TEXTS[i],
+            voiceId: settings.elevenLabsVoiceId,
+            speed: settings.sarvamPace,
+          })
+        : await sarvamTTS({
+            apiKey: SARVAM_API_KEY,
+            text: FILLER_TEXTS[i],
+            speaker: settings.sarvamSpeaker || SARVAM_TTS_SPEAKER,
+            languageCode: "hi-IN",
+            pace: settings.sarvamPace,
+            model: settings.sarvamBulbulModel,
+          });
+      if (pcm) {
+        fillerMulawCache[i] = pcm16ToMulawBase64(pcm);
+        console.log(`[sarvam-filler] cached "${FILLER_TEXTS[i]}" (${fillerMulawCache[i]!.length}b)`);
+      }
+    }
+    fillerCacheSig = currentFillerSig();
+  } catch (e) {
+    console.warn(`[sarvam-filler] warm failed:`, (e as Error).message);
+  } finally {
+    fillerWarming = false;
+  }
+}
+// Pick the next filler in rotation. Returns null if cache empty.
+function nextFiller(): string | null {
+  const ready = fillerMulawCache.filter((c): c is string => !!c);
+  if (ready.length === 0) return null;
+  const pick = ready[fillerRotation % ready.length];
+  fillerRotation++;
+  return pick;
+}
+// Fire-and-forget at module init so the first call doesn't pay the cost.
+warmFillerCache();
+
 function handlePlivoStreamSarvam(plivoWs: WebSocket, callId: string) {
   const callCtx = activeCallContexts.get(callId);
   if (!callCtx) {
@@ -2589,15 +3012,63 @@ function handlePlivoStreamSarvam(plivoWs: WebSocket, callId: string) {
   const sendTtsToPlivo = async (text: string) => {
     aiSpeaking = true;
     try {
-      // Pick TTS phonetics from the dominant script in the response so
-      // Devanagari isn't read with English-India phonemes (and vice versa).
-      const langCode = detectSarvamLanguageCode(text);
-      const pcm = await sarvamTTS({
-        apiKey: SARVAM_API_KEY,
-        text,
-        speaker: SARVAM_TTS_SPEAKER,
-        languageCode: langCode,
-      });
+      // Pick TTS phonetics from the dominant script in the response —
+      // unless the admin has forced a specific language ("auto" = detect,
+      // "hi-IN" = always Hindi phonemes, "en-IN" = always English).
+      const settings = getVoiceSettings();
+      const langCode = settings.cascadeLangOverride === "auto"
+        ? detectSarvamLanguageCode(text)
+        : settings.cascadeLangOverride;
+      // Provider switch — admin picks "sarvam" or "elevenlabs" in
+      // /admin → AI Voice Agent → Sarvam Cascade. Falls back to Sarvam
+      // gracefully if ElevenLabs is selected but voice_id or API key
+      // is missing (so admin can't accidentally break calls by toggling
+      // before pasting a voice_id).
+      // Why we may NOT use ElevenLabs even when admin selected it:
+      //   1) ELEVENLABS_API_KEY missing on Cloud Run env
+      //   2) elevenLabsVoiceId blank in admin UI
+      // Either case logs a warning ONCE per call (gated by aiTranscript
+      // length) so we know which guard tripped — silent fallback was
+      // making mid-call voice changes mysterious.
+      const elProviderSelected = settings.cascadeTtsProvider === "elevenlabs";
+      const useElevenLabs = elProviderSelected && !!ELEVENLABS_API_KEY && !!settings.elevenLabsVoiceId;
+      if (elProviderSelected && !useElevenLabs && callCtx.aiTranscript.length === 0) {
+        if (!ELEVENLABS_API_KEY) console.warn(`[${callId}] EL provider selected but ELEVENLABS_API_KEY env is empty → using Sarvam Bulbul`);
+        else if (!settings.elevenLabsVoiceId) console.warn(`[${callId}] EL provider selected but elevenLabsVoiceId admin setting is empty → using Sarvam Bulbul`);
+      }
+      let pcm: Int16Array | null = null;
+      if (useElevenLabs) {
+        pcm = await elevenLabsTTS({
+          apiKey: ELEVENLABS_API_KEY,
+          text,
+          voiceId: settings.elevenLabsVoiceId,
+          speed: settings.sarvamPace,
+        });
+        // Auto-fallback to Sarvam if ElevenLabs fails (network blip, rate
+        // limit, voice_id rejected). The detailed reason is logged inside
+        // elevenLabsTTS itself; here we just record that the cascade
+        // SWITCHED VOICES mid-call so it's grep-able in Cloud Run logs.
+        if (!pcm) {
+          console.warn(`[${callId}] ⚠ VOICE-SWITCH mid-call: EL failed → falling back to Sarvam Bulbul (text="${text.slice(0, 80)}")`);
+          pcm = await sarvamTTS({
+            apiKey: SARVAM_API_KEY,
+            text,
+            speaker: settings.sarvamSpeaker || SARVAM_TTS_SPEAKER,
+            languageCode: langCode,
+            pace: settings.sarvamPace,
+            model: settings.sarvamBulbulModel,
+          });
+        }
+      } else {
+        pcm = await sarvamTTS({
+          apiKey: SARVAM_API_KEY,
+          text,
+          speaker: settings.sarvamSpeaker || SARVAM_TTS_SPEAKER,
+          languageCode: langCode,
+          pace: settings.sarvamPace,
+          model: settings.sarvamBulbulModel,
+        });
+      }
       if (!pcm) {
         console.warn(`[${callId}] sarvam-tts returned empty pcm`);
         return;
@@ -2624,26 +3095,128 @@ function handlePlivoStreamSarvam(plivoWs: WebSocket, callId: string) {
   // raw model `parts` array so the caller can decide what to do (speak text,
   // execute tools, both).
   const callGemini = async (): Promise<any[]> => {
-    const systemPrompt = buildSystemInstruction(callCtx);
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY_FOR_TEXT}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt }] },
-          contents: history,
-          tools: [{ functionDeclarations: VOICE_AGENT_TOOLS }],
-          generationConfig: { temperature: 0.4, maxOutputTokens: 300 },
-        }),
+    // Cascade-path-only addendum: Sarvam Bulbul reads text using the
+    // phonetics of the script it's written in. If the model emits Hindi
+    // words in Latin transliteration ("main Navya hoon"), Bulbul reads
+    // each token as English ("m-a-i-n nav-yuh ho-on") and the speech
+    // sounds broken with letters separating from words. Forcing Devanagari
+    // for any Hindi/Hinglish output makes the script detector route to
+    // hi-IN phonetics and the speech becomes naturally fluent. English-
+    // only responses keep using Latin and stay routed to en-IN.
+    const cascadeAddendum = `
+
+CASCADED-PATH OUTPUT SCRIPT RULE (STRICT — affects pronunciation):
+Your written response is fed verbatim to a Hindi/English TTS engine. The
+engine picks pronunciation from the script you write in.
+- Any Hindi or Hinglish word MUST be written in Devanagari (देवनागरी), NOT in Latin transliteration.
+  ✗ Bad:  "Main Navya bol rahi hoon, NIMT se."
+  ✓ Good: "मैं नव्या बोल रही हूँ, N.I.M.T. से।"
+- Pure-English sentences stay in Latin script.
+- Mixed sentences keep English brand names / acronyms in Latin and Hindi words in Devanagari.
+  ✓ Good: "नमस्ते, आपने M.B.A. के बारे में enquiry की थी।"
+
+ACRONYM AND COURSE-NAME FORMATTING (STRICT — fixes robotic spelling):
+The TTS engine reads the literal characters you write. Use these patterns:
+
+1. Brand acronyms (NIMT, AICTE, UGC, NCTE, BCI, INC, AKTU, GGSIPU, IIT, IIM):
+   ALWAYS write with periods between letters so each letter is pronounced cleanly.
+   ✗ Bad: "NIMT", "AICTE"     (often read as one mangled word)
+   ✓ Good: "N.I.M.T.", "A.I.C.T.E.", "U.G.C.", "N.C.T.E."
+
+2. Course initialisms read as letters (MBA, BBA, BCA, MCA, MBBS, BPT, MPT, GNM, PGDM):
+   Write with periods so each letter pronounces.
+   ✗ Bad: "MBA", "BBA", "BCA"
+   ✓ Good: "M.B.A.", "B.B.A.", "B.C.A.", "M.B.B.S.", "B.P.T.", "G.N.M."
+
+3. Mixed course names (BSc, MSc, BTech, MTech, BEd, BPharm, DPharm, LLB, LLM):
+   Always write with explicit periods between every initial; spell out the suffix.
+   ✗ Bad: "BSc Nursing", "BTech CSE", "BEd"
+   ✓ Good: "B.Sc. Nursing", "B.Tech. C.S.E.", "B.Ed.", "B.Pharm.", "D.Pharm.", "L.L.B.", "L.L.M."
+
+4. Numbers and rupees: write rupee amounts in words for pacing.
+   ✓ Good: "fees five lakh rupees per year", "fees ₹1.2 lakh", "duration चार साल" (in Devanagari context)
+
+This is mechanical, not stylistic — never emit Hindi tokens in Latin, never emit acronyms without periods.
+
+TOOL ARGUMENTS — IMPORTANT EXCEPTION:
+The dotted formatting (B.Sc., M.B.A., N.I.M.T.) is for SPEECH only. When you
+call a tool (get_course_info, send_whatsapp_to_lead, etc.), pass the PLAIN
+database-style name as the argument, with NO periods.
+  ✗ Bad:  get_course_info({ course_name: "B.Sc. Nursing" })
+  ✓ Good: get_course_info({ course_name: "BSc Nursing" }) or just "Nursing"
+  ✗ Bad:  schedule_visit({ campus_name: "G.G.S.I.P.U." })
+  ✓ Good: schedule_visit({ campus_name: "GGSIPU" })
+
+NATURAL CADENCE (sound human, not a TTS dump):
+- Open replies occasionally with a short softener: "जी,", "हम्म,", "अच्छा,", "एक सेकंड,". Use ONE per turn, max — never stack ("हम्म ठीक अच्छा").
+- Mid-sentence, allow ONE small natural pause marker if the topic is heavy: "...उम्म..." or "...ek second...". Don't overdo it.
+- Short replies are better than long ones. 2 sentences is the sweet spot. Never more than 3.
+
+QUALIFICATION GATE — DO NOT FORGET:
+This is the entire purpose of the call. After you have answered the caller's
+factual questions and they sound satisfied (says "ok", "theek hai", "samajh
+gaya", "thanks", or stops asking), you MUST proactively ask:
+
+  "बहुत अच्छा। क्या आप course के लिए online apply करना चाहेंगे, या पहले हमारा campus visit करेंगे?"
+
+If they say "later"/"abhi nahi"/"soch ke batata hoon" — STILL send them the
+apply link via WhatsApp ("मैं आपको WhatsApp पर apply link भेज देती हूँ — uni.nimt.ac.in") and
+disposition as call_back with tomorrow 11 AM IST as followup_date.
+
+Never close the call without doing one of: schedule_visit, send_whatsapp_to_lead(apply_link),
+or request_human_callback. Then call set_call_disposition. A satisfied
+caller who hangs up without a next step is a FAILED qualification.`;
+    const systemPrompt = buildSystemInstruction(callCtx) + cascadeAddendum;
+    const cascadeSettings = getVoiceSettings();
+    const body = JSON.stringify({
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents: history,
+      tools: [{ functionDeclarations: VOICE_AGENT_TOOLS }],
+      // Both knobs admin-controlled. Defaults: temp=0.4 (steady),
+      // maxOutputTokens=150 (~2-3 short sentences in Devanagari).
+      generationConfig: {
+        temperature: cascadeSettings.cascadeTemperature,
+        maxOutputTokens: cascadeSettings.cascadeMaxTokens,
       },
-    );
-    if (!res.ok) {
-      console.error(`[${callId}] Gemini text gen ${res.status}: ${await res.text().catch(() => "")}`);
-      return [];
+    });
+    // Try the primary model first; if Gemini returns 503/429 (high-demand
+    // overload — observed mid-call on 2026-05-06), retry once after 600ms,
+    // then fail over to a sibling model with separate quota. Keeping the
+    // call alive on a transient overload is more important than which
+    // exact model produced the reply.
+    const MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"];
+    const TRANSIENT = new Set([429, 500, 502, 503, 504]);
+    const tryOnce = async (model: string): Promise<{ status: number; res: Response } | null> => {
+      try {
+        const r = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY_FOR_TEXT}`,
+          { method: "POST", headers: { "Content-Type": "application/json" }, body },
+        );
+        return { status: r.status, res: r };
+      } catch (e) {
+        console.error(`[${callId}] Gemini ${model} fetch threw:`, (e as Error).message);
+        return null;
+      }
+    };
+    let attempt = 0;
+    for (const model of MODELS) {
+      for (let retry = 0; retry < 2; retry++) {
+        attempt++;
+        const result = await tryOnce(model);
+        if (!result) break; // network error — try next model
+        if (result.res.ok) {
+          if (attempt > 1) console.log(`[${callId}] Gemini succeeded on attempt ${attempt} (${model})`);
+          const data = await result.res.json();
+          return data?.candidates?.[0]?.content?.parts || [];
+        }
+        const errBody = await result.res.text().catch(() => "");
+        console.error(`[${callId}] Gemini ${model} ${result.status}: ${errBody.slice(0, 200)}`);
+        if (!TRANSIENT.has(result.status)) return []; // hard error — bail out, don't retry/failover
+        if (retry === 0) await new Promise(r => setTimeout(r, 600));
+      }
+      // Exhausted retries on this model — fall through to the next one.
     }
-    const data = await res.json();
-    return data?.candidates?.[0]?.content?.parts || [];
+    return [];
   };
 
   // Drives the model turn loop: speak any text, execute any tool calls,
@@ -2720,8 +3293,36 @@ function handlePlivoStreamSarvam(plivoWs: WebSocket, callId: string) {
 
       console.log(`[${callId}] Caller said (sarvam): ${userText}`);
       callCtx.callerTranscript.push(userText);
+
+      // Race the filler against the LLM. Threshold is admin-tunable —
+      // 0 = always play, ~2000 = effectively never. If the LLM finishes
+      // first, no filler plays. Filler text rotates across 3 variants so
+      // it never repeats two turns in a row.
+      const fillerThresholdMs = getVoiceSettings().sarvamFillerThresholdMs;
+      let fillerFired = false;
+      const fillerTimer = setTimeout(() => {
+        if (plivoWs.readyState !== WebSocket.OPEN) return;
+        const payload = nextFiller();
+        if (!payload) {
+          // Cache miss — warm it for next time and skip this turn's filler.
+          if (!fillerWarming) warmFillerCache();
+          return;
+        }
+        fillerFired = true;
+        plivoWs.send(JSON.stringify({
+          event: "playAudio",
+          media: { contentType: "audio/x-mulaw", sampleRate: 8000, payload },
+        }));
+      }, fillerThresholdMs);
+
       history.push({ role: "user", parts: [{ text: userText }] });
-      await runModelTurn();
+      try {
+        await runModelTurn();
+      } finally {
+        clearTimeout(fillerTimer);
+      }
+      // (debug) help diagnose if fillers are ever firing for fast replies
+      if (fillerFired) console.log(`[${callId}] filler-ack played`);
     } finally {
       aiSpeaking = false;
     }
