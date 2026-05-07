@@ -228,7 +228,18 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
           concession_breakdown: opts.concessionBreakdown || null,
         },
       });
-      if (invErr) throw invErr;
+      if (invErr) {
+        // FunctionsHttpError.message is always "Edge Function returned a non-2xx status code".
+        // The real error is in invErr.context (a Response object) — extract it.
+        let detail = invErr.message;
+        try {
+          const ctx = (invErr as any).context;
+          const body = ctx?.json ? await ctx.json() : (ctx?.text ? await ctx.text() : null);
+          if (body?.error) detail = body.error;
+          else if (typeof body === "string" && body) detail = body;
+        } catch (_) {}
+        throw new Error(detail);
+      }
       if (data?.error) throw new Error(data.error);
       if (!data?.pay_url) throw new Error("No payment URL returned");
       if (payWin) {

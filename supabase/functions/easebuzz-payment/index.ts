@@ -304,7 +304,9 @@ Deno.serve(async (req) => {
       const txnid       = `LP${lp.id.slice(0, 8)}${Date.now()}`.slice(0, 50);
       const amountStr   = parseFloat(amount).toFixed(2);
       const emailStr    = email || "noreply@nimteducation.com";
-      const productStr  = productinfo || (payment_type === "token_fee" ? "Token Fee" : "Fee Payment");
+      // EaseBuzz productinfo must not contain special characters like %, (, )
+      const rawProduct  = productinfo || (payment_type === "token_fee" ? "Token Fee" : "Fee Payment");
+      const productStr  = rawProduct.replace(/[^a-zA-Z0-9 _\-]/g, "").trim() || "Fee Payment";
       const udf1        = lead_id;
       const udf2        = lp.id;
       const udf3        = payment_type;
