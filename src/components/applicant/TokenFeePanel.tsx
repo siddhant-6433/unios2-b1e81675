@@ -114,11 +114,14 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     }
 
     // Fetch lead info + offer + fee status in parallel via SECURITY DEFINER functions.
+    // We pull POST-WAIVER per-year fees (lead_year_fees_net) — the
+    // concession breakdown sent to easebuzz must apportion against what the
+    // candidate actually owes, not the gross fee.
     const [leadRes, statusRes, offerRes, yearRes] = await Promise.all([
       (supabase as any).rpc("get_applicant_lead_info", { _lead_id: resolvedLeadId }),
       supabase.rpc("lead_fee_status" as any, { _lead_id: resolvedLeadId }),
       (supabase as any).rpc("get_applicant_offer", { _application_id: applicationId }),
-      supabase.rpc("lead_year_fees" as any, { _lead_id: resolvedLeadId }),
+      supabase.rpc("lead_year_fees_net" as any, { _lead_id: resolvedLeadId }),
     ]);
 
     const diagParts: string[] = [];

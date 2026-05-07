@@ -765,11 +765,12 @@ function statusBadge(status: string, paymentStatus: string | null) {
 }
 
 function ApplicationDashboardView({
-  apps, leadName, offerLetters, openAppId, setOpenAppId, onContinue, onStartNew, onLogout,
+  apps, leadName, offerLetters, leadAdmissions, openAppId, setOpenAppId, onContinue, onStartNew, onLogout,
 }: {
   apps: any[];
   leadName: string;
   offerLetters: Record<string, { letter_url: string | null; approval_status: string }>;
+  leadAdmissions: Record<string, { pre_admission_no: string | null; admission_no: string | null }>;
   openAppId: string | null;
   setOpenAppId: (id: string | null) => void;
   onContinue: (app: any) => void;
@@ -823,20 +824,52 @@ function ApplicationDashboardView({
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
 
         {/* Welcome strip */}
-        <div className="rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white px-5 py-4 flex items-center justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-blue-200 mb-0.5">Welcome back</p>
-            <h1 className="text-xl font-bold leading-tight">{leadName || "Applicant"}</h1>
-            <p className="text-sm text-blue-100 mt-0.5">Your admission journey at {portal.name}</p>
-          </div>
-          <GraduationCap className="h-10 w-10 text-blue-300/60 shrink-0" />
-        </div>
+        {(() => {
+          // Find the most advanced admission number across all apps for this lead.
+          const admittedApp = apps.find((a: any) => a.lead_id && leadAdmissions[a.lead_id]?.admission_no);
+          const preAdmittedApp = !admittedApp && apps.find((a: any) => a.lead_id && leadAdmissions[a.lead_id]?.pre_admission_no);
+          const an = admittedApp?.lead_id ? leadAdmissions[admittedApp.lead_id]?.admission_no : null;
+          const pan = preAdmittedApp?.lead_id ? leadAdmissions[preAdmittedApp.lead_id]?.pre_admission_no : null;
+          return (
+            <div className={`rounded-2xl text-white px-5 py-4 ${admittedApp ? "bg-gradient-to-br from-green-600 to-emerald-700" : "bg-gradient-to-br from-blue-600 to-indigo-700"}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-widest text-blue-200 mb-0.5">Welcome back</p>
+                  <h1 className="text-xl font-bold leading-tight">{leadName || "Applicant"}</h1>
+                  {an ? (
+                    <p className="text-sm font-mono font-semibold mt-1 text-green-100">Admission No: {an}</p>
+                  ) : pan ? (
+                    <p className="text-sm font-mono font-semibold mt-1 text-blue-100">Pre-Admission No: {pan}</p>
+                  ) : (
+                    <p className="text-sm text-blue-100 mt-0.5">Your admission journey at {portal.name}</p>
+                  )}
+                </div>
+                <GraduationCap className="h-10 w-10 text-white/30 shrink-0 mt-0.5" />
+              </div>
+              {an && (
+                <a
+                  href="https://uni.nimt.ac.in"
+                  target="_blank"
+                  rel="noopener"
+                  className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-white/20 hover:bg-white/30 active:bg-white/40 transition-colors px-4 py-2.5 text-sm font-bold text-white"
+                >
+                  <GraduationCap className="h-4 w-4" />
+                  Go to Student Dashboard →
+                </a>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Application cards */}
         {apps.map((app) => {
           const a = app as DashboardApp;
           const courses = (a.course_selections || []).map((c: any) => c.course_name).filter(Boolean);
           const offer = a.lead_id ? offerLetters[a.lead_id] : undefined;
+          const admInfo = a.lead_id ? leadAdmissions[a.lead_id] : undefined;
+          const preAdmNo = admInfo?.pre_admission_no ?? null;
+          const admNo = admInfo?.admission_no ?? null;
+          const isAdmitted = !!admNo;
           const hasApprovedOffer = offer?.approval_status === "approved";
           const hasLetterPdf = hasApprovedOffer && !!offer.letter_url;
           const isDraft = a.status === "draft";
@@ -854,11 +887,29 @@ function ApplicationDashboardView({
           return (
             <div key={a.id} className={`rounded-2xl border shadow-sm overflow-hidden ${accentClass}`}>
 
-              {/* Coloured top stripe for approved offers */}
-              {hasApprovedOffer && (
+              {/* Coloured top stripe */}
+              {isAdmitted && (
+                <div className="bg-gradient-to-r from-green-600 to-emerald-600 px-4 py-2.5 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <GraduationCap className="h-4 w-4 text-white shrink-0" />
+                    <span className="text-xs font-bold text-white tracking-wide">Admitted · {admNo}</span>
+                  </div>
+                  <a
+                    href="https://uni.nimt.ac.in"
+                    target="_blank"
+                    rel="noopener"
+                    className="text-[11px] font-bold text-white/90 hover:text-white underline underline-offset-2"
+                  >
+                    Student Portal →
+                  </a>
+                </div>
+              )}
+              {!isAdmitted && hasApprovedOffer && (
                 <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2.5 flex items-center gap-2">
                   <Award className="h-4 w-4 text-yellow-300 shrink-0" />
-                  <span className="text-xs font-bold text-white tracking-wide">Offer Approved · Action Required</span>
+                  <span className="text-xs font-bold text-white tracking-wide">
+                    {preAdmNo ? `Pre-Admitted · ${preAdmNo} · Complete Payment` : "Offer Approved · Action Required"}
+                  </span>
                 </div>
               )}
               {isUnderReview && !hasApprovedOffer && (
@@ -1044,6 +1095,7 @@ const ApplyPortal = () => {
     setAppsList(null);
     setDashboardOpenAppId(null);
     setOfferLetters({});
+    setLeadAdmissions({});
     setPreviewDocs([]);
     setHasDashboard(false);
   };
@@ -1060,6 +1112,7 @@ const ApplyPortal = () => {
   const [appsList, setAppsList] = useState<any[] | null>(null);
   const [dashboardOpenAppId, setDashboardOpenAppId] = useState<string | null>(null);
   const [offerLetters, setOfferLetters] = useState<Record<string, { letter_url: string | null; approval_status: string }>>({});
+  const [leadAdmissions, setLeadAdmissions] = useState<Record<string, { pre_admission_no: string | null; admission_no: string | null }>>({});
 
   // Auto-open the token fee panel for whichever app has an approved offer,
   // but only if the user hasn't manually toggled something already.
@@ -1148,6 +1201,23 @@ const ApplyPortal = () => {
           if (!byLead[l.lead_id]) byLead[l.lead_id] = { letter_url: l.letter_url, approval_status: l.approval_status };
         });
         setOfferLetters(byLead);
+
+        // Fetch admission numbers (PAN / AN) for all leads linked to portal apps.
+        const uniqueLeadIds = [...new Set(portalApps.map((a: any) => a.lead_id).filter(Boolean))];
+        if (uniqueLeadIds.length > 0) {
+          const admissionResults = await Promise.all(
+            uniqueLeadIds.map((lid: string) =>
+              (supabase as any).rpc("get_applicant_lead_info", { _lead_id: lid })
+                .then(({ data }: any) => ({ lead_id: lid, row: data?.[0] || null }))
+                .catch(() => ({ lead_id: lid, row: null }))
+            )
+          );
+          const byLeadAdm: Record<string, { pre_admission_no: string | null; admission_no: string | null }> = {};
+          admissionResults.forEach(({ lead_id, row }: any) => {
+            if (row) byLeadAdm[lead_id] = { pre_admission_no: row.pre_admission_no ?? null, admission_no: row.admission_no ?? null };
+          });
+          setLeadAdmissions(byLeadAdm);
+        }
       }
       setShowCourseSelector(false);
       return;
@@ -1551,6 +1621,7 @@ const ApplyPortal = () => {
         apps={appsList}
         leadName={leadName}
         offerLetters={offerLetters}
+        leadAdmissions={leadAdmissions}
         openAppId={dashboardOpenAppId}
         setOpenAppId={setDashboardOpenAppId}
         onContinue={loadAppIntoEditor}
