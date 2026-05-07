@@ -10,6 +10,7 @@ interface ActiveCall {
   lead_id: string;
   lead_name: string;
   lead_phone: string;
+  lead_course?: string;
   lead_stage: string;
   counsellor_name: string;
   call_type: "manual" | "inbound";
@@ -18,6 +19,8 @@ interface ActiveCall {
   disposition: string | null;
   created_at: string;
   elapsed: number;
+  is_live_transfer?: boolean;
+  transfer_reason?: string | null;
 }
 
 const STAGE_LABELS: Record<string, string> = {
@@ -63,7 +66,7 @@ export function LiveCallBar() {
       const cutoff = new Date(Date.now() - 7 * 60 * 1000).toISOString();
       let query = supabase
         .from("ai_call_records" as any)
-        .select("id, call_uuid, lead_id, student_connected_at, disposition, created_at, caller_user_id, call_type")
+        .select("id, call_uuid, lead_id, student_connected_at, disposition, created_at, caller_user_id, call_type, is_live_transfer, transfer_reason")
         .eq("status", "initiated")
         .in("call_type", ["manual", "inbound"])
         .gte("created_at", cutoff)
@@ -97,11 +100,11 @@ export function LiveCallBar() {
         return;
       }
 
-      // Batch fetch lead details
+      // Batch fetch lead details (course is needed for live-transfer banner context)
       const leadIds = [...new Set(activeRecords.map((r: any) => r.lead_id))];
       const { data: leads } = await supabase
         .from("leads")
-        .select("id, name, phone, stage")
+        .select("id, name, phone, stage, courses:course_id(name)")
         .in("id", leadIds);
       const leadMap: Record<string, any> = {};
       (leads || []).forEach((l: any) => { leadMap[l.id] = l; });
@@ -137,6 +140,7 @@ export function LiveCallBar() {
           lead_id: r.lead_id,
           lead_name: lead.name || "Unknown",
           lead_phone: lead.phone || "",
+          lead_course: (lead.courses as any)?.name || undefined,
           lead_stage: lead.stage || "",
           counsellor_name: handlerName,
           call_type: r.call_type || "manual",
@@ -145,6 +149,8 @@ export function LiveCallBar() {
           disposition: r.disposition,
           created_at: r.created_at,
           elapsed: Math.floor((Date.now() - new Date(r.created_at).getTime()) / 1000),
+          is_live_transfer: !!r.is_live_transfer,
+          transfer_reason: r.transfer_reason || null,
         };
       });
 
@@ -269,25 +275,44 @@ export function LiveCallBar() {
       </div>
     </div>
 
-    {/* Floating incoming call popup for counsellors */}
-    {calls.filter(c => c.call_type === "inbound" && c.status === "calling").map(ic => (
-      <div key={`popup-${ic.call_uuid}`} className="fixed bottom-6 right-6 z-50 animate-bounce-slow">
-        <a href={`/admissions/${ic.lead_id}`} target="_blank" rel="noreferrer"
-          className="flex items-center gap-4 rounded-2xl border-2 border-amber-400 bg-white dark:bg-card shadow-2xl px-5 py-4 min-w-[320px] hover:shadow-3xl transition-shadow">
-          <div className="relative">
-            <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center">
-              <PhoneIncoming className="h-6 w-6 text-amber-600 animate-pulse" />
+    {/* Floating incoming call popup for counsellors. Live-transfer calls get
+        a distinct red treatment + show the AI's reason so the counsellor
+        walks into the call with context ("interested in BSc Nursing"). */}
+    {calls.filter(c => c.call_type === "inbound" && c.status === "calling").map(ic => {
+      const isXfer = !!ic.is_live_transfer;
+      return (
+        <div key={`popup-${ic.call_uuid}`} className="fixed bottom-6 right-6 z-50 animate-bounce-slow">
+          <a href={`/admissions/${ic.lead_id}`} target="_blank" rel="noreferrer"
+            className={`flex items-start gap-4 rounded-2xl border-2 bg-white dark:bg-card shadow-2xl px-5 py-4 min-w-[360px] max-w-[420px] hover:shadow-3xl transition-shadow ${
+              isXfer ? "border-red-500 ring-4 ring-red-200 dark:ring-red-900/40" : "border-amber-400"
+            }`}>
+            <div className="relative shrink-0">
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center ${isXfer ? "bg-red-100" : "bg-amber-100"}`}>
+                <PhoneIncoming className={`h-6 w-6 animate-pulse ${isXfer ? "text-red-600" : "text-amber-600"}`} />
+              </div>
+              <span className={`absolute -top-1 -right-1 w-3 h-3 rounded-full animate-ping ${isXfer ? "bg-red-500" : "bg-amber-500"}`} />
             </div>
-            <span className="absolute -top-1 -right-1 w-3 h-3 bg-amber-500 rounded-full animate-ping" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide">Incoming Call</p>
-            <p className="text-base font-bold text-foreground truncate">{ic.lead_name}</p>
-            <p className="text-xs text-muted-foreground">{ic.lead_phone} · {formatTime(Math.floor((now - new Date(ic.created_at).getTime()) / 1000))}</p>
-          </div>
-        </a>
-      </div>
-    ))}
+            <div className="flex-1 min-w-0">
+              <p className={`text-xs font-bold uppercase tracking-wide ${isXfer ? "text-red-600" : "text-amber-600"}`}>
+                {isXfer ? "🚨 Live Transfer from AI" : "Incoming Call"}
+              </p>
+              <p className="text-base font-bold text-foreground truncate">{ic.lead_name}</p>
+              <p className="text-xs text-muted-foreground">
+                {ic.lead_phone}
+                {ic.lead_course ? ` · ${ic.lead_course}` : ""}
+                {" · "}
+                {formatTime(Math.floor((now - new Date(ic.created_at).getTime()) / 1000))}
+              </p>
+              {isXfer && ic.transfer_reason && (
+                <p className="mt-1.5 text-xs font-medium text-red-700 dark:text-red-400 italic line-clamp-2">
+                  "{ic.transfer_reason}"
+                </p>
+              )}
+            </div>
+          </a>
+        </div>
+      );
+    })}
 
     <style>{`@keyframes bounce-slow{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}`}</style>
     </>

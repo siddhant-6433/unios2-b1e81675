@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Building2, GraduationCap, Pencil, Check, X, Plus, Loader2,
-  ChevronDown, ChevronRight, Shield, MapPin, Trash2, Power,
+  ChevronDown, ChevronRight, Shield, MapPin, Trash2, Power, Video,
 } from "lucide-react";
 import EligibilityRuleDialog, { EligibilityRuleRow } from "./EligibilityRuleDialog";
 import GeofenceDialog from "./GeofenceDialog";
@@ -25,6 +25,10 @@ interface Department {
 }
 interface Course {
   id: string; name: string; code: string; department_id: string; duration_years: number; type: string; is_active?: boolean;
+  /** YouTube/Vimeo/Instagram URL surfaced in WhatsApp templates
+   *  (ai_call_post_summary, ai_missed_call_followup). NULL → falls back
+   *  to the course-page URL on nimt.ac.in. */
+  video_url?: string | null;
 }
 
 export default function CourseCampusMaster() {
@@ -254,12 +258,24 @@ export default function CourseCampusMaster() {
                         <div className="flex items-center gap-2.5 py-1.5 px-3 rounded-lg hover:bg-muted/30 group">
                           <GraduationCap className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                           {isCourseEditing ? (
-                            <div className="flex items-center gap-2 flex-1" onClick={e => e.stopPropagation()}>
-                              <input value={courseDraft.name || ""} onChange={e => setCourseDraft({ ...courseDraft, name: e.target.value })} className={`${inputCls} flex-1`} />
-                              <input value={courseDraft.code || ""} onChange={e => setCourseDraft({ ...courseDraft, code: e.target.value })} className={`${inputCls} w-20`} placeholder="Code" />
-                              <input type="number" value={courseDraft.duration_years || 1} onChange={e => setCourseDraft({ ...courseDraft, duration_years: Number(e.target.value) })} className={`${inputCls} w-14`} min={1} />
-                              <button onClick={() => saveCourse(course.id)} className="text-primary p-0.5"><Check className="h-3.5 w-3.5" /></button>
-                              <button onClick={() => setEditingCourse(null)} className="text-muted-foreground p-0.5"><X className="h-3.5 w-3.5" /></button>
+                            <div className="flex flex-col gap-1.5 flex-1" onClick={e => e.stopPropagation()}>
+                              <div className="flex items-center gap-2">
+                                <input value={courseDraft.name || ""} onChange={e => setCourseDraft({ ...courseDraft, name: e.target.value })} className={`${inputCls} flex-1`} />
+                                <input value={courseDraft.code || ""} onChange={e => setCourseDraft({ ...courseDraft, code: e.target.value })} className={`${inputCls} w-20`} placeholder="Code" />
+                                <input type="number" value={courseDraft.duration_years || 1} onChange={e => setCourseDraft({ ...courseDraft, duration_years: Number(e.target.value) })} className={`${inputCls} w-14`} min={1} />
+                                <button onClick={() => saveCourse(course.id)} className="text-primary p-0.5"><Check className="h-3.5 w-3.5" /></button>
+                                <button onClick={() => setEditingCourse(null)} className="text-muted-foreground p-0.5"><X className="h-3.5 w-3.5" /></button>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Video className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                <input
+                                  type="url"
+                                  value={courseDraft.video_url || ""}
+                                  onChange={e => setCourseDraft({ ...courseDraft, video_url: e.target.value || null })}
+                                  className={`${inputCls} flex-1`}
+                                  placeholder="Course video URL — YouTube / Vimeo / Instagram (auto-included in WhatsApp follow-ups)"
+                                />
+                              </div>
                             </div>
                           ) : (
                             <>
@@ -267,6 +283,18 @@ export default function CourseCampusMaster() {
                               <span className="text-[10px] text-muted-foreground shrink-0 hidden sm:block">
                                 {course.code} · {course.duration_years}yr · {course.type}
                               </span>
+                              {course.video_url && (
+                                <a
+                                  href={course.video_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={e => e.stopPropagation()}
+                                  title={`Course video: ${course.video_url}`}
+                                  className="text-emerald-600 hover:text-emerald-700 p-0.5 shrink-0"
+                                >
+                                  <Video className="h-3.5 w-3.5" />
+                                </a>
+                              )}
                               <span className={`h-2 w-2 rounded-full shrink-0 ${course.is_active !== false ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} title={course.is_active !== false ? 'Active' : 'Inactive'} />
                               <button
                                 onClick={e => { e.stopPropagation(); openRuleDialog(course); }}
@@ -276,7 +304,7 @@ export default function CourseCampusMaster() {
                                 <Shield className="h-3.5 w-3.5" />
                               </button>
                               <button
-                                onClick={e => { e.stopPropagation(); setEditingCourse(course.id); setCourseDraft({ name: course.name, code: course.code, duration_years: course.duration_years }); }}
+                                onClick={e => { e.stopPropagation(); setEditingCourse(course.id); setCourseDraft({ name: course.name, code: course.code, duration_years: course.duration_years, video_url: course.video_url || null }); }}
                                 className="text-muted-foreground hover:text-primary p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
                               >
                                 <Pencil className="h-3 w-3" />

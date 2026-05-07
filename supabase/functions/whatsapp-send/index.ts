@@ -31,6 +31,15 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   counsellor_lead_reclaimed: { name: "counsellor_lead_reclaimed", params: ["lead_name", "course_name"] },
   // AI call follow-up with course link + apply button
   ai_call_course_info: { name: "ai_call_course_info", params: ["student_name", "course_name", "campus_name", "course_url", "apply_url"] },
+  // Post-call summary — sent at the end of an answered AI call.
+  // Body opens with "as discussed on our call" so it reads as a natural
+  // continuation. Includes course video URL when the course has one.
+  // Submit to Meta as UTILITY category so it sends without 24h reply window.
+  ai_call_post_summary: { name: "ai_call_post_summary", params: ["student_name", "course_name", "campus_name", "course_url", "apply_url", "video_url"] },
+  // Missed-call follow-up — sent when AI couldn't reach the lead. Apologises,
+  // gives the dialer number to call back, and shares course info + video.
+  // Submit to Meta as UTILITY (informational, not promotional).
+  ai_missed_call_followup: { name: "ai_missed_call_followup", params: ["student_name", "course_name", "dialer_phone", "course_url", "video_url"] },
   // Team leader TAT defaults
   team_leader_defaults: { name: "team_leader_defaults_report", params: ["leader_name", "total_count", "summary"] },
   counsellor_visit_confirmation: { name: "counsellor_visit_confirmation", params: ["lead_name", "visit_date", "campus_name"] },
@@ -258,6 +267,8 @@ Deno.serve(async (req) => {
       application_rejected: "Dear {{1}}, after review we are unable to proceed with your application {{2}}. Reason: {{3}}. Please contact our admissions office if you'd like to discuss alternatives.",
       applicant_welcome: "Hi {{1}}, thank you for starting your application at NIMT Educational Institutions!\n\nYour Application ID: {{2}}\nCourse: {{3}}\n\nComplete your application at https://uni.nimt.ac.in/apply/nimt/\n\nOur admissions team is here to help. Feel free to reach out anytime!",
       ai_call_course_info: "Hi {{1}}, thank you for speaking with us about {{2}} at NIMT Educational Institutions! 🎓\n\n🏫 Campus: {{3}}\n\n📄 Course Details: {{4}}\n📝 Apply Now: {{5}}\n\nFor questions, reply to this message or call our admissions team.\n\nWe look forward to welcoming you!",
+      ai_call_post_summary: "Hi {{1}}, as discussed on our call, here are the details for {{2}} at NIMT Educational Institutions:\n\n🏫 Campus: {{3}}\n📄 Course details: {{4}}\n📝 Apply now: {{5}}\n🎥 Watch course video: {{6}}\n\nReply to this message for any questions, or our admissions team will reach out shortly.",
+      ai_missed_call_followup: "Hi {{1}}, this is Navya from NIMT Educational Institutions. I tried calling you regarding your enquiry about {{2}}.\n\nPlease feel free to call back at {{3}} during 9 AM-8 PM IST.\n\n📄 Course information: {{4}}\n🎥 Watch course video: {{5}}\n\nLooking forward to assisting you with your admission journey.",
       apply_portal_login: "Hi {{1}}, your secure login link for the NIMT application portal is ready. Tap the button below to complete your application or pay your token fee directly — no OTP needed. The link is valid until {{2}}, so please use it before it expires.",
     };
 

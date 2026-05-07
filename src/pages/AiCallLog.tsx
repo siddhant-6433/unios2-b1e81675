@@ -7,6 +7,8 @@ import {
   Bot, Search, Loader2, CheckCircle, Play, AlertCircle, ChevronLeft, ChevronRight, Calendar,
 } from "lucide-react";
 import { AiCallQueueStatus } from "@/components/admissions/AiCallQueueStatus";
+import { VoiceQualityDashboard } from "@/components/admissions/VoiceQualityDashboard";
+import { CallQualityRating, CallQualityMetricsChip } from "@/components/admissions/CallQualityRating";
 
 interface AiCallRecord {
   id: string;
@@ -18,6 +20,9 @@ interface AiCallRecord {
   conversion_probability: number | null;
   disposition: string | null;
   created_at: string;
+  quality_score: number | null;
+  quality_notes: string | null;
+  quality_metrics: Record<string, any> | null;
   lead_name?: string;
   lead_phone?: string;
   counsellor_name?: string;
@@ -112,6 +117,7 @@ const AiCallLog = () => {
       .select(`
         id, lead_id, status, duration_seconds, recording_url, summary,
         conversion_probability, disposition, created_at,
+        quality_score, quality_notes, quality_metrics,
         leads:lead_id(name, phone, counsellor_id,
           profiles:counsellor_id(display_name)
         )
@@ -212,6 +218,9 @@ const AiCallLog = () => {
         <p className="text-sm text-muted-foreground mt-1">All AI-initiated calls with recordings and assessments</p>
       </div>
 
+      {/* Quality dashboard — 7-day rolling stats */}
+      <VoiceQualityDashboard />
+
       {/* Live queue status — auto-refreshes every 20s */}
       <AiCallQueueStatus />
 
@@ -287,6 +296,7 @@ const AiCallLog = () => {
                   <th className="px-4 py-2.5 text-center font-medium text-muted-foreground">Duration</th>
                   <th className="px-4 py-2.5 text-center font-medium text-muted-foreground">Conversion</th>
                   <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Summary</th>
+                  <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Quality</th>
                   <th className="px-4 py-2.5 text-center font-medium text-muted-foreground">Retries</th>
                   <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Follow-up</th>
                   <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Counsellor</th>
@@ -323,6 +333,17 @@ const AiCallLog = () => {
                       </td>
                       <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-[250px]">
                         <p className="line-clamp-2">{r.summary || "—"}</p>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <div className="flex flex-col gap-1">
+                          <CallQualityRating
+                            callLogId={r.id}
+                            initialScore={r.quality_score}
+                            initialNotes={r.quality_notes}
+                            compact
+                          />
+                          <CallQualityMetricsChip metrics={r.quality_metrics} />
+                        </div>
                       </td>
                       <td className="px-4 py-2.5 text-center">
                         <span className={`text-xs font-medium ${(r.retry_count || 1) > 1 ? "text-amber-600" : "text-muted-foreground"}`}>
