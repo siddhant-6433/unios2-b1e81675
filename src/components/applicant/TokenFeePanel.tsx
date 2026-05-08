@@ -11,6 +11,10 @@ type FeeStatus = {
   token_paid: number;
   application_paid: number;
   total_paid: number;
+  /** Sum of token_fee + 'other' lead_payments — i.e. money applied
+   *  toward the course balance. Excludes application_fee and
+   *  registration_fee which are separate charges. */
+  paid_toward_course?: number;
   twenty_five_pct: number;
   min_token_instalment?: number;
   token_complete: boolean;
@@ -928,19 +932,21 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         );
       })()}
 
-      {/* ── Lump-sum payment options (comparison view) ─────────────────
-           Both options always visible side-by-side with a transparent
-           line-item breakdown. The math: each card walks through
-           year fee − already-paid (carried over) − lump-sum bonus
-           (multi-year too for full course) → amount due. A candidate
-           whose token already covers year-1 sees the year-1 card as
-           "Year 1 covered ✓" with the surplus shown so they understand
-           why the option is greyed out.
+      {/* ── Lump-sum payment options ───────────────────────────────────
+           Hero "Best Value" full-course card with the marketing
+           headline ("Save ₹X on Full Course") plus a collapsible
+           breakdown for transparency. Year-1 sits below as a
+           smaller alternative — visible but visually secondary so the
+           full-course pitch lands first.
       */}
       {(feeStatus.lump_sum_pct || 0) > 0 && (() => {
         const y1Fee     = feeStatus.first_year_fee || 0;
         const totalFee  = feeStatus.total_course_fee || 0;
-        const paid      = feeStatus.total_paid || 0;
+        // Use paid_toward_course (token_fee + 'other'), NOT total_paid —
+        // application_fee and registration_fee are separate charges and
+        // shouldn't reduce the course-fee due. Falls back to total_paid
+        // for older RPC responses missing the new field.
+        const paid      = feeStatus.paid_toward_course ?? feeStatus.total_paid ?? 0;
         const y1Disc    = feeStatus.full_first_year_discount || 0;
         const fcDisc    = feeStatus.full_course_discount || 0;
         const y1Due     = feeStatus.full_first_year_amount_due || 0;
@@ -950,158 +956,66 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         const fcCovered = fcDue === 0 && totalFee > 0;
         const surplusPaidVsY1 = Math.max(0, paid - y1Fee + y1Disc);
         const fmtRupee = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
+        const hasFullCourse = (feeStatus.additional_years_fee || 0) > 0;
 
         return (
           <div className="space-y-3">
-            <div className="flex items-center gap-1.5">
-              <Sparkles className="h-3.5 w-3.5 text-emerald-500" />
-              <p className="text-[11px] font-bold uppercase tracking-wide text-emerald-600">Lump-sum payment options</p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {/* ── Year 1 only ───────────────────────────────────── */}
-              <div className={`rounded-2xl border p-4 shadow-sm ${y1Covered ? "border-gray-200 bg-gray-50" : "border-amber-200 bg-gradient-to-br from-amber-50 to-yellow-50"}`}>
-                <div className="flex items-center justify-between mb-2">
-                  <p className={`text-[11px] font-bold uppercase tracking-wide ${y1Covered ? "text-gray-500" : "text-amber-700"}`}>Year 1 only</p>
-                  {y1Covered && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-700 px-2 py-0.5 text-[10px] font-bold">
-                      <Check className="h-3 w-3" /> Covered
-                    </span>
-                  )}
-                </div>
-
-                {/* Line-item breakdown */}
-                <div className="space-y-1 text-[12px] font-mono mb-3">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Year 1 fee</span>
-                    <span className="text-gray-900">{fmtRupee(y1Fee)}</span>
-                  </div>
-                  {paid > 0 && (
-                    <div className="flex justify-between text-blue-700">
-                      <span>Already paid</span>
-                      <span>− {fmtRupee(Math.min(paid, y1Fee + y1Disc))}</span>
-                    </div>
-                  )}
-                  {y1Disc > 0 && !y1Covered && (
-                    <div className="flex justify-between text-emerald-700">
-                      <span>{feeStatus.lump_sum_pct}% lump-sum off</span>
-                      <span>− {fmtRupee(y1Disc)}</span>
-                    </div>
-                  )}
-                  <div className="border-t border-amber-200/60 pt-1.5 mt-1.5 flex justify-between font-bold">
-                    <span className="text-gray-700">Pay now</span>
-                    <span className={y1Covered ? "text-emerald-700" : "text-amber-900"}>
-                      {fmtRupee(y1Due)}
-                    </span>
-                  </div>
-                  {y1Covered && surplusPaidVsY1 > 0 && (
-                    <p className="text-[10px] text-gray-500 italic">
-                      Your token payment of {fmtRupee(paid)} already covers year 1 — the extra {fmtRupee(surplusPaidVsY1)} carries forward.
-                    </p>
-                  )}
-                </div>
-
-                {y1Covered ? (
-                  <button
-                    disabled
-                    className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-gray-200 px-4 py-2.5 text-xs font-bold text-gray-500 cursor-not-allowed"
-                  >
-                    <Check className="h-3.5 w-3.5" /> Year 1 covered
-                  </button>
-                ) : (
-                  <button
-                    disabled={paying || !applicantPhone || y1Due <= 0}
-                    onClick={() => startPayment(y1Due, {
-                      paymentType: "other",
-                      productinfo: "First-year fee (lump-sum)",
-                      concession: y1Disc,
-                      reason: `Lump-sum first-year ${feeStatus.lump_sum_pct}%`,
-                      concessionBreakdown: y1Disc > 0 ? { year_1: y1Disc } : undefined,
-                    })}
-                    className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-amber-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-amber-700 active:scale-95 transition-all disabled:opacity-50 shadow-sm"
-                  >
-                    {paying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
-                    Pay {fmtRupee(y1Due)}
-                  </button>
+            {/* ── HERO: Full course (Best Value) ──────────────────────── */}
+            {hasFullCourse && (
+              <div className={`rounded-2xl border-2 p-5 shadow-lg relative overflow-hidden ${
+                fcCovered ? "border-gray-200 bg-gray-50" :
+                showMultiYearTimer ? "border-emerald-400 bg-gradient-to-br from-emerald-50 via-green-50 to-emerald-100" : "border-emerald-300 bg-gradient-to-br from-emerald-50 to-green-50"
+              }`}>
+                {/* Decorative shimmer on the right edge */}
+                {!fcCovered && (
+                  <div className="absolute top-0 right-0 w-32 h-32 -mr-16 -mt-16 rounded-full bg-emerald-200/40 blur-2xl pointer-events-none" />
                 )}
-              </div>
 
-              {/* ── Full course (Best Value) ──────────────────────── */}
-              {(feeStatus.additional_years_fee || 0) > 0 && (
-                <div className={`rounded-2xl border-2 p-4 shadow-md relative ${
-                  fcCovered ? "border-gray-200 bg-gray-50" :
-                  showMultiYearTimer ? "border-emerald-400 bg-gradient-to-br from-emerald-50 to-green-50" : "border-emerald-300 bg-emerald-50"
-                }`}>
-                  {!fcCovered && (
-                    <div className="absolute -top-2.5 left-3 inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-0.5 text-[10px] font-bold text-white shadow-sm">
-                      <Sparkles className="h-2.5 w-2.5" /> Best Value
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between mb-2 mt-1">
-                    <p className={`text-[11px] font-bold uppercase tracking-wide ${fcCovered ? "text-gray-500" : "text-emerald-700"}`}>Full course</p>
-                    {fcCovered && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-700 px-2 py-0.5 text-[10px] font-bold">
-                        <Check className="h-3 w-3" /> Fully paid
-                      </span>
-                    )}
+                {!fcCovered && (
+                  <div className="absolute -top-3 left-4 inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-emerald-600 to-green-600 px-3 py-1 text-[10px] font-bold text-white shadow-md">
+                    <Sparkles className="h-3 w-3" /> BEST VALUE
                   </div>
+                )}
 
-                  <div className="space-y-1 text-[12px] font-mono mb-3">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Total course fee</span>
-                      <span className="text-gray-900">{fmtRupee(totalFee)}</span>
-                    </div>
-                    {paid > 0 && (
-                      <div className="flex justify-between text-blue-700">
-                        <span>Already paid</span>
-                        <span>− {fmtRupee(paid)}</span>
-                      </div>
-                    )}
-                    {y1Disc > 0 && (
-                      <div className="flex justify-between text-emerald-700">
-                        <span>{feeStatus.lump_sum_pct}% off year-1</span>
-                        <span>− {fmtRupee(y1Disc)}</span>
-                      </div>
-                    )}
-                    {multiDisc > 0 && (
-                      <div className="flex justify-between text-emerald-700">
-                        <span>
+                <div className="relative flex items-start justify-between gap-4 mt-2">
+                  <div className="min-w-0 flex-1">
+                    {fcCovered ? (
+                      <>
+                        <p className="text-sm font-bold text-emerald-900 flex items-center gap-1.5">
+                          <Check className="h-4 w-4" /> Full course paid
+                        </p>
+                        <p className="text-xs text-emerald-700 mt-0.5">Your fee is fully settled. Welcome aboard.</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-lg font-bold text-emerald-900 leading-tight">
+                          Save {fmtRupee(fcDisc)} on Full Course
+                        </p>
+                        <p className="text-xs text-emerald-700 mt-1">
+                          {feeStatus.lump_sum_pct}% off year-1
                           {inMultiYearWindow
-                            ? `${(feeStatus.lump_sum_pct || 0) + (feeStatus.multi_year_pct || 0)}% off years 2-N`
-                            : `${feeStatus.lump_sum_pct}% off years 2-N`}
-                        </span>
-                        <span>− {fmtRupee(multiDisc)}</span>
-                      </div>
-                    )}
-                    <div className="border-t border-emerald-200/60 pt-1.5 mt-1.5 flex justify-between font-bold">
-                      <span className="text-gray-700">Pay now</span>
-                      <span className={fcCovered ? "text-emerald-700" : "text-emerald-900"}>
-                        {fmtRupee(fcDue)}
-                      </span>
-                    </div>
-                    {!fcCovered && fcDisc > 0 && (
-                      <p className="text-[10px] text-emerald-700 italic">
-                        Total saving: {fmtRupee(fcDisc)}
-                      </p>
+                            ? ` + extra ${feeStatus.multi_year_pct}% off all other years.`
+                            : ` + ${feeStatus.lump_sum_pct}% off other years.`}
+                        </p>
+                        {showMultiYearTimer && (
+                          <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-white/80 border border-emerald-200 px-2.5 py-1">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            <span className="text-[10px] font-semibold text-emerald-700">Bonus expires in</span>
+                            <span className="text-[11px] font-mono font-bold text-emerald-900 tabular-nums">
+                              {formatCountdown(multiYearRemainingMs!)}
+                            </span>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
-
-                  {showMultiYearTimer && !fcCovered && (
-                    <div className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-100 border border-emerald-200 px-2.5 py-1">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      <span className="text-[10px] font-semibold text-emerald-700">Bonus expires in</span>
-                      <span className="text-[11px] font-mono font-bold text-emerald-900 tabular-nums">
-                        {formatCountdown(multiYearRemainingMs!)}
-                      </span>
-                    </div>
-                  )}
 
                   {fcCovered ? (
                     <button
                       disabled
-                      className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-gray-200 px-4 py-2.5 text-xs font-bold text-gray-500 cursor-not-allowed"
+                      className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-gray-200 px-5 py-3.5 text-sm font-bold text-gray-500 cursor-not-allowed"
                     >
-                      <Check className="h-3.5 w-3.5" /> Full course paid
+                      <Check className="h-4 w-4" /> Paid
                     </button>
                   ) : (
                     <button
@@ -1124,15 +1038,141 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                           concessionBreakdown: Object.keys(breakdown).length ? breakdown : undefined,
                         });
                       }}
-                      className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-emerald-700 active:scale-95 transition-all disabled:opacity-50 shadow-md shadow-emerald-200/60"
+                      className="shrink-0 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 px-5 py-3.5 text-sm font-bold text-white hover:from-emerald-700 hover:to-green-700 active:scale-95 transition-all disabled:opacity-50 shadow-lg shadow-emerald-300/40"
                     >
-                      {paying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
+                      {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
                       Pay {fmtRupee(fcDue)}
                     </button>
                   )}
                 </div>
-              )}
-            </div>
+
+                {/* Collapsible breakdown — tucked away by default to keep
+                    the marketing copy clean, expanded on click. */}
+                {!fcCovered && (
+                  <details className="relative mt-3 group">
+                    <summary className="cursor-pointer text-[11px] font-semibold text-emerald-700 hover:text-emerald-900 inline-flex items-center gap-1 list-none [&::-webkit-details-marker]:hidden">
+                      <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" />
+                      View breakdown
+                    </summary>
+                    <div className="mt-2 space-y-1 text-[12px] font-mono bg-white/60 rounded-lg p-3 border border-emerald-200/60">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Total course fee</span>
+                        <span className="text-gray-900">{fmtRupee(totalFee)}</span>
+                      </div>
+                      {paid > 0 && (
+                        <div className="flex justify-between text-blue-700">
+                          <span>Already paid</span>
+                          <span>− {fmtRupee(paid)}</span>
+                        </div>
+                      )}
+                      {y1Disc > 0 && (
+                        <div className="flex justify-between text-emerald-700">
+                          <span>{feeStatus.lump_sum_pct}% off year-1</span>
+                          <span>− {fmtRupee(y1Disc)}</span>
+                        </div>
+                      )}
+                      {multiDisc > 0 && (
+                        <div className="flex justify-between text-emerald-700">
+                          <span>
+                            {inMultiYearWindow
+                              ? `${(feeStatus.lump_sum_pct || 0) + (feeStatus.multi_year_pct || 0)}% off years 2-N`
+                              : `${feeStatus.lump_sum_pct}% off years 2-N`}
+                          </span>
+                          <span>− {fmtRupee(multiDisc)}</span>
+                        </div>
+                      )}
+                      <div className="border-t border-emerald-300/60 pt-1.5 mt-1.5 flex justify-between font-bold">
+                        <span className="text-gray-700">Pay now</span>
+                        <span className="text-emerald-900">{fmtRupee(fcDue)}</span>
+                      </div>
+                    </div>
+                  </details>
+                )}
+              </div>
+            )}
+
+            {/* ── Year 1 only — secondary alternative ─────────────────── */}
+            {(y1Fee > 0) && (
+              <div className={`rounded-xl border p-3 ${
+                y1Covered ? "border-gray-200 bg-gray-50" : "border-amber-200 bg-amber-50/60"
+              }`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 mb-0.5">
+                      {hasFullCourse ? "Or pay year 1 only" : "Pay year 1"}
+                    </p>
+                    {y1Covered ? (
+                      <p className="text-xs text-gray-600 inline-flex items-center gap-1">
+                        <Check className="h-3 w-3 text-emerald-600" />
+                        Year 1 covered.
+                        {surplusPaidVsY1 > 0 && (
+                          <span className="text-gray-500 italic">
+                            {fmtRupee(surplusPaidVsY1)} surplus carries forward.
+                          </span>
+                        )}
+                      </p>
+                    ) : (
+                      <p className="text-sm font-semibold text-amber-900">
+                        Save {fmtRupee(y1Disc)} ·  Pay {fmtRupee(y1Due)}
+                      </p>
+                    )}
+                  </div>
+
+                  {y1Covered ? (
+                    <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-700 px-2.5 py-1 text-[10px] font-bold">
+                      <Check className="h-3 w-3" /> Covered
+                    </span>
+                  ) : (
+                    <button
+                      disabled={paying || !applicantPhone || y1Due <= 0}
+                      onClick={() => startPayment(y1Due, {
+                        paymentType: "other",
+                        productinfo: "First-year fee (lump-sum)",
+                        concession: y1Disc,
+                        reason: `Lump-sum first-year ${feeStatus.lump_sum_pct}%`,
+                        concessionBreakdown: y1Disc > 0 ? { year_1: y1Disc } : undefined,
+                      })}
+                      className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-amber-700 active:scale-95 transition-all disabled:opacity-50 shadow-sm"
+                    >
+                      {paying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
+                      Pay {fmtRupee(y1Due)}
+                    </button>
+                  )}
+                </div>
+
+                {/* Compact breakdown — only show when there's something to pay */}
+                {!y1Covered && (
+                  <details className="mt-2 group">
+                    <summary className="cursor-pointer text-[10px] font-semibold text-amber-700 hover:text-amber-900 inline-flex items-center gap-1 list-none [&::-webkit-details-marker]:hidden">
+                      <ChevronRight className="h-2.5 w-2.5 transition-transform group-open:rotate-90" />
+                      View breakdown
+                    </summary>
+                    <div className="mt-1.5 space-y-0.5 text-[11px] font-mono bg-white/70 rounded-md p-2 border border-amber-200/50">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Year 1 fee</span>
+                        <span className="text-gray-900">{fmtRupee(y1Fee)}</span>
+                      </div>
+                      {paid > 0 && (
+                        <div className="flex justify-between text-blue-700">
+                          <span>Already paid</span>
+                          <span>− {fmtRupee(Math.min(paid, y1Fee + y1Disc))}</span>
+                        </div>
+                      )}
+                      {y1Disc > 0 && (
+                        <div className="flex justify-between text-emerald-700">
+                          <span>{feeStatus.lump_sum_pct}% lump-sum off</span>
+                          <span>− {fmtRupee(y1Disc)}</span>
+                        </div>
+                      )}
+                      <div className="border-t border-amber-200/60 pt-1 mt-1 flex justify-between font-bold">
+                        <span className="text-gray-700">Pay now</span>
+                        <span className="text-amber-900">{fmtRupee(y1Due)}</span>
+                      </div>
+                    </div>
+                  </details>
+                )}
+              </div>
+            )}
           </div>
         );
       })()}
