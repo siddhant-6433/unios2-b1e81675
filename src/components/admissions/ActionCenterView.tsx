@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Loader2, Trophy, Flame, TrendingUp } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -137,10 +138,14 @@ export function ActionCenterView({
 }: ActionCenterViewProps) {
   const { profile } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const scopedId = counsellorFilter === "all" ? undefined : counsellorFilter;
   const { data, loading, refetch } = useActionCenter(scopedId);
 
-  // Call disposition dialog state
+  // Disposition dialog state retained for the legacy onSubmit handler used by
+  // a few buckets that still surface it inline (e.g. visit-completion follow
+  // up). Action buttons no longer open it directly — they navigate to the
+  // lead's detail page with ?action=call so a real Cloud Call is placed.
   const [callLead, setCallLead] = useState<ActionLead | null>(null);
   const [campuses, setCampuses] = useState<{ id: string; name: string }[]>([]);
 
@@ -152,8 +157,14 @@ export function ActionCenterView({
     })();
   }, []);
 
+  // Navigate to the lead's detail page with ?action=call. LeadDetail's
+  // useEffect picks that up and triggers a real Cloud Call (Plivo bridges
+  // the counsellor's phone to the lead). The disposition dialog auto-opens
+  // 3s after the call connects so the result is logged. This replaces the
+  // previous in-place disposition dialog which let staff log "not answered"
+  // entries without ever placing a call.
   const handleCall = (lead: ActionLead) => {
-    setCallLead(lead);
+    navigate(`/admissions/${lead.lead_id}?action=call`);
   };
 
   const handleCallSubmit = async (dispositionData: any) => {

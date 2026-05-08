@@ -137,12 +137,19 @@ const LeadDetail = () => {
 
   useEffect(() => { if (id) fetchAll(); }, [id]);
 
-  // Auto-open call dialog when navigated with ?action=call
+  // Auto-trigger Cloud Call when navigated with ?action=call.
+  // Previously this opened the disposition dialog directly, which let
+  // staff log "not answered" entries without ever placing a real call.
+  // Now it kicks off a real Plivo call — disposition dialog opens
+  // automatically 3s after the call is placed (see triggerManualCall).
   useEffect(() => {
-    if (searchParams.get("action") === "call" && !loading && lead) {
-      setShowCallDisposition(true);
+    if (searchParams.get("action") === "call" && !loading && lead && !manualCalling) {
+      triggerManualCall();
       setSearchParams({}, { replace: true });
     }
+    // triggerManualCall is intentionally omitted from deps — it would
+    // re-fire after every render and cause the call to repeat.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, lead, searchParams]);
 
   const fetchAll = async (silent = false) => {
@@ -530,7 +537,7 @@ const LeadDetail = () => {
     // Pipeline stages must be reached via their proper workflow so the activity
     // history stays honest. Each stage's auto-set path is enforced here:
     const autoOnlyHints: Record<string, string> = {
-      counsellor_call: "Use 'Log Call' with disposition Interested / Call Back / Not Answered.",
+      counsellor_call: "Use 'Cloud Call' to dial the lead — disposition is captured automatically after the call connects.",
       visit_scheduled: "Use 'Schedule Visit' from the lead actions.",
       interview: "Set via the Interview Scoring workflow.",
       offer_sent: "Generate an offer letter from the documents/offer flow.",
@@ -883,7 +890,11 @@ const LeadDetail = () => {
           : undefined;
 
         const actions = [
-          ...(role !== "counsellor" ? [{ icon: Phone, label: "Call", color: "text-blue-600 bg-blue-100 dark:bg-blue-900/30", action: () => setShowCallDisposition(true) }] : []),
+          // Manual "Call" action removed — it opened the disposition dialog
+          // without placing a real call, enabling fake-logging (Md. Ashraf
+          // pattern: 6 "not answered" entries in 8 min, zero duration). Cloud
+          // Call below is the only path now; disposition dialog auto-opens
+          // 3s after the Plivo call connects.
           { icon: Phone, label: "Cloud Call", color: "text-cyan-600 bg-cyan-100 dark:bg-cyan-900/30", action: triggerManualCall, disabled: manualCalling },
           { icon: MessageSquare, label: "WhatsApp", color: "text-green-600 bg-green-100 dark:bg-green-900/30", action: () => setShowWhatsApp(true) },
           { icon: Clock, label: "Follow Up", color: "text-orange-600 bg-orange-100 dark:bg-orange-900/30", action: () => setShowFollowup(true) },
@@ -1040,9 +1051,11 @@ const LeadDetail = () => {
                       </div>
                       {f.status === "pending" && (
                         <button
-                          onClick={() => setShowCallDisposition(true)}
-                          className="rounded-lg bg-primary px-2.5 py-1 text-[10px] font-medium text-white hover:bg-primary/90 shrink-0 flex items-center gap-1"
-                        ><Phone className="h-2.5 w-2.5" /> Log Call</button>
+                          onClick={triggerManualCall}
+                          disabled={manualCalling}
+                          className="rounded-lg bg-cyan-600 px-2.5 py-1 text-[10px] font-medium text-white hover:bg-cyan-700 disabled:opacity-50 shrink-0 flex items-center gap-1"
+                          title="Place a Cloud Call to this lead"
+                        ><Phone className="h-2.5 w-2.5" /> Cloud Call</button>
                       )}
                     </div>
                   );
