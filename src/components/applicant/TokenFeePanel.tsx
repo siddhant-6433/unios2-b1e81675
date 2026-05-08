@@ -962,17 +962,21 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
           <div className="space-y-3">
             {/* ── HERO: Full course (Best Value) ──────────────────────── */}
             {hasFullCourse && (
-              <div className={`rounded-2xl border-2 p-5 shadow-lg relative overflow-hidden ${
+              <div className={`rounded-2xl border-2 p-5 shadow-lg relative ${
                 fcCovered ? "border-gray-200 bg-gray-50" :
                 showMultiYearTimer ? "border-emerald-400 bg-gradient-to-br from-emerald-50 via-green-50 to-emerald-100" : "border-emerald-300 bg-gradient-to-br from-emerald-50 to-green-50"
               }`}>
-                {/* Decorative shimmer on the right edge */}
+                {/* Decorative shimmer — wrapped in an overflow-hidden inner
+                    div so it clips to the card without cropping the
+                    BEST VALUE badge that sits just above the top edge. */}
                 {!fcCovered && (
-                  <div className="absolute top-0 right-0 w-32 h-32 -mr-16 -mt-16 rounded-full bg-emerald-200/40 blur-2xl pointer-events-none" />
+                  <div className="absolute inset-0 overflow-hidden rounded-2xl pointer-events-none">
+                    <div className="absolute top-0 right-0 w-32 h-32 -mr-16 -mt-16 rounded-full bg-emerald-200/40 blur-2xl" />
+                  </div>
                 )}
 
                 {!fcCovered && (
-                  <div className="absolute -top-3 left-4 inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-emerald-600 to-green-600 px-3 py-1 text-[10px] font-bold text-white shadow-md">
+                  <div className="absolute -top-3 left-4 z-10 inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-emerald-600 to-green-600 px-3 py-1 text-[10px] font-bold text-white shadow-md">
                     <Sparkles className="h-3 w-3" /> BEST VALUE
                   </div>
                 )}
