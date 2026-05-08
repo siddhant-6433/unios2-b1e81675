@@ -5,7 +5,7 @@ import {
   Search, Filter, IndianRupee, Download, Plus, CreditCard,
   FileText, BarChart3, AlertTriangle, CheckCircle, Clock,
   ArrowUpRight, ChevronRight, MoreHorizontal, Receipt, Wallet, Loader2,
-  Globe, HandCoins, Tag, TimerOff,
+  Globe, HandCoins, Tag, TimerOff, ScrollText,
 } from "lucide-react";
 import TransactionHistoryPanel from "@/components/admin/TransactionHistoryPanel";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
@@ -17,6 +17,7 @@ import { ConcessionApprovalPanel } from "@/components/finance/ConcessionApproval
 import { FinanceOverview } from "@/components/finance/FinanceOverview";
 import { OfferWaiverApprovalPanel } from "@/components/finance/OfferWaiverApprovalPanel";
 import { LateFeeConfigPanel } from "@/components/finance/LateFeeConfigPanel";
+import { PaymentAuditLog } from "@/components/finance/PaymentAuditLog";
 
 const statusStyles: Record<string, string> = {
   paid: "bg-pastel-green text-foreground/80",
@@ -36,7 +37,7 @@ const modeBadge: Record<string, string> = {
 };
 
 const Finance = () => {
-  const [tab, setTab] = useState<"ledger" | "receipts" | "online-transactions" | "structures" | "concessions" | "waivers" | "late-fees" | "reports">("ledger");
+  const [tab, setTab] = useState<"ledger" | "receipts" | "online-transactions" | "structures" | "concessions" | "waivers" | "late-fees" | "reports" | "audit">("ledger");
   const [search, setSearch] = useState("");
   const [ledger, setLedger] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
@@ -114,6 +115,7 @@ const Finance = () => {
     { id: "waivers" as const,              label: "Offer Waivers",       icon: Tag,        badge: pendingWaiverCount },
     { id: "late-fees" as const,            label: "Late Fees",           icon: TimerOff,   badge: 0 },
     { id: "reports" as const,              label: "Reports",             icon: BarChart3,  badge: 0 },
+    { id: "audit" as const,                label: "Audit Log",           icon: ScrollText, badge: 0 },
   ];
 
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
@@ -311,6 +313,8 @@ const Finance = () => {
       {tab === "late-fees" && <LateFeeConfigPanel />}
 
       {tab === "reports" && <FinanceOverview />}
+
+      {tab === "audit" && <PaymentAuditLog />}
     </div>
     </>
   );
