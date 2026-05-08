@@ -52,12 +52,36 @@ const Finance = () => {
     setLoading(true);
     const [ledgerRes, paymentsRes, structRes, waiverRes] = await Promise.all([
       supabase.from("fee_ledger").select("*, students:student_id(name, admission_no, pre_admission_no, campus_id), fee_codes:fee_code_id(code, name, category)").order("due_date", { ascending: true }).limit(200),
-      supabase.from("payments").select("*, students:student_id(name, admission_no, campus_id), profiles!recorded_by(display_name)").order("paid_at", { ascending: false }).limit(500),
+      // v_all_payments unifies pre-admission lead_payments (token / application
+      // fees confirmed before AN issuance) with post-admission payments. Without
+      // this UNION, Diya's ₹5000 token fee — confirmed in lead_payments — was
+      // invisible here. The view exposes flat student fields (person_name,
+      // admission_no, campus_id) since lead_payments don't have a student row;
+      // we reshape into the legacy {students:{...}} structure so render code
+      // below stays unchanged.
+      supabase.from("v_all_payments" as any).select("*").order("paid_at", { ascending: false }).limit(500),
       supabase.from("fee_structures").select("*, courses:course_id(name), admission_sessions:session_id(name), fee_structure_items(*, fee_codes:fee_code_id(code, name, category))").order("created_at", { ascending: false }).limit(200),
       supabase.from("offer_waivers").select("id", { count: "exact", head: true }).eq("status", "pending"),
     ]);
     if (ledgerRes.data) setLedger(ledgerRes.data);
-    if (paymentsRes.data) setPayments(paymentsRes.data);
+    if (paymentsRes.data) {
+      // Backfill recorded_by display names + reshape to {students,profiles} shape
+      const rawPayments = paymentsRes.data as any[];
+      const recorderIds = [...new Set(rawPayments.map((p) => p.recorded_by).filter(Boolean))];
+      const profMap: Record<string, string> = {};
+      if (recorderIds.length > 0) {
+        const { data: profs } = await supabase
+          .from("profiles")
+          .select("id, display_name")
+          .in("id", recorderIds);
+        (profs || []).forEach((pr: any) => { profMap[pr.id] = pr.display_name; });
+      }
+      setPayments(rawPayments.map((p) => ({
+        ...p,
+        students: { name: p.person_name, admission_no: p.admission_no, campus_id: p.campus_id },
+        profiles: p.recorded_by ? { display_name: profMap[p.recorded_by] || null } : null,
+      })));
+    }
     if (structRes.data) setStructures(structRes.data);
     setPendingWaiverCount(waiverRes.count ?? 0);
     setLoading(false);

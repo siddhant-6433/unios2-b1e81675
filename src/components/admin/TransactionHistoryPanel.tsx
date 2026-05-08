@@ -160,22 +160,57 @@ export default function TransactionHistoryPanel() {
   useEffect(() => { fetchAppTxns(); fetchStudentPmts(); }, []);
 
   // ── Reconcile pending payments ──────────────────────────────────────────────
+  // Sends application_id only — the edge function reads the persisted
+  // applications.pending_txnid (saved at initiate). The earlier client-side
+  // reconstruction `EB${app_id_clean}` was missing the Date.now() suffix and
+  // always 404'd against EaseBuzz transaction/v2/retrieve.
   const reconcilePending = async () => {
     setReconciling(true);
     setReconcileResult(null);
     let updated = 0;
+    let skipped = 0;
     const pending = appTxns.filter((t) => t.payment_status === "pending" && t.fee_amount > 0);
     for (const txn of pending) {
       try {
         const { data } = await supabase.functions.invoke("easebuzz-payment", {
-          body: { action: "verify-payment", txnid: `EB${txn.application_id.replace(/[^a-zA-Z0-9]/g, "")}`, application_id: txn.application_id },
+          body: { action: "verify-payment", application_id: txn.application_id },
         });
         if (data?.status?.toLowerCase() === "success") updated++;
-      } catch (_) { /* skip */ }
+        else if (data?.error) skipped++;
+      } catch (_) { skipped++; }
     }
-    setReconcileResult(`Reconciled ${updated} of ${pending.length} pending payments`);
+    setReconcileResult(`Reconciled ${updated} of ${pending.length} pending payments${skipped ? ` (${skipped} unverifiable — try Mark Paid by UTR)` : ""}`);
     if (updated > 0) fetchAppTxns();
     setReconciling(false);
+  };
+
+  // ── Manual mark-paid by UTR / PhonePe txn ID ────────────────────────────────
+  // Last-resort reconciliation for UPI-intent payments where EaseBuzz's API
+  // can't return the txn (the popup-based surl callback also doesn't fire
+  // when a user pays via UPI app and never returns to the redirect URL).
+  // Admin pastes the bank UTR or app txn id; we mark the application paid
+  // and fire receipt generation. payment_ref = `MANUAL_<reference>`.
+  const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
+  const markPaidByUtr = async (applicationId: string) => {
+    const reference = window.prompt(
+      `Enter UTR / PhonePe / GPay transaction ID for ${applicationId}:\n\n(Marks application as paid manually — the reference is stored as payment_ref so the audit trail keeps the source identifier.)`
+    );
+    if (!reference) return;
+    const note = window.prompt("Optional note (e.g. caller name, time, source):") || "";
+    setMarkingPaidId(applicationId);
+    try {
+      const { data, error } = await supabase.functions.invoke("easebuzz-payment", {
+        body: { action: "mark-paid-manual", application_id: applicationId, reference, note },
+      });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      setReconcileResult(`Marked ${applicationId} paid · ref ${data?.payment_ref || reference}`);
+      fetchAppTxns();
+    } catch (e: any) {
+      setReconcileResult(`Failed to mark ${applicationId}: ${e.message}`);
+    } finally {
+      setMarkingPaidId(null);
+    }
   };
 
   // ── Applicant type toggle (BSAV only) ──────────────────────────────────────
@@ -580,6 +615,18 @@ export default function TransactionHistoryPanel() {
                             className="flex items-center gap-1.5 rounded-lg border border-primary/30 px-2.5 py-1 text-[11px] font-medium text-primary hover:bg-primary/5 transition-colors"
                           >
                             <Receipt className="h-3.5 w-3.5" /> Receipt
+                          </button>
+                        ) : t.payment_status === "pending" && t.fee_amount > 0 ? (
+                          <button
+                            onClick={() => markPaidByUtr(t.application_id)}
+                            disabled={markingPaidId === t.application_id}
+                            className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-60"
+                            title="Mark as paid using a bank UTR / PhonePe / GPay transaction ID"
+                          >
+                            {markingPaidId === t.application_id
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : <CheckCircle2 className="h-3.5 w-3.5" />}
+                            Mark Paid by UTR
                           </button>
                         ) : <span className="text-muted-foreground">—</span>}
                       </td>

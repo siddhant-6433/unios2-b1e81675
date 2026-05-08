@@ -33,15 +33,33 @@ const FeeCollections = () => {
     const startOfDay = `${dateFilter}T00:00:00`;
     const endOfDay = `${dateFilter}T23:59:59`;
 
+    // v_all_payments unifies pre-AN lead_payments + post-AN payments; render
+    // code expects {students,profiles} sub-objects so we reshape after fetch.
     const { data } = await supabase
-      .from("payments")
-      .select("*, students:student_id(name, admission_no, campus_id), profiles!recorded_by(display_name)")
+      .from("v_all_payments" as any)
+      .select("*")
       .gte("paid_at", startOfDay)
       .lte("paid_at", endOfDay)
       .order("paid_at", { ascending: false })
       .limit(500);
 
-    if (data) setPayments(data);
+    if (data) {
+      const raw = data as any[];
+      const recorderIds = [...new Set(raw.map((p) => p.recorded_by).filter(Boolean))];
+      const profMap: Record<string, string> = {};
+      if (recorderIds.length > 0) {
+        const { data: profs } = await supabase
+          .from("profiles")
+          .select("id, display_name")
+          .in("id", recorderIds);
+        (profs || []).forEach((pr: any) => { profMap[pr.id] = pr.display_name; });
+      }
+      setPayments(raw.map((p) => ({
+        ...p,
+        students: { name: p.person_name, admission_no: p.admission_no, campus_id: p.campus_id },
+        profiles: p.recorded_by ? { display_name: profMap[p.recorded_by] || null } : null,
+      })));
+    }
     setLoading(false);
   };
 

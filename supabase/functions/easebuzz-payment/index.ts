@@ -206,6 +206,22 @@ Deno.serve(async (req) => {
       const productStr = productinfo || "Application Fee";
       const udf1       = application_id || "";
 
+      // Persist the txnid so the manual reconcile button can find the
+      // exact transaction later (the apply portal generates txnid with a
+      // Date.now() suffix; the reconcile button used to reconstruct it
+      // without that suffix and always 404'd against EaseBuzz).
+      if (application_id) {
+        const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+        const { error: persistErr } = await admin
+          .from("applications")
+          .update({ pending_txnid: txnid })
+          .eq("application_id", application_id);
+        if (persistErr) {
+          console.warn("[easebuzz] persist pending_txnid failed:", persistErr.message);
+          // Non-fatal — continue with payment initiation
+        }
+      }
+
       // Hash: SHA512(key|txnid|amount|productinfo|firstname|email|udf1|udf2|udf3|udf4|udf5||||||salt)
       // udf1 = application_id, udf2-udf5 empty, then 6 more empty slots before salt
       const hashInput = `${merchantKey}|${txnid}|${amountStr}|${productStr}|${firstname}|${emailStr}|${udf1}||||||||||${merchantSalt}`;
@@ -348,11 +364,31 @@ Deno.serve(async (req) => {
     }
 
     // ── Verify Payment (fallback manual check) ─────────────────────
+    // Prefer the txnid persisted at initiate (applications.pending_txnid)
+    // over a caller-supplied / reconstructed value, since the latter is
+    // missing the Date.now() suffix and always 404s against EaseBuzz.
     if (action === "verify-payment") {
-      const { txnid, application_id } = body;
+      const { txnid: callerTxnid, application_id } = body;
+
+      let txnid = callerTxnid;
+      if (application_id) {
+        const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+        const { data: appRow } = await admin
+          .from("applications")
+          .select("pending_txnid")
+          .eq("application_id", application_id)
+          .maybeSingle();
+        if (appRow?.pending_txnid) {
+          if (callerTxnid && callerTxnid !== appRow.pending_txnid) {
+            console.log(`[easebuzz] verify-payment: overriding caller txnid "${callerTxnid}" with persisted "${appRow.pending_txnid}" for ${application_id}`);
+          }
+          txnid = appRow.pending_txnid;
+        }
+      }
+
       if (!txnid) {
         return new Response(
-          JSON.stringify({ error: "txnid is required" }),
+          JSON.stringify({ error: "txnid is required (and applications.pending_txnid is empty for this app — the original txnid was not persisted)" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
@@ -398,6 +434,58 @@ Deno.serve(async (req) => {
 
       return new Response(
         JSON.stringify({ txnid: txn?.txnid, status: txn?.status, amount: txn?.amount, easepayid: txn?.easepayid }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── Manual mark-paid by UTR/reference ───────────────────────────
+    // Last-resort reconciliation: when EaseBuzz's own API can't return
+    // the txn (UPI-intent payments often disappear from their dashboard
+    // for a few hours, and sometimes never resurface), the admin can
+    // paste the bank UTR / PhonePe txn id and we mark the application
+    // paid directly. The reference goes into payment_ref so the audit
+    // trail still has a real receipt link.
+    if (action === "mark-paid-manual") {
+      const { application_id, reference, note } = body;
+      if (!application_id || !reference) {
+        return new Response(
+          JSON.stringify({ error: "application_id and reference are required" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+      // Sanitise the reference so it's clear in the receipt that this was
+      // a manual reconciliation, not a webhook-confirmed payment.
+      const refTag = `MANUAL_${reference.replace(/[^A-Z0-9_-]/gi, "_").slice(0, 80)}${note ? "_" + note.replace(/[^A-Z0-9_-]/gi, "_").slice(0, 40) : ""}`;
+      const { data: updated, error: dbErr } = await admin
+        .from("applications")
+        .update({ payment_status: "paid", payment_ref: refTag })
+        .eq("application_id", application_id)
+        .select("application_id, payment_status")
+        .maybeSingle();
+      if (dbErr) {
+        return new Response(
+          JSON.stringify({ error: dbErr.message }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      if (!updated) {
+        return new Response(
+          JSON.stringify({ error: "application not found" }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Fire-and-forget receipt generation (matches the surl path).
+      fetch(`${supabaseUrl}/functions/v1/generate-application-fee-receipt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+        body: JSON.stringify({ application_id }),
+      }).catch((e) => console.error("[easebuzz] mark-paid-manual: receipt invoke failed:", e));
+
+      return new Response(
+        JSON.stringify({ success: true, application_id, payment_ref: refTag }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
