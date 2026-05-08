@@ -1084,6 +1084,11 @@ async function buildApplicationPdfInline(
       easebuzz: "Easebuzz Gateway",
       icici:    "ICICI Gateway",
       cashfree: "Cashfree Gateway",
+      // Manually-recorded payments (UTR / cheque ref entered by admin).
+      // Renders as "Online (Marked Offline)" so the form doesn't read as
+      // an actual gateway capture.
+      offline:  "Marked Offline",
+      manual:   "Marked Offline",
     };
     const modeLabel: Record<string, string> = {
       cash: "Cash", upi: "UPI", bank_transfer: "Bank Transfer / NEFT",

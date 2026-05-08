@@ -1,190 +1,346 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { PDFDocument, PDFImage, rgb, StandardFonts } from "https://esm.sh/pdf-lib@1.17.1";
+// Brand-coloured payment receipt — mirrors the styling used by
+// ReceiptDialog.tsx in the applicant portal. Header strip with a
+// brand-coloured divider, light-grey "details" card, brand-coloured
+// "Amount Paid" band, payment-method + transaction-ref boxes, and a
+// system-generated footer. The brand colour is resolved from the
+// lead's institution_branding slug (nimt = #0035C5; falls back to the
+// NIMT default).
 
-async function fetchImage(pdf: PDFDocument, url: string | null): Promise<PDFImage | null> {
-  if (!url) return null;
-  try {
-    const r = await fetch(url);
-    if (!r.ok) return null;
-    const bytes = new Uint8Array(await r.arrayBuffer());
-    const ct = r.headers.get("content-type") || "";
-    if (ct.includes("png") || url.toLowerCase().endsWith(".png")) return await pdf.embedPng(bytes);
-    return await pdf.embedJpg(bytes);
-  } catch { return null; }
-}
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { PDFDocument, rgb, StandardFonts } from "https://esm.sh/pdf-lib@1.17.1";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
 const PAY_TYPE_LABELS: Record<string, string> = {
   application_fee:  "Application Fee",
-  token_fee:        "Token Fee",
+  token_fee:        "Token / Admission Fee",
   registration_fee: "Registration Fee",
-  other:            "Other",
+  other:            "Other Charges",
 };
 
 const MODE_LABELS: Record<string, string> = {
-  cash: "Cash", upi: "UPI", bank_transfer: "Bank Transfer / NEFT",
-  cheque: "Cheque / DD", online: "Online", gateway: "Online (PG)",
+  cash:          "Cash",
+  upi:           "UPI",
+  bank_transfer: "Bank Transfer / NEFT",
+  cheque:        "Cheque / DD",
+  online:        "Online",
+  gateway:       "Online",
 };
 
-function fmtINR(n: number): string {
-  return "Rs. " + Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const GATEWAY_LABELS: Record<string, string> = {
+  easebuzz: "Easebuzz",
+  icici:    "ICICI",
+  cashfree: "Cashfree",
+  // Manually-recorded payments — admin entered an UTR / cheque ref through
+  // the UI rather than going through a gateway. Render as "Marked Offline"
+  // so the receipt is unambiguous about the source.
+  offline:  "Marked Offline",
+  manual:   "Marked Offline",
+};
+
+// Per-portal brand colour (matches portalConfig.ts in the React app).
+const BRAND_BY_SLUG: Record<string, string> = {
+  nimt:     "#0035C5",
+  nimt_grn: "#0035C5",
+  nimt_he:  "#0035C5",
+  beacon:   "#0044FF",
+  mirai:    "#77966D",
+};
+
+// Per-portal logo PNG (uploaded to public-assets/branding/). The receipt
+// embeds the logo image instead of the brand-coloured initial square.
+const LOGO_BY_SLUG: Record<string, string> = {
+  nimt:     "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/nimt-logo.png",
+  nimt_grn: "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/nimt-logo.png",
+  nimt_he:  "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/nimt-logo.png",
+  beacon:   "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/beacon-logo.png",
+  mirai:    "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/mirai-logo.png",
+};
+
+async function fetchLogoPng(pdf: PDFDocument, url: string | null) {
+  if (!url) return null;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    return await pdf.embedPng(new Uint8Array(await r.arrayBuffer()));
+  } catch { return null; }
 }
 
-async function buildReceiptPdf(opts: {
-  receipt_no: string;
-  payment_date: string;
-  applicant_name: string;
-  phone: string | null;
-  email: string | null;
-  course_name: string | null;
-  campus_name: string | null;
-  type_label: string;
+function hexToRgb(hex: string) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+  const n = m ? parseInt(m[1], 16) : 0x0035c5;
+  return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
+}
+
+function lightenForBg(hex: string) {
+  // Mix the hex colour with white at ~92% to get the soft background tint
+  // shown on the React amount-paid label ("Amount Paid" sub-text).
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+  const n = m ? parseInt(m[1], 16) : 0x0035c5;
+  const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+  return rgb(r * 0.6 + 0.4, g * 0.6 + 0.4, b * 0.6 + 0.4);
+}
+
+const fmtINR = (n: number) =>
+  Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+const fmtDateTime = (d?: string | null) => {
+  if (!d) return "—";
+  const dt = new Date(d);
+  if (isNaN(dt.getTime())) return d;
+  return dt.toLocaleString("en-IN", {
+    day: "2-digit", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit", hour12: true,
+    timeZone: "Asia/Kolkata",
+  });
+};
+
+const fmtDateShort = (d?: string | null) => {
+  if (!d) return "—";
+  const dt = new Date(d);
+  if (isNaN(dt.getTime())) return d;
+  return dt.toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" });
+};
+
+function wrapText(text: string, font: any, size: number, maxWidth: number, maxLines = 6): string[] {
+  if (!text) return [""];
+  const words = text.split(/\s+/);
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    const trial = line ? line + " " + word : word;
+    if (font.widthOfTextAtSize(trial, size) <= maxWidth) {
+      line = trial;
+    } else {
+      if (line) lines.push(line);
+      line = word;
+      if (lines.length >= maxLines) break;
+    }
+  }
+  if (line && lines.length < maxLines) lines.push(line);
+  return lines.length ? lines : [""];
+}
+
+// Symbol-safe rupee marker — Helvetica doesn't ship the ₹ glyph and pdf-lib
+// throws on missing glyphs, so use "Rs." in the body and the band.
+const RUP = "Rs. ";
+
+interface Branding {
+  slug?: string | null;
+  name: string;
+  contact_email: string | null;
+  website: string | null;
+  address: string | null;
+}
+
+interface BuildOpts {
+  receiptNo: string;
+  receiptTitle: string;          // "PAYMENT RECEIPT" / "APPLICATION RECEIPT"
+  payerHeading: string;          // "APPLICANT DETAILS" / "STUDENT DETAILS"
+  rows: [string, string][];      // payer detail rows
   amount: number;
-  mode_label: string;
-  transaction_ref: string | null;
-  application_id: string | null;
-  pre_admission_no: string | null;
-  admission_no: string | null;
-  branding?: any;
-}): Promise<Uint8Array> {
+  paymentMode: string;
+  paymentRef: string;
+  paymentDate: string;
+  campusName: string | null;
+  brandHex: string;
+  logoUrl: string | null;
+  branding: Branding;
+}
+
+async function buildPdf(opts: BuildOpts): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
   const page = pdf.addPage([595, 842]); // A4
   const { width, height } = page.getSize();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
 
-  const margin = 50;
-  let y = height - 60;
-  const lh = await fetchImage(pdf, opts.branding?.letterhead_url ?? null);
-  if (lh) {
-    // Letterhead occupies the page; body starts ~140pt from top, ends 90pt from bottom.
-    page.drawImage(lh, { x: 0, y: 0, width, height });
-    y = height - 150;
-  } else {
-    page.drawRectangle({ x: 0, y: height - 80, width, height: 80, color: rgb(0.07, 0.09, 0.18) });
-    page.drawText(opts.branding?.name || "NIMT Educational Institutions", { x: margin, y: height - 38, size: 18, font: bold, color: rgb(1,1,1) });
-    page.drawText("Payment Receipt", { x: margin, y: height - 60, size: 11, font, color: rgb(0.85,0.88,0.95) });
+  const brand     = hexToRgb(opts.brandHex);
+  const brandSoft = lightenForBg(opts.brandHex);
+  const text      = rgb(0.10, 0.11, 0.18);
+  const muted     = rgb(0.58, 0.62, 0.69);
+  const subtle    = rgb(0.40, 0.45, 0.53);
+  const cardBg    = rgb(0.972, 0.980, 0.988);
+  const border    = rgb(0.886, 0.910, 0.941);
 
-    page.drawText(`Receipt No: ${opts.receipt_no}`, { x: width - margin - 180, y: height - 38, size: 11, font: bold, color: rgb(1,1,1) });
-    page.drawText(`Date: ${opts.payment_date}`, { x: width - margin - 180, y: height - 56, size: 10, font, color: rgb(0.85,0.88,0.95) });
+  const margin = 40;
+  let y = height - 50;
 
-    y = height - 120;
-  }
-  // When a letterhead is in use, render receipt-no/date inside the body.
-  if (lh) {
-    page.drawText(`Receipt No: ${opts.receipt_no}`, { x: width - margin - 180, y, size: 11, font: bold, color: rgb(0.07,0.09,0.18) });
-    page.drawText(`Date: ${opts.payment_date}`, { x: width - margin - 180, y: y - 14, size: 10, font, color: rgb(0.4,0.4,0.4) });
-    page.drawText("Payment Receipt", { x: margin, y, size: 14, font: bold, color: rgb(0.07,0.09,0.18) });
-    y -= 30;
-  }
-  page.drawText("Received from", { x: margin, y, size: 9, font, color: rgb(0.45,0.45,0.45) });
-  y -= 16;
-  page.drawText(opts.applicant_name, { x: margin, y, size: 14, font: bold, color: rgb(0.07,0.09,0.18) });
-  y -= 18;
-  const contactBits = [opts.phone, opts.email].filter(Boolean).join("  ·  ");
-  if (contactBits) {
-    page.drawText(contactBits, { x: margin, y, size: 10, font, color: rgb(0.4,0.4,0.4) });
-    y -= 18;
-  }
-  if (opts.course_name || opts.campus_name) {
-    page.drawText([opts.course_name, opts.campus_name].filter(Boolean).join("  ·  "), {
-      x: margin, y, size: 10, font, color: rgb(0.4,0.4,0.4),
-    });
-    y -= 16;
-  }
-
-  // Identifiers row
-  const ids: [string, string | null][] = [
-    ["Application ID", opts.application_id],
-    ["Pre-Admission No (PAN)", opts.pre_admission_no],
-    ["Admission No (AN)", opts.admission_no],
-  ].filter(([, v]) => !!v) as [string, string][];
-  if (ids.length) {
-    y -= 8;
-    for (const [k, v] of ids) {
-      page.drawText(`${k}: `, { x: margin, y, size: 10, font, color: rgb(0.45,0.45,0.45) });
-      page.drawText(v!, { x: margin + 130, y, size: 10, font: bold, color: rgb(0.07,0.09,0.18) });
-      y -= 14;
+  // ── Header — institution logo image, no text title beside it ──────
+  // Embed the portal logo PNG; fall back to a brand-coloured initial
+  // square if the logo can't be fetched. The image's native aspect is
+  // preserved with width capped at 180pt and height capped at 60pt.
+  const logoImg = await fetchLogoPng(pdf, opts.logoUrl);
+  const logoMaxH = 56;
+  const logoMaxW = 200;
+  let logoH = logoMaxH;
+  let logoW = logoMaxW;
+  let textLeftX = margin;
+  if (logoImg) {
+    const aspect = logoImg.width / logoImg.height;
+    logoH = logoMaxH;
+    logoW = Math.min(logoMaxW, logoH * aspect);
+    if (logoW > logoMaxW) {
+      logoW = logoMaxW;
+      logoH = logoW / aspect;
     }
+    page.drawImage(logoImg, { x: margin, y: y - logoH, width: logoW, height: logoH });
+    textLeftX = margin + logoW + 14;
+    // Campus + address line under/next to logo (kept small so it doesn't compete).
+    if (opts.campusName) {
+      page.drawText(opts.campusName, {
+        x: textLeftX, y: y - 18, size: 10, font: bold, color: subtle,
+      });
+    }
+    if (opts.branding.address) {
+      page.drawText(opts.branding.address.slice(0, 70), {
+        x: textLeftX, y: y - 32, size: 8.5, font, color: muted,
+      });
+    }
+  } else {
+    // Fallback: brand-coloured initial square.
+    const fallbackSize = 40;
+    page.drawRectangle({ x: margin, y: y - fallbackSize, width: fallbackSize, height: fallbackSize, color: brand });
+    const initial = (opts.branding.name || "N").trim().charAt(0).toUpperCase();
+    const initW = bold.widthOfTextAtSize(initial, 22);
+    page.drawText(initial, {
+      x: margin + (fallbackSize - initW) / 2,
+      y: y - fallbackSize + (fallbackSize - 22) / 2 + 4,
+      size: 22, font: bold, color: rgb(1, 1, 1),
+    });
+    page.drawText(opts.branding.name, {
+      x: margin + fallbackSize + 12, y: y - 14, size: 13, font: bold, color: text,
+    });
+    if (opts.campusName) {
+      page.drawText(opts.campusName, {
+        x: margin + fallbackSize + 12, y: y - 28, size: 10, font, color: subtle,
+      });
+    }
+    logoH = fallbackSize;
   }
 
-  // Divider
-  y -= 12;
-  page.drawLine({ start: { x: margin, y }, end: { x: width - margin, y }, thickness: 1, color: rgb(0.85,0.85,0.85) });
-  y -= 24;
-
-  // Particulars
-  page.drawText("Particulars", { x: margin, y, size: 11, font: bold, color: rgb(0.07,0.09,0.18) });
-  page.drawText("Amount", { x: width - margin - 100, y, size: 11, font: bold, color: rgb(0.07,0.09,0.18) });
-  y -= 16;
-  page.drawText(opts.type_label, { x: margin, y, size: 11, font, color: rgb(0.2,0.2,0.2) });
-  page.drawText(fmtINR(opts.amount), { x: width - margin - 100, y, size: 11, font, color: rgb(0.2,0.2,0.2) });
-  y -= 28;
-
-  // Total band
-  page.drawRectangle({ x: margin, y: y - 10, width: width - margin*2, height: 36, color: rgb(0.95,0.97,1) });
-  page.drawText("Total Received", { x: margin + 12, y: y + 2, size: 12, font: bold, color: rgb(0.07,0.09,0.18) });
-  page.drawText(fmtINR(opts.amount), { x: width - margin - 130, y: y + 2, size: 14, font: bold, color: rgb(0.07,0.4,0.2) });
-  y -= 50;
-
-  // Payment mode + ref
-  page.drawText("Payment Mode", { x: margin, y, size: 9, font, color: rgb(0.45,0.45,0.45) });
-  page.drawText("Transaction Ref", { x: width/2, y, size: 9, font, color: rgb(0.45,0.45,0.45) });
-  y -= 14;
-  page.drawText(opts.mode_label, { x: margin, y, size: 11, font: bold, color: rgb(0.2,0.2,0.2) });
-  page.drawText(opts.transaction_ref || "—", { x: width/2, y, size: 11, font: bold, color: rgb(0.2,0.2,0.2) });
-  y -= 40;
-
-  page.drawText("This is a system-generated receipt and does not require a physical signature.", {
-    x: margin, y, size: 9, font, color: rgb(0.5,0.5,0.5),
+  // Right column: receipt title + number + date — all right-aligned so they
+  // stack neatly under each other and don't collide with the campus/address
+  // text drawn next to the logo on the left side.
+  const titleW = bold.widthOfTextAtSize(opts.receiptTitle, 13);
+  page.drawText(opts.receiptTitle, {
+    x: width - margin - titleW, y: y - 14, size: 13, font: bold, color: brand,
   });
-  y -= 14;
-  page.drawText("For queries: admissions@nimt.ac.in  ·  https://www.nimt.ac.in", {
-    x: margin, y, size: 9, font, color: rgb(0.5,0.5,0.5),
+  const rcptText = `Receipt No: ${opts.receiptNo}`;
+  const rcptW = font.widthOfTextAtSize(rcptText, 10);
+  page.drawText(rcptText, {
+    x: width - margin - rcptW, y: y - 32, size: 10, font, color: muted,
+  });
+  const dateText = `Date: ${fmtDateShort(opts.paymentDate)}`;
+  const dateW = font.widthOfTextAtSize(dateText, 10);
+  page.drawText(dateText, {
+    x: width - margin - dateW, y: y - 48, size: 10, font, color: muted,
   });
 
-  // Footer band — only render when no letterhead is present (letterhead carries its own footer).
-  if (!opts.branding?.letterhead_url) {
-    page.drawRectangle({ x: 0, y: 0, width, height: 30, color: rgb(0.07, 0.09, 0.18) });
-    page.drawText("UniOs · " + (opts.branding?.name || "NIMT Educational Institutions"), {
-      x: margin, y: 11, size: 9, font, color: rgb(0.85,0.88,0.95),
+  y -= Math.max(64, logoH + 12);
+  // Brand-coloured divider line beneath header
+  page.drawRectangle({ x: margin, y, width: width - margin * 2, height: 2, color: brand });
+  y -= 22;
+
+  // ── Payer details card ─────────────────────────────────────────────
+  const cardPad = 14;
+  const rowGap = 16;
+  const cardH = 22 + opts.rows.length * rowGap + cardPad;
+  page.drawRectangle({
+    x: margin, y: y - cardH, width: width - margin * 2, height: cardH,
+    color: cardBg, borderColor: border, borderWidth: 0.5,
+  });
+  page.drawText(opts.payerHeading, {
+    x: margin + cardPad, y: y - 14, size: 9, font: bold, color: muted,
+  });
+  let ry = y - 30;
+  for (const [k, v] of opts.rows) {
+    page.drawText(k, { x: margin + cardPad,        y: ry, size: 10, font, color: subtle });
+    page.drawText(v || "—", { x: margin + cardPad + 130, y: ry, size: 10, font: bold, color: text });
+    ry -= rowGap;
+  }
+  y -= cardH + 14;
+
+  // ── Amount band (brand-coloured pill) ──────────────────────────────
+  const bandH = 50;
+  page.drawRectangle({
+    x: margin, y: y - bandH, width: width - margin * 2, height: bandH, color: brand,
+  });
+  page.drawText("Amount Paid", {
+    x: margin + cardPad, y: y - bandH + 18, size: 12, font, color: brandSoft,
+  });
+  const amountText = `${RUP}${fmtINR(opts.amount)}`;
+  const amountW = bold.widthOfTextAtSize(amountText, 22);
+  page.drawText(amountText, {
+    x: width - margin - cardPad - amountW, y: y - bandH + 14, size: 22, font: bold, color: rgb(1, 1, 1),
+  });
+  y -= bandH + 16;
+
+  // ── Payment-method + transaction-ref cards ─────────────────────────
+  const halfW = (width - margin * 2 - 12) / 2;
+  const boxH = 52;
+  // left
+  page.drawRectangle({
+    x: margin, y: y - boxH, width: halfW, height: boxH,
+    color: rgb(1, 1, 1), borderColor: border, borderWidth: 0.5,
+  });
+  page.drawText("PAYMENT METHOD", { x: margin + 12, y: y - 16, size: 8, font: bold, color: muted });
+  page.drawText(opts.paymentMode.toUpperCase(), {
+    x: margin + 12, y: y - 36, size: 11, font: bold, color: text,
+  });
+  // right
+  page.drawRectangle({
+    x: margin + halfW + 12, y: y - boxH, width: halfW, height: boxH,
+    color: rgb(1, 1, 1), borderColor: border, borderWidth: 0.5,
+  });
+  page.drawText("TRANSACTION REF", { x: margin + halfW + 24, y: y - 16, size: 8, font: bold, color: muted });
+  page.drawText(opts.paymentRef || "—", {
+    x: margin + halfW + 24, y: y - 36, size: 11, font: bold, color: text,
+  });
+  y -= boxH + 26;
+
+  // ── Footer — thin divider + computer-generated line ────────────────
+  page.drawRectangle({ x: margin, y, width: width - margin * 2, height: 0.5, color: border });
+  y -= 14;
+  page.drawText("This is a computer-generated receipt.", {
+    x: margin, y, size: 9, font, color: muted,
+  });
+  if (opts.branding.contact_email) {
+    page.drawText(`For queries: ${opts.branding.contact_email}`, {
+      x: margin, y: y - 12, size: 9, font, color: muted,
     });
   }
+  const siteText = opts.branding.website || "unios.nimt.ac.in";
+  const siteW = bold.widthOfTextAtSize(siteText, 9);
+  page.drawText(siteText, { x: width - margin - siteW, y, size: 9, font: bold, color: brand });
 
   return await pdf.save();
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const resendKey   = Deno.env.get("RESEND_API_KEY");
-    const waToken     = Deno.env.get("WHATSAPP_API_TOKEN");
-    const waPhoneId   = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
-    const admin       = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+    const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
-    const { lead_payment_id } = await req.json();
+    const body = await req.json();
+    const lead_payment_id = body.lead_payment_id || body.payment_id;
     if (!lead_payment_id) {
       return new Response(JSON.stringify({ error: "lead_payment_id required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Pull payment + denormalised lead/course/campus.
     const { data: lp, error: lpErr } = await admin
       .from("lead_payments")
       .select(`
-        id, receipt_no, type, amount, payment_mode, transaction_ref,
-        payment_date, status, receipt_url,
+        id, receipt_no, type, amount, payment_mode, gateway, transaction_ref,
+        payment_date, status, receipt_url, created_at,
         leads:lead_id (
           id, name, phone, email, application_id, pre_admission_no, admission_no,
           courses:course_id ( name ),
@@ -193,6 +349,7 @@ Deno.serve(async (req) => {
       `)
       .eq("id", lead_payment_id)
       .single();
+
     if (lpErr || !lp) {
       return new Response(JSON.stringify({ error: lpErr?.message || "Payment not found" }), {
         status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -207,33 +364,58 @@ Deno.serve(async (req) => {
     const lead: any = lp.leads;
     const courseName = lead?.courses?.name ?? null;
     const campusName = lead?.campuses?.name ?? null;
-    const dateStr = new Date(lp.payment_date || Date.now()).toLocaleDateString("en-IN", {
-      day: "numeric", month: "short", year: "numeric",
+
+    const { data: branding } = await admin.rpc("lead_branding" as any, {
+      _lead_id: lead?.id, _doc_type: "receipt",
+    });
+    const brandingResolved: Branding = {
+      slug:           branding?.slug ?? null,
+      name:           branding?.name || "NIMT Educational Institutions",
+      contact_email:  branding?.contact_email || "admissions@nimt.ac.in",
+      website:        branding?.website || null,
+      address:        branding?.address || null,
+    };
+    const brandHex = (brandingResolved.slug && BRAND_BY_SLUG[brandingResolved.slug]) || "#0035C5";
+    const logoUrl  = (brandingResolved.slug && LOGO_BY_SLUG[brandingResolved.slug]) || LOGO_BY_SLUG.nimt;
+
+    let paymentMode: string;
+    if (lp.payment_mode === "gateway" || lp.payment_mode === "online") {
+      const gw = lp.gateway ? (GATEWAY_LABELS[lp.gateway] || lp.gateway) : "";
+      paymentMode = gw ? `Online · ${gw}` : "Online";
+    } else {
+      paymentMode = MODE_LABELS[lp.payment_mode] || lp.payment_mode || "—";
+    }
+
+    const isApp = lp.type === "application_fee";
+    const rows: [string, string][] = [
+      ["Name",  lead?.name || "—"],
+      ["Phone", lead?.phone || "—"],
+    ];
+    if (lead?.email) rows.push(["Email", lead.email]);
+    if (isApp && lead?.application_id) rows.push(["Application ID", lead.application_id]);
+    if (!isApp) {
+      if (lead?.admission_no) rows.push(["Admission No", lead.admission_no]);
+      else if (lead?.pre_admission_no) rows.push(["Pre-Admission No", lead.pre_admission_no]);
+      if (courseName) rows.push(["Course", courseName]);
+    }
+    rows.push(["Fee Head", PAY_TYPE_LABELS[lp.type] || lp.type]);
+    rows.push(["Paid On",  fmtDateTime(lp.payment_date || lp.created_at)]);
+
+    const pdfBytes = await buildPdf({
+      receiptNo:     lp.receipt_no || "—",
+      receiptTitle:  isApp ? "APPLICATION RECEIPT" : "PAYMENT RECEIPT",
+      payerHeading:  isApp ? "APPLICANT DETAILS" : "PAYER DETAILS",
+      rows,
+      amount:        Number(lp.amount),
+      paymentMode,
+      paymentRef:    lp.transaction_ref || "—",
+      paymentDate:   lp.payment_date || lp.created_at,
+      campusName,
+      brandHex,
+      logoUrl,
+      branding:      brandingResolved,
     });
 
-    // Resolve branding tagged for receipts; falls back to "all" / default.
-    const { data: branding } = await admin.rpc("lead_branding" as any, { _lead_id: lead?.id, _doc_type: "receipt" });
-
-    // Build PDF.
-    const pdfBytes = await buildReceiptPdf({
-      receipt_no:      lp.receipt_no || "—",
-      payment_date:    dateStr,
-      applicant_name:  lead?.name || "Candidate",
-      phone:           lead?.phone || null,
-      email:           lead?.email || null,
-      course_name:     courseName,
-      campus_name:     campusName,
-      type_label:      PAY_TYPE_LABELS[lp.type] || lp.type,
-      amount:          Number(lp.amount),
-      mode_label:      MODE_LABELS[lp.payment_mode] || lp.payment_mode,
-      transaction_ref: lp.transaction_ref,
-      application_id:  lead?.application_id || null,
-      pre_admission_no: lead?.pre_admission_no || null,
-      admission_no:    lead?.admission_no || null,
-      branding,
-    });
-
-    // Upload (overwrite is fine — receipt content is immutable per receipt_no).
     const path = `receipts/${lead?.id || "unassigned"}/${lp.receipt_no}.pdf`;
     const { error: upErr } = await admin.storage
       .from("application-documents")
@@ -249,107 +431,8 @@ Deno.serve(async (req) => {
 
     await admin.from("lead_payments").update({ receipt_url: receiptUrl }).eq("id", lp.id);
 
-    // Send WhatsApp (template: payment_receipt — must be approved at Meta)
-    let waSent = false;
-    if (lead?.phone && waToken && waPhoneId) {
-      try {
-        const payload = {
-          messaging_product: "whatsapp",
-          to: lead.phone.replace(/[^0-9]/g, ""),
-          type: "template",
-          template: {
-            name: "payment_receipt",
-            language: { code: "en" },
-            components: [
-              { type: "body", parameters: [
-                { type: "text", text: lead.name || "Candidate" },
-                { type: "text", text: PAY_TYPE_LABELS[lp.type] || lp.type },
-                { type: "text", text: fmtINR(Number(lp.amount)) },
-                { type: "text", text: lp.receipt_no || "—" },
-                { type: "text", text: receiptUrl },
-              ]},
-            ],
-          },
-        };
-        const waRes = await fetch(`https://graph.facebook.com/v21.0/${waPhoneId}/messages`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${waToken}`, "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        const waBody = await waRes.json();
-        waSent = waRes.ok;
-        if (waRes.ok) {
-          await admin.from("whatsapp_messages").insert({
-            wa_message_id: waBody?.messages?.[0]?.id || null,
-            direction: "outbound",
-            phone: lead.phone.replace(/[^0-9]/g, ""),
-            message_type: "template",
-            content: `Payment receipt: ${lp.receipt_no} for ${PAY_TYPE_LABELS[lp.type]} of ${fmtINR(Number(lp.amount))}. View: ${receiptUrl}`,
-            template_key: "payment_receipt",
-            status: "sent", is_read: true, lead_id: lead.id,
-          } as any);
-        } else {
-          console.error("[receipt] whatsapp failed:", waBody?.error?.message);
-        }
-      } catch (e) {
-        console.error("[receipt] whatsapp threw:", e);
-      }
-    }
-
-    // Send email (Resend) with PDF attached.
-    let emailSent = false;
-    if (lead?.email && resendKey) {
-      try {
-        // Pdf bytes -> base64 (chunked to avoid stack issues).
-        let bin = "";
-        for (let i = 0; i < pdfBytes.length; i += 8192) {
-          bin += String.fromCharCode(...pdfBytes.subarray(i, i + 8192));
-        }
-        const b64 = btoa(bin);
-
-        const subject = `Payment receipt ${lp.receipt_no} — ${PAY_TYPE_LABELS[lp.type]}`;
-        const html = `
-          <div style="font-family:system-ui,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1f2937">
-            <h2 style="color:#111827;margin:0 0 8px">Payment received — ${PAY_TYPE_LABELS[lp.type]}</h2>
-            <p style="color:#4b5563;font-size:14px;margin:0 0 16px">
-              Hi ${lead.name || "there"}, we've received your payment of <strong>${fmtINR(Number(lp.amount))}</strong>
-              on ${dateStr}.
-            </p>
-            <table style="width:100%;border-collapse:collapse;font-size:14px;background:#f9fafb;border-radius:12px;padding:8px">
-              <tr><td style="padding:6px 12px;color:#6b7280">Receipt No</td><td style="padding:6px 12px;font-weight:600">${lp.receipt_no}</td></tr>
-              <tr><td style="padding:6px 12px;color:#6b7280">Type</td><td style="padding:6px 12px;font-weight:600">${PAY_TYPE_LABELS[lp.type]}</td></tr>
-              <tr><td style="padding:6px 12px;color:#6b7280">Mode</td><td style="padding:6px 12px;font-weight:600">${MODE_LABELS[lp.payment_mode] || lp.payment_mode}</td></tr>
-              ${lp.transaction_ref ? `<tr><td style="padding:6px 12px;color:#6b7280">Transaction Ref</td><td style="padding:6px 12px;font-weight:600">${lp.transaction_ref}</td></tr>` : ""}
-            </table>
-            <p style="color:#4b5563;font-size:13px;margin:16px 0 4px">
-              The receipt is attached as a PDF. You can also <a href="${receiptUrl}" style="color:#4f46e5">download it from this link</a>.
-            </p>
-            <p style="color:#9ca3af;font-size:12px;margin-top:24px">
-              NIMT Educational Institutions · admissions@nimt.ac.in
-            </p>
-          </div>`;
-
-        const emailFrom = Deno.env.get("EMAIL_FROM") || "admissions@nimt.ac.in";
-        const r = await fetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            from: emailFrom, to: [lead.email], subject, html,
-            attachments: [{ filename: `${lp.receipt_no}.pdf`, content: b64 }],
-          }),
-        });
-        emailSent = r.ok;
-        if (!r.ok) {
-          console.error("[receipt] resend failed:", await r.text());
-        }
-      } catch (e) {
-        console.error("[receipt] email threw:", e);
-      }
-    }
-
     return new Response(JSON.stringify({
       ok: true, receipt_no: lp.receipt_no, receipt_url: receiptUrl,
-      whatsapp_sent: waSent, email_sent: emailSent,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (err) {
