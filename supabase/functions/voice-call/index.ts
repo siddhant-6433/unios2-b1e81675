@@ -214,6 +214,7 @@ Deno.serve(async (req) => {
         plivo_call_uuid: plivoUuid,
         initiated_by: user.id,
         status: "initiated",
+        call_type: "ai",
       });
 
       // Log activity (user_id null for system-initiated calls)

@@ -69,7 +69,11 @@ Deno.serve(async (req) => {
       user = { id: data.user.id };
     }
 
-    const { template_slug, to_email, variables, lead_id, custom_subject, custom_body, cc } = await req.json();
+    const { template_slug, to_email, variables, lead_id, custom_subject, custom_body, cc, attachments } = await req.json();
+    // attachments: [{ filename: string; url?: string; content_base64?: string }]
+    // — url is fetched + base64-encoded; content_base64 is passed straight
+    // through. Resend free tier supports up to 40 MB; we don't enforce here
+    // since payment receipts are <100 KB.
 
     // Block emails to DNC leads
     if (lead_id) {
@@ -145,6 +149,39 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Resolve attachments: fetch any URL-form ones to base64 so Resend
+    // gets `{ filename, content }` for every entry. We do this serially
+    // since attachments are typically small (<100 KB) and we don't need
+    // parallel network for one or two PDFs.
+    const resolvedAttachments: { filename: string; content: string }[] = [];
+    if (Array.isArray(attachments)) {
+      for (const a of attachments) {
+        if (!a || !a.filename) continue;
+        let content_b64: string | null = null;
+        if (typeof a.content_base64 === "string" && a.content_base64) {
+          content_b64 = a.content_base64;
+        } else if (typeof a.url === "string" && a.url) {
+          try {
+            const r = await fetch(a.url);
+            if (r.ok) {
+              const buf = new Uint8Array(await r.arrayBuffer());
+              // Chunk to avoid stack overflow on large buffers.
+              let bin = "";
+              for (let i = 0; i < buf.length; i += 0x8000) {
+                bin += String.fromCharCode.apply(null, Array.from(buf.subarray(i, i + 0x8000)));
+              }
+              content_b64 = btoa(bin);
+            } else {
+              console.warn(`[send-email] attachment fetch ${a.url} returned ${r.status}; skipping`);
+            }
+          } catch (e: any) {
+            console.warn(`[send-email] attachment fetch failed for ${a.url}: ${e?.message}; skipping`);
+          }
+        }
+        if (content_b64) resolvedAttachments.push({ filename: a.filename, content: content_b64 });
+      }
+    }
+
     // Send via Resend
     const fromEmail = Deno.env.get("EMAIL_FROM") || "admissions@nimt.ac.in";
     const emailRes = await fetch("https://api.resend.com/emails", {
@@ -159,6 +196,7 @@ Deno.serve(async (req) => {
         ...(cc ? { cc: Array.isArray(cc) ? cc : [cc] } : {}),
         subject,
         html: bodyHtml,
+        ...(resolvedAttachments.length ? { attachments: resolvedAttachments } : {}),
       }),
     });
 

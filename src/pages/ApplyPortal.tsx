@@ -1930,6 +1930,13 @@ const ApplyPortal = () => {
             {renderStep()}
           </CardContent>
         </Card>
+
+        <p className="text-center text-[11px] text-muted-foreground/60 mt-6 pb-4">
+          By submitting this application you agree to our{" "}
+          <a href="/terms" target="_blank" rel="noreferrer" className="underline hover:text-muted-foreground">Terms &amp; Conditions</a>
+          {" "}and{" "}
+          <a href="/privacy" target="_blank" rel="noreferrer" className="underline hover:text-muted-foreground">Privacy Policy</a>.
+        </p>
       </div>
     </div>
   );

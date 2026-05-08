@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { ApplyMagicLinkButton } from "@/components/leads/ApplyMagicLinkButton";
 import { MiniLifecycleStepper } from "@/components/admissions/MiniLifecycleStepper";
+import { RecordPaymentDialog } from "@/components/admissions/RecordPaymentDialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -81,7 +82,9 @@ const LEAD_STAGE_BADGE: Record<string, string> = {
 export default function Applications() {
   const { role, profile } = useAuth();
   const isCounsellor = role === "counsellor";
+  const isSuperAdmin = role === "super_admin";
   const [apps, setApps] = useState<AppRow[]>([]);
+  const [offlinePaymentApp, setOfflinePaymentApp] = useState<AppRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [paymentFilter, setPaymentFilter] = useState<"all" | "paid" | "pending">("all");
@@ -95,6 +98,17 @@ export default function Applications() {
   const [generatingPdfFor, setGeneratingPdfFor] = useState<string | null>(null);
   const [bulkRegen, setBulkRegen] = useState<{ done: number; total: number } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const handleOfflinePaymentSuccess = async () => {
+    if (!offlinePaymentApp) return;
+    await supabase.from("applications" as any)
+      .update({ payment_status: "paid" })
+      .eq("id", offlinePaymentApp.id);
+    setApps(prev => prev.map(a =>
+      a.id === offlinePaymentApp.id ? { ...a, payment_status: "paid" } : a
+    ));
+    setOfflinePaymentApp(null);
+  };
 
   const generateFormPdf = async (app: AppRow) => {
     setGeneratingPdfFor(app.id);
@@ -698,6 +712,16 @@ export default function Applications() {
                                 <p><span className="text-muted-foreground">Status:</span> <Badge className={`text-[10px] border-0 ml-1 ${PAYMENT_BADGE[app.payment_status || "pending"]}`}>{app.payment_status || "pending"}</Badge></p>
                                 {app.fee_amount && <p><span className="text-muted-foreground">Amount:</span> <span className="font-medium">₹{app.fee_amount.toLocaleString("en-IN")}</span></p>}
                                 {app.payment_ref && <p><span className="text-muted-foreground">Ref:</span> <span className="font-mono text-[10px]">{app.payment_ref}</span></p>}
+                                {isSuperAdmin && app.payment_status !== "paid" && app.lead_id && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="mt-2 h-7 text-xs border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                                    onClick={() => setOfflinePaymentApp(app)}
+                                  >
+                                    <CreditCard className="h-3 w-3 mr-1" />Mark Offline Payment
+                                  </Button>
+                                )}
                               </div>
                             </div>
 
@@ -805,6 +829,18 @@ export default function Applications() {
           )}
         </DialogContent>
       </Dialog>
+
+      {offlinePaymentApp?.lead_id && (
+        <RecordPaymentDialog
+          open={!!offlinePaymentApp}
+          onOpenChange={(o) => { if (!o) setOfflinePaymentApp(null); }}
+          leadId={offlinePaymentApp.lead_id}
+          leadName={offlinePaymentApp.full_name}
+          defaultType="application_fee"
+          title="Record Offline Payment"
+          onSuccess={handleOfflinePaymentSuccess}
+        />
+      )}
     </div>
   );
 }

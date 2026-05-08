@@ -6,7 +6,7 @@ import {
   BookOpen, BarChart3, FileText, Search, Shuffle, Handshake, PieChart,
   ChevronDown, Phone, Calendar, MessageSquare, Newspaper, Building2, School, ShieldCheck, Zap, Inbox,
   Globe, FolderOpen, Heart, Award, Target, GitMerge, Bot, Gift, AlertTriangle, Sparkles, Receipt,
-  Briefcase, CalendarOff, UserCheck, Fingerprint, PhoneCall, PhoneMissed, Send, UserPlus,
+  Briefcase, CalendarOff, UserCheck, Fingerprint, PhoneCall, PhoneMissed, Send, UserPlus, Footprints,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -54,6 +54,7 @@ const admissionSubMenu: MenuItem[] = [
   { title: "Lead Allocation", url: "/lead-allocation", icon: Shuffle, permission: "lead_allocation:view" },
   { title: "Fresh Leads", url: "/fresh-leads", icon: Sparkles, permission: "call_log:view" },
   { title: "Pending Follow-ups", url: "/pending-followups", icon: AlertTriangle, permission: "call_log:view" },
+  { title: "Visit Monitor", url: "/visit-monitor", icon: Footprints, permission: "leads:view" },
   { title: "Call Log", url: "/call-log", icon: Phone, permission: "call_log:view" },
   { title: "AI Call Log", url: "/ai-call-log", icon: Bot, permission: "automation:view" },
   { title: "Automation", url: "/automation-rules", icon: Zap, permission: "automation:view" },
@@ -159,6 +160,8 @@ export function AppSidebar() {
   const [pendingFollowupCount, setPendingFollowupCount] = useState(0);
   // Missed callbacks count (ai_call_records needing followup)
   const [missedCallbackCount, setMissedCallbackCount] = useState(0);
+  // Priority interested leads (high-conversion AI calls — top of dialer queue)
+  const [priorityInterestedCount, setPriorityInterestedCount] = useState(0);
 
   const fetchNewLeadCount = () => {
     let query = supabase
@@ -239,6 +242,16 @@ export function AppSidebar() {
       setMissedCallbackCount(count || 0);
     })();
 
+    // Fetch priority interested count (leads auto-elevated by high-conversion AI calls)
+    (async () => {
+      let q = supabase.from("leads").select("id", { count: "exact", head: true }).eq("stage", "priority_interested" as any);
+      if (role === "counsellor" && profile?.id) {
+        q = q.eq("counsellor_id", profile.id);
+      }
+      const { count } = await q;
+      setPriorityInterestedCount(count || 0);
+    })();
+
     // Realtime-driven refresh, debounced so a burst of messages doesn't
     // hammer the DB. Uses direct count (see fetchUnreplied above) instead of
     // the slow whatsapp_conversations view.
@@ -302,6 +315,7 @@ export function AppSidebar() {
     if (item.url === "/counsellor-dashboard" && tatDefaults > 0) return { ...item, badge: tatDefaults };
     if (item.url === "/pending-followups" && pendingFollowupCount > 0) return { ...item, badge: pendingFollowupCount };
     if (item.url === "/missed-calls" && missedCallbackCount > 0) return { ...item, badge: missedCallbackCount };
+    if (item.url === "/cloud-dialer" && priorityInterestedCount > 0) return { ...item, badge: priorityInterestedCount };
     return item;
   }
   );

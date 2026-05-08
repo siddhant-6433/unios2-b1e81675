@@ -106,7 +106,7 @@ const CallLog = () => {
     let query = supabase
       .from("call_logs" as any)
       .select(`
-        id, lead_id, disposition, duration_seconds, notes, recording_url, created_at, called_at, user_id,
+        id, lead_id, disposition, duration_seconds, notes, recording_url, created_at, called_at, user_id, cloud_call_uuid,
         leads:lead_id(name, phone, stage, source)
       `, { count: "exact" })
       .order("created_at", { ascending: false });
@@ -143,36 +143,51 @@ const CallLog = () => {
       }));
 
       // Cloud Call rows have no recording_url in call_logs — Plivo's recording
-      // callback only updates ai_call_records. Match by the 8-char call_uuid
-      // prefix embedded in the notes ("Cloud Call [a1b2c3d4]: ...").
-      const cloudLeadIds = [
-        ...new Set(
-          enriched
-            .filter(r => !r.recording_url && /Cloud Call \[[a-f0-9]{8}\]/.test(r.notes || ""))
-            .map(r => r.lead_id)
-        ),
-      ];
-      if (cloudLeadIds.length > 0) {
+      // callback only updates ai_call_records. Match by cloud_call_uuid (the
+      // canonical column the dedup migration added). Falls back to the legacy
+      // "Cloud Call [hash]" notes pattern for rows that pre-date the column.
+      const cloudUuids = [...new Set(
+        enriched.filter(r => !r.recording_url && r.cloud_call_uuid).map(r => r.cloud_call_uuid)
+      )];
+      const legacyCloudLeadIds = [...new Set(
+        enriched
+          .filter(r => !r.recording_url && !r.cloud_call_uuid && /Cloud Call \[[a-f0-9]{8}\]/.test(r.notes || ""))
+          .map(r => r.lead_id)
+      )];
+
+      const recByUuid: Record<string, string> = {};
+      const recByPrefix: Record<string, string> = {};
+
+      if (cloudUuids.length > 0) {
         const { data: aiRecs } = await supabase
           .from("ai_call_records" as any)
           .select("call_uuid, recording_url")
-          .in("lead_id", cloudLeadIds)
+          .in("call_uuid", cloudUuids)
           .not("recording_url", "is", null);
-
-        const recByPrefix: Record<string, string> = {};
         (aiRecs || []).forEach((rec: any) => {
-          if (rec.call_uuid && rec.recording_url) {
-            recByPrefix[rec.call_uuid.slice(0, 8)] = rec.recording_url;
-          }
-        });
-
-        enriched = enriched.map(r => {
-          if (r.recording_url) return r;
-          const m = (r.notes || "").match(/Cloud Call \[([a-f0-9]{8})\]/i);
-          if (m && recByPrefix[m[1]]) return { ...r, recording_url: recByPrefix[m[1]] };
-          return r;
+          if (rec.call_uuid && rec.recording_url) recByUuid[rec.call_uuid] = rec.recording_url;
         });
       }
+      if (legacyCloudLeadIds.length > 0) {
+        const { data: aiRecs } = await supabase
+          .from("ai_call_records" as any)
+          .select("call_uuid, recording_url")
+          .in("lead_id", legacyCloudLeadIds)
+          .not("recording_url", "is", null);
+        (aiRecs || []).forEach((rec: any) => {
+          if (rec.call_uuid && rec.recording_url) recByPrefix[rec.call_uuid.slice(0, 8)] = rec.recording_url;
+        });
+      }
+
+      enriched = enriched.map(r => {
+        if (r.recording_url) return r;
+        if (r.cloud_call_uuid && recByUuid[r.cloud_call_uuid]) {
+          return { ...r, recording_url: recByUuid[r.cloud_call_uuid] };
+        }
+        const m = (r.notes || "").match(/Cloud Call \[([a-f0-9]{8})\]/i);
+        if (m && recByPrefix[m[1]]) return { ...r, recording_url: recByPrefix[m[1]] };
+        return r;
+      });
 
       setRecords(enriched);
       setTotalCount(count || enriched.length);
@@ -352,7 +367,7 @@ const CallLog = () => {
                         <p className="text-[10px] text-muted-foreground">{r.lead_phone}</p>
                       </td>
                       <td className="px-3 py-2.5 text-center">
-                        {(r.notes || "").includes("Cloud Call") ? (
+                        {(r.cloud_call_uuid || (r.notes || "").includes("Cloud Call")) ? (
                           <Badge className="text-[9px] border-0 bg-cyan-100 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-400">Cloud Call</Badge>
                         ) : (
                           <Badge className="text-[9px] border-0 bg-gray-100 text-gray-500">Manual</Badge>

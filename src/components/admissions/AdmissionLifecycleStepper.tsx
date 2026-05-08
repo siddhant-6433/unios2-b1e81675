@@ -24,7 +24,7 @@
 
 import {
   CheckCircle2, AlertCircle, FileCheck2,
-  CreditCard, ShieldCheck, Gift, Coins, GraduationCap, ArrowRight, Loader2,
+  CreditCard, ShieldCheck, Gift, Coins, GraduationCap, ArrowRight, Loader2, FileDown,
 } from "lucide-react";
 import { computeStages, type LifecycleInput, type Stage, type StageState } from "@/lib/admissionLifecycle";
 
@@ -32,6 +32,10 @@ export interface LifecycleProps extends LifecycleInput {
   /** Suggested action triggers for the call-to-action slot. */
   onApprove?: () => void;
   onIssueOffer?: () => void;
+  /** Pre-generated application-fee receipt URL — shown as a button under the Fee Paid circle. */
+  feeReceiptUrl?: string | null;
+  /** Called when receipt isn't available yet and needs to be generated on demand. */
+  onGenerateFeeReceipt?: () => void;
 }
 
 export function AdmissionLifecycleStepper(p: LifecycleProps) {
@@ -51,9 +55,15 @@ export function AdmissionLifecycleStepper(p: LifecycleProps) {
       <div className="flex items-stretch gap-1 overflow-x-auto -mx-1 px-1 py-2">
         {stages.map((s, i) => {
           const isLast = i === stages.length - 1;
+          const href = s.key === "admitted" && s.state === "done" && p.lead?.admission_no
+            ? `/students/${p.lead.admission_no}`
+            : undefined;
+          const feeReceipt = s.key === "fee" && s.state === "done"
+            ? { url: p.feeReceiptUrl || null, onGenerate: p.onGenerateFeeReceipt }
+            : undefined;
           return (
             <div key={s.key} className="flex items-stretch flex-1 min-w-[110px]">
-              <StageNode stage={s} />
+              <StageNode stage={s} href={href} feeReceipt={feeReceipt} />
               {!isLast && <Connector from={s.state} to={stages[i + 1].state} />}
             </div>
           );
@@ -80,7 +90,11 @@ export function AdmissionLifecycleStepper(p: LifecycleProps) {
 
 // ── Stage node ────────────────────────────────────────────────────────
 
-function StageNode({ stage }: { stage: Stage }) {
+function StageNode({ stage, href, feeReceipt }: {
+  stage: Stage;
+  href?: string;
+  feeReceipt?: { url: string | null; onGenerate?: () => void } | undefined;
+}) {
   const palette = {
     done:    { bg: "bg-emerald-100 dark:bg-emerald-900/30", ring: "ring-emerald-500", text: "text-emerald-800 dark:text-emerald-200", icon: "text-emerald-600", labelCls: "text-foreground" },
     current: { bg: "bg-blue-100 dark:bg-blue-900/30", ring: "ring-blue-500 ring-offset-1 animate-pulse", text: "text-blue-800 dark:text-blue-200", icon: "text-blue-600", labelCls: "text-foreground font-semibold" },
@@ -99,6 +113,33 @@ function StageNode({ stage }: { stage: Stage }) {
       </div>
       <p className={`text-[10.5px] leading-tight text-center ${palette.labelCls}`}>{stage.label}</p>
       {stage.hint && <p className="text-[9.5px] text-muted-foreground text-center -mt-0.5 truncate max-w-[110px]" title={stage.hint}>{stage.hint}</p>}
+      {href && (
+        <a
+          href={href}
+          className="mt-0.5 inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-emerald-700 transition-colors"
+        >
+          View Student
+        </a>
+      )}
+      {feeReceipt && (
+        feeReceipt.url ? (
+          <a
+            href={feeReceipt.url}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-0.5 inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary hover:bg-primary/20 transition-colors"
+          >
+            <FileDown className="h-3 w-3" />Receipt PDF
+          </a>
+        ) : feeReceipt.onGenerate ? (
+          <button
+            onClick={feeReceipt.onGenerate}
+            className="mt-0.5 inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary hover:bg-primary/20 transition-colors"
+          >
+            <FileDown className="h-3 w-3" />Get Receipt
+          </button>
+        ) : null
+      )}
     </div>
   );
 }

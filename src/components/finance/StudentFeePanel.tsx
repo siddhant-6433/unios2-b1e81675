@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Loader2, Wand2, Plus, HandCoins, Check, Clock, AlertTriangle, Trash2,
+  Receipt, FileText,
 } from "lucide-react";
 import { ConcessionDialog } from "./ConcessionDialog";
 
@@ -21,10 +22,18 @@ const feeStatusBg: Record<string, string> = {
   overdue: "bg-destructive/10 text-destructive",
 };
 
+const PAYMENT_TYPE_LABEL: Record<string, string> = {
+  application_fee: "Application Fee",
+  token_fee: "Token Fee",
+  registration_fee: "Registration Fee",
+  other: "Other",
+};
+
 export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const { role, session } = useAuth();
   const { toast } = useToast();
   const [fees, setFees] = useState<any[]>([]);
+  const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [provisioning, setProvisioning] = useState(false);
   const [concessionOpen, setConcessionOpen] = useState(false);
@@ -35,8 +44,11 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const canRequestConcession = ["counsellor", "super_admin", "campus_admin", "accountant"].includes(role || "");
 
   useEffect(() => {
-    if (student?.id) fetchFees();
-  }, [student?.id]);
+    if (student?.id) {
+      fetchFees();
+      fetchPayments();
+    }
+  }, [student?.id, student?.lead_id]);
 
   const fetchFees = async () => {
     setLoading(true);
@@ -47,6 +59,16 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
       .order("due_date");
     if (data) setFees(data);
     setLoading(false);
+  };
+
+  const fetchPayments = async () => {
+    if (!student?.lead_id) return;
+    const { data } = await supabase
+      .from("lead_payments")
+      .select("id, type, amount, payment_mode, transaction_ref, receipt_no, receipt_url, status, payment_date, created_at, concession_amount")
+      .eq("lead_id", student.lead_id)
+      .order("created_at", { ascending: false });
+    if (data) setPayments(data);
   };
 
   const handleProvision = async (force = false) => {
@@ -226,6 +248,113 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
           </tbody>
         </table>
       </div>
+
+      {/* Receipts — confirmed payments only. Pending and failed/abandoned
+          attempts live in the Transaction History table below. */}
+      {(() => {
+        const confirmed = payments.filter((p: any) => p.status === "confirmed");
+        const otherTxns = payments.filter((p: any) => p.status !== "confirmed");
+        return (
+          <>
+            <div className="rounded-xl bg-card card-shadow overflow-hidden">
+              <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+                <Receipt className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-semibold text-foreground">Receipts</span>
+                <span className="text-xs text-muted-foreground">
+                  {confirmed.length === 0 ? "no confirmed payments" : `${confirmed.length} receipt${confirmed.length === 1 ? "" : "s"}`}
+                </span>
+              </div>
+              {confirmed.length === 0 ? (
+                <div className="px-4 py-8 text-center text-xs text-muted-foreground">
+                  No confirmed payments yet.
+                </div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left">
+                      <th className="px-4 py-3 font-medium text-muted-foreground">Receipt #</th>
+                      <th className="px-4 py-3 font-medium text-muted-foreground">Type</th>
+                      <th className="px-4 py-3 font-medium text-muted-foreground">Date</th>
+                      <th className="px-4 py-3 font-medium text-muted-foreground">Mode</th>
+                      <th className="px-4 py-3 font-medium text-muted-foreground text-right">Amount</th>
+                      <th className="px-4 py-3 font-medium text-muted-foreground">PDF</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {confirmed.map((p: any) => (
+                      <tr key={p.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+                        <td className="px-4 py-3 font-mono text-xs">{p.receipt_no || "—"}</td>
+                        <td className="px-4 py-3 text-foreground">{PAYMENT_TYPE_LABEL[p.type] || p.type}</td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {p.payment_date ? new Date(p.payment_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground capitalize">{p.payment_mode?.replace("_", " ") || "—"}</td>
+                        <td className="px-4 py-3 text-right font-medium text-foreground">₹{Number(p.amount).toLocaleString("en-IN")}</td>
+                        <td className="px-4 py-3">
+                          {p.receipt_url ? (
+                            <a href={p.receipt_url} target="_blank" rel="noopener" className="text-xs text-primary hover:underline inline-flex items-center gap-1">
+                              <FileText className="h-3.5 w-3.5" /> Open
+                            </a>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Generating…</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Transaction History — pending + failed/abandoned attempts.
+                These never get a receipt number; they're kept for audit. */}
+            {otherTxns.length > 0 && (
+              <div className="rounded-xl bg-card card-shadow overflow-hidden">
+                <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-semibold text-foreground">Transaction History</span>
+                  <span className="text-xs text-muted-foreground">
+                    {otherTxns.length} unconfirmed attempt{otherTxns.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left">
+                      <th className="px-4 py-3 font-medium text-muted-foreground">Type</th>
+                      <th className="px-4 py-3 font-medium text-muted-foreground">Initiated</th>
+                      <th className="px-4 py-3 font-medium text-muted-foreground">Mode</th>
+                      <th className="px-4 py-3 font-medium text-muted-foreground">Ref</th>
+                      <th className="px-4 py-3 font-medium text-muted-foreground text-right">Amount</th>
+                      <th className="px-4 py-3 font-medium text-muted-foreground">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {otherTxns.map((p: any) => (
+                      <tr key={p.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+                        <td className="px-4 py-3 text-foreground">{PAYMENT_TYPE_LABEL[p.type] || p.type}</td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {p.created_at ? new Date(p.created_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—"}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground capitalize">{p.payment_mode?.replace("_", " ") || "—"}</td>
+                        <td className="px-4 py-3 font-mono text-[11px] text-muted-foreground">{p.transaction_ref || "—"}</td>
+                        <td className="px-4 py-3 text-right text-muted-foreground">₹{Number(p.amount).toLocaleString("en-IN")}</td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold capitalize ${
+                            p.status === "pending" ? "bg-warning/10 text-warning" : "bg-destructive/10 text-destructive"
+                          }`}>
+                            {p.status === "pending" ? <Clock className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+                            {p.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        );
+      })()}
 
       <ConcessionDialog
         open={concessionOpen}

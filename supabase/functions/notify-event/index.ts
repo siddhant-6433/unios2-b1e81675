@@ -27,8 +27,12 @@ const corsHeaders = {
 
 const APPLY_PORTAL_BASE = Deno.env.get("APPLY_PORTAL_BASE") || "https://uni.nimt.ac.in/apply";
 const CRM_BASE = Deno.env.get("CRM_BASE") || "https://uni.nimt.ac.in";
+// Finance ops mailbox — every payment + admission notification CCs / sends
+// here with the receipt PDF attached. Override via FINANCE_EMAIL env if the
+// destination changes.
+const FINANCE_EMAIL = Deno.env.get("FINANCE_EMAIL") || "finance@nimt.ac.in";
 
-type EventName = "app_submitted" | "app_fee_paid" | "offer_issued" | "pan_issued" | "payment_received" | "doc_rejected" | "application_rejected";
+type EventName = "app_submitted" | "app_fee_paid" | "app_approved" | "offer_issued" | "pan_issued" | "payment_received" | "doc_rejected" | "application_rejected" | "admission_issued";
 
 interface NotifyBody {
   event: EventName;
@@ -148,17 +152,62 @@ Deno.serve(async (req) => {
     }
   };
 
-  const sendEmail = async (template_slug: string, to_email: string, variables: Record<string, unknown>) => {
+  const sendEmail = async (
+    template_slug: string,
+    to_email: string,
+    variables: Record<string, unknown>,
+    opts: { attachments?: { filename: string; url: string }[]; cc?: string | string[] } = {},
+  ) => {
     if (!to_email) return;
     try {
       await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}` },
-        body: JSON.stringify({ template_slug, to_email, lead_id: lead.id, variables }),
+        body: JSON.stringify({
+          template_slug, to_email, lead_id: lead.id, variables,
+          ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
+          ...(opts.cc ? { cc: opts.cc } : {}),
+        }),
       });
     } catch (e) {
       console.error(`[notify-event] email ${template_slug}→${to_email} failed:`, e);
     }
+  };
+
+  // Synchronously make sure a payment row has its receipt_url + receipt_no
+  // populated before we email/WA the link. Falls through silently if the
+  // generator is unreachable — caller still has the lead-CRM fallback.
+  const ensureReceipt = async (
+    payment_id: string,
+  ): Promise<{ receipt_url: string | null; receipt_no: string | null }> => {
+    const fresh = async () => {
+      const { data } = await db
+        .from("lead_payments")
+        .select("receipt_url, receipt_no, status")
+        .eq("id", payment_id).maybeSingle();
+      return { receipt_url: data?.receipt_url ?? null, receipt_no: data?.receipt_no ?? null, status: data?.status ?? null };
+    };
+    let row = await fresh();
+    if (row.receipt_url) return row;
+    if (row.status !== "confirmed") return row;
+
+    // Generator runs synchronously and updates the row in-place.
+    try {
+      await fetch(`${SUPABASE_URL}/functions/v1/generate-payment-receipt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}` },
+        body: JSON.stringify({ payment_id }),
+      });
+      // brief retry — DB may need a beat to commit
+      for (let i = 0; i < 3; i++) {
+        row = await fresh();
+        if (row.receipt_url) return row;
+        await new Promise(r => setTimeout(r, 600));
+      }
+    } catch (e) {
+      console.error(`[notify-event] generate-payment-receipt(${payment_id}) failed:`, e);
+    }
+    return row;
   };
 
   // Mints a multi-use apply-portal magic token for "accept offer / pay
@@ -222,6 +271,9 @@ Deno.serve(async (req) => {
     case "app_fee_paid": {
       const payment_id = body.context?.payment_id as string;
       if (!payment_id) break;
+      // Make sure the receipt PDF is available — we'd rather link to it than
+      // fall back to the CRM page (which is broken from the candidate's POV).
+      const ensured = await ensureReceipt(payment_id);
       const { data: pmt } = await db
         .from("lead_payments")
         .select("amount, transaction_ref, receipt_no, receipt_url, payment_date")
@@ -229,9 +281,9 @@ Deno.serve(async (req) => {
       const { data: app } = await db
         .from("applications").select("application_id, fee_receipt_url, full_name")
         .eq("lead_id", lead.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
-      // Fallback chain: lead_payments.receipt_url → applications.fee_receipt_url
-      // → CRM lead page where staff can re-issue/view the receipt.
-      const receiptUrl = pmt?.receipt_url || app?.fee_receipt_url || leadUrl;
+      const receiptUrl = ensured.receipt_url || pmt?.receipt_url || app?.fee_receipt_url || leadUrl;
+      const receiptNo  = ensured.receipt_no  || pmt?.receipt_no  || "";
+      const haveReceipt = !!ensured.receipt_url || !!pmt?.receipt_url || !!app?.fee_receipt_url;
 
       await sendWhatsApp("app_fee_receipt",
         [lead.name || "Student", String(pmt?.amount ?? ""), app?.application_id || ""],
@@ -243,14 +295,83 @@ Deno.serve(async (req) => {
         amount: String(pmt?.amount ?? ""),
         application_id: app?.application_id || "",
         course_name: courseName,
-        payment_ref: pmt?.transaction_ref || pmt?.receipt_no || "",
+        payment_ref: pmt?.transaction_ref || receiptNo,
         receipt_url: receiptUrl, lead_url: leadUrl,
       };
-      for (const e of recipients) { await sendEmail("app-fee-paid-internal", e, vars); await new Promise(r => setTimeout(r, 300)); }
+      // Internal stakeholders (counsellor/leader/super_admin) — PDF attached,
+      // finance@nimt.ac.in CC'd so they have a record on every notification.
+      const attach = haveReceipt ? [{ filename: `Receipt-${receiptNo || payment_id}.pdf`, url: receiptUrl }] : [];
+      for (const e of recipients) {
+        await sendEmail("app-fee-paid-internal", e, vars, { attachments: attach, cc: FINANCE_EMAIL });
+        await new Promise(r => setTimeout(r, 300));
+      }
+      // If no admin recipients resolved (edge case), still notify finance directly.
+      if (recipients.length === 0) {
+        await sendEmail("app-fee-paid-internal", FINANCE_EMAIL, vars, { attachments: attach });
+      }
+
+      // Applicant email — PDF attached so they always have it even if the
+      // inline link becomes stale (e.g. storage URL not yet committed).
+      if (lead.email) await sendEmail("app-fee-paid-internal", lead.email, vars, { attachments: attach });
       break;
     }
 
-    // 3. OFFER LETTER ISSUED — applicant only, with offer PDF + magic pay link
+    // 2b. APPLICATION APPROVED — student gets WA + email; internal team notified
+    case "app_approved": {
+      const application_id = (body.context?.application_id as string) || "";
+      const { token: applyToken, url: applyUrl } = await mintApplyMagicLink();
+
+      // WA to student
+      await sendWhatsApp("application_approved",
+        [lead.name || "Student", application_id, courseName],
+        [applyToken],
+      );
+
+      // Email to student
+      if (lead.email) {
+        const subject = `Your application has been approved — ${application_id}`;
+        const bodyHtml =
+          `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">` +
+          `<h2 style="color:#0f172a">Application Approved 🎉</h2>` +
+          `<p>Dear ${lead.name || "Student"},</p>` +
+          `<p>We are pleased to inform you that your application <strong>${application_id}</strong> for <strong>${courseName}${campusName ? ` (${campusName})` : ""}</strong> has been <strong>approved</strong>.</p>` +
+          `<p>Our admissions team will issue your offer letter shortly. You can track your application status anytime via the apply portal.</p>` +
+          `<p style="margin:24px 0"><a href="${applyUrl}" style="background:#0035C5;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600">Open Apply Portal →</a></p>` +
+          `<p style="color:#64748b;font-size:12px">For queries, reply to this email or contact admissions@nimt.ac.in</p>` +
+          `</div>`;
+        await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}` },
+          body: JSON.stringify({
+            custom_subject: subject,
+            custom_body: bodyHtml,
+            to_email: lead.email,
+            lead_id: lead.id,
+          }),
+        });
+      }
+
+      // Notify internal team (counsellor only — approval is a one-line update)
+      const recipients = await resolveEmails({ counsellor: true, leader: false, super_admin: false });
+      const internalSubject = `Application approved — ${application_id} (${lead.name || "Student"})`;
+      const internalBody =
+        `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">` +
+        `<h2 style="color:#0f172a">Application approved</h2>` +
+        `<p>${lead.name || "Student"}'s application <strong>${application_id}</strong> for <strong>${courseName}</strong> has been approved.</p>` +
+        `<p><a href="${leadUrl}" style="color:#0047FF">Open lead in CRM →</a></p>` +
+        `</div>`;
+      for (const e of recipients) {
+        await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}` },
+          body: JSON.stringify({ custom_subject: internalSubject, custom_body: internalBody, to_email: e, lead_id: lead.id }),
+        });
+        await new Promise(r => setTimeout(r, 300));
+      }
+      break;
+    }
+
+    // 3. OFFER LETTER ISSUED — applicant WA + email, with offer PDF + magic pay link
     case "offer_issued": {
       const offer_id = body.context?.offer_id as string;
       if (!offer_id) break;
@@ -260,19 +381,49 @@ Deno.serve(async (req) => {
         .eq("id", offer_id).maybeSingle();
       if (!offer) break;
 
-      const { token: payToken } = await mintApplyMagicLink();
+      const { token: payToken, url: payUrl } = await mintApplyMagicLink();
 
       const deadline = offer.acceptance_deadline
         ? new Date(offer.acceptance_deadline).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
         : "the deadline";
 
-      // Single URL button — Meta substitutes the {{1}} suffix only, so we
-      // pass just the token. The template URL is
-      // https://uni.nimt.ac.in/apply?token={{1}}
+      // WA — button token only; Meta builds https://uni.nimt.ac.in/apply?token={{1}}
       await sendWhatsApp("offer_letter_issued",
         [lead.name || "Student", courseName, String(offer.net_fee ?? ""), deadline],
         [payToken],
       );
+
+      // Email to student
+      if (lead.email) {
+        const offerAttach = offer.letter_url
+          ? [{ filename: `Offer-Letter-${lead.name?.replace(/\s+/g, "-") || "Student"}.pdf`, url: offer.letter_url }]
+          : [];
+        const offerSubject = `Your offer letter is ready — ${courseName}`;
+        const offerBody =
+          `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">` +
+          `<h2 style="color:#0f172a">Offer Letter Issued 🎓</h2>` +
+          `<p>Dear ${lead.name || "Student"},</p>` +
+          `<p>Congratulations! Your offer letter for <strong>${courseName}${campusName ? ` — ${campusName}` : ""}</strong> is ready.</p>` +
+          `<table style="width:100%;border-collapse:collapse;margin:16px 0">` +
+          `<tr><td style="padding:8px;border:1px solid #ddd">Net Fee</td><td style="padding:8px;border:1px solid #ddd"><strong>₹${Number(offer.net_fee || 0).toLocaleString("en-IN")}</strong></td></tr>` +
+          `<tr><td style="padding:8px;border:1px solid #ddd">Accept by</td><td style="padding:8px;border:1px solid #ddd">${deadline}</td></tr>` +
+          `</table>` +
+          `<p>${offer.letter_url ? "The offer letter PDF is attached." : ""} To accept and pay the token fee, use the portal link below.</p>` +
+          `<p style="margin:24px 0"><a href="${payUrl}" style="background:#0035C5;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600">View & Accept Offer →</a></p>` +
+          `<p style="color:#64748b;font-size:12px">For queries contact admissions@nimt.ac.in</p>` +
+          `</div>`;
+        await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}` },
+          body: JSON.stringify({
+            custom_subject: offerSubject,
+            custom_body: offerBody,
+            to_email: lead.email,
+            lead_id: lead.id,
+            ...(offerAttach.length ? { attachments: offerAttach } : {}),
+          }),
+        });
+      }
       break;
     }
 
@@ -298,19 +449,20 @@ Deno.serve(async (req) => {
       break;
     }
 
-    // 5. ANY OTHER FEE PAID (token / registration / other) — applicant + super admins
+    // 5. ANY OTHER FEE PAID (token / registration / other) — applicant + admin
     case "payment_received": {
       const payment_id = body.context?.payment_id as string;
       if (!payment_id) break;
+      const ensured = await ensureReceipt(payment_id);
       const { data: pmt } = await db
         .from("lead_payments")
         .select("amount, type, payment_mode, transaction_ref, receipt_no, receipt_url, payment_date")
         .eq("id", payment_id).maybeSingle();
       if (!pmt) break;
+      const receiptUrl = ensured.receipt_url || pmt.receipt_url || "";
+      const receiptNo  = ensured.receipt_no  || pmt.receipt_no  || "";
+      const haveReceipt = !!receiptUrl;
 
-      // Existing approved template has 5 positional params:
-      //   {{1}} student name, {{2}} payment type label,
-      //   {{3}} amount, {{4}} receipt no, {{5}} download URL.
       const TYPE_LABEL: Record<string, string> = {
         application_fee:  "Application Fee",
         token_fee:        "Token Fee",
@@ -322,23 +474,79 @@ Deno.serve(async (req) => {
           lead.name || "Student",
           TYPE_LABEL[pmt.type as string] || pmt.type || "Fee",
           String(pmt.amount),
-          pmt.receipt_no || "",
-          pmt.receipt_url || "",
+          receiptNo,
+          receiptUrl,
         ],
       );
 
-      const recipients = await resolveEmails({ counsellor: false, leader: false, super_admin: true });
       const vars = {
         student_name: lead.name || "Student",
         amount: String(pmt.amount), phone: lead.phone || "",
         payment_mode: pmt.payment_mode || "",
         payment_type: pmt.type || "",
-        receipt_no: pmt.receipt_no || "",
+        receipt_no: receiptNo,
         payment_ref: pmt.transaction_ref || "",
         payment_date: pmt.payment_date ? new Date(pmt.payment_date).toLocaleString("en-IN") : "",
-        receipt_url: pmt.receipt_url || leadUrl, lead_url: leadUrl,
+        receipt_url: receiptUrl || leadUrl, lead_url: leadUrl,
       };
-      for (const e of recipients) { await sendEmail("payment-received-internal", e, vars); await new Promise(r => setTimeout(r, 300)); }
+
+      const attach = haveReceipt ? [{ filename: `Receipt-${receiptNo || payment_id}.pdf`, url: receiptUrl }] : [];
+
+      // Finance mailbox — receipt PDF attached.
+      await sendEmail("payment-received-internal", FINANCE_EMAIL, vars, { attachments: attach });
+
+      // Applicant — PDF attached so they always have it even if the inline link is stale.
+      if (lead.email) await sendEmail("payment-received-internal", lead.email, vars, { attachments: attach });
+      break;
+    }
+
+    // 6. ADMISSION ISSUED — student gets welcome email + WA, finance gets notice
+    case "admission_issued": {
+      const admission_no = (body.context?.admission_no as string) || "";
+
+      // Best-effort student-portal-claim link so the welcome email links
+      // to the right place (the existing trg_send_student_claim_link
+      // posts the WhatsApp; we just want the URL for the email body).
+      let portalUrl = `${CRM_BASE}/student-portal`;
+      try {
+        const { data: tok } = await db
+          .from("student_magic_tokens")
+          .select("token, expires_at")
+          .eq("lead_id", lead.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (tok?.token) portalUrl = `${CRM_BASE}/student-portal?token=${tok.token}`;
+      } catch { /* fallback to plain portal URL */ }
+
+      // WhatsApp to student — the existing trg_send_student_claim_link
+      // sends `student_portal_invite` separately. We send a complementary
+      // welcome template if it exists; failures are silent.
+      try {
+        await sendWhatsApp("student_admitted_welcome",
+          [lead.name || "Student", admission_no, courseName],
+        );
+      } catch { /* template may not exist on every WABA */ }
+
+      const vars = {
+        student_name: lead.name || "Student",
+        admission_no,
+        course_name: courseName,
+        campus_name: campusName,
+        portal_url: portalUrl,
+        lead_url: leadUrl,
+      };
+
+      // Welcome email to the student (template: student-admitted-welcome)
+      if (lead.email) await sendEmail("student-admitted-welcome", lead.email, vars);
+
+      // Notify finance/admin so they can flag the new admission in their books.
+      await sendEmail("admission-issued-internal", FINANCE_EMAIL, vars);
+
+      // Counsellor + super_admin internal note (uses the same template;
+      // they already see the notification in-app).
+      const recipients = await resolveEmails({ counsellor: true, leader: false, super_admin: true });
+      for (const e of recipients) { await sendEmail("admission-issued-internal", e, vars); await new Promise(r => setTimeout(r, 300)); }
       break;
     }
 

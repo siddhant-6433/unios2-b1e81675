@@ -1,6 +1,13 @@
 import { useRef, useState } from "react";
 import { X, Download, Loader2, Printer } from "lucide-react";
 
+// ── Shared branding defaults ──────────────────────────────────────────────────
+// Callers don't need to pass logo/primaryColor — these defaults make the
+// dialog a self-contained branded template. Override per-caller if needed.
+const DEFAULT_LOGO = "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/public-assets/branding/nimt-logo.png";
+const DEFAULT_COLOR = "#0035C5";
+const DEFAULT_INSTITUTION = "NIMT Educational Institutions";
+
 // ── Receipt data shape ────────────────────────────────────────────────────────
 
 export interface FeeLineItem {
@@ -39,20 +46,23 @@ export interface ReceiptData {
   // Branding
   logo?: string;
   primaryColor?: string;
+  // Pre-generated PDF URL — if present, "Download PDF" opens it directly
+  // instead of re-rendering via html2canvas (faster + no CORS issues).
+  receipt_url?: string | null;
+  // Edge-function payment ID — used to generate receipt on demand if
+  // receipt_url is not already available.
+  payment_id?: string | null;
 }
 
 // ── Printable receipt content ─────────────────────────────────────────────────
 
 function ReceiptContent({ d }: { d: ReceiptData }) {
   const isApp = d.type === "application_fee";
-  const color = d.primaryColor || "#6366f1";
+  const color = d.primaryColor || DEFAULT_COLOR;
+  const logo  = d.logo || DEFAULT_LOGO;
+  const institutionName = d.institution_name || DEFAULT_INSTITUTION;
   const fmt = (n: number) =>
     n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const fmtDate = (iso: string) =>
-    new Date(iso).toLocaleString("en-IN", {
-      day: "2-digit", month: "long", year: "numeric",
-      hour: "2-digit", minute: "2-digit", hour12: true,
-    });
   const hasLineItems = d.line_items && d.line_items.length > 0;
 
   return (
@@ -68,24 +78,32 @@ function ReceiptContent({ d }: { d: ReceiptData }) {
     >
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: `2px solid ${color}`, paddingBottom: "20px", marginBottom: "24px" }}>
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
-            {d.logo ? (
-              <img src={d.logo} alt={d.institution_name || "Institution"} style={{ height: "36px", width: "auto", objectFit: "contain", maxWidth: "160px" }} />
-            ) : (
+        <div style={{ maxWidth: "55%" }}>
+          <img
+            src={logo}
+            alt={institutionName}
+            crossOrigin="anonymous"
+            style={{ height: "48px", width: "auto", objectFit: "contain", maxWidth: "180px", display: "block", marginBottom: "6px" }}
+          />
+          {d.campus_name && <p style={{ margin: 0, fontSize: "11px", fontWeight: 600, color: "#64748b" }}>{d.campus_name}</p>}
+          {d.institution_address && (() => {
+            const words = d.institution_address!.split(" ");
+            const mid = d.institution_address!.length / 2;
+            let split = 1, best = Infinity, len = 0;
+            for (let i = 0; i < words.length - 1; i++) {
+              len += words[i].length + 1;
+              const dist = Math.abs(len - mid);
+              if (dist < best) { best = dist; split = i + 1; }
+            }
+            const line1 = words.slice(0, split).join(" ");
+            const line2 = words.slice(split).join(" ");
+            return (
               <>
-                <div style={{ background: color, borderRadius: "8px", width: "36px", height: "36px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <span style={{ color: "#fff", fontSize: "18px", fontWeight: "bold" }}>N</span>
-                </div>
-                <div>
-                  <p style={{ margin: 0, fontWeight: 700, fontSize: "16px" }}>{d.institution_name || "NIMT Education"}</p>
-                  {d.campus_name && <p style={{ margin: 0, fontSize: "11px", color: "#64748b" }}>{d.campus_name}</p>}
-                </div>
+                <p style={{ margin: "3px 0 0", fontSize: "10px", color: "#94a3b8" }}>{line1}</p>
+                <p style={{ margin: "1px 0 0", fontSize: "10px", color: "#94a3b8" }}>{line2}</p>
               </>
-            )}
-          </div>
-          {d.logo && d.campus_name && <p style={{ margin: "4px 0 0", fontSize: "11px", color: "#64748b" }}>{d.campus_name}</p>}
-          {d.institution_address && <p style={{ margin: "4px 0 0", fontSize: "10px", color: "#94a3b8" }}>{d.institution_address}</p>}
+            );
+          })()}
           {d.institution_pan && <p style={{ margin: "2px 0 0", fontSize: "10px", color: "#94a3b8" }}>PAN: {d.institution_pan}</p>}
         </div>
         <div style={{ textAlign: "right" }}>
@@ -227,9 +245,19 @@ export function ReceiptDialog({ data, onClose }: Props) {
     : `receipt-${data.receipt_no || data.student_name?.replace(/\s+/g, "-")}-${Date.now()}.pdf`;
 
   const downloadPdf = async () => {
-    if (!printRef.current) return;
     setGenerating(true);
     try {
+      // 1. Use the pre-generated server PDF if available — avoids CORS issues
+      //    with cross-origin images and is faster than html2canvas.
+      if (data.receipt_url) {
+        window.open(data.receipt_url, "_blank");
+        return;
+      }
+
+      // 2. Re-render the visible receipt HTML to a PDF via html2canvas.
+      //    Requires crossOrigin="anonymous" on the logo <img> so the canvas
+      //    can read its pixels without a CORS taint error.
+      if (!printRef.current) return;
       const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
         import("jspdf"),
         import("html2canvas"),
@@ -237,14 +265,22 @@ export function ReceiptDialog({ data, onClose }: Props) {
       const canvas = await html2canvas(printRef.current, {
         scale: 2,
         useCORS: true,
+        allowTaint: false,
         backgroundColor: "#ffffff",
+        imageTimeout: 10000,
+        logging: false,
       });
       const imgData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF("p", "mm", "a4");
+      // jsPDF v4 exports the class directly as default export.
+      const PdfClass = (jsPDF as any).default ?? jsPDF;
+      const pdf = new PdfClass("p", "mm", "a4");
       const imgW = 210;
       const imgH = (canvas.height * imgW) / canvas.width;
       pdf.addImage(imgData, "PNG", 0, 0, imgW, Math.min(imgH, 297));
       pdf.save(filename);
+    } catch (e) {
+      console.error("[ReceiptDialog] PDF generation failed:", e);
+      alert("PDF generation failed. Please try Print instead.");
     } finally {
       setGenerating(false);
     }

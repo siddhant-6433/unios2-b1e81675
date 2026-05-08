@@ -77,6 +77,8 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   doc_rejected:           { name: "doc_rejected",           params: ["student_name", "doc_name", "reason"] },
   // 7. Application rejected — admin declined the whole application.
   application_rejected:   { name: "application_rejected",   params: ["student_name", "application_id", "reason"] },
+  // 8. Application approved — admin approved; student is invited to the apply portal.
+  application_approved:   { name: "application_approved",   params: ["student_name", "application_id", "course_name"] },
 
   // 5. Token / other fee paid — uses the pre-existing APPROVED template
   // in Meta whose body is:
@@ -265,6 +267,7 @@ Deno.serve(async (req) => {
       payment_receipt: "Dear {{1}}, payment of ₹{{2}} received. Receipt no: {{3}}. The receipt PDF is attached for your records.",
       doc_rejected: "Hi {{1}}, your uploaded document \"{{2}}\" needs attention. Reason: {{3}}. Please re-upload a corrected version in the apply portal so your admission can proceed.",
       application_rejected: "Dear {{1}}, after review we are unable to proceed with your application {{2}}. Reason: {{3}}. Please contact our admissions office if you'd like to discuss alternatives.",
+      application_approved: "Congratulations {{1}}! Your application {{2}} for {{3}} has been approved. Our admissions team will be in touch with your offer letter shortly. Tap below to track your application in the apply portal.",
       applicant_welcome: "Hi {{1}}, thank you for starting your application at NIMT Educational Institutions!\n\nYour Application ID: {{2}}\nCourse: {{3}}\n\nComplete your application at https://uni.nimt.ac.in/apply/nimt/\n\nOur admissions team is here to help. Feel free to reach out anytime!",
       ai_call_course_info: "Hi {{1}}, thank you for speaking with us about {{2}} at NIMT Educational Institutions! 🎓\n\n🏫 Campus: {{3}}\n\n📄 Course Details: {{4}}\n📝 Apply Now: {{5}}\n\nFor questions, reply to this message or call our admissions team.\n\nWe look forward to welcoming you!",
       ai_call_post_summary: "Hi {{1}}, as discussed on our call, here are the details for {{2}} at NIMT Educational Institutions:\n\n🏫 Campus: {{3}}\n📄 Course details: {{4}}\n📝 Apply now: {{5}}\n🎥 Watch course video: {{6}}\n\nReply to this message for any questions, or our admissions team will reach out shortly.",

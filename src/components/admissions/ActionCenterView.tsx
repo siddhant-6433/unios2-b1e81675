@@ -159,14 +159,17 @@ export function ActionCenterView({
   const handleCallSubmit = async (dispositionData: any) => {
     if (!callLead || !profile?.id) return;
 
-    // Insert call log
-    await supabase.from("call_logs" as any).insert({
-      lead_id: callLead.lead_id,
-      user_id: (await supabase.auth.getUser()).data.user?.id,
-      direction: "outbound",
-      disposition: dispositionData.disposition,
-      duration_seconds: dispositionData.duration_seconds,
-      notes: dispositionData.notes,
+    // Insert call log via Cloud Dialer dedupe RPC (consistent with Cloud Dialer calls)
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    await (supabase as any).rpc("record_cloud_call_log", {
+      p_call_uuid:     crypto.randomUUID(),
+      p_lead_id:       callLead.lead_id,
+      p_user_id:       authUser?.id || null,
+      p_disposition:   dispositionData.disposition,
+      p_duration:      dispositionData.duration_seconds || 0,
+      p_notes:         dispositionData.notes || `${dispositionData.disposition.replace(/_/g, " ")} (logged from action center)`,
+      p_source:        "manual",
+      p_recording_url: null,
     });
 
     // Mark pending followups as completed

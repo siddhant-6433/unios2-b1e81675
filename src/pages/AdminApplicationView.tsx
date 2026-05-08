@@ -42,6 +42,7 @@ export default function AdminApplicationView() {
   const [rejectionReason, setRejectionReason] = useState("");
   const [showRejectionInput, setShowRejectionInput] = useState(false);
   const [showOfferLetter, setShowOfferLetter] = useState(false);
+  const [generatingReceipt, setGeneratingReceipt] = useState(false);
 
   // Async load can throw on any of N round-trips — wrap so a transient failure
   // shows a recoverable error instead of leaving the page in a permanent
@@ -166,6 +167,14 @@ export default function AdminApplicationView() {
         description: `Application ${app.application_id} approved`,
         new_stage: "application_approved",
       });
+      // Notify student + counsellor via WA + email
+      supabase.functions.invoke("notify-event", {
+        body: {
+          event: "app_approved",
+          lead_id: app.lead_id,
+          context: { application_id: app.application_id },
+        },
+      }).catch((e: any) => console.warn("[AdminApplicationView] notify app_approved failed:", e));
     } else if (decision === "rejected" && app.lead_id) {
       await supabase.from("lead_activities").insert({
         lead_id: app.lead_id,
@@ -230,6 +239,26 @@ export default function AdminApplicationView() {
 
   const decided = app.status === "approved" || app.status === "rejected";
 
+  const generateFeeReceipt = async () => {
+    if (generatingReceipt || !app?.application_id) return;
+    setGeneratingReceipt(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-application-fee-receipt", {
+        body: { application_id: app.application_id },
+      });
+      if (error) throw error;
+      const url = (data as any)?.fee_receipt_url;
+      if (url) {
+        setApp((prev: any) => prev ? { ...prev, fee_receipt_url: url } : prev);
+        window.open(url, "_blank");
+      }
+    } catch (e: any) {
+      toast({ title: "Couldn't generate receipt", description: e?.message, variant: "destructive" });
+    } finally {
+      setGeneratingReceipt(false);
+    }
+  };
+
   return (
     <div className="p-5 space-y-5 animate-fade-in max-w-5xl mx-auto">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -276,6 +305,8 @@ export default function AdminApplicationView() {
           docs={counts}
           onApprove={app.status === "submitted" ? () => decideApplication("approved") : undefined}
           onIssueOffer={app.status === "approved" && !hasOffer && lead?.id ? () => setShowOfferLetter(true) : undefined}
+          feeReceiptUrl={app.fee_receipt_url || null}
+          onGenerateFeeReceipt={appFeePaid > 0 ? generateFeeReceipt : undefined}
         />
       </SectionErrorBoundary>
 

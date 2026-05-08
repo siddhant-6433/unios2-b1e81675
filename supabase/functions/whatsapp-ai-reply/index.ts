@@ -320,18 +320,25 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Auto-create lead if doesn't exist
+    // Auto-create lead if doesn't exist. `leads.name` is NOT NULL, so we
+    // fall back to the phone number when the candidate hasn't shared
+    // their name yet — the AI prompt asks for it on the next turn and
+    // updates the lead when they reply with it.
     if (!leadId) {
-      const { data: newLead } = await admin
+      const phoneForLead = normalizedPhone.length === 10 ? `+91${normalizedPhone}` : `+${normalizedPhone}`;
+      const { data: newLead, error: leadInsertErr } = await admin
         .from("leads")
         .insert({
-          phone: normalizedPhone.length === 10 ? `91${normalizedPhone}` : normalizedPhone,
+          phone: phoneForLead,
           source: "whatsapp",
           stage: "new_lead",
-          name: lead_name || null,
+          name: lead_name || phoneForLead,
         })
         .select("id")
         .single();
+      if (leadInsertErr) {
+        console.error("Auto-create lead failed:", leadInsertErr.message);
+      }
       leadId = newLead?.id || null;
       console.log("Auto-created lead from WhatsApp:", leadId);
     }

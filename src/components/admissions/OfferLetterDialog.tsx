@@ -346,6 +346,14 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       if (autoApproved && insertedOffer?.id) {
         setSelectedOfferId(insertedOffer.id);
         await regeneratePdf(insertedOffer.id);
+        // Notify student via WA + email with the offer letter (fire-and-forget)
+        supabase.functions.invoke("notify-event", {
+          body: {
+            event: "offer_issued",
+            lead_id: leadId,
+            context: { offer_id: insertedOffer.id },
+          },
+        }).catch((e: any) => console.warn("[OfferLetterDialog] notify offer_issued failed:", e));
       }
 
       toast({
@@ -389,9 +397,12 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
         lead_id: leadId, user_id: user?.id || null, type: "offer",
         description: `Offer letter approved by ${role === "principal" ? "principal" : "super admin"}`,
       });
-      // Fire the PDF generator now that the offer is officially approved.
+      // Fire the PDF generator + notify student now that offer is officially approved.
       setSelectedOfferId(offerId);
       regeneratePdf(offerId).catch(() => {});
+      supabase.functions.invoke("notify-event", {
+        body: { event: "offer_issued", lead_id: leadId, context: { offer_id: offerId } },
+      }).catch((e: any) => console.warn("[OfferLetterDialog] notify offer_issued (principal) failed:", e));
     } else {
       await supabase.from("lead_activities").insert({
         lead_id: leadId, user_id: user?.id || null, type: "offer",

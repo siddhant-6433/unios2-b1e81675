@@ -53,33 +53,39 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
     const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || "";
-    console.log("provision-student-fees: auth header present:", !!authHeader);
-
     if (!authHeader) {
       return json({ error: "Missing authorization header" }, 401);
     }
 
-    // Use service role client to validate user via admin API
     const db = createClient(supabaseUrl, serviceRoleKey);
     const token = authHeader.replace(/^Bearer\s+/i, "");
-    const { data: { user }, error: authError } = await db.auth.getUser(token);
-    if (authError || !user) {
-      console.error("provision-student-fees: auth failed:", authError?.message);
-      return json({ error: `Auth failed: ${authError?.message || "no user"}` }, 401);
-    }
-    console.log("provision-student-fees: user:", user.id);
 
-    // Auth check: must be super_admin, campus_admin, principal, or accountant
-    const { data: roleRows, error: roleErr } = await db
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", user.id)
-      .limit(1);
-    const callerRole = roleRows?.[0]?.role;
-    console.log("provision-student-fees: role:", callerRole, "roleErr:", roleErr?.message);
-    const allowed = ["super_admin", "campus_admin", "principal", "accountant", "admission_head", "counsellor"];
-    if (!callerRole || !allowed.includes(String(callerRole))) {
-      return json({ error: `Forbidden: your role is "${callerRole || "unknown"}"` }, 403);
+    // Accept service-role tokens directly (used by the
+    // trg_auto_provision_fees_on_admission trigger via pg_net). Decode the
+    // JWT payload — string equality covers both legacy + sb_secret formats.
+    let isServiceRole = token === serviceRoleKey;
+    if (!isServiceRole) {
+      try {
+        const [, payloadB64] = token.split(".");
+        if (payloadB64) {
+          const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
+          if (payload?.role === "service_role") isServiceRole = true;
+        }
+      } catch { /* not a JWT, fall through */ }
+    }
+
+    if (!isServiceRole) {
+      const { data: { user }, error: authError } = await db.auth.getUser(token);
+      if (authError || !user) {
+        return json({ error: `Auth failed: ${authError?.message || "no user"}` }, 401);
+      }
+      const { data: roleRows } = await db
+        .from("user_roles").select("role").eq("user_id", user.id).limit(1);
+      const callerRole = roleRows?.[0]?.role;
+      const allowed = ["super_admin", "campus_admin", "principal", "accountant", "admission_head", "counsellor"];
+      if (!callerRole || !allowed.includes(String(callerRole))) {
+        return json({ error: `Forbidden: your role is "${callerRole || "unknown"}"` }, 403);
+      }
     }
 
     let body: ProvisionRequest;
@@ -133,18 +139,26 @@ async function provisionStudent(
 
   const version = student.fee_structure_version || "new_admission";
 
-  // 2. Find matching fee_structure
+  // 2. Find matching fee_structure. Try exact-version match first; fall back
+  // to any active structure for the course+session if no version match
+  // exists (institutions that seeded a single "standard" fee_structure
+  // shouldn't error on students whose version is null/new_admission).
   const { data: fsRows, error: fsErr } = await db
     .from("fee_structures")
-    .select("id")
+    .select("id, version")
     .eq("course_id", student.course_id)
     .eq("session_id", student.session_id)
-    .eq("version", version)
-    .eq("is_active", true)
-    .limit(1);
+    .eq("is_active", true);
 
-  const feeStructure = fsRows?.[0];
-  if (fsErr || !feeStructure) throw new Error(`No active fee structure for course=${student.course_id}, session=${student.session_id}, version=${version}, err=${fsErr?.message || "none"}`);
+  if (fsErr) throw new Error(`Failed to look up fee_structure: ${fsErr.message}`);
+  if (!fsRows || fsRows.length === 0) {
+    throw new Error(`No active fee structure for course=${student.course_id}, session=${student.session_id}`);
+  }
+
+  const feeStructure =
+    fsRows.find((r: any) => r.version === version) ||
+    fsRows.find((r: any) => r.version === "standard") ||
+    fsRows[0];
 
   // 3. Fetch fee_structure_items with fee_codes
   const { data: items } = await db

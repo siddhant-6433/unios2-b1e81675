@@ -138,7 +138,23 @@ async function assignLeadRoundRobin(leadId: string): Promise<string | null> {
     memberUserIds = await fetchTeamMembers(teamName);
   }
   if (memberUserIds.length === 0) {
-    console.warn(`[RoundRobin] No members in team "${teamName}" for lead ${leadId}`);
+    // All named teams are empty/missing — fall back to the DB function which
+    // picks from any counsellor in the system (no team scoping required).
+    console.warn(`[RoundRobin] All teams empty for lead ${leadId} — falling back to DB fn_round_robin_assign_counsellor`);
+    try {
+      const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/fn_round_robin_assign_counsellor`, {
+        method: "POST",
+        headers: { ...h, "Content-Type": "application/json" },
+        body: JSON.stringify({ _lead_id: leadId }),
+      });
+      const assignedProfileId: string | null = await rpcRes.json().catch(() => null);
+      if (assignedProfileId) {
+        console.log(`[RoundRobin] DB fallback assigned profile ${assignedProfileId} to lead ${leadId}`);
+        return assignedProfileId;
+      }
+    } catch (e) {
+      console.error(`[RoundRobin] DB fallback failed for lead ${leadId}:`, e);
+    }
     return null;
   }
 
@@ -2794,6 +2810,39 @@ Deno.serve({ port: PORT }, async (req) => {
     console.log(`[BRIDGE-HANGUP ${callId}] ALL PARAMS:`, JSON.stringify(params));
 
     const callCtx = activeCallContexts.get(callId);
+
+    // Context missing (server restart cleared in-memory map). Recover from DB so
+    // call_logs and ai_call_records are still written and the client poll unblocks.
+    if (!callCtx?.leadId && SUPABASE_URL) {
+      console.warn(`[BRIDGE-HANGUP ${callId}] Context missing — recovering from DB`);
+      const recovDbH = { "Content-Type": "application/json", apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
+      try {
+        const recRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}&call_type=eq.manual&select=id,lead_id,caller_user_id&limit=1`,
+          { headers: recovDbH }
+        );
+        const recs = await recRes.json().catch(() => []);
+        const rec = Array.isArray(recs) && recs.length > 0 ? recs[0] : null;
+        if (rec?.lead_id) {
+          const dispMap: Record<string, string> = { cancel: "cancelled", busy: "busy", "no-answer": "not_answered", failed: "not_answered" };
+          const recDisp = dispMap[callStatus] || "cancelled";
+          const recDur = totalDuration;
+          await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
+            method: "PATCH", headers: { ...recovDbH, Prefer: "return=minimal" },
+            body: JSON.stringify({ status: "failed", disposition: recDisp, duration_seconds: recDur, completed_at: new Date().toISOString(), plivo_call_uuid: plivoALegUUID || undefined }),
+          }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] recovery ai_call_records:`, e));
+          await fetch(`${SUPABASE_URL}/rest/v1/rpc/record_cloud_call_log`, {
+            method: "POST", headers: { ...recovDbH, Prefer: "return=minimal" },
+            body: JSON.stringify({ p_call_uuid: callId, p_lead_id: rec.lead_id, p_user_id: rec.caller_user_id || null, p_disposition: recDisp, p_duration: recDur, p_notes: `Cloud Call [${callId.slice(0,8)}]: ${recDisp} (recovered)`, p_source: "auto", p_recording_url: null }),
+          }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] recovery call_log:`, e));
+          console.log(`[BRIDGE-HANGUP ${callId}] Recovery complete: lead=${rec.lead_id} disp=${recDisp}`);
+        }
+      } catch (e) {
+        console.error(`[BRIDGE-HANGUP ${callId}] Recovery failed:`, e);
+      }
+      return new Response("OK");
+    }
+
     if (!callCtx?.leadId || !SUPABASE_URL) {
       if (callCtx) activeCallContexts.delete(callId);
       return new Response("OK");

@@ -60,19 +60,17 @@ export function GlobalActionBar() {
           if (!myLeadIds.length) { setItems([]); return; }
         }
 
-        const [
-          overdueRes, todayRes, freshRes, unassignedRes,
-          unclosedRes, confirmRes, postVisitRes, missedRes,
-        ] = await Promise.all([
-          // Overdue — use the VIEW (consistent with Admissions CRM, filters terminal stages)
+        // Use allSettled — if one source breaks (RLS, missing view, schema
+        // mismatch), the rest of the bar still renders. Promise.all would
+        // wipe ALL pills on a single failure, which is the bug we hit when
+        // one of the eight sources silently 404'd.
+        const queries = [
           (() => {
             let q = (supabase.from("overdue_followups" as any) as any)
               .select("id", { count: "exact", head: true });
             if (effectiveProfileId) q = q.eq("counsellor_id", effectiveProfileId);
             return q;
           })(),
-
-          // Today's follow-ups
           (() => {
             let q = supabase.from("lead_followups")
               .select("id", { count: "exact", head: true })
@@ -82,47 +80,35 @@ export function GlobalActionBar() {
             if (myLeadIds) q = q.in("lead_id", myLeadIds);
             return q;
           })(),
-
-          // Fresh leads (assigned but never contacted)
           (() => {
             let q = supabase.from("leads").select("id", { count: "exact", head: true })
               .eq("stage", "new_lead" as any).is("first_contact_at", null);
             if (effectiveProfileId) q = q.eq("counsellor_id", effectiveProfileId);
             return q;
           })(),
-
-          // Unassigned (admin/TL view only)
           (() => {
             if (isCounsellor || counsellorFilter !== "all") return Promise.resolve({ count: 0 });
             return supabase.from("leads").select("id", { count: "exact", head: true })
               .eq("stage", "new_lead" as any).is("counsellor_id", null);
           })(),
-
-          // Unclosed campus visits (today)
           (() => {
             let q = (supabase.from("visits_unclosed_today" as any) as any)
               .select("visit_id", { count: "exact", head: true });
             if (effectiveProfileId) q = q.eq("counsellor_id", effectiveProfileId);
             return q;
           })(),
-
-          // Visits needing confirmation
           (() => {
             let q = (supabase.from("visits_needing_confirmation" as any) as any)
               .select("visit_id", { count: "exact", head: true });
             if (effectiveProfileId) q = q.eq("counsellor_id", effectiveProfileId);
             return q;
           })(),
-
-          // Post-visit pending follow-ups
           (() => {
             let q = (supabase.from("post_visit_pending_followups" as any) as any)
               .select("visit_id", { count: "exact", head: true });
             if (effectiveProfileId) q = q.eq("counsellor_id", effectiveProfileId);
             return q;
           })(),
-
-          // Missed callbacks (AI inbound not yet actioned)
           (() => {
             let q = (supabase.from("ai_call_records" as any) as any)
               .select("id, leads!inner(counsellor_id)", { count: "exact", head: true })
@@ -131,7 +117,31 @@ export function GlobalActionBar() {
             if (effectiveProfileId) q = q.eq("leads.counsellor_id", effectiveProfileId);
             return q;
           })(),
-        ]);
+        ];
+
+        const settled = await Promise.allSettled(queries);
+        const labels = ["overdue","today","fresh","unassigned","unclosed","confirm","post_visit","missed"];
+        const pick = (i: number) => {
+          const r = settled[i];
+          if (r.status === "fulfilled") {
+            const v = r.value as any;
+            if (v?.error) {
+              console.warn(`[GlobalActionBar] ${labels[i]} query error:`, v.error.message || v.error);
+              return { count: 0 };
+            }
+            return v;
+          }
+          console.warn(`[GlobalActionBar] ${labels[i]} query rejected:`, r.reason);
+          return { count: 0 };
+        };
+        const overdueRes   = pick(0);
+        const todayRes     = pick(1);
+        const freshRes     = pick(2);
+        const unassignedRes = pick(3);
+        const unclosedRes  = pick(4);
+        const confirmRes   = pick(5);
+        const postVisitRes = pick(6);
+        const missedRes    = pick(7);
 
         const result: ActionItem[] = [];
 

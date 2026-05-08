@@ -19,6 +19,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { AiCallSummary } from "@/components/leads/AiCallSummary";
+import { PriorityInterestedCard } from "@/components/leads/PriorityInterestedCard";
 import { LeadInfoCard } from "@/components/leads/LeadInfoCard";
 import { LeadTimeline } from "@/components/leads/LeadTimeline";
 import { WebChatTranscripts } from "@/components/leads/WebChatTranscripts";
@@ -221,14 +222,17 @@ const LeadDetail = () => {
     };
     const label = dispositionLabels[data.disposition] || data.disposition;
 
-    // 1. Insert into call_logs
-    await supabase.from("call_logs").insert({
-      lead_id: id,
-      user_id: user?.id,
-      direction: "outbound",
-      duration_seconds: data.duration_seconds,
-      disposition: data.disposition,
-      notes: data.notes || null,
+    // 1. Insert into call_logs via the Cloud Dialer dedupe RPC so these entries
+    // are consistent with Cloud Dialer calls and show as "Cloud Call" in the log.
+    await (supabase as any).rpc("record_cloud_call_log", {
+      p_call_uuid:     crypto.randomUUID(),
+      p_lead_id:       id,
+      p_user_id:       user?.id || null,
+      p_disposition:   data.disposition,
+      p_duration:      data.duration_seconds || 0,
+      p_notes:         data.notes || `${label} (logged from lead page)`,
+      p_source:        "manual",
+      p_recording_url: null,
     });
 
     // 1b. Mark any pending follow-ups on this lead as completed — the call has been made
@@ -981,6 +985,11 @@ const LeadDetail = () => {
 
         {/* Right Column */}
         <div className="space-y-4">
+          {/* Priority Interested reason — shown when stage is priority_interested */}
+          {(lead as any).stage === "priority_interested" && (
+            <PriorityInterestedCard leadId={lead.id} />
+          )}
+
           {/* What's Next — upcoming followups + visits (TOP priority) */}
           {(() => {
             const pendingFollowups = followups.filter((f: any) => f.status === "pending").sort((a: any, b: any) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());

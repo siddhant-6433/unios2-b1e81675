@@ -286,6 +286,8 @@ const Finance = () => {
                           amount: Number(p.amount),
                           payment_ref: p.transaction_ref,
                           payment_date: p.paid_at,
+                          receipt_url: p.receipt_url || null,
+                          payment_id: p.id || null,
                         })}
                         className="flex items-center gap-1.5 rounded-lg border border-primary/30 px-2.5 py-1 text-[11px] font-medium text-primary hover:bg-primary/5 transition-colors"
                       >

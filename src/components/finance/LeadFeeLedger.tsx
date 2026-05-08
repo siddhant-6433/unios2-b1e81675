@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Loader2, Receipt, ChevronDown, ChevronRight, FileImage, IndianRupee, AlertCircle } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { Loader2, Receipt, ChevronDown, ChevronRight, FileImage, IndianRupee, AlertCircle, Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { OfflinePaymentDialog } from "./OfflinePaymentDialog";
 
 const PAY_TYPE_LABELS: Record<string, string> = {
   application_fee: "Application Fee",
@@ -62,6 +65,7 @@ const fmt = (n: number) => `₹${Number(n || 0).toLocaleString("en-IN", { maximu
 const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—";
 
 export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
+  const { role } = useAuth();
   const [resolvedLeadId, setResolvedLeadId] = useState<string | null>(leadId ?? null);
   const [resolvedStudentId, setResolvedStudentId] = useState<string | null>(studentId ?? null);
   const [payments, setPayments] = useState<LeadPayment[]>([]);
@@ -69,6 +73,9 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
   const [links, setLinks] = useState<LedgerLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const [offlineOpen, setOfflineOpen] = useState(false);
+  const [internalRefresh, setInternalRefresh] = useState(0);
+  const canRecordOffline = ["super_admin", "campus_admin", "accountant"].includes(role || "");
 
   useEffect(() => {
     let alive = true;
@@ -121,7 +128,7 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
       if (alive) setLoading(false);
     })();
     return () => { alive = false; };
-  }, [leadId, studentId, refreshKey]);
+  }, [leadId, studentId, refreshKey, internalRefresh]);
 
   const totals = useMemo(() => {
     const ledgerTotal      = ledger.reduce((s, r) => s + Number(r.total_amount || 0), 0);
@@ -147,15 +154,46 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
   if (loading) return <div className="flex items-center justify-center py-8"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>;
   if (payments.length === 0 && ledger.length === 0) {
     return (
-      <div className="rounded-xl border border-border bg-card p-6 text-center text-sm text-muted-foreground">
-        <AlertCircle className="mx-auto mb-2 h-5 w-5" />
-        No fee activity yet.
-      </div>
+      <>
+        <div className="rounded-xl border border-border bg-card p-6 text-center text-sm text-muted-foreground space-y-3">
+          <AlertCircle className="mx-auto h-5 w-5" />
+          <p>No fee activity yet.</p>
+          {canRecordOffline && resolvedLeadId && (
+            <Button size="sm" onClick={() => setOfflineOpen(true)} className="gap-1.5">
+              <Plus className="h-3.5 w-3.5" /> Record Offline Payment
+            </Button>
+          )}
+        </div>
+        {canRecordOffline && resolvedLeadId && (
+          <OfflinePaymentDialog
+            open={offlineOpen}
+            onOpenChange={setOfflineOpen}
+            leadId={resolvedLeadId}
+            onRecorded={() => setInternalRefresh(n => n + 1)}
+          />
+        )}
+      </>
     );
   }
 
   return (
     <div className="space-y-4">
+      {/* Header bar with offline-payment trigger (super_admin / campus_admin / accountant) */}
+      {canRecordOffline && resolvedLeadId && (
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-muted-foreground">Fee ledger &amp; receipts for this candidate.</p>
+          <Button size="sm" variant="outline" onClick={() => setOfflineOpen(true)} className="gap-1.5">
+            <Plus className="h-3.5 w-3.5" /> Record Offline Payment
+          </Button>
+          <OfflinePaymentDialog
+            open={offlineOpen}
+            onOpenChange={setOfflineOpen}
+            leadId={resolvedLeadId}
+            onRecorded={() => setInternalRefresh(n => n + 1)}
+          />
+        </div>
+      )}
+
       {/* Top summary */}
       {ledger.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">

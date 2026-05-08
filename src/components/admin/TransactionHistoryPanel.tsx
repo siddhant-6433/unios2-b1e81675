@@ -127,7 +127,7 @@ export default function TransactionHistoryPanel() {
       .from("applications")
       .select(`
         application_id, full_name, phone, email,
-        fee_amount, payment_status, payment_ref,
+        fee_amount, payment_status, payment_ref, fee_receipt_url,
         updated_at, created_at,
         flags, program_category, applicant_type,
         leads ( admission_no, pre_admission_no, campus_id )
@@ -611,6 +611,7 @@ export default function TransactionHistoryPanel() {
                               amount: t.fee_amount,
                               payment_ref: t.payment_ref,
                               payment_date: t.updated_at,
+                              receipt_url: t.fee_receipt_url || null,
                             })}
                             className="flex items-center gap-1.5 rounded-lg border border-primary/30 px-2.5 py-1 text-[11px] font-medium text-primary hover:bg-primary/5 transition-colors"
                           >

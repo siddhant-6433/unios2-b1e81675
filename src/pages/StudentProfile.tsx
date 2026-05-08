@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, User, Phone, Mail, MapPin, Calendar, Heart, GraduationCap, Check, X, Clock, BookOpen, Loader2, TrendingUp, BarChart3, Activity, Filter, Users } from "lucide-react";
+import { ArrowLeft, User, Phone, Mail, MapPin, Calendar, Heart, GraduationCap, Check, X, Clock, BookOpen, Loader2, TrendingUp, BarChart3, Activity, Filter, Users, RefreshCw, FileText, Download, ExternalLink, ShieldCheck, AlertCircle, Clock3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StudentFeePanel } from "@/components/finance/StudentFeePanel";
 
@@ -13,7 +13,11 @@ const StudentProfile = () => {
   const [attendance, setAttendance] = useState<any[]>([]);
   const [exams, setExams] = useState<any[]>([]);
   const [siblings, setSiblings] = useState<any[]>([]);
+  const [leadDocs, setLeadDocs] = useState<any[]>([]);
+  const [appDocs, setAppDocs] = useState<{ name: string; url: string; path: string }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
   useEffect(() => { if (admissionNo) fetchStudent(); }, [admissionNo]);
 
@@ -64,6 +68,30 @@ const StudentProfile = () => {
       } else {
         setSiblings([]);
       }
+
+      // Lead documents + application documents
+      if (data.lead_id) {
+        const [ldRes, appRes] = await Promise.all([
+          supabase
+            .from("lead_documents")
+            .select("id, document_name, file_url, file_name, status, rejection_reason, verified_at")
+            .eq("lead_id", data.lead_id)
+            .order("created_at"),
+          supabase
+            .from("applications")
+            .select("application_id")
+            .eq("lead_id", data.lead_id)
+            .maybeSingle(),
+        ]);
+        setLeadDocs(ldRes.data ?? []);
+
+        if (appRes.data?.application_id) {
+          const { data: fnData } = await supabase.functions.invoke("list-app-docs", {
+            body: { application_id: appRes.data.application_id },
+          }).catch(() => ({ data: null }));
+          setAppDocs((fnData?.docs ?? []) as { name: string; url: string; path: string }[]);
+        }
+      }
     }
     setLoading(false);
   };
@@ -107,6 +135,21 @@ const StudentProfile = () => {
     return "bg-warning/10 text-warning";
   };
 
+  const syncFromApplication = async () => {
+    setSyncing(true);
+    setSyncMsg(null);
+    const { data, error } = await (supabase.rpc as any)("backfill_student_from_application", { p_student_id: student.id });
+    if (error) {
+      setSyncMsg(`Error: ${error.message}`);
+    } else if (data?.ok === false) {
+      setSyncMsg(`Nothing synced: ${data.reason}`);
+    } else {
+      setSyncMsg(`Synced from application (${data?.app_status ?? "unknown"} status).`);
+      await fetchStudent();
+    }
+    setSyncing(false);
+  };
+
   return (
     <div className="space-y-5 animate-fade-in">
       <Link to="/students" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
@@ -129,9 +172,16 @@ const StudentProfile = () => {
             <p className="text-sm text-muted-foreground mt-0.5">Here's a look at performance and analytics · <span className="font-mono">{displayNo}</span></p>
           </div>
         </div>
-        <Button variant="outline" size="sm" className="gap-2 rounded-lg">
-          <Filter className="h-3.5 w-3.5" /> Filter
-        </Button>
+        <div className="flex items-center gap-2">
+          {syncMsg && <span className="text-xs text-muted-foreground">{syncMsg}</span>}
+          <Button variant="outline" size="sm" className="gap-2 rounded-lg" onClick={syncFromApplication} disabled={syncing}>
+            {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            Sync from Application
+          </Button>
+          <Button variant="outline" size="sm" className="gap-2 rounded-lg">
+            <Filter className="h-3.5 w-3.5" /> Filter
+          </Button>
+        </div>
       </div>
 
       {/* Stats Cards Row */}
@@ -203,6 +253,9 @@ const StudentProfile = () => {
       <Tabs defaultValue="details" className="w-full">
         <TabsList className="bg-card border border-border rounded-lg p-1 h-auto flex-wrap">
           <TabsTrigger value="details" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Details</TabsTrigger>
+          <TabsTrigger value="documents" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+            Documents{(leadDocs.length + appDocs.length) > 0 && <span className="ml-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold">{leadDocs.length + appDocs.length}</span>}
+          </TabsTrigger>
           <TabsTrigger value="fees" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Fee Ledger</TabsTrigger>
           <TabsTrigger value="attendance" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Attendance</TabsTrigger>
           <TabsTrigger value="exams" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Exams</TabsTrigger>
@@ -407,6 +460,81 @@ const StudentProfile = () => {
                 <Detail label="Bank Reference No" value={student.bank_reference_no || "—"} />
               </div>
             </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="documents">
+          <div className="mt-4 space-y-4">
+            {leadDocs.length === 0 && appDocs.length === 0 && (
+              <div className="rounded-xl bg-card card-shadow p-10 flex flex-col items-center gap-2 text-muted-foreground">
+                <FileText className="h-8 w-8 opacity-30" />
+                <p className="text-sm">No documents found for this student.</p>
+                {!student.lead_id && (
+                  <p className="text-xs">Student has no linked lead — documents are only available for students admitted via the apply portal.</p>
+                )}
+              </div>
+            )}
+
+            {appDocs.length > 0 && (
+              <div className="rounded-xl bg-card card-shadow p-5 space-y-3">
+                <h3 className="text-sm font-semibold text-foreground">Application Documents</h3>
+                <div className="divide-y divide-border">
+                  {appDocs.map((doc, i) => {
+                    const label = doc.name.split("-").slice(0, -1).join(" ").replace(/_/g, " ") || doc.name;
+                    const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(doc.name);
+                    return (
+                      <div key={i} className="flex items-center gap-3 py-2.5">
+                        {isImage
+                          ? <img src={doc.url} alt={label} className="h-9 w-9 rounded object-cover border border-border shrink-0" />
+                          : <div className="h-9 w-9 rounded bg-muted flex items-center justify-center shrink-0"><FileText className="h-4 w-4 text-muted-foreground" /></div>
+                        }
+                        <span className="flex-1 text-sm text-foreground truncate capitalize">{label}</span>
+                        <a href={doc.url} target="_blank" rel="noreferrer" className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-primary">
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                        <a href={doc.url} download className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-primary">
+                          <Download className="h-3.5 w-3.5" />
+                        </a>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {leadDocs.length > 0 && (
+              <div className="rounded-xl bg-card card-shadow p-5 space-y-3">
+                <h3 className="text-sm font-semibold text-foreground">Verified Documents</h3>
+                <div className="divide-y divide-border">
+                  {leadDocs.map((doc) => {
+                    const statusIcon = doc.status === "verified"
+                      ? <ShieldCheck className="h-4 w-4 text-emerald-500" />
+                      : doc.status === "rejected"
+                      ? <AlertCircle className="h-4 w-4 text-rose-500" />
+                      : <Clock3 className="h-4 w-4 text-amber-500" />;
+                    const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(doc.file_name ?? "");
+                    return (
+                      <div key={doc.id} className="flex items-center gap-3 py-2.5">
+                        {isImage && doc.file_url
+                          ? <img src={doc.file_url} alt={doc.document_name} className="h-9 w-9 rounded object-cover border border-border shrink-0" />
+                          : <div className="h-9 w-9 rounded bg-muted flex items-center justify-center shrink-0"><FileText className="h-4 w-4 text-muted-foreground" /></div>
+                        }
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-foreground truncate">{doc.document_name}</p>
+                          {doc.rejection_reason && <p className="text-[11px] text-rose-500 truncate">{doc.rejection_reason}</p>}
+                        </div>
+                        <div title={doc.status} className="shrink-0">{statusIcon}</div>
+                        {doc.file_url && (
+                          <a href={doc.file_url} target="_blank" rel="noreferrer" className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-primary shrink-0">
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </a>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </TabsContent>
 

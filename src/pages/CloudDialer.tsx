@@ -13,6 +13,7 @@ import {
   FileText, PhoneIncoming, ArrowRight,
 } from "lucide-react";
 import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
+import { PriorityInterestedCard } from "@/components/leads/PriorityInterestedCard";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -66,6 +67,7 @@ const FOLLOWUP_TIME_SLOTS = ["09:00", "10:00", "11:00", "12:00", "14:00", "15:00
 const FUTURE_SESSIONS = ["2026-27 (Current)", "2027-28", "2028-29"];
 
 const STAGE_LABELS: Record<string, string> = {
+  priority_interested: "Priority Interested",
   new_lead: "New Lead", counsellor_call: "Follow Up", application_in_progress: "App In Progress",
   visit_scheduled: "Visit Scheduled", application_fee_paid: "Fee Paid",
 };
@@ -245,6 +247,8 @@ export default function CloudDialer() {
       let q3 = supabase.from("overdue_followups" as any).select("lead_id, lead_name, lead_phone").order("scheduled_at" as any, { ascending: true }).limit(500);
       let q4 = supabase.from("lead_followups").select("lead_id, leads!inner(id, name, phone, counsellor_id)").eq("status", "pending").gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd).order("scheduled_at", { ascending: true }).limit(500);
       let q5 = supabase.from("leads").select("id, name, phone").eq("stage", "new_lead").is("first_contact_at", null).not("phone", "is", null).order("created_at", { ascending: true }).limit(500);
+      // qP: priority interested — auto-elevated high-conversion AI call leads
+      let qP = supabase.from("leads").select("id, name, phone").eq("stage", "priority_interested" as any).not("phone", "is", null).order("updated_at", { ascending: false }).limit(500);
 
       if (counsellorId) {
         q0 = q0.eq("leads.counsellor_id", counsellorId);
@@ -252,15 +256,17 @@ export default function CloudDialer() {
         q3 = q3.eq("counsellor_id", counsellorId);
         q4 = supabase.from("lead_followups").select("lead_id, leads!inner(id, name, phone, counsellor_id)").eq("status", "pending").eq("leads.counsellor_id", counsellorId).gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd).order("scheduled_at", { ascending: true }).limit(500);
         q5 = q5.eq("counsellor_id", counsellorId);
+        qP = qP.eq("counsellor_id", counsellorId);
       }
 
-      const [r0, r1, r2, r3, r4, r5] = await Promise.all([q0, q1, q2, q3, q4, q5]);
+      const [r0, r1, r2, r3, r4, r5, rP] = await Promise.all([q0, q1, q2, q3, q4, q5, qP]);
 
       const seen = new Set<string>();
       const add = (items: {id:string;name:string;phone:string}[], bucket: string) => {
         items.forEach(l => { if (!seen.has(l.id) && l.phone) { seen.add(l.id); allLeads.push({ ...l, bucket }); } });
       };
 
+      const priorityLeads = (rP.data || []).map((r: any) => ({ id: r.id, name: r.name, phone: r.phone }));
       // Deduplicate missed callbacks by lead_id (one lead may have multiple records)
       const missedCallbacks = Array.from(
         new Map((r0.data || []).map((r: any) => [r.lead_id, {
@@ -273,7 +279,10 @@ export default function CloudDialer() {
       const todayFu = (r4.data || []).map((r: any) => ({ id: r.lead_id, name: (r.leads as any)?.name || "", phone: (r.leads as any)?.phone || "" }));
       const newLeads = (r5.data || []).map((r: any) => ({ id: r.id, name: r.name, phone: r.phone }));
 
-      // Missed callbacks go FIRST — highest priority
+      // Priority Interested goes FIRST — hot leads identified by AI
+      if (priorityLeads.length) buckets.push({ key: "priority", label: "Priority Interested", color: "bg-violet-600", count: priorityLeads.length });
+      add(priorityLeads, "Priority Interested");
+      // Missed callbacks second
       if (missedCallbacks.length) buckets.push({ key: "missed", label: "Missed Callbacks", color: "bg-red-600", count: missedCallbacks.length });
       add(missedCallbacks, "Missed Callback");
       add(postVisit, "Post-Visit");
@@ -295,7 +304,7 @@ export default function CloudDialer() {
       allLeads = (data || []).filter((l: any) => l.phone).map((l: any) => ({ id: l.id, name: l.name, phone: l.phone, bucket: "New Lead" }));
       buckets.push({ key: "new", label: "New Leads", color: "bg-orange-500", count: allLeads.length });
     } else {
-      let aq = supabase.from("leads").select("id, name, phone, stage").in("stage", ["new_lead", "counsellor_call", "application_in_progress"]).not("phone", "is", null).order("created_at", { ascending: true }).limit(100);
+      let aq = supabase.from("leads").select("id, name, phone, stage").in("stage", ["priority_interested", "new_lead", "counsellor_call", "application_in_progress"] as any).not("phone", "is", null).order("created_at", { ascending: true }).limit(100);
       if (counsellorId) aq = aq.eq("counsellor_id", counsellorId);
       const { data } = await aq;
       allLeads = (data || []).filter((l: any) => l.phone).map((l: any) => ({ id: l.id, name: l.name, phone: l.phone, bucket: STAGE_LABELS[l.stage] || l.stage }));
@@ -438,6 +447,7 @@ export default function CloudDialer() {
 
   const pollRef = useRef<number | null>(null);
   const callIdRef = useRef<string | null>(null);
+  const pollStartTimeRef = useRef<number | null>(null);
 
   // Inline editing
   const [queueSearch, setQueueSearch] = useState("");
@@ -448,6 +458,7 @@ export default function CloudDialer() {
   // Poll for call end — checks ai_call_records for our call_uuid
   const startPolling = (callId: string) => {
     callIdRef.current = callId;
+    pollStartTimeRef.current = Date.now();
     const poll = async () => {
       const { data } = await supabase
         .from("ai_call_records" as any)
@@ -470,8 +481,15 @@ export default function CloudDialer() {
           // Student never connected — stop polling, show auto-followup with 15s timer
           if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
           handleAutoDisposition(data.disposition);
+        } else {
+          // Still ringing — but if we've been polling > 8 min, the call is stuck
+          // (voice-agent context was lost, bridge-hangup never updated the record).
+          const elapsed = pollStartTimeRef.current ? Date.now() - pollStartTimeRef.current : 0;
+          if (elapsed > 8 * 60 * 1000) {
+            if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+            handleAutoDisposition("not_answered");
+          }
         }
-        // else: still ringing/connecting — keep polling, stay in "calling" state
         return;
       }
 
@@ -574,11 +592,34 @@ export default function CloudDialer() {
   const finalizeDisposition = async (disposition: string, duration: number) => {
     if (!currentLead) return;
 
-    await supabase.from("call_logs" as any).insert({
-      lead_id: currentLead.id, disposition, duration_seconds: duration,
-      notes: `Cloud Dialer: ${disposition.replace("_", " ")}`,
-      direction: "outbound", user_id: user?.id, called_at: new Date().toISOString(),
-    });
+    // Route through the merge RPC keyed on cloud_call_uuid so this manual
+    // save lands on the same row as the voice-agent's bridge-hangup webhook
+    // (whichever fired first). Without this, the counsellor's pick + notes
+    // create a duplicate row alongside the auto "Cloud Call [hash]" row.
+    const callUuid = callIdRef.current;
+    if (callUuid) {
+      await (supabase as any).rpc("record_cloud_call_log", {
+        p_call_uuid:     callUuid,
+        p_lead_id:       currentLead.id,
+        p_user_id:       user?.id || null,
+        p_disposition:   disposition,
+        p_duration:      duration,
+        p_notes:         `Cloud Dialer: ${disposition.replace("_", " ")}`,
+        p_source:        "manual",
+        p_recording_url: null,
+      });
+    } else {
+      await (supabase as any).rpc("record_cloud_call_log", {
+        p_call_uuid:     crypto.randomUUID(),
+        p_lead_id:       currentLead.id,
+        p_user_id:       user?.id || null,
+        p_disposition:   disposition,
+        p_duration:      duration,
+        p_notes:         `Cloud Dialer: ${disposition.replace("_", " ")}`,
+        p_source:        "manual",
+        p_recording_url: null,
+      });
+    }
 
     // Mark pending followups as completed (clears overdue status)
     await supabase.from("lead_followups")
@@ -616,16 +657,31 @@ export default function CloudDialer() {
   const markDisposition = async (disposition: string) => {
     if (!currentLead) return;
 
-    // Log to call_logs
-    await supabase.from("call_logs" as any).insert({
-      lead_id: currentLead.id,
-      disposition,
-      duration_seconds: callState.elapsed,
-      notes: `Cloud Dialer: ${disposition.replace("_", " ")}`,
-      direction: "outbound",
-      user_id: user?.id,
-      called_at: new Date().toISOString(),
-    });
+    // Log to call_logs via the merge RPC — see finalizeDisposition for why.
+    const callUuid = callIdRef.current;
+    if (callUuid) {
+      await (supabase as any).rpc("record_cloud_call_log", {
+        p_call_uuid:     callUuid,
+        p_lead_id:       currentLead.id,
+        p_user_id:       user?.id || null,
+        p_disposition:   disposition,
+        p_duration:      callState.elapsed,
+        p_notes:         `Cloud Dialer: ${disposition.replace("_", " ")}`,
+        p_source:        "manual",
+        p_recording_url: null,
+      });
+    } else {
+      await (supabase as any).rpc("record_cloud_call_log", {
+        p_call_uuid:     crypto.randomUUID(),
+        p_lead_id:       currentLead.id,
+        p_user_id:       user?.id || null,
+        p_disposition:   disposition,
+        p_duration:      callState.elapsed,
+        p_notes:         `Cloud Dialer: ${disposition.replace("_", " ")}`,
+        p_source:        "manual",
+        p_recording_url: null,
+      });
+    }
 
     // Mark pending followups as completed (clears overdue status)
     await supabase.from("lead_followups")
@@ -667,6 +723,22 @@ export default function CloudDialer() {
     const statsKey = disposition === "busy" ? "busy" : disposition === "voicemail" ? "voicemail" : "noAnswer";
     setStats(prev => ({ ...prev, [statsKey]: prev[statsKey] + 1 }));
     setCallState(prev => ({ ...prev, status: "auto-disposed", disposition, autoDisposition: true }));
+    // Write call log via dedupe RPC so this row merges with the auto path from
+    // bridge-hangup (if it already wrote one). Without this, cancels + stuck-call
+    // timeouts produce no call log at all.
+    const callUuid = callIdRef.current;
+    if (currentLead) {
+      (supabase as any).rpc("record_cloud_call_log", {
+        p_call_uuid:     callUuid ?? crypto.randomUUID(),
+        p_lead_id:       currentLead.id,
+        p_user_id:       user?.id || null,
+        p_disposition:   disposition,
+        p_duration:      callState.elapsed,
+        p_notes:         `Cloud Dialer: ${disposition.replace("_", " ")} (auto)`,
+        p_source:        "manual",
+        p_recording_url: null,
+      });
+    }
     showFollowupAndAutoNext(disposition);
   };
 
@@ -1282,6 +1354,11 @@ export default function CloudDialer() {
                     </div>
                   </CardContent>
                 </Card>
+
+                {/* Priority Interested reason — shown before the counsellor calls */}
+                {currentLead.stage === "priority_interested" && (
+                  <PriorityInterestedCard leadId={currentLead.id} compact />
+                )}
 
                 {/* Previous Call Notes */}
                 {callHistory.length > 0 && (
