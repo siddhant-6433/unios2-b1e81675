@@ -375,6 +375,7 @@ export default function ApplicantPortal() {
                       applicantName={app.full_name}
                       applicantPhone={profile?.phone || user?.phone || null}
                       applicantEmail={user?.email || null}
+                      courseName={(app.course_selections as any[])?.[0]?.course_name || null}
                       onPayment={fetchApplications}
                     />
                   </div>

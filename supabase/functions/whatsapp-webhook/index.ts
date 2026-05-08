@@ -134,7 +134,7 @@ Deno.serve(async (req) => {
           const normalizedPhone = phone.replace(/^91/, "+91");
           const { data: leadRows } = await admin
             .from("leads")
-            .select("id, counsellor_id, name, stage")
+            .select("id, counsellor_id, name, stage, person_role")
             .or(`phone.eq.${phone},phone.eq.${normalizedPhone},phone.eq.+${phone}`)
             .limit(1);
           const lead = leadRows?.[0] || null;
@@ -160,6 +160,17 @@ Deno.serve(async (req) => {
           // immediate AI-reply dispatch below is skipped to avoid pitching
           // admissions to a likely job applicant.
           let shouldDeferAiReply = false;
+
+          // HR / careers channel: messages on +919599675267 (pnid
+          // 970526789470416) OR conversations already classified as
+          // job_applicant must NEVER receive the admissions auto-reply
+          // (greeting menu) or the admissions AI reply. Notifications and
+          // lead-activity logging still happen — only outbound auto-replies
+          // are suppressed.
+          const HR_BUSINESS_PNID = "970526789470416";
+          const isHrChannel =
+            businessPnId === HR_BUSINESS_PNID ||
+            (lead as any)?.person_role === "job_applicant";
 
           // Insert message — capture id for downstream classification queue
           const { data: insertedMsg } = await admin.from("whatsapp_messages").insert({
@@ -198,7 +209,9 @@ Deno.serve(async (req) => {
             // If regex returns 'lead' AND the message contains a possible non-admission
             // signal, defer the AI knowledge-base reply behind LLM classification.
             // Otherwise reply immediately as today (fast path for normal admission queries).
-            if (content && msgType === "text") {
+            // Skipped on the HR channel: the classifier dispatches AI replies, which
+            // we never want for HR/job-applicant traffic.
+            if (content && msgType === "text" && !isHrChannel) {
               try {
                 const { data: catResult } = await admin.rpc("auto_categorize_lead_from_message", {
                   _lead_id: lead.id,
@@ -425,8 +438,10 @@ Deno.serve(async (req) => {
           }
 
           // ── Auto-reply bot: match inbound text against keyword patterns ──
+          // Skipped on the HR channel and for job_applicant leads — those
+          // conversations are admissions-irrelevant.
           let keywordMatched = false;
-          if (!feedbackHandled && msgType === "text" && content) {
+          if (!feedbackHandled && !isHrChannel && msgType === "text" && content) {
             const matched = AUTO_REPLIES.find(r => r.patterns.test(content.trim()));
             if (matched) {
               keywordMatched = true;
@@ -484,7 +499,9 @@ Deno.serve(async (req) => {
           }
 
           // ── AI Knowledge Base reply (handles everything not matched above) ──
-          if (!feedbackHandled && !keywordMatched && !shouldDeferAiReply && msgType === "text" && content) {
+          // Suppressed on the HR channel and for job_applicant leads — the
+          // admissions knowledge base shouldn't reply on careers traffic.
+          if (!feedbackHandled && !keywordMatched && !shouldDeferAiReply && !isHrChannel && msgType === "text" && content) {
             try {
               // Map menu number selections to explicit intent so AI gives a rich answer
               const MENU_CONTEXT: Record<string, string> = {

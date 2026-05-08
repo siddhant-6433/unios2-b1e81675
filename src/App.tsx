@@ -57,6 +57,7 @@ import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
 import AlumniVerification from "./pages/AlumniVerification";
 import AlumniVerifications from "./pages/AlumniVerifications";
+import Inbox from "./pages/Inbox";
 import HrDashboard from "./pages/HrDashboard";
 import HrAttendance from "./pages/HrAttendance";
 import HrLeaveManagement from "./pages/HrLeaveManagement";
@@ -190,6 +191,7 @@ const App = () => (
                       <Route path="/consultants" element={<Consultants />} />
                       <Route path="/admission-analytics" element={<AdmissionAnalytics />} />
                       <Route path="/counsellor-dashboard" element={<CounsellorDashboard />} />
+                      <Route path="/inbox" element={<Inbox />} />
                       <Route path="/whatsapp-inbox" element={<WhatsAppInbox />} />
                       <Route path="/automation-rules" element={<AutomationRules />} />
                       <Route path="/consultant-portal" element={<ConsultantPortal />} />

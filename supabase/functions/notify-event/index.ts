@@ -395,7 +395,9 @@ Deno.serve(async (req) => {
 
       // Email to student
       if (lead.email) {
-        const offerAttach = offer.letter_url
+        // MBA: hide the offer letter PDF — show fee details + portal CTA only
+        const isMba = /\bMBA\b/i.test(courseName);
+        const offerAttach = (!isMba && offer.letter_url)
           ? [{ filename: `Offer-Letter-${lead.name?.replace(/\s+/g, "-") || "Student"}.pdf`, url: offer.letter_url }]
           : [];
         const offerSubject = `Your offer letter is ready — ${courseName}`;
@@ -408,7 +410,7 @@ Deno.serve(async (req) => {
           `<tr><td style="padding:8px;border:1px solid #ddd">Net Fee</td><td style="padding:8px;border:1px solid #ddd"><strong>₹${Number(offer.net_fee || 0).toLocaleString("en-IN")}</strong></td></tr>` +
           `<tr><td style="padding:8px;border:1px solid #ddd">Accept by</td><td style="padding:8px;border:1px solid #ddd">${deadline}</td></tr>` +
           `</table>` +
-          `<p>${offer.letter_url ? "The offer letter PDF is attached." : ""} To accept and pay the token fee, use the portal link below.</p>` +
+          `<p>${offerAttach.length ? "The offer letter PDF is attached. " : ""}To accept your offer and pay the token fee to confirm your admission, use the portal link below.</p>` +
           `<p style="margin:24px 0"><a href="${payUrl}" style="background:#0035C5;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600">View & Accept Offer →</a></p>` +
           `<p style="color:#64748b;font-size:12px">For queries contact admissions@nimt.ac.in</p>` +
           `</div>`;

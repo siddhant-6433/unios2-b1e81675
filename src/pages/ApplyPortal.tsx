@@ -823,40 +823,104 @@ function ApplicationDashboardView({
 
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
 
-        {/* Welcome strip */}
+        {/* Welcome strip — state-aware nudge */}
         {(() => {
-          // Find the most advanced admission number across all apps for this lead.
-          const admittedApp = apps.find((a: any) => a.lead_id && leadAdmissions[a.lead_id]?.admission_no);
-          const preAdmittedApp = !admittedApp && apps.find((a: any) => a.lead_id && leadAdmissions[a.lead_id]?.pre_admission_no);
-          const an = admittedApp?.lead_id ? leadAdmissions[admittedApp.lead_id]?.admission_no : null;
-          const pan = preAdmittedApp?.lead_id ? leadAdmissions[preAdmittedApp.lead_id]?.pre_admission_no : null;
+          // Priority-ordered state detection across all apps.
+          const admittedApp  = apps.find((a: any) => a.lead_id && leadAdmissions[a.lead_id]?.admission_no);
+          const preAdmitted  = !admittedApp && apps.find((a: any) => a.lead_id && leadAdmissions[a.lead_id]?.pre_admission_no);
+          const offerApp     = !admittedApp && !preAdmitted && apps.find((a: any) =>
+            (a.lead_id ? offerLetters[a.lead_id] : undefined)?.approval_status === "approved"
+          );
+          const reviewApp    = !admittedApp && !preAdmitted && !offerApp &&
+            apps.find((a: any) => a.status === "submitted" || a.status === "under_review");
+          const feeApp       = !admittedApp && !preAdmitted && !offerApp && !reviewApp &&
+            apps.find((a: any) => a.status === "draft" && Number(a.fee_amount) > 0 && a.payment_status !== "paid");
+          const draftApp     = !admittedApp && !preAdmitted && !offerApp && !reviewApp && !feeApp &&
+            apps.find((a: any) => a.status === "draft");
+
+          const an  = admittedApp?.lead_id  ? leadAdmissions[admittedApp.lead_id]?.admission_no   : null;
+          const pan = preAdmitted?.lead_id  ? leadAdmissions[preAdmitted.lead_id]?.pre_admission_no : null;
+
+          // Gradient + content derived from state.
+          let gradient     = "bg-gradient-to-br from-blue-600 to-indigo-700";
+          let eyebrowColor = "text-blue-200";
+          let subtitle: React.ReactNode = `Your admission journey at ${portal.name}`;
+          let subtitleColor = "text-blue-100";
+          let cardIcon: React.ReactNode = <GraduationCap className="h-10 w-10 text-white/30 shrink-0 mt-0.5" />;
+          let cta: React.ReactNode = null;
+
+          if (admittedApp) {
+            gradient      = "bg-gradient-to-br from-green-600 to-emerald-700";
+            eyebrowColor  = "text-green-200";
+            subtitle      = <span className="font-mono font-semibold">Admission No: {an}</span>;
+            subtitleColor = "text-green-100";
+            cta = (
+              <a href="https://uni.nimt.ac.in" target="_blank" rel="noopener"
+                className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-white/20 hover:bg-white/30 active:bg-white/40 transition-colors px-4 py-2.5 text-sm font-bold text-white">
+                <GraduationCap className="h-4 w-4" /> Go to Student Dashboard →
+              </a>
+            );
+          } else if (preAdmitted) {
+            subtitle      = <span className="font-mono font-semibold">Pre-Admission No: {pan}</span>;
+            subtitleColor = "text-blue-100";
+            cta = (
+              <button onClick={() => onContinue(preAdmitted)}
+                className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-white/20 hover:bg-white/30 active:bg-white/40 transition-colors px-4 py-2.5 text-sm font-bold text-white">
+                Pay token fee to complete admission →
+              </button>
+            );
+          } else if (offerApp) {
+            const courseLabel = (offerApp.course_selections as any[])
+              ?.map((c: any) => c.course_name).filter(Boolean).join(", ") || "your course";
+            subtitle = <>🎉 Offer approved for <span className="font-semibold">{courseLabel}</span></>;
+            cta = (
+              <button onClick={() => onContinue(offerApp)}
+                className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-white/20 hover:bg-white/30 active:bg-white/40 transition-colors px-4 py-2.5 text-sm font-bold text-white">
+                Pay token fee to secure your seat →
+              </button>
+            );
+          } else if (reviewApp) {
+            gradient      = "bg-gradient-to-br from-emerald-600 to-teal-700";
+            eyebrowColor  = "text-emerald-200";
+            subtitle      = "Application submitted · We'll be in touch soon";
+            subtitleColor = "text-emerald-100";
+            cardIcon      = <CheckCircle className="h-10 w-10 text-white/30 shrink-0 mt-0.5" />;
+          } else if (feeApp) {
+            gradient      = "bg-gradient-to-br from-amber-500 to-orange-600";
+            eyebrowColor  = "text-amber-200";
+            subtitleColor = "text-amber-100";
+            subtitle      = `Pay ₹${Number(feeApp.fee_amount).toLocaleString("en-IN")} application fee to submit`;
+            cardIcon      = <Wallet className="h-10 w-10 text-white/30 shrink-0 mt-0.5" />;
+            cta = (
+              <button onClick={() => onContinue(feeApp)}
+                className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-white/20 hover:bg-white/30 active:bg-white/40 transition-colors px-4 py-2.5 text-sm font-bold text-white">
+                Pay ₹{Number(feeApp.fee_amount).toLocaleString("en-IN")} & Submit Application →
+              </button>
+            );
+          } else if (draftApp) {
+            const cs = (draftApp.completed_sections as Record<string, boolean>) || {};
+            const allKeys = ["personal", "parents", "academic", "extracurricular", "payment", "documents", "review"];
+            const doneCount = allKeys.filter(k => cs[k]).length;
+            subtitle = `${doneCount} of ${allKeys.length} sections complete — keep going!`;
+            cta = (
+              <button onClick={() => onContinue(draftApp)}
+                className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-white/20 hover:bg-white/30 active:bg-white/40 transition-colors px-4 py-2.5 text-sm font-bold text-white">
+                Continue Application →
+              </button>
+            );
+          }
+
           return (
-            <div className={`rounded-2xl text-white px-5 py-4 ${admittedApp ? "bg-gradient-to-br from-green-600 to-emerald-700" : "bg-gradient-to-br from-blue-600 to-indigo-700"}`}>
+            <div className={`rounded-2xl text-white px-5 py-4 ${gradient}`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-xs font-semibold uppercase tracking-widest text-blue-200 mb-0.5">Welcome back</p>
+                  <p className={`text-xs font-semibold uppercase tracking-widest ${eyebrowColor} mb-0.5`}>Welcome back</p>
                   <h1 className="text-xl font-bold leading-tight">{leadName || "Applicant"}</h1>
-                  {an ? (
-                    <p className="text-sm font-mono font-semibold mt-1 text-green-100">Admission No: {an}</p>
-                  ) : pan ? (
-                    <p className="text-sm font-mono font-semibold mt-1 text-blue-100">Pre-Admission No: {pan}</p>
-                  ) : (
-                    <p className="text-sm text-blue-100 mt-0.5">Your admission journey at {portal.name}</p>
-                  )}
+                  <p className={`text-sm mt-0.5 ${subtitleColor}`}>{subtitle}</p>
                 </div>
-                <GraduationCap className="h-10 w-10 text-white/30 shrink-0 mt-0.5" />
+                {cardIcon}
               </div>
-              {an && (
-                <a
-                  href="https://uni.nimt.ac.in"
-                  target="_blank"
-                  rel="noopener"
-                  className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-white/20 hover:bg-white/30 active:bg-white/40 transition-colors px-4 py-2.5 text-sm font-bold text-white"
-                >
-                  <GraduationCap className="h-4 w-4" />
-                  Go to Student Dashboard →
-                </a>
-              )}
+              {cta}
             </div>
           );
         })()}

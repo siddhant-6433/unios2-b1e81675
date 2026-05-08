@@ -169,7 +169,12 @@ const INBOX_TEMPLATES = [
 const isAdminRole = (role: string | null | undefined) =>
   role === "super_admin" || role === "admission_head" || role === "campus_admin";
 
-const ALLOWED_ROLES = new Set(["super_admin", "campus_admin", "principal", "admission_head", "counsellor"]);
+const ALLOWED_ROLES = new Set(["super_admin", "campus_admin", "principal", "admission_head", "counsellor", "hr_manager"]);
+
+// HR-scoped inbox: messages on +919599675267 (NIMT HR / careers number) plus
+// any conversation that's been categorised as a job_applicant on the
+// admissions number. The default (admissions) inbox excludes those.
+const HR_BUSINESS_PNID = "970526789470416";
 
 const WhatsAppInbox = () => {
   const navigate = useNavigate();
@@ -178,6 +183,8 @@ const WhatsAppInbox = () => {
   const [searchParams] = useSearchParams();
   const isOutboundMode = searchParams.get("mode") === "outbound";
   const phoneParam = searchParams.get("phone");
+  const scope = searchParams.get("scope") === "hr" ? "hr" : "admissions";
+  const isHrScope = scope === "hr";
 
   if (role && !ALLOWED_ROLES.has(role)) {
     return (
@@ -283,6 +290,16 @@ const WhatsAppInbox = () => {
   };
 
   const matchesInbox = (c: Conversation) => {
+    // HR scope: messages on the HR business number OR any job_applicant
+    // conversation regardless of which number it landed on. The
+    // business-number switcher doesn't apply here — the scope is fixed.
+    if (isHrScope) {
+      return c.business_phone_number_id === HR_BUSINESS_PNID
+          || c.lead_person_role === "job_applicant";
+    }
+    // Admissions scope: exclude job_applicant conversations entirely;
+    // those live in the dedicated HR inbox.
+    if (c.lead_person_role === "job_applicant") return false;
     if (businessNumber === "primary") {
       return !c.business_phone_number_id || c.business_phone_number_id === primaryPnid;
     }
@@ -457,7 +474,13 @@ const WhatsAppInbox = () => {
         .eq("phone", selectedPhone)
         .order("created_at", { ascending: true })
         .limit(200);
-      if (businessNumber === "primary") {
+      if (isHrScope) {
+        // HR view shows the candidate's full thread: messages on the HR
+        // number AND any messages on the admissions number that were
+        // categorised as job-applicant — same conversation, different DID.
+        // We don't pnid-filter here; the conversation list is already
+        // scoped via matchesInbox.
+      } else if (businessNumber === "primary") {
         if (activePnid) q = (q as any).or(`business_phone_number_id.is.null,business_phone_number_id.eq.${activePnid}`);
       } else {
         q = q.eq("business_phone_number_id", businessNumber);
@@ -472,7 +495,9 @@ const WhatsAppInbox = () => {
         .eq("phone", selectedPhone)
         .eq("direction", "inbound")
         .eq("is_read", false);
-      if (businessNumber === "primary") {
+      if (isHrScope) {
+        // No pnid filter — mark all inbound for this candidate as read.
+      } else if (businessNumber === "primary") {
         if (activePnid) upd = (upd as any).or(`business_phone_number_id.is.null,business_phone_number_id.eq.${activePnid}`);
       } else {
         upd = upd.eq("business_phone_number_id", businessNumber);
@@ -810,7 +835,11 @@ const WhatsAppInbox = () => {
     <div className="animate-fade-in">
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">{isOutboundMode ? "WhatsApp Outbound" : "WhatsApp Inbox"}</h1>
+          <h1 className="text-2xl font-bold text-foreground">
+            {isOutboundMode
+              ? (isHrScope ? "HR WhatsApp Outbound" : "WhatsApp Outbound")
+              : (isHrScope ? "HR WhatsApp Inbox" : "WhatsApp Inbox")}
+          </h1>
           <p className="text-sm text-muted-foreground mt-1">
             {isOutboundMode
               ? `${filtered.length} outbound-only conversation${filtered.length !== 1 ? "s" : ""} (no reply received)`
@@ -820,7 +849,7 @@ const WhatsAppInbox = () => {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {hasOtherInbox && (
+          {hasOtherInbox && !isHrScope && (
             <select
               value={businessNumber}
               onChange={e => { setBusinessNumber(e.target.value); setSelectedPhone(null); }}
@@ -843,7 +872,14 @@ const WhatsAppInbox = () => {
             </button>
           )}
           <button
-            onClick={() => navigate(isOutboundMode ? "/whatsapp-inbox" : "/whatsapp-inbox?mode=outbound")}
+            onClick={() => {
+              const base = "/whatsapp-inbox";
+              const params = new URLSearchParams();
+              if (!isOutboundMode) params.set("mode", "outbound");
+              if (isHrScope) params.set("scope", "hr");
+              const qs = params.toString();
+              navigate(qs ? `${base}?${qs}` : base);
+            }}
             className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
               isOutboundMode
                 ? "border-primary bg-primary/10 text-primary"

@@ -73,10 +73,14 @@ interface Props {
   applicantName: string;
   applicantPhone: string | null;
   applicantEmail: string | null;
+  courseName?: string | null;
   onPayment?: () => void;
 }
 
-export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName, applicantPhone, applicantEmail, onPayment }: Props) {
+const isMbaCourse = (name: string | null | undefined) =>
+  !!name && /\bMBA\b/i.test(name);
+
+export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName, applicantPhone, applicantEmail, courseName, onPayment }: Props) {
   const [lead, setLead] = useState<Lead | null>(null);
   const [offer, setOffer] = useState<Offer | null>(null);
   const [feeStatus, setFeeStatus] = useState<FeeStatus | null>(null);
@@ -343,7 +347,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
               Your seat is reserved. Complete the steps below to secure your admission.
             </p>
           </div>
-          {offer.letter_url && (
+          {offer.letter_url && !isMbaCourse(courseName) && (
             <a
               href={offer.letter_url} target="_blank" rel="noopener"
               className="shrink-0 inline-flex flex-col items-center gap-1 rounded-xl bg-white/15 hover:bg-white/25 active:bg-white/30 px-3 py-2.5 text-white transition-colors"

@@ -24,6 +24,21 @@ interface ParsedLead {
   state?: string;
   area?: string;
   jd_category?: string;
+  // Meta Lead Ads attribution — populated by parseMetaAds, persisted on
+  // the leads row so per-campaign / per-form analytics work without
+  // re-querying Meta. Other parsers leave these undefined.
+  meta_leadgen_id?: string;
+  meta_form_id?: string;
+  meta_form_name?: string;
+  meta_ad_id?: string;
+  meta_ad_name?: string;
+  meta_adset_id?: string;
+  meta_adset_name?: string;
+  meta_campaign_id?: string;
+  meta_campaign_name?: string;
+  meta_page_id?: string;
+  meta_platform?: string;
+  raw_form_data?: any;
 }
 
 function parseJustDial(body: any): ParsedLead {
@@ -65,18 +80,94 @@ function parseShiksha(body: any): ParsedLead {
 }
 
 function parseMetaAds(body: any): ParsedLead {
-  // Facebook/Meta Lead Ads webhook (simplified)
-  const fieldData = body.field_data || [];
-  const getField = (name: string) =>
-    fieldData.find((f: any) => f.name === name)?.values?.[0] || "";
+  // Meta (Facebook / Instagram) Lead Ads webhook payload.
+  // The webhook function (`meta-leads-webhook`) fetches the full lead via
+  // Graph API and forwards it here as { field_data, leadgen_id, form_id,
+  // form_name, ad_id, ad_name, adset_id, adset_name, campaign_id,
+  // campaign_name, page_id, platform, ... }.
+  //
+  // Strategy:
+  //   1. Map known field names to standard columns (case-insensitive,
+  //      multiple aliases per column to cover form-builder variation).
+  //   2. Anything not mapped goes into `notes` as "Label: Value" lines.
+  //   3. Full original field_data is preserved in raw_form_data so a
+  //      future schema can promote anything we missed.
+  const fieldData = Array.isArray(body.field_data) ? body.field_data : [];
+
+  const findField = (...aliases: string[]): string => {
+    for (const alias of aliases) {
+      const target = alias.toLowerCase();
+      const f = fieldData.find((f: any) => (f?.name || "").toLowerCase() === target);
+      const v = f?.values?.[0];
+      if (v) return String(v).trim();
+    }
+    return "";
+  };
+
+  // Aliases collected from common Meta lead-form templates + custom fields
+  // we've seen in the wild. Lowercased for case-insensitive match.
+  const NAME_KEYS    = ["full_name", "name", "your_name", "candidate_name", "applicant_name"];
+  const FIRST_KEYS   = ["first_name", "given_name"];
+  const LAST_KEYS    = ["last_name", "family_name", "surname"];
+  const EMAIL_KEYS   = ["email", "email_address", "your_email", "candidate_email"];
+  const PHONE_KEYS   = ["phone_number", "phone", "mobile", "mobile_number", "contact", "contact_number", "whatsapp_number", "your_phone_number"];
+  const COURSE_KEYS  = ["course", "program", "programme", "course_interested_in", "interested_in", "preferred_course", "select_course", "which_course", "course_name"];
+  const CITY_KEYS    = ["city", "town", "your_city", "current_city"];
+  const STATE_KEYS   = ["state", "region", "current_state"];
+  const KNOWN: Set<string> = new Set([
+    ...NAME_KEYS, ...FIRST_KEYS, ...LAST_KEYS, ...EMAIL_KEYS, ...PHONE_KEYS,
+    ...COURSE_KEYS, ...CITY_KEYS, ...STATE_KEYS,
+  ].map(s => s.toLowerCase()));
+
+  // Resolve name (full first, else first+last)
+  const fullName = findField(...NAME_KEYS) ||
+    [findField(...FIRST_KEYS), findField(...LAST_KEYS)].filter(Boolean).join(" ").trim();
+
+  // Build "unmapped" lines for the notes field
+  const unmapped: string[] = [];
+  for (const f of fieldData) {
+    const fname = (f?.name || "").toLowerCase();
+    if (!fname || KNOWN.has(fname)) continue;
+    const val = (f?.values || []).filter(Boolean).join(", ");
+    if (val) {
+      // Prettify the field name (snake_case → Title Case) for the note
+      const label = String(f.name).replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      unmapped.push(`${label}: ${val}`);
+    }
+  }
+
+  const noteParts: string[] = [];
+  if (body.campaign_name) noteParts.push(`Campaign: ${body.campaign_name}`);
+  if (body.adset_name)    noteParts.push(`Adset: ${body.adset_name}`);
+  if (body.ad_name)       noteParts.push(`Ad: ${body.ad_name}`);
+  if (body.form_name)     noteParts.push(`Form: ${body.form_name}`);
+  if (body.platform)      noteParts.push(`Platform: ${String(body.platform).toUpperCase()}`);
+  if (unmapped.length)    noteParts.push(...unmapped);
 
   return {
-    name: getField("full_name") || body.full_name || body.name || "",
-    phone: (getField("phone_number") || body.phone || "").replace(/[\s\-]/g, ""),
-    email: getField("email") || body.email || undefined,
-    source: "meta_ads",
-    course_name: getField("course") || body.course || undefined,
-    notes: body.ad_name ? `Ad: ${body.ad_name}` : undefined,
+    name:        fullName || body.full_name || body.name || "",
+    phone:       (findField(...PHONE_KEYS) || body.phone || "").replace(/[\s\-()]/g, ""),
+    email:       findField(...EMAIL_KEYS) || body.email || undefined,
+    source:      "meta_ads",
+    source_lead_id: body.leadgen_id ? String(body.leadgen_id) : undefined,
+    course_name: findField(...COURSE_KEYS) || body.course || undefined,
+    city:        findField(...CITY_KEYS)   || body.city  || undefined,
+    state:       findField(...STATE_KEYS)  || body.state || undefined,
+    notes:       noteParts.length ? noteParts.join(" | ") : undefined,
+
+    // Attribution — preserved verbatim so reports can join to Meta Ads Insights
+    meta_leadgen_id:    body.leadgen_id     ? String(body.leadgen_id)     : undefined,
+    meta_form_id:       body.form_id        ? String(body.form_id)        : undefined,
+    meta_form_name:     body.form_name      || undefined,
+    meta_ad_id:         body.ad_id          ? String(body.ad_id)          : undefined,
+    meta_ad_name:       body.ad_name        || undefined,
+    meta_adset_id:      body.adset_id       ? String(body.adset_id)       : undefined,
+    meta_adset_name:    body.adset_name     || undefined,
+    meta_campaign_id:   body.campaign_id    ? String(body.campaign_id)    : undefined,
+    meta_campaign_name: body.campaign_name  || undefined,
+    meta_page_id:       body.page_id        ? String(body.page_id)        : undefined,
+    meta_platform:      body.platform       || undefined,
+    raw_form_data:      fieldData.length ? fieldData : undefined,
   };
 }
 
@@ -285,6 +376,28 @@ Deno.serve(async (req) => {
     const skipAiCallSources = ["website_chat"];
     const leadSource = validSources.includes(parsed.source) ? parsed.source : "other";
 
+    // ── Idempotency: same Meta leadgen_id from a webhook retry ─────────
+    // Meta resends the webhook if our endpoint is slow/timed-out; the
+    // unique index on meta_leadgen_id would block the insert anyway, but
+    // surfacing this as a clean "duplicate" response avoids 500s.
+    if (parsed.meta_leadgen_id) {
+      const { data: existingMeta } = await supabase
+        .from("leads")
+        .select("id, name, stage")
+        .eq("meta_leadgen_id", parsed.meta_leadgen_id)
+        .maybeSingle();
+      if (existingMeta) {
+        return new Response(
+          JSON.stringify({
+            status: "duplicate",
+            message: `Lead already ingested from this Meta leadgen_id`,
+            lead_id: existingMeta.id,
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
     // ── Duplicate detection by phone ──
     const { data: existing } = await supabase
       .from("leads")
@@ -410,9 +523,23 @@ Deno.serve(async (req) => {
         state:       parsed.state       || null,
         area:        parsed.area        || null,
         jd_category: parsed.jd_category || null,
-        notes: parsed.notes?.slice(0, 1000) || null,
+        notes: parsed.notes?.slice(0, 4000) || null,
         stage: "new_lead",
         skip_ai_call: skipAiCallSources.includes(leadSource),
+        // Meta Lead Ads attribution (set only when source='meta_ads')
+        meta_leadgen_id:    parsed.meta_leadgen_id    || null,
+        meta_form_id:       parsed.meta_form_id       || null,
+        meta_form_name:     parsed.meta_form_name     || null,
+        meta_ad_id:         parsed.meta_ad_id         || null,
+        meta_ad_name:       parsed.meta_ad_name       || null,
+        meta_adset_id:      parsed.meta_adset_id      || null,
+        meta_adset_name:    parsed.meta_adset_name    || null,
+        meta_campaign_id:   parsed.meta_campaign_id   || null,
+        meta_campaign_name: parsed.meta_campaign_name || null,
+        meta_page_id:       parsed.meta_page_id       || null,
+        meta_platform:      parsed.meta_platform      || null,
+        raw_form_data:      parsed.raw_form_data      || null,
+        fbclid:             body.fbclid               || null,
         ...attribution,
       })
       .select("id, name, phone, source, stage")

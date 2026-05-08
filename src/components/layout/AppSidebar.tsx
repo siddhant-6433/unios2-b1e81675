@@ -32,6 +32,7 @@ type MenuItem = { title: string; url: string; icon: any; permission?: string; an
 
 const mainMenu: MenuItem[] = [
   { title: "Overview", url: "/", icon: LayoutDashboard, permission: "dashboard:view" },
+  { title: "Inbox", url: "/inbox", icon: Inbox, permission: "leads:view" },
   { title: "Search", url: "/search", icon: Search, permission: "search:view" },
   { title: "Students", url: "/students", icon: Users, permission: "students:view" },
   { title: "Attendance", url: "/attendance", icon: ClipboardCheck, permission: "attendance:view" },
@@ -83,6 +84,7 @@ const ibAcademicsSubMenu: MenuItem[] = [
 const hrSubMenu: MenuItem[] = [
   { title: "HR Overview", url: "/hr", icon: Briefcase, permission: "hr:view" },
   { title: "Job Applicants", url: "/hr-job-applicants", icon: UserPlus, permission: "hr:view" },
+  { title: "WhatsApp Inbox", url: "/whatsapp-inbox?scope=hr", icon: MessageSquare, permission: "hr:view" },
   { title: "Attendance", url: "/hr-attendance", icon: Fingerprint, permission: "hr:view" },
   { title: "Leave Mgmt", url: "/hr-leave", icon: CalendarOff, permission: "hr:view" },
   { title: "Directory", url: "/hr-directory", icon: Users, permission: "hr:view" },
@@ -305,8 +307,10 @@ export function AppSidebar() {
     };
   }, [role]);
 
+  const inboxBadge = pendingApprovals + pendingFollowupCount + waUnread;
   const visibleMain = mainMenu.filter(canSee).map(item => {
     if (item.url === "/" && pendingApprovals > 0) return { ...item, badge: pendingApprovals };
+    if (item.url === "/inbox" && inboxBadge > 0) return { ...item, badge: inboxBadge };
     return item;
   });
   const visibleAdmission = admissionSubMenu.filter(canSee).map(item => {
