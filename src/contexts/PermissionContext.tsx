@@ -69,13 +69,13 @@ export const PermissionProvider = ({ children }: { children: ReactNode }) => {
 
   const can = useCallback((module: string, action: string): boolean => {
     if (role === "super_admin" || realRole === "super_admin") return true;
-    if (loading) return true; // Show everything while loading to avoid flash
+    if (loading) return false;
     return permissions.has(`${module}:${action}`);
   }, [permissions, role, realRole, loading]);
 
   const canAny = useCallback((module: string): boolean => {
     if (role === "super_admin" || realRole === "super_admin") return true;
-    if (loading) return true;
+    if (loading) return false;
     for (const p of permissions) {
       if (p.startsWith(`${module}:`)) return true;
     }

@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
 import uniosLogo from "@/assets/unios-logo.png";
 import {
   Loader2, AlertCircle, CheckCircle, CreditCard, ShieldCheck,
-  Receipt, IndianRupee, ArrowRight, Download,
+  ArrowRight, Download,
 } from "lucide-react";
 
 type Step = "verify" | "fees" | "paying" | "receipt";
@@ -26,110 +26,134 @@ interface StudentInfo {
   course_name: string;
   semester: string;
   campus_name: string;
+  parent_phone: string;
 }
 
 export default function PaymentPortal() {
   const [params] = useSearchParams();
   const studentParam = params.get("student");
-  const tokenParam = params.get("token");
+  const tokenParam   = params.get("token");
 
-  const [step, setStep] = useState<Step>("verify");
-  const [phone, setPhone] = useState("");
-  const [otp, setOtp] = useState("");
-  const [otpSent, setOtpSent] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [student, setStudent] = useState<StudentInfo | null>(null);
-  const [fees, setFees] = useState<StudentFee[]>([]);
-  const [receipt, setReceipt] = useState<ReceiptData | null>(null);
+  const [step, setStep]         = useState<Step>("verify");
+  const [phone, setPhone]       = useState("");
+  const [otp, setOtp]           = useState("");
+  const [otpSent, setOtpSent]   = useState(false);
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState<string | null>(null);
+  const [student, setStudent]   = useState<StudentInfo | null>(null);
+  const [fees, setFees]         = useState<StudentFee[]>([]);
+  const [receipt, setReceipt]   = useState<ReceiptData | null>(null);
+  const [paidTxnId, setPaidTxnId] = useState<string | null>(null);
 
-  // If token provided, try direct verification
+  const popupRef = useRef<Window | null>(null);
+  const pollRef  = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Cleanup poll on unmount
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  // Listen for postMessage from Easebuzz popup
   useEffect(() => {
-    if (tokenParam && studentParam) {
-      verifyToken();
-    }
+    const handler = (e: MessageEvent) => {
+      if (e.data?.eb_payment === "success") {
+        stopPolling();
+        checkFeesPaid();
+      }
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, [student?.id]);
+
+  // Direct link via token (skip OTP)
+  useEffect(() => {
+    if (tokenParam && studentParam) verifyToken();
   }, [tokenParam, studentParam]);
+
+  function stopPolling() {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  }
 
   const verifyToken = async () => {
     setLoading(true);
     setError(null);
-    // JWT token verification — fetch student directly
     const { data, error: err } = await supabase
       .from("students")
-      .select("id, name, admission_no, pre_admission_no, semester, campuses:campus_id(name), courses:course_id(name)")
+      .select("id, name, admission_no, pre_admission_no, semester, phone, father_phone, mother_phone, guardian_phone, campuses:campus_id(name), courses:course_id(name)")
       .eq("id", studentParam!)
       .single();
-
-    if (err || !data) {
-      setError("Invalid link. Please contact the institution.");
-      setLoading(false);
-      return;
-    }
-
-    setStudent({
-      id: data.id,
-      name: data.name,
-      admission_no: data.admission_no || data.pre_admission_no || "",
-      course_name: (data as any).courses?.name || "",
-      semester: data.semester || "",
-      campus_name: (data as any).campuses?.name || "",
-    });
-
+    if (err || !data) { setError("Invalid link. Contact the institution."); setLoading(false); return; }
+    setStudent(toInfo(data));
     await fetchFees(data.id);
     setStep("fees");
     setLoading(false);
   };
 
+  function toInfo(data: any): StudentInfo {
+    return {
+      id: data.id,
+      name: data.name,
+      admission_no: data.admission_no || data.pre_admission_no || "",
+      course_name: data.courses?.name || "",
+      semester: data.semester || "",
+      campus_name: data.campuses?.name || "",
+      parent_phone: data.father_phone || data.mother_phone || data.guardian_phone || data.phone || "",
+    };
+  }
+
   const sendOtp = async () => {
-    if (phone.length < 10) {
-      setError("Enter a valid 10-digit phone number");
-      return;
-    }
+    if (phone.length < 10) { setError("Enter a valid 10-digit phone number"); return; }
     setLoading(true);
     setError(null);
 
-    // Find student by parent phone
     const { data: studentData } = await supabase
       .from("students")
-      .select("id, name, admission_no, pre_admission_no, semester, parent_phone, campuses:campus_id(name), courses:course_id(name)")
-      .or(`parent_phone.eq.${phone},parent_phone.eq.+91${phone}`)
+      .select("id, name, admission_no, pre_admission_no, semester, phone, father_phone, mother_phone, guardian_phone, campuses:campus_id(name), courses:course_id(name)")
+      .or([
+        `phone.eq.${phone}`, `phone.eq.+91${phone}`,
+        `father_phone.eq.${phone}`, `father_phone.eq.+91${phone}`,
+        `mother_phone.eq.${phone}`, `mother_phone.eq.+91${phone}`,
+        `guardian_phone.eq.${phone}`, `guardian_phone.eq.+91${phone}`,
+      ].join(","))
       .limit(1)
       .single();
 
     if (!studentData) {
-      setError("No student found for this phone number. Contact the institution.");
+      setError("No student found for this number. Contact the institution.");
       setLoading(false);
       return;
     }
 
-    // In production, send OTP via SMS/WhatsApp edge function
-    // For now, simulate OTP sent
-    setOtpSent(true);
-    setStudent({
-      id: studentData.id,
-      name: studentData.name,
-      admission_no: studentData.admission_no || studentData.pre_admission_no || "",
-      course_name: (studentData as any).courses?.name || "",
-      semester: studentData.semester || "",
-      campus_name: (studentData as any).campuses?.name || "",
+    const { data: otpData, error: otpErr } = await supabase.functions.invoke("whatsapp-otp", {
+      body: { action: "send", phone: `+91${phone}` },
     });
+
+    if (otpErr || otpData?.error) {
+      setError(otpData?.error || otpErr?.message || "Could not send OTP. Try again.");
+      setLoading(false);
+      return;
+    }
+
+    setStudent(toInfo(studentData));
+    setOtpSent(true);
     setLoading(false);
   };
 
   const verifyOtp = async () => {
-    if (otp.length < 4) {
-      setError("Enter the OTP sent to your phone");
-      return;
-    }
+    if (otp.length < 4) { setError("Enter the OTP"); return; }
     setLoading(true);
     setError(null);
 
-    // In production, verify OTP via edge function
-    // For now, accept any 4+ digit OTP
-    if (student) {
-      await fetchFees(student.id);
-      setStep("fees");
+    const { data: otpData, error: otpErr } = await supabase.functions.invoke("whatsapp-otp", {
+      body: { action: "verify", phone: `+91${phone}`, otp },
+    });
+
+    if (otpErr || otpData?.error) {
+      setError(otpData?.error || otpErr?.message || "Invalid or expired OTP.");
+      setLoading(false);
+      return;
     }
+
+    if (student) await fetchFees(student.id);
+    setStep("fees");
     setLoading(false);
   };
 
@@ -141,34 +165,111 @@ export default function PaymentPortal() {
       .in("status", ["due", "overdue"])
       .order("due_date", { ascending: true });
 
-    if (data) {
-      setFees(data.map((f: any) => ({
-        id: f.id,
-        fee_head: f.fee_codes?.name || "Fee",
-        amount: Number(f.total_amount),
-        balance: Number(f.balance || 0),
-        status: f.status,
-        due_date: f.due_date,
-      })));
+    setFees((data || []).map((f: any) => ({
+      id: f.id,
+      fee_head: f.fee_codes?.name || "Fee",
+      amount: Number(f.total_amount),
+      balance: Number(f.balance || 0),
+      status: f.status,
+      due_date: f.due_date,
+    })));
+  };
+
+  const checkFeesPaid = async (): Promise<boolean> => {
+    if (!student) return false;
+    const { data } = await supabase
+      .from("fee_ledger")
+      .select("id")
+      .eq("student_id", student.id)
+      .in("status", ["due", "overdue"]);
+
+    if (!data || data.length === 0) {
+      setStep("receipt");
+      if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
+      return true;
     }
+    return false;
   };
 
   const totalDue = fees.reduce((s, f) => s + f.balance, 0);
 
-  const handlePay = () => {
-    // In production: redirect to Cashfree/Easebuzz payment gateway
-    // Simulate payment success after brief loading
-    setStep("paying");
-    setTimeout(() => {
-      setStep("receipt");
-    }, 2000);
+  const handlePay = async () => {
+    if (!student) return;
+    setError(null);
+    setLoading(true);
+
+    try {
+      const nameParts = student.name.trim().split(" ");
+      const txnid = `FEE${student.id.replace(/[^a-zA-Z0-9]/g, "").slice(0, 10)}${Date.now()}`.slice(0, 50);
+
+      const { data: fnData, error: fnError } = await supabase.functions.invoke("easebuzz-payment", {
+        body: {
+          action: "initiate-fee-payment",
+          student_id: student.id,
+          txnid,
+          amount: totalDue,
+          productinfo: "Fee Payment",
+          firstname: nameParts[0],
+          email: undefined,
+          phone: student.parent_phone || phone || "9999999999",
+        },
+      });
+
+      if (fnError) throw new Error(fnError.message);
+      if (fnData?.error) throw new Error(fnData.error);
+
+      const { pay_url } = fnData;
+      setPaidTxnId(txnid);
+
+      popupRef.current = window.open(
+        pay_url,
+        "easebuzz_fee_payment",
+        "width=680,height=720,scrollbars=yes,resizable=yes"
+      );
+
+      if (!popupRef.current) {
+        throw new Error("Popup was blocked. Please allow popups for this site and try again.");
+      }
+
+      setStep("paying");
+      setLoading(false);
+
+      // Poll every 2s for payment confirmation
+      pollRef.current = setInterval(async () => {
+        if (popupRef.current?.closed) {
+          stopPolling();
+          const alreadyPaid = await checkFeesPaid();
+          if (!alreadyPaid) {
+            // DB not yet updated — ask EaseBuzz server to confirm, then re-check DB
+            const { data: verifyData } = await supabase.functions.invoke("easebuzz-payment", {
+              body: { action: "verify-payment", txnid, application_id: "" },
+            });
+            if (verifyData?.status?.toLowerCase() === "success") {
+              // Server confirmed success — re-check DB to confirm ledger is updated
+              const confirmedPaid = await checkFeesPaid();
+              if (!confirmedPaid) {
+                // Ledger not yet updated (webhook delay) — show success and wait
+                setStep("receipt");
+              }
+            } else {
+              setError("Payment window was closed. If your payment was deducted, it will be confirmed shortly.");
+              setStep("fees");
+            }
+          }
+        } else {
+          await checkFeesPaid();
+        }
+      }, 2000);
+    } catch (err: any) {
+      setError(err.message || "Something went wrong. Please try again.");
+      setLoading(false);
+    }
   };
 
   return (
     <>
       <ReceiptDialog data={receipt} onClose={() => setReceipt(null)} />
       <div className="min-h-screen bg-gray-50 flex flex-col">
-        {/* Header */}
         <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
           <div className="max-w-lg mx-auto px-4 py-3 flex items-center gap-3">
             <img src={uniosLogo} alt="UniOs" className="h-8 w-8 object-contain" />
@@ -177,7 +278,13 @@ export default function PaymentPortal() {
         </header>
 
         <main className="flex-1 max-w-lg mx-auto w-full px-4 py-8 space-y-6">
-          {/* Step 1: OTP Verification */}
+          {loading && (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+            </div>
+          )}
+
+          {/* Step 1: OTP */}
           {step === "verify" && !loading && (
             <div className="space-y-6">
               <div className="text-center">
@@ -204,40 +311,30 @@ export default function PaymentPortal() {
                       <input
                         type="tel" maxLength={10} placeholder="9876543210"
                         value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))}
-                        className="flex-1 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                        onKeyDown={(e) => e.key === "Enter" && sendOtp()}
+                        className="flex-1 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                       />
                     </div>
                   </div>
-                  <button
-                    onClick={sendOtp}
-                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-white hover:bg-primary/90 transition-colors"
-                  >
+                  <button onClick={sendOtp} className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-white hover:bg-primary/90 transition-colors">
                     Send OTP <ArrowRight className="h-4 w-4" />
                   </button>
                 </div>
               ) : (
                 <div className="space-y-4">
                   <p className="text-sm text-gray-600 text-center">
-                    OTP sent to +91 {phone.slice(0, 2)}****{phone.slice(-2)}
+                    OTP sent via WhatsApp to +91 {phone.slice(0, 2)}****{phone.slice(-2)}
                   </p>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Enter OTP</label>
-                    <input
-                      type="tel" maxLength={6} placeholder="Enter OTP"
-                      value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
-                      className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-center text-lg font-mono tracking-[0.3em] text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                    />
-                  </div>
-                  <button
-                    onClick={verifyOtp}
-                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-white hover:bg-primary/90 transition-colors"
-                  >
+                  <input
+                    type="tel" maxLength={6} placeholder="Enter OTP"
+                    value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
+                    onKeyDown={(e) => e.key === "Enter" && verifyOtp()}
+                    className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-center text-lg font-mono tracking-[0.3em] focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  />
+                  <button onClick={verifyOtp} className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-white hover:bg-primary/90 transition-colors">
                     Verify & Continue <ArrowRight className="h-4 w-4" />
                   </button>
-                  <button
-                    onClick={() => { setOtpSent(false); setOtp(""); setError(null); }}
-                    className="w-full text-sm text-gray-500 hover:text-gray-700"
-                  >
+                  <button onClick={() => { setOtpSent(false); setOtp(""); setError(null); }} className="w-full text-sm text-gray-500 hover:text-gray-700">
                     Change phone number
                   </button>
                 </div>
@@ -245,17 +342,16 @@ export default function PaymentPortal() {
             </div>
           )}
 
-          {/* Loading */}
-          {loading && (
-            <div className="flex items-center justify-center py-20">
-              <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
-            </div>
-          )}
-
           {/* Step 2: Fee Summary */}
-          {step === "fees" && student && (
+          {step === "fees" && student && !loading && (
             <div className="space-y-4">
-              {/* Student card */}
+              {error && (
+                <div className="flex items-start gap-3 rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">
+                  <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+                  <span>{error}</span>
+                </div>
+              )}
+
               <div className="rounded-2xl bg-white border border-gray-200 p-5">
                 <div className="flex items-center gap-4">
                   <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-bold shrink-0">
@@ -272,7 +368,6 @@ export default function PaymentPortal() {
                 </div>
               </div>
 
-              {/* Fee items */}
               {fees.length === 0 ? (
                 <div className="rounded-xl bg-white border border-gray-200 p-8 text-center">
                   <CheckCircle className="h-10 w-10 text-green-400 mx-auto mb-3" />
@@ -288,6 +383,7 @@ export default function PaymentPortal() {
                           <p className="text-sm font-medium text-gray-900">{fee.fee_head}</p>
                           <p className="text-xs text-gray-400">
                             Due {new Date(fee.due_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+                            {fee.status === "overdue" && <span className="ml-2 text-red-500 font-medium">Overdue</span>}
                           </p>
                         </div>
                         <p className="text-sm font-semibold text-gray-900">₹{fee.balance.toLocaleString("en-IN")}</p>
@@ -299,27 +395,22 @@ export default function PaymentPortal() {
                     </div>
                   </div>
 
-                  <button
-                    onClick={handlePay}
-                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-semibold text-white hover:bg-primary/90 transition-colors"
-                  >
+                  <button onClick={handlePay} className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-semibold text-white hover:bg-primary/90 transition-colors">
                     <CreditCard className="h-4 w-4" />
                     Pay ₹{totalDue.toLocaleString("en-IN")}
                   </button>
-
-                  <p className="text-[11px] text-gray-400 text-center">
-                    Secure payment powered by Cashfree. Your data is encrypted.
-                  </p>
+                  <p className="text-[11px] text-gray-400 text-center">Secure payment powered by EaseBuzz. Your data is encrypted.</p>
                 </>
               )}
             </div>
           )}
 
-          {/* Step 3: Processing */}
+          {/* Step 3: Waiting for popup */}
           {step === "paying" && (
             <div className="flex flex-col items-center justify-center py-20 space-y-4">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              <p className="text-sm font-medium text-gray-600">Redirecting to payment...</p>
+              <p className="text-sm font-medium text-gray-600">Complete payment in the popup window</p>
+              <p className="text-xs text-gray-400">Do not close this page</p>
             </div>
           )}
 
@@ -331,9 +422,7 @@ export default function PaymentPortal() {
                   <CheckCircle className="h-8 w-8 text-green-600" />
                 </div>
                 <h2 className="text-xl font-bold text-gray-900">Payment Successful!</h2>
-                <p className="text-sm text-gray-500 mt-1">
-                  Receipt #{`NIMT/${new Date().getFullYear()}/${String(Math.floor(Math.random() * 99999)).padStart(5, "0")}`}
-                </p>
+                {paidTxnId && <p className="text-xs text-gray-400 mt-1 font-mono">{paidTxnId}</p>}
               </div>
 
               <div className="rounded-xl bg-white border border-gray-200 p-5 text-left">
@@ -370,11 +459,6 @@ export default function PaymentPortal() {
               >
                 <Download className="h-4 w-4" /> Download Receipt
               </button>
-
-              <div className="rounded-xl bg-blue-50 border border-blue-200 p-4">
-                <p className="text-sm text-blue-800 font-medium">Download the UniOs app</p>
-                <p className="text-xs text-blue-600 mt-1">For future payments, attendance updates, and notifications.</p>
-              </div>
             </div>
           )}
         </main>

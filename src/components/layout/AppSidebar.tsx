@@ -539,6 +539,7 @@ export function AppSidebar() {
 
         {/* Bottom: Settings + Account */}
         <div className="mt-auto">
+          {can("user_management", "view") && (
           <SidebarGroup>
             <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/50 px-4 mb-0.5">
               Settings
@@ -556,6 +557,7 @@ export function AppSidebar() {
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
+          )}
 
           {/* Profile moved to header — only show initials when collapsed */}
           {collapsed && (

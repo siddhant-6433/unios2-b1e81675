@@ -21,6 +21,63 @@ async function hashOtp(otp: string): Promise<string> {
     .join("");
 }
 
+async function createSession(admin: any, userId: string) {
+  const { data: userData } = await admin.auth.admin.getUserById(userId);
+  if (!userData?.user?.email) return null;
+
+  const { data: magicLink, error: magicError } = await admin.auth.admin.generateLink({
+    type: "magiclink",
+    email: userData.user.email,
+  });
+  if (magicError || !magicLink) return null;
+
+  const { data: sessionData, error: verifyError } = await admin.auth.verifyOtp({
+    token_hash: magicLink.properties.hashed_token,
+    type: "magiclink",
+  });
+  if (verifyError || !sessionData?.session) return null;
+
+  return {
+    access_token: sessionData.session.access_token,
+    refresh_token: sessionData.session.refresh_token,
+  };
+}
+
+async function provisionUser(
+  admin: any,
+  phone: string,
+  role: "student" | "parent"
+): Promise<string | null> {
+  const digits = phone.replace(/\D/g, "");
+  const email = `${digits}@${role}.unios.local`;
+
+  let userId: string | null = null;
+
+  const { data: created, error: createErr } = await admin.auth.admin.createUser({
+    email,
+    email_confirm: true,
+    user_metadata: { provisioned_by: "whatsapp_otp", role },
+  });
+
+  if (!createErr && created?.user) {
+    userId = created.user.id;
+    console.log(`[whatsapp-otp] provisioned new ${role} user ${userId} for ${phone}`);
+  } else {
+    // User already exists — find by scanning listUsers (rare path)
+    console.log(`[whatsapp-otp] createUser failed (${createErr?.message}), scanning for existing ${email}`);
+    const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    const match = list?.users?.find((u: any) => u.email === email);
+    if (match) userId = match.id;
+  }
+
+  if (!userId) return null;
+
+  // Assign role (ignore duplicate)
+  await admin.from("user_roles").upsert({ user_id: userId, role }, { onConflict: "user_id,role", ignoreDuplicates: true });
+
+  return userId;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -33,7 +90,6 @@ Deno.serve(async (req) => {
     const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
     const otpTemplateName = Deno.env.get("WHATSAPP_OTP_TEMPLATE") || "unios2_login";
 
-    // Diagnostic logging (no secret values)
     console.log("[whatsapp-otp] Secret diagnostics:", {
       WHATSAPP_API_TOKEN: !!whatsappToken,
       WHATSAPP_PHONE_NUMBER_ID: !!phoneNumberId,
@@ -53,6 +109,7 @@ Deno.serve(async (req) => {
 
     const normalizedPhone = phone?.startsWith("+") ? phone : `+${phone}`;
 
+    // ── Send OTP ──────────────────────────────────────────────────────────────
     if (action === "send") {
       if (!normalizedPhone || normalizedPhone.length < 10) {
         return new Response(
@@ -77,24 +134,16 @@ Deno.serve(async (req) => {
         );
       }
 
-      // Generate & store OTP
       const otpCode = generateOtp();
       const otpHash = await hashOtp(otpCode);
 
-      // Invalidate old OTPs for this phone
-      await adminClient
-        .from("whatsapp_otps")
-        .delete()
-        .eq("phone", normalizedPhone)
-        .eq("verified", false);
-
+      await adminClient.from("whatsapp_otps").delete().eq("phone", normalizedPhone).eq("verified", false);
       await adminClient.from("whatsapp_otps").insert({
         phone: normalizedPhone,
         otp_hash: otpHash,
         expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
       });
 
-      // Send via Meta WhatsApp Cloud API
       const waPhone = normalizedPhone.replace(/[^0-9]/g, "");
       console.log("[whatsapp-otp] Sending to:", waPhone, "template:", otpTemplateName, "phoneNumberId:", phoneNumberId);
 
@@ -134,31 +183,17 @@ Deno.serve(async (req) => {
       console.log("[whatsapp-otp] Meta API response:", waResponse.status, waBody);
 
       if (!waResponse.ok) {
-        console.error("[whatsapp-otp] Meta API error:", waResponse.status, waBody);
-        const waErrorText = waBody;
-
         let parsedWaError: any = null;
-        try {
-          parsedWaError = JSON.parse(waErrorText);
-        } catch {
-          // keep raw
-        }
-
+        try { parsedWaError = JSON.parse(waBody); } catch { /* keep raw */ }
         const waCode = parsedWaError?.error?.code;
         const waMessage = parsedWaError?.error?.message as string | undefined;
         const fbtrace = parsedWaError?.error?.fbtrace_id;
-
         return new Response(
-          JSON.stringify({
-            error: waMessage || "Failed to send WhatsApp message. Try again.",
-            meta_code: waCode,
-            meta_fbtrace: fbtrace,
-          }),
+          JSON.stringify({ error: waMessage || "Failed to send WhatsApp message. Try again.", meta_code: waCode, meta_fbtrace: fbtrace }),
           { status: waResponse.status >= 400 && waResponse.status < 500 ? 403 : 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
-      // Parse success response to get message ID and contact resolution
       let waResult: any = null;
       try { waResult = JSON.parse(waBody); } catch { /* ignore */ }
       const wamid = waResult?.messages?.[0]?.id;
@@ -166,16 +201,12 @@ Deno.serve(async (req) => {
       console.log("[whatsapp-otp] Message sent, wamid:", wamid, "contact:", JSON.stringify(waContact));
 
       return new Response(
-        JSON.stringify({
-          success: true,
-          wamid,
-          wa_id: waContact?.wa_id,        // WhatsApp-resolved number (null if not on WA)
-          input: waContact?.input,         // What we sent
-        }),
+        JSON.stringify({ success: true, wamid, wa_id: waContact?.wa_id, input: waContact?.input }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
+    // ── Verify OTP ────────────────────────────────────────────────────────────
     if (action === "verify") {
       if (!otp || !normalizedPhone) {
         return new Response(
@@ -202,71 +233,115 @@ Deno.serve(async (req) => {
         );
       }
 
-      // Mark as verified
-      await adminClient
-        .from("whatsapp_otps")
-        .update({ verified: true })
-        .eq("id", otpRecord.id);
+      await adminClient.from("whatsapp_otps").update({ verified: true }).eq("id", otpRecord.id);
 
-      // Find user by phone (for staff login flow)
+      // ── 1. Staff login: check profiles ────────────────────────────────────
       const { data: profile } = await adminClient
         .from("profiles")
         .select("user_id")
         .eq("phone", normalizedPhone)
         .single();
 
-      if (!profile) {
-        // No staff profile — this is an applicant OTP verification (no session needed)
-        return new Response(
-          JSON.stringify({ success: true, verified: true }),
-          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+      if (profile?.user_id) {
+        const token = await createSession(adminClient, profile.user_id);
+        if (!token) {
+          return new Response(JSON.stringify({ error: "Failed to create session" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+        console.log("[whatsapp-otp] staff login for user", profile.user_id);
+        return new Response(JSON.stringify({ success: true, verified: true, token }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
-      // Staff login: generate session
-      const { data: userData } = await adminClient.auth.admin.getUserById(profile.user_id);
+      // ── 2. Student login: check students.phone / whatsapp_no ──────────────
+      const { data: studentSelf } = await adminClient
+        .from("students")
+        .select("id, user_id")
+        .or(`phone.eq.${normalizedPhone},whatsapp_no.eq.${normalizedPhone}`)
+        .limit(1)
+        .single();
 
-      if (!userData?.user?.email) {
-        return new Response(
-          JSON.stringify({ error: "User has no email configured" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+      if (studentSelf) {
+        let userId = studentSelf.user_id;
+
+        if (!userId) {
+          userId = await provisionUser(adminClient, normalizedPhone, "student");
+          if (userId) {
+            await adminClient.from("students").update({ user_id: userId }).eq("id", studentSelf.id);
+            console.log("[whatsapp-otp] linked student", studentSelf.id, "→ user", userId);
+          }
+        }
+
+        if (userId) {
+          const token = await createSession(adminClient, userId);
+          if (!token) {
+            return new Response(JSON.stringify({ error: "Failed to create session" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          }
+          console.log("[whatsapp-otp] student login for student", studentSelf.id);
+          return new Response(JSON.stringify({ success: true, verified: true, token, role: "student" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
       }
 
-      const { data: magicLink, error: magicError } =
-        await adminClient.auth.admin.generateLink({
-          type: "magiclink",
-          email: userData.user.email,
-        });
+      // ── 3. Parent login: check father_phone / father_whatsapp ─────────────
+      const { data: studentByFather } = await adminClient
+        .from("students")
+        .select("id, father_user_id")
+        .or(`father_phone.eq.${normalizedPhone},father_whatsapp.eq.${normalizedPhone}`)
+        .limit(1)
+        .single();
 
-      if (magicError || !magicLink) {
-        return new Response(
-          JSON.stringify({ error: "Failed to create session" }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+      if (studentByFather) {
+        let userId = studentByFather.father_user_id;
+
+        if (!userId) {
+          userId = await provisionUser(adminClient, normalizedPhone, "parent");
+          if (userId) {
+            await adminClient.from("students").update({ father_user_id: userId }).eq("id", studentByFather.id);
+            console.log("[whatsapp-otp] linked father for student", studentByFather.id, "→ user", userId);
+          }
+        }
+
+        if (userId) {
+          const token = await createSession(adminClient, userId);
+          if (!token) {
+            return new Response(JSON.stringify({ error: "Failed to create session" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          }
+          console.log("[whatsapp-otp] father/parent login for student", studentByFather.id);
+          return new Response(JSON.stringify({ success: true, verified: true, token, role: "parent" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
       }
 
-      const { data: sessionData, error: verifyError } = await adminClient.auth.verifyOtp({
-        token_hash: magicLink.properties.hashed_token,
-        type: "magiclink",
-      });
+      // ── 4. Parent login: check mother_phone / mother_whatsapp ─────────────
+      const { data: studentByMother } = await adminClient
+        .from("students")
+        .select("id, mother_user_id")
+        .or(`mother_phone.eq.${normalizedPhone},mother_whatsapp.eq.${normalizedPhone}`)
+        .limit(1)
+        .single();
 
-      if (verifyError || !sessionData.session) {
-        return new Response(
-          JSON.stringify({ error: "Failed to create session" }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+      if (studentByMother) {
+        let userId = studentByMother.mother_user_id;
+
+        if (!userId) {
+          userId = await provisionUser(adminClient, normalizedPhone, "parent");
+          if (userId) {
+            await adminClient.from("students").update({ mother_user_id: userId }).eq("id", studentByMother.id);
+            console.log("[whatsapp-otp] linked mother for student", studentByMother.id, "→ user", userId);
+          }
+        }
+
+        if (userId) {
+          const token = await createSession(adminClient, userId);
+          if (!token) {
+            return new Response(JSON.stringify({ error: "Failed to create session" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          }
+          console.log("[whatsapp-otp] mother/parent login for student", studentByMother.id);
+          return new Response(JSON.stringify({ success: true, verified: true, token, role: "parent" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
       }
 
+      // ── 5. Fallback: applicant OTP (no session needed) ────────────────────
+      console.log("[whatsapp-otp] no user found for", normalizedPhone, "— applicant flow");
       return new Response(
-        JSON.stringify({
-          success: true,
-          verified: true,
-          token: {
-            access_token: sessionData.session.access_token,
-            refresh_token: sessionData.session.refresh_token,
-          },
-        }),
+        JSON.stringify({ success: true, verified: true }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }

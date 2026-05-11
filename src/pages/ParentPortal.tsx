@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { PortalLayout } from "@/components/layout/PortalLayout";
@@ -45,6 +46,7 @@ interface AttendanceSummary {
 
 export default function ParentPortal() {
   const { user, profile } = useAuth();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("fees");
   const [student, setStudent] = useState<StudentInfo | null>(null);
   const [fees, setFees] = useState<FeeItem[]>([]);
@@ -63,7 +65,7 @@ export default function ParentPortal() {
     const { data: studentData } = await supabase
       .from("students")
       .select("id, name, admission_no, pre_admission_no, semester, campus_id, batch_id, campuses:campus_id(name), batches:batch_id(name), courses:course_id(name)")
-      .or(`parent_user_id.eq.${user?.id},user_id.eq.${user?.id}`)
+      .or(`user_id.eq.${user?.id},father_user_id.eq.${user?.id},mother_user_id.eq.${user?.id},guardian_user_id.eq.${user?.id}`)
       .limit(1)
       .single();
 
@@ -205,7 +207,10 @@ export default function ParentPortal() {
 
             {/* Pay Now CTA */}
             {totalDue > 0 && (
-              <button className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-semibold text-white hover:bg-primary/90 transition-colors">
+              <button
+                onClick={() => navigate(`/pay?student=${student.id}`)}
+                className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-semibold text-white hover:bg-primary/90 transition-colors"
+              >
                 <CreditCard className="h-4 w-4" />
                 Pay Now — ₹{totalDue.toLocaleString("en-IN")}
               </button>

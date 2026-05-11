@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { PortalLayout } from "@/components/layout/PortalLayout";
@@ -42,6 +43,7 @@ interface AttendanceSummary {
 
 export default function StudentPortal() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("fees");
   const [student, setStudent] = useState<StudentInfo | null>(null);
   const [fees, setFees] = useState<FeeItem[]>([]);
@@ -177,7 +179,10 @@ export default function StudentPortal() {
                 <p className="text-xs text-primary/70">Amount Due</p>
                 <p className="text-xl font-bold text-primary">₹{totalDue.toLocaleString("en-IN")}</p>
               </div>
-              <button className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary/90 transition-colors">
+              <button
+                onClick={() => navigate(`/pay?student=${student.id}`)}
+                className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary/90 transition-colors"
+              >
                 <CreditCard className="h-4 w-4" /> Pay Now
               </button>
             </div>

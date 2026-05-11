@@ -11,15 +11,17 @@ import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 type LoginMethod = "google" | "email_otp" | "whatsapp_otp" | "dev_password";
 
 const Login = () => {
-  const { session, loading } = useAuth();
+  const { session, loading, role, roleLoaded } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
 
   useEffect(() => {
-    if (!loading && session) {
-      navigate("/", { replace: true });
-    }
-  }, [session, loading, navigate]);
+    if (loading || !session || !roleLoaded) return;
+    if (role === "student") navigate("/student", { replace: true });
+    else if (role === "parent") navigate("/parent", { replace: true });
+    else if (role === null) navigate("/my-applications", { replace: true });
+    else navigate("/", { replace: true });
+  }, [session, loading, role, roleLoaded, navigate]);
 
   const [method, setMethod] = useState<LoginMethod>(import.meta.env.DEV ? "dev_password" : "google");
   const [devEmail, setDevEmail] = useState("");

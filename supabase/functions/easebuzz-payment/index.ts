@@ -117,6 +117,46 @@ Deno.serve(async (req) => {
       const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
       const paymentRef = easepayid || txnid || null;
 
+      // udf3="fee_payment" + udf4=student_id → student fee ledger payment
+      if (udf3 === "fee_payment" && udf4 && /^[0-9a-f-]{36}$/i.test(udf4)) {
+        if (isSuccess) {
+          // SECURITY: reject if EaseBuzz hash is invalid (tampered callback)
+          if (!hashValid) {
+            console.error("[easebuzz] fee_payment: hash mismatch — rejecting callback for student", udf4);
+            return returnPage("Payment Error", "Payment verification failed. Please contact support.", false);
+          }
+
+          const paidAmount = parseFloat(amount || "0");
+
+          const { data: ledgerRows } = await admin
+            .from("fee_ledger")
+            .select("id, total_amount, balance")
+            .eq("student_id", udf4)
+            .in("status", ["due", "overdue"]);
+
+          const expectedTotal = (ledgerRows || []).reduce((s: number, r: any) => s + Number(r.balance ?? r.total_amount), 0);
+
+          // SECURITY: reject if paid amount doesn't match outstanding balance (tolerance ₹1)
+          if (Math.abs(paidAmount - expectedTotal) > 1) {
+            console.error("[easebuzz] fee_payment amount mismatch: paid", paidAmount, "expected", expectedTotal, "student", udf4);
+            return returnPage("Payment Error", `Amount mismatch (received ₹${paidAmount}, expected ₹${expectedTotal}). Transaction ID: ${easepayid || txnid}. Please contact support.`, false);
+          }
+
+          for (const row of ledgerRows || []) {
+            await admin
+              .from("fee_ledger")
+              .update({ paid_amount: row.total_amount, balance: 0, status: "paid" })
+              .eq("id", row.id);
+          }
+          console.log("[easebuzz] fee_payment: marked", ledgerRows?.length ?? 0, "entries paid for student", udf4);
+        }
+        return returnPage(
+          isSuccess ? "Payment Successful" : "Payment Failed",
+          isSuccess ? "Your fee payment has been received. You may close this window." : `Payment could not be completed (status: ${status}). Please try again.`,
+          isSuccess,
+        );
+      }
+
       // udf2 carries the pre-created lead_payments.id when this is a lead-side
       // payment (token_fee / application_fee for a lead). Update that row's
       // status — the AFTER trigger will then auto-advance the lead's stage and
@@ -265,6 +305,82 @@ Deno.serve(async (req) => {
           txnid,
           pay_url: `${baseUrl}/pay/${data.data}`,
         }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── Initiate student fee payment ──────────────────────────────────────────
+    if (action === "initiate-fee-payment") {
+      const { student_id, txnid, productinfo, firstname, email, phone } = body;
+      // amount is intentionally NOT taken from the client — computed from DB to prevent underpayment attacks
+
+      if (!student_id || !txnid || !firstname || !phone) {
+        return new Response(
+          JSON.stringify({ error: "Missing required fields (student_id, txnid, firstname, phone)" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Fetch actual outstanding balance from DB — never trust client-supplied amount
+      const adminInit = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+      const { data: dueRows, error: dueErr } = await adminInit
+        .from("fee_ledger")
+        .select("balance")
+        .eq("student_id", student_id)
+        .in("status", ["due", "overdue"]);
+
+      if (dueErr || !dueRows?.length) {
+        return new Response(
+          JSON.stringify({ error: "No outstanding fees found for this student" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const totalDue   = dueRows.reduce((s: number, r: any) => s + Number(r.balance), 0);
+      const amountStr  = totalDue.toFixed(2);
+      const emailStr   = email || "noreply@nimteducation.com";
+      const productStr = productinfo || "Fee Payment";
+      const selfUrl    = `${supabaseUrl}/functions/v1/easebuzz-payment`;
+
+      // udf3=fee_payment, udf4=student_id — surl handler routes on these
+      // Hash: key|txnid|amount|productinfo|firstname|email|udf1..udf10|salt
+      const hashInput = `${merchantKey}|${txnid}|${amountStr}|${productStr}|${firstname}|${emailStr}|||fee_payment|${student_id}|||||||${merchantSalt}`;
+      const hash = await sha512(hashInput);
+
+      const formData = new URLSearchParams({
+        key:         merchantKey,
+        txnid,
+        amount:      amountStr,
+        productinfo: productStr,
+        firstname,
+        email:       emailStr,
+        phone:       phone.replace(/\D/g, "").slice(-10),
+        hash,
+        udf1: "", udf2: "", udf3: "fee_payment", udf4: student_id, udf5: "",
+        surl: selfUrl,
+        furl: selfUrl,
+      });
+
+      const res = await fetch(`${baseUrl}/payment/initiateLink`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: formData.toString(),
+      });
+
+      const data = await res.json();
+
+      if (data.status !== 1) {
+        console.error("[easebuzz] initiate-fee-payment error:", data);
+        return new Response(
+          JSON.stringify({ error: data.error_desc || data.data || "Failed to initiate payment" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      console.log("[easebuzz] initiate-fee-payment: txnid", txnid, "student", student_id, "amount", amountStr);
+
+      return new Response(
+        JSON.stringify({ txnid, pay_url: `${baseUrl}/pay/${data.data}` }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }

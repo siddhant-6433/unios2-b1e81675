@@ -1036,6 +1036,9 @@ const WhatsAppInbox = () => {
                             <p className="text-[10px] text-muted-foreground flex items-center gap-1">
                               {formatPhone(c.phone)}
                               {c.course_name && <span className="px-1 rounded bg-blue-50 text-blue-600 text-[8px] font-medium">{courseAcronym(c.course_name)}</span>}
+                              {c.counsellor_name && !isStaffConv(c) && (
+                                <span className="text-[9px] text-muted-foreground/70">· {c.counsellor_name.split(" ")[0]}</span>
+                              )}
                             </p>
                             <p className={`text-xs truncate mt-0.5 ${c.unread_count > 0 ? "font-medium text-foreground/80" : "text-muted-foreground"}`}>
                               {c.last_direction === "outbound" ? <span className="text-muted-foreground">You: </span> : ""}{(c.last_message || "[media]").replace(/\\n/g, " ")}

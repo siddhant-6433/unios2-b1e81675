@@ -8,7 +8,15 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { CampusProvider } from "@/contexts/CampusContext";
 import { PermissionProvider } from "@/contexts/PermissionContext";
-import { ProtectedRoute, ApplicantRoute } from "@/components/ProtectedRoute";
+import {
+  ProtectedRoute,
+  StaffRoute,
+  StudentRoute,
+  ParentRoute,
+  ApplicantRoute,
+  RequirePermission,
+  RequireRole,
+} from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import Admissions from "./pages/Admissions";
@@ -52,6 +60,7 @@ import Reports from "./pages/Reports";
 import Documents from "./pages/Documents";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+import Forbidden from "./pages/Forbidden";
 import ApplicantPortal from "./pages/ApplicantPortal";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
@@ -140,93 +149,118 @@ const App = () => (
             <Route
               path="/parent"
               element={
-                <ProtectedRoute>
+                <ParentRoute>
                   <ParentPortal />
-                </ProtectedRoute>
+                </ParentRoute>
               }
             />
             <Route
               path="/student"
               element={
-                <ProtectedRoute>
+                <StudentRoute>
                   <StudentPortalPage />
-                </ProtectedRoute>
+                </StudentRoute>
               }
             />
+            <Route path="/forbidden" element={<Forbidden />} />
             <Route
               path="/*"
               element={
-                <ProtectedRoute>
+                <StaffRoute>
                   <PermissionProvider>
                   <CampusProvider>
                   <AppLayout>
                     <Routes>
                       <Route path="/" element={<Dashboard />} />
-                      <Route path="/admissions" element={<Admissions />} />
-                      <Route path="/admissions/:id" element={<LeadDetail />} />
-                      <Route path="/lead-allocation" element={<LeadAllocation />} />
-                      <Route path="/lead-buckets" element={<LeadBuckets />} />
-                      <Route path="/pending-followups" element={<PendingFollowups />} />
-                      <Route path="/fresh-leads" element={<FreshLeads />} />
-                      <Route path="/visit-monitor" element={<VisitMonitor />} />
-                      <Route path="/call-log" element={<CallLog />} />
-                      <Route path="/ai-call-log" element={<AiCallLog />} />
-                      <Route path="/cloud-dialer" element={<CloudDialer />} />
-                      <Route path="/missed-calls" element={<MissedCalls />} />
-                      <Route path="/applications" element={<Applications />} />
-                      <Route path="/applications/:applicationId" element={<AdminApplicationView />} />
-                      <Route path="/referrals" element={<StudentReferrals />} />
-                      <Route path="/search" element={<GlobalSearch />} />
-                      <Route path="/students" element={<Students />} />
-                      <Route path="/students/:admissionNo" element={<StudentProfile />} />
-                      <Route path="/attendance" element={<Attendance />} />
-                      <Route path="/finance" element={<Finance />} />
-                      <Route path="/collections" element={<FeeCollections />} />
-                      <Route path="/hr" element={<HrDashboard />} />
-                      <Route path="/hr-job-applicants" element={<HrJobApplicants />} />
-                      <Route path="/hr-attendance" element={<HrAttendance />} />
-                      <Route path="/hr-leave" element={<HrLeaveManagement />} />
-                      <Route path="/hr-directory" element={<HrEmployeeDirectory />} />
-                      <Route path="/admin" element={<AdminPanel />} />
-                      <Route path="/consultants" element={<Consultants />} />
-                      <Route path="/admission-analytics" element={<AdmissionAnalytics />} />
-                      <Route path="/counsellor-dashboard" element={<CounsellorDashboard />} />
+
+                      {/* Admissions — requires leads:view */}
+                      <Route path="/admissions" element={<RequirePermission module="leads" action="view"><Admissions /></RequirePermission>} />
+                      <Route path="/admissions/:id" element={<RequirePermission module="leads" action="view"><LeadDetail /></RequirePermission>} />
+                      <Route path="/lead-buckets" element={<RequirePermission module="lead_buckets" action="view"><LeadBuckets /></RequirePermission>} />
+                      <Route path="/pending-followups" element={<RequirePermission module="leads" action="view"><PendingFollowups /></RequirePermission>} />
+                      <Route path="/fresh-leads" element={<RequirePermission module="leads" action="view"><FreshLeads /></RequirePermission>} />
+                      <Route path="/visit-monitor" element={<RequirePermission module="leads" action="view"><VisitMonitor /></RequirePermission>} />
+                      <Route path="/call-log" element={<RequirePermission module="call_log" action="view"><CallLog /></RequirePermission>} />
+                      <Route path="/ai-call-log" element={<RequirePermission module="call_log" action="view"><AiCallLog /></RequirePermission>} />
+                      <Route path="/cloud-dialer" element={<RequirePermission module="call_log" action="view"><CloudDialer /></RequirePermission>} />
+                      <Route path="/missed-calls" element={<RequirePermission module="call_log" action="view"><MissedCalls /></RequirePermission>} />
+                      <Route path="/referrals" element={<RequirePermission module="referrals" action="view"><StudentReferrals /></RequirePermission>} />
+
+                      {/* Lead allocation & automation — restricted roles */}
+                      <Route path="/lead-allocation" element={<RequirePermission module="lead_allocation" action="view"><LeadAllocation /></RequirePermission>} />
+                      <Route path="/automation-rules" element={<RequirePermission module="automation" action="view"><AutomationRules /></RequirePermission>} />
+
+                      {/* Applications */}
+                      <Route path="/applications" element={<RequirePermission module="students" action="view"><Applications /></RequirePermission>} />
+                      <Route path="/applications/:applicationId" element={<RequirePermission module="students" action="view"><AdminApplicationView /></RequirePermission>} />
+
+                      {/* Students */}
+                      <Route path="/search" element={<RequirePermission module="search" action="view"><GlobalSearch /></RequirePermission>} />
+                      <Route path="/students" element={<RequirePermission module="students" action="view"><Students /></RequirePermission>} />
+                      <Route path="/students/:admissionNo" element={<RequirePermission module="students" action="view"><StudentProfile /></RequirePermission>} />
+                      <Route path="/attendance" element={<RequirePermission module="attendance" action="view"><Attendance /></RequirePermission>} />
+
+                      {/* Finance — accountant / admin only */}
+                      <Route path="/finance" element={<RequirePermission module="finance" action="view"><Finance /></RequirePermission>} />
+                      <Route path="/collections" element={<RequirePermission module="finance" action="view"><FeeCollections /></RequirePermission>} />
+                      <Route path="/fee-structures" element={<RequirePermission module="courses_fees" action="view"><FeeStructures /></RequirePermission>} />
+
+                      {/* HR — campus_admin / principal / office_admin only */}
+                      <Route path="/hr" element={<RequirePermission module="hr" action="view"><HrDashboard /></RequirePermission>} />
+                      <Route path="/hr-job-applicants" element={<RequirePermission module="hr" action="view"><HrJobApplicants /></RequirePermission>} />
+                      <Route path="/hr-attendance" element={<RequirePermission module="hr" action="view"><HrAttendance /></RequirePermission>} />
+                      <Route path="/hr-leave" element={<RequirePermission module="hr" action="view"><HrLeaveManagement /></RequirePermission>} />
+                      <Route path="/hr-directory" element={<RequirePermission module="hr" action="view"><HrEmployeeDirectory /></RequirePermission>} />
+
+                      {/* Admin — user_management:view */}
+                      <Route path="/admin" element={<RequirePermission module="user_management" action="view"><AdminPanel /></RequirePermission>} />
+                      <Route path="/settings" element={<RequirePermission module="user_management" action="view"><Settings /></RequirePermission>} />
+
+                      {/* Comms */}
                       <Route path="/inbox" element={<Inbox />} />
-                      <Route path="/whatsapp-inbox" element={<WhatsAppInbox />} />
-                      <Route path="/automation-rules" element={<AutomationRules />} />
-                      <Route path="/consultant-portal" element={<ConsultantPortal />} />
-                      <Route path="/publisher-portal" element={<PublisherPortal />} />
-                      <Route path="/publisher-analytics" element={<PublisherAnalytics />} />
-                      <Route path="/consultant-guide" element={<ConsultantGuide />} />
-                      <Route path="/template-manager" element={<TemplateManager />} />
-                      <Route path="/fee-structures" element={<FeeStructures />} />
-                      <Route path="/exams" element={<Exams />} />
-                      <Route path="/reports" element={<Reports />} />
-                      <Route path="/documents" element={<Documents />} />
-                      <Route path="/settings" element={<Settings />} />
+                      <Route path="/whatsapp-inbox" element={<RequirePermission module="whatsapp" action="view"><WhatsAppInbox /></RequirePermission>} />
+                      <Route path="/template-manager" element={<RequirePermission module="templates" action="view"><TemplateManager /></RequirePermission>} />
+
+                      {/* Analytics & reporting */}
+                      <Route path="/admission-analytics" element={<RequirePermission module="analytics" action="view"><AdmissionAnalytics /></RequirePermission>} />
+                      <Route path="/counsellor-dashboard" element={<RequirePermission module="performance" action="view"><CounsellorDashboard /></RequirePermission>} />
+                      <Route path="/reports" element={<RequirePermission module="reports" action="view"><Reports /></RequirePermission>} />
+
+                      {/* Portals */}
+                      <Route path="/consultants" element={<RequirePermission module="consultants" action="view"><Consultants /></RequirePermission>} />
+                      <Route path="/consultant-portal" element={<RequirePermission module="consultant_portal" action="view"><ConsultantPortal /></RequirePermission>} />
+                      <Route path="/consultant-guide" element={<RequirePermission module="consultant_portal" action="view"><ConsultantGuide /></RequirePermission>} />
+                      <Route path="/publisher-portal" element={<RequirePermission module="publisher_portal" action="view"><PublisherPortal /></RequirePermission>} />
+                      <Route path="/publisher-analytics" element={<RequirePermission module="publisher_portal" action="view"><PublisherAnalytics /></RequirePermission>} />
+
+                      {/* Misc */}
+                      <Route path="/exams" element={<RequirePermission module="exams" action="view"><Exams /></RequirePermission>} />
+                      <Route path="/documents" element={<RequirePermission module="documents" action="view"><Documents /></RequirePermission>} />
                       <Route path="/alumni-verifications" element={<AlumniVerifications />} />
-                      {/* IB Academics routes */}
-                      <Route path="/ib/poi" element={<ProgrammeOfInquiry />} />
-                      <Route path="/ib/units" element={<UnitPlanner />} />
-                      <Route path="/ib/units/:id" element={<UnitDetail />} />
-                      <Route path="/ib/gradebook" element={<Gradebook />} />
-                      <Route path="/ib/assessments/:id" element={<AssessmentDetail />} />
-                      <Route path="/ib/portfolios" element={<Portfolios />} />
-                      <Route path="/ib/portfolios/:studentId" element={<StudentPortfolio />} />
-                      <Route path="/ib/action" element={<ActionService />} />
-                      <Route path="/ib/exhibition" element={<Exhibition />} />
-                      <Route path="/ib/reports" element={<ReportCards />} />
-                      <Route path="/ib/reports/templates" element={<ReportTemplates />} />
-                      <Route path="/ib/reports/:studentId/:term" element={<ReportCardView />} />
-                      <Route path="/ib/projects" element={<MYPProjects />} />
-                      <Route path="/ib/projects/:id" element={<ProjectDetail />} />
-                      <Route path="/ib/idu" element={<InterdisciplinaryUnits />} />
+
+                      {/* IB Academics — gated per-module */}
+                      <Route path="/ib/poi" element={<RequirePermission module="ib_poi" action="view"><ProgrammeOfInquiry /></RequirePermission>} />
+                      <Route path="/ib/units" element={<RequirePermission module="ib_units" action="view"><UnitPlanner /></RequirePermission>} />
+                      <Route path="/ib/units/:id" element={<RequirePermission module="ib_units" action="view"><UnitDetail /></RequirePermission>} />
+                      <Route path="/ib/gradebook" element={<RequirePermission module="ib_gradebook" action="view"><Gradebook /></RequirePermission>} />
+                      <Route path="/ib/assessments/:id" element={<RequirePermission module="ib_gradebook" action="view"><AssessmentDetail /></RequirePermission>} />
+                      <Route path="/ib/portfolios" element={<RequirePermission module="ib_portfolios" action="view"><Portfolios /></RequirePermission>} />
+                      <Route path="/ib/portfolios/:studentId" element={<RequirePermission module="ib_portfolios" action="view"><StudentPortfolio /></RequirePermission>} />
+                      <Route path="/ib/action" element={<RequirePermission module="ib_action" action="view"><ActionService /></RequirePermission>} />
+                      <Route path="/ib/exhibition" element={<RequirePermission module="ib_exhibition" action="view"><Exhibition /></RequirePermission>} />
+                      <Route path="/ib/reports" element={<RequirePermission module="ib_reports" action="view"><ReportCards /></RequirePermission>} />
+                      <Route path="/ib/reports/templates" element={<RequirePermission module="ib_reports" action="view"><ReportTemplates /></RequirePermission>} />
+                      <Route path="/ib/reports/:studentId/:term" element={<RequirePermission module="ib_reports" action="view"><ReportCardView /></RequirePermission>} />
+                      <Route path="/ib/projects" element={<RequirePermission module="ib_projects" action="view"><MYPProjects /></RequirePermission>} />
+                      <Route path="/ib/projects/:id" element={<RequirePermission module="ib_projects" action="view"><ProjectDetail /></RequirePermission>} />
+                      <Route path="/ib/idu" element={<RequirePermission module="ib_idu" action="view"><InterdisciplinaryUnits /></RequirePermission>} />
+
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </AppLayout>
                   </CampusProvider>
                   </PermissionProvider>
-                </ProtectedRoute>
+                </StaffRoute>
               }
             />
           </Routes>
