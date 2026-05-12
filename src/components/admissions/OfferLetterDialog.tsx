@@ -51,6 +51,19 @@ interface OfferWaiver {
   created_at: string;
 }
 
+interface OfferLetterEditRequest {
+  id: string;
+  offer_letter_id: string;
+  requested_by_name: string | null;
+  requested_by_role: string | null;
+  proposed_changes: { acceptance_deadline?: string };
+  reason: string | null;
+  status: "pending" | "approved" | "rejected";
+  reviewed_at: string | null;
+  rejection_reason: string | null;
+  created_at: string;
+}
+
 export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, courseId, campusId, onSuccess }: OfferLetterDialogProps) {
   const { user, role } = useAuth();
   const { toast } = useToast();
@@ -91,6 +104,12 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   const [showPreWaiverForm, setShowPreWaiverForm] = useState(false);
   const [preWaiverForm, setPreWaiverForm] = useState<{ term: string; amount: string; reason: string }>({ term: "year_1", amount: "", reason: "" });
   const [deletingOfferId, setDeletingOfferId] = useState<string | null>(null);
+  // Edit requests
+  const [editRequestsByOffer, setEditRequestsByOffer] = useState<Record<string, OfferLetterEditRequest[]>>({});
+  const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ acceptance_deadline: "", reason: "" });
+  const [editSaving, setEditSaving] = useState(false);
+  const [editDecidingId, setEditDecidingId] = useState<string | null>(null);
   // Which offer's PDF is showing in the right-hand preview pane.
   const [selectedOfferId, setSelectedOfferId] = useState<string | null>(null);
   // Tracks an in-flight generate-offer-letter call so the preview pane can
@@ -129,6 +148,23 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
         setWaiversByOffer(grouped);
       } else {
         setWaiversByOffer({});
+      }
+
+      // Fetch pending edit requests for all offers
+      if (offerIds.length > 0) {
+        const { data: editRows } = await supabase
+          .from("offer_letter_edit_requests" as any)
+          .select("id, offer_letter_id, requested_by_name, requested_by_role, proposed_changes, reason, status, reviewed_at, rejection_reason, created_at")
+          .in("offer_letter_id", offerIds)
+          .eq("status", "pending")
+          .order("created_at", { ascending: false });
+        const grouped: Record<string, OfferLetterEditRequest[]> = {};
+        for (const r of (editRows || []) as OfferLetterEditRequest[]) {
+          (grouped[r.offer_letter_id] ||= []).push(r);
+        }
+        setEditRequestsByOffer(grouped);
+      } else {
+        setEditRequestsByOffer({});
       }
     }
     setLoading(false);
@@ -535,6 +571,80 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       toast({ title: "Couldn't delete offer", description: e.message, variant: "destructive" });
     } finally {
       setDeletingOfferId(null);
+    }
+  };
+
+  const handleSubmitEditRequest = async (offerId: string) => {
+    if (!editForm.acceptance_deadline) {
+      toast({ title: "Enter a new acceptance deadline", variant: "destructive" });
+      return;
+    }
+    setEditSaving(true);
+    try {
+      if (isSuperAdmin) {
+        // Super admin edits directly — no approval needed
+        const { error } = await supabase
+          .from("offer_letters")
+          .update({ acceptance_deadline: editForm.acceptance_deadline })
+          .eq("id", offerId);
+        if (error) throw error;
+        toast({ title: "Offer letter updated" });
+        setEditingOfferId(null);
+        setEditForm({ acceptance_deadline: "", reason: "" });
+        await fetchOffers();
+        await regeneratePdf(offerId);
+      } else {
+        // Non-super-admin: create edit request for approval
+        const { error } = await supabase
+          .from("offer_letter_edit_requests" as any)
+          .insert({
+            offer_letter_id: offerId,
+            proposed_changes: { acceptance_deadline: editForm.acceptance_deadline },
+            reason: editForm.reason || null,
+          });
+        if (error) throw error;
+        toast({
+          title: "Edit request submitted",
+          description: "Super admin will be notified to review and approve.",
+        });
+        setEditingOfferId(null);
+        setEditForm({ acceptance_deadline: "", reason: "" });
+        await fetchOffers();
+      }
+    } catch (e: any) {
+      toast({ title: "Failed to submit", description: e.message, variant: "destructive" });
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleDecideEditRequest = async (req: OfferLetterEditRequest, decision: "approved" | "rejected") => {
+    if (!isSuperAdmin) return;
+    let rejectionReason: string | undefined;
+    if (decision === "rejected") {
+      const r = window.prompt("Reason for rejection (optional):");
+      rejectionReason = r || undefined;
+    }
+    setEditDecidingId(req.id);
+    try {
+      const updates: any = {
+        status: decision,
+        reviewed_by: user?.id,
+        reviewed_at: new Date().toISOString(),
+      };
+      if (rejectionReason) updates.rejection_reason = rejectionReason;
+      const { error } = await supabase
+        .from("offer_letter_edit_requests" as any)
+        .update(updates)
+        .eq("id", req.id);
+      if (error) throw error;
+      toast({ title: decision === "approved" ? "Edit approved" : "Edit rejected" });
+      await fetchOffers();
+      if (decision === "approved") regeneratePdf(req.offer_letter_id).catch(() => {});
+    } catch (e: any) {
+      toast({ title: "Action failed", description: e.message, variant: "destructive" });
+    } finally {
+      setEditDecidingId(null);
     }
   };
 
@@ -1078,6 +1188,126 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                           </Button>
                         </div>
                       )}
+
+                      {/* ── Edit offer letter ── */}
+                      {isApprovedOffer && (() => {
+                        const editReqs = editRequestsByOffer[offer.id] || [];
+                        const hasPendingEdit = editReqs.length > 0;
+                        const isEditing = editingOfferId === offer.id;
+                        return (
+                          <div className="mt-3 pt-3 border-t border-border/40 space-y-2" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-between">
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Edit Offer</p>
+                              {!isEditing && !hasPendingEdit && (
+                                <button
+                                  onClick={() => {
+                                    setEditingOfferId(offer.id);
+                                    setEditForm({
+                                      acceptance_deadline: offer.acceptance_deadline?.slice(0, 10) || "",
+                                      reason: "",
+                                    });
+                                  }}
+                                  className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+                                >
+                                  <Pencil className="h-3 w-3" /> Edit
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Pending edit requests — super admin sees approve/reject */}
+                            {editReqs.map((req) => (
+                              <div key={req.id} className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/20 p-2 text-xs space-y-1.5">
+                                <div className="flex items-start justify-between gap-2 flex-wrap">
+                                  <div className="space-y-0.5">
+                                    <p className="font-semibold text-amber-800 dark:text-amber-200">
+                                      Edit requested by {req.requested_by_name || "staff"}
+                                      {req.requested_by_role && <span className="font-normal"> ({req.requested_by_role})</span>}
+                                    </p>
+                                    {req.proposed_changes.acceptance_deadline && (
+                                      <p className="text-amber-700 dark:text-amber-300">
+                                        New deadline: {new Date(req.proposed_changes.acceptance_deadline).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                                      </p>
+                                    )}
+                                    {req.reason && <p className="text-amber-600 dark:text-amber-400">Reason: {req.reason}</p>}
+                                  </div>
+                                  {isSuperAdmin && (
+                                    <div className="flex gap-1 shrink-0">
+                                      <button
+                                        disabled={editDecidingId === req.id}
+                                        onClick={() => handleDecideEditRequest(req, "approved")}
+                                        className="rounded bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-0.5 text-[10px] font-semibold disabled:opacity-50"
+                                      >
+                                        {editDecidingId === req.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Approve"}
+                                      </button>
+                                      <button
+                                        disabled={editDecidingId === req.id}
+                                        onClick={() => handleDecideEditRequest(req, "rejected")}
+                                        className="rounded border border-destructive/30 text-destructive hover:bg-destructive/10 px-2 py-0.5 text-[10px] font-semibold disabled:opacity-50"
+                                      >
+                                        Reject
+                                      </button>
+                                    </div>
+                                  )}
+                                  {!isSuperAdmin && (
+                                    <span className="text-[10px] text-amber-600 dark:text-amber-400 italic">Awaiting super admin</span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+
+                            {/* Inline edit form */}
+                            {isEditing && (
+                              <div className="rounded-md border border-primary/30 bg-primary/5 p-2 space-y-2">
+                                <div>
+                                  <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">
+                                    New Acceptance Deadline
+                                  </label>
+                                  <input
+                                    type="date"
+                                    value={editForm.acceptance_deadline}
+                                    min={new Date().toISOString().slice(0, 10)}
+                                    onChange={(e) => setEditForm((p) => ({ ...p, acceptance_deadline: e.target.value }))}
+                                    className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+                                  />
+                                </div>
+                                {!isSuperAdmin && (
+                                  <div>
+                                    <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">
+                                      Reason <span className="text-muted-foreground/60">(optional)</span>
+                                    </label>
+                                    <input
+                                      value={editForm.reason}
+                                      onChange={(e) => setEditForm((p) => ({ ...p, reason: e.target.value }))}
+                                      className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+                                      placeholder="Why is this change needed?"
+                                    />
+                                  </div>
+                                )}
+                                {!isSuperAdmin && (
+                                  <p className="text-[10px] text-amber-700 dark:text-amber-400">
+                                    This change requires super admin approval before it takes effect.
+                                  </p>
+                                )}
+                                <div className="flex gap-2">
+                                  <Button
+                                    size="sm" className="text-xs h-7" disabled={editSaving}
+                                    onClick={() => handleSubmitEditRequest(offer.id)}
+                                  >
+                                    {editSaving && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
+                                    {isSuperAdmin ? "Update" : "Request Edit"}
+                                  </Button>
+                                  <Button
+                                    size="sm" variant="outline" className="text-xs h-7"
+                                    onClick={() => { setEditingOfferId(null); setEditForm({ acceptance_deadline: "", reason: "" }); }}
+                                  >
+                                    Cancel
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {/* Mark as accepted/rejected by student (only for approved offers in "issued" state).
                           Admins record the candidate's response here when the candidate has
