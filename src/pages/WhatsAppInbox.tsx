@@ -768,7 +768,11 @@ const WhatsAppInbox = () => {
     // Search
     if (search) {
       const q = search.toLowerCase();
-      return getDisplayName(c).toLowerCase().includes(q) || c.phone.includes(q);
+      return (
+        getDisplayName(c).toLowerCase().includes(q) ||
+        c.phone.includes(q) ||
+        (c.counsellor_name?.toLowerCase().includes(q) ?? false)
+      );
     }
     return true;
   }).sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime());
@@ -1083,8 +1087,16 @@ const WhatsAppInbox = () => {
                     <User className="h-4 w-4 text-primary" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-foreground truncate">{selectedConv?.lead_name || (selectedPhone ? formatPhone(selectedPhone) : "")}</p>
-                    <p className="text-[10px] text-muted-foreground flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="text-sm font-semibold text-foreground truncate">{selectedConv?.lead_name || (selectedPhone ? formatPhone(selectedPhone) : "")}</p>
+                      {selectedConv?.counsellor_name && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 dark:bg-violet-900/30 border border-violet-200 dark:border-violet-700 px-2 py-0.5 text-[10px] font-medium text-violet-700 dark:text-violet-300 whitespace-nowrap">
+                          <User className="h-2.5 w-2.5" />
+                          {selectedConv.counsellor_name}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground flex items-center gap-1.5 mt-0.5">
                       {selectedPhone ? formatPhone(selectedPhone) : ""}
                       {selectedConv?.course_name && (
                         <span
@@ -1096,9 +1108,12 @@ const WhatsAppInbox = () => {
                     </p>
                   </div>
                   {selectedConv?.lead_id && (
-                    <Button variant="ghost" size="sm" className="gap-1 text-xs" onClick={() => navigate(`/admissions/${selectedConv.lead_id}`)}>
+                    <button
+                      onClick={() => navigate(`/admissions/${selectedConv.lead_id}`)}
+                      className="flex items-center gap-1 rounded-lg border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 transition-colors whitespace-nowrap"
+                    >
                       View Lead <ExternalLink className="h-3 w-3" />
-                    </Button>
+                    </button>
                   )}
                   {selectedConv?.lead_id && selectedConv?.lead_stage !== "dnc" && (
                     <Button
