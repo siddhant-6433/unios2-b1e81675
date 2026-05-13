@@ -291,9 +291,6 @@ Deno.serve(async (req) => {
     }
 
     // ── Insert lead ───────────────────────────────────────────────────────
-      (() => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let s = ""; for (let i = 0; i < 6; i++) s += c[Math.floor(Math.random() * c.length)]; return s; })()
-    }`;
-
     const { data: lead, error } = await supabase
       .from("leads")
       .insert({
@@ -310,7 +307,6 @@ Deno.serve(async (req) => {
         jd_contract_id: contractId || null,
         notes:          notesParts.join(" | ").slice(0, 1000) || null,
         stage:          "new_lead",
-        },
       })
       .select("id, name, phone, source, stage")
       .single();
