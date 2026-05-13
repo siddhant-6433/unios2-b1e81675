@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X, KeyRound, Trash2, UserCheck, Lock, LockOpen
+  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X, KeyRound, Trash2, UserCheck, Lock, LockOpen, ArrowRightLeft
 } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -27,6 +27,7 @@ import ApprovalLettersPanel from "@/components/admin/ApprovalLettersPanel";
 import { BrandingPanel } from "@/components/admin/BrandingPanel";
 import CampusGeofencePanel from "@/components/admin/CampusGeofencePanel";
 import FaceApprovalPanel from "@/components/admin/FaceApprovalPanel";
+import { TransferAccountDialog } from "@/components/admin/TransferAccountDialog";
 import type { Database } from "@/integrations/supabase/types";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
@@ -51,6 +52,7 @@ const ALL_ROLES: { value: AppRole; label: string }[] = [
 
 interface UserWithRole {
   user_id: string;
+  profile_id: string;
   display_name: string | null;
   email: string | null;
   phone: string | null;
@@ -98,6 +100,7 @@ const AdminPanel = () => {
   const [deleting, setDeleting] = useState(false);
   const [disableTarget, setDisableTarget] = useState<{ userId: string; name: string; nextDisabled: boolean } | null>(null);
   const [togglingLogin, setTogglingLogin] = useState(false);
+  const [transferTarget, setTransferTarget] = useState<{ profileId: string; userId: string; name: string } | null>(null);
   const [linkingPubId, setLinkingPubId] = useState<string | null>(null);
   const [linkUserId, setLinkUserId] = useState<string>("");
   const [linking, setLinking] = useState(false);
@@ -109,7 +112,7 @@ const AdminPanel = () => {
     try {
       const { data: profiles, error: profileError } = await supabase
         .from("profiles")
-        .select("user_id, display_name, email, phone, campus, updated_at, login_disabled")
+        .select("id, user_id, display_name, email, phone, campus, updated_at, login_disabled")
         .order("created_at", { ascending: false });
 
       if (profileError) {
@@ -134,6 +137,7 @@ const AdminPanel = () => {
         const userRole = (roles || []).find((r) => r.user_id === p.user_id);
         return {
           user_id: p.user_id,
+          profile_id: p.id,
           display_name: p.display_name,
           email: p.email || null,
           phone: p.phone,
@@ -792,6 +796,13 @@ const AdminPanel = () => {
                                         : <Lock className="h-3.5 w-3.5" />}
                                     </button>
                                   )}
+                                  {isSuperAdmin && user.role !== "super_admin" && user.user_id !== authUser?.id && (
+                                    <button onClick={() => setTransferTarget({ profileId: user.profile_id, userId: user.user_id, name: user.display_name || "Unnamed" })}
+                                      className="rounded-lg bg-violet-500/10 p-1.5 text-violet-700 dark:text-violet-400 hover:bg-violet-500/20 transition-colors"
+                                      title="Transfer account data">
+                                      <ArrowRightLeft className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
                                   {isSuperAdmin && user.role !== "super_admin" && (
                                     <button onClick={() => setDeleteTarget({ userId: user.user_id, name: user.display_name || "Unnamed" })}
                                       className="rounded-lg bg-destructive/10 p-1.5 text-destructive hover:bg-destructive/20 transition-colors"
@@ -825,6 +836,7 @@ const AdminPanel = () => {
             <EditPhoneDialog open={!!phoneEdit} onClose={() => setPhoneEdit(null)} onSuccess={() => fetchUsers()}
               userId={phoneEdit?.userId || ""} userName={phoneEdit?.name || ""} currentPhone={phoneEdit?.phone || null} />
             <EmployeeProfileDialog open={!!employeeProfile} onClose={() => setEmployeeProfile(null)}
+              onSuccess={() => fetchUsers()}
               userId={employeeProfile?.userId || ""} userName={employeeProfile?.name || ""} />
             <SetPasswordDialog open={!!setPasswordTarget} onClose={() => setSetPasswordTarget(null)}
               userId={setPasswordTarget?.userId || ""} userName={setPasswordTarget?.name || ""} />
@@ -880,6 +892,18 @@ const AdminPanel = () => {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
+
+            <TransferAccountDialog
+              source={transferTarget}
+              allUsers={users.filter((u) => u.role && !["super_admin", "student", "parent"].includes(u.role)).map((u) => ({
+                profile_id: u.profile_id,
+                user_id: u.user_id,
+                name: u.display_name || "Unnamed",
+                role: u.role,
+              }))}
+              onClose={() => setTransferTarget(null)}
+              onDone={() => { setTransferTarget(null); fetchUsers(); }}
+            />
           </div>
         </TabsContent>
 
