@@ -36,22 +36,23 @@ export function CloudDialerNudge() {
     // Skip the nudge if they're already using cloud dialer recently.
     (async () => {
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
-      const counsellorId = profile?.id;
-      if (!counsellorId) { setHidden(false); return; }
+      if (!user?.id) { setHidden(false); return; }
 
+      // call_logs links to the calling staff via user_id (auth uid), not
+      // counsellor_id (profile.id). Cloud-dialer calls have a non-null
+      // cloud_call_uuid; manual logged calls leave it null.
       const { count } = await supabase
-        .from("call_logs" as any)
+        .from("call_logs")
         .select("id", { count: "exact", head: true })
-        .eq("counsellor_id", counsellorId)
-        .eq("source", "cloud_dialer")
+        .eq("user_id", user.id)
+        .not("cloud_call_uuid", "is", null)
         .gte("created_at", sevenDaysAgo);
 
-      // Heads-up: the call_logs table / source column may not exist on every
-      // deployment. If the query errors out, count is null — fall back to
+      // If the query errors out for any reason, count is null — fall back to
       // showing the nudge (safer to over-nudge than miss it).
       setHidden((count ?? 0) > 0);
     })();
-  }, [role, user?.id, profile?.id, dismissKey]);
+  }, [role, user?.id, dismissKey]);
 
   if (role !== "counsellor" || hidden) return null;
 
