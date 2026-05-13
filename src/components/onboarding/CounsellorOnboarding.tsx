@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import {
   Users, MessageSquare, Phone, Calendar, MapPin, Clock, FileText,
@@ -220,8 +220,8 @@ export function CounsellorOnboarding() {
               <Icon className="h-5 w-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-foreground">{current.title}</h2>
-              <p className="text-[11px] text-muted-foreground">{current.subtitle}</p>
+              <DialogTitle className="text-base font-bold text-foreground">{current.title}</DialogTitle>
+              <DialogDescription className="text-[11px] text-muted-foreground">{current.subtitle}</DialogDescription>
             </div>
           </div>
 
