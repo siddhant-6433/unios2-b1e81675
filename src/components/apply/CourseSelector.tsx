@@ -374,8 +374,9 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
               </optgroup>
             ))}
           </select>
-          <Button onClick={addCourse} disabled={!addingCourse} size="icon" variant="outline">
+          <Button onClick={addCourse} disabled={!addingCourse} variant="outline" className="shrink-0 gap-1.5">
             <Plus className="h-4 w-4" />
+            Add Course
           </Button>
         </div>
       </div>

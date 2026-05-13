@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 interface EmployeeProfileDialogProps {
   open: boolean;
   onClose: () => void;
+  onSuccess?: () => void;
   userId: string;
   userName: string;
 }
@@ -56,7 +57,7 @@ const emptyProfile: EmployeeProfile = {
   pan_number: "", aadhaar_number: "", education: [], experience: [], professional_summary: "",
 };
 
-const EmployeeProfileDialog = ({ open, onClose, userId, userName }: EmployeeProfileDialogProps) => {
+const EmployeeProfileDialog = ({ open, onClose, onSuccess, userId, userName }: EmployeeProfileDialogProps) => {
   const [profile, setProfile] = useState<EmployeeProfile>(emptyProfile);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -186,17 +187,19 @@ const EmployeeProfileDialog = ({ open, onClose, userId, userName }: EmployeeProf
         if (error) throw error;
       }
 
-      // Also sync mobile_number → profiles.phone (used for OTP login and admin panel display)
-      if (profile.mobile_number) {
-        const normalizedPhone = profile.mobile_number.startsWith("+")
-          ? profile.mobile_number
-          : `+${profile.mobile_number.replace(/\D/g, "")}`;
-        const profileUpdate: Record<string, string> = { phone: normalizedPhone };
-        if (profile.display_name) profileUpdate.display_name = profile.display_name;
-        await supabase.from("profiles").upsert({ user_id: userId, ...profileUpdate }, { onConflict: "user_id" });
-      }
+      // Sync back to profiles via SECURITY DEFINER RPC (bypasses RLS on profiles table)
+      const normalizedPhone = profile.mobile_number
+        ? (profile.mobile_number.startsWith("+") ? profile.mobile_number : `+${profile.mobile_number.replace(/\D/g, "")}`)
+        : null;
+      await supabase.rpc("admin_update_profile", {
+        p_user_id:     userId,
+        p_display_name: profile.display_name || null,
+        p_email:       profile.work_email || null,
+        p_phone:       normalizedPhone,
+      });
 
       toast({ title: "Saved", description: "Employee profile updated successfully." });
+      onSuccess?.();
     } catch (err: any) {
       toast({ title: "Error", description: err.message, variant: "destructive" });
     } finally {
