@@ -39,16 +39,19 @@ export function CloudDialerNudge() {
       const counsellorId = profile?.id;
       if (!counsellorId) { setHidden(false); return; }
 
+      // call_logs.user_id is the auth user id (not the counsellor profile id),
+      // so we filter by user_id, not counsellor_id. The source column is
+      // populated by the record_cloud_call_log RPC for new calls from the
+      // 20260610020000 migration onward — older rows have NULL source and
+      // won't match this filter (correctly: we don't know what channel they
+      // used).
       const { count } = await supabase
         .from("call_logs" as any)
         .select("id", { count: "exact", head: true })
-        .eq("counsellor_id", counsellorId)
+        .eq("user_id", user.id)
         .eq("source", "cloud_dialer")
-        .gte("created_at", sevenDaysAgo);
+        .gte("called_at", sevenDaysAgo);
 
-      // Heads-up: the call_logs table / source column may not exist on every
-      // deployment. If the query errors out, count is null — fall back to
-      // showing the nudge (safer to over-nudge than miss it).
       setHidden((count ?? 0) > 0);
     })();
   }, [role, user?.id, profile?.id, dismissKey]);

@@ -240,6 +240,7 @@ const LeadDetail = () => {
       p_notes:         data.notes || `${label} (logged from lead page)`,
       p_source:        "manual",
       p_recording_url: null,
+      p_call_source:   "manual_log",
     });
 
     // 1b. Mark any pending follow-ups on this lead as completed — the call has been made

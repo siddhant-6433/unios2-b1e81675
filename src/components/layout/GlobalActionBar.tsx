@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
-import { AlertTriangle, Clock, MapPin, Phone, CalendarCheck, Sparkles, Inbox, PhoneMissed } from "lucide-react";
+import { AlertTriangle, Clock, MapPin, Phone, CalendarCheck, Sparkles, Inbox, PhoneMissed, Flame, MessageCircle, Timer } from "lucide-react";
 
 interface ActionItem {
   key: string;
@@ -117,10 +117,36 @@ export function GlobalActionBar() {
             if (effectiveProfileId) q = q.eq("leads.counsellor_id", effectiveProfileId);
             return q;
           })(),
+          // Hot leads: AI-elevated priority_interested. Counsellor-scoped only —
+          // the team-wide count is too noisy for the action bar.
+          (() => {
+            if (!effectiveProfileId) return Promise.resolve({ count: 0 });
+            return supabase.from("leads").select("id", { count: "exact", head: true })
+              .eq("stage", "priority_interested" as any)
+              .eq("counsellor_id", effectiveProfileId);
+          })(),
+          // WhatsApp unread: sum of unread_count from the conversations view.
+          // Counsellor-scoped only; admins have a dedicated inbox.
+          (() => {
+            if (!effectiveProfileId) return Promise.resolve({ data: [] });
+            return (supabase.from("whatsapp_conversations" as any) as any)
+              .select("unread_count")
+              .eq("counsellor_id", effectiveProfileId);
+          })(),
+          // Reclaim soon: leads that the SLA cron will unassign in <=30 min if
+          // no contact is made. Counsellor-scoped; uses RPC for the per-source
+          // SLA window math (see fn_count_leads_reclaim_soon).
+          (() => {
+            if (!effectiveProfileId) return Promise.resolve({ data: 0 });
+            return (supabase as any).rpc("fn_count_leads_reclaim_soon", {
+              p_counsellor_id: effectiveProfileId,
+              p_within_min: 30,
+            });
+          })(),
         ];
 
         const settled = await Promise.allSettled(queries);
-        const labels = ["overdue","today","fresh","unassigned","unclosed","confirm","post_visit","missed"];
+        const labels = ["overdue","today","fresh","unassigned","unclosed","confirm","post_visit","missed","hot","wa_unread","reclaim_soon"];
         const pick = (i: number) => {
           const r = settled[i];
           if (r.status === "fulfilled") {
@@ -142,20 +168,43 @@ export function GlobalActionBar() {
         const confirmRes   = pick(5);
         const postVisitRes = pick(6);
         const missedRes    = pick(7);
+        const hotRes       = pick(8);
+        const waRes        = pick(9);
+        const reclaimRes   = pick(10);
 
         const result: ActionItem[] = [];
 
         const c = (r: any) => r?.count || 0;
+        // WhatsApp returns rows of { unread_count }, not a count head.
+        const waUnread = Array.isArray(waRes?.data)
+          ? (waRes.data as { unread_count: number | null }[]).reduce((s, r) => s + (r.unread_count || 0), 0)
+          : 0;
+        // RPC returns the integer directly in .data, not .count.
+        const reclaimSoon = typeof reclaimRes?.data === "number" ? reclaimRes.data : 0;
 
         if (c(missedRes) > 0) result.push({
           key: "missed", label: "Missed Callbacks", count: c(missedRes),
           icon: PhoneMissed, color: "text-white bg-red-600 border-red-700 animate-pulse",
           url: "/missed-calls",
         });
+        // Reclaim Soon — highest urgency after missed callbacks. Pulses so the
+        // counsellor can't miss it. Clicks straight to the dialer where the
+        // leads at risk are already in the queue with their own per-row badge.
+        if (reclaimSoon > 0) result.push({
+          key: "reclaim_soon", label: "Reclaim in <30m", count: reclaimSoon,
+          icon: Timer, color: "text-white bg-red-600 border-red-700 animate-pulse",
+          url: "/cloud-dialer",
+        });
         if (c(unassignedRes) > 0) result.push({
           key: "unassigned", label: "Unassigned", count: c(unassignedRes),
           icon: Inbox, color: "text-white bg-orange-500 border-orange-600 animate-pulse",
           url: "/lead-buckets",
+        });
+        // Hot Leads — AI-elevated priority_interested. Counsellor-scoped.
+        if (c(hotRes) > 0) result.push({
+          key: "hot", label: "Hot Leads", count: c(hotRes),
+          icon: Flame, color: "text-violet-700 bg-violet-50 border-violet-200",
+          url: "/cloud-dialer",
         });
         if (c(overdueRes) > 0) result.push({
           key: "overdue", label: "Overdue Follow-ups", count: c(overdueRes),
@@ -186,6 +235,14 @@ export function GlobalActionBar() {
           key: "confirm", label: "Visit Confirmations", count: c(confirmRes),
           icon: CalendarCheck, color: "text-purple-600 bg-purple-50 border-purple-200",
           url: "/pending-followups?tab=visit_confirm",
+        });
+        // WhatsApp unread — last in the strip since it's a softer signal than
+        // the others (a message can wait a few hours; a missed call or
+        // reclaim-risk can't).
+        if (waUnread > 0) result.push({
+          key: "wa_unread", label: "WhatsApp Unread", count: waUnread,
+          icon: MessageCircle, color: "text-emerald-700 bg-emerald-50 border-emerald-200",
+          url: "/whatsapp-inbox",
         });
 
         setItems(result);

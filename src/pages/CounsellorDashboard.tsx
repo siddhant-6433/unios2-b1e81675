@@ -325,11 +325,15 @@ const CounsellorDashboard = () => {
   const [stats, setStats] = useState<CounsellorStats[]>([]);
   const [overdue, setOverdue] = useState<OverdueFollowup[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"leaderboard" | "overdue" | "tat-defaults" | "breakdown" | "activity" | "calling">("leaderboard");
+  const [tab, setTab] = useState<"leaderboard" | "overdue" | "tat-defaults" | "breakdown" | "activity" | "calling" | "funnel">("leaderboard");
   const [activityData, setActivityData] = useState<any[]>([]);
   const [activityLoading, setActivityLoading] = useState(false);
   const [callingData, setCallingData] = useState<any[]>([]);
   const [callingLoading, setCallingLoading] = useState(false);
+  // Funnel: rows from counsellor_funnel_stats — one row per (counsellor, stage, week).
+  const [funnelRows, setFunnelRows] = useState<{ counsellor_id: string; counsellor_name: string; stage: string; week_start: string; leads_reached: number }[]>([]);
+  const [funnelLoading, setFunnelLoading] = useState(false);
+  const [funnelRange, setFunnelRange] = useState<"7d" | "30d" | "all">("30d");
   const [callingDatePreset, setCallingDatePreset] = useState<DatePreset>("today");
   const [activityDatePreset, setActivityDatePreset] = useState<DatePreset>("today");
   const [tatDefaults, setTatDefaults] = useState<any[]>([]);
@@ -724,6 +728,19 @@ const CounsellorDashboard = () => {
     setCallingLoading(false);
   }, []);
 
+  const fetchFunnel = useCallback(async (range: "7d" | "30d" | "all") => {
+    setFunnelLoading(true);
+    let q = (supabase.from("counsellor_funnel_stats" as any) as any).select("counsellor_id, counsellor_name, stage, week_start, leads_reached");
+    if (range !== "all") {
+      const days = range === "7d" ? 7 : 30;
+      const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      q = q.gte("week_start", since);
+    }
+    const { data } = await q;
+    setFunnelRows((data || []) as any);
+    setFunnelLoading(false);
+  }, []);
+
   // Auto-fetch activity when tab switches to it
   useEffect(() => {
     if (tab === "activity" && activityData.length === 0 && !activityLoading) {
@@ -731,6 +748,9 @@ const CounsellorDashboard = () => {
     }
     if (tab === "calling" && callingData.length === 0 && !callingLoading) {
       fetchCalling(callingDatePreset);
+    }
+    if (tab === "funnel" && funnelRows.length === 0 && !funnelLoading) {
+      fetchFunnel(funnelRange);
     }
   }, [tab]);
 
@@ -838,10 +858,37 @@ const CounsellorDashboard = () => {
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
   const [leaderboardPeriod, setLeaderboardPeriod] = useState<"weekly" | "monthly" | "all">("all");
 
+  // Cloud Dialer adoption % per counsellor, aggregated over the last 30 days.
+  // Visibility only — no enforcement yet. NULL pct means no attributed calls
+  // (cloud_dialer + manual_log combined are zero); shown as "—".
+  const [dialerUsage, setDialerUsage] = useState<Record<string, number | null>>({});
+
   useEffect(() => {
     (async () => {
       const { data } = await supabase.rpc("get_counsellor_leaderboard" as any);
       if (data) setLeaderboard(data);
+    })();
+    (async () => {
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const { data } = await (supabase.from("counsellor_dialer_usage" as any) as any)
+        .select("counsellor_id, cloud_dialer_calls, manual_log_calls")
+        .gte("week_start", since);
+      if (!data) return;
+      // Re-aggregate weekly rows into a single per-counsellor pct so the
+      // leaderboard cell shows one number, not a per-week breakdown.
+      const agg: Record<string, { cd: number; ml: number }> = {};
+      for (const r of data as { counsellor_id: string; cloud_dialer_calls: number; manual_log_calls: number }[]) {
+        const a = agg[r.counsellor_id] || { cd: 0, ml: 0 };
+        a.cd += r.cloud_dialer_calls;
+        a.ml += r.manual_log_calls;
+        agg[r.counsellor_id] = a;
+      }
+      const pct: Record<string, number | null> = {};
+      for (const [id, v] of Object.entries(agg)) {
+        const total = v.cd + v.ml;
+        pct[id] = total > 0 ? Math.round((v.cd / total) * 100) : null;
+      }
+      setDialerUsage(pct);
     })();
   }, []);
 
@@ -883,10 +930,11 @@ const CounsellorDashboard = () => {
           daily_score: lb.daily_score || 0,
           positive_actions: lb.positive_actions || 0,
           negative_actions: lb.negative_actions || 0,
+          dialer_usage_pct: dialerUsage[lb.counsellor_id] ?? null,
         };
       })
       .sort((a, b) => b.score - a.score);
-  }, [stats, leaderboard, leaderboardPeriod]);
+  }, [stats, leaderboard, leaderboardPeriod, dialerUsage]);
 
   const breakdownTotals = useMemo(() => breakdownData.reduce((acc, b) => ({
     total: acc.total + b.total,
@@ -1023,6 +1071,12 @@ const CounsellorDashboard = () => {
           >
             Lead Calling
           </button>
+          <button
+            onClick={() => setTab("funnel")}
+            className={`rounded-lg px-4 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${tab === "funnel" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            Funnel
+          </button>
         </div>
       </div>
 
@@ -1059,6 +1113,12 @@ const CounsellorDashboard = () => {
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Counsellor</th>
                     <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Leads</th>
                     <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Calls</th>
+                    <th
+                      className="px-3 py-3 text-center text-[10px] font-semibold text-cyan-700 uppercase tracking-wide"
+                      title="Share of attributable calls (cloud_dialer + manual_log) over the last 30 days that used the Cloud Dialer. Visibility only — not yet enforced."
+                    >
+                      Dialer %
+                    </th>
                     <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Conversions</th>
                     <th className="px-4 py-3 text-center text-xs font-semibold text-violet-600 uppercase tracking-wide">Apps</th>
                     <th className="px-4 py-3 text-center text-[10px] font-semibold text-orange-600 uppercase tracking-wide" title="New leads not contacted within SLA">New Due</th>
@@ -1087,6 +1147,17 @@ const CounsellorDashboard = () => {
                       </td>
                       <td className="px-4 py-3 text-center text-muted-foreground">{s.leads_assigned}</td>
                       <td className="px-4 py-3 text-center font-medium text-foreground">{s.total_calls}</td>
+                      <td className="px-3 py-3 text-center">
+                        {s.dialer_usage_pct === null || s.dialer_usage_pct === undefined ? (
+                          <span className="text-[10px] text-muted-foreground/60">—</span>
+                        ) : (
+                          <span className={`inline-flex h-5 min-w-[34px] items-center justify-center rounded-full px-1.5 text-[10px] font-bold ${
+                            s.dialer_usage_pct >= 70 ? "bg-emerald-100 text-emerald-700" :
+                            s.dialer_usage_pct >= 50 ? "bg-amber-100 text-amber-700" :
+                            "bg-red-100 text-red-700"
+                          }`}>{s.dialer_usage_pct}%</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-center">
                         <span className="font-bold text-primary">{s.conversions}</span>
                       </td>
@@ -1138,7 +1209,7 @@ const CounsellorDashboard = () => {
                     );
                   })}
                   {ranked.length === 0 && (
-                    <tr><td colSpan={14} className="px-4 py-8 text-center text-sm text-muted-foreground">No counsellor data available</td></tr>
+                    <tr><td colSpan={15} className="px-4 py-8 text-center text-sm text-muted-foreground">No counsellor data available</td></tr>
                   )}
                 </tbody>
               </table>
@@ -1962,7 +2033,196 @@ const CounsellorDashboard = () => {
             </CardContent>
           </Card>
         </div>
+      ) : tab === "funnel" ? (
+        <FunnelTab
+          rows={funnelRows}
+          loading={funnelLoading}
+          range={funnelRange}
+          onRangeChange={(r) => { setFunnelRange(r); fetchFunnel(r); }}
+        />
       ) : null}
+    </div>
+  );
+};
+
+// Stage ordering used to compute adjacent-stage conversion. Terminal forks
+// (rejected / not_interested / dnc / deferred / ineligible) are intentionally
+// excluded — they're outcomes, not progressions.
+const FUNNEL_STAGES = [
+  "new_lead",
+  "ai_called",
+  "counsellor_call",
+  "application_in_progress",
+  "visit_scheduled",
+  "interview",
+  "offer_sent",
+  "token_paid",
+  "pre_admitted",
+  "admitted",
+] as const;
+
+const STAGE_LABEL: Record<string, string> = {
+  new_lead: "New Lead",
+  ai_called: "AI Called",
+  counsellor_call: "Counsellor Call",
+  application_in_progress: "App In Progress",
+  visit_scheduled: "Visit Scheduled",
+  interview: "Interview",
+  offer_sent: "Offer Sent",
+  token_paid: "Token Paid",
+  pre_admitted: "Pre-Admitted",
+  admitted: "Admitted",
+};
+
+interface FunnelRow {
+  counsellor_id: string;
+  counsellor_name: string;
+  stage: string;
+  week_start: string;
+  leads_reached: number;
+}
+
+const FunnelTab = ({
+  rows,
+  loading,
+  range,
+  onRangeChange,
+}: {
+  rows: FunnelRow[];
+  loading: boolean;
+  range: "7d" | "30d" | "all";
+  onRangeChange: (r: "7d" | "30d" | "all") => void;
+}) => {
+  // Aggregate team-wide counts per stage across the date range.
+  const teamTotals: Record<string, number> = {};
+  for (const r of rows) {
+    teamTotals[r.stage] = (teamTotals[r.stage] || 0) + r.leads_reached;
+  }
+  const teamMax = Math.max(1, ...FUNNEL_STAGES.map(s => teamTotals[s] || 0));
+
+  // Aggregate per-counsellor counts across the date range.
+  const perCounsellor = new Map<string, { name: string; counts: Record<string, number> }>();
+  for (const r of rows) {
+    const existing = perCounsellor.get(r.counsellor_id) || { name: r.counsellor_name, counts: {} };
+    existing.counts[r.stage] = (existing.counts[r.stage] || 0) + r.leads_reached;
+    perCounsellor.set(r.counsellor_id, existing);
+  }
+  const counsellors = Array.from(perCounsellor.entries()).sort(
+    (a, b) => (b[1].counts["admitted"] || 0) - (a[1].counts["admitted"] || 0),
+  );
+
+  const conv = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) : null);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <div className="flex rounded-lg border border-input bg-card p-0.5">
+          {([
+            { key: "7d", label: "Last 7 days" },
+            { key: "30d", label: "Last 30 days" },
+            { key: "all", label: "All time" },
+          ] as const).map(p => (
+            <button
+              key={p.key}
+              onClick={() => onRangeChange(p.key)}
+              className={`rounded-md px-3 py-1 text-[11px] font-medium transition-colors whitespace-nowrap ${
+                range === p.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+      </div>
+
+      <Card className="rounded-2xl">
+        <CardHeader>
+          <CardTitle className="text-sm">Team funnel — where leads drop off</CardTitle>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            Counts distinct leads pushed into each stage by any counsellor in the selected window.
+            % below each bar is the conversion to the next stage — the smallest % is your biggest leak.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2.5">
+            {FUNNEL_STAGES.map((stage, idx) => {
+              const count = teamTotals[stage] || 0;
+              const nextStage = FUNNEL_STAGES[idx + 1];
+              const nextCount = nextStage ? teamTotals[nextStage] || 0 : null;
+              const dropTo = nextStage ? conv(nextCount as number, count) : null;
+              const width = (count / teamMax) * 100;
+              const isLeak = dropTo !== null && dropTo < 30 && count > 0;
+              return (
+                <div key={stage}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-32 shrink-0 text-xs text-muted-foreground">{STAGE_LABEL[stage]}</div>
+                    <div className="flex-1 relative h-7 rounded-md bg-muted/40 overflow-hidden">
+                      <div
+                        className={`absolute inset-y-0 left-0 ${idx === FUNNEL_STAGES.length - 1 ? "bg-emerald-500/80" : "bg-primary/70"} transition-all`}
+                        style={{ width: `${width}%` }}
+                      />
+                      <span className="relative z-10 flex items-center h-full px-2.5 text-xs font-semibold text-foreground">
+                        {count}
+                      </span>
+                    </div>
+                    {nextStage && (
+                      <div className={`w-20 text-right text-xs tabular-nums ${isLeak ? "text-red-600 font-semibold" : "text-muted-foreground"}`}>
+                        {dropTo !== null ? `${dropTo}% →` : "—"}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {rows.length === 0 && !loading && (
+            <p className="text-xs text-muted-foreground text-center py-8">
+              No stage transitions logged in this window. Stage changes are recorded as counsellors move leads forward.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {counsellors.length > 0 && (
+        <Card className="rounded-2xl">
+          <CardHeader>
+            <CardTitle className="text-sm">Per-counsellor — leads reached at each stage</CardTitle>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Rows ordered by admissions. Compare counts horizontally to see whose pipeline is healthy at the late stages even if their admissions count looks low.
+            </p>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/40">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium text-muted-foreground sticky left-0 bg-muted/40">Counsellor</th>
+                    {FUNNEL_STAGES.map(s => (
+                      <th key={s} className="px-2 py-2 text-center font-medium text-muted-foreground">{STAGE_LABEL[s]}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {counsellors.map(([id, c]) => (
+                    <tr key={id} className="border-t border-border/40">
+                      <td className="px-3 py-2 text-foreground font-medium sticky left-0 bg-background">{c.name}</td>
+                      {FUNNEL_STAGES.map(s => {
+                        const n = c.counts[s] || 0;
+                        return (
+                          <td key={s} className={`px-2 py-2 text-center tabular-nums ${n === 0 ? "text-muted-foreground/40" : "text-foreground"}`}>
+                            {n || "—"}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 };
