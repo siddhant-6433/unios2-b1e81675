@@ -23,82 +23,35 @@ Deno.serve(async (req) => {
     let assigned = 0;
     let retries = 0;
 
-    // ── Phase 1: Round-robin assign leads with 3+ failed calls (via SQL) ──
-    const assignSql = `
-      WITH team_members AS (
-        SELECT p.id as profile_id, ROW_NUMBER() OVER (ORDER BY p.id) as rn
-        FROM teams t JOIN team_members tm ON tm.team_id = t.id JOIN profiles p ON p.user_id = tm.user_id
-        WHERE t.name = 'Grn Counselling'
-      ),
-      leads_to_assign AS (
-        SELECT l.id as lead_id, ROW_NUMBER() OVER (ORDER BY l.created_at) as rn
-        FROM get_leads_for_counsellor_assignment() a
-        JOIN leads l ON l.id = a.lead_id
-        LIMIT 50
-      ),
-      updated AS (
-        UPDATE leads SET counsellor_id = tm.profile_id, assigned_at = now()
-        FROM leads_to_assign la
-        JOIN team_members tm ON ((la.rn - 1) % (SELECT count(*) FROM team_members)) + 1 = tm.rn
-        WHERE leads.id = la.lead_id AND leads.counsellor_id IS NULL
-        RETURNING leads.id
-      ),
-      followups AS (
-        INSERT INTO lead_followups (lead_id, scheduled_at, type, notes, status)
-        SELECT id, now() + interval '30 minutes', 'call',
-          '🤖 AI Call: Max 3 attempts failed — counsellor follow-up required', 'pending'
-        FROM updated
-        RETURNING lead_id
-      )
-      SELECT count(*) as assigned_count FROM updated;
-    `;
+    // ── Phase 1: Round-robin assign leads with 3+ failed calls ──
+    // Each lead is routed via fn_round_robin_assign_counsellor, which picks
+    // the right team (Mirai / NSAE II / BEd / Law / Mgmt / Grn Counselling)
+    // from the lead's campus + course department. Hardcoding Grn Counselling
+    // here previously dumped Law/Mgmt/School leads onto the wrong counsellors.
+    const { data: remaining } = await db.rpc("get_leads_for_counsellor_assignment" as any);
+    const candidates = ((remaining || []) as any[]).slice(0, 50);
 
-    const assignRes = await fetch(`${supabaseUrl}/rest/v1/rpc/exec_sql`, {
-      method: "POST", headers: { "Content-Type": "application/json", apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
-      body: JSON.stringify({ sql: assignSql }),
-    });
+    for (const c of candidates) {
+      const lid = c.lead_id;
+      const { data: pickedId, error: rrErr } = await db.rpc(
+        "fn_round_robin_assign_counsellor" as any,
+        { _lead_id: lid },
+      );
+      if (rrErr || !pickedId) continue;
 
-    // Fallback: use direct query if exec_sql doesn't exist
-    if (!assignRes.ok) {
-      // Run via the query endpoint
-      const { data: remaining } = await db.rpc("get_leads_for_counsellor_assignment" as any);
-      const candidates = (remaining || []) as any[];
-
-      if (candidates.length > 0) {
-        // Get Grn Counselling team members
-        const { data: teams } = await db.from("teams").select("id").eq("name", "Grn Counselling").limit(1);
-        if (teams?.length) {
-          const { data: members } = await db.from("team_members").select("user_id").eq("team_id", teams[0].id);
-          const uids = (members || []).map((m: any) => m.user_id);
-          const { data: profs } = await db.from("profiles").select("id").in("user_id", uids);
-          const profileIds = (profs || []).map((p: any) => p.id);
-
-          if (profileIds.length > 0) {
-            for (let i = 0; i < Math.min(candidates.length, 50); i++) {
-              const pick = profileIds[i % profileIds.length];
-              const lid = candidates[i].lead_id;
-              const { error } = await db.from("leads")
-                .update({ counsellor_id: pick, assigned_at: new Date().toISOString() } as any)
-                .eq("id", lid);
-              if (!error) {
-                await db.from("lead_followups").insert({
-                  lead_id: lid, type: "call", status: "pending",
-                  scheduled_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
-                  notes: "🤖 AI Call: Max 3 attempts failed — counsellor follow-up required",
-                });
-                await db.from("lead_activities").insert({
-                  lead_id: lid, type: "assignment",
-                  description: "Lead auto-assigned after 3 failed AI calls",
-                });
-                assigned++;
-              }
-            }
-          }
-        }
-      }
-    } else {
-      const result = await assignRes.json().catch(() => null);
-      assigned = result?.[0]?.assigned_count || result?.assigned_count || 0;
+      await db.from("leads")
+        .update({ assigned_at: new Date().toISOString() } as any)
+        .eq("id", lid);
+      await db.from("lead_followups").insert({
+        lead_id: lid, type: "call", status: "pending",
+        scheduled_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+        notes: "🤖 AI Call: Max 3 attempts failed — counsellor follow-up required",
+      });
+      await db.from("lead_activities").insert({
+        lead_id: lid, type: "assignment",
+        description: "Lead auto-assigned after 3 failed AI calls",
+      });
+      assigned++;
     }
 
     // ── Phase 2: Queue retries for leads with < 3 attempts ──
