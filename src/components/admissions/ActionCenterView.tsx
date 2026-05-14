@@ -181,6 +181,7 @@ export function ActionCenterView({
       p_notes:         dispositionData.notes || `${dispositionData.disposition.replace(/_/g, " ")} (logged from action center)`,
       p_source:        "manual",
       p_recording_url: null,
+      p_call_source:   "manual_log",
     });
 
     // Mark pending followups as completed

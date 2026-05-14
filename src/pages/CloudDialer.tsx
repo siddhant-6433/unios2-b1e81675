@@ -30,6 +30,15 @@ interface QueueLead {
   bucket: string; // bucket label in smart queue
   attempt_count: number;
   course_fee?: string;
+  // Type of follow-up that placed this lead in the queue: call (default), whatsapp, email, visit.
+  // Drives quick-action button next to the call bar for non-call follow-ups.
+  followup_type?: "call" | "whatsapp" | "email" | "visit";
+  followup_id?: string;
+  // SLA fields — used to compute "will reclaim soon" badges. assigned_at +
+  // source_sla_hours is when the cron will unassign this lead if first_contact_at
+  // is still null.
+  assigned_at?: string | null;
+  first_contact_at?: string | null;
 }
 
 interface CallState {
@@ -193,6 +202,10 @@ export default function CloudDialer() {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [loading, setLoading] = useState(true);
   const [queueSource, setQueueSource] = useState<"smart" | "followups" | "fresh" | "all">("smart");
+  // Source → first_contact_hours map for the SLA reclaim warning.
+  // Loaded once at mount; falls back to 24h for unknown sources (matches the
+  // server-side default in fn_reclaim_overdue_leads).
+  const [slaWindowHours, setSlaWindowHours] = useState<Record<string, number>>({});
 
   // Dialer state
   const [dialerActive, setDialerActive] = useState(false);
@@ -225,6 +238,19 @@ export default function CloudDialer() {
 
   const currentLead = queue[currentIdx] || null;
 
+  // Returns minutes until this lead is auto-reclaimed by the SLA cron, or null
+  // if the lead isn't reclaim-eligible (already contacted, not in an early
+  // stage, or not currently assigned). Used to render warning badges in the
+  // queue so counsellors can prioritize before the lead vanishes back into
+  // the bucket.
+  const minutesToReclaim = (lead: QueueLead): number | null => {
+    if (!lead.assigned_at || lead.first_contact_at) return null;
+    if (lead.stage !== "new_lead" && lead.stage !== "ai_called") return null;
+    const windowH = slaWindowHours[lead.source] ?? 24;
+    const reclaimAt = new Date(lead.assigned_at).getTime() + windowH * 60 * 60 * 1000;
+    return Math.round((reclaimAt - Date.now()) / 60_000);
+  };
+
   // ── Load queue ────────────────────────────────────────────────────────────
 
   // Counsellor scope (NULL for admin views — RPC then returns org-wide queue)
@@ -250,7 +276,7 @@ export default function CloudDialer() {
       setLoading(smartLoading);
       return;
     }
-    const mapped: QueueLead[] = (smartPayload.queue || []).map(r => ({
+    const mapped: QueueLead[] = (smartPayload.queue || []).map((r: any) => ({
       id: r.id,
       name: r.name || "Unknown",
       phone: r.phone || "",
@@ -264,10 +290,18 @@ export default function CloudDialer() {
       course_fee: r.course_fee_per_year
         ? `₹${Number(r.course_fee_per_year).toLocaleString("en-IN")}/year`
         : undefined,
+      // Phase 1 + 2 fields. The RPC populates these from migration
+      // 20260610160000 (cloud_dialer_queue_extras) onward; before that
+      // they're undefined and the dependent badges/callouts simply don't
+      // render — safe degradation.
+      assigned_at: r.assigned_at ?? null,
+      first_contact_at: r.first_contact_at ?? null,
+      followup_id: r.followup_id ?? undefined,
+      followup_type: (r.followup_type as QueueLead["followup_type"]) ?? undefined,
     })).filter(l => l.phone);
 
     const buckets: {key:string; label:string; color:string; count:number}[] = [];
-    (smartPayload.buckets || []).forEach(b => {
+    (smartPayload.buckets || []).forEach((b: any) => {
       const meta = BUCKET_META[b.label];
       if (meta && b.count > 0) {
         buckets.push({ key: meta.key, label: meta.uiLabel, color: meta.color, count: b.count });
@@ -325,6 +359,20 @@ export default function CloudDialer() {
     setCurrentIdx(0);
     setLoading(false);
   }, [queueSource, counsellorId]);
+
+  // ── Load source SLA windows once for reclaim warnings ─────────────────────
+  useEffect(() => {
+    (async () => {
+      const { data } = await (supabase.from("source_sla_config" as any) as any)
+        .select("source, first_contact_hours");
+      if (!data) return;
+      const map: Record<string, number> = {};
+      (data as { source: string; first_contact_hours: number }[]).forEach(r => {
+        map[r.source] = r.first_contact_hours;
+      });
+      setSlaWindowHours(map);
+    })();
+  }, []);
 
   useEffect(() => {
     if (!isSmartQueue) loadNonSmartQueue();
@@ -586,6 +634,7 @@ export default function CloudDialer() {
         p_notes:         `Cloud Dialer: ${disposition.replace("_", " ")}`,
         p_source:        "manual",
         p_recording_url: null,
+        p_call_source:   "cloud_dialer",
       });
     } else {
       await (supabase as any).rpc("record_cloud_call_log", {
@@ -597,6 +646,7 @@ export default function CloudDialer() {
         p_notes:         `Cloud Dialer: ${disposition.replace("_", " ")}`,
         p_source:        "manual",
         p_recording_url: null,
+        p_call_source:   "cloud_dialer",
       });
     }
 
@@ -648,6 +698,7 @@ export default function CloudDialer() {
         p_notes:         `Cloud Dialer: ${disposition.replace("_", " ")}`,
         p_source:        "manual",
         p_recording_url: null,
+        p_call_source:   "cloud_dialer",
       });
     } else {
       await (supabase as any).rpc("record_cloud_call_log", {
@@ -659,6 +710,7 @@ export default function CloudDialer() {
         p_notes:         `Cloud Dialer: ${disposition.replace("_", " ")}`,
         p_source:        "manual",
         p_recording_url: null,
+        p_call_source:   "cloud_dialer",
       });
     }
 
@@ -716,6 +768,7 @@ export default function CloudDialer() {
         p_notes:         `Cloud Dialer: ${disposition.replace("_", " ")} (auto)`,
         p_source:        "manual",
         p_recording_url: null,
+        p_call_source:   "cloud_dialer",
       });
     }
     showFollowupAndAutoNext(disposition);
@@ -820,6 +873,19 @@ export default function CloudDialer() {
     if (currentIdx < queue.length - 1) {
       setCurrentIdx(prev => prev + 1);
     }
+  };
+
+  // Mark a non-call follow-up (whatsapp / email / visit) complete and advance
+  // the queue. Counsellor uses this after they've actually replied / mailed / met
+  // the lead via the side action.
+  const completeFollowupAndAdvance = async () => {
+    if (!currentLead?.followup_id) { skipLead(); return; }
+    await supabase.from("lead_followups").update({
+      status: "completed",
+      completed_at: new Date().toISOString(),
+    }).eq("id", currentLead.followup_id);
+    toast({ title: "Marked done", description: `${currentLead.followup_type} follow-up completed.` });
+    skipLead();
   };
 
   // ── Start/Stop dialer ─────────────────────────────────────────────────────
@@ -1012,6 +1078,24 @@ export default function CloudDialer() {
                     lead.bucket === "New Lead" ? "bg-orange-100 text-orange-700" :
                     "bg-gray-100 text-gray-600"
                   }`}>{lead.bucket}</Badge>
+                  {lead.followup_type && lead.followup_type !== "call" && (
+                    <Badge className={`text-[9px] border-0 ${
+                      lead.followup_type === "whatsapp" ? "bg-emerald-100 text-emerald-700" :
+                      lead.followup_type === "email" ? "bg-sky-100 text-sky-700" :
+                      "bg-violet-100 text-violet-700"
+                    }`}>{lead.followup_type === "whatsapp" ? "WA" : lead.followup_type === "email" ? "Email" : "Visit"}</Badge>
+                  )}
+                  {(() => {
+                    const mins = minutesToReclaim(lead);
+                    if (mins === null) return null;
+                    if (mins <= 0) {
+                      return <Badge className="text-[9px] border-0 bg-red-600 text-white animate-pulse">Reclaim now</Badge>;
+                    }
+                    if (mins <= 30) {
+                      return <Badge className="text-[9px] border-0 bg-red-100 text-red-700">⚠ {mins}m to reclaim</Badge>;
+                    }
+                    return null;
+                  })()}
                   {lead.attempt_count > 0 && <Badge className="text-[9px] border-0 bg-gray-100 text-gray-500">{lead.attempt_count}x</Badge>}
                   {idx < currentIdx && <CheckCircle className="h-3 w-3 text-emerald-500 ml-auto" />}
                 </div>
@@ -1032,6 +1116,49 @@ export default function CloudDialer() {
         <div className="flex-1 flex flex-col overflow-hidden">
           {currentLead ? (
             <>
+            {/* Non-call follow-up callout — routes counsellor to the native action.
+                Shown only when this queue entry came from a whatsapp / email / visit
+                follow-up and a call isn't already in progress. */}
+            {currentLead.followup_type && currentLead.followup_type !== "call" && callState.status === "idle" && (
+              <div className={`shrink-0 px-5 py-2.5 border-b flex items-center gap-3 ${
+                currentLead.followup_type === "whatsapp" ? "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200" :
+                currentLead.followup_type === "email" ? "bg-sky-50 dark:bg-sky-950/20 border-sky-200" :
+                "bg-violet-50 dark:bg-violet-950/20 border-violet-200"
+              }`}>
+                {currentLead.followup_type === "whatsapp" && <FileText className="h-4 w-4 text-emerald-700 shrink-0" />}
+                {currentLead.followup_type === "email" && <FileText className="h-4 w-4 text-sky-700 shrink-0" />}
+                {currentLead.followup_type === "visit" && <Calendar className="h-4 w-4 text-violet-700 shrink-0" />}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-foreground">
+                    {currentLead.followup_type === "whatsapp" && "WhatsApp follow-up due"}
+                    {currentLead.followup_type === "email" && "Email follow-up due"}
+                    {currentLead.followup_type === "visit" && "Visit follow-up due"}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    This lead's next action isn't a call — open the channel, complete the action, then mark done to move on. You can still call if needed.
+                  </p>
+                </div>
+                {currentLead.followup_type === "whatsapp" && (
+                  <Button size="sm" variant="outline" onClick={() => navigate(`/whatsapp-inbox?lead=${currentLead.id}`)} className="h-8 text-xs">
+                    Open WhatsApp
+                  </Button>
+                )}
+                {currentLead.followup_type === "email" && (
+                  <Button size="sm" variant="outline" onClick={() => navigate(`/admissions/${currentLead.id}`)} className="h-8 text-xs">
+                    Open lead
+                  </Button>
+                )}
+                {currentLead.followup_type === "visit" && (
+                  <Button size="sm" variant="outline" onClick={() => navigate(`/admissions/${currentLead.id}`)} className="h-8 text-xs">
+                    Open lead
+                  </Button>
+                )}
+                <Button size="sm" onClick={completeFollowupAndAdvance} className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700">
+                  <CheckCircle className="h-3.5 w-3.5 mr-1" /> Mark done
+                </Button>
+              </div>
+            )}
+
             {/* ── Fixed Call Bar at top (never scrolls) ──────────────── */}
             <div className="shrink-0 px-5 py-3 border-b border-border bg-card">
               {/* Call Bar — in fixed top section */}

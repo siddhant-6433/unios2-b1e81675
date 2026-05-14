@@ -23,6 +23,12 @@ const pageTitles: Record<string, string> = {
   "/hr-attendance": "Employee Attendance",
   "/hr-leave": "Leave Management",
   "/hr-directory": "Employee Directory",
+  "/cloud-dialer": "Cloud Dialer",
+  "/whatsapp-inbox": "WhatsApp Inbox",
+  "/pending-followups": "Pending Follow-ups",
+  "/fresh-leads": "Fresh Leads",
+  "/missed-calls": "Missed Calls",
+  "/lead-buckets": "Lead Buckets",
   "/exams": "Exams",
   "/campuses": "Campuses",
   "/courses": "Courses",
@@ -42,10 +48,24 @@ const pageTitles: Record<string, string> = {
   "/ib/idu": "Interdisciplinary Units",
 };
 
+// Counsellor-only greeting prefix shown in the header breadcrumb. Resolves
+// "morning / afternoon / evening" against IST so it doesn't drift when the
+// app is opened from a different timezone (some counsellors travel).
+function counsellorGreeting(displayName: string | null | undefined): string {
+  const hourIst = parseInt(
+    new Intl.DateTimeFormat("en-GB", { hour: "numeric", hour12: false, timeZone: "Asia/Kolkata" }).format(new Date()),
+    10,
+  );
+  const period = hourIst < 12 ? "Morning" : hourIst < 17 ? "Afternoon" : "Evening";
+  const firstName = (displayName || "").split(" ")[0] || "there";
+  return `Good ${period}, ${firstName}`;
+}
+
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const title = pageTitles[location.pathname] || "NIMT UniOs";
-  const { profile } = useAuth();
+  const { profile, role } = useAuth();
+  const isCounsellor = role === "counsellor";
 
   return (
     <CounsellorFilterProvider>
@@ -59,7 +79,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               <div className="flex items-center gap-3">
                 <SidebarTrigger className="text-muted-foreground hover:text-foreground transition-colors" />
                 <div className="flex items-center gap-1.5 text-sm">
-                  <span className="font-semibold text-foreground">NIMT</span>
+                  <span className="font-semibold text-foreground">
+                    {isCounsellor ? counsellorGreeting(profile?.display_name) : "NIMT"}
+                  </span>
                   <span className="text-muted-foreground/50">›</span>
                   <span className="font-medium text-muted-foreground">{title}</span>
                 </div>
