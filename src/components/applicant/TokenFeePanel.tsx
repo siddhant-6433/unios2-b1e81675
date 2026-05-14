@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Loader2, CreditCard, FileText, IndianRupee, Clock, Check, GraduationCap, Sparkles, ChevronRight } from "lucide-react";
+import { Loader2, CreditCard, FileText, IndianRupee, Clock, Check, GraduationCap, Sparkles, ChevronRight, CalendarDays } from "lucide-react";
+
+// Fallbacks if the get_applicant_deadlines RPC is unreachable.
+// The single source of truth is _app_config — these are last-resort
+// defaults so the UI still renders during a brief outage.
+const DEFAULT_FEE_SUBMISSION_DEADLINE      = "2026-06-15";
+const DEFAULT_FULL_COURSE_PAYMENT_DEADLINE = "2026-09-15";
 
 type FeeStatus = {
   first_year_fee: number;
@@ -30,18 +36,6 @@ type FeeStatus = {
   full_course_discount?: number;
   full_course_amount_due?: number;
 };
-
-function formatCountdown(ms: number): string {
-  if (ms <= 0) return "Expired";
-  const totalSec = Math.floor(ms / 1000);
-  const days = Math.floor(totalSec / 86400);
-  const hours = Math.floor((totalSec % 86400) / 3600);
-  const mins = Math.floor((totalSec % 3600) / 60);
-  const secs = totalSec % 60;
-  if (days > 0) return `${days}d ${hours}h ${mins}m`;
-  if (hours > 0) return `${hours}h ${mins}m ${secs}s`;
-  return `${mins}m ${secs}s`;
-}
 
 interface Lead {
   id: string;
@@ -97,7 +91,10 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   const [instalmentPreset, setInstalmentPreset] = useState<number | null>(null);
   const [customAmt, setCustomAmt] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [now, setNow] = useState(() => Date.now());
+  const [deadlines, setDeadlines] = useState<{ fee_submission_deadline: string; full_course_payment_deadline: string }>({
+    fee_submission_deadline:      DEFAULT_FEE_SUBMISSION_DEADLINE,
+    full_course_payment_deadline: DEFAULT_FULL_COURSE_PAYMENT_DEADLINE,
+  });
 
   const load = async () => {
     setLoading(true);
@@ -121,16 +118,26 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
       return;
     }
 
-    // Fetch lead info + offer + fee status in parallel via SECURITY DEFINER functions.
-    // We pull POST-WAIVER per-year fees (lead_year_fees_net) — the
-    // concession breakdown sent to easebuzz must apportion against what the
-    // candidate actually owes, not the gross fee.
-    const [leadRes, statusRes, offerRes, yearRes] = await Promise.all([
+    // Fetch lead info + offer + fee status + global deadlines in parallel
+    // via SECURITY DEFINER functions. We pull POST-WAIVER per-year fees
+    // (lead_year_fees_net) — the concession breakdown sent to easebuzz must
+    // apportion against what the candidate actually owes, not the gross fee.
+    const [leadRes, statusRes, offerRes, yearRes, dlRes] = await Promise.all([
       (supabase as any).rpc("get_applicant_lead_info", { _lead_id: resolvedLeadId }),
       supabase.rpc("lead_fee_status" as any, { _lead_id: resolvedLeadId }),
       (supabase as any).rpc("get_applicant_offer", { _application_id: applicationId }),
       supabase.rpc("lead_year_fees_net" as any, { _lead_id: resolvedLeadId }),
+      (supabase as any).rpc("get_applicant_deadlines"),
     ]);
+
+    // Deadlines are non-critical — log but don't block render if missing.
+    if (!dlRes.error && dlRes.data) {
+      const d = dlRes.data as Record<string, string>;
+      setDeadlines({
+        fee_submission_deadline:      d.fee_submission_deadline      || DEFAULT_FEE_SUBMISSION_DEADLINE,
+        full_course_payment_deadline: d.full_course_payment_deadline || DEFAULT_FULL_COURSE_PAYMENT_DEADLINE,
+      });
+    }
 
     const diagParts: string[] = [];
     if (leadRes.error)   diagParts.push(`lead_info err: ${leadRes.error.message}`);
@@ -184,17 +191,6 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   };
 
   useEffect(() => { load(); }, [applicationId]);
-
-  // Tick a clock once a second so the multi-year countdown stays live
-  // (only when there's an active window we care about).
-  useEffect(() => {
-    const expiresAt = feeStatus?.multi_year_window_expires_at
-      ? new Date(feeStatus.multi_year_window_expires_at).getTime()
-      : null;
-    if (!expiresAt || expiresAt <= Date.now()) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [feeStatus?.multi_year_window_expires_at]);
 
   // Listen for the popup's success/failure ping.
   useEffect(() => {
@@ -308,15 +304,26 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   const isUrgent = daysLeft !== null && daysLeft <= 7 && daysLeft >= 0;
   const isExpired = daysLeft !== null && daysLeft < 0;
 
-  // Multi-year waiver calculations
+  // Global deadlines (super_admin-editable via _app_config). Parse as IST
+  // midnight so end-of-day comparisons are correct for India users.
+  const semesterFeeDeadline       = new Date(deadlines.fee_submission_deadline);
+  const fullCoursePaymentDeadline = new Date(deadlines.full_course_payment_deadline);
+  // The 1-year fee conversion (additional scholarship) shares its deadline
+  // with the pending-fee submission — a single date the super_admin can
+  // extend in one shot for every active offer.
+  const scholarshipDeadline       = semesterFeeDeadline;
+  const todayMs                   = Date.now();
+  const fullCourseWindowOpen      = todayMs <= fullCoursePaymentDeadline.getTime() + 86399000;
+  const scholarshipWindowOpen     = todayMs <= scholarshipDeadline.getTime() + 86399000;
+
+  // Multi-year waiver visibility — driven by the global scholarship
+  // deadline, NOT the per-lead countdown the policy used to enforce.
+  // Show the additional-years discount whenever today ≤ scholarship
+  // deadline AND the offer has additional years.
   const showFullCourse = (feeStatus.lump_sum_pct || 0) > 0
     && (feeStatus.additional_years_fee || 0) > 0
     && (feeStatus.full_course_amount_due || 0) > 0;
-  const multiYearExpiresAt = feeStatus.multi_year_window_expires_at
-    ? new Date(feeStatus.multi_year_window_expires_at).getTime() : null;
-  const inMultiYearWindow = !!feeStatus.within_multi_year_window;
-  const multiYearRemainingMs = multiYearExpiresAt ? multiYearExpiresAt - now : null;
-  const showMultiYearTimer = inMultiYearWindow && multiYearRemainingMs !== null && multiYearRemainingMs > 0;
+  const inMultiYearWindow = scholarshipWindowOpen;
 
   // Milestone dates
   const tokenPaidAt = feeStatus.token_completed_at ? new Date(feeStatus.token_completed_at) : null;
@@ -327,8 +334,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     : deadlineDate
     ? new Date(deadlineDate.getTime() + 5 * 86400000)
     : null;
-  const semesterFeeDeadline = new Date("2026-06-15");
   const fmtDate = (d: Date) => d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  const fmtDateLong = (d: Date) => d.toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
   const daysUntil = (d: Date) => Math.ceil((d.getTime() - Date.now()) / 86400000);
 
   return (
@@ -964,11 +971,15 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
 
         return (
           <div className="space-y-3">
-            {/* ── HERO: Full course (Best Value) ──────────────────────── */}
-            {hasFullCourse && (
+            {/* ── HERO: Full course (Best Value) ──────────────────────────
+                Gated on full_course_payment_deadline — after that date the
+                lump-sum CTA disappears (only year-1 lump-sum remains
+                below). The card stays visible if the candidate already
+                paid in full, so they always see the receipt state. */}
+            {hasFullCourse && (fullCourseWindowOpen || fcCovered) && (
               <div className={`rounded-2xl border-2 p-5 shadow-lg relative ${
                 fcCovered ? "border-gray-200 bg-gray-50" :
-                showMultiYearTimer ? "border-emerald-400 bg-gradient-to-br from-emerald-50 via-green-50 to-emerald-100" : "border-emerald-300 bg-gradient-to-br from-emerald-50 to-green-50"
+                "border-emerald-300 bg-gradient-to-br from-emerald-50 via-green-50 to-emerald-100"
               }`}>
                 {/* Decorative shimmer — wrapped in an overflow-hidden inner
                     div so it clips to the card without cropping the
@@ -1005,12 +1016,12 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                             ? ` + extra ${feeStatus.multi_year_pct}% off all other years.`
                             : ` + ${feeStatus.lump_sum_pct}% off other years.`}
                         </p>
-                        {showMultiYearTimer && (
+                        {inMultiYearWindow && (
                           <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-white/80 border border-emerald-200 px-2.5 py-1">
-                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            <span className="text-[10px] font-semibold text-emerald-700">Bonus expires in</span>
-                            <span className="text-[11px] font-mono font-bold text-emerald-900 tabular-nums">
-                              {formatCountdown(multiYearRemainingMs!)}
+                            <CalendarDays className="h-3 w-3 text-emerald-700" />
+                            <span className="text-[10px] font-semibold text-emerald-700">Additional scholarship available until</span>
+                            <span className="text-[11px] font-bold text-emerald-900">
+                              {fmtDateLong(scholarshipDeadline)}
                             </span>
                           </div>
                         )}
