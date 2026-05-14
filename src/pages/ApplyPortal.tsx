@@ -1210,11 +1210,14 @@ const ApplyPortal = () => {
     // / under-review / approved apps load correctly. The submitted-state UI
     // (line ~1081) handles displaying them — without this we'd silently start
     // a fresh draft on top of an existing submitted application.
-    const { data: existingApps } = await supabase
-      .from("applications")
-      .select("*")
-      .eq("phone", phoneVal)
-      .order("created_at", { ascending: false });
+    //
+    // Uses a SECURITY DEFINER RPC instead of direct table SELECT because the
+    // portal runs as the anon role (WhatsApp-OTP auth, no Supabase session) and
+    // the applications SELECT policy is now scoped to authenticated users only.
+    const { data: existingApps } = await (supabase as any).rpc(
+      "get_applicant_applications_by_phone",
+      { _phone: phoneVal }
+    );
 
     // Pick apps belonging to this portal. There can be multiple — e.g. a
     // submitted app + a new draft.
