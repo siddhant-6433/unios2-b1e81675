@@ -1,4 +1,6 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useAdmissionsStats } from "@/hooks/useAdmissionsData";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -185,6 +187,11 @@ const Admissions = () => {
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
 
+  // Server-side total count (only used in list view — pipeline view fetches all)
+  const [totalCount, setTotalCount] = useState(0);
+  // Debounced search — keeps server roundtrips low while typing
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
   const [serverSearching, setServerSearching] = useState(false);
 
   // Selection & bulk actions
@@ -288,25 +295,64 @@ const Admissions = () => {
     })();
   }, [pendingNotCalledFilter, loading]);
 
+  // Debounce search input so we don't query the DB on every keystroke
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 350);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Hydrate application completion % for whichever rows we just loaded.
+  // Split out so both fetch paths can reuse it.
+  const hydrateApplications = async (rows: any[]) => {
+    if (!rows.length) return rows;
+    const leadIds = rows.map(r => r.id);
+    const { data: apps } = await supabase
+      .from("applications")
+      .select("lead_id, completed_sections, program_category, payment_status, fee_amount, status")
+      .in("lead_id", leadIds);
+    if (!apps?.length) return rows;
+    const byLead: Record<string, any> = {};
+    apps.forEach((a: any) => {
+      const existing = byLead[a.lead_id];
+      const pct = getCompletionPct(a.completed_sections, a.program_category);
+      if (!existing || pct > existing.pct) {
+        byLead[a.lead_id] = { pct, payment_status: a.payment_status, fee_amount: a.fee_amount, status: a.status };
+      }
+    });
+    rows.forEach((l: any) => {
+      const m = byLead[l.id];
+      if (m) {
+        l.app_completion_pct = m.pct;
+        l.app_payment_status = m.payment_status;
+        l.app_fee_amount = m.fee_amount ?? null;
+      }
+    });
+    return rows;
+  };
+
   const fetchLeads = async () => {
     setLoading(true);
-    let query = supabase
-      .from("leads")
-      .select(`*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`)
-      .order("created_at", { ascending: false })
-      .limit(500);
-    // Apply counsellor filter (from global bar or self for counsellors)
-    if (role === "counsellor" && profile?.id) {
-      query = query.eq("counsellor_id", profile.id);
-    } else if (counsellorFilter !== "all") {
-      query = query.eq("counsellor_id", counsellorFilter);
-    } else if (selectedCampusId !== "all") {
-      query = query.eq("campus_id", selectedCampusId);
-    }
-    const { data, error } = await query;
 
-    if (data) {
-      const enriched = data.map((l: any) => ({
+    // Pipeline / action_center / seats / payments need the in-memory pool to
+    // bucket by stage. Capped at 500 (same as before — those views are heavy).
+    // List view is the hot path most counsellors live in; it pages server-side.
+    if (view !== "list") {
+      let query = supabase
+        .from("leads")
+        .select(`*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`)
+        .order("created_at", { ascending: false })
+        .limit(500);
+      if (role === "counsellor" && profile?.id) {
+        query = query.eq("counsellor_id", profile.id);
+      } else if (counsellorFilter !== "all" && counsellorFilter !== "unassigned") {
+        query = query.eq("counsellor_id", counsellorFilter);
+      } else if (counsellorFilter === "unassigned") {
+        query = query.is("counsellor_id", null);
+      } else if (selectedCampusId !== "all") {
+        query = query.eq("campus_id", selectedCampusId);
+      }
+      const { data } = await query;
+      const enriched = (data || []).map((l: any) => ({
         ...l,
         course_name: l.courses?.name || "—",
         campus_name: l.campuses?.name || "—",
@@ -315,89 +361,105 @@ const Admissions = () => {
         app_payment_status: null as string | null,
         app_fee_amount: null as number | null,
       }));
-
-      // Fetch applications for these leads (for completion %)
-      const leadIds = enriched.map(l => l.id);
-      if (leadIds.length > 0) {
-        const { data: apps } = await supabase
-          .from("applications")
-          .select("lead_id, completed_sections, program_category, payment_status, fee_amount, status")
-          .in("lead_id", leadIds);
-        if (apps && apps.length > 0) {
-          const byLead: Record<string, any> = {};
-          apps.forEach((a: any) => {
-            // Keep the most complete app per lead if duplicates
-            const existing = byLead[a.lead_id];
-            const pct = getCompletionPct(a.completed_sections, a.program_category);
-            if (!existing || pct > existing.pct) {
-              byLead[a.lead_id] = { pct, payment_status: a.payment_status, fee_amount: a.fee_amount, status: a.status };
-            }
-          });
-          enriched.forEach(l => {
-            const m = byLead[l.id];
-            if (m) {
-              l.app_completion_pct = m.pct;
-              l.app_payment_status = m.payment_status;
-              l.app_fee_amount = m.fee_amount ?? null;
-            }
-          });
-        }
-      }
-
+      await hydrateApplications(enriched);
       setLeads(enriched);
+      setTotalCount(enriched.length);
+      setSelectedIds(new Set());
+      setLoading(false);
+      return;
     }
-    setSelectedIds(new Set());
+
+    // ── List view: server-side filter + paginate ───────────────────────────
+    const offset = (page - 1) * PAGE_SIZE;
+    let query: any = supabase
+      .from("leads")
+      .select(
+        "*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)",
+        { count: "exact" }
+      )
+      .order("created_at", { ascending: false });
+
+    // Counsellor / campus scope
+    if (role === "counsellor" && profile?.id) {
+      query = query.eq("counsellor_id", profile.id);
+    } else if (counsellorFilter === "unassigned") {
+      query = query.is("counsellor_id", null);
+    } else if (counsellorFilter !== "all") {
+      query = query.eq("counsellor_id", counsellorFilter);
+    } else if (selectedCampusId !== "all") {
+      query = query.eq("campus_id", selectedCampusId);
+    }
+
+    // Stage / source / role / temperature
+    if (stageFilter !== "all") {
+      const stages = stageFilter.split(",").map(s => s.trim()).filter(Boolean);
+      if (stages.length === 1) query = query.eq("stage", stages[0]);
+      else if (stages.length > 1) query = query.in("stage", stages);
+    }
+    if (sourceFilter !== "all") query = query.eq("source", sourceFilter);
+    if (roleFilter !== "all") query = query.eq("person_role", roleFilter);
+    if (tempFilter !== "all") query = query.eq("lead_temperature", tempFilter);
+
+    // Date range (applied to created_at)
+    if (fromDate) query = query.gte("created_at", `${fromDate}T00:00:00`);
+    if (toDate) query = query.lte("created_at", `${toDate}T23:59:59.999`);
+
+    // Multi-field search (server-side ilike OR). Triggered after ≥ 2 chars.
+    if (debouncedSearch.length >= 2) {
+      const q = debouncedSearch;
+      const digits = q.replace(/\D/g, "");
+      const phoneTerm = digits.length >= 3 ? digits : q;
+      // Escape any commas in the user-supplied search to avoid breaking the OR string
+      const safe = (s: string) => s.replace(/,/g, "");
+      query = query.or(
+        `name.ilike.%${safe(q)}%,phone.ilike.%${safe(phoneTerm)}%,email.ilike.%${safe(q)}%,application_id.ilike.%${safe(q)}%`
+      );
+    }
+
+    // ID-set filters: intersect any active sets and pass the result as .in("id", …)
+    const idSets: (Set<string> | null)[] = [inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds];
+    const activeSets = idSets.filter((s): s is Set<string> => s !== null);
+    if (activeSets.length > 0) {
+      let intersection = Array.from(activeSets[0]);
+      for (let i = 1; i < activeSets.length; i++) {
+        const other = activeSets[i];
+        intersection = intersection.filter(id => other.has(id));
+      }
+      if (intersection.length === 0) {
+        setLeads([]); setTotalCount(0); setSelectedIds(new Set()); setLoading(false);
+        return;
+      }
+      query = query.in("id", intersection);
+    }
+
+    query = query.range(offset, offset + PAGE_SIZE - 1);
+
+    const { data, count } = await query;
+    const enriched = (data || []).map((l: any) => ({
+      ...l,
+      course_name: l.courses?.name || "—",
+      campus_name: l.campuses?.name || "—",
+      counsellor_name: l.profiles?.display_name || "Unassigned",
+      app_completion_pct: null as number | null,
+      app_payment_status: null as string | null,
+      app_fee_amount: null as number | null,
+    }));
+    await hydrateApplications(enriched);
+    setLeads(enriched);
+    setTotalCount(count ?? enriched.length);
     setLoading(false);
   };
 
-  useEffect(() => { fetchLeads(); }, [selectedCampusId, counsellorFilter]);
-
-  // Server-side search: when search has 3+ chars, query DB for leads beyond the loaded 200
-  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Refetch whenever any input that affects the query changes
   useEffect(() => {
-    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    const q = search.trim();
-    if (q.length < 3) return;
-
-    searchTimerRef.current = setTimeout(async () => {
-      setServerSearching(true);
-      const digits = q.replace(/\D/g, "");
-      // Build server-side search query
-      let query = supabase
-        .from("leads")
-        .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)")
-        .or(`name.ilike.%${q}%,phone.ilike.%${digits.length >= 3 ? digits : q}%,email.ilike.%${q}%,application_id.ilike.%${q}%`)
-        .order("created_at", { ascending: false })
-        .limit(50);
-
-      if (role === "counsellor" && profile?.id) {
-        query = query.eq("counsellor_id", profile.id);
-      } else if (selectedCampusId !== "all") {
-        query = query.eq("campus_id", selectedCampusId);
-      }
-
-      const { data } = await query;
-      if (data && data.length > 0) {
-        setLeads(prev => {
-          const existingIds = new Set(prev.map(l => l.id));
-          const newLeads = data
-            .filter((l: any) => !existingIds.has(l.id))
-            .map((l: any) => ({
-              ...l,
-              course_name: l.courses?.name || "—",
-              campus_name: l.campuses?.name || "—",
-              counsellor_name: l.profiles?.display_name || "Unassigned",
-              app_completion_pct: null,
-              app_payment_status: null, app_fee_amount: null,
-            }));
-          return newLeads.length > 0 ? [...prev, ...newLeads] : prev;
-        });
-      }
-      setServerSearching(false);
-    }, 400);
-
-    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
-  }, [search, selectedCampusId, role, profile?.id]);
+    fetchLeads();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    view, page, selectedCampusId, counsellorFilter, role, profile?.id,
+    stageFilter, sourceFilter, roleFilter, tempFilter,
+    fromDate, toDate, debouncedSearch,
+    inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds,
+  ]);
 
   // Fetch counsellor list for filter (admin / admission_head / team leader only)
   useEffect(() => {
@@ -423,20 +485,46 @@ const Admissions = () => {
     })();
   }, [canFilterByCounsellor]);
 
-  // Auto-refresh when leads change (new leads, stage changes, assignments)
+  // Auto-refresh when leads change (new leads, stage changes, assignments).
+  // Scoped + debounced + cache-aware: invalidates the cached stats so the
+  // dashboard counters update too without an extra fetch per render.
+  const queryClient = useQueryClient();
+  // Keep latest fetchLeads in a ref so the long-lived realtime subscription
+  // always invokes the current closure (current page/filters), not a stale one.
+  const fetchLeadsRef = useRef(fetchLeads);
+  useEffect(() => { fetchLeadsRef.current = fetchLeads; });
+
   useEffect(() => {
+    let filter: string | undefined;
+    if (role === "counsellor" && profile?.id) {
+      filter = `counsellor_id=eq.${profile.id}`;
+    } else if (selectedCampusId !== "all") {
+      filter = `campus_id=eq.${selectedCampusId}`;
+    }
+
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRefetch = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        fetchLeadsRef.current();
+        queryClient.invalidateQueries({ queryKey: ["admissions-stats"] });
+      }, 800);
+    };
+
     const channel = supabase
-      .channel("leads-realtime")
-      .on("postgres_changes" as any, {
-        event: "*",
-        schema: "public",
-        table: "leads",
-      }, () => {
-        fetchLeads();
-      })
+      .channel(`leads-realtime-${filter ?? "all"}`)
+      .on(
+        "postgres_changes" as any,
+        { event: "*", schema: "public", table: "leads", ...(filter ? { filter } : {}) },
+        scheduleRefetch,
+      )
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [selectedCampusId]);
+
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      supabase.removeChannel(channel);
+    };
+  }, [selectedCampusId, role, profile?.id, queryClient]);
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
@@ -528,140 +616,42 @@ const Admissions = () => {
     return matchesSearch && matchesStage && matchesSource && matchesRole && matchesTemp && matchesInactive && matchesFollowup && matchesVisit && matchesCounsellor && matchesNotCalled && matchesAction && matchesDate;
   });
 
-  const filteredCount = filtered.length;
+  // List view paginates server-side: `leads` is already the current page
+  // and `totalCount` is the unpaginated total. Pipeline / action_center
+  // still need the client-side `filtered` array for stage bucketing.
+  const filteredCount = view === "list" ? totalCount : filtered.length;
   const totalPages = Math.ceil(filteredCount / PAGE_SIZE);
-  const paginatedLeads = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const paginatedLeads = view === "list" ? leads : filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // Reset page when filters change
   useEffect(() => { setPage(1); }, [stageFilter, sourceFilter, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, fromDate, toDate]);
 
   const totalLeads = leads.length;
 
-  // Stage counts fetched from DB (not from limited local array)
-  const [newLeads, setNewLeads] = useState(0);
-  const [todayLeads, setTodayLeads] = useState(0);
-  const [appStarted, setAppStarted] = useState(0);
-  const [feePaid, setFeePaid] = useState(0);
-  const [appSubmitted, setAppSubmitted] = useState(0);
-  const [admitted, setAdmitted] = useState(0);
-  const [offerSent, setOfferSent] = useState(0);
-  const [tokenPaid, setTokenPaid] = useState(0);
-  const [preAdmitted, setPreAdmitted] = useState(0);
+  // Cached dashboard counts (TanStack Query). Survives navigation back to
+  // /admissions without a refetch as long as data is < 30s stale.
+  const statsCounsellorId = role === "counsellor" && profile?.id ? profile.id : null;
+  const statsCampusId = statsCounsellorId ? null : (selectedCampusId !== "all" ? selectedCampusId : null);
+  const { data: statsData } = useAdmissionsStats({ counsellorId: statsCounsellorId, campusId: statsCampusId });
 
-  // Followup & visit counts fetched from DB
-  const [pendingFollowups, setPendingFollowups] = useState(0);
-  const [todayFollowups, setTodayFollowups] = useState(0);
-  const [overdueFollowups, setOverdueFollowups] = useState(0);
-  const [upcomingVisits, setUpcomingVisits] = useState(0);
-  const [completedVisits, setCompletedVisits] = useState(0);
-  const [postVisitPendingIds, setPostVisitPendingIds] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    (async () => {
-      const now = new Date();
-      const todayStart = now.toISOString().slice(0, 10);
-      const todayEnd = todayStart + "T23:59:59";
-
-      // For counsellors, limit stats to their own assigned leads
-      let leadIds: string[] | null = null;
-      if (role === "counsellor" && profile?.id) {
-        const { data: myLeads } = await supabase
-          .from("leads")
-          .select("id")
-          .eq("counsellor_id", profile.id);
-        leadIds = (myLeads || []).map((l: any) => l.id);
-        if (leadIds.length === 0) {
-          setNewLeads(0); setTodayLeads(0); setAppStarted(0); setFeePaid(0);
-          setAppSubmitted(0); setAdmitted(0); setOfferSent(0); setTokenPaid(0); setPreAdmitted(0);
-          setPendingFollowups(0); setTodayFollowups(0); setOverdueFollowups(0);
-          setUpcomingVisits(0); setCompletedVisits(0);
-          return;
-        }
-      }
-
-      const applyLeadFilter = <T extends any>(q: T): T => {
-        if (leadIds) return (q as any).in("lead_id", leadIds) as T;
-        return q;
-      };
-
-      // Stage count queries — excludes mirror leads to avoid double-counting school leads
-      const buildStageQ = (stages: string[]) => {
-        let q = supabase.from("leads").select("id", { count: "exact", head: true })
-          .in("stage", stages)
-          .eq("is_mirror" as any, false);
-        if (role === "counsellor" && profile?.id) q = q.eq("counsellor_id", profile.id);
-        else if (selectedCampusId !== "all") q = q.eq("campus_id", selectedCampusId);
-        return q;
-      };
-
-      const buildTodayQ = () => {
-        let q = supabase.from("leads").select("id", { count: "exact", head: true })
-          .gte("created_at", todayStart + "T00:00:00").lte("created_at", todayEnd)
-          .eq("is_mirror" as any, false);
-        if (role === "counsellor" && profile?.id) q = q.eq("counsellor_id", profile.id);
-        else if (selectedCampusId !== "all") q = q.eq("campus_id", selectedCampusId);
-        return q;
-      };
-
-      // Fee paid: combine lead stage + applications with payment_status='paid'
-      const buildFeePaidQ = async (): Promise<number> => {
-        // Leads in fee-paid stages (excludes mirrors)
-        const stageRes = await buildStageQ(["application_fee_paid", "application_submitted", "offer_sent", "token_paid", "pre_admitted", "admitted"]);
-        // Applications with payment received (catch portal payments not yet reflected in lead stage)
-        let appQ = supabase.from("applications").select("lead_id").eq("payment_status", "paid");
-        const { data: paidApps } = await appQ;
-        const paidLeadIds = new Set((paidApps || []).map((a: any) => a.lead_id));
-        // Union: stageRes count + paid apps whose lead is NOT in those stages
-        // Simpler: return max of the two since stage count includes most paid apps
-        return Math.max(stageRes.count || 0, paidLeadIds.size);
-      };
-
-      const [
-        pendingRes, todayFuRes, overdueRes, upVisitRes, compVisitRes,
-        newLeadRes, todayLeadRes, appStartedRes, appSubmittedRes, admittedRes,
-        feePaidCount, offerSentRes, tokenPaidRes, preAdmittedRes,
-      ] = await Promise.all([
-        applyLeadFilter(supabase.from("lead_followups").select("id", { count: "exact", head: true }).eq("status", "pending")),
-        applyLeadFilter(supabase.from("lead_followups").select("id", { count: "exact", head: true }).eq("status", "pending").gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd)),
-        applyLeadFilter(supabase.from("overdue_followups" as any).select("id", { count: "exact", head: true })),
-        applyLeadFilter(supabase.from("campus_visits").select("lead_id").gte("visit_date", todayStart).in("status", ["scheduled", "confirmed"])),
-        applyLeadFilter(supabase.from("campus_visits").select("lead_id").eq("status", "completed")),
-        // Stage counts (mirror-excluded)
-        buildStageQ(["new_lead"]),
-        buildTodayQ(),
-        buildStageQ(["application_in_progress", "application_fee_paid", "application_submitted", "offer_sent", "token_paid", "pre_admitted"]),
-        buildStageQ(["application_submitted", "offer_sent", "token_paid", "pre_admitted"]),
-        buildStageQ(["admitted"]),
-        buildFeePaidQ(),
-        buildStageQ(["offer_sent"]),
-        buildStageQ(["token_paid"]),
-        buildStageQ(["pre_admitted"]),
-      ]);
-
-      setPendingFollowups(pendingRes.count || 0);
-      setTodayFollowups(todayFuRes.count || 0);
-      setOverdueFollowups(overdueRes.count || 0);
-      // Count unique leads with visits (not visit count)
-      setUpcomingVisits(new Set((upVisitRes.data || []).map((r: any) => r.lead_id)).size);
-      setCompletedVisits(new Set((compVisitRes.data || []).map((r: any) => r.lead_id)).size);
-
-      // Fetch post-visit pending lead IDs for visual indicator
-      const { data: pvPending } = await supabase
-        .from("post_visit_pending_followups" as any)
-        .select("lead_id");
-      setPostVisitPendingIds(new Set((pvPending || []).map((r: any) => r.lead_id)));
-      // Stage counts
-      setNewLeads(newLeadRes.count || 0);
-      setTodayLeads(todayLeadRes.count || 0);
-      setAppStarted(appStartedRes.count || 0);
-      setFeePaid(feePaidCount);
-      setAppSubmitted(appSubmittedRes.count || 0);
-      setAdmitted(admittedRes.count || 0);
-      setOfferSent(offerSentRes.count || 0);
-      setTokenPaid(tokenPaidRes.count || 0);
-      setPreAdmitted(preAdmittedRes.count || 0);
-    })();
-  }, [selectedCampusId, role, profile?.id]);
+  const newLeads        = statsData?.new_leads         ?? 0;
+  const todayLeads      = statsData?.today_leads       ?? 0;
+  const appStarted      = statsData?.app_started       ?? 0;
+  const feePaid         = statsData?.fee_paid          ?? 0;
+  const appSubmitted    = statsData?.app_submitted     ?? 0;
+  const admitted        = statsData?.admitted          ?? 0;
+  const offerSent       = statsData?.offer_sent        ?? 0;
+  const tokenPaid       = statsData?.token_paid        ?? 0;
+  const preAdmitted     = statsData?.pre_admitted      ?? 0;
+  const pendingFollowups = statsData?.pending_followups ?? 0;
+  const todayFollowups  = statsData?.today_followups   ?? 0;
+  const overdueFollowups = statsData?.overdue_followups ?? 0;
+  const upcomingVisits  = statsData?.upcoming_visits   ?? 0;
+  const completedVisits = statsData?.completed_visits  ?? 0;
+  const postVisitPendingIds = useMemo(
+    () => new Set<string>(statsData?.post_visit_pending_lead_ids ?? []),
+    [statsData?.post_visit_pending_lead_ids],
+  );
 
   // Row 1: Lead data
   const leadStats = [
@@ -1263,7 +1253,7 @@ const Admissions = () => {
         <div className="flex items-center justify-between mb-2">
           <p className="text-sm text-muted-foreground">
             Showing <span className="font-semibold text-foreground">{paginatedLeads.length}</span> of <span className="font-semibold text-foreground">{filteredCount}</span> leads
-            {filteredCount !== totalLeads && <span> (filtered from {totalLeads})</span>}
+            {view !== "list" && filteredCount !== totalLeads && <span> (filtered from {totalLeads})</span>}
           </p>
           {totalPages > 1 && (
             <div className="flex items-center gap-1.5">
