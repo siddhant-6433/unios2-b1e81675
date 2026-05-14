@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
-  Bot, Search, Loader2, CheckCircle, Play, AlertCircle, ChevronLeft, ChevronRight, Calendar, PhoneIncoming, Phone,
+  Bot, Search, Loader2, CheckCircle, Play, AlertCircle, ChevronLeft, ChevronRight, Calendar, PhoneIncoming, PhoneOutgoing, Phone,
 } from "lucide-react";
 import { AiCallQueueStatus } from "@/components/admissions/AiCallQueueStatus";
 import { VoiceQualityDashboard } from "@/components/admissions/VoiceQualityDashboard";
@@ -23,6 +23,7 @@ interface AiCallRecord {
   quality_score: number | null;
   quality_notes: string | null;
   quality_metrics: Record<string, any> | null;
+  call_type?: string | null;
   lead_name?: string;
   lead_phone?: string;
   counsellor_name?: string;
@@ -120,7 +121,7 @@ const AiCallLog = () => {
       .select(`
         id, lead_id, status, duration_seconds, recording_url, summary,
         conversion_probability, disposition, created_at,
-        quality_score, quality_notes, quality_metrics,
+        quality_score, quality_notes, quality_metrics, call_type,
         leads:lead_id(name, phone, counsellor_id,
           profiles:counsellor_id(display_name)
         )
@@ -342,6 +343,7 @@ const AiCallLog = () => {
                 <tr className="border-b border-border bg-muted/40">
                   <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Lead</th>
                   <th className="px-4 py-2.5 text-center font-medium text-muted-foreground">Type</th>
+                  <th className="px-4 py-2.5 text-center font-medium text-muted-foreground">Direction</th>
                   <th className="px-4 py-2.5 text-center font-medium text-muted-foreground">Status</th>
                   <th className="px-4 py-2.5 text-center font-medium text-muted-foreground">Duration</th>
                   <th className="px-4 py-2.5 text-center font-medium text-muted-foreground">Conversion</th>
@@ -374,6 +376,12 @@ const AiCallLog = () => {
                           : r.call_type === "manual"
                           ? <Badge className="text-[9px] border-0 bg-cyan-100 text-cyan-700 gap-0.5"><Phone className="h-2.5 w-2.5" />Manual</Badge>
                           : <Badge className="text-[9px] border-0 bg-amber-100 text-amber-700 gap-0.5"><Bot className="h-2.5 w-2.5" />AI</Badge>
+                        }
+                      </td>
+                      <td className="px-4 py-2.5 text-center">
+                        {r.call_type === "inbound"
+                          ? <Badge className="text-[9px] border-0 bg-violet-100 text-violet-700 gap-0.5"><PhoneIncoming className="h-2.5 w-2.5" />Inbound</Badge>
+                          : <Badge className="text-[9px] border-0 bg-sky-100 text-sky-700 gap-0.5"><PhoneOutgoing className="h-2.5 w-2.5" />Outbound</Badge>
                         }
                       </td>
                       <td className="px-4 py-2.5 text-center">
@@ -444,7 +452,7 @@ const AiCallLog = () => {
                   );
                 })}
                 {records.length === 0 && (
-                  <tr><td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">
+                  <tr><td colSpan={13} className="px-4 py-12 text-center text-muted-foreground">
                     <Bot className="h-8 w-8 mx-auto mb-2 opacity-30" />
                     <p className="text-sm">No AI call records found</p>
                   </td></tr>
