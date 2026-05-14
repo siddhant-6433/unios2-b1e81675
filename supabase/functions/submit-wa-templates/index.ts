@@ -119,6 +119,34 @@ const TEMPLATES = [
       },
     ],
   },
+  // Token-fee deadline reminder — fired by the token-fee-reminders cron
+  // at 2 days / 1 day / 4 hours before offer.acceptance_deadline. Body
+  // params: name, course, amount, time_left ("2 days" / "1 day" / "just
+  // 4 hours"). URL button suffix is the magic apply-portal token so one
+  // tap lands on the pay screen.
+  {
+    name: "token_fee_reminder",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        // Body must not end on a variable (Meta subcode 2388299), so the
+        // {{4}} time_left is followed by a closing line.
+        text: "Hi {{1}}, this is a friendly reminder that your token fee of Rs.{{3}} for {{2}} is due in {{4}}. Pay now to secure your seat — once paid, your Pre-Admission Number is issued instantly and your admission process moves forward.",
+        example: { body_text: [["Rahul Sharma", "BBA", "12000", "2 days"]] },
+      },
+      {
+        type: "BUTTONS",
+        buttons: [{
+          type: "URL",
+          text: "Pay Token Fee Now",
+          url: "https://uni.nimt.ac.in/apply?token={{1}}",
+          example: ["https://uni.nimt.ac.in/apply?token=a1b2c3d4e5f6789012345678abcdef00"],
+        }],
+      },
+    ],
+  },
   {
     name: "doc_rejected",
     category: "UTILITY",
@@ -230,7 +258,15 @@ Deno.serve(async (req) => {
     const url = `https://graph.facebook.com/v21.0/${wabaId}/message_templates?access_token=${waToken}`;
     const results: Record<string, any> = {};
 
-    for (const tpl of TEMPLATES) {
+    // Optional { names: [...] } filter — submit only the listed templates.
+    // If omitted, every template in the array is (re-)submitted; Meta returns
+    // 400 with code 2388023 for any that already exist, which is fine.
+    const filterNames: string[] | null = Array.isArray(body?.names) ? body.names : null;
+    const queue = filterNames
+      ? TEMPLATES.filter(t => filterNames.includes(t.name))
+      : TEMPLATES;
+
+    for (const tpl of queue) {
       try {
         const res = await fetch(url, {
           method: "POST",
@@ -244,7 +280,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ submitted: TEMPLATES.length, results }, null, 2), {
+    return new Response(JSON.stringify({ submitted: queue.length, results }, null, 2), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err: any) {

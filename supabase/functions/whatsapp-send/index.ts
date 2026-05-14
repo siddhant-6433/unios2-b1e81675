@@ -73,6 +73,12 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   offer_letter_issued:    { name: "offer_letter_issued",    params: ["student_name", "course_name", "net_fee", "deadline"] },
   // 4. PAN issued — nudge to pay balance for AN. magic_pay_url for one-tap.
   pan_nudge_balance:      { name: "pan_nudge_balance",      params: ["student_name", "pre_admission_no", "balance_amount"] },
+  // 4a. Token-fee deadline reminder — fired by token-fee-reminders cron
+  // at 2d / 1d / 4h before offer.acceptance_deadline. Body params:
+  //   student_name, course_name, amount, time_left (e.g. "2 days", "4 hours")
+  // URL button suffix is the magic apply-portal token so one tap takes
+  // the applicant straight to the pay screen.
+  token_fee_reminder:     { name: "token_fee_reminder",     params: ["student_name", "course_name", "amount", "time_left"] },
   // 6. Document rejected — student must re-upload. URL button to apply portal.
   doc_rejected:           { name: "doc_rejected",           params: ["student_name", "doc_name", "reason"] },
   // 7. Application rejected — admin declined the whole application.
