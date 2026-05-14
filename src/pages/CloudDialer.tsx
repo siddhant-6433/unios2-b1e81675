@@ -243,7 +243,7 @@ export default function CloudDialer() {
         .order("created_at", { ascending: true })
         .limit(500);
       let q1 = supabase.from("post_visit_pending_followups" as any).select("lead_id, lead_name, lead_phone").order("visit_date" as any, { ascending: true }).limit(500);
-      let q2 = supabase.from("lead_visits" as any).select("lead_id, leads:lead_id(name, phone)").eq("status", "scheduled").gte("visit_date", todayStart).order("visit_date", { ascending: true }).limit(500);
+      let q2 = supabase.from("campus_visits").select("lead_id, leads:lead_id(name, phone)").eq("status", "scheduled").gte("visit_date", todayStart).order("visit_date", { ascending: true }).limit(500);
       let q3 = supabase.from("overdue_followups" as any).select("lead_id, lead_name, lead_phone").order("scheduled_at" as any, { ascending: true }).limit(500);
       let q4 = supabase.from("lead_followups").select("lead_id, leads!inner(id, name, phone, counsellor_id)").eq("status", "pending").gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd).order("scheduled_at", { ascending: true }).limit(500);
       let q5 = supabase.from("leads").select("id, name, phone").eq("stage", "new_lead").is("first_contact_at", null).not("phone", "is", null).order("created_at", { ascending: true }).limit(500);

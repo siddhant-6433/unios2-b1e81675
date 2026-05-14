@@ -37,12 +37,22 @@ export function ConsultantVoiceMessagesPanel() {
       .from("consultant_voice_messages" as any)
       .select(`
         *,
-        consultants:consultant_id(name),
-        profiles:sender_user_id(display_name)
+        consultants:consultant_id(name)
       `)
       .order("created_at", { ascending: false })
       .limit(20);
-    setMessages((data || []) as any);
+
+    const rows = (data || []) as any[];
+    const senderIds = Array.from(new Set(rows.map(r => r.sender_user_id).filter(Boolean)));
+    let nameMap: Record<string, string> = {};
+    if (senderIds.length) {
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("user_id, display_name")
+        .in("user_id", senderIds);
+      nameMap = Object.fromEntries((profs || []).map(p => [p.user_id, p.display_name || ""]));
+    }
+    setMessages(rows.map(r => ({ ...r, profiles: r.sender_user_id ? { display_name: nameMap[r.sender_user_id] || "" } : null })));
     setLoading(false);
   };
 

@@ -231,30 +231,22 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
     }
     setLoading(true);
     try {
-      const { data: app, error } = await supabase
-        .from("applications")
-        .select("phone, full_name")
-        .eq("application_id", applicationId.trim().toUpperCase())
-        .maybeSingle();
-
+      // Use the SECURITY DEFINER RPC instead of a direct SELECT — anon SELECT
+      // on applications is intentionally locked down to avoid full-table dumps.
+      // The RPC returns only phone + full_name and checks both applications
+      // and leads in one call.
+      const { data, error } = await (supabase.rpc as any)(
+        "lookup_application_for_otp",
+        { p_application_id: applicationId.trim().toUpperCase() },
+      );
       if (error) throw error;
-      if (!app) {
-        const { data: lead } = await supabase
-          .from("leads")
-          .select("phone, name")
-          .eq("application_id", applicationId.trim().toUpperCase())
-          .maybeSingle();
-
-        if (!lead) {
-          toast({ title: "Application not found", variant: "destructive" });
-          setLoading(false);
-          return;
-        }
-        setPhone(lead.phone);
-      } else {
-        setPhone(app.phone);
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row?.phone) {
+        toast({ title: "Application not found", variant: "destructive" });
+        setLoading(false);
+        return;
       }
-
+      setPhone(row.phone);
       setLoginMode("phone");
       toast({ title: "Found! Verify your phone to continue." });
     } catch (err: any) {
