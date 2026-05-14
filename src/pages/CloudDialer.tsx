@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
 import { PriorityInterestedCard } from "@/components/leads/PriorityInterestedCard";
+import { useCloudDialerQueue, useMyProfileId } from "@/hooks/useAdmissionsData";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -174,6 +175,17 @@ const getCourseNudges = (courseName: string): string[] => {
   return ["Strong placement support", "Experienced faculty"];
 };
 
+// Bucket label (as returned by cloud_dialer_queue RPC) → UI metadata.
+const BUCKET_META: Record<string, { key: string; color: string; uiLabel: string }> = {
+  "Priority Interested": { key: "priority",      color: "bg-violet-600", uiLabel: "Priority Interested" },
+  "Missed Callback":     { key: "missed",        color: "bg-red-600",    uiLabel: "Missed Callbacks" },
+  "Post-Visit":          { key: "post_visit",    color: "bg-amber-500",  uiLabel: "Post-Visit" },
+  "Visit Checkin":       { key: "visit_confirm", color: "bg-violet-500", uiLabel: "Visit Checkin" },
+  "Overdue":             { key: "overdue",       color: "bg-red-500",    uiLabel: "Overdue" },
+  "Today":               { key: "today",         color: "bg-blue-500",   uiLabel: "Today" },
+  "New Lead":            { key: "new",           color: "bg-orange-500", uiLabel: "New Leads" },
+};
+
 // ── Component ───────────────────────────────────────────────────────────────
 
 export default function CloudDialer() {
@@ -216,8 +228,8 @@ export default function CloudDialer() {
   const [lookupResult, setLookupResult] = useState<{id:string; name:string; phone:string; course_name:string; stage:string}|null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupNotFound, setLookupNotFound] = useState(false);
-  // Profile ID for activity logging
-  const [profileId, setProfileId] = useState<string | null>(null);
+  // Profile ID for activity logging (cached — same hook used across pages)
+  const { data: profileId } = useMyProfileId();
 
   const callTimerRef = useRef<number | null>(null);
   const autoNextRef = useRef<number | null>(null);
@@ -241,155 +253,112 @@ export default function CloudDialer() {
 
   // ── Load queue ────────────────────────────────────────────────────────────
 
-  const loadQueue = useCallback(async () => {
-    setLoading(true);
+  // Counsellor scope (NULL for admin views — RPC then returns org-wide queue)
+  const counsellorId = isCounsellor ? (profileId ?? null) : null;
+  const isSmartQueue = queueSource === "smart" || queueSource === "followups";
 
-    // Get counsellor's profile ID for scoped queries (counsellors only)
-    let counsellorId: string | null = null;
-    if (isCounsellor) {
-      const { data: myProfile } = await supabase
-        .from("profiles").select("id").eq("user_id", user?.id || "").single();
-      counsellorId = myProfile?.id || null;
+  // Smart/followups: cached RPC via TanStack Query (survives navigation).
+  const {
+    data: smartPayload,
+    isLoading: smartLoading,
+    refetch: refetchSmartQueue,
+  } = useCloudDialerQueue({
+    counsellorId,
+    maxPerBucket: 100,
+    enabled: isSmartQueue && (!isCounsellor || !!counsellorId),
+  });
+
+  // Sync the cached smart-queue payload into mutable state so disposition
+  // handlers can pop leads out without re-running the RPC.
+  useEffect(() => {
+    if (!isSmartQueue) return;
+    if (!smartPayload) {
+      setLoading(smartLoading);
+      return;
     }
+    const mapped: QueueLead[] = (smartPayload.queue || []).map((r: any) => ({
+      id: r.id,
+      name: r.name || "Unknown",
+      phone: r.phone || "",
+      stage: r.stage || "",
+      source: r.source || "",
+      course_id: r.course_id || null,
+      course_name: r.course_name || "—",
+      campus_name: r.campus_name || "—",
+      bucket: r.bucket,
+      attempt_count: r.attempt_count || 0,
+      course_fee: r.course_fee_per_year
+        ? `₹${Number(r.course_fee_per_year).toLocaleString("en-IN")}/year`
+        : undefined,
+      // Phase 1 + 2 fields. The RPC populates these from migration
+      // 20260610160000 (cloud_dialer_queue_extras) onward; before that
+      // they're undefined and the dependent badges/callouts simply don't
+      // render — safe degradation.
+      assigned_at: r.assigned_at ?? null,
+      first_contact_at: r.first_contact_at ?? null,
+      followup_id: r.followup_id ?? undefined,
+      followup_type: (r.followup_type as QueueLead["followup_type"]) ?? undefined,
+    })).filter(l => l.phone);
 
-    let allLeads: { id: string; name: string; phone: string; bucket: string; followup_type?: QueueLead["followup_type"]; followup_id?: string }[] = [];
     const buckets: {key:string; label:string; color:string; count:number}[] = [];
-
-    if (queueSource === "smart" || queueSource === "followups") {
-      const now = new Date();
-      const todayStart = now.toISOString().slice(0, 10);
-      const todayEnd = todayStart + "T23:59:59";
-
-      // Build queries — scoped to counsellor if counsellor role, unscoped for admin
-      // q0: missed callbacks (top priority — AI inbound calls not yet actioned)
-      let q0 = (supabase.from("ai_call_records" as any) as any)
-        .select("lead_id, leads!inner(id, name, phone, counsellor_id)")
-        .eq("needs_followup", true)
-        .is("followup_done_at", null)
-        .order("created_at", { ascending: true })
-        .limit(500);
-      let q1 = supabase.from("post_visit_pending_followups" as any).select("lead_id, lead_name, lead_phone").order("visit_date" as any, { ascending: true }).limit(500);
-      let q2 = supabase.from("campus_visits").select("lead_id, leads:lead_id(name, phone)").eq("status", "scheduled").gte("visit_date", todayStart).order("visit_date", { ascending: true }).limit(500);
-      let q3 = supabase.from("overdue_followups" as any).select("lead_id, lead_name, lead_phone").order("scheduled_at" as any, { ascending: true }).limit(500);
-      let q4 = supabase.from("lead_followups").select("id, lead_id, type, leads!inner(id, name, phone, counsellor_id)").eq("status", "pending").gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd).order("scheduled_at", { ascending: true }).limit(500);
-      let q5 = supabase.from("leads").select("id, name, phone").eq("stage", "new_lead").is("first_contact_at", null).not("phone", "is", null).order("created_at", { ascending: true }).limit(500);
-      // qP: priority interested — auto-elevated high-conversion AI call leads
-      let qP = supabase.from("leads").select("id, name, phone").eq("stage", "priority_interested" as any).not("phone", "is", null).order("updated_at", { ascending: false }).limit(500);
-
-      if (counsellorId) {
-        q0 = q0.eq("leads.counsellor_id", counsellorId);
-        q1 = q1.eq("counsellor_id", counsellorId);
-        q3 = q3.eq("counsellor_id", counsellorId);
-        q4 = supabase.from("lead_followups").select("id, lead_id, type, leads!inner(id, name, phone, counsellor_id)").eq("status", "pending").eq("leads.counsellor_id", counsellorId).gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd).order("scheduled_at", { ascending: true }).limit(500);
-        q5 = q5.eq("counsellor_id", counsellorId);
-        qP = qP.eq("counsellor_id", counsellorId);
+    (smartPayload.buckets || []).forEach((b: any) => {
+      const meta = BUCKET_META[b.label];
+      if (meta && b.count > 0) {
+        buckets.push({ key: meta.key, label: meta.uiLabel, color: meta.color, count: b.count });
       }
-
-      const [r0, r1, r2, r3, r4, r5, rP] = await Promise.all([q0, q1, q2, q3, q4, q5, qP]);
-
-      const seen = new Set<string>();
-      const add = (
-        items: {id:string;name:string;phone:string; followup_type?: QueueLead["followup_type"]; followup_id?: string}[],
-        bucket: string,
-      ) => {
-        items.forEach(l => { if (!seen.has(l.id) && l.phone) { seen.add(l.id); allLeads.push({ ...l, bucket }); } });
-      };
-
-      const priorityLeads = (rP.data || []).map((r: any) => ({ id: r.id, name: r.name, phone: r.phone }));
-      // Deduplicate missed callbacks by lead_id (one lead may have multiple records)
-      const missedCallbacks = Array.from(
-        new Map((r0.data || []).map((r: any) => [r.lead_id, {
-          id: r.lead_id, name: (r.leads as any)?.name || "", phone: (r.leads as any)?.phone || "",
-        }])).values()
-      ).filter((l: any) => l.phone);
-      const postVisit = (r1.data || []).map((r: any) => ({ id: r.lead_id, name: r.lead_name, phone: r.lead_phone }));
-      const visitConf = (r2.data || []).map((r: any) => ({ id: r.lead_id, name: (r.leads as any)?.name || "", phone: (r.leads as any)?.phone || "" })).filter((l: any) => l.phone);
-      const overdue = (r3.data || []).map((r: any) => ({ id: r.lead_id, name: r.lead_name, phone: r.lead_phone }));
-      const todayFu = (r4.data || []).map((r: any) => ({
-        id: r.lead_id,
-        name: (r.leads as any)?.name || "",
-        phone: (r.leads as any)?.phone || "",
-        followup_id: r.id,
-        followup_type: (r.type as QueueLead["followup_type"]) || "call",
-      }));
-      const newLeads = (r5.data || []).map((r: any) => ({ id: r.id, name: r.name, phone: r.phone }));
-
-      // Priority Interested goes FIRST — hot leads identified by AI
-      if (priorityLeads.length) buckets.push({ key: "priority", label: "Priority Interested", color: "bg-violet-600", count: priorityLeads.length });
-      add(priorityLeads, "Priority Interested");
-      // Missed callbacks second
-      if (missedCallbacks.length) buckets.push({ key: "missed", label: "Missed Callbacks", color: "bg-red-600", count: missedCallbacks.length });
-      add(missedCallbacks, "Missed Callback");
-      add(postVisit, "Post-Visit");
-      add(visitConf, "Visit Checkin");
-      add(overdue, "Overdue");
-      add(todayFu, "Today");
-      add(newLeads, "New Lead");
-
-      if (postVisit.length) buckets.push({ key: "post_visit", label: "Post-Visit", color: "bg-amber-500", count: postVisit.length });
-      if (visitConf.length) buckets.push({ key: "visit_confirm", label: "Visit Checkin", color: "bg-violet-500", count: visitConf.length });
-      if (overdue.length) buckets.push({ key: "overdue", label: "Overdue", color: "bg-red-500", count: overdue.length });
-      if (todayFu.length) buckets.push({ key: "today", label: "Today", color: "bg-blue-500", count: todayFu.length });
-      if (newLeads.length) buckets.push({ key: "new", label: "New Leads", color: "bg-orange-500", count: newLeads.length });
-
-    } else if (queueSource === "fresh") {
-      let fq = supabase.from("leads").select("id, name, phone").eq("stage", "new_lead").not("phone", "is", null).order("created_at", { ascending: true }).limit(100);
-      if (counsellorId) fq = fq.eq("counsellor_id", counsellorId);
-      const { data } = await fq;
-      allLeads = (data || []).filter((l: any) => l.phone).map((l: any) => ({ id: l.id, name: l.name, phone: l.phone, bucket: "New Lead" }));
-      buckets.push({ key: "new", label: "New Leads", color: "bg-orange-500", count: allLeads.length });
-    } else {
-      let aq = supabase.from("leads").select("id, name, phone, stage").in("stage", ["priority_interested", "new_lead", "counsellor_call", "application_in_progress"] as any).not("phone", "is", null).order("created_at", { ascending: true }).limit(100);
-      if (counsellorId) aq = aq.eq("counsellor_id", counsellorId);
-      const { data } = await aq;
-      allLeads = (data || []).filter((l: any) => l.phone).map((l: any) => ({ id: l.id, name: l.name, phone: l.phone, bucket: STAGE_LABELS[l.stage] || l.stage }));
-      buckets.push({ key: "all", label: "All Pipeline", color: "bg-gray-500", count: allLeads.length });
-    }
-
-    // Get full lead details + attempt counts
-    const leadIds = allLeads.map(l => l.id);
-    const detailMap: Record<string, any> = {};
-    const attemptMap: Record<string, number> = {};
-
-    if (leadIds.length > 0) {
-      // Batch fetch lead details
-      for (let i = 0; i < leadIds.length; i += 50) {
-        const batch = leadIds.slice(i, i + 50);
-        const { data } = await supabase.from("leads")
-          .select("id, name, phone, stage, source, course_id, assigned_at, first_contact_at, courses:course_id(name, fee_per_year), campuses:campus_id(name)")
-          .in("id", batch);
-        (data || []).forEach((l: any) => { detailMap[l.id] = l; });
-      }
-
-      const { data: calls } = await supabase.from("ai_call_records")
-        .select("lead_id").in("lead_id", leadIds).eq("call_type", "manual");
-      (calls || []).forEach((c: any) => { attemptMap[c.lead_id] = (attemptMap[c.lead_id] || 0) + 1; });
-    }
-
-    const mapped: QueueLead[] = allLeads.map(l => {
-      const d = detailMap[l.id] || {};
-      const c = d.courses || {};
-      return {
-        id: l.id, name: d.name || l.name || "Unknown", phone: d.phone || l.phone || "",
-        stage: d.stage || "", source: d.source || "",
-        course_id: d.course_id || null,
-        course_name: c.name || "—", campus_name: d.campuses?.name || "—",
-        bucket: l.bucket, attempt_count: attemptMap[l.id] || 0,
-        course_fee: c.fee_per_year ? `₹${Number(c.fee_per_year).toLocaleString("en-IN")}/year` : undefined,
-        followup_type: l.followup_type,
-        followup_id: l.followup_id,
-        assigned_at: d.assigned_at ?? null,
-        first_contact_at: d.first_contact_at ?? null,
-      };
-    }).filter(l => l.phone);
+    });
 
     setQueue(mapped);
     setQueueBuckets(buckets);
     setCurrentIdx(0);
     setLoading(false);
-  }, [queueSource, user?.id]);
+  }, [isSmartQueue, smartPayload, smartLoading]);
 
-  useEffect(() => { loadQueue(); }, [loadQueue]);
+  // Fresh / all paths still fetch directly (small queries, not cached).
+  const loadNonSmartQueue = useCallback(async () => {
+    setLoading(true);
+    let mapped: QueueLead[] = [];
+    const buckets: {key:string; label:string; color:string; count:number}[] = [];
+
+    if (queueSource === "fresh") {
+      let fq = supabase.from("leads").select("id, name, phone, stage, source, course_id, courses:course_id(name, fee_per_year), campuses:campus_id(name)").eq("stage", "new_lead").not("phone", "is", null).order("created_at", { ascending: true }).limit(100);
+      if (counsellorId) fq = fq.eq("counsellor_id", counsellorId);
+      const { data } = await fq;
+      mapped = (data || []).filter((l: any) => l.phone).map((l: any) => ({
+        id: l.id, name: l.name, phone: l.phone, stage: l.stage || "", source: l.source || "",
+        course_id: l.course_id || null,
+        course_name: l.courses?.name || "—",
+        campus_name: l.campuses?.name || "—",
+        bucket: "New Lead",
+        attempt_count: 0,
+        course_fee: l.courses?.fee_per_year
+          ? `₹${Number(l.courses.fee_per_year).toLocaleString("en-IN")}/year`
+          : undefined,
+      }));
+      buckets.push({ key: "new", label: "New Leads", color: "bg-orange-500", count: mapped.length });
+    } else {
+      let aq = supabase.from("leads").select("id, name, phone, stage, source, course_id, courses:course_id(name, fee_per_year), campuses:campus_id(name)").in("stage", ["priority_interested", "new_lead", "counsellor_call", "application_in_progress"] as any).not("phone", "is", null).order("created_at", { ascending: true }).limit(100);
+      if (counsellorId) aq = aq.eq("counsellor_id", counsellorId);
+      const { data } = await aq;
+      mapped = (data || []).filter((l: any) => l.phone).map((l: any) => ({
+        id: l.id, name: l.name, phone: l.phone, stage: l.stage || "", source: l.source || "",
+        course_id: l.course_id || null,
+        course_name: l.courses?.name || "—",
+        campus_name: l.campuses?.name || "—",
+        bucket: STAGE_LABELS[l.stage] || l.stage,
+        attempt_count: 0,
+        course_fee: l.courses?.fee_per_year
+          ? `₹${Number(l.courses.fee_per_year).toLocaleString("en-IN")}/year`
+          : undefined,
+      }));
+      buckets.push({ key: "all", label: "All Pipeline", color: "bg-gray-500", count: mapped.length });
+    }
+
+    setQueue(mapped);
+    setQueueBuckets(buckets);
+    setCurrentIdx(0);
+    setLoading(false);
+  }, [queueSource, counsellorId]);
 
   // ── Load source SLA windows once for reclaim warnings ─────────────────────
   useEffect(() => {
@@ -405,12 +374,17 @@ export default function CloudDialer() {
     })();
   }, []);
 
-  // ── Fetch profile ID for activity logging ────────────────────────────────
   useEffect(() => {
-    if (!user?.id) return;
-    supabase.from("profiles").select("id").eq("user_id", user.id).single()
-      .then(({ data }) => { if (data) setProfileId(data.id); });
-  }, [user?.id]);
+    if (!isSmartQueue) loadNonSmartQueue();
+  }, [isSmartQueue, loadNonSmartQueue]);
+
+  // Unified callable used after dispositions and manual refreshes.
+  const loadQueue = useCallback(() => {
+    if (isSmartQueue) refetchSmartQueue();
+    else loadNonSmartQueue();
+  }, [isSmartQueue, refetchSmartQueue, loadNonSmartQueue]);
+
+  // (profile ID is now provided by the cached useMyProfileId hook above)
 
   // ── Fetch call history when current lead changes ─────────────────────────
   useEffect(() => {
