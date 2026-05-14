@@ -20,6 +20,7 @@ const Login = () => {
     if (role === "student") navigate("/student", { replace: true });
     else if (role === "parent") navigate("/parent", { replace: true });
     else if (role === null) navigate("/my-applications", { replace: true });
+    else if (role === "counsellor") navigate("/cloud-dialer", { replace: true });
     else navigate("/", { replace: true });
   }, [session, loading, role, roleLoaded, navigate]);
 
