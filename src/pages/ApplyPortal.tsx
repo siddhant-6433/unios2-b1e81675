@@ -1406,9 +1406,14 @@ const ApplyPortal = () => {
     }
 
     const appId = generateApplicationId();
+    // Pre-generate the DB primary key client-side so we can avoid INSERT...RETURNING.
+    // Anon applicants (WhatsApp-OTP flow) have no SELECT policy on applications, so
+    // PostgREST raises a false RLS error when RETURNING * comes back empty.
+    const appDbId = crypto.randomUUID();
     const flagsForNewApp = [...flags, `portal:${portal.id}`];
 
     const newApp: any = {
+      id: appDbId,
       application_id: appId,
       lead_id: leadId,
       session_id: sessionId,
@@ -1424,17 +1429,17 @@ const ApplyPortal = () => {
       ...(childDob ? { dob: childDob } : {}),
     };
 
-    const { data: inserted, error } = await supabase
+    const { error } = await supabase
       .from("applications")
-      .insert(newApp)
-      .select()
-      .single();
+      .insert(newApp);
 
     if (error) {
       toast({ title: "Failed to create application", description: error.message, variant: "destructive" });
       setSaving(false);
       return;
     }
+
+    const inserted = newApp;
 
     // Create/link lead via SECURITY DEFINER RPC (bypasses RLS restrictions on
     // the authenticated applicant, who has no staff role).
@@ -1463,8 +1468,8 @@ const ApplyPortal = () => {
       console.error("Failed to upsert lead for application:", leadErr);
     } else if (upsertedLeadId) {
       resolvedLeadId = upsertedLeadId as unknown as string;
-      // Link the application to the lead
-      await supabase.from("applications").update({ lead_id: resolvedLeadId }).eq("id", inserted.id);
+      // Link the application to the lead (anon UPDATE is allowed by policy)
+      await supabase.from("applications").update({ lead_id: resolvedLeadId }).eq("id", appDbId);
     }
 
     if (resolvedLeadId) {
