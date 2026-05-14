@@ -32,7 +32,7 @@ const CRM_BASE = Deno.env.get("CRM_BASE") || "https://uni.nimt.ac.in";
 // destination changes.
 const FINANCE_EMAIL = Deno.env.get("FINANCE_EMAIL") || "finance@nimt.ac.in";
 
-type EventName = "app_submitted" | "app_fee_paid" | "app_approved" | "offer_issued" | "pan_issued" | "payment_received" | "doc_rejected" | "application_rejected" | "admission_issued";
+type EventName = "app_submitted" | "app_fee_paid" | "app_approved" | "offer_issued" | "pan_issued" | "payment_received" | "doc_rejected" | "application_rejected" | "admission_issued" | "token_fee_reminder";
 
 interface NotifyBody {
   event: EventName;
@@ -426,6 +426,34 @@ Deno.serve(async (req) => {
           }),
         });
       }
+      break;
+    }
+
+    // 3b. TOKEN FEE REMINDER — fired by cron at 2d/1d/4h before deadline
+    case "token_fee_reminder": {
+      const offer_id = body.context?.offer_id as string;
+      const milestone = (body.context?.milestone as string) || "soon";
+      if (!offer_id) break;
+
+      const { data: offer } = await db
+        .from("offer_letters")
+        .select("net_fee, token_fee_amount, acceptance_deadline")
+        .eq("id", offer_id).maybeSingle();
+      if (!offer) break;
+
+      const amount = Number(offer.token_fee_amount ?? offer.net_fee ?? 0);
+      const timeLeft =
+        milestone === "4h" ? "just 4 hours"
+        : milestone === "1d" ? "1 day"
+        : milestone === "2d" ? "2 days"
+        : "soon";
+
+      const { token: payToken } = await mintApplyMagicLink();
+
+      await sendWhatsApp("token_fee_reminder",
+        [lead.name || "Student", courseName, amount.toLocaleString("en-IN"), timeLeft],
+        [payToken],
+      );
       break;
     }
 

@@ -8,7 +8,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 interface AttendanceRecord {
   id: string;
@@ -190,6 +190,8 @@ const HrAttendance = () => {
                               </button>
                             </DialogTrigger>
                             <DialogContent className="max-w-md p-0 overflow-hidden max-h-[90vh] flex flex-col">
+                              <DialogTitle className="sr-only">{r.display_name} punch-in photo</DialogTitle>
+                              <DialogDescription className="sr-only">Attendance photo for {r.display_name} on {new Date(r.date).toLocaleDateString("en-IN")}</DialogDescription>
                               <img
                                 src={r.selfie_url}
                                 alt={`${r.display_name} punch-in photo`}

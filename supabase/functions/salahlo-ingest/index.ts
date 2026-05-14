@@ -193,10 +193,6 @@ Deno.serve(async (req) => {
       if (campus) campus_id = campus.id;
     }
 
-    // ── Generate application ID ──────────────────────────────────────────
-      (() => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let s = ""; for (let i = 0; i < 6; i++) s += c[Math.floor(Math.random() * c.length)]; return s; })()
-    }`;
-
     // ── Insert lead ──────────────────────────────────────────────────────
     const { data: lead, error } = await supabase
       .from("leads")
@@ -212,7 +208,6 @@ Deno.serve(async (req) => {
         state:            state || null,
         notes:            notes?.slice(0, 1000) || null,
         stage:            "new_lead",
-        },
       })
       .select("id, name, phone, source, stage")
       .single();

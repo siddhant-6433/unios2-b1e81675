@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import {
-  MapPin, Save, Loader2, Building2, Navigation, Radius,
+  MapPin, Save, Loader2, Building2, Navigation, Radius, CalendarDays, Info,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,10 +20,32 @@ interface CampusGeofence {
   geofence_radius_meters: number | null;
 }
 
+type DeadlineKey = "fee_submission_deadline" | "full_course_payment_deadline";
+
+const DEADLINE_LABELS: Record<DeadlineKey, { title: string; help: string }> = {
+  fee_submission_deadline: {
+    title: "Pending Fee + Scholarship Deadline",
+    help: "Last date for first-year pending fee submission AND availing the 1-year fee conversion (additional scholarship). Shown to applicants on the offer view. Extending this date applies to every active offer in one shot.",
+  },
+  full_course_payment_deadline: {
+    title: "Full-Course Lump-Sum Deadline",
+    help: 'Last date the "Pay all course fees at one go" option is offered on the applicant portal. After this date the BEST VALUE card hides; only the year-1 lump-sum stays.',
+  },
+};
+
 const Settings = () => {
   const { role } = useAuth();
   const { toast } = useToast();
-  const [tab, setTab] = useState<"geofence">("geofence");
+  const [tab, setTab] = useState<"geofence" | "deadlines">("geofence");
+
+  // ── Deadlines state ────────────────────────────────────────────
+  const [deadlines, setDeadlines] = useState<Record<DeadlineKey, string>>({
+    fee_submission_deadline: "",
+    full_course_payment_deadline: "",
+  });
+  const [deadlineEdits, setDeadlineEdits] = useState<Partial<Record<DeadlineKey, string>>>({});
+  const [deadlinesLoading, setDeadlinesLoading] = useState(true);
+  const [savingDeadline, setSavingDeadline] = useState<DeadlineKey | null>(null);
   const [campuses, setCampuses] = useState<CampusGeofence[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
@@ -33,7 +55,39 @@ const Settings = () => {
 
   useEffect(() => {
     fetchCampuses();
+    fetchDeadlines();
   }, []);
+
+  const fetchDeadlines = async () => {
+    setDeadlinesLoading(true);
+    const { data } = await (supabase as any).rpc("get_applicant_deadlines");
+    if (data) {
+      setDeadlines({
+        fee_submission_deadline:      (data.fee_submission_deadline      as string) || "",
+        full_course_payment_deadline: (data.full_course_payment_deadline as string) || "",
+      });
+    }
+    setDeadlinesLoading(false);
+  };
+
+  const saveDeadline = async (key: DeadlineKey) => {
+    const value = deadlineEdits[key];
+    if (!value) return;
+    setSavingDeadline(key);
+    const { error } = await (supabase as any).rpc("set_applicant_deadline", { _key: key, _value: value });
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Saved", description: `${DEADLINE_LABELS[key].title} updated.` });
+      setDeadlines((prev) => ({ ...prev, [key]: value }));
+      setDeadlineEdits((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
+    setSavingDeadline(null);
+  };
 
   const fetchCampuses = async () => {
     setLoading(true);
@@ -103,7 +157,88 @@ const Settings = () => {
         >
           <MapPin className="h-4 w-4" /> Campus Geofence
         </button>
+        <button
+          onClick={() => setTab("deadlines")}
+          className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+            tab === "deadlines" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <CalendarDays className="h-4 w-4" /> Applicant Deadlines
+        </button>
       </div>
+
+      {tab === "deadlines" && (
+        <>
+          {!isSuperAdmin ? (
+            <Card className="border-border/60 shadow-none">
+              <CardContent className="py-12 text-center">
+                <p className="text-sm text-muted-foreground">Only super admins can manage applicant deadlines.</p>
+              </CardContent>
+            </Card>
+          ) : deadlinesLoading ? (
+            <div className="flex h-48 items-center justify-center">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 flex gap-2 items-start">
+                <Info className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
+                <p className="text-xs text-blue-900 leading-relaxed">
+                  These dates apply to <strong>every active offer</strong>. Extend them here in one shot — applicant portals refresh automatically on next load.
+                </p>
+              </div>
+
+              {(Object.keys(DEADLINE_LABELS) as DeadlineKey[]).map((key) => {
+                const meta    = DEADLINE_LABELS[key];
+                const current = deadlines[key];
+                const edited  = deadlineEdits[key];
+                const value   = edited ?? current;
+                const hasChange = edited !== undefined && edited !== current;
+
+                return (
+                  <Card key={key} className="border-border/60 shadow-none">
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
+                          <CalendarDays className="h-5 w-5 text-primary" />
+                        </div>
+                        <div>
+                          <CardTitle className="text-base font-semibold">{meta.title}</CardTitle>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            Current: <strong>{current ? new Date(current).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" }) : "—"}</strong>
+                          </p>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <p className="text-xs text-muted-foreground leading-relaxed">{meta.help}</p>
+                      <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+                        <div className="flex-1">
+                          <label className="block text-xs font-medium text-muted-foreground mb-1.5">New date</label>
+                          <input
+                            type="date"
+                            value={value}
+                            onChange={(e) => setDeadlineEdits((p) => ({ ...p, [key]: e.target.value }))}
+                            className="w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                          />
+                        </div>
+                        <Button
+                          onClick={() => saveDeadline(key)}
+                          disabled={!hasChange || savingDeadline === key}
+                          className="gap-2 shrink-0"
+                        >
+                          {savingDeadline === key ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                          Save
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
 
       {tab === "geofence" && (
         <>

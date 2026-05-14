@@ -1,5 +1,5 @@
 -- Lightweight count RPC for the global action bar's "Reclaim soon" chip.
--- The SLA window is per-source (see source_sla_config from 20260610000000),
+-- The SLA window is per-source (see source_sla_config from 20260610120000),
 -- so the count can't be a single client-side WHERE clause. This RPC does the
 -- join + interval math server-side and returns one integer.
 --
