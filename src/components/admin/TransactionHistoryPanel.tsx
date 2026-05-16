@@ -184,6 +184,43 @@ export default function TransactionHistoryPanel() {
     setReconciling(false);
   };
 
+  // ── Reconcile by UDF1 — fetch all EaseBuzz txns for last N days and match by
+  // application_id stored in udf1. Catches UPI-Intent payments that miss the
+  // S2S webhook AND whose pending_txnid drifted from the actually-settled txn
+  // (the per-app verify-payment path can't recover those).
+  const reconcileByUdf1 = async () => {
+    const days = window.prompt("Look back how many days? (1-30)", "7");
+    if (!days) return;
+    const daysBack = Math.max(1, Math.min(30, parseInt(days, 10) || 7));
+    setReconciling(true);
+    setReconcileResult(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("easebuzz-payment", {
+        body: { action: "reconcile-by-udf1", days_back: daysBack },
+      });
+      // Always dump the full response to the console — the function returns
+      // EaseBuzz's raw response under `attempts[*].sample` so we can diagnose
+      // a 0-row result without trawling edge-function logs.
+      console.log("[reconcile-by-udf1] response:", data);
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error + (data.attempts ? ` — see browser console for raw EaseBuzz response` : ""));
+      const r = data?.reconciled?.length || 0;
+      const s = data?.skipped?.length || 0;
+      const win = data?.window ? `${data.window.start_iso}→${data.window.end_iso}` : "?";
+      setReconcileResult(
+        `EaseBuzz UDF1 sweep · window ${win} · ` +
+        `attempt=${data?.chosen_attempt || "none-succeeded"} · ` +
+        `${data?.eb_txns_in_window ?? 0} txns · ${data?.eb_successful_with_udf1 ?? 0} success+udf1 · ` +
+        `matched: ${r}${s ? ` · skipped: ${s}` : ""} · open DevTools console for raw EB payload`
+      );
+      if (r > 0) fetchAppTxns();
+    } catch (e: any) {
+      setReconcileResult(`Reconcile by UDF1 failed: ${e.message}`);
+    } finally {
+      setReconciling(false);
+    }
+  };
+
   // ── Manual mark-paid by UTR / PhonePe txn ID ────────────────────────────────
   // Last-resort reconciliation for UPI-intent payments where EaseBuzz's API
   // can't return the txn (the popup-based surl callback also doesn't fire
@@ -472,16 +509,33 @@ export default function TransactionHistoryPanel() {
           <RefreshCw className="h-4 w-4" />
         </button>
 
-        {tab === "applications" && appStats.pendingCount > 0 && (
-          <button
-            onClick={reconcilePending}
-            disabled={reconciling}
-            className="flex items-center gap-2 rounded-xl border border-input bg-card px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
-            title="Verify pending payments with EaseBuzz"
-          >
-            {reconciling ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-            Reconcile Pending
-          </button>
+        {tab === "applications" && (
+          <>
+            {appStats.pendingCount > 0 && (
+              <button
+                onClick={reconcilePending}
+                disabled={reconciling}
+                className="flex items-center gap-2 rounded-xl border border-input bg-card px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                title="Verify pending payments with EaseBuzz (per-app, uses pending_txnid)"
+              >
+                {reconciling ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                Reconcile Pending
+              </button>
+            )}
+            {/* Always available on the Applications tab — admin may want to
+                run a UDF1 sweep proactively (e.g., after EaseBuzz dashboard
+                shows new successful UPI txns) even if our pending count
+                hasn't shifted yet. */}
+            <button
+              onClick={reconcileByUdf1}
+              disabled={reconciling}
+              className="flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50"
+              title="Pull EaseBuzz transactions by date range and match to applications via UDF1 — recovers UPI-Intent webhook misses"
+            >
+              {reconciling ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              Reconcile via EaseBuzz (UDF1)
+            </button>
+          </>
         )}
 
         <button
