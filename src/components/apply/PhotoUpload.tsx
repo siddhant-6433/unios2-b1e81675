@@ -7,11 +7,12 @@ import { useToast } from "@/hooks/use-toast";
 
 interface Props {
   applicationId: string;
+  phone: string;
   onUploaded: (url: string) => void;
   existingUrl?: string;
 }
 
-export function PhotoUpload({ applicationId, onUploaded, existingUrl }: Props) {
+export function PhotoUpload({ applicationId, phone, onUploaded, existingUrl }: Props) {
   const { toast } = useToast();
   const [preview, setPreview] = useState<string | null>(existingUrl || null);
   const [processing, setProcessing] = useState(false);
@@ -29,6 +30,19 @@ export function PhotoUpload({ applicationId, onUploaded, existingUrl }: Props) {
     }
   }, [showWebcam]);
 
+  const uploadViaEdgeFn = useCallback(async (blob: Blob, filename: string): Promise<string> => {
+    const form = new FormData();
+    form.append('application_id', applicationId);
+    form.append('phone', phone);
+    form.append('doc_key', 'passport_photo');
+    form.append('file', new File([blob], filename, { type: blob.type || 'image/png' }));
+    const { data: res, error } = await supabase.functions.invoke('apply-portal-upload-doc', { body: form });
+    if (error || (res && res.error)) {
+      throw new Error((res && res.error) || error?.message || 'Upload failed');
+    }
+    return res.path as string;
+  }, [applicationId, phone]);
+
   const processAndUpload = useCallback(async (imageDataUrl: string) => {
     setProcessing(true);
     try {
@@ -39,40 +53,32 @@ export function PhotoUpload({ applicationId, onUploaded, existingUrl }: Props) {
       if (fnError) throw fnError;
 
       const processedUrl = fnData?.processedImage || imageDataUrl;
-      setPreview(processedUrl);
-
       const base64 = processedUrl.split(',')[1];
       if (!base64) throw new Error('Invalid image data');
       const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
       const blob = new Blob([bytes], { type: 'image/png' });
-      const path = `${applicationId}/passport_photo.png`;
-      const { error: uploadErr } = await supabase.storage
-        .from('application-documents')
-        .upload(path, blob, { upsert: true, contentType: 'image/png' });
-      if (uploadErr) throw uploadErr;
-
+      const path = await uploadViaEdgeFn(blob, 'passport_photo.png');
+      setPreview(processedUrl);
       onUploaded(path);
       toast({ title: 'Passport photo uploaded successfully' });
     } catch (err: any) {
       console.error('Photo processing error:', err);
       try {
         const base64 = imageDataUrl.split(',')[1];
-        if (base64) {
-          const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-          const blob = new Blob([bytes], { type: 'image/png' });
-          const path = `${applicationId}/passport_photo.png`;
-          await supabase.storage.from('application-documents').upload(path, blob, { upsert: true, contentType: 'image/png' });
-          onUploaded(path);
-          setPreview(imageDataUrl);
-          toast({ title: 'Photo uploaded (without background processing)', description: 'AI processing unavailable, original photo saved.' });
-        }
-      } catch {
-        toast({ title: 'Upload failed', description: err.message, variant: 'destructive' });
+        if (!base64) throw err;
+        const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+        const blob = new Blob([bytes], { type: 'image/png' });
+        const path = await uploadViaEdgeFn(blob, 'passport_photo.png');
+        setPreview(imageDataUrl);
+        onUploaded(path);
+        toast({ title: 'Photo uploaded (without background processing)', description: 'AI processing unavailable, original photo saved.' });
+      } catch (e: any) {
+        toast({ title: 'Upload failed', description: e?.message || err.message, variant: 'destructive' });
       }
     } finally {
       setProcessing(false);
     }
-  }, [applicationId, onUploaded, toast]);
+  }, [applicationId, phone, onUploaded, toast]);
 
   const handleFileUpload = (file: File) => {
     if (file.size > 2 * 1024 * 1024) {
