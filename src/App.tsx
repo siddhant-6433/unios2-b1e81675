@@ -143,6 +143,10 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
+          {/* All routes are React.lazy() — wrap in Suspense so concurrent
+              renders can pause for the chunk instead of throwing
+              "suspended while responding to synchronous input". */}
+          <Suspense fallback={<div className="flex items-center justify-center min-h-screen text-sm text-muted-foreground">Loading…</div>}>
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/reset-password" element={<ResetPassword />} />
@@ -282,6 +286,7 @@ const App = () => (
               }
             />
           </Routes>
+          </Suspense>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>

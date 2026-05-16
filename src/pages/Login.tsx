@@ -4,7 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Mail, MessageCircle, Loader2, ShieldCheck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { PhoneInput } from "@/components/ui/phone-input";
+import { PhoneInput, parsePhone } from "@/components/ui/phone-input";
+import { COUNTRIES } from "@/components/apply/countries";
 import uniosLogo from "@/assets/unios-logo.png";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 
@@ -117,7 +118,28 @@ const Login = () => {
     }
   };
 
-  const handleWhatsAppSendOtp = (e: React.FormEvent) => { e.preventDefault(); if (phone.trim()) sendWhatsAppOtp(); };
+  // For +91 the WABA only accepts 10-digit local numbers; reject anything
+  // shorter or longer before invoking the OTP function. Same rule per
+  // country's `digits` so other ISDs aren't false-positive blocked.
+  const phoneDigitCount = (() => {
+    const { countryCode, number } = parsePhone(phone);
+    const country = COUNTRIES.find(c => c.code === countryCode);
+    return { actual: number.replace(/\D/g, "").length, expected: country?.digits ?? 10 };
+  })();
+  const phoneValid = phoneDigitCount.actual === phoneDigitCount.expected;
+
+  const handleWhatsAppSendOtp = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!phoneValid) {
+      toast({
+        title: "Invalid number",
+        description: `Enter exactly ${phoneDigitCount.expected} digits for the selected country code.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    sendWhatsAppOtp();
+  };
 
   const handleWhatsAppVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -412,7 +434,7 @@ const Login = () => {
                 </p>
                 <button
                   type="submit"
-                  disabled={submitting || !phone.trim()}
+                  disabled={submitting || !phoneValid}
                   className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Send WhatsApp OTP"}

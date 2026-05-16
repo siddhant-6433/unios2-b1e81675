@@ -136,20 +136,73 @@ Deno.serve(async (req) => {
   };
 
   // ── Channel callers (fire-and-forget, log on caller side) ──────────
-  const sendWhatsApp = async (template_key: string, params: string[], button_urls?: string[]) => {
-    if (!lead.phone) return;
+  // `phoneOverride` lets the caller mirror a template to staff phones
+  // (counsellor / leader / super_admin) — defaults to the applicant.
+  const sendWhatsApp = async (
+    template_key: string,
+    params: string[],
+    button_urls?: string[],
+    phoneOverride?: string,
+  ) => {
+    const phone = phoneOverride ?? lead.phone;
+    if (!phone) return;
     try {
       await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}` },
         body: JSON.stringify({
-          template_key, phone: lead.phone, lead_id: lead.id, params,
+          template_key, phone, lead_id: lead.id, params,
           ...(button_urls?.length ? { button_urls } : {}),
         }),
       });
     } catch (e) {
-      console.error(`[notify-event] whatsapp ${template_key} failed:`, e);
+      console.error(`[notify-event] whatsapp ${template_key}→${phone} failed:`, e);
     }
+  };
+
+  // Mirror image of resolveEmails — pulls phone numbers for the same
+  // counsellor / team-leader / super-admin set. Used when a payment
+  // notification needs to be cc'd via WhatsApp as well as email.
+  const resolveStaffPhones = async (which: { counsellor: boolean; leader: boolean; super_admin: boolean }): Promise<string[]> => {
+    const phones = new Set<string>();
+    let counsellorUserId: string | null = null;
+
+    if ((which.counsellor || which.leader) && lead.counsellor_id) {
+      const { data } = await db
+        .from("profiles")
+        .select("phone, user_id")
+        .eq("id", lead.counsellor_id)
+        .maybeSingle();
+      if (which.counsellor && data?.phone) phones.add(String(data.phone));
+      counsellorUserId = (data?.user_id as string) ?? null;
+    }
+
+    if (which.leader && counsellorUserId) {
+      const { data: tm } = await db
+        .from("team_members")
+        .select("team_id")
+        .eq("user_id", counsellorUserId);
+      const teamIds = (tm || []).map((r: any) => r.team_id);
+      if (teamIds.length) {
+        const { data: teams } = await db.from("teams").select("leader_id").in("id", teamIds);
+        const leaderProfileIds = (teams || []).map((t: any) => t.leader_id).filter(Boolean);
+        if (leaderProfileIds.length) {
+          const { data: leaders } = await db.from("profiles").select("phone").in("id", leaderProfileIds);
+          (leaders || []).forEach((l: any) => l.phone && phones.add(String(l.phone)));
+        }
+      }
+    }
+
+    if (which.super_admin) {
+      const { data: roles } = await db.from("user_roles").select("user_id").eq("role", "super_admin");
+      const userIds = (roles || []).map((r: any) => r.user_id);
+      if (userIds.length) {
+        const { data: profs } = await db.from("profiles").select("phone").in("user_id", userIds);
+        (profs || []).forEach((p: any) => p.phone && phones.add(String(p.phone)));
+      }
+    }
+
+    return [...phones];
   };
 
   const sendEmail = async (
@@ -499,15 +552,27 @@ Deno.serve(async (req) => {
         registration_fee: "Registration Fee",
         other:            "Other Charges",
       };
-      await sendWhatsApp("payment_receipt",
-        [
-          lead.name || "Student",
-          TYPE_LABEL[pmt.type as string] || pmt.type || "Fee",
-          String(pmt.amount),
-          receiptNo,
-          receiptUrl,
-        ],
-      );
+      const waParams = [
+        lead.name || "Student",
+        TYPE_LABEL[pmt.type as string] || pmt.type || "Fee",
+        String(pmt.amount),
+        receiptNo,
+        receiptUrl,
+      ];
+      // Applicant — primary recipient.
+      await sendWhatsApp("payment_receipt", waParams);
+
+      // Mirror to staff phones (counsellor + team leader + super_admin) so
+      // the same payment notice that reaches the candidate also lands in
+      // their WhatsApp. Sent serially with a brief gap — Meta rate-limits
+      // template sends and a burst from one template_key can throttle.
+      const staffPhones = await resolveStaffPhones({ counsellor: true, leader: true, super_admin: true });
+      for (const p of staffPhones) {
+        // Skip duplicate sends if a staff member shares the lead's phone.
+        if (lead.phone && p.replace(/\D/g, "") === lead.phone.replace(/\D/g, "")) continue;
+        await sendWhatsApp("payment_receipt", waParams, undefined, p);
+        await new Promise(r => setTimeout(r, 300));
+      }
 
       const vars = {
         student_name: lead.name || "Student",
@@ -522,8 +587,19 @@ Deno.serve(async (req) => {
 
       const attach = haveReceipt ? [{ filename: `Receipt-${receiptNo || payment_id}.pdf`, url: receiptUrl }] : [];
 
-      // Finance mailbox — receipt PDF attached.
-      await sendEmail("payment-received-internal", FINANCE_EMAIL, vars, { attachments: attach });
+      // Internal stakeholders — super_admin (primary owner), counsellor, team
+      // leader. Finance CC'd on every send so they have one consolidated trail.
+      // Matches the app_fee_paid recipient set so token/registration/other
+      // receipts don't go to a smaller audience than application fees.
+      const recipients = await resolveEmails({ counsellor: true, leader: true, super_admin: true });
+      for (const e of recipients) {
+        await sendEmail("payment-received-internal", e, vars, { attachments: attach, cc: FINANCE_EMAIL });
+        await new Promise(r => setTimeout(r, 300));
+      }
+      // No internal recipients resolved → still notify finance so the receipt isn't lost.
+      if (recipients.length === 0) {
+        await sendEmail("payment-received-internal", FINANCE_EMAIL, vars, { attachments: attach });
+      }
 
       // Applicant — PDF attached so they always have it even if the inline link is stale.
       if (lead.email) await sendEmail("payment-received-internal", lead.email, vars, { attachments: attach });
