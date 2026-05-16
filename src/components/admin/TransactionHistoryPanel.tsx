@@ -17,12 +17,19 @@ interface AppTransaction {
   fee_amount: number;
   payment_status: string;
   payment_ref: string | null;
+  fee_receipt_url?: string | null;
   updated_at: string;
   created_at: string;
   flags: string[];
   program_category: string | null;
   applicant_type: string | null;
   leads: { admission_no: string | null; pre_admission_no: string | null; campus_id: string | null } | null;
+  // For non-application_fee lead_payments rolled into the Application/Token Fee
+  // view, the source is "lead_payment"; for applications-table rows it's "application".
+  fee_type?: "application_fee" | "token_fee" | "registration_fee" | "other";
+  source?: "application" | "lead_payment";
+  // lead_payment id (only when source='lead_payment')
+  lead_payment_id?: string;
 }
 
 interface StudentPayment {
@@ -120,40 +127,150 @@ export default function TransactionHistoryPanel() {
 
   // ── Fetchers ───────────────────────────────────────────────────────────────
 
+  // The Application / Token Fee tab is the "pre-admission" payment view:
+  //   - applications.payment_status (application_fee) for leads whose
+  //     admission_no is still NULL
+  //   - lead_payments of type token_fee / registration_fee / other for the
+  //     same pre-admission cohort
+  // Once a lead's admission_no is generated the corresponding rows
+  // graduate to the Student Fee tab (so finance has one canonical
+  // before/after view per candidate).
   const fetchAppTxns = async () => {
     setLoadingApp(true);
     setErrorApp(null);
-    const { data, error } = await (supabase as any)
-      .from("applications")
-      .select(`
-        application_id, full_name, phone, email,
-        fee_amount, payment_status, payment_ref, fee_receipt_url,
-        updated_at, created_at,
-        flags, program_category, applicant_type,
-        leads ( admission_no, pre_admission_no, campus_id )
-      `)
-      .order("updated_at", { ascending: false })
-      .limit(1000);
-    if (error) setErrorApp(error.message);
-    else setAppTxns(data || []);
+    const [appsRes, lpRes] = await Promise.all([
+      (supabase as any)
+        .from("applications")
+        .select(`
+          application_id, full_name, phone, email,
+          fee_amount, payment_status, payment_ref, fee_receipt_url,
+          updated_at, created_at,
+          flags, program_category, applicant_type, lead_id,
+          leads ( admission_no, pre_admission_no, campus_id )
+        `)
+        .order("updated_at", { ascending: false })
+        .limit(1000),
+      (supabase as any)
+        .from("lead_payments")
+        .select(`
+          id, lead_id, type, amount, status, transaction_ref, receipt_no,
+          payment_mode, payment_date, created_at, notes, receipt_url,
+          leads ( name, phone, email, admission_no, pre_admission_no, campus_id )
+        `)
+        .in("type", ["token_fee", "registration_fee", "other"])
+        .order("created_at", { ascending: false })
+        .limit(1000),
+    ]);
+
+    if (appsRes.error) { setErrorApp(appsRes.error.message); setLoadingApp(false); return; }
+    if (lpRes.error)   { setErrorApp(lpRes.error.message);   setLoadingApp(false); return; }
+
+    // Filter applications: only keep pre-admission (no admission_no on lead).
+    const apps: AppTransaction[] = (appsRes.data || [])
+      .filter((a: any) => !a.leads?.admission_no)
+      .map((a: any) => ({ ...a, fee_type: "application_fee" as const, source: "application" as const }));
+
+    // Filter lead_payments: only pre-admission, normalise to AppTransaction shape.
+    const lps: AppTransaction[] = (lpRes.data || [])
+      .filter((lp: any) => !lp.leads?.admission_no)
+      .map((lp: any) => ({
+        application_id: lp.receipt_no || `LP-${String(lp.id).slice(0, 8)}`,
+        full_name:      lp.leads?.name || "—",
+        phone:          lp.leads?.phone || "",
+        email:          lp.leads?.email || null,
+        fee_amount:     Number(lp.amount || 0),
+        payment_status: lp.status === "confirmed" ? "paid" : (lp.status || "pending"),
+        payment_ref:    lp.transaction_ref,
+        // Pre-generated receipt PDF for the lead_payment, populated by
+        // generate-payment-receipt when the payment confirmed. Shown by the
+        // Receipt action.
+        fee_receipt_url: lp.receipt_url || null,
+        updated_at:     lp.payment_date || lp.created_at,
+        created_at:     lp.created_at,
+        flags:          [],
+        program_category: null,
+        applicant_type:   null,
+        leads:          lp.leads ? {
+          admission_no:      lp.leads.admission_no ?? null,
+          pre_admission_no:  lp.leads.pre_admission_no ?? null,
+          campus_id:         lp.leads.campus_id ?? null,
+        } : null,
+        fee_type:       lp.type,
+        source:         "lead_payment",
+        lead_payment_id: lp.id,
+      } as AppTransaction));
+
+    const merged = [...apps, ...lps].sort((a, b) =>
+      (b.updated_at || "").localeCompare(a.updated_at || ""),
+    );
+    setAppTxns(merged);
     setLoadingApp(false);
   };
 
+  // Student Fee = post-admission payments. Sources:
+  //   - payments table (current student-fee ledger payments)
+  //   - lead_payments rows where the lead has admission_no (a candidate's
+  //     pre-AN payments stay visible against them after AN issuance)
   const fetchStudentPmts = async () => {
     setLoadingStudent(true);
     setErrorStudent(null);
-    const { data, error } = await (supabase as any)
-      .from("payments")
-      .select(`
-        id, amount, payment_mode, transaction_ref,
-        receipt_no, paid_at, notes,
-        students ( name, admission_no, pre_admission_no, phone, email, campus_id ),
-        profiles!recorded_by ( display_name )
-      `)
-      .order("paid_at", { ascending: false })
-      .limit(1000);
-    if (error) setErrorStudent(error.message);
-    else setStudentPmts(data || []);
+    const [paymentsRes, lpRes] = await Promise.all([
+      (supabase as any)
+        .from("payments")
+        .select(`
+          id, amount, payment_mode, transaction_ref,
+          receipt_no, paid_at, notes,
+          students ( name, admission_no, pre_admission_no, phone, email, campus_id ),
+          profiles!recorded_by ( display_name )
+        `)
+        .order("paid_at", { ascending: false })
+        .limit(1000),
+      (supabase as any)
+        .from("lead_payments")
+        .select(`
+          id, lead_id, type, amount, payment_mode, transaction_ref, receipt_no,
+          payment_date, created_at, notes, status,
+          leads ( name, admission_no, pre_admission_no, phone, email, campus_id )
+        `)
+        .eq("status", "confirmed")
+        .order("created_at", { ascending: false })
+        .limit(1000),
+    ]);
+
+    if (paymentsRes.error) { setErrorStudent(paymentsRes.error.message); setLoadingStudent(false); return; }
+    if (lpRes.error)       { setErrorStudent(lpRes.error.message);       setLoadingStudent(false); return; }
+
+    // Native student-fee payments. Always shown.
+    const native: StudentPayment[] = (paymentsRes.data || []) as any;
+
+    // lead_payments graduate into student-fee view once the lead has an
+    // admission_no. Tag with type so the row label distinguishes them from
+    // ledger-side payments (which all come through students.* path).
+    const promoted: StudentPayment[] = (lpRes.data || [])
+      .filter((lp: any) => !!lp.leads?.admission_no)
+      .map((lp: any) => ({
+        id: `lp-${lp.id}`,
+        amount: Number(lp.amount || 0),
+        payment_mode: lp.payment_mode || "gateway",
+        transaction_ref: lp.transaction_ref,
+        receipt_no: lp.receipt_no,
+        paid_at: lp.payment_date || lp.created_at,
+        notes: lp.notes ? `[${lp.type}] ${lp.notes}` : `[${lp.type}]`,
+        students: lp.leads ? {
+          name: lp.leads.name || "",
+          admission_no:     lp.leads.admission_no ?? null,
+          pre_admission_no: lp.leads.pre_admission_no ?? null,
+          phone:            lp.leads.phone ?? null,
+          email:            lp.leads.email ?? null,
+          campus_id:        lp.leads.campus_id ?? null,
+        } : null,
+        profiles: null,
+      }));
+
+    const merged = [...native, ...promoted].sort((a, b) =>
+      (b.paid_at || "").localeCompare(a.paid_at || ""),
+    );
+    setStudentPmts(merged);
     setLoadingStudent(false);
   };
 
@@ -169,7 +286,10 @@ export default function TransactionHistoryPanel() {
     setReconcileResult(null);
     let updated = 0;
     let skipped = 0;
-    const pending = appTxns.filter((t) => t.payment_status === "pending" && t.fee_amount > 0);
+    // Reconcile only applies to applications-table rows. lead_payment rows
+    // shown in this view come from the offer flow and have their own
+    // confirm path; we mustn't call verify-payment with their synthetic ID.
+    const pending = appTxns.filter((t) => t.payment_status === "pending" && t.fee_amount > 0 && t.source !== "lead_payment");
     for (const txn of pending) {
       try {
         const { data } = await supabase.functions.invoke("easebuzz-payment", {
@@ -437,7 +557,7 @@ export default function TransactionHistoryPanel() {
             }`}
           >
             {t === "applications" ? <CreditCard className="h-4 w-4" /> : <Banknote className="h-4 w-4" />}
-            {t === "applications" ? "Application Fees" : "Student Payments"}
+            {t === "applications" ? "Application / Token Fee" : "Student Payments"}
           </button>
         ))}
       </div>
@@ -577,12 +697,12 @@ export default function TransactionHistoryPanel() {
                   <tr className="border-b border-border bg-muted/30 text-left">
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Date</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Receipt / App ID</th>
+                    <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Type</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground">Applicant</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground">Phone</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground text-right whitespace-nowrap">Amount</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground">Status</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Payment Ref</th>
-                    <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Admission No</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Pre-Admission No</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Student Type</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Receipt</th>
@@ -597,6 +717,16 @@ export default function TransactionHistoryPanel() {
                       <td className="px-4 py-3">
                         <span className="font-mono text-xs bg-muted px-2 py-0.5 rounded-md text-foreground">
                           {t.application_id}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize ${
+                          t.fee_type === "application_fee" ? "bg-blue-50 text-blue-700" :
+                          t.fee_type === "token_fee"       ? "bg-purple-50 text-purple-700" :
+                          t.fee_type === "registration_fee"? "bg-indigo-50 text-indigo-700" :
+                                                             "bg-gray-100 text-gray-700"
+                        }`}>
+                          {(t.fee_type || "application_fee").replace(/_/g, " ")}
                         </span>
                       </td>
                       <td className="px-4 py-3">
@@ -617,11 +747,6 @@ export default function TransactionHistoryPanel() {
                       <td className="px-4 py-3">
                         {t.payment_ref
                           ? <span className="font-mono text-xs text-muted-foreground">{t.payment_ref}</span>
-                          : <span className="text-muted-foreground">—</span>}
-                      </td>
-                      <td className="px-4 py-3">
-                        {t.leads?.admission_no
-                          ? <span className="font-mono text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md">{t.leads.admission_no}</span>
                           : <span className="text-muted-foreground">—</span>}
                       </td>
                       <td className="px-4 py-3">
@@ -655,23 +780,41 @@ export default function TransactionHistoryPanel() {
                       </td>
                       <td className="px-4 py-3">
                         {t.payment_status === "paid" && t.fee_amount > 0 ? (
-                          <button
-                            onClick={() => setReceipt({
-                              type: "application_fee",
-                              application_id: t.application_id,
-                              applicant_name: t.full_name,
-                              phone: t.phone,
-                              email: t.email || undefined,
-                              amount: t.fee_amount,
-                              payment_ref: t.payment_ref,
-                              payment_date: t.updated_at,
-                              receipt_url: t.fee_receipt_url || null,
-                            })}
-                            className="flex items-center gap-1.5 rounded-lg border border-primary/30 px-2.5 py-1 text-[11px] font-medium text-primary hover:bg-primary/5 transition-colors"
-                          >
-                            <Receipt className="h-3.5 w-3.5" /> Receipt
-                          </button>
-                        ) : t.payment_status === "pending" && t.fee_amount > 0 ? (
+                          // lead_payment rows: link directly to the server-side
+                          // PDF (generated by generate-payment-receipt). Falls
+                          // back to the rendered application_fee dialog if URL
+                          // isn't on file yet.
+                          t.source === "lead_payment" && t.fee_receipt_url ? (
+                            <a
+                              href={t.fee_receipt_url} target="_blank" rel="noopener"
+                              className="flex items-center gap-1.5 rounded-lg border border-primary/30 px-2.5 py-1 text-[11px] font-medium text-primary hover:bg-primary/5 transition-colors"
+                            >
+                              <Receipt className="h-3.5 w-3.5" /> Receipt
+                            </a>
+                          ) : (
+                            <button
+                              onClick={() => setReceipt({
+                                type: "application_fee",
+                                application_id: t.application_id,
+                                applicant_name: t.full_name,
+                                phone: t.phone,
+                                email: t.email || undefined,
+                                amount: t.fee_amount,
+                                payment_ref: t.payment_ref,
+                                payment_date: t.updated_at,
+                                receipt_url: t.fee_receipt_url || null,
+                              })}
+                              className="flex items-center gap-1.5 rounded-lg border border-primary/30 px-2.5 py-1 text-[11px] font-medium text-primary hover:bg-primary/5 transition-colors"
+                            >
+                              <Receipt className="h-3.5 w-3.5" /> Receipt
+                            </button>
+                          )
+                        ) : t.payment_status === "pending" && t.fee_amount > 0 && t.source !== "lead_payment" ? (
+                          // Mark-Paid-by-UTR only makes sense for applications-table
+                          // rows (their reconcile chain flips payment_status + writes
+                          // a mirror to lead_payments). Lead_payments are intent rows
+                          // owned by the offer flow and shouldn't be force-confirmed
+                          // through this admin path.
                           <button
                             onClick={() => markPaidByUtr(t.application_id)}
                             disabled={markingPaidId === t.application_id}
