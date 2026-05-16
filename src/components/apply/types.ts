@@ -117,7 +117,7 @@ export const DEFAULT_APPLICATION: Omit<ApplicationData, 'id' | 'application_id'>
   phone: '',
   email: '',
   whatsapp_verified: false,
-  address: {},
+  address: { country: 'India' },
   father: {},
   mother: {},
   guardian: {},
