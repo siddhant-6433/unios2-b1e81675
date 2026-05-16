@@ -63,7 +63,12 @@ export function computeStages(p: LifecycleInput): Stage[] {
   if (!a) return [];
 
   const isSubmitted = a.status !== "draft";
-  const isFeePaid = (a.payment_status === "paid") || p.appFeePaid > 0;
+  // Use ONLY this application's own payment_status — never the lead-level
+  // appFeePaid aggregate. Falling back to "any paid app for the lead" made
+  // every sibling draft visually light up "Fee Paid" when the lead had any
+  // other paid application (e.g., Naaz Bano's abandoned XS8L draft showing
+  // paid because XQUX was the real paid app).
+  const isFeePaid = a.payment_status === "paid";
   const allDocsReviewed = p.docs.total === 0 || p.docs.pending === 0;
   const isApproved = a.status === "approved";
   const isRejectedApp = a.status === "rejected";
