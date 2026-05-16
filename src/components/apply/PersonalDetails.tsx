@@ -84,6 +84,15 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
 
   const [showErrors, setShowErrors] = useState(false);
 
+  // The Country select shows "India" as a visual fallback, but a fallback in the
+  // displayed value doesn't write to state — so users who never touch the dropdown
+  // submit with country undefined and trip "Country is required". Commit the default.
+  useEffect(() => {
+    if (!readOnly && !address.country) {
+      onChange({ address: { ...address, country: 'India' } });
+    }
+  }, [address.country, readOnly]);
+
   // Validation predicates — these mirror the on-screen `*` markers.
   const missing = {
     full_name: !data.full_name?.trim(),

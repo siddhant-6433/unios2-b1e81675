@@ -236,6 +236,10 @@ async function fireAutomation(triggerType: string, leadId: string, extra: Record
 
 // ── Post-call reconciliation helpers ─────────────────────────────────
 
+function xmlEsc(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
 /** Extract a visit date from the AI transcript lines. Returns YYYY-MM-DD or null. */
 function extractVisitDateFromTranscript(aiLines: string[]): string | null {
   const text = aiLines.join(" ").toLowerCase();
@@ -2333,7 +2337,7 @@ Deno.serve({ port: PORT }, async (req) => {
     const wsUrl = `${wsProtocol}://${host}/ws/${callId}`;
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Speak voice="WOMAN">Your counsellor is currently unavailable. Let me connect you with our admissions assistant.</Speak>
+  <Speak voice="Polly.Kajal" language="en-IN">Your counsellor is currently unavailable. Let me connect you with our admissions assistant.</Speak>
   <Stream streamTimeout="600" keepCallAlive="true" bidirectional="true" contentType="audio/x-mulaw;rate=8000">${wsUrl}</Stream>
 </Response>`;
 
@@ -2679,9 +2683,9 @@ Deno.serve({ port: PORT }, async (req) => {
       || "";
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Speak voice="Polly.Kajal" language="en-IN">Connecting you to ${bridge.name} now. Please hold.</Speak>
+  <Speak voice="Polly.Kajal" language="en-IN">Connecting you to ${xmlEsc(bridge.name)} now. Please hold.</Speak>
   <Dial timeout="30" callerId="${callerId}">
-    <Number>${bridge.phone}</Number>
+    <Number>${xmlEsc(bridge.phone)}</Number>
   </Dial>
 </Response>`;
     return new Response(xml, { headers: { "Content-Type": "application/xml" } });
