@@ -201,6 +201,7 @@ export default function Applications() {
       const leadAnMap: Record<string, string | null> = {};
       const leadOfferMap: Record<string, boolean> = {};
       const appFeePaidMap: Record<string, number> = {};
+      const leadTokenFeePaidSet: Set<string> = new Set();
       const appDocCountsMap: Record<string, { total: number; verified: number; rejected: number; pending: number }> = {};
       if (leadIds.length > 0) {
         // Offer-letter existence — one row per lead is enough to flag.
@@ -209,14 +210,23 @@ export default function Applications() {
           .in("lead_id", leadIds);
         (offers || []).forEach((o: any) => { leadOfferMap[o.lead_id] = true; });
 
-        // Confirmed application_fee payments — sum per lead.
+        // Confirmed application_fee + token_fee payments — track per lead.
+        // We need TOKEN-fee separately so the "Token Paid" stat reflects
+        // anyone who actually paid the token fee, not just leads whose
+        // current `stage` happens to equal 'token_paid' (which gets
+        // overwritten as soon as they progress to offer_sent / pre_admitted
+        // / admitted, leaving most real payers uncounted).
         const { data: pmts } = await supabase.from("lead_payments")
-          .select("lead_id, amount")
+          .select("lead_id, amount, type")
           .in("lead_id", leadIds)
-          .eq("type", "application_fee")
+          .in("type", ["application_fee", "token_fee"])
           .eq("status", "confirmed");
         (pmts || []).forEach((p: any) => {
-          appFeePaidMap[p.lead_id] = (appFeePaidMap[p.lead_id] || 0) + Number(p.amount || 0);
+          if (p.type === "application_fee") {
+            appFeePaidMap[p.lead_id] = (appFeePaidMap[p.lead_id] || 0) + Number(p.amount || 0);
+          } else if (p.type === "token_fee") {
+            leadTokenFeePaidSet.add(p.lead_id);
+          }
         });
 
         for (let i = 0; i < leadIds.length; i += 50) {
@@ -274,6 +284,7 @@ export default function Applications() {
         lead_admission_no: leadAnMap[a.lead_id] || null,
         has_offer: !!leadOfferMap[a.lead_id],
         app_fee_paid: appFeePaidMap[a.lead_id] || 0,
+        has_token_fee_paid: leadTokenFeePaidSet.has(a.lead_id),
         doc_counts: appDocCountsMap[a.application_id] || { total: 0, verified: 0, rejected: 0, pending: 0 },
       }));
 
@@ -295,7 +306,14 @@ export default function Applications() {
   const filtered = apps.filter(a => {
     if (paymentFilter !== "all" && a.payment_status !== paymentFilter) return false;
     if (statusFilter !== "all" && a.status !== statusFilter) return false;
-    if (stageFilter && a.lead_stage !== stageFilter) return false;
+    // The "token_paid" tile filters on the lead_payments-derived flag so it
+    // includes everyone who paid token fee, not just those currently AT the
+    // token_paid stage. Other stage tiles still match on the lead's stage.
+    if (stageFilter === "token_paid") {
+      if (!a.has_token_fee_paid) return false;
+    } else if (stageFilter && a.lead_stage !== stageFilter) {
+      return false;
+    }
     if (!search) return true;
     const q = search.toLowerCase();
     return (
@@ -362,7 +380,10 @@ export default function Applications() {
     submitted: apps.filter(a => a.status === "submitted").length,
     approved_pending_offer: apps.filter(a => a.lead_stage === "application_approved").length,
     offer_sent: apps.filter(a => a.lead_stage === "offer_sent").length,
-    token_paid: apps.filter(a => a.lead_stage === "token_paid").length,
+    // Count anyone with a confirmed token-fee lead_payment, regardless of
+    // current lead.stage. Deduped by lead_id so a candidate with two
+    // applications doesn't double-count.
+    token_paid: new Set(apps.filter(a => a.has_token_fee_paid && a.lead_id).map(a => a.lead_id)).size,
     pre_admitted: apps.filter(a => a.lead_stage === "pre_admitted").length,
     admitted: apps.filter(a => a.lead_stage === "admitted").length,
   };
