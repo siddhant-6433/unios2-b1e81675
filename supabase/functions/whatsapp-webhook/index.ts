@@ -5,6 +5,40 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+type WhatsAppRoute = "default" | "otp" | "call" | "visit" | "bulk" | "reply";
+
+function routeConfig(route: WhatsAppRoute) {
+  const token =
+    (route === "otp" ? Deno.env.get("WHATSAPP_OTP_API_TOKEN") : null) ||
+    (route === "call" ? Deno.env.get("WHATSAPP_CALL_API_TOKEN") : null) ||
+    (route === "visit" ? Deno.env.get("WHATSAPP_VISIT_API_TOKEN") : null) ||
+    (route === "bulk" ? Deno.env.get("WHATSAPP_BULK_API_TOKEN") : null) ||
+    (route === "reply" ? Deno.env.get("WHATSAPP_REPLY_API_TOKEN") : null) ||
+    Deno.env.get("WHATSAPP_API_TOKEN");
+
+  const phoneNumberId =
+    (route === "otp" ? Deno.env.get("WHATSAPP_OTP_PHONE_NUMBER_ID") : null) ||
+    (route === "call" ? Deno.env.get("WHATSAPP_CALL_PHONE_NUMBER_ID") : null) ||
+    (route === "visit" ? Deno.env.get("WHATSAPP_VISIT_PHONE_NUMBER_ID") : null) ||
+    (route === "bulk" ? Deno.env.get("WHATSAPP_BULK_PHONE_NUMBER_ID") : null) ||
+    (route === "reply" ? Deno.env.get("WHATSAPP_REPLY_PHONE_NUMBER_ID") : null) ||
+    Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+
+  return { route, token, phoneNumberId };
+}
+
+function getWhatsAppConfigForPhone(requestedPhoneNumberId: string | null) {
+  const configs = [
+    routeConfig("default"),
+    routeConfig("otp"),
+    routeConfig("call"),
+    routeConfig("visit"),
+    routeConfig("bulk"),
+    routeConfig("reply"),
+  ];
+  return configs.find((config) => requestedPhoneNumberId && config.phoneNumberId === requestedPhoneNumberId) || routeConfig("reply");
+}
+
 // Auto-reply rules: keyword patterns → response
 // Matched top-to-bottom; first match wins. Patterns are case-insensitive.
 // Only keep exact greeting and menu-number responses.
@@ -333,8 +367,8 @@ Deno.serve(async (req) => {
                       .eq("id", fb.id);
 
                     // Send thank-you reply
-                    const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
-                    const pnId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+                    const { token: waToken, phoneNumberId: pnId } = getWhatsAppConfigForPhone(businessPnId);
+                    if (!waToken || !pnId) throw new Error("WhatsApp reply route is not configured");
                     const waPhone = phone.replace(/[^0-9]/g, "");
                     const thankMsg = rating >= 4
                       ? "Thank you for the wonderful feedback! We're glad you had a great experience. 😊"
@@ -370,6 +404,7 @@ Deno.serve(async (req) => {
                           content: thankMsg,
                           status: "sent",
                           is_read: true,
+                          business_phone_number_id: pnId,
                         });
                       }
                     } catch (e) {
@@ -409,8 +444,8 @@ Deno.serve(async (req) => {
             }
             // Send DNC acknowledgment
             try {
-              const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
-              const pnId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+              const { token: waToken, phoneNumberId: pnId } = getWhatsAppConfigForPhone(businessPnId);
+              if (!waToken || !pnId) throw new Error("WhatsApp reply route is not configured");
               const dncMsg = "You have been unsubscribed and added to our Do Not Contact list. We will not reach out to you again. If this was a mistake, please reply \"START\" to re-subscribe.";
               const dncRes = await fetch(`https://graph.facebook.com/v21.0/${pnId}/messages`, {
                 method: "POST",
@@ -424,6 +459,7 @@ Deno.serve(async (req) => {
                   wa_message_id: dncResult?.messages?.[0]?.id || null,
                   direction: "outbound", phone,
                   message_type: "text", content: dncMsg, status: "sent", is_read: true,
+                  business_phone_number_id: pnId,
                 });
               }
             } catch (e) { console.error("DNC ack error:", e); }
@@ -446,8 +482,8 @@ Deno.serve(async (req) => {
             if (matched) {
               keywordMatched = true;
               try {
-                const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
-                const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+                const { token: waToken, phoneNumberId } = getWhatsAppConfigForPhone(businessPnId);
+                if (!waToken || !phoneNumberId) throw new Error("WhatsApp reply route is not configured");
                 const waPhone = phone.replace(/[^0-9]/g, "");
 
                 const autoRes = await fetch(
@@ -472,6 +508,7 @@ Deno.serve(async (req) => {
                     direction: "outbound",
                     phone, message_type: "text", content: matched.reply, status: "sent", is_read: true,
                     template_key: "auto_reply",
+                    business_phone_number_id: phoneNumberId,
                   });
                   const trimmedContent = content.trim();
                   if (lead?.id && lead?.counsellor_id && (trimmedContent === "3" || trimmedContent === "5")) {
@@ -538,6 +575,7 @@ Deno.serve(async (req) => {
                   lead_stage: lead?.stage || null,
                   course_interest: null,
                   recent_messages: (recentMsgs || []).reverse(),
+                  business_phone_number_id: businessPnId,
                 }),
               });
             } catch (aiErr) {
@@ -552,9 +590,14 @@ Deno.serve(async (req) => {
           const waMessageId = status.id;
           const newStatus = status.status; // sent, delivered, read, failed
           if (waMessageId && newStatus) {
+            const updates: Record<string, unknown> = {
+              status: newStatus,
+              ...(businessPnId ? { business_phone_number_id: businessPnId } : {}),
+              ...(status.errors ? { status_error: status.errors } : {}),
+            };
             await admin
               .from("whatsapp_messages")
-              .update({ status: newStatus })
+              .update(updates)
               .eq("wa_message_id", waMessageId);
           }
         }

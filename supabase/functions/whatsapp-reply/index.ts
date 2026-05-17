@@ -6,22 +6,50 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+type WhatsAppRoute = "default" | "otp" | "call" | "visit" | "bulk" | "reply";
+
+function routeConfig(route: WhatsAppRoute) {
+  const token =
+    (route === "otp" ? Deno.env.get("WHATSAPP_OTP_API_TOKEN") : null) ||
+    (route === "call" ? Deno.env.get("WHATSAPP_CALL_API_TOKEN") : null) ||
+    (route === "visit" ? Deno.env.get("WHATSAPP_VISIT_API_TOKEN") : null) ||
+    (route === "bulk" ? Deno.env.get("WHATSAPP_BULK_API_TOKEN") : null) ||
+    (route === "reply" ? Deno.env.get("WHATSAPP_REPLY_API_TOKEN") : null) ||
+    Deno.env.get("WHATSAPP_API_TOKEN");
+
+  const phoneNumberId =
+    (route === "otp" ? Deno.env.get("WHATSAPP_OTP_PHONE_NUMBER_ID") : null) ||
+    (route === "call" ? Deno.env.get("WHATSAPP_CALL_PHONE_NUMBER_ID") : null) ||
+    (route === "visit" ? Deno.env.get("WHATSAPP_VISIT_PHONE_NUMBER_ID") : null) ||
+    (route === "bulk" ? Deno.env.get("WHATSAPP_BULK_PHONE_NUMBER_ID") : null) ||
+    (route === "reply" ? Deno.env.get("WHATSAPP_REPLY_PHONE_NUMBER_ID") : null) ||
+    Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+
+  return { route, token, phoneNumberId };
+}
+
+function allowedPhoneConfigs() {
+  const configs = [
+    routeConfig("default"),
+    routeConfig("otp"),
+    routeConfig("call"),
+    routeConfig("visit"),
+    routeConfig("bulk"),
+    routeConfig("reply"),
+  ];
+
+  return configs.filter((config, index, all) =>
+    config.phoneNumberId &&
+    all.findIndex((item) => item.phoneNumberId === config.phoneNumberId) === index
+  );
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const whatsappToken = Deno.env.get("WHATSAPP_API_TOKEN");
-    const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
-
-    if (!whatsappToken || !phoneNumberId) {
-      return new Response(
-        JSON.stringify({ error: "WhatsApp API not configured" }),
-        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -44,11 +72,25 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { phone, message, lead_id, bypass_dnc } = await req.json();
+    const { phone, message, lead_id, bypass_dnc, business_phone_number_id } = await req.json();
     if (!phone || !message) {
       return new Response(JSON.stringify({ error: "phone and message are required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    const requestedPhoneNumberId = typeof business_phone_number_id === "string" ? business_phone_number_id : null;
+    const matchingConfig = requestedPhoneNumberId
+      ? allowedPhoneConfigs().find((config) => config.phoneNumberId === requestedPhoneNumberId)
+      : null;
+    const defaultConfig = routeConfig("reply");
+    const { token: whatsappToken, phoneNumberId } = matchingConfig || defaultConfig;
+
+    if (!whatsappToken || !phoneNumberId) {
+      return new Response(
+        JSON.stringify({ error: "WhatsApp reply route is not configured" }),
+        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
@@ -104,6 +146,7 @@ Deno.serve(async (req) => {
       content: message,
       status: "sent",
       is_read: true,
+      business_phone_number_id: phoneNumberId,
     });
 
     // Log activity
@@ -117,7 +160,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ success: true, message_id: waResult?.messages?.[0]?.id }),
+      JSON.stringify({ success: true, message_id: waResult?.messages?.[0]?.id, business_phone_number_id: phoneNumberId }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err: any) {

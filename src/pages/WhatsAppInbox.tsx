@@ -566,6 +566,7 @@ const WhatsAppInbox = () => {
         phone: selectedPhone,
         message: reply.trim(),
         lead_id: conv?.lead_id || null,
+        business_phone_number_id: conv?.business_phone_number_id || null,
       },
     });
 
@@ -594,7 +595,12 @@ const WhatsAppInbox = () => {
     // These only work within the 24-hour WhatsApp conversation window
     if (KB_TEMPLATE_KEYS.has(selectedTemplate)) {
       const { data: replyData, error } = await supabase.functions.invoke("whatsapp-reply", {
-        body: { phone: selectedPhone, message: previewText, lead_id: conv?.lead_id || null },
+        body: {
+          phone: selectedPhone,
+          message: previewText,
+          lead_id: conv?.lead_id || null,
+          business_phone_number_id: conv?.business_phone_number_id || null,
+        },
       });
       if (error || replyData?.error) {
         const errMsg = replyData?.error || error?.message || "Unknown error";
@@ -705,7 +711,12 @@ const WhatsAppInbox = () => {
     }
 
     const { data: replyData, error: replyErr } = await supabase.functions.invoke("whatsapp-reply", {
-      body: { phone: selectedPhone, message, lead_id: leadId },
+      body: {
+        phone: selectedPhone,
+        message,
+        lead_id: leadId,
+        business_phone_number_id: selectedConv?.business_phone_number_id || null,
+      },
     });
 
     if (replyErr || replyData?.error) {
@@ -1131,6 +1142,7 @@ const WhatsAppInbox = () => {
                             message: "You have been added to our Do Not Contact list. We will not reach out to you via call or WhatsApp going forward. If this was a mistake, please reply START or call us at +91 9555192192.",
                             lead_id: dncLeadId,
                             bypass_dnc: true,
+                            business_phone_number_id: selectedConv?.business_phone_number_id || null,
                           },
                         });
                         // Reflect new DNC status locally so composer disables immediately

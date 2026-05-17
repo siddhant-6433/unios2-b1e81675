@@ -18,10 +18,10 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const whatsappToken = Deno.env.get("WHATSAPP_API_TOKEN");
-  const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+  const defaultWhatsappToken = Deno.env.get("WHATSAPP_API_TOKEN");
+  const defaultPhoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
 
-  if (!whatsappToken || !phoneNumberId) {
+  if (!defaultWhatsappToken || !defaultPhoneNumberId) {
     return new Response(JSON.stringify({ error: "WhatsApp not configured" }), {
       status: 503,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -58,6 +58,12 @@ Deno.serve(async (req) => {
       const interactionText = fb.interaction_type === "visit"
         ? "your recent campus visit"
         : "your recent call";
+      const whatsappToken = fb.interaction_type === "visit"
+        ? (Deno.env.get("WHATSAPP_VISIT_API_TOKEN") || defaultWhatsappToken)
+        : (Deno.env.get("WHATSAPP_CALL_API_TOKEN") || defaultWhatsappToken);
+      const phoneNumberId = fb.interaction_type === "visit"
+        ? (Deno.env.get("WHATSAPP_VISIT_PHONE_NUMBER_ID") || defaultPhoneNumberId)
+        : (Deno.env.get("WHATSAPP_CALL_PHONE_NUMBER_ID") || defaultPhoneNumberId);
 
       // Send feedback request as a plain text message (since we may not have a Meta-approved template yet)
       // This is a session message — will only deliver if the user has messaged within 24h
@@ -103,6 +109,7 @@ Deno.serve(async (req) => {
             content: messageBody,
             status: "sent",
             is_read: true,
+            business_phone_number_id: phoneNumberId,
           });
 
           sent++;

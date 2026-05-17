@@ -88,9 +88,22 @@ export function BulkWhatsAppDialog({ open, onOpenChange, leads, onSuccess }: Bul
     await supabase.from("whatsapp_campaign_recipients" as any).insert(recipients as any);
 
     // Fire-and-forget: send via background edge function
-    const { error: invokeErr } = await supabase.functions.invoke("whatsapp-campaign-send", {
+    const { data: invokeData, error: invokeErr } = await supabase.functions.invoke("whatsapp-campaign-send", {
       body: { campaign_id: (campaign as any).id },
     });
+
+    // The edge fn returns 503 with {paused:true} when WHATSAPP_BULK_PAUSED is
+    // set during a Meta quality incident. Surface that distinctly so admins
+    // know it's a deliberate hold, not a generic error.
+    if ((invokeData as any)?.paused) {
+      toast({
+        title: "Bulk WhatsApp is paused",
+        description: (invokeData as any)?.error || "Bulk campaigns are temporarily disabled by an administrator.",
+        variant: "destructive",
+      });
+      setSending(false);
+      return;
+    }
 
     if (invokeErr) {
       toast({ title: "Failed to start campaign", description: invokeErr.message, variant: "destructive" });

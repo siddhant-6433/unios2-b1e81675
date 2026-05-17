@@ -29,8 +29,22 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const whatsappToken = Deno.env.get("WHATSAPP_API_TOKEN");
-    const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+    // Kill switch: when WHATSAPP_BULK_PAUSED is set to anything truthy, the
+    // function returns 503 before any send. Used to halt bulk dispatch
+    // during a Meta quality-rating incident without ripping out the rule.
+    const bulkPaused = (Deno.env.get("WHATSAPP_BULK_PAUSED") || "").toLowerCase();
+    if (bulkPaused === "true" || bulkPaused === "1" || bulkPaused === "yes") {
+      return new Response(
+        JSON.stringify({
+          error: "Bulk WhatsApp campaigns are paused by an administrator. Contact ops to re-enable (unset WHATSAPP_BULK_PAUSED).",
+          paused: true,
+        }),
+        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const whatsappToken = Deno.env.get("WHATSAPP_BULK_API_TOKEN") || Deno.env.get("WHATSAPP_API_TOKEN");
+    const phoneNumberId = Deno.env.get("WHATSAPP_BULK_PHONE_NUMBER_ID") || Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
 
     if (!whatsappToken || !phoneNumberId) {
       return new Response(
@@ -195,6 +209,7 @@ Deno.serve(async (req) => {
             template_key: campaign.template_key,
             status: "sent",
             is_read: true,
+            business_phone_number_id: phoneNumberId,
           });
 
           // Log lead activity

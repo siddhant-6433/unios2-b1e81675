@@ -205,6 +205,23 @@ export default function CloudDialer() {
   const [lookupNotFound, setLookupNotFound] = useState(false);
   // Profile ID for activity logging
   const [profileId, setProfileId] = useState<string | null>(null);
+  // Counsellor display name + phone — used to personalise the
+  // nimt_not_interested_ack WhatsApp template after a manual disposition.
+  const [counsellorIdentity, setCounsellorIdentity] = useState<{ display_name: string; phone: string | null }>({
+    display_name: "the admissions team",
+    phone: null,
+  });
+  // WhatsApp follow-up nudge state. After a manual disposition the dialer
+  // surfaces a small "send a WhatsApp" panel above the Next Call button so the
+  // counsellor can fire course_info_v1 (or the not-interested ack) in one tap
+  // without leaving the dialer.
+  const [nudgeSendingKey, setNudgeSendingKey] = useState<string | null>(null);
+  const [nudgeSentKeys, setNudgeSentKeys] = useState<Set<string>>(new Set());
+  const [nudgeDismissed, setNudgeDismissed] = useState(false);
+  // Per-counsellor "most used after disposition" templates, populated from
+  // whatsapp_messages aggregated by template_key over the last 30 days. Top 2
+  // (excluding the course_info_v1 primary suggestion) are surfaced alongside.
+  const [mostUsedTemplates, setMostUsedTemplates] = useState<{ key: string; label: string }[]>([]);
 
   const callTimerRef = useRef<number | null>(null);
   const autoNextRef = useRef<number | null>(null);
@@ -352,12 +369,73 @@ export default function CloudDialer() {
 
   useEffect(() => { loadQueue(); }, [loadQueue]);
 
-  // ── Fetch profile ID for activity logging ────────────────────────────────
+  // ── Fetch profile ID, display name, phone + counsellor's most-used templates ─
+  // display_name/phone feed the nimt_not_interested_ack template params.
+  // most-used templates are surfaced in the post-disposition WhatsApp nudge.
   useEffect(() => {
     if (!user?.id) return;
-    supabase.from("profiles").select("id").eq("user_id", user.id).single()
-      .then(({ data }) => { if (data) setProfileId(data.id); });
+    (async () => {
+      const { data: prof } = await supabase
+        .from("profiles")
+        .select("id, display_name, phone")
+        .eq("user_id", user.id)
+        .single();
+      if (!prof) return;
+      setProfileId(prof.id);
+      setCounsellorIdentity({
+        display_name: prof.display_name || "the admissions team",
+        phone: prof.phone || null,
+      });
+
+      // Aggregate the counsellor's outbound template sends over the last 30
+      // days. whatsapp_messages has no sender column, so we pull from
+      // lead_activities (which is written with user_id by whatsapp-send) and
+      // parse the template_key out of the description. The description
+      // pattern is stable: "...— Template: {template_key with spaces}" or
+      // "...Automated WhatsApp sent — {template_key with spaces}".
+      const since = new Date(Date.now() - 30 * 86400000).toISOString();
+      const { data: acts } = await supabase
+        .from("lead_activities")
+        .select("description")
+        .eq("user_id", prof.id)
+        .eq("type", "whatsapp")
+        .gte("created_at", since)
+        .limit(500);
+
+      const counts = new Map<string, number>();
+      (acts || []).forEach((a: any) => {
+        const m = String(a.description || "").match(/(?:Template:\s*|—\s*)([a-z0-9_ ]+?)(?:\s*$|\s*\()/i);
+        if (!m) return;
+        const k = m[1].trim().toLowerCase().replace(/\s+/g, "_");
+        if (!k) return;
+        if (k === "course_info_v1" || k === "course_info_generic") return;
+        if (k === "auto_reply" || k === "ai_auto_reply") return;
+        counts.set(k, (counts.get(k) || 0) + 1);
+      });
+      const TEMPLATE_LABELS: Record<string, string> = {
+        apply_portal_login: "Send apply portal link",
+        callback_scheduled: "Send callback ack",
+        missed_call: "Send missed-call note",
+        course_info_video: "Send course video",
+        visit_confirmation: "Send visit confirmation",
+        ai_call_post_summary: "Send call summary",
+        ai_call_course_info: "Send course details",
+      };
+      const top = Array.from(counts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 2)
+        .map(([key]) => ({ key, label: TEMPLATE_LABELS[key] || key.replace(/_/g, " ") }));
+      setMostUsedTemplates(top);
+    })();
   }, [user?.id]);
+
+  // Reset the WhatsApp nudge when the lead changes so the previous lead's
+  // sent-state never carries over.
+  useEffect(() => {
+    setNudgeSentKeys(new Set());
+    setNudgeSendingKey(null);
+    setNudgeDismissed(false);
+  }, [currentLead?.id]);
 
   // ── Fetch call history when current lead changes ─────────────────────────
   useEffect(() => {
@@ -780,6 +858,39 @@ export default function CloudDialer() {
       setAutoNextTimer(60); // 60s for connected calls (pre-selected during call)
     } else {
       setAutoNextTimer(60); // 60s for post-call dispositions
+    }
+  };
+
+  // ── Post-disposition WhatsApp nudge sender ────────────────────────────────
+  // Fires whatsapp-send for the chosen template. The nudge panel renders
+  // after a manual disposition; the counsellor taps once and the message
+  // goes via the call route (whatsapp-send infers the route from
+  // template_key). Used for course_info_v1, nimt_not_interested_ack, and the
+  // counsellor's most-used templates surfaced in mostUsedTemplates.
+  const sendDispositionNudge = async (
+    templateKey: string,
+    opts?: { params?: string[]; buttonUrls?: string[] }
+  ) => {
+    if (!currentLead) return;
+    setNudgeSendingKey(templateKey);
+    try {
+      const { data, error } = await supabase.functions.invoke("whatsapp-send", {
+        body: {
+          template_key: templateKey,
+          phone: currentLead.phone,
+          lead_id: currentLead.id,
+          ...(opts?.params ? { params: opts.params } : {}),
+          ...(opts?.buttonUrls ? { button_urls: opts.buttonUrls } : {}),
+        },
+      });
+      const errMsg = error?.message || (data as any)?.error;
+      if (errMsg) throw new Error(errMsg);
+      setNudgeSentKeys(prev => new Set(prev).add(templateKey));
+      toast({ title: "WhatsApp sent", description: templateKey.replace(/_/g, " ") });
+    } catch (e: any) {
+      toast({ title: "WhatsApp send failed", description: e?.message || "Unknown error", variant: "destructive" });
+    } finally {
+      setNudgeSendingKey(null);
     }
   };
 
@@ -1246,6 +1357,92 @@ export default function CloudDialer() {
                                 {session}
                               </button>
                             ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/*
+                        WhatsApp follow-up nudge — appears after a manual
+                        disposition. course_info_v1 is the primary suggestion
+                        when the lead has a course (whatsapp-send resolves
+                        params from the DB so we send no body args here). For
+                        not_interested, we pre-fill the personalised ack with
+                        the counsellor's name + Plivo phone. For interested /
+                        call_back, also surface up to 2 of the counsellor's
+                        most-used templates.
+                      */}
+                      {!callState.autoDisposition && !nudgeDismissed && callState.disposition &&
+                       !["wrong_number", "do_not_contact", "cancelled"].includes(callState.disposition) && (
+                        <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 dark:bg-emerald-950/20 dark:border-emerald-900 p-2.5">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
+                              <ArrowRight className="h-3 w-3" />
+                              Send a WhatsApp?
+                            </div>
+                            <button
+                              onClick={() => setNudgeDismissed(true)}
+                              className="text-[10px] text-muted-foreground hover:text-foreground"
+                            >Skip</button>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {callState.disposition === "not_interested" ? (
+                              <Button
+                                size="sm"
+                                variant={nudgeSentKeys.has("nimt_not_interested_ack") ? "secondary" : "outline"}
+                                disabled={!!nudgeSendingKey || nudgeSentKeys.has("nimt_not_interested_ack")}
+                                className="h-7 text-[11px]"
+                                onClick={() => sendDispositionNudge("nimt_not_interested_ack", {
+                                  params: [
+                                    currentLead.name,
+                                    currentLead.course_name || "your enquiry",
+                                    counsellorIdentity.display_name,
+                                    counsellorIdentity.phone || "+91 9555192192",
+                                  ],
+                                })}
+                              >
+                                {nudgeSendingKey === "nimt_not_interested_ack" ? (
+                                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                ) : nudgeSentKeys.has("nimt_not_interested_ack") ? (
+                                  <Check className="h-3 w-3 mr-1" />
+                                ) : null}
+                                {nudgeSentKeys.has("nimt_not_interested_ack") ? "Sent: closure note" : "Send closure note"}
+                              </Button>
+                            ) : (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant={nudgeSentKeys.has("course_info_v1") ? "secondary" : "outline"}
+                                  disabled={!!nudgeSendingKey || nudgeSentKeys.has("course_info_v1")}
+                                  className="h-7 text-[11px]"
+                                  onClick={() => sendDispositionNudge("course_info_v1")}
+                                  title={currentLead.course_name ? `Sends course-specific info for ${currentLead.course_name}` : "No course on lead — sends generic info"}
+                                >
+                                  {nudgeSendingKey === "course_info_v1" ? (
+                                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                  ) : nudgeSentKeys.has("course_info_v1") ? (
+                                    <Check className="h-3 w-3 mr-1" />
+                                  ) : null}
+                                  {nudgeSentKeys.has("course_info_v1") ? "Sent: course info" : "Send course info"}
+                                </Button>
+                                {mostUsedTemplates.map(t => (
+                                  <Button
+                                    key={t.key}
+                                    size="sm"
+                                    variant={nudgeSentKeys.has(t.key) ? "secondary" : "outline"}
+                                    disabled={!!nudgeSendingKey || nudgeSentKeys.has(t.key)}
+                                    className="h-7 text-[11px]"
+                                    onClick={() => sendDispositionNudge(t.key)}
+                                  >
+                                    {nudgeSendingKey === t.key ? (
+                                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                    ) : nudgeSentKeys.has(t.key) ? (
+                                      <Check className="h-3 w-3 mr-1" />
+                                    ) : null}
+                                    {nudgeSentKeys.has(t.key) ? `Sent: ${t.label.toLowerCase()}` : t.label}
+                                  </Button>
+                                ))}
+                              </>
+                            )}
                           </div>
                         </div>
                       )}
