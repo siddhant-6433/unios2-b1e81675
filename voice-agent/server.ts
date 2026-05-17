@@ -2772,10 +2772,10 @@ Deno.serve({ port: PORT }, async (req) => {
         headers: { ...dbH, Prefer: "return=minimal" },
         body: JSON.stringify({
           student_connected_at: new Date().toISOString(),
-          status: "in-progress",
+          status: "in_progress",
         }),
       }).catch(e => console.error(`[BRIDGE-CALL-STATUS ${callId}] DB update failed:`, e.message));
-      console.log(`[BRIDGE-CALL-STATUS ${callId}] Wrote student_connected_at + status=in-progress`);
+      console.log(`[BRIDGE-CALL-STATUS ${callId}] Wrote student_connected_at + status=in_progress`);
     }
     return new Response("OK");
   }
@@ -2832,23 +2832,35 @@ Deno.serve({ port: PORT }, async (req) => {
       (callCtx as any)._bLegUUID = bLegUUID;
     }
 
-    // Plivo's "answered" Dial event sends Event="Answered" (also seen as
-    // CallStatus="answered" or "in-progress" depending on which callback
-    // shape Plivo uses). Accept all three.
+    // Plivo's "answered" Dial event uses Event=DialAnswer or DialConnected
+    // (lowercased here). CallStatus=in-progress arrives on the
+    // DialConnected event. Accept any of the three.
     const isAnsweredEvent = callStatus === "in-progress"
       || callStatus === "answered"
-      || event === "answered";
+      || event === "answered"
+      || event === "dialanswer"
+      || event === "dialconnected";
     if (isAnsweredEvent && SUPABASE_URL) {
       const dbH = { "Content-Type": "application/json", apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
-      await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
-        method: "PATCH",
-        headers: { ...dbH, Prefer: "return=minimal" },
-        body: JSON.stringify({
-          student_connected_at: new Date().toISOString(),
-          status: "in-progress",
-        }),
-      }).catch(e => console.error(`[BRIDGE-B-STATUS ${callId}] DB update failed:`, e.message));
-      console.log(`[BRIDGE-B-STATUS ${callId}] Student answered! Updated student_connected_at + status=in-progress`);
+      try {
+        const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
+          method: "PATCH",
+          headers: { ...dbH, Prefer: "return=representation" },
+          body: JSON.stringify({
+            student_connected_at: new Date().toISOString(),
+            status: "in_progress",
+          }),
+        });
+        const patchBody = await patchRes.text().catch(() => "");
+        if (!patchRes.ok) {
+          console.error(`[BRIDGE-B-STATUS ${callId}] PATCH FAILED status=${patchRes.status} body=${patchBody.slice(0, 500)}`);
+        } else {
+          const rows = patchBody ? (JSON.parse(patchBody) as any[]) : [];
+          console.log(`[BRIDGE-B-STATUS ${callId}] PATCH ok rows=${Array.isArray(rows) ? rows.length : "?"} student_connected_at=${(rows[0] || {}).student_connected_at || "(missing)"}`);
+        }
+      } catch (e: any) {
+        console.error(`[BRIDGE-B-STATUS ${callId}] DB update threw:`, e.message);
+      }
     }
 
     return new Response("OK");
