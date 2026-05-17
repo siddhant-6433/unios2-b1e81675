@@ -46,6 +46,7 @@ import Consultants from "./pages/Consultants";
 import AdmissionAnalytics from "./pages/AdmissionAnalytics";
 import CounsellorDashboard from "./pages/CounsellorDashboard";
 import WhatsAppInbox from "./pages/WhatsAppInbox";
+import WhatsAppHealth from "./pages/WhatsAppHealth";
 import AutomationRules from "./pages/AutomationRules";
 import ConsultantPortal from "./pages/ConsultantPortal";
 import PublisherPortal from "./pages/PublisherPortal";
@@ -235,6 +236,7 @@ const App = () => (
                       {/* Comms */}
                       <Route path="/inbox" element={<Inbox />} />
                       <Route path="/whatsapp-inbox" element={<RequirePermission module="whatsapp" action="view"><WhatsAppInbox /></RequirePermission>} />
+                      <Route path="/whatsapp-health" element={<RequirePermission module="user_management" action="view"><WhatsAppHealth /></RequirePermission>} />
                       <Route path="/template-manager" element={<RequirePermission module="templates" action="view"><TemplateManager /></RequirePermission>} />
 
                       {/* Analytics & reporting */}
