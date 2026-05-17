@@ -203,6 +203,14 @@ export default function CloudDialer() {
   const [lookupResult, setLookupResult] = useState<{id:string; name:string; phone:string; course_name:string; stage:string}|null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupNotFound, setLookupNotFound] = useState(false);
+  // Outbound dial-by-number ("call a new number" panel) — supports both
+  // existing-lead matches (auto-pin + jump to that lead) and brand-new
+  // numbers (creates a stub lead first so call_logs has a lead_id).
+  const [dialPhone, setDialPhone] = useState("");
+  const [dialLeadMatch, setDialLeadMatch] = useState<{id:string;name:string} | null>(null);
+  const [dialNoMatch, setDialNoMatch] = useState(false);
+  const [dialNewName, setDialNewName] = useState("");
+  const [dialPlacing, setDialPlacing] = useState(false);
   // Profile ID for activity logging
   const [profileId, setProfileId] = useState<string | null>(null);
   // Counsellor display name + phone — used to personalise the
@@ -246,6 +254,26 @@ export default function CloudDialer() {
     let allLeads: { id: string; name: string; phone: string; bucket: string }[] = [];
     const buckets: {key:string; label:string; color:string; count:number}[] = [];
 
+    // Manually pinned leads first — counsellor hit "Add to Dialer" on a
+    // lead page and the row is in cloud_dialer_pins. RLS scopes to the
+    // current user. Prepended to allLeads so they sit at the top of the
+    // dialer regardless of bucket source.
+    if (user?.id) {
+      const { data: pins } = await (supabase as any)
+        .from("cloud_dialer_pins")
+        .select("lead_id, created_at, lead:leads(id, name, phone)")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+      const pinnedLeads = (pins || [])
+        .map((p: any) => p.lead)
+        .filter((l: any) => l && l.phone)
+        .map((l: any) => ({ id: l.id, name: l.name, phone: l.phone, bucket: "pinned" }));
+      if (pinnedLeads.length) {
+        allLeads.push(...pinnedLeads);
+        buckets.push({ key: "pinned", label: "Pinned", color: "bg-fuchsia-500", count: pinnedLeads.length });
+      }
+    }
+
     if (queueSource === "smart" || queueSource === "followups") {
       const now = new Date();
       const todayStart = now.toISOString().slice(0, 10);
@@ -278,7 +306,9 @@ export default function CloudDialer() {
 
       const [r0, r1, r2, r3, r4, r5, rP] = await Promise.all([q0, q1, q2, q3, q4, q5, qP]);
 
-      const seen = new Set<string>();
+      // Seed seen with pin ids so they keep their "pinned" bucket and aren't
+      // duplicated under followups/visits/etc.
+      const seen = new Set<string>(allLeads.map(l => l.id));
       const add = (items: {id:string;name:string;phone:string}[], bucket: string) => {
         items.forEach(l => { if (!seen.has(l.id) && l.phone) { seen.add(l.id); allLeads.push({ ...l, bucket }); } });
       };
@@ -626,6 +656,105 @@ export default function CloudDialer() {
     }
     setEditing(null);
     toast({ title: "Updated", description: `Lead ${field} updated.` });
+  };
+
+  // ── Dial-by-number lookup + call ──────────────────────────────────────────
+  // Counsellor types a phone number → we look it up in `leads`; if found we
+  // pin that lead and start the dialer on it; if not we surface a name
+  // input, create a stub lead row (so call_logs has a lead_id) and dial.
+
+  const normalisePhone = (raw: string): string => {
+    const digits = raw.replace(/\D/g, "");
+    if (digits.length === 10) return `+91${digits}`;
+    if (digits.length === 12 && digits.startsWith("91")) return `+${digits}`;
+    if (raw.startsWith("+")) return raw;
+    return digits ? `+${digits}` : "";
+  };
+
+  const dialLookup = async () => {
+    setDialNoMatch(false);
+    setDialLeadMatch(null);
+    const norm = normalisePhone(dialPhone);
+    if (!norm || norm.length < 8) {
+      toast({ title: "Enter a phone number first", variant: "destructive" });
+      return;
+    }
+    const { data: leadRow } = await (supabase as any)
+      .from("leads")
+      .select("id, name, phone")
+      .eq("phone", norm)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (leadRow) {
+      setDialLeadMatch({ id: leadRow.id, name: leadRow.name });
+    } else {
+      setDialNoMatch(true);
+    }
+  };
+
+  // Pin → reload → set currentIdx to the matching row → start dialer.
+  const pinAndStart = async (leadId: string) => {
+    if (!user?.id) return;
+    setDialPlacing(true);
+    await (supabase as any)
+      .from("cloud_dialer_pins")
+      .upsert({ user_id: user.id, lead_id: leadId }, { onConflict: "user_id,lead_id" });
+    await loadQueue();
+    // Race-safe: after loadQueue we look up the new position; queue is updated
+    // via setQueue but state may not be flushed yet, so use a setTimeout to
+    // let React commit.
+    setTimeout(() => {
+      setQueue(prev => {
+        const idx = prev.findIndex(l => l.id === leadId);
+        if (idx >= 0) {
+          setCurrentIdx(idx);
+          setDialerActive(true);
+          setPaused(false);
+          setTimeout(() => placeCall(), 50);
+        }
+        return prev;
+      });
+      setDialPlacing(false);
+      setDialPhone("");
+      setDialNewName("");
+      setDialLeadMatch(null);
+      setDialNoMatch(false);
+    }, 100);
+  };
+
+  const dialCallExisting = () => {
+    if (dialLeadMatch) pinAndStart(dialLeadMatch.id);
+  };
+
+  // Create stub lead, then pin+dial. Stub has stage=new_lead, source=dialer,
+  // and counsellor_id set to the current user's profile id so RLS scoping
+  // matches the standard counsellor flow.
+  const dialCreateAndCall = async () => {
+    if (!user?.id || !dialNewName.trim()) {
+      toast({ title: "Name required", description: "Enter a name for the new lead.", variant: "destructive" });
+      return;
+    }
+    const norm = normalisePhone(dialPhone);
+    setDialPlacing(true);
+    const { data: prof } = await supabase.from("profiles").select("id").eq("user_id", user.id).single();
+    const { data: newLead, error } = await (supabase as any)
+      .from("leads")
+      .insert({
+        name: dialNewName.trim(),
+        phone: norm,
+        stage: "new_lead",
+        source: "dialer",
+        counsellor_id: prof?.id || null,
+      })
+      .select("id")
+      .single();
+    if (error || !newLead) {
+      toast({ title: "Couldn't create lead", description: error?.message || "Try again", variant: "destructive" });
+      setDialPlacing(false);
+      return;
+    }
+    await pinAndStart(newLead.id);
   };
 
   const placeCall = async () => {
@@ -1022,6 +1151,64 @@ export default function CloudDialer() {
           <ArrowRight className="h-4 w-4 text-amber-600 shrink-0" />
         </button>
       )}
+
+      {/* Dial a number — type a phone, look up in leads, then pin+call.
+          For unknown numbers, a name input appears so we can create a stub
+          lead and dial it (so call_logs has a lead_id and the disposition
+          flow works end-to-end). */}
+      <div className="px-6 pt-3">
+        <div className="rounded-xl border border-border bg-card p-3 flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+            <PhoneCall className="h-3.5 w-3.5 text-cyan-600" /> Dial a number
+          </div>
+          <input
+            type="tel"
+            value={dialPhone}
+            onChange={e => { setDialPhone(e.target.value); setDialLeadMatch(null); setDialNoMatch(false); }}
+            placeholder="+91 9555 192 192"
+            disabled={dialerActive || dialPlacing}
+            className="flex-1 min-w-[180px] rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm font-mono disabled:opacity-50"
+            onKeyDown={e => { if (e.key === "Enter") dialLookup(); }}
+          />
+          {!dialLeadMatch && !dialNoMatch && (
+            <Button size="sm" variant="outline" onClick={dialLookup} disabled={!dialPhone || dialerActive || dialPlacing}>
+              Look up
+            </Button>
+          )}
+          {dialLeadMatch && (
+            <>
+              <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20 px-2 py-1 text-xs">
+                <CheckCircle className="h-3 w-3 text-emerald-600" />
+                <span className="font-medium text-emerald-900 dark:text-emerald-200">{dialLeadMatch.name}</span>
+              </span>
+              <Button size="sm" className="bg-cyan-600 hover:bg-cyan-700" onClick={dialCallExisting} disabled={dialPlacing}>
+                {dialPlacing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5 mr-1" />}
+                Call now
+              </Button>
+            </>
+          )}
+          {dialNoMatch && (
+            <>
+              <span className="text-[11px] text-amber-700 dark:text-amber-400">No lead found — add new:</span>
+              <input
+                type="text"
+                value={dialNewName}
+                onChange={e => setDialNewName(e.target.value)}
+                placeholder="Lead name"
+                disabled={dialPlacing}
+                className="rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm disabled:opacity-50 w-44"
+              />
+              <Button size="sm" className="bg-cyan-600 hover:bg-cyan-700" onClick={dialCreateAndCall} disabled={!dialNewName.trim() || dialPlacing}>
+                {dialPlacing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5 mr-1" />}
+                Create & Call
+              </Button>
+              <Button size="sm" variant="ghost" className="text-xs" onClick={() => { setDialNoMatch(false); setDialPhone(""); setDialNewName(""); }}>
+                Cancel
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
 
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-card">

@@ -7,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeft, Loader2, Trash2, ArrowRightLeft, Phone, MessageSquare,
   Calendar, CalendarDays, Clock, FileText, Bot, UserCheck, Mail, IndianRupee, MapPin, ThumbsDown, CheckCircle, Footprints,
-  ChevronRight, Ban,
+  ChevronRight, Ban, Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -798,6 +798,29 @@ const LeadDetail = () => {
     setAiCalling(false);
   };
 
+  // Adds the current lead to the user's cloud-dialer pin list so it shows
+  // at the top of /cloud-dialer next time they load that page. RLS limits
+  // inserts to user_id = auth.uid(). The trigger fn_cleanup_cloud_dialer_pin
+  // auto-removes the pin once the lead is actually called.
+  const [pinningToDialer, setPinningToDialer] = useState(false);
+  const pinToDialer = async () => {
+    if (!id || !user?.id) return;
+    setPinningToDialer(true);
+    const { error } = await (supabase as any)
+      .from("cloud_dialer_pins")
+      .insert({ user_id: user.id, lead_id: id });
+    if (error && !String(error.code || "").startsWith("23505")) {
+      // 23505 = duplicate key (already pinned) — treat as success
+      toast({ title: "Couldn't add to dialer", description: error.message, variant: "destructive" });
+    } else {
+      toast({
+        title: error ? "Already in your dialer queue" : "Added to Cloud Dialer",
+        description: "This lead is now pinned at the top of your dialer.",
+      });
+    }
+    setPinningToDialer(false);
+  };
+
   const triggerManualCall = async () => {
     if (!id) return;
     setManualCalling(true);
@@ -1012,6 +1035,11 @@ const LeadDetail = () => {
           // Call below is the only path now; disposition dialog auto-opens
           // 3s after the Plivo call connects.
           { icon: Phone, label: "Cloud Call", color: "text-cyan-600 bg-cyan-100 dark:bg-cyan-900/30", action: triggerManualCall, disabled: manualCalling },
+          // Counsellor-only — push this lead to the top of /cloud-dialer.
+          ...(role === "counsellor" ? [{
+            icon: Sparkles, label: "Add to Dialer", color: "text-fuchsia-600 bg-fuchsia-100 dark:bg-fuchsia-900/30",
+            action: pinToDialer, disabled: pinningToDialer,
+          }] : []),
           { icon: MessageSquare, label: "WhatsApp", color: "text-green-600 bg-green-100 dark:bg-green-900/30", action: () => setShowWhatsApp(true) },
           { icon: Clock, label: "Follow Up", color: "text-orange-600 bg-orange-100 dark:bg-orange-900/30", action: () => setShowFollowup(true) },
           { icon: MapPin, label: "Schedule Visit", color: "text-violet-600 bg-violet-100 dark:bg-violet-900/30", action: () => setShowScheduleVisit(true) },

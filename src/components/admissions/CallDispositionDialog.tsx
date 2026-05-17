@@ -314,6 +314,28 @@ export function CallDispositionDialog({
 
   const isAutoDisposed =
     callStatus === "no_answer" || callStatus === "busy" || callStatus === "failed";
+
+  // Live elapsed timer for the connected phase. Starts when the parent flips
+  // callStatus → "connected" and stops when the dialog closes. Pure UI; the
+  // real call duration is whatever Plivo reports at hangup.
+  const [connectedAt, setConnectedAt] = useState<number | null>(null);
+  const [elapsedSec, setElapsedSec] = useState(0);
+  useEffect(() => {
+    if (callStatus === "connected" && !connectedAt) {
+      setConnectedAt(Date.now());
+      setElapsedSec(0);
+    }
+    if (!open) {
+      setConnectedAt(null);
+      setElapsedSec(0);
+    }
+  }, [callStatus, open, connectedAt]);
+  useEffect(() => {
+    if (!connectedAt) return;
+    const id = setInterval(() => setElapsedSec(Math.floor((Date.now() - connectedAt) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [connectedAt]);
+  const fmtElapsed = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   const autoBannerText: Record<string, string> = {
     no_answer: "Lead didn't pick up — auto-set to Not Answered.",
     busy: "Lead's line was busy — auto-set to Busy.",
@@ -331,6 +353,27 @@ export function CallDispositionDialog({
         </DialogHeader>
 
         <div className="space-y-4 pt-1">
+          {/* Connected banner with live elapsed timer — mirrors CloudDialer's
+              on-call indicator so the counsellor knows the bridge is live
+              while they're picking a disposition. */}
+          {callStatus === "connected" && (
+            <div className="rounded-xl border border-emerald-300 dark:border-emerald-800/40 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2 flex items-center gap-2.5">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+              </span>
+              <div className="flex-1">
+                <p className="text-xs font-semibold text-emerald-900 dark:text-emerald-200">Call connected</p>
+                <p className="text-[10px] text-emerald-700 dark:text-emerald-300">
+                  Live with {leadName}. Mark the outcome below — the dialog stays open through the call.
+                </p>
+              </div>
+              <div className="font-mono text-sm font-semibold text-emerald-900 dark:text-emerald-200 tabular-nums">
+                {fmtElapsed(elapsedSec)}
+              </div>
+            </div>
+          )}
+
           {/* Auto-disposed banner */}
           {isAutoDisposed && (
             <div className="rounded-xl border border-amber-200 dark:border-amber-800/40 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 flex items-start gap-2">
