@@ -1,10 +1,10 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import {
   Phone, CheckCircle, XCircle, PhoneMissed, PhoneOff, Clock3,
   BanIcon, Loader2, ArrowRight, MapPin, CalendarDays, ChevronDown, Clock,
-  AlertCircle,
+  AlertCircle, MessageSquare, GraduationCap,
 } from "lucide-react";
 
 export type CallDisposition =
@@ -27,7 +27,31 @@ export interface CallDispositionData {
   visit?: { visit_date: string; campus_id: string };
   /** Set when disposition is "ineligible" — lead eligible for future session */
   future_eligible_session?: "2027-28" | "2028-29" | null;
+  /** Suppress the disposition-based auto WhatsApp send (counsellor opted out) */
+  suppress_auto_whatsapp?: boolean;
+  /** Also fire course_info_v1 after the disposition WA template */
+  send_course_info?: boolean;
 }
+
+/**
+ * Live call status passed in by the caller (e.g. LeadDetail polling
+ * ai_call_records via Plivo callbacks).
+ *  - "calling": ringing the counsellor or the student; dialog shows a "waiting
+ *    for pickup" state and hides the disposition picker.
+ *  - "connected": call answered and bridged; full picker is shown.
+ *  - "no_answer" | "busy" | "failed": Plivo reported a terminal non-answer
+ *    state; we auto-select the matching disposition and skip straight to the
+ *    follow-up editor so the counsellor only needs to confirm the next
+ *    callback time.
+ *  - undefined: legacy "manual log" mode used when the counsellor opens the
+ *    dialog from outside an active call. Shows the full picker as before.
+ */
+export type DialogCallStatus =
+  | "calling"
+  | "connected"
+  | "no_answer"
+  | "busy"
+  | "failed";
 
 interface CallDispositionDialogProps {
   open: boolean;
@@ -39,6 +63,8 @@ interface CallDispositionDialogProps {
   onSubmit: (data: CallDispositionData) => Promise<void>;
   /** Called when counsellor clicks "Call Now" — e.g. to send tap-to-call WhatsApp */
   onCallNow?: () => void | Promise<void>;
+  /** Optional live status from the dialer poll. Drives the auto-flow. */
+  callStatus?: DialogCallStatus;
 }
 
 const DISPOSITIONS: { value: CallDisposition; label: string; icon: any; color: string; suggestsFollowup: boolean }[] = [
@@ -83,7 +109,7 @@ const formatDisplayDate = (dateStr: string) => {
   return `${day}, ${d}/${m}/${y.slice(2)}`;
 };
 
-export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone, campuses, defaultCampusId, onSubmit, onCallNow }: CallDispositionDialogProps) {
+export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone, campuses, defaultCampusId, onSubmit, onCallNow, callStatus }: CallDispositionDialogProps) {
   const [disposition, setDisposition] = useState<CallDisposition | null>(null);
   const [duration, setDuration] = useState(0);
   const [notes, setNotes] = useState("");
@@ -97,9 +123,25 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
   const [visitCampusId, setVisitCampusId] = useState(defaultCampusId || campuses[0]?.id || "");
   // Ineligible → future eligibility state
   const [futureSession, setFutureSession] = useState<"2027-28" | "2028-29" | null>(null);
+  // WhatsApp nudge controls — visible when a disposition is set. Counsellor can
+  // opt out of the auto-send or also fire course_info_v1 alongside.
+  const [suppressAutoWa, setSuppressAutoWa] = useState(false);
+  const [sendCourseInfo, setSendCourseInfo] = useState(false);
   const dateInputRef = useRef<HTMLInputElement>(null);
 
   const selectedDisp = DISPOSITIONS.find(d => d.value === disposition);
+
+  // Plivo-driven auto-disposition: when the caller signals busy / no_answer /
+  // failed via callStatus, pre-select the matching disposition pill so the
+  // counsellor only has to confirm the follow-up time. We never overwrite a
+  // disposition the counsellor has already chosen manually.
+  useEffect(() => {
+    if (!open) return;
+    if (disposition) return;
+    if (callStatus === "no_answer") setDisposition("not_answered");
+    else if (callStatus === "busy") setDisposition("busy");
+    else if (callStatus === "failed") setDisposition("not_answered");
+  }, [callStatus, open, disposition]);
 
   const resetState = () => {
     setDisposition(null);
@@ -111,6 +153,8 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
     setVisitDate(tomorrowStr());
     setVisitTime("11:00");
     setFutureSession(null);
+    setSuppressAutoWa(false);
+    setSendCourseInfo(false);
   };
 
   const handleSubmit = async (opts: { scheduleFollowup?: boolean; scheduleVisit?: boolean } = {}) => {
@@ -130,6 +174,8 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
       followup_date: followupDatetime,
       visit,
       future_eligible_session: disposition === "ineligible" ? futureSession : null,
+      suppress_auto_whatsapp: suppressAutoWa,
+      send_course_info: sendCourseInfo,
     });
     setSaving(false);
     resetState();
@@ -146,35 +192,100 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
     dateInputRef.current?.focus();
   };
 
+  // ── Phase 1: still ringing — show waiting state, hide picker ──────────────
+  // Only the lead summary + a status banner are shown. The dialog cannot be
+  // submitted while the call is still establishing; the parent dialer flips
+  // callStatus to "connected" (or to a terminal failure) once Plivo reports.
+  if (callStatus === "calling") {
+    return (
+      <Dialog open={open} onOpenChange={handleClose}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Phone className="h-4 w-4 text-primary" />
+              Calling {leadName}…
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-1">
+            <div className="rounded-xl bg-muted/40 px-3 py-3">
+              <p className="text-sm font-medium text-foreground truncate">{leadName}</p>
+              <p className="text-[11px] text-muted-foreground font-mono">{leadPhone}</p>
+            </div>
+            <div className="flex flex-col items-center justify-center gap-3 py-8 text-center">
+              <Loader2 className="h-7 w-7 text-primary animate-spin" />
+              <p className="text-sm font-medium text-foreground">Waiting for {leadName} to pick up…</p>
+              <p className="text-xs text-muted-foreground max-w-xs">
+                The outcome screen will appear here once they answer, or auto-fill if
+                their phone is busy / switched off / unanswered.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleClose(false)}
+              className="w-full text-xs"
+            >
+              Cancel — log manually later
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  const isAutoDisposed =
+    callStatus === "no_answer" || callStatus === "busy" || callStatus === "failed";
+  const autoBannerText: Record<string, string> = {
+    no_answer: "Lead didn't pick up — auto-set to Not Answered.",
+    busy: "Lead's line was busy — auto-set to Busy.",
+    failed: "Call failed (switched off / unreachable) — auto-set to Not Answered.",
+  };
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Phone className="h-4 w-4 text-primary" />
-            Log Call Outcome
+            {isAutoDisposed ? "Schedule next callback" : "Log Call Outcome"}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 pt-1">
-          {/* Lead info + Call Now button */}
+          {/* Auto-disposed banner */}
+          {isAutoDisposed && (
+            <div className="rounded-xl border border-amber-200 dark:border-amber-800/40 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 text-amber-700 dark:text-amber-400 mt-0.5 shrink-0" />
+              <div className="text-xs text-amber-900 dark:text-amber-200">
+                {autoBannerText[callStatus!] || "Call did not connect."}
+                <div className="text-[10px] mt-0.5 opacity-80">Edit the follow-up time below and save.</div>
+              </div>
+            </div>
+          )}
+
+          {/* Lead info + Call Now button — Call Now hidden when call already in flight */}
           <div className="flex items-center justify-between gap-3 rounded-xl bg-muted/40 px-3 py-2.5">
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-foreground truncate">{leadName}</p>
               <p className="text-[11px] text-muted-foreground font-mono">{leadPhone}</p>
             </div>
-            <Button
-              size="sm"
-              className="shrink-0 gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
-              onClick={async () => {
-                if (leadPhone) window.open(`tel:${leadPhone}`);
-                if (onCallNow) await onCallNow();
-              }}
-            >
-              <Phone className="h-3.5 w-3.5" /> Call Now
-            </Button>
+            {!callStatus && (
+              <Button
+                size="sm"
+                className="shrink-0 gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
+                onClick={async () => {
+                  if (leadPhone) window.open(`tel:${leadPhone}`);
+                  if (onCallNow) await onCallNow();
+                }}
+              >
+                <Phone className="h-3.5 w-3.5" /> Call Now
+              </Button>
+            )}
           </div>
 
+          {/* Disposition pills — hidden when Plivo already auto-disposed */}
+          {!isAutoDisposed && (
+            <>
           {/* Disposition pills */}
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Outcome *</label>
@@ -275,6 +386,65 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
               )}
             </div>
           )}
+            </>
+          )}
+          {/* end !isAutoDisposed gate — picker, duration, notes, ineligible */}
+
+          {/* WhatsApp follow-up nudge — visible the moment a disposition is set
+              (manual or auto). Shows the template that will auto-send and lets
+              the counsellor opt out, plus offers a one-tap course-info send. */}
+          {disposition && (() => {
+            const noFollowupRequired = ["not_interested", "ineligible", "wrong_number", "do_not_contact"];
+            const autoTemplate =
+              disposition === "interested" || disposition === "call_back"
+                ? "callback_scheduled"
+                : disposition === "not_answered" || disposition === "busy" || disposition === "voicemail"
+                ? "missed_call"
+                : null;
+            const wontAutoSend = noFollowupRequired.includes(disposition);
+            if (wontAutoSend && !autoTemplate) return null;
+            return (
+              <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/40 bg-emerald-50/60 dark:bg-emerald-950/20 p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-400" />
+                  <span className="text-xs font-semibold text-emerald-900 dark:text-emerald-200">
+                    WhatsApp follow-up
+                  </span>
+                </div>
+                {autoTemplate && (
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={!suppressAutoWa}
+                      onChange={(e) => setSuppressAutoWa(!e.target.checked)}
+                      className="mt-0.5 accent-emerald-600"
+                    />
+                    <span className="text-[11px] text-foreground">
+                      Send <span className="font-mono">{autoTemplate.replace(/_/g, " ")}</span> to {leadName}
+                      <span className="block text-[10px] text-muted-foreground">
+                        {autoTemplate === "missed_call"
+                          ? "Apology + tap-to-call back. Works outside the 24h window."
+                          : "Thanks-for-talking note with course mention."}
+                      </span>
+                    </span>
+                  </label>
+                )}
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={sendCourseInfo}
+                    onChange={(e) => setSendCourseInfo(e.target.checked)}
+                    className="mt-0.5 accent-emerald-600"
+                  />
+                  <span className="text-[11px] text-foreground flex items-center gap-1">
+                    <GraduationCap className="h-3 w-3 text-emerald-700" />
+                    Also send course details
+                    <span className="text-[10px] text-muted-foreground">(course_info_v1 — auto-filled from DB)</span>
+                  </span>
+                </label>
+              </div>
+            );
+          })()}
 
           {/* Inline follow-up scheduling — mandatory for actionable dispositions */}
           {(() => {

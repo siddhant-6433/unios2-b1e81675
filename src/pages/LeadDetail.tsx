@@ -112,6 +112,13 @@ const LeadDetail = () => {
   const [showScheduleVisit, setShowScheduleVisit] = useState(false);
   const [showFollowup, setShowFollowup] = useState(false);
   const [showCallDisposition, setShowCallDisposition] = useState(false);
+  // Live Plivo status of the in-flight manual call. Drives the dialog through
+  // calling → connected / no_answer / busy / failed. `undefined` means the
+  // dialog was opened outside an active call (legacy "log past call" mode).
+  const [dispositionCallStatus, setDispositionCallStatus] = useState<
+    "calling" | "connected" | "no_answer" | "busy" | "failed" | undefined
+  >(undefined);
+  const [activeCallUuid, setActiveCallUuid] = useState<string | null>(null);
   const [dispositionWaSent, setDispositionWaSent] = useState(false);
   const [showRecordPayment, setShowRecordPayment] = useState(false);
   const [showTokenOverride, setShowTokenOverride] = useState(false);
@@ -136,6 +143,67 @@ const LeadDetail = () => {
   const { buckets, nextLead, refetch: refetchQueue } = useCallQueue(id);
 
   useEffect(() => { if (id) fetchAll(); }, [id]);
+
+  // ── Manual-call status poll ───────────────────────────────────────────────
+  // While a manual call is in flight, poll ai_call_records by call_uuid every
+  // 2s. The voice-call-callback edge fn updates this row from Plivo callbacks:
+  //   initiated/ringing/in-progress → still "calling"
+  //   completed (duration > 5s)     → "connected" — show full picker
+  //   no-answer / cancel            → "no_answer" — auto-dispose
+  //   busy                          → "busy"      — auto-dispose
+  //   failed                        → "failed"    — auto-dispose (switched off)
+  // Stops as soon as a terminal state is reached or the dialog closes.
+  useEffect(() => {
+    if (!activeCallUuid || !showCallDisposition) return;
+    if (dispositionCallStatus && dispositionCallStatus !== "calling") return;
+
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      const { data } = await (supabase as any)
+        .from("ai_call_records")
+        .select("status, duration_seconds")
+        .eq("call_uuid", activeCallUuid)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (cancelled) return;
+      if (!data) return;
+      const s = String(data.status || "").toLowerCase();
+      if (s === "completed" && (data.duration_seconds || 0) > 5) {
+        setDispositionCallStatus("connected");
+      } else if (s === "no_answer" || s === "no-answer" || s === "cancel") {
+        setDispositionCallStatus("no_answer");
+      } else if (s === "busy") {
+        setDispositionCallStatus("busy");
+      } else if (s === "failed") {
+        setDispositionCallStatus("failed");
+      }
+    };
+    tick();
+    const interval = setInterval(tick, 2000);
+    // Safety: if no Plivo callback comes in 90s, assume no_answer so the
+    // counsellor isn't stuck on the spinner.
+    const safety = setTimeout(() => {
+      if (!cancelled) {
+        setDispositionCallStatus((prev) => (prev === "calling" ? "no_answer" : prev));
+      }
+    }, 90_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      clearTimeout(safety);
+    };
+  }, [activeCallUuid, showCallDisposition, dispositionCallStatus]);
+
+  // Reset the call-status state whenever the dialog closes so the next call
+  // starts fresh.
+  useEffect(() => {
+    if (!showCallDisposition) {
+      setDispositionCallStatus(undefined);
+      setActiveCallUuid(null);
+    }
+  }, [showCallDisposition]);
 
   // Auto-trigger Cloud Call when navigated with ?action=call.
   // Previously this opened the disposition dialog directly, which let
@@ -294,7 +362,7 @@ const LeadDetail = () => {
     // 4. Auto-send WhatsApp to lead based on disposition (fire-and-forget)
     // Uses UTILITY templates (admissions_followup_update) which work outside the 24-hour window
     // MARKETING templates (ai_call_course_info) may fail if conversation window expired
-    if (lead.phone) {
+    if (lead.phone && !data.suppress_auto_whatsapp) {
       const course = courseName || "your selected course";
       let autoTemplate: string | null = null;
       let autoParams: string[] = [];
@@ -341,6 +409,30 @@ const LeadDetail = () => {
           console.error("Auto WA exception:", e);
         });
       }
+    }
+
+    // Optional course-info follow-up — fires when the counsellor ticked
+    // "Also send course details" in the disposition dialog. course_info_v1
+    // resolves all params + button URLs server-side from the lead's course_id,
+    // so we just pass {template_key, phone, lead_id}.
+    if (data.send_course_info && lead.phone && id) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken || anonKey}`,
+          apikey: anonKey,
+        },
+        body: JSON.stringify({
+          template_key: "course_info_v1",
+          phone: lead.phone,
+          lead_id: id,
+        }),
+      }).catch(e => console.error("course_info_v1 send exception:", e));
     }
 
     toast({ title: "Call logged", description: label });
@@ -705,8 +797,12 @@ const LeadDetail = () => {
         toast({ title: "Call Failed", description: data.error, variant: "destructive" });
       } else {
         toast({ title: "Calling You", description: data?.message || "Pick up your phone to connect to the student." });
-        // Show disposition dialog after a short delay so counsellor can log the call outcome
-        setTimeout(() => setShowCallDisposition(true), 3000);
+        // Open the disposition dialog immediately in "calling" mode. The poll
+        // below flips it to connected / no_answer / busy / failed once Plivo
+        // reports back via ai_call_records.
+        setActiveCallUuid(data?.call_id || null);
+        setDispositionCallStatus("calling");
+        setShowCallDisposition(true);
         fetchAll(true);
       }
     } catch (e: any) {
@@ -1254,6 +1350,7 @@ const LeadDetail = () => {
         campuses={campuses}
         defaultCampusId={lead.campus_id || undefined}
         onSubmit={logCallDisposition}
+        callStatus={dispositionCallStatus}
       />
 
       {/* Score animation popup */}
