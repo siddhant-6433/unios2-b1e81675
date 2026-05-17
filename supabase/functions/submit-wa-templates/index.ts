@@ -277,6 +277,25 @@ const TEMPLATES = [
       },
     ],
   },
+  // Connected-call follow-up. Sent after a counsellor marks a call as
+  // Interested or Call Back. Says the counsellor will call back on the
+  // scheduled date and signs off with the counsellor's name + reach-me phone
+  // so the lead has a personal point of contact.
+  // Body params: name, formatted-date, counsellor_name, counsellor_phone.
+  {
+    name: "nimt_followup_v1",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        // Body cannot end with a variable (Meta error 2388299 "Leading or
+        // trailing params not allowed") — trailing text after {{4}}.
+        text: "Hi {{1}}, thanks for speaking with us at NIMT Educational Institutions. As per our discussion I will call you back on {{2}}. Looking forward to assisting you with your admission journey.\n\n— {{3}}, NIMT Counsellor\nReach me directly on {{4}} for any questions before our next call.",
+        example: { body_text: [["Rahul Sharma", "Fri, 2nd May", "Priya Kapoor", "+91 9555 192 192"]] },
+      },
+    ],
+  },
   // Counsellor-friendly closure when the lead said "not interested" during a
   // MANUAL call disposition. NOT sent from AI calls (that would amplify spam
   // exactly when the user has signalled they don't want messages). Body is

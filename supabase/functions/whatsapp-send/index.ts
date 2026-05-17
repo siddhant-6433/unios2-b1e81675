@@ -109,6 +109,10 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
 
   // Manual not-interested closure (counsellor-triggered only).
   nimt_not_interested_ack: { name: "nimt_not_interested_ack", params: ["student_name", "course_name", "counsellor_name", "counsellor_phone"] },
+
+  // Personal follow-up after a connected interested / call-back disposition.
+  // params: [student_name, formatted_date, counsellor_name, counsellor_phone]
+  nimt_followup_v1:        { name: "nimt_followup_v1",        params: ["student_name", "followup_date", "counsellor_name", "counsellor_phone"] },
 };
 
 type WhatsAppRoute = "default" | "call" | "visit";
@@ -128,6 +132,7 @@ const CALL_TEMPLATE_KEYS = new Set([
   "course_info_generic",
   // Follow-up to a manual call disposition — belongs on the call route.
   "nimt_not_interested_ack",
+  "nimt_followup_v1",
 ]);
 
 const VISIT_TEMPLATE_KEYS = new Set([

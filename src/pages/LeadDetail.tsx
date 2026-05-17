@@ -359,22 +359,43 @@ const LeadDetail = () => {
     }
 
     // 4. Auto-send WhatsApp to lead based on disposition (fire-and-forget)
-    // Uses UTILITY templates (admissions_followup_update) which work outside the 24-hour window
-    // MARKETING templates (ai_call_course_info) may fail if conversation window expired
+    // Uses UTILITY templates which work outside the 24-hour window.
+    // For interested / call_back: nimt_followup_v1 (personal sign-off with
+    // counsellor name + phone + the actual follow-up date). Counsellor name
+    // and phone are filled in by the fn_resolve_counsellor_signature RPC.
     if (lead.phone && !data.suppress_auto_whatsapp) {
       const course = courseName || "your selected course";
       let autoTemplate: string | null = null;
       let autoParams: string[] = [];
 
-      if (data.disposition === "interested") {
-        // Use utility template (always delivers) instead of marketing template
-        autoTemplate = "callback_scheduled";
-        autoParams = [lead.name, course];
+      // Format "Fri, 2nd May" — used by nimt_followup_v1.
+      const formatFollowupDate = (iso?: string) => {
+        if (!iso) return "the agreed time";
+        const d = new Date(iso);
+        const day = d.toLocaleDateString("en-IN", { weekday: "short" });
+        const date = d.getDate();
+        const month = d.toLocaleDateString("en-IN", { month: "short" });
+        const ord = (n: number) => {
+          const s = ["th", "st", "nd", "rd"], v = n % 100;
+          return n + (s[(v - 20) % 10] || s[v] || s[0]);
+        };
+        return `${day}, ${ord(date)} ${month}`;
+      };
+
+      if (data.disposition === "interested" || data.disposition === "call_back") {
+        // Resolve counsellor signature from the DB so the message is personal
+        // and the phone fallback chain (official_phone → Plivo DID → admissions)
+        // is centralised in SQL rather than duplicated here.
+        const { data: sig } = await (supabase as any).rpc("fn_resolve_counsellor_signature", { p_lead_id: id });
+        autoTemplate = "nimt_followup_v1";
+        autoParams = [
+          lead.name,
+          formatFollowupDate(data.followup_date),
+          sig?.counsellor_name || "the admissions team",
+          sig?.counsellor_phone || "+91 9555 192 192",
+        ];
       } else if (data.disposition === "not_answered" || data.disposition === "busy" || data.disposition === "voicemail") {
         autoTemplate = "missed_call";
-        autoParams = [lead.name, course];
-      } else if (data.disposition === "call_back") {
-        autoTemplate = "callback_scheduled";
         autoParams = [lead.name, course];
       }
 

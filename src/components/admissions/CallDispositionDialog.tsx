@@ -156,6 +156,19 @@ export function CallDispositionDialog({
     else if (callStatus === "failed") setDisposition("not_answered");
   }, [callStatus, open, disposition]);
 
+  // Default-on the course-info follow-up for positive dispositions so the
+  // counsellor doesn't have to remember to tick it after every connected
+  // call. Stays off for non-engagement dispositions (busy / not_interested /
+  // ineligible / wrong_number / dnc) where pushing course info would be spammy.
+  useEffect(() => {
+    if (!disposition) return;
+    if (disposition === "interested" || disposition === "call_back") {
+      setSendCourseInfo(true);
+    } else {
+      setSendCourseInfo(false);
+    }
+  }, [disposition]);
+
   const resetState = () => {
     setDisposition(null);
     setDuration(0);
@@ -215,7 +228,7 @@ export function CallDispositionDialog({
   if (callStatus === "calling") {
     return (
       <Dialog open={open} onOpenChange={handleClose}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Phone className="h-4 w-4 text-primary" />
@@ -309,7 +322,7 @@ export function CallDispositionDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Phone className="h-4 w-4 text-primary" />
