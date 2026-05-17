@@ -202,6 +202,31 @@ const TEMPLATES = [
   //     button_urls: [token],
   //     phone, lead_id,
   //   }
+  // Counsellor call/visit feedback — quick-reply buttons (Good/Bad).
+  // Sent by feedback-sender-cron on a 10% sample of completed interactions.
+  // Body params: {{1}} lead name, {{2}} counsellor name.
+  // Button payload (set at send time): "feedback_good_<feedback_id>" /
+  // "feedback_bad_<feedback_id>" — parsed by whatsapp-webhook to update the
+  // matching feedback_responses row.
+  {
+    name: "counsellor_feedback",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Hi {{1}}, we noticed you just had an interaction with our counsellor, {{2}}. We'd love to know how it went! Your feedback means a lot to us. How was your experience?",
+        example: { body_text: [["Siddhant", "Adarsh Raj"]] },
+      },
+      {
+        type: "BUTTONS",
+        buttons: [
+          { type: "QUICK_REPLY", text: "Good" },
+          { type: "QUICK_REPLY", text: "Bad" },
+        ],
+      },
+    ],
+  },
   {
     name: "apply_portal_login",
     category: "UTILITY",
