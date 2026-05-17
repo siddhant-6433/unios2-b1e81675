@@ -2727,12 +2727,19 @@ Deno.serve({ port: PORT }, async (req) => {
 
     const bStatusUrl = `https://${host}/bridge-b-status/${callId}`;
 
+    // statusCallbackEvent is critical: Plivo defaults to "completed"-only
+    // callbacks for <Number>, which means we never get notified when the
+    // student actually answers — only after the whole leg ends. Asking for
+    // "answered" too gives us the in-progress event that lets the lead-page
+    // dialog auto-flip from "waiting for pickup" → disposition picker the
+    // moment the student picks up. "completed" stays in the event list so
+    // we still get hangup details even if Dial's `action` is skipped.
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Record recordSession="true" redirect="false" maxLength="3600"${recordingCallbackUrl ? ` callbackUrl="${recordingCallbackUrl}" callbackMethod="POST"` : ""} />
   <Speak voice="Polly.Kajal">Connecting you to the student now.</Speak>
   <Dial callerId="${PLIVO_PHONE_NUMBER}" action="${statusUrl}" method="POST" machineDetection="true" machineDetectionTime="5000">
-    <Number statusCallbackUrl="${bStatusUrl}" statusCallbackMethod="POST">${studentPhone}</Number>
+    <Number statusCallbackUrl="${bStatusUrl}" statusCallbackMethod="POST" statusCallbackEvent="answered,completed">${studentPhone}</Number>
   </Dial>
 </Response>`;
 
@@ -2785,15 +2792,26 @@ Deno.serve({ port: PORT }, async (req) => {
       (callCtx as any)._bLegUUID = bLegUUID;
     }
 
-    // Student answered — update DB so client polling can detect it
-    if (callStatus === "in-progress" && SUPABASE_URL) {
+    // Student answered — update DB so client polling can detect it.
+    // Plivo's "answered" event sends CallStatus="in-progress"; sometimes the
+    // raw event name "answered" arrives via Event= param instead, so we
+    // accept both. This row also bumps status to "in-progress" so the
+    // lead-page polling can detect it without the extra student_connected_at
+    // column (older voice-agent deploys may not have it).
+    const isAnsweredEvent = callStatus === "in-progress"
+      || callStatus === "answered"
+      || (params.Event || "").toLowerCase() === "answered";
+    if (isAnsweredEvent && SUPABASE_URL) {
       const dbH = { "Content-Type": "application/json", apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
       await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
         method: "PATCH",
         headers: { ...dbH, Prefer: "return=minimal" },
-        body: JSON.stringify({ student_connected_at: new Date().toISOString() }),
+        body: JSON.stringify({
+          student_connected_at: new Date().toISOString(),
+          status: "in-progress",
+        }),
       }).catch(e => console.error(`[BRIDGE-B-STATUS ${callId}] DB update failed:`, e.message));
-      console.log(`[BRIDGE-B-STATUS ${callId}] Student answered! Updated student_connected_at`);
+      console.log(`[BRIDGE-B-STATUS ${callId}] Student answered! Updated student_connected_at + status=in-progress`);
     }
 
     return new Response("OK");

@@ -173,8 +173,9 @@ const LeadDetail = () => {
       const s = String(data.status || "").toLowerCase();
       const dur = data.duration_seconds || 0;
       // Student answered mid-call — voice-agent writes student_connected_at
-      // the moment Plivo reports CallStatus="in-progress" on the B-leg.
-      if (data.student_connected_at) {
+      // AND status="in-progress" the moment Plivo's <Number statusCallback
+      // fires the "answered" event. Either signal flips the dialog.
+      if (data.student_connected_at || s === "in-progress" || s === "in_progress" || s === "answered") {
         setDispositionCallStatus("connected");
         return;
       }
