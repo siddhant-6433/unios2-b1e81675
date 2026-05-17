@@ -145,16 +145,15 @@ const LeadDetail = () => {
   useEffect(() => { if (id) fetchAll(); }, [id]);
 
   // ── Manual-call status poll ───────────────────────────────────────────────
-  // While a manual call is in flight, poll ai_call_records by call_uuid every
-  // 3s. The voice-call-callback edge fn writes status from Plivo callbacks,
-  // but during the talk the row sits at "initiated" — there's no intermediate
-  // "answered" event. So:
-  //  - Terminal "no-answer" / busy / failed / cancel → auto-dispose
-  //  - Terminal "completed" with talk time           → flip to "connected"
-  //  - Otherwise the counsellor uses the "Call connected" button in the
-  //    dialog (onManualConnect) to advance manually.
-  // No more 90s timeout — the manual button removes that need and the old
-  // timeout was prematurely auto-disposing answered calls.
+  // The voice-agent already captures the "student answered" event in its
+  // /bridge-b-status handler — but it writes a timestamp to
+  // ai_call_records.student_connected_at, not to `status` (which stays
+  // "initiated" until Plivo hangs up). So we poll both columns:
+  //   - student_connected_at IS NOT NULL → flip to "connected"
+  //   - terminal status (no-answer / busy / failed / cancel) → auto-dispose
+  //   - completed with >5s talk → "connected"; ≤5s → "no_answer"
+  // No safety timeout — the manual "Call connected" button covers the edge
+  // case where bridge-b-status never fires (e.g. machine detection skipped).
   useEffect(() => {
     if (!activeCallUuid || !showCallDisposition) return;
     if (dispositionCallStatus && dispositionCallStatus !== "calling") return;
@@ -164,7 +163,7 @@ const LeadDetail = () => {
       if (cancelled) return;
       const { data } = await (supabase as any)
         .from("ai_call_records")
-        .select("status, duration_seconds")
+        .select("status, duration_seconds, student_connected_at")
         .eq("call_uuid", activeCallUuid)
         .order("created_at", { ascending: false })
         .limit(1)
@@ -173,6 +172,12 @@ const LeadDetail = () => {
       if (!data) return;
       const s = String(data.status || "").toLowerCase();
       const dur = data.duration_seconds || 0;
+      // Student answered mid-call — voice-agent writes student_connected_at
+      // the moment Plivo reports CallStatus="in-progress" on the B-leg.
+      if (data.student_connected_at) {
+        setDispositionCallStatus("connected");
+        return;
+      }
       if (s === "no_answer" || s === "no-answer" || s === "cancel") {
         setDispositionCallStatus("no_answer");
       } else if (s === "busy") {
@@ -180,15 +185,14 @@ const LeadDetail = () => {
       } else if (s === "failed") {
         setDispositionCallStatus("failed");
       } else if (s === "completed") {
-        // Plivo hung up. >5s of talk → counsellor and lead conversed.
-        // ≤5s → treat as no answer / quick decline.
+        // Hangup arrived before B-status poll caught up. Use duration as the
+        // tiebreaker — >5s of talk means they connected.
         setDispositionCallStatus(dur > 5 ? "connected" : "no_answer");
       }
-      // initiated / ringing / in-progress → keep "calling"; counsellor can
-      // hit the manual "Call connected" button at any time.
+      // initiated / ringing → keep "calling"; manual button is the fallback.
     };
     tick();
-    const interval = setInterval(tick, 3000);
+    const interval = setInterval(tick, 2000);
     return () => {
       cancelled = true;
       clearInterval(interval);
