@@ -1155,23 +1155,32 @@ export default function CloudDialer() {
       {/* Dial a number — type a phone, look up in leads, then pin+call.
           For unknown numbers, a name input appears so we can create a stub
           lead and dial it (so call_logs has a lead_id and the disposition
-          flow works end-to-end). */}
-      <div className="px-6 pt-3">
+          flow works end-to-end). 10-digit Indian mobile only; storage
+          format is +91XXXXXXXXXX. */}
+      <div className="px-6 pt-3 pb-3">
         <div className="rounded-xl border border-border bg-card p-3 flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
             <PhoneCall className="h-3.5 w-3.5 text-cyan-600" /> Dial a number
           </div>
           <input
             type="tel"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={10}
             value={dialPhone}
-            onChange={e => { setDialPhone(e.target.value); setDialLeadMatch(null); setDialNoMatch(false); }}
-            placeholder="+91 9555 192 192"
+            onChange={e => {
+              const digits = e.target.value.replace(/\D/g, "").slice(0, 10);
+              setDialPhone(digits);
+              setDialLeadMatch(null);
+              setDialNoMatch(false);
+            }}
+            placeholder="9555192192"
             disabled={dialerActive || dialPlacing}
             className="flex-1 min-w-[180px] rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm font-mono disabled:opacity-50"
-            onKeyDown={e => { if (e.key === "Enter") dialLookup(); }}
+            onKeyDown={e => { if (e.key === "Enter" && dialPhone.length === 10) dialLookup(); }}
           />
           {!dialLeadMatch && !dialNoMatch && (
-            <Button size="sm" variant="outline" onClick={dialLookup} disabled={!dialPhone || dialerActive || dialPlacing}>
+            <Button size="sm" variant="outline" onClick={dialLookup} disabled={dialPhone.length !== 10 || dialerActive || dialPlacing}>
               Look up
             </Button>
           )}

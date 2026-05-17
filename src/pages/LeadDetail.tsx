@@ -1035,11 +1035,12 @@ const LeadDetail = () => {
           // Call below is the only path now; disposition dialog auto-opens
           // 3s after the Plivo call connects.
           { icon: Phone, label: "Cloud Call", color: "text-cyan-600 bg-cyan-100 dark:bg-cyan-900/30", action: triggerManualCall, disabled: manualCalling },
-          // Counsellor-only — push this lead to the top of /cloud-dialer.
-          ...(role === "counsellor" ? [{
+          // Push this lead to the top of the calling user's /cloud-dialer.
+          // Available to anyone who can place calls (RLS scopes to auth.uid()).
+          {
             icon: Sparkles, label: "Add to Dialer", color: "text-fuchsia-600 bg-fuchsia-100 dark:bg-fuchsia-900/30",
             action: pinToDialer, disabled: pinningToDialer,
-          }] : []),
+          },
           { icon: MessageSquare, label: "WhatsApp", color: "text-green-600 bg-green-100 dark:bg-green-900/30", action: () => setShowWhatsApp(true) },
           { icon: Clock, label: "Follow Up", color: "text-orange-600 bg-orange-100 dark:bg-orange-900/30", action: () => setShowFollowup(true) },
           { icon: MapPin, label: "Schedule Visit", color: "text-violet-600 bg-violet-100 dark:bg-violet-900/30", action: () => setShowScheduleVisit(true) },
