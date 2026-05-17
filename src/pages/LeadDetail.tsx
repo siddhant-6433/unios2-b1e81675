@@ -458,7 +458,7 @@ const LeadDetail = () => {
     }
 
     // Optional course-info follow-up — fires when the counsellor ticked
-    // "Also send course details" in the disposition dialog. course_info_v1
+    // "Also send course details" in the disposition dialog. course_info_v3
     // resolves all params + button URLs server-side from the lead's course_id,
     // so we just pass {template_key, phone, lead_id}.
     if (data.send_course_info && lead.phone && id) {
@@ -474,11 +474,11 @@ const LeadDetail = () => {
           apikey: anonKey,
         },
         body: JSON.stringify({
-          template_key: "course_info_v1",
+          template_key: "course_info_v3",
           phone: lead.phone,
           lead_id: id,
         }),
-      }).catch(e => console.error("course_info_v1 send exception:", e));
+      }).catch(e => console.error("course_info_v3 send exception:", e));
     }
 
     toast({ title: "Call logged", description: label });

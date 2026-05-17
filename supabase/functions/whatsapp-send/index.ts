@@ -97,6 +97,13 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   // {template_key, phone, lead_id}. Caller can also supply params/button_urls
   // explicitly to override.
   course_info_v1:         { name: "course_info_v1",         params: ["student_name", "course_name", "duration", "eligibility", "approval"] },
+  // v2: single "View fees & apply" button, no video.
+  course_info_v2:         { name: "course_info_v2",         params: ["student_name", "course_name", "duration", "eligibility", "approval"] },
+  // v3: same body as v1/v2 + the actual courses.video_url as a 6th body
+  // param (WhatsApp auto-linkifies URLs in body text). Single button to
+  // the fees section. This is the right shape because Meta button prefixes
+  // can't host arbitrary external URLs (youtu.be / instagram.com / etc).
+  course_info_v3:         { name: "course_info_v3",         params: ["student_name", "course_name", "duration", "eligibility", "approval", "video_url"] },
   // Fallback when lead.course_id is null — no params beyond name.
   course_info_generic:    { name: "course_info_generic",    params: ["student_name"] },
 
@@ -129,6 +136,8 @@ const CALL_TEMPLATE_KEYS = new Set([
   // belongs on the call route to keep quality ratings aligned with the rest
   // of the post-call flow.
   "course_info_v1",
+  "course_info_v2",
+  "course_info_v3",
   "course_info_generic",
   // Follow-up to a manual call disposition — belongs on the call route.
   "nimt_not_interested_ack",
@@ -250,33 +259,52 @@ Deno.serve(async (req) => {
     // consistent message without hand-assembling the args. If the lead has no
     // course_id the resolver returns null and we fall back to the generic
     // template.
-    if (template_key === "course_info_v1" && lead_id && (!params || params.length === 0)) {
+    // course_info_v1 and v2 share the same body. v1 has two URL buttons
+    // (video + fees), v2 has one. Both Meta templates use the URL prefix
+    // https://www.nimt.ac.in/courses/ — variable suffixes only:
+    //   Button 1 (v1 only) "Watch course video" → bare slug, lands at the
+    //     top of the course page where the embedded video plays
+    //   Button 2 (v1) / Button 1 (v2) "View fees & apply" → slug + #admissions
+    //     anchor scrolls to the fees section
+    if ((template_key === "course_info_v1" || template_key === "course_info_v2" || template_key === "course_info_v3") && lead_id && (!params || params.length === 0)) {
       const { data: resolved, error: resolveErr } = await admin.rpc(
         "fn_resolve_course_info_params",
         { p_lead_id: lead_id }
       );
-      if (resolveErr) {
-        console.error("course_info_v1 resolver failed:", resolveErr.message);
-      }
+      if (resolveErr) console.error(`${template_key} resolver failed:`, resolveErr.message);
       if (resolved && typeof resolved === "object") {
-        params = [
+        const baseParams = [
           resolved.student_name,
           resolved.course_name,
           resolved.duration,
           resolved.eligibility,
           resolved.approval,
         ];
-        // Both URL buttons take only the variable suffix appended after the
-        // template's fixed prefix (https://www.nimt.ac.in/courses/). The
-        // resolver returns full URLs, so strip the prefix here.
+        // Derive the bare slug + the slug#admissions suffix from the resolver's
+        // course_url ("https://www.nimt.ac.in/courses/{slug}#admissions").
         const prefix = "https://www.nimt.ac.in/courses/";
-        const videoSuffix = typeof resolved.video_url === "string" && resolved.video_url.startsWith(prefix)
-          ? resolved.video_url.slice(prefix.length)
-          : resolved.course_url?.slice(prefix.length) || "";
-        const courseSuffix = typeof resolved.course_url === "string" && resolved.course_url.startsWith(prefix)
-          ? resolved.course_url.slice(prefix.length)
-          : "";
-        button_urls = [videoSuffix, courseSuffix];
+        const courseUrlFull = typeof resolved.course_url === "string" ? resolved.course_url : "";
+        const afterPrefix = courseUrlFull.startsWith(prefix) ? courseUrlFull.slice(prefix.length) : "";
+        const bareSlug = afterPrefix.split("#")[0] || "";
+        const slugWithFees = bareSlug ? `${bareSlug}#admissions` : afterPrefix;
+        if (template_key === "course_info_v3") {
+          // v3 body has a 6th param: the actual video URL (youtu.be /
+          // instagram / etc) from courses.video_url. WhatsApp auto-linkifies
+          // URLs in body text so it renders as a tappable link, sidestepping
+          // Meta's button-prefix lock-in for arbitrary external URLs.
+          const videoUrl = (typeof resolved.video_url === "string" && resolved.video_url.length > 0)
+            ? resolved.video_url
+            : courseUrlFull;
+          params = [...baseParams, videoUrl];
+          button_urls = [slugWithFees];
+        } else if (template_key === "course_info_v2") {
+          params = baseParams;
+          button_urls = [slugWithFees];
+        } else {
+          // v1: button 1 = video (top of page), button 2 = fees section
+          params = baseParams;
+          button_urls = [bareSlug, slugWithFees];
+        }
       } else {
         // No course on the lead — switch to the generic template.
         template_key = "course_info_generic";

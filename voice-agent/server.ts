@@ -702,14 +702,13 @@ async function reconcilePostCall(
     return actions.length > 0 ? { templateKey: "", templateParams: [], actions } : null;
   }
 
-  // Default for interested / no disposition / partial conversation: send the
-  // data-driven course_info_v1 template. whatsapp-send fills body params and
-  // both button URLs from fn_resolve_course_info_params(lead_id), so the body
-  // reflects the actual course on the lead (duration, eligibility, approvals,
-  // video, course page) instead of the older static post-call summary.
-  actions.push("wa:course_info_v1");
+  // Default for interested / no disposition / partial conversation: send
+  // course_info_v3 — body includes the actual courses.video_url
+  // (youtu.be / instagram / etc) as a tappable URL plus a single "View
+  // fees & apply" button to the course page admissions section.
+  actions.push("wa:course_info_v3");
   return {
-    templateKey: "course_info_v1",
+    templateKey: "course_info_v3",
     templateParams: [],
     phone: waLd.phone,
     actions,
