@@ -140,6 +140,28 @@ export function CallDispositionDialog({
   // opt out of the auto-send or also fire course_info_v1 alongside.
   const [suppressAutoWa, setSuppressAutoWa] = useState(false);
   const [sendCourseInfo, setSendCourseInfo] = useState(false);
+  // Live elapsed timer for the connected phase. Starts when the parent flips
+  // callStatus → "connected" and stops when the dialog closes. Pure UI; the
+  // real call duration is whatever Plivo reports at hangup. Declared up here
+  // (with the other hooks) so the hook order stays stable across the early
+  // return for the "calling" phase below.
+  const [connectedAt, setConnectedAt] = useState<number | null>(null);
+  const [elapsedSec, setElapsedSec] = useState(0);
+  useEffect(() => {
+    if (callStatus === "connected" && !connectedAt) {
+      setConnectedAt(Date.now());
+      setElapsedSec(0);
+    }
+    if (!open) {
+      setConnectedAt(null);
+      setElapsedSec(0);
+    }
+  }, [callStatus, open, connectedAt]);
+  useEffect(() => {
+    if (!connectedAt) return;
+    const id = setInterval(() => setElapsedSec(Math.floor((Date.now() - connectedAt) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [connectedAt]);
   const dateInputRef = useRef<HTMLInputElement>(null);
 
   const selectedDisp = DISPOSITIONS.find(d => d.value === disposition);
@@ -314,27 +336,6 @@ export function CallDispositionDialog({
 
   const isAutoDisposed =
     callStatus === "no_answer" || callStatus === "busy" || callStatus === "failed";
-
-  // Live elapsed timer for the connected phase. Starts when the parent flips
-  // callStatus → "connected" and stops when the dialog closes. Pure UI; the
-  // real call duration is whatever Plivo reports at hangup.
-  const [connectedAt, setConnectedAt] = useState<number | null>(null);
-  const [elapsedSec, setElapsedSec] = useState(0);
-  useEffect(() => {
-    if (callStatus === "connected" && !connectedAt) {
-      setConnectedAt(Date.now());
-      setElapsedSec(0);
-    }
-    if (!open) {
-      setConnectedAt(null);
-      setElapsedSec(0);
-    }
-  }, [callStatus, open, connectedAt]);
-  useEffect(() => {
-    if (!connectedAt) return;
-    const id = setInterval(() => setElapsedSec(Math.floor((Date.now() - connectedAt) / 1000)), 1000);
-    return () => clearInterval(id);
-  }, [connectedAt]);
   const fmtElapsed = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   const autoBannerText: Record<string, string> = {
     no_answer: "Lead didn't pick up — auto-set to Not Answered.",
