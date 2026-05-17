@@ -22,6 +22,11 @@ const AUTO_REPLIES: { patterns: RegExp; reply: string }[] = [
   },
 ];
 
+function extractWhatsAppLoginCode(content: string | null | undefined): string | null {
+  const match = (content || "").match(/\bUNIOS[-\s:]?([23456789A-HJ-NP-Z]{8})\b/i);
+  return match?.[1]?.toUpperCase() || null;
+}
+
 Deno.serve(async (req) => {
   // Meta webhook verification (GET)
   if (req.method === "GET") {
@@ -84,6 +89,39 @@ Deno.serve(async (req) => {
             `[${msgType}]`;
           const mediaId = msg.image?.id || msg.document?.id || msg.audio?.id || msg.video?.id || null;
           let mediaUrl: string | null = mediaId;
+
+          // ── WhatsApp sign-in intent ──────────────────────────────────────
+          // The browser creates a short-lived intent, then opens WhatsApp with
+          // a prefilled "UNIOS-XXXXXXXX" message. When that message arrives
+          // from the user's WhatsApp account, mark the intent verified and let
+          // the browser polling endpoint mint the Supabase session.
+          const loginCode = msgType === "text" ? extractWhatsAppLoginCode(content) : null;
+          if (loginCode) {
+            const senderPhone = `+${phone.replace(/[^0-9]/g, "")}`;
+            const { data: intent } = await admin
+              .from("whatsapp_login_intents")
+              .select("id")
+              .eq("code", loginCode)
+              .eq("status", "pending")
+              .gt("expires_at", new Date().toISOString())
+              .single();
+
+            if (intent?.id) {
+              await admin
+                .from("whatsapp_login_intents")
+                .update({
+                  status: "verified",
+                  sender_phone: senderPhone,
+                  business_phone_number_id: businessPnId,
+                  wa_message_id: waMessageId,
+                  verified_at: new Date().toISOString(),
+                })
+                .eq("id", intent.id)
+                .eq("status", "pending");
+            }
+
+            continue;
+          }
 
           // ── Personal Document Tracker: #mydoc trigger ───────────────────
           // Two valid patterns:

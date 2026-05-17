@@ -1,4 +1,4 @@
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -13,15 +13,52 @@ function generateOtp(): string {
 }
 
 async function hashOtp(otp: string): Promise<string> {
+  return hashText(otp);
+}
+
+async function hashText(value: string): Promise<string> {
   const encoder = new TextEncoder();
-  const data = encoder.encode(otp);
+  const data = encoder.encode(value);
   const hash = await crypto.subtle.digest("SHA-256", data);
   return Array.from(new Uint8Array(hash))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
 
-async function createSession(admin: any, userId: string) {
+function randomBase64Url(byteLength: number): string {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function generateLoginCode(): string {
+  const alphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function parseJsonObject(value: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Unknown error";
+}
+
+async function createSession(admin: SupabaseClient, userId: string) {
   const { data: userData } = await admin.auth.admin.getUserById(userId);
   if (!userData?.user?.email) return null;
 
@@ -44,7 +81,7 @@ async function createSession(admin: any, userId: string) {
 }
 
 async function provisionUser(
-  admin: any,
+  admin: SupabaseClient,
   phone: string,
   role: "student" | "parent"
 ): Promise<string | null> {
@@ -66,7 +103,7 @@ async function provisionUser(
     // User already exists — find by scanning listUsers (rare path)
     console.log(`[whatsapp-otp] createUser failed (${createErr?.message}), scanning for existing ${email}`);
     const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-    const match = list?.users?.find((u: any) => u.email === email);
+    const match = list?.users?.find((u) => u.email === email);
     if (match) userId = match.id;
   }
 
@@ -76,6 +113,66 @@ async function provisionUser(
   await admin.from("user_roles").upsert({ user_id: userId, role }, { onConflict: "user_id,role", ignoreDuplicates: true });
 
   return userId;
+}
+
+async function resolveUserForPhone(admin: SupabaseClient, normalizedPhone: string): Promise<{ userId: string; role?: string } | null> {
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("user_id")
+    .eq("phone", normalizedPhone)
+    .single();
+
+  if (profile?.user_id) return { userId: profile.user_id, role: "staff" };
+
+  const { data: studentSelf } = await admin
+    .from("students")
+    .select("id, user_id")
+    .or(`phone.eq.${normalizedPhone},whatsapp_no.eq.${normalizedPhone}`)
+    .limit(1)
+    .single();
+
+  if (studentSelf) {
+    let userId = studentSelf.user_id;
+    if (!userId) {
+      userId = await provisionUser(admin, normalizedPhone, "student");
+      if (userId) await admin.from("students").update({ user_id: userId }).eq("id", studentSelf.id);
+    }
+    if (userId) return { userId, role: "student" };
+  }
+
+  const { data: studentByFather } = await admin
+    .from("students")
+    .select("id, father_user_id")
+    .or(`father_phone.eq.${normalizedPhone},father_whatsapp.eq.${normalizedPhone}`)
+    .limit(1)
+    .single();
+
+  if (studentByFather) {
+    let userId = studentByFather.father_user_id;
+    if (!userId) {
+      userId = await provisionUser(admin, normalizedPhone, "parent");
+      if (userId) await admin.from("students").update({ father_user_id: userId }).eq("id", studentByFather.id);
+    }
+    if (userId) return { userId, role: "parent" };
+  }
+
+  const { data: studentByMother } = await admin
+    .from("students")
+    .select("id, mother_user_id")
+    .or(`mother_phone.eq.${normalizedPhone},mother_whatsapp.eq.${normalizedPhone}`)
+    .limit(1)
+    .single();
+
+  if (studentByMother) {
+    let userId = studentByMother.mother_user_id;
+    if (!userId) {
+      userId = await provisionUser(admin, normalizedPhone, "parent");
+      if (userId) await admin.from("students").update({ mother_user_id: userId }).eq("id", studentByMother.id);
+    }
+    if (userId) return { userId, role: "parent" };
+  }
+
+  return null;
 }
 
 Deno.serve(async (req) => {
@@ -105,9 +202,168 @@ Deno.serve(async (req) => {
     }
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
-    const { action, phone, otp } = await req.json();
+    const { action, phone, otp, intent_id, client_secret } = await req.json();
 
     const normalizedPhone = phone?.startsWith("+") ? phone : `+${phone}`;
+
+    // ── Start WhatsApp sign-in intent ────────────────────────────────────────
+    if (action === "start_sign_in") {
+      const businessPhone = (Deno.env.get("WHATSAPP_SIGN_IN_PHONE") || Deno.env.get("WHATSAPP_BUSINESS_PHONE") || "")
+        .replace(/[^0-9]/g, "");
+
+      if (!businessPhone) {
+        return new Response(
+          JSON.stringify({ error: "WhatsApp sign-in number is not configured." }),
+          { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const clientSecret = randomBase64Url(32);
+      const clientSecretHash = await hashText(clientSecret);
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+
+      let created: { id: string; code: string; expires_at: string } | null = null;
+      let lastError: unknown = null;
+      for (let attempt = 0; attempt < 3 && !created; attempt++) {
+        const code = generateLoginCode();
+        const { data, error } = await adminClient
+          .from("whatsapp_login_intents")
+          .insert({
+            code,
+            client_secret_hash: clientSecretHash,
+            expires_at: expiresAt,
+          })
+          .select("id, code, expires_at")
+          .single();
+        created = data;
+        lastError = error;
+      }
+
+      if (!created) {
+        console.error("[whatsapp-otp] failed to create login intent", lastError);
+        return new Response(
+          JSON.stringify({ error: "Could not start WhatsApp sign-in. Try again." }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const text = [
+        "Sign in to NIMT UniOs",
+        "",
+        `Code: UNIOS-${created.code}`,
+        "",
+        "Only send this if you just requested login on this device.",
+      ].join("\n");
+      const deeplinkUrl = `https://wa.me/${businessPhone}?text=${encodeURIComponent(text)}`;
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          intent_id: created.id,
+          client_secret: clientSecret,
+          code: created.code,
+          expires_at: created.expires_at,
+          deeplink_url: deeplinkUrl,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── Poll WhatsApp sign-in intent ─────────────────────────────────────────
+    if (action === "status_sign_in") {
+      if (!intent_id || !client_secret) {
+        return new Response(
+          JSON.stringify({ error: "Login request id and client secret required" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const clientSecretHash = await hashText(client_secret);
+      const { data: intent } = await adminClient
+        .from("whatsapp_login_intents")
+        .select("id, status, sender_phone, user_id, role, error, expires_at")
+        .eq("id", intent_id)
+        .eq("client_secret_hash", clientSecretHash)
+        .single();
+
+      if (!intent) {
+        return new Response(
+          JSON.stringify({ error: "Login request not found" }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (intent.status === "pending" && new Date(intent.expires_at).getTime() < Date.now()) {
+        await adminClient
+          .from("whatsapp_login_intents")
+          .update({ status: "expired", error: "Login request expired" })
+          .eq("id", intent.id)
+          .eq("status", "pending");
+        return new Response(
+          JSON.stringify({ success: true, status: "expired", error: "Login request expired" }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (intent.status === "pending") {
+        return new Response(
+          JSON.stringify({ success: true, status: "pending", expires_at: intent.expires_at }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (intent.status === "failed" || intent.status === "expired" || intent.status === "consumed") {
+        return new Response(
+          JSON.stringify({ success: true, status: intent.status, error: intent.error }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      let userId = intent.user_id;
+      let role = intent.role;
+      if (!userId) {
+        const resolved = intent.sender_phone
+          ? await resolveUserForPhone(adminClient, intent.sender_phone)
+          : null;
+        if (!resolved) {
+          const error = "No UniOs account is linked to this WhatsApp number.";
+          await adminClient
+            .from("whatsapp_login_intents")
+            .update({ status: "failed", error })
+            .eq("id", intent.id)
+            .eq("status", "verified");
+          return new Response(
+            JSON.stringify({ success: true, status: "failed", error }),
+            { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        userId = resolved.userId;
+        role = resolved.role;
+        await adminClient
+          .from("whatsapp_login_intents")
+          .update({ user_id: userId, role })
+          .eq("id", intent.id);
+      }
+
+      const token = await createSession(adminClient, userId);
+      if (!token) {
+        return new Response(
+          JSON.stringify({ error: "Failed to create session" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      await adminClient
+        .from("whatsapp_login_intents")
+        .update({ status: "consumed", consumed_at: new Date().toISOString() })
+        .eq("id", intent.id)
+        .eq("status", "verified");
+
+      return new Response(
+        JSON.stringify({ success: true, status: "verified", token, role }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     // ── Send OTP ──────────────────────────────────────────────────────────────
     if (action === "send") {
@@ -183,21 +439,23 @@ Deno.serve(async (req) => {
       console.log("[whatsapp-otp] Meta API response:", waResponse.status, waBody);
 
       if (!waResponse.ok) {
-        let parsedWaError: any = null;
-        try { parsedWaError = JSON.parse(waBody); } catch { /* keep raw */ }
-        const waCode = parsedWaError?.error?.code;
-        const waMessage = parsedWaError?.error?.message as string | undefined;
-        const fbtrace = parsedWaError?.error?.fbtrace_id;
+        const parsedWaError = parseJsonObject(waBody);
+        const waError = isRecord(parsedWaError?.error) ? parsedWaError.error : null;
+        const waCode = typeof waError?.code === "string" || typeof waError?.code === "number" ? waError.code : undefined;
+        const waMessage = typeof waError?.message === "string" ? waError.message : undefined;
+        const fbtrace = typeof waError?.fbtrace_id === "string" ? waError.fbtrace_id : undefined;
         return new Response(
           JSON.stringify({ error: waMessage || "Failed to send WhatsApp message. Try again.", meta_code: waCode, meta_fbtrace: fbtrace }),
           { status: waResponse.status >= 400 && waResponse.status < 500 ? 403 : 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
-      let waResult: any = null;
-      try { waResult = JSON.parse(waBody); } catch { /* ignore */ }
-      const wamid = waResult?.messages?.[0]?.id;
-      const waContact = waResult?.contacts?.[0];
+      const waResult = parseJsonObject(waBody);
+      const waMessages = Array.isArray(waResult?.messages) ? waResult.messages : [];
+      const waContacts = Array.isArray(waResult?.contacts) ? waResult.contacts : [];
+      const waMessage = isRecord(waMessages[0]) ? waMessages[0] : null;
+      const waContact = isRecord(waContacts[0]) ? waContacts[0] : null;
+      const wamid = typeof waMessage?.id === "string" ? waMessage.id : undefined;
       console.log("[whatsapp-otp] Message sent, wamid:", wamid, "contact:", JSON.stringify(waContact));
 
       return new Response(
@@ -350,10 +608,10 @@ Deno.serve(async (req) => {
       JSON.stringify({ error: "Invalid action" }),
       { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("[whatsapp-otp] Error:", err);
     return new Response(
-      JSON.stringify({ error: err.message }),
+      JSON.stringify({ error: getErrorMessage(err) }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
