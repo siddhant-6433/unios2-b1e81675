@@ -221,14 +221,14 @@ export default function CloudDialer() {
   });
   // WhatsApp follow-up nudge state. After a manual disposition the dialer
   // surfaces a small "send a WhatsApp" panel above the Next Call button so the
-  // counsellor can fire course_info_v3 (or the not-interested ack) in one tap
+  // counsellor can fire course_info_v4 (or the not-interested ack) in one tap
   // without leaving the dialer.
   const [nudgeSendingKey, setNudgeSendingKey] = useState<string | null>(null);
   const [nudgeSentKeys, setNudgeSentKeys] = useState<Set<string>>(new Set());
   const [nudgeDismissed, setNudgeDismissed] = useState(false);
   // Per-counsellor "most used after disposition" templates, populated from
   // whatsapp_messages aggregated by template_key over the last 30 days. Top 2
-  // (excluding the course_info_v3 primary suggestion) are surfaced alongside.
+  // (excluding the course_info_v4 primary suggestion) are surfaced alongside.
   const [mostUsedTemplates, setMostUsedTemplates] = useState<{ key: string; label: string }[]>([]);
 
   const callTimerRef = useRef<number | null>(null);
@@ -438,7 +438,7 @@ export default function CloudDialer() {
         if (!m) return;
         const k = m[1].trim().toLowerCase().replace(/\s+/g, "_");
         if (!k) return;
-        if (k === "course_info_v3" || k === "course_info_generic") return;
+        if (k === "course_info_v4" || k === "course_info_generic") return;
         if (k === "auto_reply" || k === "ai_auto_reply") return;
         counts.set(k, (counts.get(k) || 0) + 1);
       });
@@ -994,7 +994,7 @@ export default function CloudDialer() {
   // Fires whatsapp-send for the chosen template. The nudge panel renders
   // after a manual disposition; the counsellor taps once and the message
   // goes via the call route (whatsapp-send infers the route from
-  // template_key). Used for course_info_v3, nimt_not_interested_ack, and the
+  // template_key). Used for course_info_v4, nimt_not_interested_ack, and the
   // counsellor's most-used templates surfaced in mostUsedTemplates.
   const sendDispositionNudge = async (
     templateKey: string,
@@ -1561,7 +1561,7 @@ export default function CloudDialer() {
 
                       {/*
                         WhatsApp follow-up nudge — appears after a manual
-                        disposition. course_info_v3 is the primary suggestion
+                        disposition. course_info_v4 is the primary suggestion
                         when the lead has a course (whatsapp-send resolves
                         params from the DB so we send no body args here). For
                         not_interested, we pre-fill the personalised ack with
@@ -1606,18 +1606,18 @@ export default function CloudDialer() {
                                 </Button>
                                 <Button
                                   size="sm"
-                                  variant={nudgeSentKeys.has("course_info_v3") ? "secondary" : "outline"}
-                                  disabled={!!nudgeSendingKey || nudgeSentKeys.has("course_info_v3")}
+                                  variant={nudgeSentKeys.has("course_info_v4") ? "secondary" : "outline"}
+                                  disabled={!!nudgeSendingKey || nudgeSentKeys.has("course_info_v4")}
                                   className="h-7 text-[11px]"
-                                  onClick={() => sendDispositionNudge("course_info_v3")}
+                                  onClick={() => sendDispositionNudge("course_info_v4")}
                                   title={currentLead.course_name ? `Sends course-specific info for ${currentLead.course_name}` : "No course on lead — sends generic info"}
                                 >
-                                  {nudgeSendingKey === "course_info_v3" ? (
+                                  {nudgeSendingKey === "course_info_v4" ? (
                                     <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                  ) : nudgeSentKeys.has("course_info_v3") ? (
+                                  ) : nudgeSentKeys.has("course_info_v4") ? (
                                     <Check className="h-3 w-3 mr-1" />
                                   ) : null}
-                                  {nudgeSentKeys.has("course_info_v3") ? "Sent: course info" : "Send course info"}
+                                  {nudgeSentKeys.has("course_info_v4") ? "Sent: course info" : "Send course info"}
                                 </Button>
                               </>
                             ) : callState.disposition === "not_interested" ? (
@@ -1646,18 +1646,18 @@ export default function CloudDialer() {
                               <>
                                 <Button
                                   size="sm"
-                                  variant={nudgeSentKeys.has("course_info_v3") ? "secondary" : "outline"}
-                                  disabled={!!nudgeSendingKey || nudgeSentKeys.has("course_info_v3")}
+                                  variant={nudgeSentKeys.has("course_info_v4") ? "secondary" : "outline"}
+                                  disabled={!!nudgeSendingKey || nudgeSentKeys.has("course_info_v4")}
                                   className="h-7 text-[11px]"
-                                  onClick={() => sendDispositionNudge("course_info_v3")}
+                                  onClick={() => sendDispositionNudge("course_info_v4")}
                                   title={currentLead.course_name ? `Sends course-specific info for ${currentLead.course_name}` : "No course on lead — sends generic info"}
                                 >
-                                  {nudgeSendingKey === "course_info_v3" ? (
+                                  {nudgeSendingKey === "course_info_v4" ? (
                                     <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                  ) : nudgeSentKeys.has("course_info_v3") ? (
+                                  ) : nudgeSentKeys.has("course_info_v4") ? (
                                     <Check className="h-3 w-3 mr-1" />
                                   ) : null}
-                                  {nudgeSentKeys.has("course_info_v3") ? "Sent: course info" : "Send course info"}
+                                  {nudgeSentKeys.has("course_info_v4") ? "Sent: course info" : "Send course info"}
                                 </Button>
                                 {mostUsedTemplates.map(t => (
                                   <Button

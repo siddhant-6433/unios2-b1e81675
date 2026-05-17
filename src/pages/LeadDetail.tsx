@@ -385,7 +385,7 @@ const LeadDetail = () => {
 
     // 4. Auto-send WhatsApp to lead based on disposition (fire-and-forget)
     // Uses UTILITY templates which work outside the 24-hour window.
-    // For interested / call_back: nimt_followup_v1 (personal sign-off with
+    // For interested / call_back: nimt_followup_v2 (personal sign-off with
     // counsellor name + phone + the actual follow-up date). Counsellor name
     // and phone are filled in by the fn_resolve_counsellor_signature RPC.
     if (lead.phone && !data.suppress_auto_whatsapp) {
@@ -393,7 +393,7 @@ const LeadDetail = () => {
       let autoTemplate: string | null = null;
       let autoParams: string[] = [];
 
-      // Format "Fri, 2nd May" — used by nimt_followup_v1.
+      // Format "Fri, 2nd May" — used by nimt_followup_v2.
       const formatFollowupDate = (iso?: string) => {
         if (!iso) return "the agreed time";
         const d = new Date(iso);
@@ -412,7 +412,7 @@ const LeadDetail = () => {
         // name + phone server-side from profiles + the PLIVO_DIALER_PHONE_NUMBER
         // env var so the fallback chain lives in one place (and the Plivo
         // number can be rotated via Supabase secrets without code changes).
-        autoTemplate = "nimt_followup_v1";
+        autoTemplate = "nimt_followup_v2";
         autoParams = [lead.name, formatFollowupDate(data.followup_date)];
       } else if (data.disposition === "not_answered" || data.disposition === "busy" || data.disposition === "voicemail") {
         autoTemplate = "missed_call";
@@ -420,7 +420,7 @@ const LeadDetail = () => {
       } else if (data.disposition === "not_interested") {
         // Personal closure note. whatsapp-send fills counsellor name + phone
         // server-side from profiles + PLIVO_DIALER_PHONE_NUMBER, same as
-        // nimt_followup_v1 — caller just passes [name, course_name].
+        // nimt_followup_v2 — caller just passes [name, course_name].
         autoTemplate = "nimt_not_interested_ack";
         autoParams = [lead.name, course];
       }
@@ -458,7 +458,7 @@ const LeadDetail = () => {
     }
 
     // Optional course-info follow-up — fires when the counsellor ticked
-    // "Also send course details" in the disposition dialog. course_info_v3
+    // "Also send course details" in the disposition dialog. course_info_v4
     // resolves all params + button URLs server-side from the lead's course_id,
     // so we just pass {template_key, phone, lead_id}.
     if (data.send_course_info && lead.phone && id) {
@@ -474,11 +474,11 @@ const LeadDetail = () => {
           apikey: anonKey,
         },
         body: JSON.stringify({
-          template_key: "course_info_v3",
+          template_key: "course_info_v4",
           phone: lead.phone,
           lead_id: id,
         }),
-      }).catch(e => console.error("course_info_v3 send exception:", e));
+      }).catch(e => console.error("course_info_v4 send exception:", e));
     }
 
     toast({ title: "Call logged", description: label });

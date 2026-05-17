@@ -703,12 +703,12 @@ async function reconcilePostCall(
   }
 
   // Default for interested / no disposition / partial conversation: send
-  // course_info_v3 — body includes the actual courses.video_url
+  // course_info_v4 — body includes the actual courses.video_url
   // (youtu.be / instagram / etc) as a tappable URL plus a single "View
   // fees & apply" button to the course page admissions section.
-  actions.push("wa:course_info_v3");
+  actions.push("wa:course_info_v4");
   return {
-    templateKey: "course_info_v3",
+    templateKey: "course_info_v4",
     templateParams: [],
     phone: waLd.phone,
     actions,

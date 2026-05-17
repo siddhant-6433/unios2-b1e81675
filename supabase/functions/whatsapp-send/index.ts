@@ -104,6 +104,11 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   // the fees section. This is the right shape because Meta button prefixes
   // can't host arbitrary external URLs (youtu.be / instagram.com / etc).
   course_info_v3:         { name: "course_info_v3",         params: ["student_name", "course_name", "duration", "eligibility", "approval", "video_url"] },
+  // v4: same 6 params as v3 but the body is rewritten as "as requested,
+  // here are the details you enquired about" so Meta categorises as UTILITY
+  // (v3 got auto-flipped to MARKETING because of promotional CTAs). Button
+  // text changed to "Open course page" — no "fees & apply" wording.
+  course_info_v4:         { name: "course_info_v4",         params: ["student_name", "course_name", "duration", "eligibility", "approval", "video_url"] },
   // Fallback when lead.course_id is null — no params beyond name.
   course_info_generic:    { name: "course_info_generic",    params: ["student_name"] },
 
@@ -120,6 +125,9 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   // Personal follow-up after a connected interested / call-back disposition.
   // params: [student_name, formatted_date, counsellor_name, counsellor_phone]
   nimt_followup_v1:        { name: "nimt_followup_v1",        params: ["student_name", "followup_date", "counsellor_name", "counsellor_phone"] },
+  // v2 rewrites the body as an appointment-confirmation so Meta
+  // categorises as UTILITY (v1 got auto-flipped to MARKETING).
+  nimt_followup_v2:        { name: "nimt_followup_v2",        params: ["student_name", "followup_date", "counsellor_name", "counsellor_phone"] },
 };
 
 type WhatsAppRoute = "default" | "call" | "visit";
@@ -138,10 +146,12 @@ const CALL_TEMPLATE_KEYS = new Set([
   "course_info_v1",
   "course_info_v2",
   "course_info_v3",
+  "course_info_v4",
   "course_info_generic",
   // Follow-up to a manual call disposition — belongs on the call route.
   "nimt_not_interested_ack",
   "nimt_followup_v1",
+  "nimt_followup_v2",
 ]);
 
 const VISIT_TEMPLATE_KEYS = new Set([
@@ -228,7 +238,7 @@ Deno.serve(async (req) => {
     // profiles + PLIVO_DIALER_PHONE_NUMBER env var so the fallback chain
     // lives in one place and the Plivo number can be rotated via Supabase
     // secrets without a code change.
-    if ((template_key === "nimt_followup_v1" || template_key === "nimt_not_interested_ack") && lead_id && params && params.length === 2) {
+    if ((template_key === "nimt_followup_v1" || template_key === "nimt_followup_v2" || template_key === "nimt_not_interested_ack") && lead_id && params && params.length === 2) {
       let counsellorName = "the admissions team";
       let counsellorPhone: string | null = null;
       try {
@@ -266,7 +276,7 @@ Deno.serve(async (req) => {
     //     top of the course page where the embedded video plays
     //   Button 2 (v1) / Button 1 (v2) "View fees & apply" → slug + #admissions
     //     anchor scrolls to the fees section
-    if ((template_key === "course_info_v1" || template_key === "course_info_v2" || template_key === "course_info_v3") && lead_id && (!params || params.length === 0)) {
+    if ((template_key === "course_info_v1" || template_key === "course_info_v2" || template_key === "course_info_v3" || template_key === "course_info_v4") && lead_id && (!params || params.length === 0)) {
       const { data: resolved, error: resolveErr } = await admin.rpc(
         "fn_resolve_course_info_params",
         { p_lead_id: lead_id }
@@ -287,16 +297,19 @@ Deno.serve(async (req) => {
         const afterPrefix = courseUrlFull.startsWith(prefix) ? courseUrlFull.slice(prefix.length) : "";
         const bareSlug = afterPrefix.split("#")[0] || "";
         const slugWithFees = bareSlug ? `${bareSlug}#admissions` : afterPrefix;
-        if (template_key === "course_info_v3") {
-          // v3 body has a 6th param: the actual video URL (youtu.be /
+        if (template_key === "course_info_v3" || template_key === "course_info_v4") {
+          // v3/v4 body has a 6th param: the actual video URL (youtu.be /
           // instagram / etc) from courses.video_url. WhatsApp auto-linkifies
           // URLs in body text so it renders as a tappable link, sidestepping
-          // Meta's button-prefix lock-in for arbitrary external URLs.
+          // Meta's button-prefix lock-in for arbitrary external URLs. v4 is
+          // the UTILITY-categorised rewrite (v3 got auto-flipped to MARKETING).
           const videoUrl = (typeof resolved.video_url === "string" && resolved.video_url.length > 0)
             ? resolved.video_url
             : courseUrlFull;
           params = [...baseParams, videoUrl];
-          button_urls = [slugWithFees];
+          // v4's single URL button is the bare slug ("Open course page"),
+          // v3's was slug#admissions ("View fees & apply").
+          button_urls = template_key === "course_info_v4" ? [bareSlug] : [slugWithFees];
         } else if (template_key === "course_info_v2") {
           params = baseParams;
           button_urls = [slugWithFees];
