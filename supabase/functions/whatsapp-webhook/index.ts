@@ -74,6 +74,177 @@ Deno.serve(async (req) => {
           const mediaId = msg.image?.id || msg.document?.id || msg.audio?.id || msg.video?.id || null;
           let mediaUrl: string | null = mediaId;
 
+          // ── Personal Document Tracker: #mydoc trigger ───────────────────
+          // Two valid patterns:
+          //   (a) ONE message: media with caption "#mydoc [type_hint]"
+          //   (b) TWO messages: media first (no caption), then a text
+          //       message that starts with "#mydoc" within 5 minutes.
+          //       WhatsApp on mobile makes captioning a forwarded
+          //       document unobvious, so this two-message flow is the
+          //       common case in practice.
+          // Both route the file into the personal-documents bucket,
+          // extract fields, save a row, and reply. We then `continue`
+          // so the message does NOT enter the lead pipeline /
+          // whatsapp_messages log — this is genuinely personal data.
+          const captionText = (msg.text?.body || msg.caption || msg.image?.caption || msg.document?.caption || "").trim();
+          const isMydocTextOnly = !mediaId && /^#mydoc\b/i.test(captionText);
+          const isMydocInline   =  mediaId && /^#mydoc\b/i.test(captionText);
+
+          if (isMydocInline || isMydocTextOnly) {
+            try {
+              // Look up the sender by matching their profile.phone (digits-only)
+              // against all super_admin users. The "+" prefix in phone numbers
+              // is not URL-encoded by PostgREST, so we do the comparison in JS.
+              const phoneDigits = phone.replace(/[^0-9]/g, "");
+              const phoneE164   = `+${phoneDigits}`;
+
+              // 1. All super_admin user IDs
+              const { data: roleRows } = await admin
+                .from("user_roles")
+                .select("user_id")
+                .eq("role", "super_admin");
+              const saIds = (roleRows || []).map((r: { user_id: string }) => r.user_id);
+
+              // 2. Their profile phones
+              const { data: profileRows } = saIds.length
+                ? await admin.from("profiles").select("user_id, phone").in("user_id", saIds)
+                : { data: [] };
+              const matchedProfile = (profileRows || []).find(
+                (p: { user_id: string; phone: string | null }) =>
+                  (p.phone || "").replace(/[^0-9]/g, "") === phoneDigits
+              );
+
+              if (!matchedProfile) {
+                console.log(`[#mydoc] rejected — phone ${phoneE164} not linked to any super_admin profile`);
+                await sendWaText(phone, `Sorry, ${phoneE164} isn't linked to any super-admin account. Make sure your mobile number is set in your profile.`);
+                continue;
+              }
+
+              // 3. Resolve the user's email
+              const { data: { user: saUser } } = await admin.auth.admin.getUserById(matchedProfile.user_id);
+              const owner = { email: saUser?.email || "" };
+              if (!owner.email) {
+                console.error(`[#mydoc] could not resolve email for user_id ${matchedProfile.user_id}`);
+                continue;
+              }
+
+              const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
+              const supaUrl = Deno.env.get("SUPABASE_URL")!;
+              const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+              // Resolve the media bytes. Inline case: fetch fresh from
+              // Meta. Text-only case: the prior media message was already
+              // mirrored to the whatsapp-media bucket by the standard
+              // handler; pull it back out by phone+recency.
+              let fileBlob: Blob;
+              let mimeType: string;
+
+              if (isMydocInline) {
+                const mRes = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
+                  headers: { Authorization: `Bearer ${waToken}` },
+                });
+                if (!mRes.ok) throw new Error(`media meta ${mRes.status}`);
+                const mMeta = await mRes.json();
+                const dlRes = await fetch(mMeta.url, { headers: { Authorization: `Bearer ${waToken}` } });
+                if (!dlRes.ok) throw new Error(`media download ${dlRes.status}`);
+                fileBlob = await dlRes.blob();
+                mimeType = mMeta.mime_type || dlRes.headers.get("content-type") || "application/octet-stream";
+              } else {
+                // text-only #mydoc: find the most recent inbound media
+                // message from this phone in the last 5 minutes.
+                const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+                const { data: priorMsgs } = await admin
+                  .from("whatsapp_messages")
+                  .select("media_url, message_type, created_at")
+                  .eq("phone", phone)
+                  .eq("direction", "inbound")
+                  .gte("created_at", fiveMinAgo)
+                  .not("media_url", "is", null)
+                  .order("created_at", { ascending: false })
+                  .limit(1);
+                const prior = priorMsgs?.[0];
+                if (!prior?.media_url) {
+                  await sendWaText(phone, "I didn't find a document just before this. Forward the file again with caption #mydoc, or send the file first and then #mydoc within 5 minutes.");
+                  continue;
+                }
+                const dlRes = await fetch(prior.media_url);
+                if (!dlRes.ok) throw new Error(`mirror download ${dlRes.status}`);
+                fileBlob = await dlRes.blob();
+                mimeType = dlRes.headers.get("content-type") || "application/octet-stream";
+              }
+              const extMap: Record<string, string> = {
+                "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+                "application/pdf": "pdf",
+              };
+              const ext = extMap[mimeType] || "bin";
+              const docId = crypto.randomUUID();
+              const path = `${owner.email}/${docId}.${ext}`;
+
+              const { error: upErr } = await admin.storage
+                .from("personal-documents")
+                .upload(path, fileBlob, { contentType: mimeType, upsert: false });
+              if (upErr) throw new Error(`storage upload: ${upErr.message}`);
+
+              // Optional type hint from "#mydoc <type>"
+              const hintMatch = captionText.match(/^#mydoc\s+([a-z_]+)/i);
+              const docTypeHint = hintMatch ? hintMatch[1].toLowerCase() : undefined;
+
+              // Run extractor (service-role auth)
+              const exRes = await fetch(`${supaUrl}/functions/v1/extract-personal-doc`, {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${serviceKey}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ file_path: path, doc_type_hint: docTypeHint }),
+              });
+
+              let extracted: any = {};
+              let extractionErr: string | null = null;
+              if (exRes.ok) {
+                extracted = await exRes.json();
+              } else {
+                const errBody = await exRes.text();
+                extractionErr = `HTTP ${exRes.status}: ${errBody.slice(0, 250)}`;
+                console.error("[#mydoc] extraction failed:", extractionErr);
+              }
+
+              const { error: insErr } = await admin.from("personal_documents").insert({
+                id: docId,
+                owner_email: owner.email,
+                doc_type: extracted.doc_type || "other",
+                label: extracted.label || `WhatsApp upload ${new Date().toLocaleDateString("en-IN")}`,
+                file_path: path,
+                mime_type: mimeType,
+                source: "whatsapp",
+                issuer: extracted.issuer ?? null,
+                policy_number: extracted.policy_number ?? null,
+                vehicle_reg: extracted.vehicle_reg ?? null,
+                insured_name: extracted.insured_name ?? null,
+                issued_on: extracted.issued_on ?? null,
+                expires_on: extracted.expires_on ?? null,
+                raw_extracted: extracted.raw ?? null,
+              });
+              if (insErr) throw new Error(`insert: ${insErr.message}`);
+
+              // Confirmation reply
+              const lines = [
+                "✅ Document saved to your dashboard.",
+                `Type: ${extracted.doc_type || "other"}`,
+                extracted.label ? `Label: ${extracted.label}` : null,
+                extracted.policy_number ? `Policy #: ${extracted.policy_number}` : null,
+                extracted.vehicle_reg ? `Vehicle: ${extracted.vehicle_reg}` : null,
+                extracted.expires_on ? `Expires: ${extracted.expires_on}` : "Expiry: not detected — please edit on dashboard",
+                extractionErr ? `⚠️ Extraction error: ${extractionErr}` : null,
+              ].filter(Boolean).join("\n");
+              await sendWaText(phone, lines);
+            } catch (e: any) {
+              console.error("[#mydoc] error:", e?.message || e);
+              await sendWaText(phone, `Couldn't save that document: ${e?.message || "unknown error"}`);
+            }
+            continue; // skip lead pipeline entirely
+          }
+
           // Download media from Meta and upload to Supabase Storage for public access
           if (mediaId) {
             try {
@@ -573,3 +744,28 @@ Deno.serve(async (req) => {
     });
   }
 });
+
+// Fire-and-forget text reply via the WhatsApp Cloud API. Used by the
+// #mydoc personal-documents branch; logs but does not throw on failure
+// so the caller never blocks on delivery errors.
+async function sendWaText(toPhone: string, body: string): Promise<void> {
+  try {
+    const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
+    const pnId    = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+    if (!waToken || !pnId) return;
+    const to = toPhone.replace(/[^0-9]/g, "");
+    const r = await fetch(`https://graph.facebook.com/v21.0/${pnId}/messages`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${waToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to,
+        type: "text",
+        text: { body },
+      }),
+    });
+    if (!r.ok) console.error("sendWaText failed:", r.status, await r.text());
+  } catch (e: any) {
+    console.error("sendWaText error:", e?.message || e);
+  }
+}

@@ -106,3 +106,14 @@ verify_jwt = false
 # its own auth via the time-bound token in the request body — no JWT needed.
 [functions.redeem-apply-link]
 verify_jwt = false
+
+# Called by pg_cron via service-role bearer — the function does its own auth
+# off SUPABASE_SERVICE_ROLE_KEY presence, so we skip gateway JWT verification.
+[functions.personal-doc-reminder-cron]
+verify_jwt = false
+
+# Called both by signed-in users (from /my-docs) and by whatsapp-webhook
+# with the service-role key. The gateway can't validate the new opaque
+# sb_secret service-role tokens, so let the function handle auth itself.
+[functions.extract-personal-doc]
+verify_jwt = false

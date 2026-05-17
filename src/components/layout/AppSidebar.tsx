@@ -7,6 +7,7 @@ import {
   ChevronDown, Phone, Calendar, MessageSquare, Newspaper, Building2, School, ShieldCheck, Zap, Inbox,
   Globe, FolderOpen, Heart, Award, Target, GitMerge, Bot, Gift, AlertTriangle, Sparkles, Receipt,
   Briefcase, CalendarOff, UserCheck, Fingerprint, PhoneCall, PhoneMissed, Send, UserPlus, Footprints,
+  FolderLock,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -164,6 +165,8 @@ export function AppSidebar() {
   const [missedCallbackCount, setMissedCallbackCount] = useState(0);
   // Priority interested leads (high-conversion AI calls — top of dialer queue)
   const [priorityInterestedCount, setPriorityInterestedCount] = useState(0);
+  // Personal Document Tracker — visible to all super_admins
+  const hasPersonalDocs = role === "super_admin";
 
   const fetchNewLeadCount = () => {
     let query = supabase
@@ -514,6 +517,26 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {hasPersonalDocs && (
+          <SidebarGroup>
+            <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/50 px-4 mb-0.5">
+              Personal
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={isActive("/my-docs")}>
+                    <NavLink to="/my-docs" className={linkClass} activeClassName={activeClass}>
+                      <FolderLock className="h-[17px] w-[17px]" />
+                      {!collapsed && <span>My Documents</span>}
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
 
         {visibleMgmt.length > 0 && (
           <SidebarGroup>
