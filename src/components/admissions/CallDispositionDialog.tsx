@@ -65,6 +65,9 @@ interface CallDispositionDialogProps {
   onCallNow?: () => void | Promise<void>;
   /** Optional live status from the dialer poll. Drives the auto-flow. */
   callStatus?: DialogCallStatus;
+  /** True once Plivo has reported the bridge as ended (CallStatus=completed).
+   *  Keeps the dialog in "connected" UI state but freezes the elapsed timer. */
+  callEnded?: boolean;
   /** Called when counsellor clicks "Call connected" — flips parent state */
   onManualConnect?: () => void;
   /** Lead context surfaced in the calling state so the counsellor knows who
@@ -154,7 +157,7 @@ const formatDisplayDate = (dateStr: string) => {
 
 export function CallDispositionDialog({
   open, onOpenChange, leadName, leadPhone, campuses, defaultCampusId,
-  onSubmit, onCallNow, callStatus, onManualConnect,
+  onSubmit, onCallNow, callStatus, callEnded, onManualConnect,
   courseName, leadStage, personRole, latestNote, aiCallSummary,
 }: CallDispositionDialogProps) {
   const [disposition, setDisposition] = useState<CallDisposition | null>(null);
@@ -193,9 +196,13 @@ export function CallDispositionDialog({
   }, [callStatus, open, connectedAt]);
   useEffect(() => {
     if (!connectedAt) return;
+    // Stop ticking once the parent reports the bridge has ended. We still
+    // keep the last elapsedSec showing — gives the counsellor a final talk
+    // duration alongside the disposition picker.
+    if (callEnded) return;
     const id = setInterval(() => setElapsedSec(Math.floor((Date.now() - connectedAt) / 1000)), 1000);
     return () => clearInterval(id);
-  }, [connectedAt]);
+  }, [connectedAt, callEnded]);
   const dateInputRef = useRef<HTMLInputElement>(null);
 
   const selectedDisp = DISPOSITIONS.find(d => d.value === disposition);
@@ -388,22 +395,34 @@ export function CallDispositionDialog({
         </DialogHeader>
 
         <div className="space-y-4 pt-1">
-          {/* Connected banner with live elapsed timer — mirrors CloudDialer's
-              on-call indicator so the counsellor knows the bridge is live
-              while they're picking a disposition. */}
+          {/* Connected banner with elapsed timer. Live (pulsing green) while
+              the bridge is up; switches to a muted "Call ended" state with
+              frozen final duration once Plivo reports the hangup. */}
           {callStatus === "connected" && (
-            <div className="rounded-xl border border-emerald-300 dark:border-emerald-800/40 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2 flex items-center gap-2.5">
+            <div className={`rounded-xl border px-3 py-2 flex items-center gap-2.5 ${
+              callEnded
+                ? "border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40"
+                : "border-emerald-300 dark:border-emerald-800/40 bg-emerald-50 dark:bg-emerald-950/30"
+            }`}>
               <span className="relative flex h-2.5 w-2.5">
-                <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+                {!callEnded && (
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+                )}
+                <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${callEnded ? "bg-slate-400" : "bg-emerald-500"}`} />
               </span>
               <div className="flex-1">
-                <p className="text-xs font-semibold text-emerald-900 dark:text-emerald-200">Call connected</p>
-                <p className="text-[10px] text-emerald-700 dark:text-emerald-300">
-                  Live with {leadName}. Mark the outcome below — the dialog stays open through the call.
+                <p className={`text-xs font-semibold ${callEnded ? "text-slate-700 dark:text-slate-200" : "text-emerald-900 dark:text-emerald-200"}`}>
+                  {callEnded ? "Call ended" : "Call connected"}
+                </p>
+                <p className={`text-[10px] ${callEnded ? "text-slate-600 dark:text-slate-400" : "text-emerald-700 dark:text-emerald-300"}`}>
+                  {callEnded
+                    ? `Talked with ${leadName} for ${fmtElapsed(elapsedSec)}. Mark the outcome below.`
+                    : `Live with ${leadName}. Mark the outcome below — the dialog stays open through the call.`}
                 </p>
               </div>
-              <div className="font-mono text-sm font-semibold text-emerald-900 dark:text-emerald-200 tabular-nums">
+              <div className={`font-mono text-sm font-semibold tabular-nums ${
+                callEnded ? "text-slate-700 dark:text-slate-200" : "text-emerald-900 dark:text-emerald-200"
+              }`}>
                 {fmtElapsed(elapsedSec)}
               </div>
             </div>

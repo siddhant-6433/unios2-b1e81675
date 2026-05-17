@@ -118,6 +118,10 @@ const LeadDetail = () => {
   const [dispositionCallStatus, setDispositionCallStatus] = useState<
     "calling" | "connected" | "no_answer" | "busy" | "failed" | undefined
   >(undefined);
+  // True once Plivo reports the bridge has hung up. The dialog stays on the
+  // "connected" UI (disposition picker) but the elapsed timer freezes —
+  // counsellor sees the final talk duration alongside the picker.
+  const [dispositionCallEnded, setDispositionCallEnded] = useState(false);
   const [activeCallUuid, setActiveCallUuid] = useState<string | null>(null);
   const [dispositionWaSent, setDispositionWaSent] = useState(false);
   const [showRecordPayment, setShowRecordPayment] = useState(false);
@@ -156,7 +160,11 @@ const LeadDetail = () => {
   // case where bridge-b-status never fires (e.g. machine detection skipped).
   useEffect(() => {
     if (!activeCallUuid || !showCallDisposition) return;
-    if (dispositionCallStatus && dispositionCallStatus !== "calling") return;
+    // Stop polling once we've moved past calling, EXCEPT when we're in
+    // "connected" — that state stays until Plivo hangs up (callEnded flag).
+    // Once callEnded is set, no more polls.
+    if (dispositionCallEnded) return;
+    if (dispositionCallStatus && dispositionCallStatus !== "calling" && dispositionCallStatus !== "connected") return;
 
     let cancelled = false;
     const tick = async () => {
@@ -172,10 +180,22 @@ const LeadDetail = () => {
       if (!data) return;
       const s = String(data.status || "").toLowerCase();
       const dur = data.duration_seconds || 0;
-      // Student answered mid-call — voice-agent writes student_connected_at
-      // AND status="in-progress" the moment Plivo's <Number statusCallback
-      // fires the "answered" event. Either signal flips the dialog.
-      if (data.student_connected_at || s === "in-progress" || s === "in_progress" || s === "answered") {
+      // Bridge state machine:
+      //  - status=completed with talk-time OR student_connected_at set →
+      //    "connected" (dialog stays on disposition picker)
+      //  - status=completed AND it's the terminal hangup → also flip
+      //    callEnded so the timer freezes
+      //  - status=in_progress / answered / student_connected_at set without
+      //    completed → "connected", timer keeps ticking
+      const wasAnswered = !!data.student_connected_at
+        || s === "in-progress" || s === "in_progress" || s === "answered"
+        || (s === "completed" && dur > 5);
+      if (s === "completed" && wasAnswered) {
+        setDispositionCallStatus("connected");
+        setDispositionCallEnded(true);
+        return;
+      }
+      if (wasAnswered) {
         setDispositionCallStatus("connected");
         return;
       }
@@ -186,9 +206,8 @@ const LeadDetail = () => {
       } else if (s === "failed") {
         setDispositionCallStatus("failed");
       } else if (s === "completed") {
-        // Hangup arrived before B-status poll caught up. Use duration as the
-        // tiebreaker — >5s of talk means they connected.
-        setDispositionCallStatus(dur > 5 ? "connected" : "no_answer");
+        // Hangup with <5s of talk — treat as no_answer.
+        setDispositionCallStatus("no_answer");
       }
       // initiated / ringing → keep "calling"; manual button is the fallback.
     };
@@ -198,13 +217,14 @@ const LeadDetail = () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [activeCallUuid, showCallDisposition, dispositionCallStatus]);
+  }, [activeCallUuid, showCallDisposition, dispositionCallStatus, dispositionCallEnded]);
 
   // Reset the call-status state whenever the dialog closes so the next call
   // starts fresh.
   useEffect(() => {
     if (!showCallDisposition) {
       setDispositionCallStatus(undefined);
+      setDispositionCallEnded(false);
       setActiveCallUuid(null);
     }
   }, [showCallDisposition]);
@@ -1406,6 +1426,7 @@ const LeadDetail = () => {
         defaultCampusId={lead.campus_id || undefined}
         onSubmit={logCallDisposition}
         callStatus={dispositionCallStatus}
+        callEnded={dispositionCallEnded}
         onManualConnect={() => setDispositionCallStatus("connected")}
         courseName={courseName}
         leadStage={lead.stage as any}
