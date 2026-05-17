@@ -66,10 +66,21 @@ Deno.serve(async (req) => {
           const phone = msg.from; // sender's phone number
           const waMessageId = msg.id;
           const msgType = msg.type || "text";
+          // Interactive button replies (e.g. our Good/Bad feedback buttons)
+          // carry their payload in msg.interactive.button_reply. Surface the
+          // chosen title in `content` so the inbox shows "Good" / "Bad"
+          // instead of the placeholder `[interactive]`.
+          const buttonReply = msg.interactive?.button_reply || msg.button?.payload
+            ? {
+                id:    msg.interactive?.button_reply?.id    || msg.button?.payload || null,
+                title: msg.interactive?.button_reply?.title || msg.button?.text    || null,
+              }
+            : null;
           const content =
             msg.text?.body ||
             msg.caption ||
             msg.image?.caption ||
+            buttonReply?.title ||
             `[${msgType}]`;
           const mediaId = msg.image?.id || msg.document?.id || msg.audio?.id || msg.video?.id || null;
           let mediaUrl: string | null = mediaId;
@@ -466,9 +477,89 @@ Deno.serve(async (req) => {
           }
 
           // Feedback response detection — check BEFORE auto-replies
-          // If the user has an open feedback request and replies 1-5, record the rating
           let feedbackHandled = false;
-          if (msgType === "text" && content) {
+
+          // (a) Interactive button reply: payload ids look like
+          //     "feedback_good_<feedback_id>" / "feedback_bad_<feedback_id>"
+          //     (sent by feedback-sender-cron). Good=5, Bad=1.
+          if (!feedbackHandled && buttonReply?.id) {
+            const m = buttonReply.id.match(/^feedback_(good|bad)_([0-9a-f-]{36})$/i);
+            if (m) {
+              const verdict = m[1].toLowerCase();
+              const fbId = m[2];
+              const rating = verdict === "good" ? 5 : 1;
+
+              // Update the specific feedback row. Restrict to status='sent' so a
+              // duplicate tap can't overwrite an already-responded row.
+              const { data: updatedRows } = await admin
+                .from("feedback_responses")
+                .update({
+                  rating,
+                  status: "responded",
+                  responded_at: new Date().toISOString(),
+                })
+                .eq("id", fbId)
+                .eq("status", "sent")
+                .select("id, lead_id, counsellor_id, interaction_type");
+
+              const updated = updatedRows?.[0];
+              if (updated) {
+                // Notify the counsellor in the navbar bell. Title shows the
+                // lead name + verdict so it's actionable at a glance.
+                const verdictLabel = verdict === "good" ? "👍 Good" : "👎 Bad";
+                await admin.from("notifications").insert({
+                  user_id: updated.counsellor_id,
+                  type: "feedback_received",
+                  title: `${verdictLabel} feedback from ${lead?.name || phone}`,
+                  body: updated.interaction_type === "visit"
+                    ? "Rated their recent campus visit."
+                    : "Rated their recent call.",
+                  link: updated.lead_id ? `/admissions/${updated.lead_id}` : null,
+                  lead_id: updated.lead_id,
+                });
+
+                // Acknowledge on WhatsApp
+                const thankMsg = verdict === "good"
+                  ? "Thank you for the kind feedback! We're glad you had a great experience. 😊"
+                  : "Thank you for sharing your feedback. We're sorry it wasn't a great experience — your input helps us improve. 🙏";
+                try {
+                  const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
+                  const pnId    = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+                  const waPhone = phone.replace(/[^0-9]/g, "");
+                  const ackRes = await fetch(`https://graph.facebook.com/v21.0/${pnId}/messages`, {
+                    method: "POST",
+                    headers: { Authorization: `Bearer ${waToken}`, "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      messaging_product: "whatsapp",
+                      to: waPhone,
+                      type: "text",
+                      text: { body: thankMsg },
+                    }),
+                  });
+                  if (ackRes.ok) {
+                    const ackResult = await ackRes.json();
+                    await admin.from("whatsapp_messages").insert({
+                      lead_id: updated.lead_id,
+                      wa_message_id: ackResult?.messages?.[0]?.id || null,
+                      direction: "outbound",
+                      phone,
+                      message_type: "text",
+                      content: thankMsg,
+                      status: "sent",
+                      is_read: true,
+                    });
+                  }
+                } catch (e) {
+                  console.error("Feedback button ack error:", e);
+                }
+              }
+              feedbackHandled = true;
+            }
+          }
+
+          // (b) Legacy 1–5 text fallback for anyone who replies with a digit
+          //     instead of tapping the button.
+          if (!feedbackHandled && msgType === "text" && content) {
             const trimmed = content.trim();
             const ratingMatch = trimmed.match(/^([1-5])$/);
             if (ratingMatch) {
