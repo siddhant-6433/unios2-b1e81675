@@ -213,12 +213,13 @@ Deno.serve(async (req) => {
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
 
-    // nimt_followup_v1: caller passes [name, formatted_date]; we fill the
-    // counsellor signature (name + phone) from profiles + the
-    // PLIVO_DIALER_PHONE_NUMBER env var. Keeps the fallback chain in one
-    // place and lets ops rotate the Plivo cloud-dialer number via Supabase
+    // nimt_followup_v1 and nimt_not_interested_ack: caller passes a short
+    // 2-element params array (name+date for followup, name+course for
+    // closure). We fill the counsellor signature (name + phone) from
+    // profiles + PLIVO_DIALER_PHONE_NUMBER env var so the fallback chain
+    // lives in one place and the Plivo number can be rotated via Supabase
     // secrets without a code change.
-    if (template_key === "nimt_followup_v1" && lead_id && params && params.length === 2) {
+    if ((template_key === "nimt_followup_v1" || template_key === "nimt_not_interested_ack") && lead_id && params && params.length === 2) {
       let counsellorName = "the admissions team";
       let counsellorPhone: string | null = null;
       try {

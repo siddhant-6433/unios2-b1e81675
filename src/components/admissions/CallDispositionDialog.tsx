@@ -76,16 +76,50 @@ interface CallDispositionDialogProps {
   aiCallSummary?: string | null;
 }
 
-const DISPOSITIONS: { value: CallDisposition; label: string; icon: any; color: string; suggestsFollowup: boolean }[] = [
-  { value: "interested", label: "Interested", icon: CheckCircle, color: "bg-emerald-100 text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-400", suggestsFollowup: true },
-  { value: "not_interested", label: "Not Interested", icon: XCircle, color: "bg-red-100 text-red-700 border-red-300 hover:bg-red-50 dark:bg-red-900/30 dark:text-red-400", suggestsFollowup: false },
-  { value: "ineligible", label: "Ineligible", icon: AlertCircle, color: "bg-purple-100 text-purple-700 border-purple-300 hover:bg-purple-50 dark:bg-purple-900/30 dark:text-purple-400", suggestsFollowup: false },
-  { value: "not_answered", label: "Not Answered", icon: PhoneMissed, color: "bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-50 dark:bg-amber-900/30 dark:text-amber-400", suggestsFollowup: true },
-  { value: "call_back", label: "Call Back Later", icon: Clock3, color: "bg-blue-100 text-blue-700 border-blue-300 hover:bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400", suggestsFollowup: true },
-  { value: "voicemail", label: "Voicemail", icon: PhoneOff, color: "bg-indigo-100 text-indigo-700 border-indigo-300 hover:bg-indigo-50 dark:bg-indigo-900/30 dark:text-indigo-400", suggestsFollowup: true },
-  { value: "busy", label: "Busy", icon: Phone, color: "bg-orange-100 text-orange-700 border-orange-300 hover:bg-orange-50 dark:bg-orange-900/30 dark:text-orange-400", suggestsFollowup: true },
-  { value: "wrong_number", label: "Wrong Number", icon: BanIcon, color: "bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300", suggestsFollowup: false },
-  { value: "do_not_contact", label: "Do Not Contact", icon: BanIcon, color: "bg-red-100 text-red-700 border-red-300 hover:bg-red-50 dark:bg-red-900/30 dark:text-red-400", suggestsFollowup: false },
+// requiresConnected: option only makes sense when the counsellor actually
+//   spoke with the lead. We hide these once callStatus="connected" is false
+//   (call wasn't answered, e.g. ringing-only / busy / no-answer auto-disposal).
+// onlyWhenNotConnected: opposite — only shown when the call didn't connect.
+//   Hidden once the bridge has established because "Not Answered" is
+//   nonsensical when the counsellor just got off a 3-minute call.
+// help: short description shown as a hover tooltip on each pill so the
+//   counsellor doesn't confuse e.g. "Do Not Contact" (adds lead to DNC list,
+//   never call again) with "Not Answered" (couldn't reach this time).
+const DISPOSITIONS: {
+  value: CallDisposition;
+  label: string;
+  icon: any;
+  color: string;
+  suggestsFollowup: boolean;
+  help: string;
+  onlyWhenNotConnected?: boolean;
+  requiresConnected?: boolean;
+}[] = [
+  { value: "interested", label: "Interested", icon: CheckCircle, color: "bg-emerald-100 text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-400", suggestsFollowup: true,
+    help: "Lead engaged on the call and is interested in the programme. Triggers personalised follow-up WhatsApp + course info.",
+    requiresConnected: true },
+  { value: "not_interested", label: "Not Interested", icon: XCircle, color: "bg-red-100 text-red-700 border-red-300 hover:bg-red-50 dark:bg-red-900/30 dark:text-red-400", suggestsFollowup: false,
+    help: "Lead spoke with you and explicitly declined. Sends a polite closure WhatsApp with your contact for future revival.",
+    requiresConnected: true },
+  { value: "ineligible", label: "Ineligible", icon: AlertCircle, color: "bg-purple-100 text-purple-700 border-purple-300 hover:bg-purple-50 dark:bg-purple-900/30 dark:text-purple-400", suggestsFollowup: false,
+    help: "Lead doesn't meet course eligibility (marks, subjects, age). Optionally deferred to a future session.",
+    requiresConnected: true },
+  { value: "not_answered", label: "Not Answered", icon: PhoneMissed, color: "bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-50 dark:bg-amber-900/30 dark:text-amber-400", suggestsFollowup: true,
+    help: "Phone rang but lead didn't pick up. Sends an apology + course-info WhatsApp.",
+    onlyWhenNotConnected: true },
+  { value: "call_back", label: "Call Back Later", icon: Clock3, color: "bg-blue-100 text-blue-700 border-blue-300 hover:bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400", suggestsFollowup: true,
+    help: "Lead spoke but asked to be called back at a specific time. Schedules the follow-up + sends a WhatsApp confirming the time.",
+    requiresConnected: true },
+  { value: "voicemail", label: "Voicemail", icon: PhoneOff, color: "bg-indigo-100 text-indigo-700 border-indigo-300 hover:bg-indigo-50 dark:bg-indigo-900/30 dark:text-indigo-400", suggestsFollowup: true,
+    help: "Call landed on voicemail / answering machine. Sends an apology WhatsApp with a tap-to-call link.",
+    onlyWhenNotConnected: true },
+  { value: "busy", label: "Busy", icon: Phone, color: "bg-orange-100 text-orange-700 border-orange-300 hover:bg-orange-50 dark:bg-orange-900/30 dark:text-orange-400", suggestsFollowup: true,
+    help: "Lead's line was busy. Will retry; an apology WhatsApp also goes out.",
+    onlyWhenNotConnected: true },
+  { value: "wrong_number", label: "Wrong Number", icon: BanIcon, color: "bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300", suggestsFollowup: false,
+    help: "Number reached someone other than the lead, or is invalid. No further calls; flag for admin to clean the data." },
+  { value: "do_not_contact", label: "Do Not Contact", icon: BanIcon, color: "bg-red-100 text-red-700 border-red-300 hover:bg-red-50 dark:bg-red-900/30 dark:text-red-400", suggestsFollowup: false,
+    help: "Lead requested to be removed from all outreach. Adds them to the DNC list — NO future calls or WhatsApp messages. Use only when the lead explicitly asks to be removed." },
 ];
 
 const DURATION_OPTIONS = [
@@ -409,17 +443,29 @@ export function CallDispositionDialog({
           {/* Disposition pills — hidden when Plivo already auto-disposed */}
           {!isAutoDisposed && (
             <>
-          {/* Disposition pills */}
+          {/* Disposition pills — filtered by call state so connected calls
+              don't show "Not Answered" / "Busy" / "Voicemail", and pre-call
+              auto-disposed cases don't show options that require an actual
+              conversation (interested / not_interested / ineligible /
+              call_back). Native title attribute renders as the hover tooltip
+              so counsellors see what each option actually does. */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Outcome *</label>
+            <label className="text-xs font-medium text-muted-foreground">
+              Outcome * <span className="text-[10px] font-normal opacity-70">— hover for details</span>
+            </label>
             <div className="grid grid-cols-2 gap-1.5">
-              {DISPOSITIONS.map(d => {
+              {DISPOSITIONS.filter(d => {
+                if (callStatus === "connected" && d.onlyWhenNotConnected) return false;
+                if (isAutoDisposed && d.requiresConnected) return false;
+                return true;
+              }).map(d => {
                 const Icon = d.icon;
                 const selected = disposition === d.value;
                 return (
                   <button
                     key={d.value}
                     type="button"
+                    title={d.help}
                     onClick={() => setDisposition(d.value)}
                     className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition-all ${
                       selected
@@ -433,6 +479,18 @@ export function CallDispositionDialog({
                 );
               })}
             </div>
+            {/* Inline reminder of what the selected disposition does — helps
+                counsellors notice the difference between e.g. DNC and Not
+                Answered without needing to hover. */}
+            {disposition && (() => {
+              const meta = DISPOSITIONS.find(d => d.value === disposition);
+              if (!meta) return null;
+              return (
+                <p className="text-[10px] text-muted-foreground mt-1 px-1">
+                  <span className="font-medium text-foreground">{meta.label}:</span> {meta.help}
+                </p>
+              );
+            })()}
           </div>
 
           {/* Duration */}
@@ -517,15 +575,23 @@ export function CallDispositionDialog({
               (manual or auto). Shows the template that will auto-send and lets
               the counsellor opt out, plus offers a one-tap course-info send. */}
           {disposition && (() => {
-            const noFollowupRequired = ["not_interested", "ineligible", "wrong_number", "do_not_contact"];
             const autoTemplate =
               disposition === "interested" || disposition === "call_back"
                 ? "callback_scheduled"
                 : disposition === "not_answered" || disposition === "busy" || disposition === "voicemail"
                 ? "missed_call"
+                : disposition === "not_interested"
+                ? "nimt_not_interested_ack"
                 : null;
-            const wontAutoSend = noFollowupRequired.includes(disposition);
-            if (wontAutoSend && !autoTemplate) return null;
+            // No template = no nudge UI.
+            if (!autoTemplate) return null;
+            // Per-template friendly description so counsellors know what's going out.
+            const templateDescription =
+              autoTemplate === "missed_call"
+                ? "Apology + tap-to-call back. Works outside the 24h window."
+                : autoTemplate === "nimt_not_interested_ack"
+                ? "Polite closure note signed off by you with your contact for future revival."
+                : "Thanks-for-talking note with course mention.";
             return (
               <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/40 bg-emerald-50/60 dark:bg-emerald-950/20 p-3 space-y-2">
                 <div className="flex items-center gap-2">
@@ -534,37 +600,38 @@ export function CallDispositionDialog({
                     WhatsApp follow-up
                   </span>
                 </div>
-                {autoTemplate && (
-                  <label className="flex items-start gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={!suppressAutoWa}
-                      onChange={(e) => setSuppressAutoWa(!e.target.checked)}
-                      className="mt-0.5 accent-emerald-600"
-                    />
-                    <span className="text-[11px] text-foreground">
-                      Send <span className="font-mono">{autoTemplate.replace(/_/g, " ")}</span> to {leadName}
-                      <span className="block text-[10px] text-muted-foreground">
-                        {autoTemplate === "missed_call"
-                          ? "Apology + tap-to-call back. Works outside the 24h window."
-                          : "Thanks-for-talking note with course mention."}
-                      </span>
-                    </span>
-                  </label>
-                )}
                 <label className="flex items-start gap-2 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={sendCourseInfo}
-                    onChange={(e) => setSendCourseInfo(e.target.checked)}
+                    checked={!suppressAutoWa}
+                    onChange={(e) => setSuppressAutoWa(!e.target.checked)}
                     className="mt-0.5 accent-emerald-600"
                   />
-                  <span className="text-[11px] text-foreground flex items-center gap-1">
-                    <GraduationCap className="h-3 w-3 text-emerald-700" />
-                    Also send course details
-                    <span className="text-[10px] text-muted-foreground">(course_info_v1 — auto-filled from DB)</span>
+                  <span className="text-[11px] text-foreground">
+                    Send <span className="font-mono">{autoTemplate.replace(/_/g, " ")}</span> to {leadName}
+                    <span className="block text-[10px] text-muted-foreground">
+                      {templateDescription}
+                    </span>
                   </span>
                 </label>
+                {/* Course-info opt-in only makes sense for engagement
+                    dispositions — never for not_interested where pushing
+                    course details would feel spammy. */}
+                {disposition !== "not_interested" && (
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={sendCourseInfo}
+                      onChange={(e) => setSendCourseInfo(e.target.checked)}
+                      className="mt-0.5 accent-emerald-600"
+                    />
+                    <span className="text-[11px] text-foreground flex items-center gap-1">
+                      <GraduationCap className="h-3 w-3 text-emerald-700" />
+                      Also send course details
+                      <span className="text-[10px] text-muted-foreground">(course_info_v1 — auto-filled from DB)</span>
+                    </span>
+                  </label>
+                )}
               </div>
             );
           })()}

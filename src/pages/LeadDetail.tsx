@@ -397,6 +397,12 @@ const LeadDetail = () => {
       } else if (data.disposition === "not_answered" || data.disposition === "busy" || data.disposition === "voicemail") {
         autoTemplate = "missed_call";
         autoParams = [lead.name, course];
+      } else if (data.disposition === "not_interested") {
+        // Personal closure note. whatsapp-send fills counsellor name + phone
+        // server-side from profiles + PLIVO_DIALER_PHONE_NUMBER, same as
+        // nimt_followup_v1 — caller just passes [name, course_name].
+        autoTemplate = "nimt_not_interested_ack";
+        autoParams = [lead.name, course];
       }
 
       if (autoTemplate) {
