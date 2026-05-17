@@ -63,6 +63,7 @@ const EnquiryForm          = lazy(() => import("./pages/EnquiryForm"));
 const Exams                = lazy(() => import("./pages/Exams"));
 const Reports              = lazy(() => import("./pages/Reports"));
 const Documents            = lazy(() => import("./pages/Documents"));
+const MyDocs               = lazy(() => import("./pages/MyDocs"));
 const Settings             = lazy(() => import("./pages/Settings"));
 const NotFound             = lazy(() => import("./pages/NotFound"));
 const Forbidden            = lazy(() => import("./pages/Forbidden"));
@@ -258,6 +259,8 @@ const App = () => (
                       {/* Misc */}
                       <Route path="/exams" element={<RequirePermission module="exams" action="view"><Exams /></RequirePermission>} />
                       <Route path="/documents" element={<RequirePermission module="documents" action="view"><Documents /></RequirePermission>} />
+                      {/* Personal Document Tracker — gated server-side via RLS to allow-listed emails */}
+                      <Route path="/my-docs" element={<MyDocs />} />
                       <Route path="/alumni-verifications" element={<AlumniVerifications />} />
 
                       {/* IB Academics — gated per-module */}
