@@ -2727,23 +2727,56 @@ Deno.serve({ port: PORT }, async (req) => {
 
     const bStatusUrl = `https://${host}/bridge-b-status/${callId}`;
 
-    // statusCallbackEvent is critical: Plivo defaults to "completed"-only
-    // callbacks for <Number>, which means we never get notified when the
-    // student actually answers — only after the whole leg ends. Asking for
-    // "answered" too gives us the in-progress event that lets the lead-page
-    // dialog auto-flip from "waiting for pickup" → disposition picker the
-    // moment the student picks up. "completed" stays in the event list so
-    // we still get hangup details even if Dial's `action` is skipped.
+    // Note: do NOT add statusCallbackEvent — that's Twilio syntax. Plivo's
+    // <Number> rejects it as "Invalid Action XML" (HangupCauseCode 8012)
+    // and the entire callback path silently breaks. The "answered" event
+    // is delivered separately via the parent call's callback_url, set by
+    // manual-call/index.ts on Plivo Call.create — see /bridge-call-status.
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Record recordSession="true" redirect="false" maxLength="3600"${recordingCallbackUrl ? ` callbackUrl="${recordingCallbackUrl}" callbackMethod="POST"` : ""} />
   <Speak voice="Polly.Kajal">Connecting you to the student now.</Speak>
   <Dial callerId="${PLIVO_PHONE_NUMBER}" action="${statusUrl}" method="POST" machineDetection="true" machineDetectionTime="5000">
-    <Number statusCallbackUrl="${bStatusUrl}" statusCallbackMethod="POST" statusCallbackEvent="answered,completed">${studentPhone}</Number>
+    <Number statusCallbackUrl="${bStatusUrl}" statusCallbackMethod="POST">${studentPhone}</Number>
   </Dial>
 </Response>`;
 
     return new Response(xml, { headers: { "Content-Type": "application/xml" } });
+  }
+
+  // POST /bridge-call-status/{callId} — Plivo per-state callback on the
+  // PARENT call (set via callback_url on Call.create). Fires every time the
+  // CallStatus changes (initiated → ringing → in-progress → completed). We
+  // use the in-progress event to write ai_call_records.student_connected_at
+  // so the lead-page polling can auto-flip the dialog.
+  //
+  // The <Number statusCallbackUrl="…" /bridge-b-status> path is unreliable
+  // because Plivo's per-leg callback defaults to "completed"-only and the
+  // attribute we'd need to widen it (statusCallbackEvent) is Twilio-only
+  // syntax that Plivo rejects with "Invalid Action XML".
+  if (path.startsWith("/bridge-call-status/")) {
+    const callId = path.split("/bridge-call-status/")[1];
+    const body = await req.formData().catch(() => null);
+    const params = body ? Object.fromEntries(body) : {} as any;
+    const callStatus = String(params.CallStatus || params.Status || "").toLowerCase();
+    const event = String(params.Event || "").toLowerCase();
+
+    console.log(`[BRIDGE-CALL-STATUS ${callId}] CallStatus=${callStatus} Event=${event}`);
+
+    const isAnswered = callStatus === "in-progress" || event === "answered";
+    if (isAnswered && SUPABASE_URL) {
+      const dbH = { "Content-Type": "application/json", apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
+      await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
+        method: "PATCH",
+        headers: { ...dbH, Prefer: "return=minimal" },
+        body: JSON.stringify({
+          student_connected_at: new Date().toISOString(),
+          status: "in-progress",
+        }),
+      }).catch(e => console.error(`[BRIDGE-CALL-STATUS ${callId}] DB update failed:`, e.message));
+      console.log(`[BRIDGE-CALL-STATUS ${callId}] Wrote student_connected_at + status=in-progress`);
+    }
+    return new Response("OK");
   }
 
   // POST /bridge-status/{callId} — Plivo Dial action callback (student leg result)

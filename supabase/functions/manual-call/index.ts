@@ -113,6 +113,7 @@ Deno.serve(async (req) => {
     const plivoUrl = `https://api.plivo.com/v1/Account/${PLIVO_AUTH_ID}/Call/`;
 
     const hangupUrl = `${VOICE_AGENT_URL}/bridge-hangup/${callId}`;
+    const stateCallbackUrl = `${VOICE_AGENT_URL}/bridge-call-status/${callId}`;
 
     const plivoPayload = {
       from: PLIVO_DIALER_PHONE_NUMBER,
@@ -121,6 +122,14 @@ Deno.serve(async (req) => {
       answer_method: "GET",
       hangup_url: hangupUrl,
       hangup_method: "POST",
+      // Per-state callback. Plivo POSTs this URL on every CallStatus change
+      // (initiated / ringing / in-progress / completed) for the parent call.
+      // We use it to write ai_call_records.student_connected_at when the
+      // bridged leg enters in-progress, so the lead-page dialog auto-flips
+      // from "waiting for pickup" → disposition picker without the
+      // counsellor having to tap "Call connected".
+      callback_url: stateCallbackUrl,
+      callback_method: "POST",
       ring_timeout: 30,
       caller_name: `NIMT CRM: ${lead.name || "Lead"}`,
     };
