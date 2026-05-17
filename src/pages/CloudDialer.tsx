@@ -1183,13 +1183,15 @@ export default function CloudDialer() {
                       {callState.status === "auto-disposed" && <AlertCircle className="h-5 w-5 text-amber-600" />}
                       <div>
                         <p className="text-sm font-bold text-foreground">
-                          {callState.status === "calling" && "Calling..."}
+                          {callState.status === "calling" && `Calling ${currentLead?.name || "lead"}…`}
                           {callState.status === "connected" && "On Call — Student Connected"}
                           {callState.status === "ended" && "Call Ended"}
                           {callState.status === "auto-disposed" && (callState.disposition?.replace("_", " ").toUpperCase())}
                         </p>
                         {callState.status === "calling" && (
-                          <p className="text-[10px] text-cyan-600">Pick up your phone. Waiting for student to answer...</p>
+                          <p className="text-xs text-cyan-700 dark:text-cyan-300 font-medium">
+                            📞 Pick up your phone. Waiting for {currentLead?.name || "the student"} to answer…
+                          </p>
                         )}
                         <p className="text-xs text-muted-foreground tabular-nums">{formatTime(callState.elapsed)}</p>
                       </div>
@@ -1371,13 +1373,13 @@ export default function CloudDialer() {
                         call_back, also surface up to 2 of the counsellor's
                         most-used templates.
                       */}
-                      {!callState.autoDisposition && !nudgeDismissed && callState.disposition &&
+                      {!nudgeDismissed && callState.disposition &&
                        !["wrong_number", "do_not_contact", "cancelled"].includes(callState.disposition) && (
                         <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 dark:bg-emerald-950/20 dark:border-emerald-900 p-2.5">
                           <div className="flex items-center justify-between mb-1.5">
                             <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
                               <ArrowRight className="h-3 w-3" />
-                              Send a WhatsApp?
+                              {callState.autoDisposition ? "Send a follow-up WhatsApp?" : "Send a WhatsApp?"}
                             </div>
                             <button
                               onClick={() => setNudgeDismissed(true)}
@@ -1385,7 +1387,44 @@ export default function CloudDialer() {
                             >Skip</button>
                           </div>
                           <div className="flex flex-wrap gap-1.5">
-                            {callState.disposition === "not_interested" ? (
+                            {callState.autoDisposition && ["not_answered", "busy", "voicemail"].includes(callState.disposition) ? (
+                              <>
+                                {/* Auto-disposed (Plivo: no_answer / busy / voicemail). Surface a
+                                    missed-call apology + the course-info option so the counsellor
+                                    can keep the lead warm in one tap without leaving the dialer. */}
+                                <Button
+                                  size="sm"
+                                  variant={nudgeSentKeys.has("missed_call") ? "secondary" : "outline"}
+                                  disabled={!!nudgeSendingKey || nudgeSentKeys.has("missed_call")}
+                                  className="h-7 text-[11px]"
+                                  onClick={() => sendDispositionNudge("missed_call", {
+                                    params: [currentLead.name, currentLead.course_name || "your enquiry"],
+                                  })}
+                                >
+                                  {nudgeSendingKey === "missed_call" ? (
+                                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                  ) : nudgeSentKeys.has("missed_call") ? (
+                                    <Check className="h-3 w-3 mr-1" />
+                                  ) : null}
+                                  {nudgeSentKeys.has("missed_call") ? "Sent: missed-call note" : "Send missed-call note"}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant={nudgeSentKeys.has("course_info_v1") ? "secondary" : "outline"}
+                                  disabled={!!nudgeSendingKey || nudgeSentKeys.has("course_info_v1")}
+                                  className="h-7 text-[11px]"
+                                  onClick={() => sendDispositionNudge("course_info_v1")}
+                                  title={currentLead.course_name ? `Sends course-specific info for ${currentLead.course_name}` : "No course on lead — sends generic info"}
+                                >
+                                  {nudgeSendingKey === "course_info_v1" ? (
+                                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                  ) : nudgeSentKeys.has("course_info_v1") ? (
+                                    <Check className="h-3 w-3 mr-1" />
+                                  ) : null}
+                                  {nudgeSentKeys.has("course_info_v1") ? "Sent: course info" : "Send course info"}
+                                </Button>
+                              </>
+                            ) : callState.disposition === "not_interested" ? (
                               <Button
                                 size="sm"
                                 variant={nudgeSentKeys.has("nimt_not_interested_ack") ? "secondary" : "outline"}
