@@ -213,6 +213,36 @@ Deno.serve(async (req) => {
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
 
+    // nimt_followup_v1: caller passes [name, formatted_date]; we fill the
+    // counsellor signature (name + phone) from profiles + the
+    // PLIVO_DIALER_PHONE_NUMBER env var. Keeps the fallback chain in one
+    // place and lets ops rotate the Plivo cloud-dialer number via Supabase
+    // secrets without a code change.
+    if (template_key === "nimt_followup_v1" && lead_id && params && params.length === 2) {
+      let counsellorName = "the admissions team";
+      let counsellorPhone: string | null = null;
+      try {
+        const { data: row } = await admin
+          .from("leads")
+          .select("counsellor:profiles!counsellor_id(display_name,official_phone)")
+          .eq("id", lead_id)
+          .maybeSingle();
+        const c = (row as any)?.counsellor;
+        if (c?.display_name) counsellorName = c.display_name;
+        if (c?.official_phone && String(c.official_phone).trim().length > 0) {
+          counsellorPhone = String(c.official_phone).trim();
+        }
+      } catch (e) {
+        console.error("counsellor lookup failed:", e);
+      }
+      if (!counsellorPhone) {
+        const plivoDid = (Deno.env.get("PLIVO_DIALER_PHONE_NUMBER") || "").trim();
+        if (plivoDid) counsellorPhone = plivoDid;
+      }
+      if (!counsellorPhone) counsellorPhone = "+91 9555 192 192";
+      params = [params[0], params[1], counsellorName, counsellorPhone];
+    }
+
     // course_info_v1 can be invoked with only {template_key, phone, lead_id}.
     // Fill body params + button URLs from fn_resolve_course_info_params so
     // every caller (AI post-call, disposition nudge, manual sends) emits a

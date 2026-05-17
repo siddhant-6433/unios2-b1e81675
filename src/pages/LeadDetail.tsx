@@ -383,17 +383,12 @@ const LeadDetail = () => {
       };
 
       if (data.disposition === "interested" || data.disposition === "call_back") {
-        // Resolve counsellor signature from the DB so the message is personal
-        // and the phone fallback chain (official_phone → Plivo DID → admissions)
-        // is centralised in SQL rather than duplicated here.
-        const { data: sig } = await (supabase as any).rpc("fn_resolve_counsellor_signature", { p_lead_id: id });
+        // Only pass the bits the client knows. whatsapp-send fills counsellor
+        // name + phone server-side from profiles + the PLIVO_DIALER_PHONE_NUMBER
+        // env var so the fallback chain lives in one place (and the Plivo
+        // number can be rotated via Supabase secrets without code changes).
         autoTemplate = "nimt_followup_v1";
-        autoParams = [
-          lead.name,
-          formatFollowupDate(data.followup_date),
-          sig?.counsellor_name || "the admissions team",
-          sig?.counsellor_phone || "+91 9555 192 192",
-        ];
+        autoParams = [lead.name, formatFollowupDate(data.followup_date)];
       } else if (data.disposition === "not_answered" || data.disposition === "busy" || data.disposition === "voicemail") {
         autoTemplate = "missed_call";
         autoParams = [lead.name, course];
