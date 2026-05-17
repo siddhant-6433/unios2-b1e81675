@@ -146,13 +146,15 @@ const LeadDetail = () => {
 
   // ── Manual-call status poll ───────────────────────────────────────────────
   // While a manual call is in flight, poll ai_call_records by call_uuid every
-  // 2s. The voice-call-callback edge fn updates this row from Plivo callbacks:
-  //   initiated/ringing/in-progress → still "calling"
-  //   completed (duration > 5s)     → "connected" — show full picker
-  //   no-answer / cancel            → "no_answer" — auto-dispose
-  //   busy                          → "busy"      — auto-dispose
-  //   failed                        → "failed"    — auto-dispose (switched off)
-  // Stops as soon as a terminal state is reached or the dialog closes.
+  // 3s. The voice-call-callback edge fn writes status from Plivo callbacks,
+  // but during the talk the row sits at "initiated" — there's no intermediate
+  // "answered" event. So:
+  //  - Terminal "no-answer" / busy / failed / cancel → auto-dispose
+  //  - Terminal "completed" with talk time           → flip to "connected"
+  //  - Otherwise the counsellor uses the "Call connected" button in the
+  //    dialog (onManualConnect) to advance manually.
+  // No more 90s timeout — the manual button removes that need and the old
+  // timeout was prematurely auto-disposing answered calls.
   useEffect(() => {
     if (!activeCallUuid || !showCallDisposition) return;
     if (dispositionCallStatus && dispositionCallStatus !== "calling") return;
@@ -170,29 +172,26 @@ const LeadDetail = () => {
       if (cancelled) return;
       if (!data) return;
       const s = String(data.status || "").toLowerCase();
-      if (s === "completed" && (data.duration_seconds || 0) > 5) {
-        setDispositionCallStatus("connected");
-      } else if (s === "no_answer" || s === "no-answer" || s === "cancel") {
+      const dur = data.duration_seconds || 0;
+      if (s === "no_answer" || s === "no-answer" || s === "cancel") {
         setDispositionCallStatus("no_answer");
       } else if (s === "busy") {
         setDispositionCallStatus("busy");
       } else if (s === "failed") {
         setDispositionCallStatus("failed");
+      } else if (s === "completed") {
+        // Plivo hung up. >5s of talk → counsellor and lead conversed.
+        // ≤5s → treat as no answer / quick decline.
+        setDispositionCallStatus(dur > 5 ? "connected" : "no_answer");
       }
+      // initiated / ringing / in-progress → keep "calling"; counsellor can
+      // hit the manual "Call connected" button at any time.
     };
     tick();
-    const interval = setInterval(tick, 2000);
-    // Safety: if no Plivo callback comes in 90s, assume no_answer so the
-    // counsellor isn't stuck on the spinner.
-    const safety = setTimeout(() => {
-      if (!cancelled) {
-        setDispositionCallStatus((prev) => (prev === "calling" ? "no_answer" : prev));
-      }
-    }, 90_000);
+    const interval = setInterval(tick, 3000);
     return () => {
       cancelled = true;
       clearInterval(interval);
-      clearTimeout(safety);
     };
   }, [activeCallUuid, showCallDisposition, dispositionCallStatus]);
 
@@ -1351,6 +1350,12 @@ const LeadDetail = () => {
         defaultCampusId={lead.campus_id || undefined}
         onSubmit={logCallDisposition}
         callStatus={dispositionCallStatus}
+        onManualConnect={() => setDispositionCallStatus("connected")}
+        courseName={courseName}
+        leadStage={lead.stage as any}
+        personRole={(lead as any).person_role || null}
+        latestNote={notes[0]?.content || null}
+        aiCallSummary={(lead as any).ai_notes || null}
       />
 
       {/* Score animation popup */}

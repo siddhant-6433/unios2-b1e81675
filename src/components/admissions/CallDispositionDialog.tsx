@@ -65,6 +65,15 @@ interface CallDispositionDialogProps {
   onCallNow?: () => void | Promise<void>;
   /** Optional live status from the dialer poll. Drives the auto-flow. */
   callStatus?: DialogCallStatus;
+  /** Called when counsellor clicks "Call connected" — flips parent state */
+  onManualConnect?: () => void;
+  /** Lead context surfaced in the calling state so the counsellor knows who
+   *  they're calling and why without leaving the dialog. */
+  courseName?: string | null;
+  leadStage?: string | null;
+  personRole?: string | null;
+  latestNote?: string | null;
+  aiCallSummary?: string | null;
 }
 
 const DISPOSITIONS: { value: CallDisposition; label: string; icon: any; color: string; suggestsFollowup: boolean }[] = [
@@ -109,7 +118,11 @@ const formatDisplayDate = (dateStr: string) => {
   return `${day}, ${d}/${m}/${y.slice(2)}`;
 };
 
-export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone, campuses, defaultCampusId, onSubmit, onCallNow, callStatus }: CallDispositionDialogProps) {
+export function CallDispositionDialog({
+  open, onOpenChange, leadName, leadPhone, campuses, defaultCampusId,
+  onSubmit, onCallNow, callStatus, onManualConnect,
+  courseName, leadStage, personRole, latestNote, aiCallSummary,
+}: CallDispositionDialogProps) {
   const [disposition, setDisposition] = useState<CallDisposition | null>(null);
   const [duration, setDuration] = useState(0);
   const [notes, setNotes] = useState("");
@@ -192,10 +205,13 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
     dateInputRef.current?.focus();
   };
 
-  // ── Phase 1: still ringing — show waiting state, hide picker ──────────────
-  // Only the lead summary + a status banner are shown. The dialog cannot be
-  // submitted while the call is still establishing; the parent dialer flips
-  // callStatus to "connected" (or to a terminal failure) once Plivo reports.
+  // ── Phase 1: still ringing — show waiting state + context, hide picker ───
+  // Plivo's manual-call flow only writes ai_call_records.status on hangup, so
+  // we cannot detect "answered" from the DB during the talk. The counsellor
+  // therefore gets a "Call connected" button to manually advance to the
+  // picker the moment the lead picks up. The surrounding context (course,
+  // stage, latest note, AI summary) helps the counsellor remember who and
+  // why during the few seconds of ringing.
   if (callStatus === "calling") {
     return (
       <Dialog open={open} onOpenChange={handleClose}>
@@ -206,27 +222,77 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
               Calling {leadName}…
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 pt-1">
-            <div className="rounded-xl bg-muted/40 px-3 py-3">
-              <p className="text-sm font-medium text-foreground truncate">{leadName}</p>
+          <div className="space-y-3 pt-1">
+            {/* Lead summary: name + phone + stage / role badges */}
+            <div className="rounded-xl bg-muted/40 px-3 py-3 space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-foreground truncate">{leadName}</p>
+                <div className="flex items-center gap-1.5">
+                  {personRole && personRole !== "lead" && (
+                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">
+                      {personRole.replace(/_/g, " ")}
+                    </span>
+                  )}
+                  {leadStage && (
+                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                      {leadStage.replace(/_/g, " ")}
+                    </span>
+                  )}
+                </div>
+              </div>
               <p className="text-[11px] text-muted-foreground font-mono">{leadPhone}</p>
+              {courseName && (
+                <p className="text-xs text-foreground flex items-center gap-1.5 pt-0.5">
+                  <span className="text-muted-foreground">Course:</span>
+                  <span className="font-medium">{courseName}</span>
+                </p>
+              )}
             </div>
-            <div className="flex flex-col items-center justify-center gap-3 py-8 text-center">
-              <Loader2 className="h-7 w-7 text-primary animate-spin" />
+
+            {/* AI call summary if available — primary "why am I calling this lead" context */}
+            {aiCallSummary && (
+              <div className="rounded-xl border border-purple-200 dark:border-purple-800/40 bg-purple-50/50 dark:bg-purple-950/20 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-purple-700 dark:text-purple-300 mb-1">AI call summary</p>
+                <p className="text-xs text-foreground whitespace-pre-wrap line-clamp-5">{aiCallSummary}</p>
+              </div>
+            )}
+
+            {/* Latest counsellor note */}
+            {latestNote && (
+              <div className="rounded-xl border border-amber-200 dark:border-amber-800/40 bg-amber-50/40 dark:bg-amber-950/20 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-1">Latest note</p>
+                <p className="text-xs text-foreground whitespace-pre-wrap line-clamp-3">{latestNote}</p>
+              </div>
+            )}
+
+            {/* Waiting spinner */}
+            <div className="flex flex-col items-center justify-center gap-2 py-4 text-center">
+              <Loader2 className="h-6 w-6 text-primary animate-spin" />
               <p className="text-sm font-medium text-foreground">Waiting for {leadName} to pick up…</p>
-              <p className="text-xs text-muted-foreground max-w-xs">
-                The outcome screen will appear here once they answer, or auto-fill if
-                their phone is busy / switched off / unanswered.
+              <p className="text-[11px] text-muted-foreground max-w-xs">
+                Tap <span className="font-semibold">Call connected</span> the moment they answer,
+                or wait — the screen will auto-fill if their phone is busy / switched off / unanswered.
               </p>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleClose(false)}
-              className="w-full text-xs"
-            >
-              Cancel — log manually later
-            </Button>
+
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-xs"
+                onClick={() => onManualConnect?.()}
+              >
+                <CheckCircle className="h-3.5 w-3.5 mr-1.5" />
+                Call connected — Mark Outcome
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleClose(false)}
+                className="text-xs"
+              >
+                Cancel
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

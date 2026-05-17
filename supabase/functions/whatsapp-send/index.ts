@@ -339,7 +339,11 @@ Deno.serve(async (req) => {
       }
     );
 
-    const waResult = await waResponse.json();
+    // Parse body as text first so we can keep the raw response for the failed
+    // path even when Meta returns non-JSON (e.g. plain-text 5xx from the edge).
+    const waResultText = await waResponse.text().catch(() => "");
+    let waResult: any = null;
+    try { waResult = waResultText ? JSON.parse(waResultText) : null; } catch { waResult = null; }
 
     // Log to whatsapp_messages + lead_activities (even if Meta rejected it)
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
@@ -395,7 +399,18 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Insert into whatsapp_messages for inbox visibility — log even if Meta rejected
+    // Insert into whatsapp_messages for inbox visibility — log even if Meta rejected.
+    // status_error captures everything we know about the failure so the spam
+    // dashboard and the per-message inbox can show what Meta complained about.
+    const statusErrorPayload = metaFailed
+      ? {
+          http_status: waResponse.status,
+          ...(waResult?.error ? { error: waResult.error } : {}),
+          ...(waResult && !waResult.error ? { body: waResult } : {}),
+          ...(!waResult && waResultText ? { raw: waResultText.slice(0, 1000) } : {}),
+        }
+      : null;
+
     await adminClient.from("whatsapp_messages").insert({
       lead_id: lead_id || null,
       wa_message_id: waResult?.messages?.[0]?.id || null,
@@ -407,7 +422,7 @@ Deno.serve(async (req) => {
       status: metaFailed ? "failed" : "sent",
       is_read: true,
       business_phone_number_id: phoneNumberId,
-      status_error: metaFailed ? waResult?.error || waResult || null : null,
+      status_error: statusErrorPayload,
     });
 
     if (lead_id) {
