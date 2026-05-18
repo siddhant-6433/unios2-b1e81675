@@ -1,0 +1,30 @@
+name: Access guardrails
+
+# Static checks that catch the three regression patterns that have hit
+# applicant / counsellor / student logins in production:
+#   A. anon-apply-portal edge function missing from supabase/config.toml
+#      (defaults to verify_jwt=true, 401s applicants)
+#   B. SECURITY INVOKER view querying leads/applications/students directly
+#      (RLS filters it to 0 rows for counsellor / applicant logins)
+#   C. apply portal invoking notify-event (requires service-role auth, fails)
+#
+# Runs on every PR + every push to main. No services, no Supabase auth —
+# pure file parsing, finishes in seconds. Override a specific line with
+# `lint-allow: <reason>` if you've considered the trade-off.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  guardrails:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Run access-guardrails lint
+        run: node scripts/lint-access-guardrails.mjs

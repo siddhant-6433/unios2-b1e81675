@@ -8,6 +8,7 @@
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
+    "lint:access": "node scripts/lint-access-guardrails.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"

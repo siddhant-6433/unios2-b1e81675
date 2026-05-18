@@ -143,6 +143,11 @@ const LeadDetail = () => {
   const [showNextLeadPrompt, setShowNextLeadPrompt] = useState(false);
   const [lastDisposition, setLastDisposition] = useState<string>("");
   const [scorePopup, setScorePopup] = useState<{ points: number; label: string; visible: boolean }>({ points: 0, label: "", visible: false });
+  // When the lead_detail RPC returns nothing (RLS blocked because the lead is
+  // assigned to someone else), we still want to tell the user *who* it is
+  // assigned to. lead_assignment_info is a SECURITY DEFINER RPC that returns
+  // just the assignee's display name — no contact info, no stage.
+  const [assignmentInfo, setAssignmentInfo] = useState<{ exists: boolean; lead_name: string | null; counsellor_name: string | null } | null>(null);
   const { buckets, nextLead, refetch: refetchQueue } = useCallQueue(id);
 
   // useLeadDetail handles initial fetch + refetch on id change automatically.
@@ -156,6 +161,7 @@ const LeadDetail = () => {
     setVisits([]);
     setActivities([]);
     setCallLogs([]);
+    setAssignmentInfo(null);
   }, [id]);
 
   // Auto-trigger Cloud Call when navigated with ?action=call.
@@ -211,6 +217,21 @@ const LeadDetail = () => {
     setLoading(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detailData, detailFetching]);
+
+  // If the RLS-bound fetch returned an empty lead, fall back to the
+  // assignment-info RPC so we can tell the user who currently owns the lead.
+  useEffect(() => {
+    if (!id) return;
+    if (detailFetching) return;
+    if (detailData?.lead) { setAssignmentInfo(null); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await (supabase as any).rpc("lead_assignment_info", { p_lead_id: id });
+      if (cancelled) return;
+      setAssignmentInfo(data || { exists: false, lead_name: null, counsellor_name: null });
+    })();
+    return () => { cancelled = true; };
+  }, [id, detailData, detailFetching]);
 
   // Sync reference data + profile id into legacy state for downstream dialogs
   useEffect(() => { if (campusesData) setCampuses(campusesData); }, [campusesData]);
@@ -804,7 +825,52 @@ const LeadDetail = () => {
   };
 
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
-  if (!lead) return <div className="text-center py-20"><p className="text-muted-foreground">Lead not found</p></div>;
+  if (!lead) {
+    // Distinguish "this lead exists but isn't assigned to you" from "no such lead".
+    // assignmentInfo comes from the SECURITY DEFINER lead_assignment_info RPC.
+    if (assignmentInfo?.exists && assignmentInfo.counsellor_name) {
+      return (
+        <div className="mx-auto max-w-xl py-16">
+          <div className="rounded-2xl border border-amber-300/60 bg-amber-50 dark:bg-amber-950/20 p-6 space-y-3">
+            <div className="flex items-center gap-2">
+              <UserCheck className="h-5 w-5 text-amber-600 shrink-0" />
+              <h2 className="text-base font-semibold text-amber-900 dark:text-amber-200">Lead access restricted</h2>
+            </div>
+            <p className="text-sm text-amber-900/90 dark:text-amber-100/90">
+              Lead currently assigned to <span className="font-semibold">{assignmentInfo.counsellor_name}</span>.
+              Please get the lead reassigned to you from admin to access this lead data.
+            </p>
+            <div className="pt-1">
+              <Link to="/admissions" className="inline-flex items-center gap-1 text-xs font-medium text-amber-800 dark:text-amber-300 hover:underline">
+                <ArrowLeft className="h-3.5 w-3.5" /> Back to Leads
+              </Link>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    if (assignmentInfo?.exists && !assignmentInfo.counsellor_name) {
+      return (
+        <div className="mx-auto max-w-xl py-16">
+          <div className="rounded-2xl border border-amber-300/60 bg-amber-50 dark:bg-amber-950/20 p-6 space-y-3">
+            <div className="flex items-center gap-2">
+              <UserCheck className="h-5 w-5 text-amber-600 shrink-0" />
+              <h2 className="text-base font-semibold text-amber-900 dark:text-amber-200">Lead access restricted</h2>
+            </div>
+            <p className="text-sm text-amber-900/90 dark:text-amber-100/90">
+              This lead is currently unassigned. Please ask an admin to assign it to you to access this lead data.
+            </p>
+            <div className="pt-1">
+              <Link to="/admissions" className="inline-flex items-center gap-1 text-xs font-medium text-amber-800 dark:text-amber-300 hover:underline">
+                <ArrowLeft className="h-3.5 w-3.5" /> Back to Leads
+              </Link>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return <div className="text-center py-20"><p className="text-muted-foreground">Lead not found</p></div>;
+  }
 
   // Skeleton placeholder for lazy chunks (kept lightweight so the header
   // can paint immediately while heavy children stream in)
