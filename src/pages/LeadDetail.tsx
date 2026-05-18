@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -13,34 +13,44 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { TransferLeadDialog } from "@/components/admissions/TransferLeadDialog";
+// Dialogs are lazy — they only need to download when the user actually opens them.
+const TransferLeadDialog = lazy(() =>
+  import("@/components/admissions/TransferLeadDialog").then(m => ({ default: m.TransferLeadDialog })));
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { AiCallSummary } from "@/components/leads/AiCallSummary";
-import { PriorityInterestedCard } from "@/components/leads/PriorityInterestedCard";
+// Eager: small / essential-for-first-paint components
 import { LeadInfoCard } from "@/components/leads/LeadInfoCard";
-import { LeadTimeline } from "@/components/leads/LeadTimeline";
-import { WebChatTranscripts } from "@/components/leads/WebChatTranscripts";
-import { InterviewScoringDialog } from "@/components/admissions/InterviewScoringDialog";
-import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
-import { ConvertToStudentDialog } from "@/components/admissions/ConvertToStudentDialog";
-import { SendWhatsAppDialog } from "@/components/leads/SendWhatsAppDialog";
-import { AddSecondaryCounsellorDialog } from "@/components/leads/AddSecondaryCounsellorDialog";
-import { ApplyMagicLinkButton } from "@/components/leads/ApplyMagicLinkButton";
-import { ScheduleVisitDialog } from "@/components/admissions/ScheduleVisitDialog";
-import { ScheduleFollowupDialog } from "@/components/admissions/ScheduleFollowupDialog";
-import { CallDispositionDialog, type CallDispositionData } from "@/components/admissions/CallDispositionDialog";
-import { RecordPaymentDialog } from "@/components/admissions/RecordPaymentDialog";
-import { LeadFeeLedger } from "@/components/finance/LeadFeeLedger";
 import { FuzzyDuplicateAlert } from "@/components/admissions/FuzzyDuplicateAlert";
-import { ApplicationProgress } from "@/components/leads/ApplicationProgress";
-import { FeeStructureViewer } from "@/components/finance/FeeStructureViewer";
-import { SendEmailDialog } from "@/components/leads/SendEmailDialog";
+import { type CallDispositionData } from "@/components/admissions/CallDispositionDialog";
+
+// Lazy: heavy body components — header paints before these chunks arrive
+const AiCallSummary         = lazy(() => import("@/components/leads/AiCallSummary").then(m => ({ default: m.AiCallSummary })));
+const PriorityInterestedCard = lazy(() => import("@/components/leads/PriorityInterestedCard").then(m => ({ default: m.PriorityInterestedCard })));
+const LeadTimeline          = lazy(() => import("@/components/leads/LeadTimeline").then(m => ({ default: m.LeadTimeline })));
+const WebChatTranscripts    = lazy(() => import("@/components/leads/WebChatTranscripts").then(m => ({ default: m.WebChatTranscripts })));
+const ApplicationProgress   = lazy(() => import("@/components/leads/ApplicationProgress").then(m => ({ default: m.ApplicationProgress })));
+const LeadFeeLedger         = lazy(() => import("@/components/finance/LeadFeeLedger").then(m => ({ default: m.LeadFeeLedger })));
+const FeeStructureViewer    = lazy(() => import("@/components/finance/FeeStructureViewer").then(m => ({ default: m.FeeStructureViewer })));
+const ApplyMagicLinkButton  = lazy(() => import("@/components/leads/ApplyMagicLinkButton").then(m => ({ default: m.ApplyMagicLinkButton })));
+
+// Lazy: dialogs — only loaded when the user opens them
+const InterviewScoringDialog       = lazy(() => import("@/components/admissions/InterviewScoringDialog").then(m => ({ default: m.InterviewScoringDialog })));
+const OfferLetterDialog            = lazy(() => import("@/components/admissions/OfferLetterDialog").then(m => ({ default: m.OfferLetterDialog })));
+const ConvertToStudentDialog       = lazy(() => import("@/components/admissions/ConvertToStudentDialog").then(m => ({ default: m.ConvertToStudentDialog })));
+const SendWhatsAppDialog           = lazy(() => import("@/components/leads/SendWhatsAppDialog").then(m => ({ default: m.SendWhatsAppDialog })));
+const AddSecondaryCounsellorDialog = lazy(() => import("@/components/leads/AddSecondaryCounsellorDialog").then(m => ({ default: m.AddSecondaryCounsellorDialog })));
+const ScheduleVisitDialog          = lazy(() => import("@/components/admissions/ScheduleVisitDialog").then(m => ({ default: m.ScheduleVisitDialog })));
+const ScheduleFollowupDialog       = lazy(() => import("@/components/admissions/ScheduleFollowupDialog").then(m => ({ default: m.ScheduleFollowupDialog })));
+const CallDispositionDialog        = lazy(() => import("@/components/admissions/CallDispositionDialog").then(m => ({ default: m.CallDispositionDialog })));
+const RecordPaymentDialog          = lazy(() => import("@/components/admissions/RecordPaymentDialog").then(m => ({ default: m.RecordPaymentDialog })));
+const SendEmailDialog              = lazy(() => import("@/components/leads/SendEmailDialog").then(m => ({ default: m.SendEmailDialog })));
 import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
 import { useCallQueue } from "@/hooks/useCallQueue";
 import { ScorePopup } from "@/components/admissions/ScorePopup";
+import { useQueryClient } from "@tanstack/react-query";
+import { useLeadDetail, useCampuses, useCourses, useMyProfileId } from "@/hooks/useAdmissionsData";
 
 // Score points for each disposition (mirrors DB trigger)
 const DISPOSITION_POINTS: Record<string, { points: number; label: string }> = {
@@ -146,7 +156,18 @@ const LeadDetail = () => {
   const [scorePopup, setScorePopup] = useState<{ points: number; label: string; visible: boolean }>({ points: 0, label: "", visible: false });
   const { buckets, nextLead, refetch: refetchQueue } = useCallQueue(id);
 
-  useEffect(() => { if (id) fetchAll(); }, [id]);
+  // useLeadDetail handles initial fetch + refetch on id change automatically.
+  // Reset local state when navigating between leads so the old data doesn't
+  // flash through before the new payload lands.
+  useEffect(() => {
+    setLead(null);
+    setLoading(true);
+    setNotes([]);
+    setFollowups([]);
+    setVisits([]);
+    setActivities([]);
+    setCallLogs([]);
+  }, [id]);
 
   // ── Manual-call status poll ───────────────────────────────────────────────
   // The voice-agent already captures the "student answered" event in its
@@ -244,33 +265,28 @@ const LeadDetail = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, lead, searchParams]);
 
-  const fetchAll = async (silent = false) => {
-    if (!silent) setLoading(true);
-    // All queries fire in parallel, but render unblocks as soon as the lead
-    // row arrives — no need to wait for notes/timeline/call-logs/etc to
-    // finish before showing the lead card. The secondary data hydrates in
-    // the background and child components re-render when their state lands.
-    // Embedded course/campus/counsellor save 3 follow-up round-trips.
-    const leadP = supabase.from("leads")
-      .select("*, lead_course:course_id(name,duration_years,type), lead_campus:campus_id(name,city,state), lead_counsellor:counsellor_id(display_name)")
-      .eq("id", id).single();
-    const secondaryP = Promise.all([
-      supabase.from("lead_notes").select("*").eq("lead_id", id).order("created_at", { ascending: false }).limit(50),
-      supabase.from("lead_followups").select("*").eq("lead_id", id).order("scheduled_at", { ascending: true }).limit(30),
-      supabase.from("campus_visits").select("*").eq("lead_id", id).order("visit_date", { ascending: false }).limit(20),
-      supabase.from("lead_activities").select("*").eq("lead_id", id).order("created_at", { ascending: false }).limit(50),
-      supabase.from("campuses").select("id, name"),
-      supabase.from("call_logs").select("*").eq("lead_id", id!).order("called_at", { ascending: false }).limit(20),
-      supabase.from("courses").select("id, name"),
-      user?.id ? supabase.from("profiles").select("id").eq("user_id", user.id).single() : Promise.resolve({ data: null }),
-    ]);
+  // Single lead_detail RPC replaces the 6-parallel per-lead query block.
+  // Cached → navigating to a child route and back doesn't refetch (10s stale).
+  const queryClient = useQueryClient();
+  const { data: detailData, isFetching: detailFetching, refetch: refetchDetail } = useLeadDetail(id);
+  // Reference data shared across pages — long-cached.
+  const { data: campusesData } = useCampuses();
+  const { data: coursesData } = useCourses();
+  const { data: profileIdData } = useMyProfileId();
 
-    const leadRes = await leadP;
-    if (leadRes.data) {
-      const ld: any = leadRes.data;
+  // Project the cached payload into the local mutable state the rest of the
+  // component still uses (note/followup/visit handlers mutate these arrays
+  // optimistically before refetching).
+  useEffect(() => {
+    if (!detailData) {
+      // Mid-fetch: keep current state, only flip loading if we have no lead yet
+      setLoading(detailFetching && !lead);
+      return;
+    }
+    const ld: any = detailData.lead;
+    if (ld) {
       setLead(ld);
-      const lc = ld.lead_counsellor;
-      setCounsellorName(lc?.display_name || undefined);
+      setCounsellorName(ld.lead_counsellor?.display_name || undefined);
       const cs = ld.lead_course;
       setCourseName(cs?.name || undefined);
       setCourseDuration(cs?.duration_years || undefined);
@@ -279,19 +295,26 @@ const LeadDetail = () => {
       setCampusName(cp?.name || undefined);
       setCampusCity(cp?.city ? (cp.state ? `${cp.city}, ${cp.state}` : cp.city) : undefined);
     }
+    setNotes(detailData.notes);
+    setFollowups(detailData.followups);
+    setVisits(detailData.visits);
+    setActivities(detailData.activities);
+    setCallLogs(detailData.call_logs);
     setLoading(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailData, detailFetching]);
 
-    // Background hydration — list states are initialised to [] so children
-    // render empty placeholders immediately and re-render when data lands.
-    const [notesRes, followupsRes, visitsRes, activitiesRes, campusesRes, callLogsRes, coursesRes, profileRes] = await secondaryP;
-    if (profileRes.data) setProfileId((profileRes.data as any).id);
-    if (notesRes.data) setNotes(notesRes.data);
-    if (followupsRes.data) setFollowups(followupsRes.data);
-    if (visitsRes.data) setVisits(visitsRes.data);
-    if (activitiesRes.data) setActivities(activitiesRes.data);
-    if (campusesRes.data) setCampuses(campusesRes.data);
-    if (callLogsRes.data) setCallLogs(callLogsRes.data);
-    if (coursesRes.data) setCourses(coursesRes.data);
+  // Sync reference data + profile id into legacy state for downstream dialogs
+  useEffect(() => { if (campusesData) setCampuses(campusesData); }, [campusesData]);
+  useEffect(() => { if (coursesData) setCourses(coursesData); }, [coursesData]);
+  useEffect(() => { if (profileIdData) setProfileId(profileIdData); }, [profileIdData]);
+
+  // Existing call sites expect a `fetchAll(silent)` callable that re-pulls
+  // the per-lead data after a mutation. Provide a thin wrapper that
+  // invalidates the cache and refetches.
+  const fetchAll = async (_silent = false) => {
+    await queryClient.invalidateQueries({ queryKey: ["lead-detail", id] });
+    await refetchDetail();
   };
 
   const addNote = async () => {
@@ -332,6 +355,7 @@ const LeadDetail = () => {
       p_notes:         data.notes || `${label} (logged from lead page)`,
       p_source:        "manual",
       p_recording_url: null,
+      p_call_source:   "manual_log",
     });
 
     // 1b. Mark any pending follow-ups on this lead as completed — the call has been made
@@ -947,7 +971,16 @@ const LeadDetail = () => {
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
   if (!lead) return <div className="text-center py-20"><p className="text-muted-foreground">Lead not found</p></div>;
 
+  // Skeleton placeholder for lazy chunks (kept lightweight so the header
+  // can paint immediately while heavy children stream in)
+  const lazyFallback = (
+    <div className="flex h-24 items-center justify-center text-muted-foreground">
+      <Loader2 className="h-4 w-4 animate-spin" />
+    </div>
+  );
+
   return (
+    <Suspense fallback={lazyFallback}>
     <div className="space-y-4 animate-fade-in px-0">
       {/* DNC Banner */}
       {lead.stage === "dnc" && (
@@ -1574,6 +1607,7 @@ const LeadDetail = () => {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+    </Suspense>
   );
 };
 

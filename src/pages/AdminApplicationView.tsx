@@ -4,13 +4,17 @@ import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, FileText, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Gift } from "lucide-react";
+import { ArrowLeft, FileText, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Gift, User, Trash2 } from "lucide-react";
 import { ApplicationPreview, type PreviewDoc } from "@/components/applicant/ApplicationPreview";
 import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
 import { AdmissionLifecycleStepper } from "@/components/admissions/AdmissionLifecycleStepper";
 import { DocReviewPanel } from "@/components/admissions/DocReviewPanel";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 type DocStatus = "pending" | "verified" | "rejected";
 
@@ -41,6 +45,8 @@ export default function AdminApplicationView() {
   const [decisionBusy, setDecisionBusy] = useState(false);
   const [rejectionReason, setRejectionReason] = useState("");
   const [showRejectionInput, setShowRejectionInput] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [showOfferLetter, setShowOfferLetter] = useState(false);
   const [generatingReceipt, setGeneratingReceipt] = useState(false);
 
@@ -203,6 +209,19 @@ export default function AdminApplicationView() {
     return { total, verified, rejected, pending };
   }, [docs, reviews]);
 
+  const deleteApplication = async () => {
+    if (!app || app.payment_status === "paid") return;
+    setDeleting(true);
+    const { error } = await supabase.from("applications").delete().eq("id", app.id);
+    setDeleting(false);
+    if (error) {
+      toast({ title: "Delete failed", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Application deleted" });
+    navigate("/applications");
+  };
+
   if (loading) {
     return (
       <div className="p-8 flex items-center justify-center">
@@ -283,6 +302,28 @@ export default function AdminApplicationView() {
         <div className="flex items-center gap-2">
           <Badge className="text-[10px] border-0 bg-violet-100 text-violet-700">{app.status}</Badge>
           <Badge className="text-[10px] border-0 bg-emerald-100 text-emerald-700">{app.payment_status || "pending"}</Badge>
+          {lead?.id && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              onClick={() => navigate(`/admissions/${lead.id}`)}
+            >
+              <User className="h-3.5 w-3.5" />
+              View Lead
+            </Button>
+          )}
+          {role === "super_admin" && app.payment_status !== "paid" && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 text-xs text-destructive border-destructive/30 hover:bg-destructive/5"
+              onClick={() => setShowDeleteConfirm(true)}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete
+            </Button>
+          )}
           {app.form_pdf_url && (
             <a href={app.form_pdf_url} target="_blank" rel="noreferrer"
               className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20">
@@ -435,6 +476,29 @@ export default function AdminApplicationView() {
       />
 
       <ApplicationPreview app={app} docs={docs} />
+
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete application?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete <span className="font-medium text-foreground">{app.application_id}</span> ({app.full_name}).
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleting}
+              onClick={deleteApplication}
+            >
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Trash2 className="h-4 w-4 mr-1.5" />}
+              Delete permanently
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Offer Letter dialog — opens after approval */}
       {lead?.id && (

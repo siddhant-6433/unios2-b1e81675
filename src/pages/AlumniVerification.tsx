@@ -109,9 +109,27 @@ function OtpLogin({ onVerified }: { onVerified: (phone: string) => void }) {
   const handleVerifyOtp = async () => {
     setLoading(true);
     const { data, error } = await supabase.functions.invoke("whatsapp-otp", { body: { phone: fullPhone, otp, action: "verify" } });
+    if (error || data?.error || !data?.verified) {
+      setLoading(false);
+      toast({ title: "Invalid OTP", variant: "destructive" });
+      return;
+    }
+    // Establish a real Supabase session so subsequent DB calls are authenticated.
+    // RLS on alumni_verification_requests is scoped to authenticated callers
+    // whose auth phone matches the row — anonymous reads/updates are blocked.
+    if (data?.token?.access_token && data?.token?.refresh_token) {
+      const { error: sessErr } = await supabase.auth.setSession({
+        access_token: data.token.access_token,
+        refresh_token: data.token.refresh_token,
+      });
+      if (sessErr) {
+        setLoading(false);
+        toast({ title: "Sign-in failed", description: sessErr.message, variant: "destructive" });
+        return;
+      }
+    }
     setLoading(false);
-    if (error || data?.error || !data?.verified) { toast({ title: "Invalid OTP", variant: "destructive" }); }
-    else { onVerified(fullPhone); }
+    onVerified(fullPhone);
   };
 
   return (

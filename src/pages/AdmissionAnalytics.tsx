@@ -43,6 +43,7 @@ const AdmissionAnalytics = () => {
   const [sourceFunnel, setSourceFunnel] = useState<any[]>([]);
   const [seatMatrix, setSeatMatrix] = useState<any[]>([]);
   const [counsellorStats, setCounsellorStats] = useState<any[]>([]);
+  const [feedbackByCounsellor, setFeedbackByCounsellor] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -55,7 +56,8 @@ const AdmissionAnalytics = () => {
       supabase.from("source_funnel" as any).select("*"),
       supabase.from("seat_matrix" as any).select("*"),
       supabase.from("counsellor_performance_stats" as any).select("*"),
-    ]).then(([leadsR, roiR, agingR, trendR, heatR, funnelR, seatR, counsellorR]) => {
+      supabase.from("counsellor_feedback_summary" as any).select("*"),
+    ]).then(([leadsR, roiR, agingR, trendR, heatR, funnelR, seatR, counsellorR, feedbackR]) => {
       if (leadsR.data) setLeads(leadsR.data);
       if (roiR.data) setSourceROI(roiR.data);
       if (agingR.data) setStageAging(agingR.data);
@@ -64,6 +66,11 @@ const AdmissionAnalytics = () => {
       if (funnelR.data) setSourceFunnel(funnelR.data);
       if (seatR.data) setSeatMatrix(seatR.data);
       if (counsellorR.data) setCounsellorStats(counsellorR.data);
+      if (feedbackR.data) {
+        const byId: Record<string, any> = {};
+        for (const row of feedbackR.data as any[]) byId[row.counsellor_id] = row;
+        setFeedbackByCounsellor(byId);
+      }
       setLoading(false);
     });
   }, []);
@@ -327,12 +334,18 @@ const AdmissionAnalytics = () => {
                     <th className="px-4 py-2 text-center text-xs font-semibold text-muted-foreground uppercase">Visits</th>
                     <th className="px-4 py-2 text-center text-xs font-semibold text-muted-foreground uppercase">Conversions</th>
                     <th className="px-4 py-2 text-center text-xs font-semibold text-muted-foreground uppercase">Overdue</th>
+                    <th className="px-4 py-2 text-center text-xs font-semibold text-muted-foreground uppercase" title="Student feedback from WhatsApp Good/Bad responses">Feedback</th>
                   </tr>
                 </thead>
                 <tbody>
                   {counsellorStats
                     .sort((a: any, b: any) => Number(b.conversions) - Number(a.conversions))
-                    .map((c: any) => (
+                    .map((c: any) => {
+                      const fb = feedbackByCounsellor[c.counsellor_id];
+                      const responses = Number(fb?.total_responses || 0);
+                      const lowRating = Number(fb?.low_rating || 0);
+                      const avg = fb?.avg_rating != null ? Number(fb.avg_rating) : null;
+                      return (
                       <tr key={c.counsellor_id} className="border-b border-border last:border-0">
                         <td className="px-4 py-2 font-medium text-foreground">{c.counsellor_name || "Unknown"}</td>
                         <td className="px-4 py-2 text-center text-muted-foreground">{c.leads_assigned}</td>
@@ -346,8 +359,21 @@ const AdmissionAnalytics = () => {
                             <Badge className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border-0 text-[10px]">{c.followups_overdue}</Badge>
                           ) : "0"}
                         </td>
+                        <td className="px-4 py-2 text-center">
+                          {responses === 0 ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5">
+                              <Badge className={`text-[10px] border-0 ${avg != null && avg >= 4 ? "bg-emerald-100 text-emerald-700" : avg != null && avg <= 2 ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>
+                                {avg != null ? `★ ${avg}` : "—"}
+                              </Badge>
+                              <span className="text-[11px] text-muted-foreground">({responses}{lowRating > 0 ? `, ${lowRating}↓` : ""})</span>
+                            </span>
+                          )}
+                        </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                 </tbody>
               </table>
             </CardContent>

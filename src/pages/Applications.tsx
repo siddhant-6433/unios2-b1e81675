@@ -10,11 +10,15 @@ import { Badge } from "@/components/ui/badge";
 import {
   FileText, Download, Eye, Loader2, Search, Filter, ExternalLink,
   CheckCircle, Clock, CreditCard, Upload, AlertCircle, ChevronDown, ChevronUp, X,
-  Sparkles, Send, Gift, Wallet, UserCheck, GraduationCap, Receipt, RefreshCw, ClipboardCheck,
+  Sparkles, Send, Gift, Wallet, UserCheck, GraduationCap, Receipt, RefreshCw, ClipboardCheck, Trash2,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface AppRow {
   id: string;
@@ -98,6 +102,8 @@ export default function Applications() {
   const [generatingPdfFor, setGeneratingPdfFor] = useState<string | null>(null);
   const [bulkRegen, setBulkRegen] = useState<{ done: number; total: number } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleteTarget, setDeleteTarget] = useState<AppRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const handleOfflinePaymentSuccess = async () => {
     if (!offlinePaymentApp) return;
@@ -195,6 +201,7 @@ export default function Applications() {
       const leadAnMap: Record<string, string | null> = {};
       const leadOfferMap: Record<string, boolean> = {};
       const appFeePaidMap: Record<string, number> = {};
+      const leadTokenFeePaidSet: Set<string> = new Set();
       const appDocCountsMap: Record<string, { total: number; verified: number; rejected: number; pending: number }> = {};
       if (leadIds.length > 0) {
         // Offer-letter existence — one row per lead is enough to flag.
@@ -203,14 +210,23 @@ export default function Applications() {
           .in("lead_id", leadIds);
         (offers || []).forEach((o: any) => { leadOfferMap[o.lead_id] = true; });
 
-        // Confirmed application_fee payments — sum per lead.
+        // Confirmed application_fee + token_fee payments — track per lead.
+        // We need TOKEN-fee separately so the "Token Paid" stat reflects
+        // anyone who actually paid the token fee, not just leads whose
+        // current `stage` happens to equal 'token_paid' (which gets
+        // overwritten as soon as they progress to offer_sent / pre_admitted
+        // / admitted, leaving most real payers uncounted).
         const { data: pmts } = await supabase.from("lead_payments")
-          .select("lead_id, amount")
+          .select("lead_id, amount, type")
           .in("lead_id", leadIds)
-          .eq("type", "application_fee")
+          .in("type", ["application_fee", "token_fee"])
           .eq("status", "confirmed");
         (pmts || []).forEach((p: any) => {
-          appFeePaidMap[p.lead_id] = (appFeePaidMap[p.lead_id] || 0) + Number(p.amount || 0);
+          if (p.type === "application_fee") {
+            appFeePaidMap[p.lead_id] = (appFeePaidMap[p.lead_id] || 0) + Number(p.amount || 0);
+          } else if (p.type === "token_fee") {
+            leadTokenFeePaidSet.add(p.lead_id);
+          }
         });
 
         for (let i = 0; i < leadIds.length; i += 50) {
@@ -268,6 +284,7 @@ export default function Applications() {
         lead_admission_no: leadAnMap[a.lead_id] || null,
         has_offer: !!leadOfferMap[a.lead_id],
         app_fee_paid: appFeePaidMap[a.lead_id] || 0,
+        has_token_fee_paid: leadTokenFeePaidSet.has(a.lead_id),
         doc_counts: appDocCountsMap[a.application_id] || { total: 0, verified: 0, rejected: 0, pending: 0 },
       }));
 
@@ -289,7 +306,14 @@ export default function Applications() {
   const filtered = apps.filter(a => {
     if (paymentFilter !== "all" && a.payment_status !== paymentFilter) return false;
     if (statusFilter !== "all" && a.status !== statusFilter) return false;
-    if (stageFilter && a.lead_stage !== stageFilter) return false;
+    // The "token_paid" tile filters on the lead_payments-derived flag so it
+    // includes everyone who paid token fee, not just those currently AT the
+    // token_paid stage. Other stage tiles still match on the lead's stage.
+    if (stageFilter === "token_paid") {
+      if (!a.has_token_fee_paid) return false;
+    } else if (stageFilter && a.lead_stage !== stageFilter) {
+      return false;
+    }
     if (!search) return true;
     const q = search.toLowerCase();
     return (
@@ -356,9 +380,26 @@ export default function Applications() {
     submitted: apps.filter(a => a.status === "submitted").length,
     approved_pending_offer: apps.filter(a => a.lead_stage === "application_approved").length,
     offer_sent: apps.filter(a => a.lead_stage === "offer_sent").length,
-    token_paid: apps.filter(a => a.lead_stage === "token_paid").length,
+    // Count anyone with a confirmed token-fee lead_payment, regardless of
+    // current lead.stage. Deduped by lead_id so a candidate with two
+    // applications doesn't double-count.
+    token_paid: new Set(apps.filter(a => a.has_token_fee_paid && a.lead_id).map(a => a.lead_id)).size,
     pre_admitted: apps.filter(a => a.lead_stage === "pre_admitted").length,
     admitted: apps.filter(a => a.lead_stage === "admitted").length,
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget || deleteTarget.payment_status === "paid") return;
+    setDeleting(true);
+    const { error } = await supabase.from("applications").delete().eq("id", deleteTarget.id);
+    setDeleting(false);
+    if (error) {
+      // toast is not imported here — use alert as lightweight fallback
+      alert(`Delete failed: ${error.message}`);
+      return;
+    }
+    setApps(prev => prev.filter(a => a.id !== deleteTarget.id));
+    setDeleteTarget(null);
   };
 
   if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
@@ -635,6 +676,15 @@ export default function Applications() {
                             leadPhone={app.phone}
                           />
                         )}
+                        {role === "super_admin" && app.payment_status !== "paid" && (
+                          <button
+                            onClick={() => setDeleteTarget(app)}
+                            className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/5 transition-colors"
+                            title="Delete application"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -841,6 +891,29 @@ export default function Applications() {
           onSuccess={handleOfflinePaymentSuccess}
         />
       )}
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete application?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete <span className="font-medium text-foreground">{deleteTarget?.application_id}</span> ({deleteTarget?.full_name}).
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleting}
+              onClick={handleDelete}
+            >
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Trash2 className="h-4 w-4 mr-1.5" />}
+              Delete permanently
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

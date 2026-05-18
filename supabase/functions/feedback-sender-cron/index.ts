@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
     // Get pending feedback requests
     const { data: pending, error } = await supabase
       .from("feedback_responses")
-      .select("id, lead_id, interaction_type, leads!inner(name, phone)")
+      .select("id, lead_id, counsellor_id, interaction_type, leads!inner(name, phone)")
       .eq("status", "pending_send")
       .limit(20);
 
@@ -47,6 +47,20 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Look up counsellor display names in one round-trip so we can name the
+    // advisor in the WhatsApp body (matches the screenshot).
+    const counsellorIds = [...new Set((pending as any[]).map((p) => p.counsellor_id).filter(Boolean))];
+    const counsellorNameById: Record<string, string> = {};
+    if (counsellorIds.length) {
+      const { data: profileRows } = await supabase
+        .from("profiles")
+        .select("id, display_name")
+        .in("id", counsellorIds);
+      for (const p of profileRows || []) {
+        counsellorNameById[(p as any).id] = (p as any).display_name || "our counsellor";
+      }
+    }
+
     let sent = 0;
 
     for (const fb of pending as any[]) {
@@ -55,20 +69,52 @@ Deno.serve(async (req) => {
 
       const phone = lead.phone.replace(/[^0-9]/g, "");
       const waPhone = phone.startsWith("91") ? phone : `91${phone}`;
-      const interactionText = fb.interaction_type === "visit"
-        ? "your recent campus visit"
-        : "your recent call";
       const whatsappToken = fb.interaction_type === "visit"
         ? (Deno.env.get("WHATSAPP_VISIT_API_TOKEN") || defaultWhatsappToken)
         : (Deno.env.get("WHATSAPP_CALL_API_TOKEN") || defaultWhatsappToken);
       const phoneNumberId = fb.interaction_type === "visit"
         ? (Deno.env.get("WHATSAPP_VISIT_PHONE_NUMBER_ID") || defaultPhoneNumberId)
         : (Deno.env.get("WHATSAPP_CALL_PHONE_NUMBER_ID") || defaultPhoneNumberId);
+      const counsellorName = counsellorNameById[fb.counsellor_id] || "our counsellor";
 
-      // Send feedback request as a plain text message (since we may not have a Meta-approved template yet)
-      // This is a session message — will only deliver if the user has messaged within 24h
-      // For production: create a Meta-approved template and use template messaging
-      const messageBody = `Hi ${lead.name}! 👋\n\nThank you for ${interactionText} with NIMT Educational Institutions.\n\nWe'd love your quick feedback! On a scale of 1-5, how would you rate your experience?\n\n1⃣ Poor\n2⃣ Below Average\n3⃣ Average\n4⃣ Good\n5⃣ Excellent\n\nJust reply with a number (1-5). Your feedback helps us serve you better! 🙏`;
+      // Send via the Meta-approved `counsellor_feedback` template so delivery
+      // works outside the 24h session window. Body params: lead name,
+      // counsellor name. Each quick-reply button carries a payload that
+      // whatsapp-webhook parses (`feedback_good_<id>` / `feedback_bad_<id>`)
+      // to update this feedback_responses row.
+      const previewBody =
+        `Hi ${lead.name}, we noticed you just had an interaction with our counsellor, ${counsellorName}. We'd love to know how it went! Your feedback means a lot to us. How was your experience?`;
+
+      const templatePayload = {
+        messaging_product: "whatsapp",
+        to: waPhone,
+        type: "template",
+        template: {
+          name: "counsellor_feedback",
+          language: { code: "en" },
+          components: [
+            {
+              type: "body",
+              parameters: [
+                { type: "text", text: lead.name },
+                { type: "text", text: counsellorName },
+              ],
+            },
+            {
+              type: "button",
+              sub_type: "quick_reply",
+              index: "0",
+              parameters: [{ type: "payload", payload: `feedback_good_${fb.id}` }],
+            },
+            {
+              type: "button",
+              sub_type: "quick_reply",
+              index: "1",
+              parameters: [{ type: "payload", payload: `feedback_bad_${fb.id}` }],
+            },
+          ],
+        },
+      };
 
       try {
         const res = await fetch(
@@ -79,12 +125,7 @@ Deno.serve(async (req) => {
               Authorization: `Bearer ${whatsappToken}`,
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({
-              messaging_product: "whatsapp",
-              to: waPhone,
-              type: "text",
-              text: { body: messageBody },
-            }),
+            body: JSON.stringify(templatePayload),
           }
         );
 
@@ -93,29 +134,30 @@ Deno.serve(async (req) => {
         if (res.ok) {
           const waMessageId = result?.messages?.[0]?.id || null;
 
-          // Update status to sent
           await supabase
             .from("feedback_responses")
             .update({ status: "sent", sent_at: new Date().toISOString(), wa_message_id: waMessageId })
             .eq("id", fb.id);
 
-          // Log as outbound message
           await supabase.from("whatsapp_messages").insert({
             lead_id: fb.lead_id,
             wa_message_id: waMessageId,
             direction: "outbound",
             phone: waPhone,
-            message_type: "text",
-            content: messageBody,
+            message_type: "template",
+            content: `${previewBody}\n[Good] [Bad]`,
             status: "sent",
             is_read: true,
             business_phone_number_id: phoneNumberId,
+            template_key: "counsellor_feedback",
           });
 
           sent++;
         } else {
           console.error("Feedback WA failed:", result?.error?.message);
-          // Mark as sent anyway to avoid retrying forever (session window might be closed)
+          // Mark as sent so the cron doesn't retry forever (session window
+          // likely closed). The lead is still under cooldown so they won't be
+          // re-sampled for 3 days.
           await supabase
             .from("feedback_responses")
             .update({ status: "sent", sent_at: new Date().toISOString() })

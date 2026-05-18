@@ -56,6 +56,11 @@ const AUTO_REPLIES: { patterns: RegExp; reply: string }[] = [
   },
 ];
 
+function extractWhatsAppLoginCode(content: string | null | undefined): string | null {
+  const match = (content || "").match(/\bUNIOS[-\s:]?([23456789A-HJ-NP-Z]{8})\b/i);
+  return match?.[1]?.toUpperCase() || null;
+}
+
 Deno.serve(async (req) => {
   // Meta webhook verification (GET)
   if (req.method === "GET") {
@@ -100,13 +105,228 @@ Deno.serve(async (req) => {
           const phone = msg.from; // sender's phone number
           const waMessageId = msg.id;
           const msgType = msg.type || "text";
+          // Interactive button replies (e.g. our Good/Bad feedback buttons)
+          // carry their payload in msg.interactive.button_reply. Surface the
+          // chosen title in `content` so the inbox shows "Good" / "Bad"
+          // instead of the placeholder `[interactive]`.
+          const buttonReply = msg.interactive?.button_reply || msg.button?.payload
+            ? {
+                id:    msg.interactive?.button_reply?.id    || msg.button?.payload || null,
+                title: msg.interactive?.button_reply?.title || msg.button?.text    || null,
+              }
+            : null;
           const content =
             msg.text?.body ||
             msg.caption ||
             msg.image?.caption ||
+            buttonReply?.title ||
             `[${msgType}]`;
           const mediaId = msg.image?.id || msg.document?.id || msg.audio?.id || msg.video?.id || null;
           let mediaUrl: string | null = mediaId;
+
+          // ── WhatsApp sign-in intent ──────────────────────────────────────
+          // The browser creates a short-lived intent, then opens WhatsApp with
+          // a prefilled "UNIOS-XXXXXXXX" message. When that message arrives
+          // from the user's WhatsApp account, mark the intent verified and let
+          // the browser polling endpoint mint the Supabase session.
+          const loginCode = msgType === "text" ? extractWhatsAppLoginCode(content) : null;
+          if (loginCode) {
+            const senderPhone = `+${phone.replace(/[^0-9]/g, "")}`;
+            const { data: intent } = await admin
+              .from("whatsapp_login_intents")
+              .select("id")
+              .eq("code", loginCode)
+              .eq("status", "pending")
+              .gt("expires_at", new Date().toISOString())
+              .single();
+
+            if (intent?.id) {
+              await admin
+                .from("whatsapp_login_intents")
+                .update({
+                  status: "verified",
+                  sender_phone: senderPhone,
+                  business_phone_number_id: businessPnId,
+                  wa_message_id: waMessageId,
+                  verified_at: new Date().toISOString(),
+                })
+                .eq("id", intent.id)
+                .eq("status", "pending");
+            }
+
+            continue;
+          }
+
+          // ── Personal Document Tracker: #mydoc trigger ───────────────────
+          // Two valid patterns:
+          //   (a) ONE message: media with caption "#mydoc [type_hint]"
+          //   (b) TWO messages: media first (no caption), then a text
+          //       message that starts with "#mydoc" within 5 minutes.
+          //       WhatsApp on mobile makes captioning a forwarded
+          //       document unobvious, so this two-message flow is the
+          //       common case in practice.
+          // Both route the file into the personal-documents bucket,
+          // extract fields, save a row, and reply. We then `continue`
+          // so the message does NOT enter the lead pipeline /
+          // whatsapp_messages log — this is genuinely personal data.
+          const captionText = (msg.text?.body || msg.caption || msg.image?.caption || msg.document?.caption || "").trim();
+          const isMydocTextOnly = !mediaId && /^#mydoc\b/i.test(captionText);
+          const isMydocInline   =  mediaId && /^#mydoc\b/i.test(captionText);
+
+          if (isMydocInline || isMydocTextOnly) {
+            try {
+              // Look up the sender by matching their profile.phone (digits-only)
+              // against all super_admin users. The "+" prefix in phone numbers
+              // is not URL-encoded by PostgREST, so we do the comparison in JS.
+              const phoneDigits = phone.replace(/[^0-9]/g, "");
+              const phoneE164   = `+${phoneDigits}`;
+
+              // 1. All super_admin user IDs
+              const { data: roleRows } = await admin
+                .from("user_roles")
+                .select("user_id")
+                .eq("role", "super_admin");
+              const saIds = (roleRows || []).map((r: { user_id: string }) => r.user_id);
+
+              // 2. Their profile phones
+              const { data: profileRows } = saIds.length
+                ? await admin.from("profiles").select("user_id, phone").in("user_id", saIds)
+                : { data: [] };
+              const matchedProfile = (profileRows || []).find(
+                (p: { user_id: string; phone: string | null }) =>
+                  (p.phone || "").replace(/[^0-9]/g, "") === phoneDigits
+              );
+
+              if (!matchedProfile) {
+                console.log(`[#mydoc] rejected — phone ${phoneE164} not linked to any super_admin profile`);
+                await sendWaText(phone, `Sorry, ${phoneE164} isn't linked to any super-admin account. Make sure your mobile number is set in your profile.`);
+                continue;
+              }
+
+              // 3. Resolve the user's email
+              const { data: { user: saUser } } = await admin.auth.admin.getUserById(matchedProfile.user_id);
+              const owner = { email: saUser?.email || "" };
+              if (!owner.email) {
+                console.error(`[#mydoc] could not resolve email for user_id ${matchedProfile.user_id}`);
+                continue;
+              }
+
+              const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
+              const supaUrl = Deno.env.get("SUPABASE_URL")!;
+              const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+              // Resolve the media bytes. Inline case: fetch fresh from
+              // Meta. Text-only case: the prior media message was already
+              // mirrored to the whatsapp-media bucket by the standard
+              // handler; pull it back out by phone+recency.
+              let fileBlob: Blob;
+              let mimeType: string;
+
+              if (isMydocInline) {
+                const mRes = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
+                  headers: { Authorization: `Bearer ${waToken}` },
+                });
+                if (!mRes.ok) throw new Error(`media meta ${mRes.status}`);
+                const mMeta = await mRes.json();
+                const dlRes = await fetch(mMeta.url, { headers: { Authorization: `Bearer ${waToken}` } });
+                if (!dlRes.ok) throw new Error(`media download ${dlRes.status}`);
+                fileBlob = await dlRes.blob();
+                mimeType = mMeta.mime_type || dlRes.headers.get("content-type") || "application/octet-stream";
+              } else {
+                // text-only #mydoc: find the most recent inbound media
+                // message from this phone in the last 5 minutes.
+                const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+                const { data: priorMsgs } = await admin
+                  .from("whatsapp_messages")
+                  .select("media_url, message_type, created_at")
+                  .eq("phone", phone)
+                  .eq("direction", "inbound")
+                  .gte("created_at", fiveMinAgo)
+                  .not("media_url", "is", null)
+                  .order("created_at", { ascending: false })
+                  .limit(1);
+                const prior = priorMsgs?.[0];
+                if (!prior?.media_url) {
+                  await sendWaText(phone, "I didn't find a document just before this. Forward the file again with caption #mydoc, or send the file first and then #mydoc within 5 minutes.");
+                  continue;
+                }
+                const dlRes = await fetch(prior.media_url);
+                if (!dlRes.ok) throw new Error(`mirror download ${dlRes.status}`);
+                fileBlob = await dlRes.blob();
+                mimeType = dlRes.headers.get("content-type") || "application/octet-stream";
+              }
+              const extMap: Record<string, string> = {
+                "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+                "application/pdf": "pdf",
+              };
+              const ext = extMap[mimeType] || "bin";
+              const docId = crypto.randomUUID();
+              const path = `${owner.email}/${docId}.${ext}`;
+
+              const { error: upErr } = await admin.storage
+                .from("personal-documents")
+                .upload(path, fileBlob, { contentType: mimeType, upsert: false });
+              if (upErr) throw new Error(`storage upload: ${upErr.message}`);
+
+              // Optional type hint from "#mydoc <type>"
+              const hintMatch = captionText.match(/^#mydoc\s+([a-z_]+)/i);
+              const docTypeHint = hintMatch ? hintMatch[1].toLowerCase() : undefined;
+
+              // Run extractor (service-role auth)
+              const exRes = await fetch(`${supaUrl}/functions/v1/extract-personal-doc`, {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${serviceKey}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ file_path: path, doc_type_hint: docTypeHint }),
+              });
+
+              let extracted: any = {};
+              let extractionErr: string | null = null;
+              if (exRes.ok) {
+                extracted = await exRes.json();
+              } else {
+                const errBody = await exRes.text();
+                extractionErr = `HTTP ${exRes.status}: ${errBody.slice(0, 250)}`;
+                console.error("[#mydoc] extraction failed:", extractionErr);
+              }
+
+              const { error: insErr } = await admin.from("personal_documents").insert({
+                id: docId,
+                owner_email: owner.email,
+                doc_type: extracted.doc_type || "other",
+                label: extracted.label || `WhatsApp upload ${new Date().toLocaleDateString("en-IN")}`,
+                file_path: path,
+                mime_type: mimeType,
+                source: "whatsapp",
+                issuer: extracted.issuer ?? null,
+                policy_number: extracted.policy_number ?? null,
+                vehicle_reg: extracted.vehicle_reg ?? null,
+                insured_name: extracted.insured_name ?? null,
+                issued_on: extracted.issued_on ?? null,
+                expires_on: extracted.expires_on ?? null,
+                raw_extracted: extracted.raw ?? null,
+              });
+              if (insErr) throw new Error(`insert: ${insErr.message}`);
+
+              // Confirmation reply
+              const lines = [
+                "✅ Document saved to your dashboard.",
+                `Type: ${extracted.doc_type || "other"}`,
+                extracted.label ? `Label: ${extracted.label}` : null,
+                extracted.policy_number ? `Policy #: ${extracted.policy_number}` : null,
+                extracted.vehicle_reg ? `Vehicle: ${extracted.vehicle_reg}` : null,
+                extracted.expires_on ? `Expires: ${extracted.expires_on}` : "Expiry: not detected — please edit on dashboard",
+                extractionErr ? `⚠️ Extraction error: ${extractionErr}` : null,
+              ].filter(Boolean).join("\n");
+              await sendWaText(phone, lines);
+            } catch (e: any) {
+              console.error("[#mydoc] error:", e?.message || e);
+              await sendWaText(phone, `Couldn't save that document: ${e?.message || "unknown error"}`);
+            }
+            continue; // skip lead pipeline entirely
+          }
 
           // Download media from Meta and upload to Supabase Storage for public access
           if (mediaId) {
@@ -329,9 +549,89 @@ Deno.serve(async (req) => {
           }
 
           // Feedback response detection — check BEFORE auto-replies
-          // If the user has an open feedback request and replies 1-5, record the rating
           let feedbackHandled = false;
-          if (msgType === "text" && content) {
+
+          // (a) Interactive button reply: payload ids look like
+          //     "feedback_good_<feedback_id>" / "feedback_bad_<feedback_id>"
+          //     (sent by feedback-sender-cron). Good=5, Bad=1.
+          if (!feedbackHandled && buttonReply?.id) {
+            const m = buttonReply.id.match(/^feedback_(good|bad)_([0-9a-f-]{36})$/i);
+            if (m) {
+              const verdict = m[1].toLowerCase();
+              const fbId = m[2];
+              const rating = verdict === "good" ? 5 : 1;
+
+              // Update the specific feedback row. Restrict to status='sent' so a
+              // duplicate tap can't overwrite an already-responded row.
+              const { data: updatedRows } = await admin
+                .from("feedback_responses")
+                .update({
+                  rating,
+                  status: "responded",
+                  responded_at: new Date().toISOString(),
+                })
+                .eq("id", fbId)
+                .eq("status", "sent")
+                .select("id, lead_id, counsellor_id, interaction_type");
+
+              const updated = updatedRows?.[0];
+              if (updated) {
+                // Notify the counsellor in the navbar bell. Title shows the
+                // lead name + verdict so it's actionable at a glance.
+                const verdictLabel = verdict === "good" ? "👍 Good" : "👎 Bad";
+                await admin.from("notifications").insert({
+                  user_id: updated.counsellor_id,
+                  type: "feedback_received",
+                  title: `${verdictLabel} feedback from ${lead?.name || phone}`,
+                  body: updated.interaction_type === "visit"
+                    ? "Rated their recent campus visit."
+                    : "Rated their recent call.",
+                  link: updated.lead_id ? `/admissions/${updated.lead_id}` : null,
+                  lead_id: updated.lead_id,
+                });
+
+                // Acknowledge on WhatsApp
+                const thankMsg = verdict === "good"
+                  ? "Thank you for the kind feedback! We're glad you had a great experience. 😊"
+                  : "Thank you for sharing your feedback. We're sorry it wasn't a great experience — your input helps us improve. 🙏";
+                try {
+                  const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
+                  const pnId    = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+                  const waPhone = phone.replace(/[^0-9]/g, "");
+                  const ackRes = await fetch(`https://graph.facebook.com/v21.0/${pnId}/messages`, {
+                    method: "POST",
+                    headers: { Authorization: `Bearer ${waToken}`, "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      messaging_product: "whatsapp",
+                      to: waPhone,
+                      type: "text",
+                      text: { body: thankMsg },
+                    }),
+                  });
+                  if (ackRes.ok) {
+                    const ackResult = await ackRes.json();
+                    await admin.from("whatsapp_messages").insert({
+                      lead_id: updated.lead_id,
+                      wa_message_id: ackResult?.messages?.[0]?.id || null,
+                      direction: "outbound",
+                      phone,
+                      message_type: "text",
+                      content: thankMsg,
+                      status: "sent",
+                      is_read: true,
+                    });
+                  }
+                } catch (e) {
+                  console.error("Feedback button ack error:", e);
+                }
+              }
+              feedbackHandled = true;
+            }
+          }
+
+          // (b) Legacy 1–5 text fallback for anyone who replies with a digit
+          //     instead of tapping the button.
+          if (!feedbackHandled && msgType === "text" && content) {
             const trimmed = content.trim();
             const ratingMatch = trimmed.match(/^([1-5])$/);
             if (ratingMatch) {
@@ -616,3 +916,28 @@ Deno.serve(async (req) => {
     });
   }
 });
+
+// Fire-and-forget text reply via the WhatsApp Cloud API. Used by the
+// #mydoc personal-documents branch; logs but does not throw on failure
+// so the caller never blocks on delivery errors.
+async function sendWaText(toPhone: string, body: string): Promise<void> {
+  try {
+    const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
+    const pnId    = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+    if (!waToken || !pnId) return;
+    const to = toPhone.replace(/[^0-9]/g, "");
+    const r = await fetch(`https://graph.facebook.com/v21.0/${pnId}/messages`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${waToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to,
+        type: "text",
+        text: { body },
+      }),
+    });
+    if (!r.ok) console.error("sendWaText failed:", r.status, await r.text());
+  } catch (e: any) {
+    console.error("sendWaText error:", e?.message || e);
+  }
+}

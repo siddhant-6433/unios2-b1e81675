@@ -36,22 +36,26 @@ export function CloudDialerNudge() {
     // Skip the nudge if they're already using cloud dialer recently.
     (async () => {
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
-      const counsellorId = profile?.id;
-      if (!counsellorId) { setHidden(false); return; }
+      if (!user?.id) { setHidden(false); return; }
 
+      // call_logs.user_id is the auth user id (not the counsellor profile id),
+      // so we filter by user_id, not counsellor_id. The source column is
+      // populated by the record_cloud_call_log RPC from the 20260610140000
+      // migration onward — older rows have NULL source and won't match this
+      // filter (correct: we don't know what channel they used, so we can't
+      // count them as cloud-dialer usage). We deliberately don't fall back to
+      // `cloud_call_uuid IS NOT NULL` because that uuid is also set for
+      // manual_log calls logged from the lead page.
       const { count } = await supabase
-        .from("call_logs" as any)
+        .from("call_logs")
         .select("id", { count: "exact", head: true })
-        .eq("counsellor_id", counsellorId)
+        .eq("user_id", user.id)
         .eq("source", "cloud_dialer")
-        .gte("created_at", sevenDaysAgo);
+        .gte("called_at", sevenDaysAgo);
 
-      // Heads-up: the call_logs table / source column may not exist on every
-      // deployment. If the query errors out, count is null — fall back to
-      // showing the nudge (safer to over-nudge than miss it).
       setHidden((count ?? 0) > 0);
     })();
-  }, [role, user?.id, profile?.id, dismissKey]);
+  }, [role, user?.id, dismissKey]);
 
   if (role !== "counsellor" || hidden) return null;
 

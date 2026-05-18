@@ -236,13 +236,21 @@ export function ApplicationProgress({ leadId, leadPhone, applicationId, canImper
                   View / Edit
                 </Button>
                 {leadId && (
-                  <ApplyMagicLinkButton
-                    leadId={leadId}
-                    leadName={null}
-                    leadPhone={leadPhone || null}
-                    compact
-                    directOpen
-                  />
+                  <>
+                    <ApplyMagicLinkButton
+                      leadId={leadId}
+                      leadName={null}
+                      leadPhone={leadPhone || null}
+                      compact
+                    />
+                    <ApplyMagicLinkButton
+                      leadId={leadId}
+                      leadName={null}
+                      leadPhone={leadPhone || null}
+                      compact
+                      directOpen
+                    />
+                  </>
                 )}
               </>
             )}

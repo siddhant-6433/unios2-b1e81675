@@ -203,17 +203,20 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
 
   const handleUpload = async (docKey: string, file: File) => {
     setUploading(docKey);
-    // Sanitize filename: replace spaces and special chars with underscores
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const path = `${data.application_id}/${docKey}-${safeName}`;
-    const { error } = await supabase.storage.from('application-documents').upload(path, file, { upsert: true });
+    const form = new FormData();
+    form.append('application_id', data.application_id);
+    form.append('phone', data.phone);
+    form.append('doc_key', docKey);
+    form.append('file', file);
 
-    if (error) {
-      toast({ title: 'Upload failed', description: error.message, variant: 'destructive' });
+    const { data: res, error } = await supabase.functions.invoke('apply-portal-upload-doc', { body: form });
+
+    if (error || (res && res.error)) {
+      const msg = (res && res.error) || error?.message || 'Upload failed';
+      toast({ title: 'Upload failed', description: msg, variant: 'destructive' });
     } else {
       setUploaded(prev => ({ ...prev, [docKey]: true }));
-      const { data: urlData } = supabase.storage.from('application-documents').getPublicUrl(path);
-      setUploadedUrls(prev => ({ ...prev, [docKey]: urlData.publicUrl }));
+      if (res?.url) setUploadedUrls(prev => ({ ...prev, [docKey]: res.url }));
       toast({ title: `${docKey.replace(/_/g, ' ')} uploaded` });
     }
     setUploading(null);
@@ -234,6 +237,7 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
       {data.program_category !== 'school' && (
         <PhotoUpload
           applicationId={data.application_id}
+          phone={data.phone}
           existingUrl={data.passport_photo_path ? undefined : undefined}
           onUploaded={(path) => onChange({ passport_photo_path: path })}
         />

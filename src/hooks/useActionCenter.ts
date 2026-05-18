@@ -173,8 +173,28 @@ export function useActionCenter(counsellorFilterId?: string) {
 
       const [r1, r2, r3, r4, r5, r6, r7a, r7b] = await Promise.all([q1, q2, q3, q4, q5, q6, q7a, q7b]);
 
+      // A lead can legitimately have multiple pending follow-up rows
+      // (one overdue from yesterday + one scheduled later today). Without
+      // dedup the same lead shows up in both Overdue and Today's buckets
+      // and double-counts in the action counts. Rule: one row per lead per
+      // bucket (keep the most-urgent / earliest), and if a lead is overdue
+      // suppress it from Today/Upcoming — handling the overdue call clears
+      // the planned slot too.
+      const dedupByLead = <T extends { lead_id: string; scheduled_at?: string; visit_date?: string }>(rows: T[]): T[] => {
+        const seen = new Map<string, T>();
+        for (const r of rows) {
+          if (!r.lead_id) continue;
+          const existing = seen.get(r.lead_id);
+          if (!existing) { seen.set(r.lead_id, r); continue; }
+          const a = (existing.scheduled_at || existing.visit_date || "");
+          const b = (r.scheduled_at || r.visit_date || "");
+          if (b && (!a || b < a)) seen.set(r.lead_id, r);
+        }
+        return [...seen.values()];
+      };
+
       // Transform results into ActionLead[]
-      const overdueFollowups: ActionLead[] = (r1.data || []).map((r: any) => ({
+      const overdueFollowups: ActionLead[] = dedupByLead((r1.data || []).map((r: any) => ({
         id: r.id,
         lead_id: r.lead_id,
         name: r.lead_name,
@@ -188,7 +208,8 @@ export function useActionCenter(counsellorFilterId?: string) {
         days_overdue: r.days_overdue,
         followup_type: r.type,
         scheduled_at: r.scheduled_at,
-      }));
+      })));
+      const overdueLeadIds = new Set(overdueFollowups.map(l => l.lead_id));
 
       const newLeads: ActionLead[] = (r2.data || []).map((r: any) => ({
         id: r.id,
@@ -204,23 +225,29 @@ export function useActionCenter(counsellorFilterId?: string) {
         assigned_ago: timeAgo(r.created_at),
       }));
 
-      const todayFollowups: ActionLead[] = (r3.data || []).map((r: any) => {
-        const lead = r.leads;
-        return {
-          id: r.id,
-          lead_id: r.lead_id,
-          name: lead?.name || "",
-          phone: lead?.phone || "",
-          stage: lead?.stage || "",
-          source: lead?.source || "",
-          course_name: lead?.courses?.name || "—",
-          campus_name: lead?.campuses?.name || "—",
-          counsellor_id: lead?.counsellor_id,
-          counsellor_name: lead?.profiles?.display_name || null,
-          scheduled_at: r.scheduled_at,
-          followup_type: r.type,
-        };
-      });
+      const todayFollowups: ActionLead[] = dedupByLead(
+        (r3.data || [])
+          // Suppress today's followup when the same lead already appears
+          // in Overdue — counsellor sees them once, in the more urgent bucket.
+          .filter((r: any) => !overdueLeadIds.has(r.lead_id))
+          .map((r: any) => {
+            const lead = r.leads;
+            return {
+              id: r.id,
+              lead_id: r.lead_id,
+              name: lead?.name || "",
+              phone: lead?.phone || "",
+              stage: lead?.stage || "",
+              source: lead?.source || "",
+              course_name: lead?.courses?.name || "—",
+              campus_name: lead?.campuses?.name || "—",
+              counsellor_id: lead?.counsellor_id,
+              counsellor_name: lead?.profiles?.display_name || null,
+              scheduled_at: r.scheduled_at,
+              followup_type: r.type,
+            };
+          })
+      );
 
       const todayVisits: ActionLead[] = (r4.data || []).map((r: any) => {
         const lead = r.leads;

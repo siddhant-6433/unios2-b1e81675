@@ -231,30 +231,22 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
     }
     setLoading(true);
     try {
-      const { data: app, error } = await supabase
-        .from("applications")
-        .select("phone, full_name")
-        .eq("application_id", applicationId.trim().toUpperCase())
-        .maybeSingle();
-
+      // Use the SECURITY DEFINER RPC instead of a direct SELECT — anon SELECT
+      // on applications is intentionally locked down to avoid full-table dumps.
+      // The RPC returns only phone + full_name and checks both applications
+      // and leads in one call.
+      const { data, error } = await (supabase.rpc as any)(
+        "lookup_application_for_otp",
+        { p_application_id: applicationId.trim().toUpperCase() },
+      );
       if (error) throw error;
-      if (!app) {
-        const { data: lead } = await supabase
-          .from("leads")
-          .select("phone, name")
-          .eq("application_id", applicationId.trim().toUpperCase())
-          .maybeSingle();
-
-        if (!lead) {
-          toast({ title: "Application not found", variant: "destructive" });
-          setLoading(false);
-          return;
-        }
-        setPhone(lead.phone);
-      } else {
-        setPhone(app.phone);
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row?.phone) {
+        toast({ title: "Application not found", variant: "destructive" });
+        setLoading(false);
+        return;
       }
-
+      setPhone(row.phone);
       setLoginMode("phone");
       toast({ title: "Found! Verify your phone to continue." });
     } catch (err: any) {
@@ -764,6 +756,139 @@ function statusBadge(status: string, paymentStatus: string | null) {
   return { label: "Draft · In Progress", className: "bg-amber-100 text-amber-700", Icon: Clock };
 }
 
+// Lists every confirmed payment receipt for an application's lead — used by
+// the dashboard "Receipt" button so token / registration / other receipts
+// are visible alongside the application fee, not hidden behind the offer
+// flow's TokenFeePanel.
+const RECEIPT_TYPE_LABELS: Record<string, string> = {
+  application_fee: "Application / Registration Fee",
+  token_fee:       "Token / Admission Fee",
+  registration_fee: "Registration Fee",
+  other:           "Other",
+};
+function AllReceiptsDialog({
+  leadId, fallbackReceipt, onClose,
+}: {
+  leadId: string | null;
+  fallbackReceipt: ReceiptData;       // single application_fee receipt — used if no PDF on file
+  onClose: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [payments, setPayments] = useState<any[]>([]);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // When set, render the legacy single-receipt dialog (only used as a
+  // fallback for an application_fee row that has no server-generated PDF).
+  const [showFallback, setShowFallback] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!leadId) { setLoading(false); return; }
+      const { data, error } = await (supabase as any).rpc("get_applicant_payments", { _lead_id: leadId });
+      if (cancelled) return;
+      if (error) setErrorMsg(error.message);
+      setPayments((data || []).filter((p: any) => p.status === "confirmed"));
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [leadId]);
+
+  if (showFallback) {
+    return <ReceiptDialog data={fallbackReceipt} onClose={onClose} />;
+  }
+
+  const fmtAmt = (n: number) => `₹${Number(n).toLocaleString("en-IN")}`;
+  const fmtDt  = (s: string | null) => s
+    ? new Date(s).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+    : "—";
+
+  // If there are no lead_payments rows yet (rare — e.g. fee mirror trigger
+  // hasn't fired), fall back to the legacy single-receipt view for the
+  // application so the user still sees something.
+  const showEmpty = !loading && payments.length === 0;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div className="flex items-center gap-2">
+            <Receipt className="h-4 w-4 text-gray-500" />
+            <h2 className="text-sm font-semibold text-gray-900">Receipts</h2>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors text-sm">Close</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {loading && (
+            <div className="px-5 py-8 flex items-center justify-center text-xs text-gray-500">
+              <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading receipts…
+            </div>
+          )}
+
+          {errorMsg && (
+            <div className="px-5 py-4 text-xs text-red-600 bg-red-50 border-b border-red-100">{errorMsg}</div>
+          )}
+
+          {showEmpty && (
+            <div className="px-5 py-6 text-center">
+              <p className="text-xs text-gray-500 mb-3">No payment receipts on file yet.</p>
+              <button
+                onClick={() => setShowFallback(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100 transition-colors"
+              >
+                <FileText className="h-3.5 w-3.5" /> View application fee receipt
+              </button>
+            </div>
+          )}
+
+          {!loading && payments.length > 0 && (
+            <div className="divide-y divide-gray-50">
+              {payments.map(p => (
+                <div key={p.id} className="px-5 py-3 flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-gray-800">
+                      {RECEIPT_TYPE_LABELS[p.type] || p.type}
+                    </p>
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                      {p.receipt_no && (
+                        <span className="text-[11px] font-mono text-gray-400">#{p.receipt_no}</span>
+                      )}
+                      <span className="text-[11px] text-gray-400">{fmtDt(p.payment_date || p.created_at)}</span>
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-sm font-bold text-gray-900">{fmtAmt(p.amount)}</p>
+                    {p.receipt_url ? (
+                      <a
+                        href={p.receipt_url} target="_blank" rel="noopener"
+                        className="text-[11px] text-blue-600 hover:underline font-semibold"
+                      >
+                        Download ↗
+                      </a>
+                    ) : p.type === "application_fee" ? (
+                      // App fee mirrors from applications — if the PDF
+                      // generator hasn't run yet, render the HTML receipt
+                      // from the application row so the user isn't blocked.
+                      <button
+                        onClick={() => setShowFallback(true)}
+                        className="text-[11px] text-blue-600 hover:underline font-semibold"
+                      >
+                        View
+                      </button>
+                    ) : (
+                      <span className="text-[11px] text-gray-400">Generating…</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ApplicationDashboardView({
   apps, leadName, offerLetters, leadAdmissions, openAppId, setOpenAppId, onContinue, onStartNew, onLogout,
 }: {
@@ -1104,7 +1229,11 @@ function ApplicationDashboardView({
       </main>
 
       {receiptApp && (
-        <ReceiptDialog data={buildReceiptData(receiptApp)} onClose={() => setReceiptApp(null)} />
+        <AllReceiptsDialog
+          leadId={receiptApp.lead_id || null}
+          fallbackReceipt={buildReceiptData(receiptApp)}
+          onClose={() => setReceiptApp(null)}
+        />
       )}
     </div>
   );
@@ -1210,11 +1339,14 @@ const ApplyPortal = () => {
     // / under-review / approved apps load correctly. The submitted-state UI
     // (line ~1081) handles displaying them — without this we'd silently start
     // a fresh draft on top of an existing submitted application.
-    const { data: existingApps } = await supabase
-      .from("applications")
-      .select("*")
-      .eq("phone", phoneVal)
-      .order("created_at", { ascending: false });
+    //
+    // Uses a SECURITY DEFINER RPC instead of direct table SELECT because the
+    // portal runs as the anon role (WhatsApp-OTP auth, no Supabase session) and
+    // the applications SELECT policy is now scoped to authenticated users only.
+    const { data: existingApps } = await (supabase as any).rpc(
+      "get_applicant_applications_by_phone",
+      { _phone: phoneVal }
+    );
 
     // Pick apps belonging to this portal. There can be multiple — e.g. a
     // submitted app + a new draft.
@@ -1406,9 +1538,14 @@ const ApplyPortal = () => {
     }
 
     const appId = generateApplicationId();
+    // Pre-generate the DB primary key client-side so we can avoid INSERT...RETURNING.
+    // Anon applicants (WhatsApp-OTP flow) have no SELECT policy on applications, so
+    // PostgREST raises a false RLS error when RETURNING * comes back empty.
+    const appDbId = crypto.randomUUID();
     const flagsForNewApp = [...flags, `portal:${portal.id}`];
 
     const newApp: any = {
+      id: appDbId,
       application_id: appId,
       lead_id: leadId,
       session_id: sessionId,
@@ -1424,17 +1561,17 @@ const ApplyPortal = () => {
       ...(childDob ? { dob: childDob } : {}),
     };
 
-    const { data: inserted, error } = await supabase
+    const { error } = await supabase
       .from("applications")
-      .insert(newApp)
-      .select()
-      .single();
+      .insert(newApp);
 
     if (error) {
       toast({ title: "Failed to create application", description: error.message, variant: "destructive" });
       setSaving(false);
       return;
     }
+
+    const inserted = newApp;
 
     // Create/link lead via SECURITY DEFINER RPC (bypasses RLS restrictions on
     // the authenticated applicant, who has no staff role).
@@ -1463,8 +1600,8 @@ const ApplyPortal = () => {
       console.error("Failed to upsert lead for application:", leadErr);
     } else if (upsertedLeadId) {
       resolvedLeadId = upsertedLeadId as unknown as string;
-      // Link the application to the lead
-      await supabase.from("applications").update({ lead_id: resolvedLeadId }).eq("id", inserted.id);
+      // Link the application to the lead (anon UPDATE is allowed by policy)
+      await supabase.from("applications").update({ lead_id: resolvedLeadId }).eq("id", appDbId);
     }
 
     if (resolvedLeadId) {

@@ -186,13 +186,6 @@ const WhatsAppInbox = () => {
   const scope = searchParams.get("scope") === "hr" ? "hr" : "admissions";
   const isHrScope = scope === "hr";
 
-  if (role && !ALLOWED_ROLES.has(role)) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh] text-muted-foreground">
-        <p>You don't have access to the WhatsApp Inbox.</p>
-      </div>
-    );
-  }
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedPhone, setSelectedPhone] = useState<string | null>(null);
@@ -843,6 +836,14 @@ const WhatsAppInbox = () => {
     if (dDay.getTime() === yesterday.getTime()) return "Yesterday";
     return d.toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
   };
+
+  if (role && !ALLOWED_ROLES.has(role)) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh] text-muted-foreground">
+        <p>You don't have access to the WhatsApp Inbox.</p>
+      </div>
+    );
+  }
 
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
 

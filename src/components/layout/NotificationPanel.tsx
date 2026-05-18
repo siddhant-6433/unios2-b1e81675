@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   Bell, UserPlus, AlertTriangle, RotateCcw, Calendar, Clock,
   MapPin, ArrowRightLeft, Trash2, Info, CheckCheck, Loader2,
-  MessageSquare, X, ShieldCheck,
+  MessageSquare, X, ShieldCheck, Star,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,6 +38,7 @@ const TYPE_ICONS: Record<string, typeof Bell> = {
   tat_defaults_report: AlertTriangle,
   post_visit_nudge: MapPin,
   score_penalty: AlertTriangle,
+  feedback_received: Star,
   general: Info,
 };
 
@@ -57,6 +58,7 @@ const TYPE_COLORS: Record<string, string> = {
   tat_defaults_report: "text-red-600 bg-red-50 dark:bg-red-950/30",
   post_visit_nudge: "text-violet-600 bg-violet-50 dark:bg-violet-950/30",
   score_penalty: "text-red-600 bg-red-50 dark:bg-red-950/30",
+  feedback_received: "text-yellow-600 bg-yellow-50 dark:bg-yellow-950/30",
   general: "text-gray-500 bg-gray-50 dark:bg-gray-900/30",
 };
 

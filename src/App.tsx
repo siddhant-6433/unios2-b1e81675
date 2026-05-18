@@ -1,5 +1,5 @@
 // GitHub sync confirmed - test commit March 8, 2026 v2
-import { Component, ReactNode } from "react";
+import { Component, ReactNode, Suspense, lazy } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -18,83 +18,101 @@ import {
   RequireRole,
 } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
-import Dashboard from "./pages/Dashboard";
-import Admissions from "./pages/Admissions";
-import LeadDetail from "./pages/LeadDetail";
-import LeadAllocation from "./pages/LeadAllocation";
-import LeadBuckets from "./pages/LeadBuckets";
-import CallLog from "./pages/CallLog";
-import AiCallLog from "./pages/AiCallLog";
-import CloudDialer from "./pages/CloudDialer";
-import MissedCalls from "./pages/MissedCalls";
-import Applications from "./pages/Applications";
-import AdminApplicationView from "./pages/AdminApplicationView";
-import PendingFollowups from "./pages/PendingFollowups";
-import FreshLeads from "./pages/FreshLeads";
-import VisitMonitor from "./pages/VisitMonitor";
-import StudentReferrals from "./pages/StudentReferrals";
-import GlobalSearch from "./pages/GlobalSearch";
-import Students from "./pages/Students";
-import StudentProfile from "./pages/StudentProfile";
-import Attendance from "./pages/Attendance";
-import Finance from "./pages/Finance";
-import Login from "./pages/Login";
-import ResetPassword from "./pages/ResetPassword";
-import AdminPanel from "./pages/AdminPanel";
-import ApplyPortal from "./pages/ApplyPortal";
-import Consultants from "./pages/Consultants";
-import AdmissionAnalytics from "./pages/AdmissionAnalytics";
-import CounsellorDashboard from "./pages/CounsellorDashboard";
-import WhatsAppInbox from "./pages/WhatsAppInbox";
-import WhatsAppHealth from "./pages/WhatsAppHealth";
-import AutomationRules from "./pages/AutomationRules";
-import ConsultantPortal from "./pages/ConsultantPortal";
-import PublisherPortal from "./pages/PublisherPortal";
-import PublisherLogin from "./pages/PublisherLogin";
-import PublisherAnalytics from "./pages/PublisherAnalytics";
-import ConsultantGuide from "./pages/ConsultantGuide";
-import TemplateManager from "./pages/TemplateManager";
-import FeeStructures from "./pages/FeeStructures";
-import EnquiryForm from "./pages/EnquiryForm";
-import Exams from "./pages/Exams";
-import Reports from "./pages/Reports";
-import Documents from "./pages/Documents";
-import Settings from "./pages/Settings";
-import NotFound from "./pages/NotFound";
-import Forbidden from "./pages/Forbidden";
-import ApplicantPortal from "./pages/ApplicantPortal";
-import PrivacyPolicy from "./pages/PrivacyPolicy";
-import TermsOfService from "./pages/TermsOfService";
-import AlumniVerification from "./pages/AlumniVerification";
-import AlumniVerifications from "./pages/AlumniVerifications";
-import Inbox from "./pages/Inbox";
-import HrDashboard from "./pages/HrDashboard";
-import HrAttendance from "./pages/HrAttendance";
-import HrLeaveManagement from "./pages/HrLeaveManagement";
-import HrEmployeeDirectory from "./pages/HrEmployeeDirectory";
-import HrJobApplicants from "./pages/HrJobApplicants";
-import FeeCollections from "./pages/FeeCollections";
-import ParentPortal from "./pages/ParentPortal";
-import StudentPortalPage from "./pages/StudentPortal";
-import PaymentPortal from "./pages/PaymentPortal";
-// IB Academics pages
-import ProgrammeOfInquiry from "./pages/ib/ProgrammeOfInquiry";
-import UnitPlanner from "./pages/ib/UnitPlanner";
-import UnitDetail from "./pages/ib/UnitDetail";
-import Gradebook from "./pages/ib/Gradebook";
-import AssessmentDetail from "./pages/ib/AssessmentDetail";
-import Portfolios from "./pages/ib/Portfolios";
-import StudentPortfolio from "./pages/ib/StudentPortfolio";
-import ActionService from "./pages/ib/ActionService";
-import Exhibition from "./pages/ib/Exhibition";
-import ReportCards from "./pages/ib/ReportCards";
-import ReportCardView from "./pages/ib/ReportCardView";
-import ReportTemplates from "./pages/ib/ReportTemplates";
-import MYPProjects from "./pages/ib/MYPProjects";
-import ProjectDetail from "./pages/ib/ProjectDetail";
-import InterdisciplinaryUnits from "./pages/ib/InterdisciplinaryUnits";
 
-const queryClient = new QueryClient();
+// All pages are code-split so the initial JS bundle stays small. Counsellors
+// no longer download HR, IB-academics, parent/student portal, etc. just to
+// open the login screen. Each route loads its own chunk on demand.
+const Dashboard            = lazy(() => import("./pages/Dashboard"));
+const Admissions           = lazy(() => import("./pages/Admissions"));
+const LeadDetail           = lazy(() => import("./pages/LeadDetail"));
+const LeadAllocation       = lazy(() => import("./pages/LeadAllocation"));
+const LeadBuckets          = lazy(() => import("./pages/LeadBuckets"));
+const CallLog              = lazy(() => import("./pages/CallLog"));
+const AiCallLog            = lazy(() => import("./pages/AiCallLog"));
+const CloudDialer          = lazy(() => import("./pages/CloudDialer"));
+const MissedCalls          = lazy(() => import("./pages/MissedCalls"));
+const Applications         = lazy(() => import("./pages/Applications"));
+const AdminApplicationView = lazy(() => import("./pages/AdminApplicationView"));
+const PendingFollowups     = lazy(() => import("./pages/PendingFollowups"));
+const FreshLeads           = lazy(() => import("./pages/FreshLeads"));
+const VisitMonitor         = lazy(() => import("./pages/VisitMonitor"));
+const StudentReferrals     = lazy(() => import("./pages/StudentReferrals"));
+const GlobalSearch         = lazy(() => import("./pages/GlobalSearch"));
+const Students             = lazy(() => import("./pages/Students"));
+const StudentProfile       = lazy(() => import("./pages/StudentProfile"));
+const Attendance           = lazy(() => import("./pages/Attendance"));
+const Finance              = lazy(() => import("./pages/Finance"));
+const Login                = lazy(() => import("./pages/Login"));
+const ResetPassword        = lazy(() => import("./pages/ResetPassword"));
+const AdminPanel           = lazy(() => import("./pages/AdminPanel"));
+const ApplyPortal          = lazy(() => import("./pages/ApplyPortal"));
+const Consultants          = lazy(() => import("./pages/Consultants"));
+const AdmissionAnalytics   = lazy(() => import("./pages/AdmissionAnalytics"));
+const CounsellorDashboard  = lazy(() => import("./pages/CounsellorDashboard"));
+const WhatsAppInbox        = lazy(() => import("./pages/WhatsAppInbox"));
+const WhatsAppHealth       = lazy(() => import("./pages/WhatsAppHealth"));
+const AutomationRules      = lazy(() => import("./pages/AutomationRules"));
+const ConsultantPortal     = lazy(() => import("./pages/ConsultantPortal"));
+const PublisherPortal      = lazy(() => import("./pages/PublisherPortal"));
+const PublisherLogin       = lazy(() => import("./pages/PublisherLogin"));
+const PublisherAnalytics   = lazy(() => import("./pages/PublisherAnalytics"));
+const ConsultantGuide      = lazy(() => import("./pages/ConsultantGuide"));
+const TemplateManager      = lazy(() => import("./pages/TemplateManager"));
+const FeeStructures        = lazy(() => import("./pages/FeeStructures"));
+const EnquiryForm          = lazy(() => import("./pages/EnquiryForm"));
+const Exams                = lazy(() => import("./pages/Exams"));
+const Reports              = lazy(() => import("./pages/Reports"));
+const Documents            = lazy(() => import("./pages/Documents"));
+const MyDocs               = lazy(() => import("./pages/MyDocs"));
+const Settings             = lazy(() => import("./pages/Settings"));
+const NotFound             = lazy(() => import("./pages/NotFound"));
+const Forbidden            = lazy(() => import("./pages/Forbidden"));
+const ApplicantPortal      = lazy(() => import("./pages/ApplicantPortal"));
+const PrivacyPolicy        = lazy(() => import("./pages/PrivacyPolicy"));
+const TermsOfService       = lazy(() => import("./pages/TermsOfService"));
+const AlumniVerification   = lazy(() => import("./pages/AlumniVerification"));
+const AlumniVerifications  = lazy(() => import("./pages/AlumniVerifications"));
+const Inbox                = lazy(() => import("./pages/Inbox"));
+const HrDashboard          = lazy(() => import("./pages/HrDashboard"));
+const HrAttendance         = lazy(() => import("./pages/HrAttendance"));
+const HrLeaveManagement    = lazy(() => import("./pages/HrLeaveManagement"));
+const HrEmployeeDirectory  = lazy(() => import("./pages/HrEmployeeDirectory"));
+const HrJobApplicants      = lazy(() => import("./pages/HrJobApplicants"));
+const FeeCollections       = lazy(() => import("./pages/FeeCollections"));
+const ParentPortal         = lazy(() => import("./pages/ParentPortal"));
+const StudentPortalPage    = lazy(() => import("./pages/StudentPortal"));
+const PaymentPortal        = lazy(() => import("./pages/PaymentPortal"));
+// IB Academics pages
+const ProgrammeOfInquiry    = lazy(() => import("./pages/ib/ProgrammeOfInquiry"));
+const UnitPlanner           = lazy(() => import("./pages/ib/UnitPlanner"));
+const UnitDetail            = lazy(() => import("./pages/ib/UnitDetail"));
+const Gradebook             = lazy(() => import("./pages/ib/Gradebook"));
+const AssessmentDetail      = lazy(() => import("./pages/ib/AssessmentDetail"));
+const Portfolios            = lazy(() => import("./pages/ib/Portfolios"));
+const StudentPortfolio      = lazy(() => import("./pages/ib/StudentPortfolio"));
+const ActionService         = lazy(() => import("./pages/ib/ActionService"));
+const Exhibition            = lazy(() => import("./pages/ib/Exhibition"));
+const ReportCards           = lazy(() => import("./pages/ib/ReportCards"));
+const ReportCardView        = lazy(() => import("./pages/ib/ReportCardView"));
+const ReportTemplates       = lazy(() => import("./pages/ib/ReportTemplates"));
+const MYPProjects           = lazy(() => import("./pages/ib/MYPProjects"));
+const ProjectDetail         = lazy(() => import("./pages/ib/ProjectDetail"));
+const InterdisciplinaryUnits = lazy(() => import("./pages/ib/InterdisciplinaryUnits"));
+
+// Shared cache so navigation between pages reuses recent results.
+// TanStack defaults are too aggressive about refetching for a CRM where
+// the same lead is opened and closed dozens of times per shift.
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,          // 30s before a refetch is considered useful
+      gcTime: 5 * 60_000,         // keep unused query data around for 5 min
+      refetchOnWindowFocus: false, // counsellors switch tabs constantly; don't thrash
+      refetchOnReconnect: true,
+      retry: 1,
+    },
+  },
+});
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   constructor(props: { children: ReactNode }) {
@@ -132,6 +150,10 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
+          {/* All routes are React.lazy() — wrap in Suspense so concurrent
+              renders can pause for the chunk instead of throwing
+              "suspended while responding to synchronous input". */}
+          <Suspense fallback={<div className="flex items-center justify-center min-h-screen text-sm text-muted-foreground">Loading…</div>}>
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/reset-password" element={<ResetPassword />} />
@@ -254,6 +276,8 @@ const App = () => (
                       {/* Misc */}
                       <Route path="/exams" element={<RequirePermission module="exams" action="view"><Exams /></RequirePermission>} />
                       <Route path="/documents" element={<RequirePermission module="documents" action="view"><Documents /></RequirePermission>} />
+                      {/* Personal Document Tracker — gated server-side via RLS to allow-listed emails */}
+                      <Route path="/my-docs" element={<MyDocs />} />
                       <Route path="/alumni-verifications" element={<AlumniVerifications />} />
 
                       {/* IB Academics — gated per-module */}
@@ -282,6 +306,7 @@ const App = () => (
               }
             />
           </Routes>
+          </Suspense>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
