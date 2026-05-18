@@ -41,14 +41,26 @@ Deno.serve(async (req) => {
   const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
   const todayEnd   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
 
-  // Fetch today's scheduled visits with lead & campus info
+  // Fetch today's scheduled visits with lead, course, counsellor & campus info.
+  // The visit_reminder_v2 template names the counsellor and course inline so
+  // the message reads as a personal nudge rather than a generic reminder.
   const { data: visits, error } = await supabase
     .from("campus_visits")
     .select(`
       id,
       visit_date,
       lead_id,
-      leads ( id, name, phone, course_id, courses:course_id ( department_id, departments:department_id ( institution_id, institutions:institution_id ( google_maps_url ) ) ) ),
+      leads (
+        id, name, phone, course_id, counsellor_id,
+        counsellor:profiles!counsellor_id ( display_name ),
+        courses:course_id (
+          name, department_id,
+          departments:department_id (
+            institution_id,
+            institutions:institution_id ( google_maps_url )
+          )
+        )
+      ),
       campuses ( id, name, city, google_maps_url )
     `)
     .eq("status", "scheduled")
@@ -101,24 +113,34 @@ Deno.serve(async (req) => {
     const mapCid = cidMatch ? cidMatch[1] : "";
 
     // Send WhatsApp template with map button
-    const whatsappToken = Deno.env.get("WHATSAPP_API_TOKEN");
-    const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+    const whatsappToken = Deno.env.get("WHATSAPP_VISIT_API_TOKEN") || Deno.env.get("WHATSAPP_API_TOKEN");
+    const phoneNumberId = Deno.env.get("WHATSAPP_VISIT_PHONE_NUMBER_ID") || Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
     const waPhone = lead.phone.replace(/[^0-9]/g, "");
+    if (!whatsappToken || !phoneNumberId) {
+      console.error("Visit WhatsApp route is not configured");
+      failed++;
+      continue;
+    }
+
+    const courseName = (lead?.courses as any)?.name || "your programme";
+    const counsellorName = (lead?.counsellor as any)?.display_name || "the admissions team";
 
     const waPayload: any = {
       messaging_product: "whatsapp",
       to: waPhone,
       type: "template",
       template: {
-        name: "visit_reminder",
+        name: "visit_reminder_v2",
         language: { code: "en" },
         components: [
           {
             type: "body",
             parameters: [
               { type: "text", text: lead.name },
+              { type: "text", text: courseName },
               { type: "text", text: visitTime },
               { type: "text", text: campusLabel },
+              { type: "text", text: counsellorName },
             ],
           },
           ...(mapCid ? [{
@@ -147,6 +169,20 @@ Deno.serve(async (req) => {
       if (!waRes.ok) {
         const errBody = await waRes.json();
         waError = { message: errBody?.error?.message || "WhatsApp send failed" };
+      } else {
+        const waResult = await waRes.json();
+        await supabase.from("whatsapp_messages").insert({
+          lead_id: visit.lead_id,
+          wa_message_id: waResult?.messages?.[0]?.id || null,
+          direction: "outbound",
+          phone: waPhone,
+          message_type: "template",
+          content: `Visit reminder sent for ${visitTime} at ${campusLabel}`,
+          template_key: "visit_reminder_v2",
+          status: "sent",
+          is_read: true,
+          business_phone_number_id: phoneNumberId,
+        });
       }
     } catch (e: any) {
       waError = { message: e.message };

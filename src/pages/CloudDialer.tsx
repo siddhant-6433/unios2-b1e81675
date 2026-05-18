@@ -10,7 +10,7 @@ import {
   Phone, PhoneOff, Pause, Play, SkipForward, Clock,
   Loader2, CheckCircle, XCircle, PhoneMissed, Users, BarChart3,
   Calendar, AlertCircle, Volume2, Pencil, Check, X, Search,
-  FileText, PhoneIncoming, ArrowRight,
+  FileText, PhoneIncoming, ArrowRight, PhoneCall,
 } from "lucide-react";
 import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
 import { PriorityInterestedCard } from "@/components/leads/PriorityInterestedCard";
@@ -228,8 +228,26 @@ export default function CloudDialer() {
   const [lookupResult, setLookupResult] = useState<{id:string; name:string; phone:string; course_name:string; stage:string}|null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupNotFound, setLookupNotFound] = useState(false);
+  // Outbound dial-by-number ("call a new number" panel) — supports both
+  // existing-lead matches (auto-pin + jump to that lead) and brand-new
+  // numbers (creates a stub lead first so call_logs has a lead_id).
+  const [dialPhone, setDialPhone] = useState("");
+  const [dialLeadMatch, setDialLeadMatch] = useState<{id:string;name:string} | null>(null);
+  const [dialNoMatch, setDialNoMatch] = useState(false);
+  const [dialNewName, setDialNewName] = useState("");
+  const [dialPlacing, setDialPlacing] = useState(false);
   // Profile ID for activity logging (cached — same hook used across pages)
   const { data: profileId } = useMyProfileId();
+  // Counsellor display name + phone — used to personalise the
+  // nimt_not_interested_ack WhatsApp template after a manual disposition.
+  const [counsellorIdentity, setCounsellorIdentity] = useState<{ display_name: string; phone: string | null }>({
+    display_name: "the admissions team",
+    phone: null,
+  });
+  const [nudgeSendingKey, setNudgeSendingKey] = useState<string | null>(null);
+  const [nudgeSentKeys, setNudgeSentKeys] = useState<Set<string>>(new Set());
+  const [nudgeDismissed, setNudgeDismissed] = useState(false);
+  const [mostUsedTemplates, setMostUsedTemplates] = useState<{ key: string; label: string }[]>([]);
 
   const callTimerRef = useRef<number | null>(null);
   const autoNextRef = useRef<number | null>(null);
@@ -384,7 +402,66 @@ export default function CloudDialer() {
     else loadNonSmartQueue();
   }, [isSmartQueue, refetchSmartQueue, loadNonSmartQueue]);
 
-  // (profile ID is now provided by the cached useMyProfileId hook above)
+  // ── Fetch counsellor display name, phone + most-used templates ────────────
+  // display_name/phone feed the nimt_not_interested_ack template params.
+  // most-used templates are surfaced in the post-disposition WhatsApp nudge.
+  useEffect(() => {
+    if (!user?.id) return;
+    (async () => {
+      const { data: prof } = await supabase
+        .from("profiles")
+        .select("id, display_name, phone")
+        .eq("user_id", user.id)
+        .single();
+      if (!prof) return;
+      setCounsellorIdentity({
+        display_name: prof.display_name || "the admissions team",
+        phone: prof.phone || null,
+      });
+
+      const since = new Date(Date.now() - 30 * 86400000).toISOString();
+      const { data: acts } = await supabase
+        .from("lead_activities")
+        .select("description")
+        .eq("user_id", prof.id)
+        .eq("type", "whatsapp")
+        .gte("created_at", since)
+        .limit(500);
+
+      const counts = new Map<string, number>();
+      (acts || []).forEach((a: any) => {
+        const m = String(a.description || "").match(/(?:Template:\s*|—\s*)([a-z0-9_ ]+?)(?:\s*$|\s*\()/i);
+        if (!m) return;
+        const k = m[1].trim().toLowerCase().replace(/\s+/g, "_");
+        if (!k) return;
+        if (k === "course_info_v4" || k === "course_info_generic") return;
+        if (k === "auto_reply" || k === "ai_auto_reply") return;
+        counts.set(k, (counts.get(k) || 0) + 1);
+      });
+      const TEMPLATE_LABELS: Record<string, string> = {
+        apply_portal_login: "Send apply portal link",
+        callback_scheduled: "Send callback ack",
+        missed_call: "Send missed-call note",
+        course_info_video: "Send course video",
+        visit_confirmation: "Send visit confirmation",
+        ai_call_post_summary: "Send call summary",
+        ai_call_course_info: "Send course details",
+      };
+      const top = Array.from(counts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 2)
+        .map(([key]) => ({ key, label: TEMPLATE_LABELS[key] || key.replace(/_/g, " ") }));
+      setMostUsedTemplates(top);
+    })();
+  }, [user?.id]);
+
+  // Reset the WhatsApp nudge when the lead changes so the previous lead's
+  // sent-state never carries over.
+  useEffect(() => {
+    setNudgeSentKeys(new Set());
+    setNudgeSendingKey(null);
+    setNudgeDismissed(false);
+  }, [currentLead?.id]);
 
   // ── Fetch call history when current lead changes ─────────────────────────
   useEffect(() => {
@@ -575,6 +652,105 @@ export default function CloudDialer() {
     }
     setEditing(null);
     toast({ title: "Updated", description: `Lead ${field} updated.` });
+  };
+
+  // ── Dial-by-number lookup + call ──────────────────────────────────────────
+  // Counsellor types a phone number → we look it up in `leads`; if found we
+  // pin that lead and start the dialer on it; if not we surface a name
+  // input, create a stub lead row (so call_logs has a lead_id) and dial.
+
+  const normalisePhone = (raw: string): string => {
+    const digits = raw.replace(/\D/g, "");
+    if (digits.length === 10) return `+91${digits}`;
+    if (digits.length === 12 && digits.startsWith("91")) return `+${digits}`;
+    if (raw.startsWith("+")) return raw;
+    return digits ? `+${digits}` : "";
+  };
+
+  const dialLookup = async () => {
+    setDialNoMatch(false);
+    setDialLeadMatch(null);
+    const norm = normalisePhone(dialPhone);
+    if (!norm || norm.length < 8) {
+      toast({ title: "Enter a phone number first", variant: "destructive" });
+      return;
+    }
+    const { data: leadRow } = await (supabase as any)
+      .from("leads")
+      .select("id, name, phone")
+      .eq("phone", norm)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (leadRow) {
+      setDialLeadMatch({ id: leadRow.id, name: leadRow.name });
+    } else {
+      setDialNoMatch(true);
+    }
+  };
+
+  // Pin → reload → set currentIdx to the matching row → start dialer.
+  const pinAndStart = async (leadId: string) => {
+    if (!user?.id) return;
+    setDialPlacing(true);
+    await (supabase as any)
+      .from("cloud_dialer_pins")
+      .upsert({ user_id: user.id, lead_id: leadId }, { onConflict: "user_id,lead_id" });
+    await loadQueue();
+    // Race-safe: after loadQueue we look up the new position; queue is updated
+    // via setQueue but state may not be flushed yet, so use a setTimeout to
+    // let React commit.
+    setTimeout(() => {
+      setQueue(prev => {
+        const idx = prev.findIndex(l => l.id === leadId);
+        if (idx >= 0) {
+          setCurrentIdx(idx);
+          setDialerActive(true);
+          setPaused(false);
+          setTimeout(() => placeCall(), 50);
+        }
+        return prev;
+      });
+      setDialPlacing(false);
+      setDialPhone("");
+      setDialNewName("");
+      setDialLeadMatch(null);
+      setDialNoMatch(false);
+    }, 100);
+  };
+
+  const dialCallExisting = () => {
+    if (dialLeadMatch) pinAndStart(dialLeadMatch.id);
+  };
+
+  // Create stub lead, then pin+dial. Stub has stage=new_lead, source=dialer,
+  // and counsellor_id set to the current user's profile id so RLS scoping
+  // matches the standard counsellor flow.
+  const dialCreateAndCall = async () => {
+    if (!user?.id || !dialNewName.trim()) {
+      toast({ title: "Name required", description: "Enter a name for the new lead.", variant: "destructive" });
+      return;
+    }
+    const norm = normalisePhone(dialPhone);
+    setDialPlacing(true);
+    const { data: prof } = await supabase.from("profiles").select("id").eq("user_id", user.id).single();
+    const { data: newLead, error } = await (supabase as any)
+      .from("leads")
+      .insert({
+        name: dialNewName.trim(),
+        phone: norm,
+        stage: "new_lead",
+        source: "dialer",
+        counsellor_id: prof?.id || null,
+      })
+      .select("id")
+      .single();
+    if (error || !newLead) {
+      toast({ title: "Couldn't create lead", description: error?.message || "Try again", variant: "destructive" });
+      setDialPlacing(false);
+      return;
+    }
+    await pinAndStart(newLead.id);
   };
 
   const placeCall = async () => {
@@ -815,6 +991,39 @@ export default function CloudDialer() {
     }
   };
 
+  // ── Post-disposition WhatsApp nudge sender ────────────────────────────────
+  // Fires whatsapp-send for the chosen template. The nudge panel renders
+  // after a manual disposition; the counsellor taps once and the message
+  // goes via the call route (whatsapp-send infers the route from
+  // template_key). Used for course_info_v4, nimt_not_interested_ack, and the
+  // counsellor's most-used templates surfaced in mostUsedTemplates.
+  const sendDispositionNudge = async (
+    templateKey: string,
+    opts?: { params?: string[]; buttonUrls?: string[] }
+  ) => {
+    if (!currentLead) return;
+    setNudgeSendingKey(templateKey);
+    try {
+      const { data, error } = await supabase.functions.invoke("whatsapp-send", {
+        body: {
+          template_key: templateKey,
+          phone: currentLead.phone,
+          lead_id: currentLead.id,
+          ...(opts?.params ? { params: opts.params } : {}),
+          ...(opts?.buttonUrls ? { button_urls: opts.buttonUrls } : {}),
+        },
+      });
+      const errMsg = error?.message || (data as any)?.error;
+      if (errMsg) throw new Error(errMsg);
+      setNudgeSentKeys(prev => new Set(prev).add(templateKey));
+      toast({ title: "WhatsApp sent", description: templateKey.replace(/_/g, " ") });
+    } catch (e: any) {
+      toast({ title: "WhatsApp send failed", description: e?.message || "Unknown error", variant: "destructive" });
+    } finally {
+      setNudgeSendingKey(null);
+    }
+  };
+
   // ── Confirm followup and move to next ─────────────────────────────────────
 
   const moveToNext = async () => {
@@ -956,6 +1165,73 @@ export default function CloudDialer() {
           <ArrowRight className="h-4 w-4 text-amber-600 shrink-0" />
         </button>
       )}
+
+      {/* Dial a number — type a phone, look up in leads, then pin+call.
+          For unknown numbers, a name input appears so we can create a stub
+          lead and dial it (so call_logs has a lead_id and the disposition
+          flow works end-to-end). 10-digit Indian mobile only; storage
+          format is +91XXXXXXXXXX. */}
+      <div className="px-6 pt-3 pb-3">
+        <div className="rounded-xl border border-border bg-card p-3 flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+            <PhoneCall className="h-3.5 w-3.5 text-cyan-600" /> Dial a number
+          </div>
+          <input
+            type="tel"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={10}
+            value={dialPhone}
+            onChange={e => {
+              const digits = e.target.value.replace(/\D/g, "").slice(0, 10);
+              setDialPhone(digits);
+              setDialLeadMatch(null);
+              setDialNoMatch(false);
+            }}
+            placeholder="9555192192"
+            disabled={dialerActive || dialPlacing}
+            className="flex-1 min-w-[180px] rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm font-mono disabled:opacity-50"
+            onKeyDown={e => { if (e.key === "Enter" && dialPhone.length === 10) dialLookup(); }}
+          />
+          {!dialLeadMatch && !dialNoMatch && (
+            <Button size="sm" variant="outline" onClick={dialLookup} disabled={dialPhone.length !== 10 || dialerActive || dialPlacing}>
+              Look up
+            </Button>
+          )}
+          {dialLeadMatch && (
+            <>
+              <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20 px-2 py-1 text-xs">
+                <CheckCircle className="h-3 w-3 text-emerald-600" />
+                <span className="font-medium text-emerald-900 dark:text-emerald-200">{dialLeadMatch.name}</span>
+              </span>
+              <Button size="sm" className="bg-cyan-600 hover:bg-cyan-700" onClick={dialCallExisting} disabled={dialPlacing}>
+                {dialPlacing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5 mr-1" />}
+                Call now
+              </Button>
+            </>
+          )}
+          {dialNoMatch && (
+            <>
+              <span className="text-[11px] text-amber-700 dark:text-amber-400">No lead found — add new:</span>
+              <input
+                type="text"
+                value={dialNewName}
+                onChange={e => setDialNewName(e.target.value)}
+                placeholder="Lead name"
+                disabled={dialPlacing}
+                className="rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm disabled:opacity-50 w-44"
+              />
+              <Button size="sm" className="bg-cyan-600 hover:bg-cyan-700" onClick={dialCreateAndCall} disabled={!dialNewName.trim() || dialPlacing}>
+                {dialPlacing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5 mr-1" />}
+                Create & Call
+              </Button>
+              <Button size="sm" variant="ghost" className="text-xs" onClick={() => { setDialNoMatch(false); setDialPhone(""); setDialNewName(""); }}>
+                Cancel
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
 
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-card">
@@ -1178,13 +1454,15 @@ export default function CloudDialer() {
                       {callState.status === "auto-disposed" && <AlertCircle className="h-5 w-5 text-amber-600" />}
                       <div>
                         <p className="text-sm font-bold text-foreground">
-                          {callState.status === "calling" && "Calling..."}
+                          {callState.status === "calling" && `Calling ${currentLead?.name || "lead"}…`}
                           {callState.status === "connected" && "On Call — Student Connected"}
                           {callState.status === "ended" && "Call Ended"}
                           {callState.status === "auto-disposed" && (callState.disposition?.replace("_", " ").toUpperCase())}
                         </p>
                         {callState.status === "calling" && (
-                          <p className="text-[10px] text-cyan-600">Pick up your phone. Waiting for student to answer...</p>
+                          <p className="text-xs text-cyan-700 dark:text-cyan-300 font-medium">
+                            📞 Pick up your phone. Waiting for {currentLead?.name || "the student"} to answer…
+                          </p>
                         )}
                         <p className="text-xs text-muted-foreground tabular-nums">{formatTime(callState.elapsed)}</p>
                       </div>
@@ -1352,6 +1630,129 @@ export default function CloudDialer() {
                                 {session}
                               </button>
                             ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/*
+                        WhatsApp follow-up nudge — appears after a manual
+                        disposition. course_info_v4 is the primary suggestion
+                        when the lead has a course (whatsapp-send resolves
+                        params from the DB so we send no body args here). For
+                        not_interested, we pre-fill the personalised ack with
+                        the counsellor's name + Plivo phone. For interested /
+                        call_back, also surface up to 2 of the counsellor's
+                        most-used templates.
+                      */}
+                      {!nudgeDismissed && callState.disposition &&
+                       !["wrong_number", "do_not_contact", "cancelled"].includes(callState.disposition) && (
+                        <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 dark:bg-emerald-950/20 dark:border-emerald-900 p-2.5">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
+                              <ArrowRight className="h-3 w-3" />
+                              {callState.autoDisposition ? "Send a follow-up WhatsApp?" : "Send a WhatsApp?"}
+                            </div>
+                            <button
+                              onClick={() => setNudgeDismissed(true)}
+                              className="text-[10px] text-muted-foreground hover:text-foreground"
+                            >Skip</button>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {callState.autoDisposition && ["not_answered", "busy", "voicemail"].includes(callState.disposition) ? (
+                              <>
+                                {/* Auto-disposed (Plivo: no_answer / busy / voicemail). Surface a
+                                    missed-call apology + the course-info option so the counsellor
+                                    can keep the lead warm in one tap without leaving the dialer. */}
+                                <Button
+                                  size="sm"
+                                  variant={nudgeSentKeys.has("missed_call") ? "secondary" : "outline"}
+                                  disabled={!!nudgeSendingKey || nudgeSentKeys.has("missed_call")}
+                                  className="h-7 text-[11px]"
+                                  onClick={() => sendDispositionNudge("missed_call", {
+                                    params: [currentLead.name, currentLead.course_name || "your enquiry"],
+                                  })}
+                                >
+                                  {nudgeSendingKey === "missed_call" ? (
+                                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                  ) : nudgeSentKeys.has("missed_call") ? (
+                                    <Check className="h-3 w-3 mr-1" />
+                                  ) : null}
+                                  {nudgeSentKeys.has("missed_call") ? "Sent: missed-call note" : "Send missed-call note"}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant={nudgeSentKeys.has("course_info_v4") ? "secondary" : "outline"}
+                                  disabled={!!nudgeSendingKey || nudgeSentKeys.has("course_info_v4")}
+                                  className="h-7 text-[11px]"
+                                  onClick={() => sendDispositionNudge("course_info_v4")}
+                                  title={currentLead.course_name ? `Sends course-specific info for ${currentLead.course_name}` : "No course on lead — sends generic info"}
+                                >
+                                  {nudgeSendingKey === "course_info_v4" ? (
+                                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                  ) : nudgeSentKeys.has("course_info_v4") ? (
+                                    <Check className="h-3 w-3 mr-1" />
+                                  ) : null}
+                                  {nudgeSentKeys.has("course_info_v4") ? "Sent: course info" : "Send course info"}
+                                </Button>
+                              </>
+                            ) : callState.disposition === "not_interested" ? (
+                              <Button
+                                size="sm"
+                                variant={nudgeSentKeys.has("nimt_not_interested_ack") ? "secondary" : "outline"}
+                                disabled={!!nudgeSendingKey || nudgeSentKeys.has("nimt_not_interested_ack")}
+                                className="h-7 text-[11px]"
+                                onClick={() => sendDispositionNudge("nimt_not_interested_ack", {
+                                  params: [
+                                    currentLead.name,
+                                    currentLead.course_name || "your enquiry",
+                                    counsellorIdentity.display_name,
+                                    counsellorIdentity.phone || "+91 9555192192",
+                                  ],
+                                })}
+                              >
+                                {nudgeSendingKey === "nimt_not_interested_ack" ? (
+                                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                ) : nudgeSentKeys.has("nimt_not_interested_ack") ? (
+                                  <Check className="h-3 w-3 mr-1" />
+                                ) : null}
+                                {nudgeSentKeys.has("nimt_not_interested_ack") ? "Sent: closure note" : "Send closure note"}
+                              </Button>
+                            ) : (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant={nudgeSentKeys.has("course_info_v4") ? "secondary" : "outline"}
+                                  disabled={!!nudgeSendingKey || nudgeSentKeys.has("course_info_v4")}
+                                  className="h-7 text-[11px]"
+                                  onClick={() => sendDispositionNudge("course_info_v4")}
+                                  title={currentLead.course_name ? `Sends course-specific info for ${currentLead.course_name}` : "No course on lead — sends generic info"}
+                                >
+                                  {nudgeSendingKey === "course_info_v4" ? (
+                                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                  ) : nudgeSentKeys.has("course_info_v4") ? (
+                                    <Check className="h-3 w-3 mr-1" />
+                                  ) : null}
+                                  {nudgeSentKeys.has("course_info_v4") ? "Sent: course info" : "Send course info"}
+                                </Button>
+                                {mostUsedTemplates.map(t => (
+                                  <Button
+                                    key={t.key}
+                                    size="sm"
+                                    variant={nudgeSentKeys.has(t.key) ? "secondary" : "outline"}
+                                    disabled={!!nudgeSendingKey || nudgeSentKeys.has(t.key)}
+                                    className="h-7 text-[11px]"
+                                    onClick={() => sendDispositionNudge(t.key)}
+                                  >
+                                    {nudgeSendingKey === t.key ? (
+                                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                    ) : nudgeSentKeys.has(t.key) ? (
+                                      <Check className="h-3 w-3 mr-1" />
+                                    ) : null}
+                                    {nudgeSentKeys.has(t.key) ? `Sent: ${t.label.toLowerCase()}` : t.label}
+                                  </Button>
+                                ))}
+                              </>
+                            )}
                           </div>
                         </div>
                       )}

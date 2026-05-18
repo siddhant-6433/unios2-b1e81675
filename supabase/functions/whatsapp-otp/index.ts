@@ -183,13 +183,15 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const whatsappToken = Deno.env.get("WHATSAPP_API_TOKEN");
-    const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+    const whatsappToken = Deno.env.get("WHATSAPP_OTP_API_TOKEN") || Deno.env.get("WHATSAPP_API_TOKEN");
+    const phoneNumberId = Deno.env.get("WHATSAPP_OTP_PHONE_NUMBER_ID") || Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
     const otpTemplateName = Deno.env.get("WHATSAPP_OTP_TEMPLATE") || "unios2_login";
 
     console.log("[whatsapp-otp] Secret diagnostics:", {
-      WHATSAPP_API_TOKEN: !!whatsappToken,
-      WHATSAPP_PHONE_NUMBER_ID: !!phoneNumberId,
+      WHATSAPP_OTP_API_TOKEN: !!Deno.env.get("WHATSAPP_OTP_API_TOKEN"),
+      WHATSAPP_API_TOKEN: !!Deno.env.get("WHATSAPP_API_TOKEN"),
+      WHATSAPP_OTP_PHONE_NUMBER_ID: !!Deno.env.get("WHATSAPP_OTP_PHONE_NUMBER_ID"),
+      WHATSAPP_PHONE_NUMBER_ID: !!Deno.env.get("WHATSAPP_PHONE_NUMBER_ID"),
       phoneNumberId_length: phoneNumberId?.length ?? 0,
       templateName: otpTemplateName,
     });

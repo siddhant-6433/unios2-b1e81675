@@ -96,7 +96,97 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   // here because the template is already approved and we don't want to
   // submit a divergent variant.
   payment_receipt:        { name: "payment_receipt",        params: ["student_name", "payment_type", "amount", "receipt_no", "download_url"] },
+
+  // ── Course info (data-driven) ─────────────────────────────────────────
+  // Body params + both button URLs are resolved per-lead via the
+  // fn_resolve_course_info_params RPC when caller passes only
+  // {template_key, phone, lead_id}. Caller can also supply params/button_urls
+  // explicitly to override.
+  course_info_v1:         { name: "course_info_v1",         params: ["student_name", "course_name", "duration", "eligibility", "approval"] },
+  // v2: single "View fees & apply" button, no video.
+  course_info_v2:         { name: "course_info_v2",         params: ["student_name", "course_name", "duration", "eligibility", "approval"] },
+  // v3: same body as v1/v2 + the actual courses.video_url as a 6th body
+  // param (WhatsApp auto-linkifies URLs in body text). Single button to
+  // the fees section. This is the right shape because Meta button prefixes
+  // can't host arbitrary external URLs (youtu.be / instagram.com / etc).
+  course_info_v3:         { name: "course_info_v3",         params: ["student_name", "course_name", "duration", "eligibility", "approval", "video_url"] },
+  // v4: same 6 params as v3 but the body is rewritten as "as requested,
+  // here are the details you enquired about" so Meta categorises as UTILITY
+  // (v3 got auto-flipped to MARKETING because of promotional CTAs). Button
+  // text changed to "Open course page" — no "fees & apply" wording.
+  course_info_v4:         { name: "course_info_v4",         params: ["student_name", "course_name", "duration", "eligibility", "approval", "video_url"] },
+  // Fallback when lead.course_id is null — no params beyond name.
+  course_info_generic:    { name: "course_info_generic",    params: ["student_name"] },
+
+  // Visit reminder with counsellor name (replaces older visit_reminder once
+  // approved by Meta). button_urls=[google_maps_cid].
+  visit_reminder_v2:      { name: "visit_reminder_v2",      params: ["student_name", "course_name", "visit_date", "campus_name", "counsellor_name"] },
+
+  // Offer letter with single-tap accept+pay portal. button_urls=[token].
+  offer_letter_acceptance: { name: "offer_letter_acceptance", params: ["student_name", "course_name", "net_fee", "deadline"] },
+
+  // Manual not-interested closure (counsellor-triggered only).
+  nimt_not_interested_ack: { name: "nimt_not_interested_ack", params: ["student_name", "course_name", "counsellor_name", "counsellor_phone"] },
+
+  // Personal follow-up after a connected interested / call-back disposition.
+  // params: [student_name, formatted_date, counsellor_name, counsellor_phone]
+  nimt_followup_v1:        { name: "nimt_followup_v1",        params: ["student_name", "followup_date", "counsellor_name", "counsellor_phone"] },
+  // v2 rewrites the body as an appointment-confirmation so Meta
+  // categorises as UTILITY (v1 got auto-flipped to MARKETING).
+  nimt_followup_v2:        { name: "nimt_followup_v2",        params: ["student_name", "followup_date", "counsellor_name", "counsellor_phone"] },
 };
+
+type WhatsAppRoute = "default" | "call" | "visit";
+
+const CALL_TEMPLATE_KEYS = new Set([
+  "missed_call",
+  "callback_scheduled",
+  "counsellor_call_lead",
+  "ai_call_course_info",
+  "ai_call_post_summary",
+  "ai_missed_call_followup",
+  "post_call_feedback",
+  // Course info follow-up is sent right after an AI call disposition, so it
+  // belongs on the call route to keep quality ratings aligned with the rest
+  // of the post-call flow.
+  "course_info_v1",
+  "course_info_v2",
+  "course_info_v3",
+  "course_info_v4",
+  "course_info_generic",
+  // Follow-up to a manual call disposition — belongs on the call route.
+  "nimt_not_interested_ack",
+  "nimt_followup_v1",
+  "nimt_followup_v2",
+]);
+
+const VISIT_TEMPLATE_KEYS = new Set([
+  "visit_confirmation",
+  "visit_reminder_24hr",
+  "visit_reminder_v2",
+  "counsellor_visit_confirmation",
+  "post_visit_feedback",
+]);
+
+function getRouteForTemplate(templateKey: string): WhatsAppRoute {
+  if (CALL_TEMPLATE_KEYS.has(templateKey)) return "call";
+  if (VISIT_TEMPLATE_KEYS.has(templateKey)) return "visit";
+  return "default";
+}
+
+function getWhatsAppConfig(route: WhatsAppRoute) {
+  const token =
+    (route === "call" ? Deno.env.get("WHATSAPP_CALL_API_TOKEN") : null) ||
+    (route === "visit" ? Deno.env.get("WHATSAPP_VISIT_API_TOKEN") : null) ||
+    Deno.env.get("WHATSAPP_API_TOKEN");
+
+  const phoneNumberId =
+    (route === "call" ? Deno.env.get("WHATSAPP_CALL_PHONE_NUMBER_ID") : null) ||
+    (route === "visit" ? Deno.env.get("WHATSAPP_VISIT_PHONE_NUMBER_ID") : null) ||
+    Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+
+  return { token, phoneNumberId };
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -104,16 +194,6 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const whatsappToken = Deno.env.get("WHATSAPP_API_TOKEN");
-    const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
-
-    if (!whatsappToken || !phoneNumberId) {
-      return new Response(
-        JSON.stringify({ error: "WhatsApp API not configured. Contact administrator." }),
-        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
     // Validate auth — accept user JWT, service role key, cron secret, or voice agent key
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -154,9 +234,104 @@ Deno.serve(async (req) => {
       user = data.user;
     }
 
-    const { template_key, phone, params, lead_id, header_video_url, button_urls } = await req.json();
+    let { template_key, phone, params, lead_id, header_video_url, button_urls } = await req.json();
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
+
+    // nimt_followup_v1 and nimt_not_interested_ack: caller passes a short
+    // 2-element params array (name+date for followup, name+course for
+    // closure). We fill the counsellor signature (name + phone) from
+    // profiles + PLIVO_DIALER_PHONE_NUMBER env var so the fallback chain
+    // lives in one place and the Plivo number can be rotated via Supabase
+    // secrets without a code change.
+    if ((template_key === "nimt_followup_v1" || template_key === "nimt_followup_v2" || template_key === "nimt_not_interested_ack") && lead_id && params && params.length === 2) {
+      let counsellorName = "the admissions team";
+      let counsellorPhone: string | null = null;
+      try {
+        const { data: row } = await admin
+          .from("leads")
+          .select("counsellor:profiles!counsellor_id(display_name,official_phone)")
+          .eq("id", lead_id)
+          .maybeSingle();
+        const c = (row as any)?.counsellor;
+        if (c?.display_name) counsellorName = c.display_name;
+        if (c?.official_phone && String(c.official_phone).trim().length > 0) {
+          counsellorPhone = String(c.official_phone).trim();
+        }
+      } catch (e) {
+        console.error("counsellor lookup failed:", e);
+      }
+      if (!counsellorPhone) {
+        const plivoDid = (Deno.env.get("PLIVO_DIALER_PHONE_NUMBER") || "").trim();
+        if (plivoDid) counsellorPhone = plivoDid;
+      }
+      if (!counsellorPhone) counsellorPhone = "+91 9555 192 192";
+      params = [params[0], params[1], counsellorName, counsellorPhone];
+    }
+
+    // course_info_v1 can be invoked with only {template_key, phone, lead_id}.
+    // Fill body params + button URLs from fn_resolve_course_info_params so
+    // every caller (AI post-call, disposition nudge, manual sends) emits a
+    // consistent message without hand-assembling the args. If the lead has no
+    // course_id the resolver returns null and we fall back to the generic
+    // template.
+    // course_info_v1 and v2 share the same body. v1 has two URL buttons
+    // (video + fees), v2 has one. Both Meta templates use the URL prefix
+    // https://www.nimt.ac.in/courses/ — variable suffixes only:
+    //   Button 1 (v1 only) "Watch course video" → bare slug, lands at the
+    //     top of the course page where the embedded video plays
+    //   Button 2 (v1) / Button 1 (v2) "View fees & apply" → slug + #admissions
+    //     anchor scrolls to the fees section
+    if ((template_key === "course_info_v1" || template_key === "course_info_v2" || template_key === "course_info_v3" || template_key === "course_info_v4") && lead_id && (!params || params.length === 0)) {
+      const { data: resolved, error: resolveErr } = await admin.rpc(
+        "fn_resolve_course_info_params",
+        { p_lead_id: lead_id }
+      );
+      if (resolveErr) console.error(`${template_key} resolver failed:`, resolveErr.message);
+      if (resolved && typeof resolved === "object") {
+        const baseParams = [
+          resolved.student_name,
+          resolved.course_name,
+          resolved.duration,
+          resolved.eligibility,
+          resolved.approval,
+        ];
+        // Derive the bare slug + the slug#admissions suffix from the resolver's
+        // course_url ("https://www.nimt.ac.in/courses/{slug}#admissions").
+        const prefix = "https://www.nimt.ac.in/courses/";
+        const courseUrlFull = typeof resolved.course_url === "string" ? resolved.course_url : "";
+        const afterPrefix = courseUrlFull.startsWith(prefix) ? courseUrlFull.slice(prefix.length) : "";
+        const bareSlug = afterPrefix.split("#")[0] || "";
+        const slugWithFees = bareSlug ? `${bareSlug}#admissions` : afterPrefix;
+        if (template_key === "course_info_v3" || template_key === "course_info_v4") {
+          // v3/v4 body has a 6th param: the actual video URL (youtu.be /
+          // instagram / etc) from courses.video_url. WhatsApp auto-linkifies
+          // URLs in body text so it renders as a tappable link, sidestepping
+          // Meta's button-prefix lock-in for arbitrary external URLs. v4 is
+          // the UTILITY-categorised rewrite (v3 got auto-flipped to MARKETING).
+          const videoUrl = (typeof resolved.video_url === "string" && resolved.video_url.length > 0)
+            ? resolved.video_url
+            : courseUrlFull;
+          params = [...baseParams, videoUrl];
+          // v4's single URL button is the bare slug ("Open course page"),
+          // v3's was slug#admissions ("View fees & apply").
+          button_urls = template_key === "course_info_v4" ? [bareSlug] : [slugWithFees];
+        } else if (template_key === "course_info_v2") {
+          params = baseParams;
+          button_urls = [slugWithFees];
+        } else {
+          // v1: button 1 = video (top of page), button 2 = fees section
+          params = baseParams;
+          button_urls = [bareSlug, slugWithFees];
+        }
+      } else {
+        // No course on the lead — switch to the generic template.
+        template_key = "course_info_generic";
+        const { data: leadRow } = await admin.from("leads").select("name").eq("id", lead_id).single();
+        params = [leadRow?.name || "there"];
+        button_urls = undefined;
+      }
+    }
 
     // Block sends to DNC leads
     if (lead_id) {
@@ -180,6 +355,16 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({ error: `Unknown template: ${template_key}` }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const phoneRoute = getRouteForTemplate(template_key);
+    const { token: whatsappToken, phoneNumberId } = getWhatsAppConfig(phoneRoute);
+
+    if (!whatsappToken || !phoneNumberId) {
+      return new Response(
+        JSON.stringify({ error: `WhatsApp ${phoneRoute} route is not configured. Contact administrator.` }),
+        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -237,7 +422,11 @@ Deno.serve(async (req) => {
       }
     );
 
-    const waResult = await waResponse.json();
+    // Parse body as text first so we can keep the raw response for the failed
+    // path even when Meta returns non-JSON (e.g. plain-text 5xx from the edge).
+    const waResultText = await waResponse.text().catch(() => "");
+    let waResult: any = null;
+    try { waResult = waResultText ? JSON.parse(waResultText) : null; } catch { waResult = null; }
 
     // Log to whatsapp_messages + lead_activities (even if Meta rejected it)
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
@@ -279,6 +468,11 @@ Deno.serve(async (req) => {
       ai_call_post_summary: "Hi {{1}}, as discussed on our call, here are the details for {{2}} at NIMT Educational Institutions:\n\n🏫 Campus: {{3}}\n📄 Course details: {{4}}\n📝 Apply now: {{5}}\n🎥 Watch course video: {{6}}\n\nReply to this message for any questions, or our admissions team will reach out shortly.",
       ai_missed_call_followup: "Hi {{1}}, this is Navya from NIMT Educational Institutions. I tried calling you regarding your enquiry about {{2}}.\n\nPlease feel free to call back at {{3}} during 9 AM-8 PM IST.\n\n📄 Course information: {{4}}\n🎥 Watch course video: {{5}}\n\nLooking forward to assisting you with your admission journey.",
       apply_portal_login: "Hi {{1}}, your secure login link for the NIMT application portal is ready. Tap the button below to complete your application or pay your token fee directly — no OTP needed. The link is valid until {{2}}, so please use it before it expires.",
+      course_info_v1: "Hi {{1}}, here are the details for {{2}} at NIMT:\n• Duration: {{3}}\n• Eligibility: {{4}}\n• Accreditation: {{5}}\n\nWatch a short course video or view the full fees and syllabus on the course page. Reply STOP to opt out.",
+      course_info_generic: "Hi {{1}}, thanks for your interest in NIMT Educational Institutions. We offer programmes in nursing, paramedical, pharma, management, education, law, and engineering across our Greater Noida, Ghaziabad, and Kotputli campuses. Browse the full list, fees, and eligibility on our website. Reply STOP to opt out.",
+      visit_reminder_v2: "Hi {{1}}, your campus visit for {{2}} is on {{3}} at {{4}}. Your counsellor {{5}} will meet you there. Tap below for directions to the campus.",
+      offer_letter_acceptance: "Congratulations {{1}}! NIMT has issued your offer letter for {{2}}. Net fee: Rs.{{3}}. Please accept by {{4}}. Tap below to view your offer, accept it, and pay the token fee in one secure step.",
+      nimt_not_interested_ack: "Hi {{1}}, thanks for speaking with us about {{2}}. We've marked your enquiry as \"not interested\" and won't reach out unless you'd like us to. If you'd like to revisit this in the future, message {{3}} directly on {{4}}. Reply STOP to fully opt out.",
     };
 
     let readableContent = TEMPLATE_TEXTS[template_key] || `[Template: ${template_key}]`;
@@ -288,7 +482,18 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Insert into whatsapp_messages for inbox visibility — log even if Meta rejected
+    // Insert into whatsapp_messages for inbox visibility — log even if Meta rejected.
+    // status_error captures everything we know about the failure so the spam
+    // dashboard and the per-message inbox can show what Meta complained about.
+    const statusErrorPayload = metaFailed
+      ? {
+          http_status: waResponse.status,
+          ...(waResult?.error ? { error: waResult.error } : {}),
+          ...(waResult && !waResult.error ? { body: waResult } : {}),
+          ...(!waResult && waResultText ? { raw: waResultText.slice(0, 1000) } : {}),
+        }
+      : null;
+
     await adminClient.from("whatsapp_messages").insert({
       lead_id: lead_id || null,
       wa_message_id: waResult?.messages?.[0]?.id || null,
@@ -299,6 +504,8 @@ Deno.serve(async (req) => {
       template_key,
       status: metaFailed ? "failed" : "sent",
       is_read: true,
+      business_phone_number_id: phoneNumberId,
+      status_error: statusErrorPayload,
     });
 
     if (lead_id) {
@@ -326,7 +533,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ success: true, message_id: waResult?.messages?.[0]?.id }),
+      JSON.stringify({ success: true, message_id: waResult?.messages?.[0]?.id, phone_route: phoneRoute, business_phone_number_id: phoneNumberId }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err: any) {

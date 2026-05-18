@@ -108,8 +108,8 @@ Deno.serve(async (req) => {
     const noLead = unique.filter(m => !m.lead_id);
 
     const DNC_ACK = "You have been added to our Do Not Contact list. We will not reach out to you via call or WhatsApp going forward. If this was a mistake, please reply START or call us at +91 9555192192.";
-    const waToken = Deno.env.get("WHATSAPP_API_TOKEN")!;
-    const pnId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID")!;
+    const waToken = Deno.env.get("WHATSAPP_REPLY_API_TOKEN") || Deno.env.get("WHATSAPP_API_TOKEN")!;
+    const pnId = Deno.env.get("WHATSAPP_REPLY_PHONE_NUMBER_ID") || Deno.env.get("WHATSAPP_PHONE_NUMBER_ID")!;
 
     const sendDncAck = async (phone: string, leadId: string | null) => {
       const waPhone = phone.replace(/[^0-9]/g, "");
@@ -126,6 +126,7 @@ Deno.serve(async (req) => {
             wa_message_id: result?.messages?.[0]?.id || null,
             direction: "outbound", phone,
             message_type: "text", content: DNC_ACK, status: "sent", is_read: true,
+            business_phone_number_id: pnId,
           });
           return true;
         }

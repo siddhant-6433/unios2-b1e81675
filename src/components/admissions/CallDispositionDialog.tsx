@@ -1,10 +1,10 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import {
   Phone, CheckCircle, XCircle, PhoneMissed, PhoneOff, Clock3,
   BanIcon, Loader2, ArrowRight, MapPin, CalendarDays, ChevronDown, Clock,
-  AlertCircle,
+  AlertCircle, MessageSquare, GraduationCap,
 } from "lucide-react";
 
 export type CallDisposition =
@@ -27,7 +27,31 @@ export interface CallDispositionData {
   visit?: { visit_date: string; campus_id: string };
   /** Set when disposition is "ineligible" — lead eligible for future session */
   future_eligible_session?: "2027-28" | "2028-29" | null;
+  /** Suppress the disposition-based auto WhatsApp send (counsellor opted out) */
+  suppress_auto_whatsapp?: boolean;
+  /** Also fire course_info_v1 after the disposition WA template */
+  send_course_info?: boolean;
 }
+
+/**
+ * Live call status passed in by the caller (e.g. LeadDetail polling
+ * ai_call_records via Plivo callbacks).
+ *  - "calling": ringing the counsellor or the student; dialog shows a "waiting
+ *    for pickup" state and hides the disposition picker.
+ *  - "connected": call answered and bridged; full picker is shown.
+ *  - "no_answer" | "busy" | "failed": Plivo reported a terminal non-answer
+ *    state; we auto-select the matching disposition and skip straight to the
+ *    follow-up editor so the counsellor only needs to confirm the next
+ *    callback time.
+ *  - undefined: legacy "manual log" mode used when the counsellor opens the
+ *    dialog from outside an active call. Shows the full picker as before.
+ */
+export type DialogCallStatus =
+  | "calling"
+  | "connected"
+  | "no_answer"
+  | "busy"
+  | "failed";
 
 interface CallDispositionDialogProps {
   open: boolean;
@@ -39,18 +63,66 @@ interface CallDispositionDialogProps {
   onSubmit: (data: CallDispositionData) => Promise<void>;
   /** Called when counsellor clicks "Call Now" — e.g. to send tap-to-call WhatsApp */
   onCallNow?: () => void | Promise<void>;
+  /** Optional live status from the dialer poll. Drives the auto-flow. */
+  callStatus?: DialogCallStatus;
+  /** True once Plivo has reported the bridge as ended (CallStatus=completed).
+   *  Keeps the dialog in "connected" UI state but freezes the elapsed timer. */
+  callEnded?: boolean;
+  /** Called when counsellor clicks "Call connected" — flips parent state */
+  onManualConnect?: () => void;
+  /** Lead context surfaced in the calling state so the counsellor knows who
+   *  they're calling and why without leaving the dialog. */
+  courseName?: string | null;
+  leadStage?: string | null;
+  personRole?: string | null;
+  latestNote?: string | null;
+  aiCallSummary?: string | null;
 }
 
-const DISPOSITIONS: { value: CallDisposition; label: string; icon: any; color: string; suggestsFollowup: boolean }[] = [
-  { value: "interested", label: "Interested", icon: CheckCircle, color: "bg-emerald-100 text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-400", suggestsFollowup: true },
-  { value: "not_interested", label: "Not Interested", icon: XCircle, color: "bg-red-100 text-red-700 border-red-300 hover:bg-red-50 dark:bg-red-900/30 dark:text-red-400", suggestsFollowup: false },
-  { value: "ineligible", label: "Ineligible", icon: AlertCircle, color: "bg-purple-100 text-purple-700 border-purple-300 hover:bg-purple-50 dark:bg-purple-900/30 dark:text-purple-400", suggestsFollowup: false },
-  { value: "not_answered", label: "Not Answered", icon: PhoneMissed, color: "bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-50 dark:bg-amber-900/30 dark:text-amber-400", suggestsFollowup: true },
-  { value: "call_back", label: "Call Back Later", icon: Clock3, color: "bg-blue-100 text-blue-700 border-blue-300 hover:bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400", suggestsFollowup: true },
-  { value: "voicemail", label: "Voicemail", icon: PhoneOff, color: "bg-indigo-100 text-indigo-700 border-indigo-300 hover:bg-indigo-50 dark:bg-indigo-900/30 dark:text-indigo-400", suggestsFollowup: true },
-  { value: "busy", label: "Busy", icon: Phone, color: "bg-orange-100 text-orange-700 border-orange-300 hover:bg-orange-50 dark:bg-orange-900/30 dark:text-orange-400", suggestsFollowup: true },
-  { value: "wrong_number", label: "Wrong Number", icon: BanIcon, color: "bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300", suggestsFollowup: false },
-  { value: "do_not_contact", label: "Do Not Contact", icon: BanIcon, color: "bg-red-100 text-red-700 border-red-300 hover:bg-red-50 dark:bg-red-900/30 dark:text-red-400", suggestsFollowup: false },
+// requiresConnected: option only makes sense when the counsellor actually
+//   spoke with the lead. We hide these once callStatus="connected" is false
+//   (call wasn't answered, e.g. ringing-only / busy / no-answer auto-disposal).
+// onlyWhenNotConnected: opposite — only shown when the call didn't connect.
+//   Hidden once the bridge has established because "Not Answered" is
+//   nonsensical when the counsellor just got off a 3-minute call.
+// help: short description shown as a hover tooltip on each pill so the
+//   counsellor doesn't confuse e.g. "Do Not Contact" (adds lead to DNC list,
+//   never call again) with "Not Answered" (couldn't reach this time).
+const DISPOSITIONS: {
+  value: CallDisposition;
+  label: string;
+  icon: any;
+  color: string;
+  suggestsFollowup: boolean;
+  help: string;
+  onlyWhenNotConnected?: boolean;
+  requiresConnected?: boolean;
+}[] = [
+  { value: "interested", label: "Interested", icon: CheckCircle, color: "bg-emerald-100 text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-400", suggestsFollowup: true,
+    help: "Lead engaged on the call and is interested in the programme. Triggers personalised follow-up WhatsApp + course info.",
+    requiresConnected: true },
+  { value: "not_interested", label: "Not Interested", icon: XCircle, color: "bg-red-100 text-red-700 border-red-300 hover:bg-red-50 dark:bg-red-900/30 dark:text-red-400", suggestsFollowup: false,
+    help: "Lead spoke with you and explicitly declined. Sends a polite closure WhatsApp with your contact for future revival.",
+    requiresConnected: true },
+  { value: "ineligible", label: "Ineligible", icon: AlertCircle, color: "bg-purple-100 text-purple-700 border-purple-300 hover:bg-purple-50 dark:bg-purple-900/30 dark:text-purple-400", suggestsFollowup: false,
+    help: "Lead doesn't meet course eligibility (marks, subjects, age). Optionally deferred to a future session.",
+    requiresConnected: true },
+  { value: "not_answered", label: "Not Answered", icon: PhoneMissed, color: "bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-50 dark:bg-amber-900/30 dark:text-amber-400", suggestsFollowup: true,
+    help: "Phone rang but lead didn't pick up. Sends an apology + course-info WhatsApp.",
+    onlyWhenNotConnected: true },
+  { value: "call_back", label: "Call Back Later", icon: Clock3, color: "bg-blue-100 text-blue-700 border-blue-300 hover:bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400", suggestsFollowup: true,
+    help: "Lead spoke but asked to be called back at a specific time. Schedules the follow-up + sends a WhatsApp confirming the time.",
+    requiresConnected: true },
+  { value: "voicemail", label: "Voicemail", icon: PhoneOff, color: "bg-indigo-100 text-indigo-700 border-indigo-300 hover:bg-indigo-50 dark:bg-indigo-900/30 dark:text-indigo-400", suggestsFollowup: true,
+    help: "Call landed on voicemail / answering machine. Sends an apology WhatsApp with a tap-to-call link.",
+    onlyWhenNotConnected: true },
+  { value: "busy", label: "Busy", icon: Phone, color: "bg-orange-100 text-orange-700 border-orange-300 hover:bg-orange-50 dark:bg-orange-900/30 dark:text-orange-400", suggestsFollowup: true,
+    help: "Lead's line was busy. Will retry; an apology WhatsApp also goes out.",
+    onlyWhenNotConnected: true },
+  { value: "wrong_number", label: "Wrong Number", icon: BanIcon, color: "bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300", suggestsFollowup: false,
+    help: "Number reached someone other than the lead, or is invalid. No further calls; flag for admin to clean the data." },
+  { value: "do_not_contact", label: "Do Not Contact", icon: BanIcon, color: "bg-red-100 text-red-700 border-red-300 hover:bg-red-50 dark:bg-red-900/30 dark:text-red-400", suggestsFollowup: false,
+    help: "Lead requested to be removed from all outreach. Adds them to the DNC list — NO future calls or WhatsApp messages. Use only when the lead explicitly asks to be removed." },
 ];
 
 const DURATION_OPTIONS = [
@@ -83,7 +155,11 @@ const formatDisplayDate = (dateStr: string) => {
   return `${day}, ${d}/${m}/${y.slice(2)}`;
 };
 
-export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone, campuses, defaultCampusId, onSubmit, onCallNow }: CallDispositionDialogProps) {
+export function CallDispositionDialog({
+  open, onOpenChange, leadName, leadPhone, campuses, defaultCampusId,
+  onSubmit, onCallNow, callStatus, callEnded, onManualConnect,
+  courseName, leadStage, personRole, latestNote, aiCallSummary,
+}: CallDispositionDialogProps) {
   const [disposition, setDisposition] = useState<CallDisposition | null>(null);
   const [duration, setDuration] = useState(0);
   const [notes, setNotes] = useState("");
@@ -97,9 +173,64 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
   const [visitCampusId, setVisitCampusId] = useState(defaultCampusId || campuses[0]?.id || "");
   // Ineligible → future eligibility state
   const [futureSession, setFutureSession] = useState<"2027-28" | "2028-29" | null>(null);
+  // WhatsApp nudge controls — visible when a disposition is set. Counsellor can
+  // opt out of the auto-send or also fire course_info_v1 alongside.
+  const [suppressAutoWa, setSuppressAutoWa] = useState(false);
+  const [sendCourseInfo, setSendCourseInfo] = useState(false);
+  // Live elapsed timer for the connected phase. Starts when the parent flips
+  // callStatus → "connected" and stops when the dialog closes. Pure UI; the
+  // real call duration is whatever Plivo reports at hangup. Declared up here
+  // (with the other hooks) so the hook order stays stable across the early
+  // return for the "calling" phase below.
+  const [connectedAt, setConnectedAt] = useState<number | null>(null);
+  const [elapsedSec, setElapsedSec] = useState(0);
+  useEffect(() => {
+    if (callStatus === "connected" && !connectedAt) {
+      setConnectedAt(Date.now());
+      setElapsedSec(0);
+    }
+    if (!open) {
+      setConnectedAt(null);
+      setElapsedSec(0);
+    }
+  }, [callStatus, open, connectedAt]);
+  useEffect(() => {
+    if (!connectedAt) return;
+    // Stop ticking once the parent reports the bridge has ended. We still
+    // keep the last elapsedSec showing — gives the counsellor a final talk
+    // duration alongside the disposition picker.
+    if (callEnded) return;
+    const id = setInterval(() => setElapsedSec(Math.floor((Date.now() - connectedAt) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [connectedAt, callEnded]);
   const dateInputRef = useRef<HTMLInputElement>(null);
 
   const selectedDisp = DISPOSITIONS.find(d => d.value === disposition);
+
+  // Plivo-driven auto-disposition: when the caller signals busy / no_answer /
+  // failed via callStatus, pre-select the matching disposition pill so the
+  // counsellor only has to confirm the follow-up time. We never overwrite a
+  // disposition the counsellor has already chosen manually.
+  useEffect(() => {
+    if (!open) return;
+    if (disposition) return;
+    if (callStatus === "no_answer") setDisposition("not_answered");
+    else if (callStatus === "busy") setDisposition("busy");
+    else if (callStatus === "failed") setDisposition("not_answered");
+  }, [callStatus, open, disposition]);
+
+  // Default-on the course-info follow-up for positive dispositions so the
+  // counsellor doesn't have to remember to tick it after every connected
+  // call. Stays off for non-engagement dispositions (busy / not_interested /
+  // ineligible / wrong_number / dnc) where pushing course info would be spammy.
+  useEffect(() => {
+    if (!disposition) return;
+    if (disposition === "interested" || disposition === "call_back") {
+      setSendCourseInfo(true);
+    } else {
+      setSendCourseInfo(false);
+    }
+  }, [disposition]);
 
   const resetState = () => {
     setDisposition(null);
@@ -111,6 +242,8 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
     setVisitDate(tomorrowStr());
     setVisitTime("11:00");
     setFutureSession(null);
+    setSuppressAutoWa(false);
+    setSendCourseInfo(false);
   };
 
   const handleSubmit = async (opts: { scheduleFollowup?: boolean; scheduleVisit?: boolean } = {}) => {
@@ -130,6 +263,8 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
       followup_date: followupDatetime,
       visit,
       future_eligible_session: disposition === "ineligible" ? futureSession : null,
+      suppress_auto_whatsapp: suppressAutoWa,
+      send_course_info: sendCourseInfo,
     });
     setSaving(false);
     resetState();
@@ -146,46 +281,210 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
     dateInputRef.current?.focus();
   };
 
+  // ── Phase 1: still ringing — show waiting state + context, hide picker ───
+  // Plivo's manual-call flow only writes ai_call_records.status on hangup, so
+  // we cannot detect "answered" from the DB during the talk. The counsellor
+  // therefore gets a "Call connected" button to manually advance to the
+  // picker the moment the lead picks up. The surrounding context (course,
+  // stage, latest note, AI summary) helps the counsellor remember who and
+  // why during the few seconds of ringing.
+  if (callStatus === "calling") {
+    return (
+      <Dialog open={open} onOpenChange={handleClose}>
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Phone className="h-4 w-4 text-primary" />
+              Calling {leadName}…
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 pt-1">
+            {/* Lead summary: name + phone + stage / role badges */}
+            <div className="rounded-xl bg-muted/40 px-3 py-3 space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-foreground truncate">{leadName}</p>
+                <div className="flex items-center gap-1.5">
+                  {personRole && personRole !== "lead" && (
+                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">
+                      {personRole.replace(/_/g, " ")}
+                    </span>
+                  )}
+                  {leadStage && (
+                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                      {leadStage.replace(/_/g, " ")}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <p className="text-[11px] text-muted-foreground font-mono">{leadPhone}</p>
+              {courseName && (
+                <p className="text-xs text-foreground flex items-center gap-1.5 pt-0.5">
+                  <span className="text-muted-foreground">Course:</span>
+                  <span className="font-medium">{courseName}</span>
+                </p>
+              )}
+            </div>
+
+            {/* AI call summary if available — primary "why am I calling this lead" context */}
+            {aiCallSummary && (
+              <div className="rounded-xl border border-purple-200 dark:border-purple-800/40 bg-purple-50/50 dark:bg-purple-950/20 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-purple-700 dark:text-purple-300 mb-1">AI call summary</p>
+                <p className="text-xs text-foreground whitespace-pre-wrap line-clamp-5">{aiCallSummary}</p>
+              </div>
+            )}
+
+            {/* Latest counsellor note */}
+            {latestNote && (
+              <div className="rounded-xl border border-amber-200 dark:border-amber-800/40 bg-amber-50/40 dark:bg-amber-950/20 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-1">Latest note</p>
+                <p className="text-xs text-foreground whitespace-pre-wrap line-clamp-3">{latestNote}</p>
+              </div>
+            )}
+
+            {/* Waiting spinner */}
+            <div className="flex flex-col items-center justify-center gap-2 py-4 text-center">
+              <Loader2 className="h-6 w-6 text-primary animate-spin" />
+              <p className="text-sm font-medium text-foreground">Waiting for {leadName} to pick up…</p>
+              <p className="text-[11px] text-muted-foreground max-w-xs">
+                Tap <span className="font-semibold">Call connected</span> the moment they answer,
+                or wait — the screen will auto-fill if their phone is busy / switched off / unanswered.
+              </p>
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-xs"
+                onClick={() => onManualConnect?.()}
+              >
+                <CheckCircle className="h-3.5 w-3.5 mr-1.5" />
+                Call connected — Mark Outcome
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleClose(false)}
+                className="text-xs"
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  const isAutoDisposed =
+    callStatus === "no_answer" || callStatus === "busy" || callStatus === "failed";
+  const fmtElapsed = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  const autoBannerText: Record<string, string> = {
+    no_answer: "Lead didn't pick up — auto-set to Not Answered.",
+    busy: "Lead's line was busy — auto-set to Busy.",
+    failed: "Call failed (switched off / unreachable) — auto-set to Not Answered.",
+  };
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Phone className="h-4 w-4 text-primary" />
-            Log Call Outcome
+            {isAutoDisposed ? "Schedule next callback" : "Log Call Outcome"}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 pt-1">
-          {/* Lead info + Call Now button */}
+          {/* Connected banner with elapsed timer. Live (pulsing green) while
+              the bridge is up; switches to a muted "Call ended" state with
+              frozen final duration once Plivo reports the hangup. */}
+          {callStatus === "connected" && (
+            <div className={`rounded-xl border px-3 py-2 flex items-center gap-2.5 ${
+              callEnded
+                ? "border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40"
+                : "border-emerald-300 dark:border-emerald-800/40 bg-emerald-50 dark:bg-emerald-950/30"
+            }`}>
+              <span className="relative flex h-2.5 w-2.5">
+                {!callEnded && (
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+                )}
+                <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${callEnded ? "bg-slate-400" : "bg-emerald-500"}`} />
+              </span>
+              <div className="flex-1">
+                <p className={`text-xs font-semibold ${callEnded ? "text-slate-700 dark:text-slate-200" : "text-emerald-900 dark:text-emerald-200"}`}>
+                  {callEnded ? "Call ended" : "Call connected"}
+                </p>
+                <p className={`text-[10px] ${callEnded ? "text-slate-600 dark:text-slate-400" : "text-emerald-700 dark:text-emerald-300"}`}>
+                  {callEnded
+                    ? `Talked with ${leadName} for ${fmtElapsed(elapsedSec)}. Mark the outcome below.`
+                    : `Live with ${leadName}. Mark the outcome below — the dialog stays open through the call.`}
+                </p>
+              </div>
+              <div className={`font-mono text-sm font-semibold tabular-nums ${
+                callEnded ? "text-slate-700 dark:text-slate-200" : "text-emerald-900 dark:text-emerald-200"
+              }`}>
+                {fmtElapsed(elapsedSec)}
+              </div>
+            </div>
+          )}
+
+          {/* Auto-disposed banner */}
+          {isAutoDisposed && (
+            <div className="rounded-xl border border-amber-200 dark:border-amber-800/40 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 text-amber-700 dark:text-amber-400 mt-0.5 shrink-0" />
+              <div className="text-xs text-amber-900 dark:text-amber-200">
+                {autoBannerText[callStatus!] || "Call did not connect."}
+                <div className="text-[10px] mt-0.5 opacity-80">Edit the follow-up time below and save.</div>
+              </div>
+            </div>
+          )}
+
+          {/* Lead info + Call Now button — Call Now hidden when call already in flight */}
           <div className="flex items-center justify-between gap-3 rounded-xl bg-muted/40 px-3 py-2.5">
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-foreground truncate">{leadName}</p>
               <p className="text-[11px] text-muted-foreground font-mono">{leadPhone}</p>
             </div>
-            <Button
-              size="sm"
-              className="shrink-0 gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
-              onClick={async () => {
-                if (leadPhone) window.open(`tel:${leadPhone}`);
-                if (onCallNow) await onCallNow();
-              }}
-            >
-              <Phone className="h-3.5 w-3.5" /> Call Now
-            </Button>
+            {!callStatus && (
+              <Button
+                size="sm"
+                className="shrink-0 gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
+                onClick={async () => {
+                  if (leadPhone) window.open(`tel:${leadPhone}`);
+                  if (onCallNow) await onCallNow();
+                }}
+              >
+                <Phone className="h-3.5 w-3.5" /> Call Now
+              </Button>
+            )}
           </div>
 
-          {/* Disposition pills */}
+          {/* Disposition pills — hidden when Plivo already auto-disposed */}
+          {!isAutoDisposed && (
+            <>
+          {/* Disposition pills — filtered by call state so connected calls
+              don't show "Not Answered" / "Busy" / "Voicemail", and pre-call
+              auto-disposed cases don't show options that require an actual
+              conversation (interested / not_interested / ineligible /
+              call_back). Native title attribute renders as the hover tooltip
+              so counsellors see what each option actually does. */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Outcome *</label>
+            <label className="text-xs font-medium text-muted-foreground">
+              Outcome * <span className="text-[10px] font-normal opacity-70">— hover for details</span>
+            </label>
             <div className="grid grid-cols-2 gap-1.5">
-              {DISPOSITIONS.map(d => {
+              {DISPOSITIONS.filter(d => {
+                if (callStatus === "connected" && d.onlyWhenNotConnected) return false;
+                if (isAutoDisposed && d.requiresConnected) return false;
+                return true;
+              }).map(d => {
                 const Icon = d.icon;
                 const selected = disposition === d.value;
                 return (
                   <button
                     key={d.value}
                     type="button"
+                    title={d.help}
                     onClick={() => setDisposition(d.value)}
                     className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition-all ${
                       selected
@@ -199,6 +498,18 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
                 );
               })}
             </div>
+            {/* Inline reminder of what the selected disposition does — helps
+                counsellors notice the difference between e.g. DNC and Not
+                Answered without needing to hover. */}
+            {disposition && (() => {
+              const meta = DISPOSITIONS.find(d => d.value === disposition);
+              if (!meta) return null;
+              return (
+                <p className="text-[10px] text-muted-foreground mt-1 px-1">
+                  <span className="font-medium text-foreground">{meta.label}:</span> {meta.help}
+                </p>
+              );
+            })()}
           </div>
 
           {/* Duration */}
@@ -275,6 +586,74 @@ export function CallDispositionDialog({ open, onOpenChange, leadName, leadPhone,
               )}
             </div>
           )}
+            </>
+          )}
+          {/* end !isAutoDisposed gate — picker, duration, notes, ineligible */}
+
+          {/* WhatsApp follow-up nudge — visible the moment a disposition is set
+              (manual or auto). Shows the template that will auto-send and lets
+              the counsellor opt out, plus offers a one-tap course-info send. */}
+          {disposition && (() => {
+            const autoTemplate =
+              disposition === "interested" || disposition === "call_back"
+                ? "callback_scheduled"
+                : disposition === "not_answered" || disposition === "busy" || disposition === "voicemail"
+                ? "missed_call"
+                : disposition === "not_interested"
+                ? "nimt_not_interested_ack"
+                : null;
+            // No template = no nudge UI.
+            if (!autoTemplate) return null;
+            // Per-template friendly description so counsellors know what's going out.
+            const templateDescription =
+              autoTemplate === "missed_call"
+                ? "Apology + tap-to-call back. Works outside the 24h window."
+                : autoTemplate === "nimt_not_interested_ack"
+                ? "Polite closure note signed off by you with your contact for future revival."
+                : "Thanks-for-talking note with course mention.";
+            return (
+              <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/40 bg-emerald-50/60 dark:bg-emerald-950/20 p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-400" />
+                  <span className="text-xs font-semibold text-emerald-900 dark:text-emerald-200">
+                    WhatsApp follow-up
+                  </span>
+                </div>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!suppressAutoWa}
+                    onChange={(e) => setSuppressAutoWa(!e.target.checked)}
+                    className="mt-0.5 accent-emerald-600"
+                  />
+                  <span className="text-[11px] text-foreground">
+                    Send <span className="font-mono">{autoTemplate.replace(/_/g, " ")}</span> to {leadName}
+                    <span className="block text-[10px] text-muted-foreground">
+                      {templateDescription}
+                    </span>
+                  </span>
+                </label>
+                {/* Course-info opt-in only makes sense for engagement
+                    dispositions — never for not_interested where pushing
+                    course details would feel spammy. */}
+                {disposition !== "not_interested" && (
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={sendCourseInfo}
+                      onChange={(e) => setSendCourseInfo(e.target.checked)}
+                      className="mt-0.5 accent-emerald-600"
+                    />
+                    <span className="text-[11px] text-foreground flex items-center gap-1">
+                      <GraduationCap className="h-3 w-3 text-emerald-700" />
+                      Also send course details
+                      <span className="text-[10px] text-muted-foreground">(course_info_v1 — auto-filled from DB)</span>
+                    </span>
+                  </label>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Inline follow-up scheduling — mandatory for actionable dispositions */}
           {(() => {

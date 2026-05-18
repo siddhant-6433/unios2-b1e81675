@@ -706,12 +706,14 @@ async function reconcilePostCall(
     return actions.length > 0 ? { templateKey: "", templateParams: [], actions } : null;
   }
 
-  // Default for interested / no disposition / partial conversation: post-call summary
-  // ("as discussed on our call, here are the details for ..."). Includes video URL.
-  actions.push("wa:ai_call_post_summary");
+  // Default for interested / no disposition / partial conversation: send
+  // course_info_v4 — body includes the actual courses.video_url
+  // (youtu.be / instagram / etc) as a tappable URL plus a single "View
+  // fees & apply" button to the course page admissions section.
+  actions.push("wa:course_info_v4");
   return {
-    templateKey: "ai_call_post_summary",
-    templateParams: [waLd.name, cn, cm, courseLink, applyLink, videoLink],
+    templateKey: "course_info_v4",
+    templateParams: [],
     phone: waLd.phone,
     actions,
   };
@@ -2728,16 +2730,57 @@ Deno.serve({ port: PORT }, async (req) => {
 
     const bStatusUrl = `https://${host}/bridge-b-status/${callId}`;
 
+    // Plivo fires <Dial callbackUrl="…"> on every Dial event (ringing,
+    // answered, completed). This is the only reliable way to detect the
+    // "answered" moment for a bridged leg in Plivo XML — Call.create's
+    // callback_url only fires once at queue time, and <Number>'s own
+    // statusCallbackUrl defaults to completed-only with no widening attr
+    // that Plivo accepts.
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Record recordSession="true" redirect="false" maxLength="3600"${recordingCallbackUrl ? ` callbackUrl="${recordingCallbackUrl}" callbackMethod="POST"` : ""} />
   <Speak voice="Polly.Kajal">Connecting you to the student now.</Speak>
-  <Dial callerId="${PLIVO_PHONE_NUMBER}" action="${statusUrl}" method="POST" machineDetection="true" machineDetectionTime="5000">
-    <Number statusCallbackUrl="${bStatusUrl}" statusCallbackMethod="POST">${studentPhone}</Number>
+  <Dial callerId="${PLIVO_PHONE_NUMBER}" action="${statusUrl}" method="POST" callbackUrl="${bStatusUrl}" callbackMethod="POST" machineDetection="true" machineDetectionTime="5000">
+    <Number>${studentPhone}</Number>
   </Dial>
 </Response>`;
 
     return new Response(xml, { headers: { "Content-Type": "application/xml" } });
+  }
+
+  // POST /bridge-call-status/{callId} — Plivo per-state callback on the
+  // PARENT call (set via callback_url on Call.create). Fires every time the
+  // CallStatus changes (initiated → ringing → in-progress → completed). We
+  // use the in-progress event to write ai_call_records.student_connected_at
+  // so the lead-page polling can auto-flip the dialog.
+  //
+  // The <Number statusCallbackUrl="…" /bridge-b-status> path is unreliable
+  // because Plivo's per-leg callback defaults to "completed"-only and the
+  // attribute we'd need to widen it (statusCallbackEvent) is Twilio-only
+  // syntax that Plivo rejects with "Invalid Action XML".
+  if (path.startsWith("/bridge-call-status/")) {
+    const callId = path.split("/bridge-call-status/")[1];
+    const body = await req.formData().catch(() => null);
+    const params = body ? Object.fromEntries(body) : {} as any;
+    const callStatus = String(params.CallStatus || params.Status || "").toLowerCase();
+    const event = String(params.Event || "").toLowerCase();
+
+    console.log(`[BRIDGE-CALL-STATUS ${callId}] CallStatus=${callStatus} Event=${event}`);
+
+    const isAnswered = callStatus === "in-progress" || event === "answered";
+    if (isAnswered && SUPABASE_URL) {
+      const dbH = { "Content-Type": "application/json", apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
+      await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
+        method: "PATCH",
+        headers: { ...dbH, Prefer: "return=minimal" },
+        body: JSON.stringify({
+          student_connected_at: new Date().toISOString(),
+          status: "in_progress",
+        }),
+      }).catch(e => console.error(`[BRIDGE-CALL-STATUS ${callId}] DB update failed:`, e.message));
+      console.log(`[BRIDGE-CALL-STATUS ${callId}] Wrote student_connected_at + status=in_progress`);
+    }
+    return new Response("OK");
   }
 
   // POST /bridge-status/{callId} — Plivo Dial action callback (student leg result)
@@ -2765,20 +2808,26 @@ Deno.serve({ port: PORT }, async (req) => {
       (callCtx as any)._statusRan = true;
       console.log(`[BRIDGE-STATUS ${callId}] disposition=${disp || "connected"} aLeg=${aLegUUID.slice(0,12)}`);
     }
-    return new Response("OK");
+    // Plivo's <Dial action="…"> expects empty body or valid PlivoML. Returning
+    // plain "OK" triggers HangupCauseCode 8012 "Invalid Action XML" in Plivo
+    // logs (call audio still works, but the error noise hides real failures).
+    return new Response("<Response></Response>", { headers: { "Content-Type": "application/xml" } });
   }
 
-  // POST /bridge-b-status/{callId} — Plivo B-leg (student) status callback
-  // Fires when student's phone rings, answers, or hangs up.
-  // Key event: CallStatus="in-progress" means student ACTUALLY answered.
+  // POST /bridge-b-status/{callId} — Plivo <Dial callbackUrl=…> events.
+  // Fires on each Dial state change (ringing / answered / completed). The
+  // payload uses Event= for the state name ("Answered", "Ringing", "Hangup")
+  // plus CallStatus/DialStatus mirroring the same info. We also still
+  // accept the older per-Number callback shape that uses just CallStatus.
   if (path.startsWith("/bridge-b-status/")) {
     const callId = path.split("/bridge-b-status/")[1];
     const body = await req.formData().catch(() => null);
     const params = body ? Object.fromEntries(body) : {} as any;
-    const callStatus = (params.CallStatus || "").toLowerCase();
-    const bLegUUID = params.CallUUID || "";
+    const callStatus = String(params.CallStatus || params.DialStatus || "").toLowerCase();
+    const event = String(params.Event || "").toLowerCase();
+    const bLegUUID = String(params.DialBLegUUID || params.CallUUID || "");
 
-    console.log(`[BRIDGE-B-STATUS ${callId}] CallStatus=${callStatus} bLeg=${bLegUUID} ALL:`, JSON.stringify(params));
+    console.log(`[BRIDGE-B-STATUS ${callId}] CallStatus=${callStatus} Event=${event} bLeg=${bLegUUID} ALL:`, JSON.stringify(params));
 
     // Store bLegUUID in call context for bridge-hangup to use
     const callCtx = activeCallContexts.get(callId);
@@ -2786,15 +2835,35 @@ Deno.serve({ port: PORT }, async (req) => {
       (callCtx as any)._bLegUUID = bLegUUID;
     }
 
-    // Student answered — update DB so client polling can detect it
-    if (callStatus === "in-progress" && SUPABASE_URL) {
+    // Plivo's "answered" Dial event uses Event=DialAnswer or DialConnected
+    // (lowercased here). CallStatus=in-progress arrives on the
+    // DialConnected event. Accept any of the three.
+    const isAnsweredEvent = callStatus === "in-progress"
+      || callStatus === "answered"
+      || event === "answered"
+      || event === "dialanswer"
+      || event === "dialconnected";
+    if (isAnsweredEvent && SUPABASE_URL) {
       const dbH = { "Content-Type": "application/json", apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
-      await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
-        method: "PATCH",
-        headers: { ...dbH, Prefer: "return=minimal" },
-        body: JSON.stringify({ student_connected_at: new Date().toISOString() }),
-      }).catch(e => console.error(`[BRIDGE-B-STATUS ${callId}] DB update failed:`, e.message));
-      console.log(`[BRIDGE-B-STATUS ${callId}] Student answered! Updated student_connected_at`);
+      try {
+        const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
+          method: "PATCH",
+          headers: { ...dbH, Prefer: "return=representation" },
+          body: JSON.stringify({
+            student_connected_at: new Date().toISOString(),
+            status: "in_progress",
+          }),
+        });
+        const patchBody = await patchRes.text().catch(() => "");
+        if (!patchRes.ok) {
+          console.error(`[BRIDGE-B-STATUS ${callId}] PATCH FAILED status=${patchRes.status} body=${patchBody.slice(0, 500)}`);
+        } else {
+          const rows = patchBody ? (JSON.parse(patchBody) as any[]) : [];
+          console.log(`[BRIDGE-B-STATUS ${callId}] PATCH ok rows=${Array.isArray(rows) ? rows.length : "?"} student_connected_at=${(rows[0] || {}).student_connected_at || "(missing)"}`);
+        }
+      } catch (e: any) {
+        console.error(`[BRIDGE-B-STATUS ${callId}] DB update threw:`, e.message);
+      }
     }
 
     return new Response("OK");

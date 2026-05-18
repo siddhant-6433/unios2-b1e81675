@@ -102,6 +102,7 @@ const managementMenu: MenuItem[] = [
     icon: ShieldCheck,
     anyPermission: ["campuses_courses:view", "user_management:view", "permissions:view"],
   },
+  { title: "WhatsApp Health", url: "/whatsapp-health", icon: AlertTriangle, permission: "user_management:view" },
   { title: "Documents", url: "/documents", icon: FileText, permission: "documents:view" },
   { title: "Alumni Verification", url: "/alumni-verifications", icon: ShieldCheck, permission: "alumni_verification:view" },
 ];

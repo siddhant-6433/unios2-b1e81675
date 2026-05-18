@@ -5,6 +5,40 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+type WhatsAppRoute = "default" | "otp" | "call" | "visit" | "bulk" | "reply";
+
+function routeConfig(route: WhatsAppRoute) {
+  const token =
+    (route === "otp" ? Deno.env.get("WHATSAPP_OTP_API_TOKEN") : null) ||
+    (route === "call" ? Deno.env.get("WHATSAPP_CALL_API_TOKEN") : null) ||
+    (route === "visit" ? Deno.env.get("WHATSAPP_VISIT_API_TOKEN") : null) ||
+    (route === "bulk" ? Deno.env.get("WHATSAPP_BULK_API_TOKEN") : null) ||
+    (route === "reply" ? Deno.env.get("WHATSAPP_REPLY_API_TOKEN") : null) ||
+    Deno.env.get("WHATSAPP_API_TOKEN");
+
+  const phoneNumberId =
+    (route === "otp" ? Deno.env.get("WHATSAPP_OTP_PHONE_NUMBER_ID") : null) ||
+    (route === "call" ? Deno.env.get("WHATSAPP_CALL_PHONE_NUMBER_ID") : null) ||
+    (route === "visit" ? Deno.env.get("WHATSAPP_VISIT_PHONE_NUMBER_ID") : null) ||
+    (route === "bulk" ? Deno.env.get("WHATSAPP_BULK_PHONE_NUMBER_ID") : null) ||
+    (route === "reply" ? Deno.env.get("WHATSAPP_REPLY_PHONE_NUMBER_ID") : null) ||
+    Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+
+  return { route, token, phoneNumberId };
+}
+
+function getWhatsAppConfigForPhone(requestedPhoneNumberId: string | null) {
+  const configs = [
+    routeConfig("default"),
+    routeConfig("otp"),
+    routeConfig("call"),
+    routeConfig("visit"),
+    routeConfig("bulk"),
+    routeConfig("reply"),
+  ];
+  return configs.find((config) => requestedPhoneNumberId && config.phoneNumberId === requestedPhoneNumberId) || routeConfig("reply");
+}
+
 // ─── NIMT Knowledge Base ────────────────────────────────────────────────────
 
 const KNOWLEDGE_BASE = `
@@ -235,7 +269,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { phone, message, lead_name, lead_stage, course_interest, recent_messages } = await req.json();
+    const { phone, message, lead_name, lead_stage, course_interest, recent_messages, business_phone_number_id } = await req.json();
 
     if (!phone || !message) {
       return new Response(JSON.stringify({ error: "phone and message required" }), {
@@ -288,8 +322,8 @@ Deno.serve(async (req) => {
         ? "Thanks for writing to NIMT. You've been forwarded to our HR team — they will get in touch about openings shortly. For urgent queries email careers@nimt.ac.in."
         : "Thanks for your message. You've been forwarded to our procurement team. For business enquiries please email procurement@nimt.ac.in with your company profile.";
       try {
-        const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
-        const pnId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+        const { token: waToken, phoneNumberId: pnId } = getWhatsAppConfigForPhone(typeof business_phone_number_id === "string" ? business_phone_number_id : null);
+        if (!waToken || !pnId) throw new Error("WhatsApp reply route is not configured");
         const waPhone = phone.replace(/[^0-9]/g, "");
         const sendRes = await fetch(`https://graph.facebook.com/v21.0/${pnId}/messages`, {
           method: "POST",
@@ -310,6 +344,7 @@ Deno.serve(async (req) => {
             status: "sent",
             is_read: true,
             template_key: role === "job_applicant" ? "hr_handoff" : "procurement_handoff",
+            business_phone_number_id: pnId,
           });
         }
       } catch (e) {
@@ -463,8 +498,12 @@ Deno.serve(async (req) => {
     }
 
     // ── Send via WhatsApp API ───────────────────────────────────────────────
-    const waToken = Deno.env.get("WHATSAPP_API_TOKEN")!;
-    const pnId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID")!;
+    const { token: waToken, phoneNumberId: pnId } = getWhatsAppConfigForPhone(typeof business_phone_number_id === "string" ? business_phone_number_id : null);
+    if (!waToken || !pnId) {
+      return new Response(JSON.stringify({ error: "WhatsApp reply route is not configured" }), {
+        status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     const waPhone = phone.replace(/[^0-9]/g, "");
 
     const waRes = await fetch(`https://graph.facebook.com/v21.0/${pnId}/messages`, {
@@ -497,6 +536,7 @@ Deno.serve(async (req) => {
       status: "sent",
       is_read: true,
       template_key: "ai_auto_reply",
+      business_phone_number_id: pnId,
     });
 
     return new Response(JSON.stringify({ success: true, reply: aiReply, query_type: queryType, action: botAction }), {

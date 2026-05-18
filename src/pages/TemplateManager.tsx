@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   Loader2, Plus, Edit, Trash2, Mail, MessageSquare, Eye, RefreshCw, Send, CheckCircle, Clock, XCircle, AlertTriangle,
+  GraduationCap, Save, Filter,
 } from "lucide-react";
 
 // ── WhatsApp Template (from Meta API) ──
@@ -61,6 +62,122 @@ const TemplateManager = () => {
   const [formBody, setFormBody] = useState("");
   const [formCategory, setFormCategory] = useState("general");
   const [formVariables, setFormVariables] = useState("");
+
+  // ── Course Data tab state ────────────────────────────────────────────────
+  // Fields that flow into the course_info_v1 WhatsApp template body via
+  // fn_resolve_course_info_params. Admins edit them here so the resolver
+  // pulls the right text without anyone having to touch SQL.
+  type CourseRow = {
+    id: string;
+    code: string;
+    name: string;
+    duration_years: number | null;
+    type: string | null;
+    marketing_eligibility: string | null;
+    video_url: string | null;
+    slug: string | null;
+  };
+  const [courseRows, setCourseRows] = useState<CourseRow[]>([]);
+  const [coursesLoading, setCoursesLoading] = useState(false);
+  const [courseEdits, setCourseEdits] = useState<Record<string, Partial<CourseRow>>>({});
+  const [savingCourseId, setSavingCourseId] = useState<string | null>(null);
+  const [coursePreview, setCoursePreview] = useState<{ courseName: string; rendered: string } | null>(null);
+
+  const fetchCourses = async () => {
+    setCoursesLoading(true);
+    const { data, error } = await (supabase as any)
+      .from("courses")
+      .select("id, code, name, duration_years, type, marketing_eligibility, video_url, slug")
+      .order("code");
+    if (!error && data) setCourseRows(data as CourseRow[]);
+    setCoursesLoading(false);
+  };
+
+  const saveCourse = async (id: string) => {
+    const edits = courseEdits[id];
+    if (!edits) return;
+    setSavingCourseId(id);
+    const { error } = await (supabase as any).from("courses").update(edits).eq("id", id);
+    if (error) {
+      toast({ title: "Save failed", description: error.message, variant: "destructive" });
+    } else {
+      setCourseRows(prev => prev.map(c => (c.id === id ? { ...c, ...edits } : c)));
+      setCourseEdits(prev => { const n = { ...prev }; delete n[id]; return n; });
+      toast({ title: "Course updated" });
+    }
+    setSavingCourseId(null);
+  };
+
+  // Preview what course_info_v1 will look like for a given course — calls the
+  // resolver RPC with a fake lead (we attach the course_id to a transient
+  // representative lead via a wrapper RPC). Simpler: just show the resolver
+  // output by attaching a real lead temporarily isn't ideal. Instead we
+  // render client-side from the edited fields so previews work without round-tripping.
+  const previewCourseTemplate = (c: CourseRow) => {
+    const e = courseEdits[c.id] || {};
+    const merged = { ...c, ...e } as CourseRow;
+    const duration = merged.duration_years
+      ? `${merged.duration_years} year${merged.duration_years === 1 ? "" : "s"} (${merged.type || "—"})`
+      : "—";
+    const eligibility = merged.marketing_eligibility || "(falls back to eligibility_rules.notes)";
+    const courseUrl = merged.slug
+      ? `https://www.nimt.ac.in/courses/${merged.slug}#admissions`
+      : "https://www.nimt.ac.in/courses";
+    const videoUrl = merged.video_url || courseUrl;
+    const rendered =
+`Hi <student>, here are the details for ${merged.name} at NIMT:
+• Duration: ${duration}
+• Eligibility: ${eligibility}
+• Accreditation: (resolved from approval_letters)
+
+Buttons:
+  ▶ Watch course video → ${videoUrl}
+  ▶ View fees & apply → ${courseUrl}`;
+    setCoursePreview({ courseName: merged.name, rendered });
+  };
+
+  useEffect(() => { fetchCourses(); }, []);
+
+  // ── Lead Picker tab state ────────────────────────────────────────────────
+  // whatsapp_template_settings.show_in_lead_picker drives the visible list
+  // in the lead-page SendWhatsAppDialog. Admin toggles each here.
+  type WaSetting = {
+    template_key: string;
+    display_name: string;
+    description: string | null;
+    category: string | null;
+    show_in_lead_picker: boolean;
+  };
+  const [waSettings, setWaSettings] = useState<WaSetting[]>([]);
+  const [waSettingsLoading, setWaSettingsLoading] = useState(false);
+  const [waToggling, setWaToggling] = useState<string | null>(null);
+
+  const fetchWaSettings = async () => {
+    setWaSettingsLoading(true);
+    const { data, error } = await (supabase as any)
+      .from("whatsapp_template_settings")
+      .select("template_key, display_name, description, category, show_in_lead_picker")
+      .order("category", { ascending: true })
+      .order("display_name", { ascending: true });
+    if (!error && data) setWaSettings(data as WaSetting[]);
+    setWaSettingsLoading(false);
+  };
+
+  const toggleWaSetting = async (templateKey: string, next: boolean) => {
+    setWaToggling(templateKey);
+    const { error } = await (supabase as any)
+      .from("whatsapp_template_settings")
+      .update({ show_in_lead_picker: next })
+      .eq("template_key", templateKey);
+    if (error) {
+      toast({ title: "Update failed", description: error.message, variant: "destructive" });
+    } else {
+      setWaSettings(prev => prev.map(s => s.template_key === templateKey ? { ...s, show_in_lead_picker: next } : s));
+    }
+    setWaToggling(null);
+  };
+
+  useEffect(() => { fetchWaSettings(); }, []);
 
   // WhatsApp state
   const [waTemplates, setWaTemplates] = useState<MetaTemplate[]>([]);
@@ -240,6 +357,14 @@ const TemplateManager = () => {
           <TabsTrigger value="whatsapp"
             className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
             WhatsApp Templates
+          </TabsTrigger>
+          <TabsTrigger value="courses"
+            className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
+            Course Data
+          </TabsTrigger>
+          <TabsTrigger value="picker"
+            className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
+            Lead Picker
           </TabsTrigger>
         </TabsList>
 
@@ -438,7 +563,204 @@ const TemplateManager = () => {
             </div>
           )}
         </TabsContent>
+
+        {/* COURSE DATA — fields that flow into the course_info_v1 template */}
+        <TabsContent value="courses" className="mt-4 space-y-4">
+          <div className="rounded-xl border border-border bg-card p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <GraduationCap className="h-4 w-4 text-primary" />
+                  Course data sent in WhatsApp templates
+                </h3>
+                <p className="text-xs text-muted-foreground mt-1 max-w-2xl">
+                  These five fields feed the <span className="font-mono">course_info_v1</span> template body (Duration,
+                  Eligibility, Accreditation, the video button, and the fees-and-apply button). Edit them here so
+                  outbound messages match reality. Preview shows the rendered template.
+                </p>
+              </div>
+              <Button variant="outline" size="sm" className="gap-2" onClick={fetchCourses} disabled={coursesLoading}>
+                <RefreshCw className={`h-3.5 w-3.5 ${coursesLoading ? "animate-spin" : ""}`} /> Reload
+              </Button>
+            </div>
+          </div>
+
+          {coursesLoading ? (
+            <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+          ) : (
+            <div className="rounded-xl border border-border bg-card overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/40 text-muted-foreground">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium">Code</th>
+                    <th className="text-left px-3 py-2 font-medium">Course name</th>
+                    <th className="text-left px-3 py-2 font-medium">Duration</th>
+                    <th className="text-left px-3 py-2 font-medium min-w-[220px]">Marketing eligibility</th>
+                    <th className="text-left px-3 py-2 font-medium min-w-[200px]">Video URL</th>
+                    <th className="text-left px-3 py-2 font-medium min-w-[180px]">Slug</th>
+                    <th className="text-right px-3 py-2 font-medium">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {courseRows.map((c) => {
+                    const e = courseEdits[c.id] || {};
+                    const merged = { ...c, ...e } as CourseRow;
+                    const dirty = Object.keys(e).length > 0;
+                    const set = (k: keyof CourseRow, v: any) => setCourseEdits(prev => ({ ...prev, [c.id]: { ...prev[c.id], [k]: v } }));
+                    return (
+                      <tr key={c.id} className="border-t border-border align-top">
+                        <td className="px-3 py-2 font-mono text-foreground whitespace-nowrap">{c.code}</td>
+                        <td className="px-3 py-2 text-foreground">{c.name}</td>
+                        <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">
+                          {c.duration_years ? `${c.duration_years}y` : "—"} {c.type ? `(${c.type})` : ""}
+                        </td>
+                        <td className="px-3 py-2">
+                          <textarea
+                            value={merged.marketing_eligibility || ""}
+                            onChange={(ev) => set("marketing_eligibility", ev.target.value)}
+                            rows={2}
+                            placeholder="10+2 with PCB, min 50%…"
+                            className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs resize-y"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            value={merged.video_url || ""}
+                            onChange={(ev) => set("video_url", ev.target.value)}
+                            placeholder="https://youtu.be/…"
+                            className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            value={merged.slug || ""}
+                            onChange={(ev) => set("slug", ev.target.value)}
+                            placeholder="bachelor-of-science-in-nursing"
+                            className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs font-mono"
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-right whitespace-nowrap">
+                          <div className="flex gap-1 justify-end">
+                            <Button size="sm" variant="ghost" className="h-7 text-[11px]" onClick={() => previewCourseTemplate(c)}>
+                              <Eye className="h-3 w-3 mr-1" /> Preview
+                            </Button>
+                            <Button
+                              size="sm"
+                              className="h-7 text-[11px]"
+                              disabled={!dirty || savingCourseId === c.id}
+                              onClick={() => saveCourse(c.id)}
+                            >
+                              {savingCourseId === c.id ? (
+                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                              ) : (
+                                <Save className="h-3 w-3 mr-1" />
+                              )}
+                              Save
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {courseRows.length === 0 && (
+                    <tr><td colSpan={7} className="text-center py-6 text-muted-foreground">No courses.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </TabsContent>
+
+        {/* LEAD PICKER — toggle which WhatsApp templates appear in the lead-page picker */}
+        <TabsContent value="picker" className="mt-4 space-y-4">
+          <div className="rounded-xl border border-border bg-card p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <Filter className="h-4 w-4 text-primary" />
+                  Lead-page Send WhatsApp picker
+                </h3>
+                <p className="text-xs text-muted-foreground mt-1 max-w-2xl">
+                  Toggle which templates the counsellor sees when they tap <span className="font-mono">Send WhatsApp</span> on a lead.
+                  Auto-fired templates (missed_call, nimt_followup_v1, offer_letter_acceptance) are off by default — they're sent
+                  by the system on disposition / offer issuance, not by hand.
+                </p>
+              </div>
+              <Button variant="outline" size="sm" className="gap-2" onClick={fetchWaSettings} disabled={waSettingsLoading}>
+                <RefreshCw className={`h-3.5 w-3.5 ${waSettingsLoading ? "animate-spin" : ""}`} /> Reload
+              </Button>
+            </div>
+          </div>
+
+          {waSettingsLoading ? (
+            <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+          ) : (
+            <div className="rounded-xl border border-border bg-card overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/40 text-muted-foreground">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium">Template key</th>
+                    <th className="text-left px-3 py-2 font-medium">Display name</th>
+                    <th className="text-left px-3 py-2 font-medium">Category</th>
+                    <th className="text-left px-3 py-2 font-medium">Description</th>
+                    <th className="text-center px-3 py-2 font-medium">Show in picker</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {waSettings.map((s) => (
+                    <tr key={s.template_key} className="border-t border-border">
+                      <td className="px-3 py-2 font-mono text-foreground">{s.template_key}</td>
+                      <td className="px-3 py-2 text-foreground">{s.display_name}</td>
+                      <td className="px-3 py-2">
+                        <Badge variant="outline" className="text-[10px]">{s.category || "general"}</Badge>
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground max-w-md">{s.description || "—"}</td>
+                      <td className="px-3 py-2 text-center">
+                        <button
+                          role="switch"
+                          aria-checked={s.show_in_lead_picker}
+                          disabled={waToggling === s.template_key}
+                          onClick={() => toggleWaSetting(s.template_key, !s.show_in_lead_picker)}
+                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                            s.show_in_lead_picker ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-700"
+                          } ${waToggling === s.template_key ? "opacity-60" : ""}`}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                              s.show_in_lead_picker ? "translate-x-4" : "translate-x-0.5"
+                            }`}
+                          />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {waSettings.length === 0 && (
+                    <tr><td colSpan={5} className="text-center py-6 text-muted-foreground">No settings yet. Apply migration 20260610100900_whatsapp_template_settings to seed.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </TabsContent>
       </Tabs>
+
+      {/* Course preview dialog */}
+      <Dialog open={!!coursePreview} onOpenChange={(v) => !v && setCoursePreview(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="h-4 w-4" />
+              Preview — {coursePreview?.courseName}
+            </DialogTitle>
+          </DialogHeader>
+          <pre className="text-xs whitespace-pre-wrap font-sans bg-muted/40 rounded-lg p-3 max-h-[60vh] overflow-y-auto">
+            {coursePreview?.rendered}
+          </pre>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCoursePreview(null)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit/Create Dialog */}
       <Dialog open={showEdit} onOpenChange={setShowEdit}>

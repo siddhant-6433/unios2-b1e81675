@@ -4,8 +4,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { Loader2 } from "lucide-react";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { CampusProvider } from "@/contexts/CampusContext";
 import { PermissionProvider } from "@/contexts/PermissionContext";
@@ -51,6 +50,7 @@ const Consultants          = lazy(() => import("./pages/Consultants"));
 const AdmissionAnalytics   = lazy(() => import("./pages/AdmissionAnalytics"));
 const CounsellorDashboard  = lazy(() => import("./pages/CounsellorDashboard"));
 const WhatsAppInbox        = lazy(() => import("./pages/WhatsAppInbox"));
+const WhatsAppHealth       = lazy(() => import("./pages/WhatsAppHealth"));
 const AutomationRules      = lazy(() => import("./pages/AutomationRules"));
 const ConsultantPortal     = lazy(() => import("./pages/ConsultantPortal"));
 const PublisherPortal      = lazy(() => import("./pages/PublisherPortal"));
@@ -136,6 +136,12 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { error: Error
   }
 }
 
+function OfferLinkRedirect() {
+  const { token } = useParams<{ token: string }>();
+  if (!token) return <Navigate to="/apply" replace />;
+  return <Navigate to={`/apply?token=${encodeURIComponent(token)}&view=offer`} replace />;
+}
+
 const App = () => (
   <AppErrorBoundary>
   <QueryClientProvider client={queryClient}>
@@ -155,6 +161,16 @@ const App = () => (
             <Route path="/apply/nimt" element={<ApplyPortal />} />
             <Route path="/apply/beacon" element={<ApplyPortal />} />
             <Route path="/apply/mirai" element={<ApplyPortal />} />
+            {/*
+              Magic-link entry point used by the offer_letter_acceptance
+              WhatsApp template. The button URL is
+              https://uni.nimt.ac.in/apply/offer/{token}; this route normalises
+              the path-param token into the ?token= query string that the
+              apply portal's existing redeem flow already handles, and adds a
+              `view=offer` hint so the portal lands on the offer view after
+              authentication.
+            */}
+            <Route path="/apply/offer/:token" element={<OfferLinkRedirect />} />
             <Route path="/enquiry" element={<EnquiryForm />} />
             <Route path="/publisher-login" element={<PublisherLogin />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
@@ -242,6 +258,7 @@ const App = () => (
                       {/* Comms */}
                       <Route path="/inbox" element={<Inbox />} />
                       <Route path="/whatsapp-inbox" element={<RequirePermission module="whatsapp" action="view"><WhatsAppInbox /></RequirePermission>} />
+                      <Route path="/whatsapp-health" element={<RequirePermission module="user_management" action="view"><WhatsAppHealth /></RequirePermission>} />
                       <Route path="/template-manager" element={<RequirePermission module="templates" action="view"><TemplateManager /></RequirePermission>} />
 
                       {/* Analytics & reporting */}

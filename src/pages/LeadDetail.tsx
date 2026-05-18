@@ -7,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeft, Loader2, Trash2, ArrowRightLeft, Phone, MessageSquare,
   Calendar, CalendarDays, Clock, FileText, Bot, UserCheck, Mail, IndianRupee, MapPin, ThumbsDown, CheckCircle, Footprints,
-  ChevronRight, Ban,
+  ChevronRight, Ban, Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -122,6 +122,17 @@ const LeadDetail = () => {
   const [showScheduleVisit, setShowScheduleVisit] = useState(false);
   const [showFollowup, setShowFollowup] = useState(false);
   const [showCallDisposition, setShowCallDisposition] = useState(false);
+  // Live Plivo status of the in-flight manual call. Drives the dialog through
+  // calling → connected / no_answer / busy / failed. `undefined` means the
+  // dialog was opened outside an active call (legacy "log past call" mode).
+  const [dispositionCallStatus, setDispositionCallStatus] = useState<
+    "calling" | "connected" | "no_answer" | "busy" | "failed" | undefined
+  >(undefined);
+  // True once Plivo reports the bridge has hung up. The dialog stays on the
+  // "connected" UI (disposition picker) but the elapsed timer freezes —
+  // counsellor sees the final talk duration alongside the picker.
+  const [dispositionCallEnded, setDispositionCallEnded] = useState(false);
+  const [activeCallUuid, setActiveCallUuid] = useState<string | null>(null);
   const [dispositionWaSent, setDispositionWaSent] = useState(false);
   const [showRecordPayment, setShowRecordPayment] = useState(false);
   const [showTokenOverride, setShowTokenOverride] = useState(false);
@@ -157,6 +168,87 @@ const LeadDetail = () => {
     setActivities([]);
     setCallLogs([]);
   }, [id]);
+
+  // ── Manual-call status poll ───────────────────────────────────────────────
+  // The voice-agent already captures the "student answered" event in its
+  // /bridge-b-status handler — but it writes a timestamp to
+  // ai_call_records.student_connected_at, not to `status` (which stays
+  // "initiated" until Plivo hangs up). So we poll both columns:
+  //   - student_connected_at IS NOT NULL → flip to "connected"
+  //   - terminal status (no-answer / busy / failed / cancel) → auto-dispose
+  //   - completed with >5s talk → "connected"; ≤5s → "no_answer"
+  // No safety timeout — the manual "Call connected" button covers the edge
+  // case where bridge-b-status never fires (e.g. machine detection skipped).
+  useEffect(() => {
+    if (!activeCallUuid || !showCallDisposition) return;
+    // Stop polling once we've moved past calling, EXCEPT when we're in
+    // "connected" — that state stays until Plivo hangs up (callEnded flag).
+    // Once callEnded is set, no more polls.
+    if (dispositionCallEnded) return;
+    if (dispositionCallStatus && dispositionCallStatus !== "calling" && dispositionCallStatus !== "connected") return;
+
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      const { data } = await (supabase as any)
+        .from("ai_call_records")
+        .select("status, duration_seconds, student_connected_at")
+        .eq("call_uuid", activeCallUuid)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (cancelled) return;
+      if (!data) return;
+      const s = String(data.status || "").toLowerCase();
+      const dur = data.duration_seconds || 0;
+      // Bridge state machine:
+      //  - status=completed with talk-time OR student_connected_at set →
+      //    "connected" (dialog stays on disposition picker)
+      //  - status=completed AND it's the terminal hangup → also flip
+      //    callEnded so the timer freezes
+      //  - status=in_progress / answered / student_connected_at set without
+      //    completed → "connected", timer keeps ticking
+      const wasAnswered = !!data.student_connected_at
+        || s === "in-progress" || s === "in_progress" || s === "answered"
+        || (s === "completed" && dur > 5);
+      if (s === "completed" && wasAnswered) {
+        setDispositionCallStatus("connected");
+        setDispositionCallEnded(true);
+        return;
+      }
+      if (wasAnswered) {
+        setDispositionCallStatus("connected");
+        return;
+      }
+      if (s === "no_answer" || s === "no-answer" || s === "cancel") {
+        setDispositionCallStatus("no_answer");
+      } else if (s === "busy") {
+        setDispositionCallStatus("busy");
+      } else if (s === "failed") {
+        setDispositionCallStatus("failed");
+      } else if (s === "completed") {
+        // Hangup with <5s of talk — treat as no_answer.
+        setDispositionCallStatus("no_answer");
+      }
+      // initiated / ringing → keep "calling"; manual button is the fallback.
+    };
+    tick();
+    const interval = setInterval(tick, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [activeCallUuid, showCallDisposition, dispositionCallStatus, dispositionCallEnded]);
+
+  // Reset the call-status state whenever the dialog closes so the next call
+  // starts fresh.
+  useEffect(() => {
+    if (!showCallDisposition) {
+      setDispositionCallStatus(undefined);
+      setDispositionCallEnded(false);
+      setActiveCallUuid(null);
+    }
+  }, [showCallDisposition]);
 
   // Auto-trigger Cloud Call when navigated with ?action=call.
   // Previously this opened the disposition dialog directly, which let
@@ -316,22 +408,44 @@ const LeadDetail = () => {
     }
 
     // 4. Auto-send WhatsApp to lead based on disposition (fire-and-forget)
-    // Uses UTILITY templates (admissions_followup_update) which work outside the 24-hour window
-    // MARKETING templates (ai_call_course_info) may fail if conversation window expired
-    if (lead.phone) {
+    // Uses UTILITY templates which work outside the 24-hour window.
+    // For interested / call_back: nimt_followup_v2 (personal sign-off with
+    // counsellor name + phone + the actual follow-up date). Counsellor name
+    // and phone are filled in by the fn_resolve_counsellor_signature RPC.
+    if (lead.phone && !data.suppress_auto_whatsapp) {
       const course = courseName || "your selected course";
       let autoTemplate: string | null = null;
       let autoParams: string[] = [];
 
-      if (data.disposition === "interested") {
-        // Use utility template (always delivers) instead of marketing template
-        autoTemplate = "callback_scheduled";
-        autoParams = [lead.name, course];
+      // Format "Fri, 2nd May" — used by nimt_followup_v2.
+      const formatFollowupDate = (iso?: string) => {
+        if (!iso) return "the agreed time";
+        const d = new Date(iso);
+        const day = d.toLocaleDateString("en-IN", { weekday: "short" });
+        const date = d.getDate();
+        const month = d.toLocaleDateString("en-IN", { month: "short" });
+        const ord = (n: number) => {
+          const s = ["th", "st", "nd", "rd"], v = n % 100;
+          return n + (s[(v - 20) % 10] || s[v] || s[0]);
+        };
+        return `${day}, ${ord(date)} ${month}`;
+      };
+
+      if (data.disposition === "interested" || data.disposition === "call_back") {
+        // Only pass the bits the client knows. whatsapp-send fills counsellor
+        // name + phone server-side from profiles + the PLIVO_DIALER_PHONE_NUMBER
+        // env var so the fallback chain lives in one place (and the Plivo
+        // number can be rotated via Supabase secrets without code changes).
+        autoTemplate = "nimt_followup_v2";
+        autoParams = [lead.name, formatFollowupDate(data.followup_date)];
       } else if (data.disposition === "not_answered" || data.disposition === "busy" || data.disposition === "voicemail") {
         autoTemplate = "missed_call";
         autoParams = [lead.name, course];
-      } else if (data.disposition === "call_back") {
-        autoTemplate = "callback_scheduled";
+      } else if (data.disposition === "not_interested") {
+        // Personal closure note. whatsapp-send fills counsellor name + phone
+        // server-side from profiles + PLIVO_DIALER_PHONE_NUMBER, same as
+        // nimt_followup_v2 — caller just passes [name, course_name].
+        autoTemplate = "nimt_not_interested_ack";
         autoParams = [lead.name, course];
       }
 
@@ -365,6 +479,30 @@ const LeadDetail = () => {
           console.error("Auto WA exception:", e);
         });
       }
+    }
+
+    // Optional course-info follow-up — fires when the counsellor ticked
+    // "Also send course details" in the disposition dialog. course_info_v4
+    // resolves all params + button URLs server-side from the lead's course_id,
+    // so we just pass {template_key, phone, lead_id}.
+    if (data.send_course_info && lead.phone && id) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken || anonKey}`,
+          apikey: anonKey,
+        },
+        body: JSON.stringify({
+          template_key: "course_info_v4",
+          phone: lead.phone,
+          lead_id: id,
+        }),
+      }).catch(e => console.error("course_info_v4 send exception:", e));
     }
 
     toast({ title: "Call logged", description: label });
@@ -710,6 +848,29 @@ const LeadDetail = () => {
     setAiCalling(false);
   };
 
+  // Adds the current lead to the user's cloud-dialer pin list so it shows
+  // at the top of /cloud-dialer next time they load that page. RLS limits
+  // inserts to user_id = auth.uid(). The trigger fn_cleanup_cloud_dialer_pin
+  // auto-removes the pin once the lead is actually called.
+  const [pinningToDialer, setPinningToDialer] = useState(false);
+  const pinToDialer = async () => {
+    if (!id || !user?.id) return;
+    setPinningToDialer(true);
+    const { error } = await (supabase as any)
+      .from("cloud_dialer_pins")
+      .insert({ user_id: user.id, lead_id: id });
+    if (error && !String(error.code || "").startsWith("23505")) {
+      // 23505 = duplicate key (already pinned) — treat as success
+      toast({ title: "Couldn't add to dialer", description: error.message, variant: "destructive" });
+    } else {
+      toast({
+        title: error ? "Already in your dialer queue" : "Added to Cloud Dialer",
+        description: "This lead is now pinned at the top of your dialer.",
+      });
+    }
+    setPinningToDialer(false);
+  };
+
   const triggerManualCall = async () => {
     if (!id) return;
     setManualCalling(true);
@@ -729,8 +890,12 @@ const LeadDetail = () => {
         toast({ title: "Call Failed", description: data.error, variant: "destructive" });
       } else {
         toast({ title: "Calling You", description: data?.message || "Pick up your phone to connect to the student." });
-        // Show disposition dialog after a short delay so counsellor can log the call outcome
-        setTimeout(() => setShowCallDisposition(true), 3000);
+        // Open the disposition dialog immediately in "calling" mode. The poll
+        // below flips it to connected / no_answer / busy / failed once Plivo
+        // reports back via ai_call_records.
+        setActiveCallUuid(data?.call_id || null);
+        setDispositionCallStatus("calling");
+        setShowCallDisposition(true);
         fetchAll(true);
       }
     } catch (e: any) {
@@ -929,6 +1094,12 @@ const LeadDetail = () => {
           // Call below is the only path now; disposition dialog auto-opens
           // 3s after the Plivo call connects.
           { icon: Phone, label: "Cloud Call", color: "text-cyan-600 bg-cyan-100 dark:bg-cyan-900/30", action: triggerManualCall, disabled: manualCalling },
+          // Push this lead to the top of the calling user's /cloud-dialer.
+          // Available to anyone who can place calls (RLS scopes to auth.uid()).
+          {
+            icon: Sparkles, label: "Add to Dialer", color: "text-fuchsia-600 bg-fuchsia-100 dark:bg-fuchsia-900/30",
+            action: pinToDialer, disabled: pinningToDialer,
+          },
           { icon: MessageSquare, label: "WhatsApp", color: "text-green-600 bg-green-100 dark:bg-green-900/30", action: () => setShowWhatsApp(true) },
           { icon: Clock, label: "Follow Up", color: "text-orange-600 bg-orange-100 dark:bg-orange-900/30", action: () => setShowFollowup(true) },
           { icon: MapPin, label: "Schedule Visit", color: "text-violet-600 bg-violet-100 dark:bg-violet-900/30", action: () => setShowScheduleVisit(true) },
@@ -1287,6 +1458,14 @@ const LeadDetail = () => {
         campuses={campuses}
         defaultCampusId={lead.campus_id || undefined}
         onSubmit={logCallDisposition}
+        callStatus={dispositionCallStatus}
+        callEnded={dispositionCallEnded}
+        onManualConnect={() => setDispositionCallStatus("connected")}
+        courseName={courseName}
+        leadStage={lead.stage as any}
+        personRole={(lead as any).person_role || null}
+        latestNote={notes[0]?.content || null}
+        aiCallSummary={(lead as any).ai_notes || null}
       />
 
       {/* Score animation popup */}

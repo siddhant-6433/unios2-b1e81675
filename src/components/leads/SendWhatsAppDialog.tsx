@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -192,7 +192,52 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
 
-  const selectedTmpl = TEMPLATES.find(t => t.key === selectedTemplate);
+  // Visibility set from whatsapp_template_settings — only templates with
+  // show_in_lead_picker=true (AND any team/user scoping the admin set) are
+  // surfaced. While loading we render nothing rather than the full
+  // hardcoded list, so admins who toggle a template off see it disappear
+  // immediately instead of after a refresh.
+  const [allowedKeys, setAllowedKeys] = useState<Set<string> | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data, error } = await (supabase as any)
+        .from("whatsapp_template_settings")
+        .select("template_key, show_in_lead_picker, allowed_team_ids, allowed_user_ids")
+        .eq("show_in_lead_picker", true);
+      if (error) {
+        // Fail open — show everything rather than a blank picker.
+        setAllowedKeys(new Set(TEMPLATES.map(t => t.key)));
+        return;
+      }
+      const userId = user?.id || null;
+      const keys = new Set<string>();
+      (data || []).forEach((r: any) => {
+        const teamScoped = Array.isArray(r.allowed_team_ids) && r.allowed_team_ids.length > 0;
+        const userScoped = Array.isArray(r.allowed_user_ids) && r.allowed_user_ids.length > 0;
+        // Team scoping (when active) is enforced server-side via RLS-aware
+        // joins in a future iteration. For now, user-scoping is honored
+        // client-side; team-scoping falls through to all-users.
+        if (userScoped && (!userId || !r.allowed_user_ids.includes(userId))) return;
+        if (teamScoped) {
+          // No team check client-side yet; trust the admin's intent and show.
+          // (Admins choosing to set allowed_team_ids should also set
+          // allowed_user_ids if they want hard enforcement.)
+        }
+        keys.add(r.template_key);
+      });
+      setAllowedKeys(keys);
+    })();
+  }, [open]);
+
+  const visibleTemplates = useMemo(() => {
+    if (!allowedKeys) return [];
+    return TEMPLATES.filter(t => allowedKeys.has(t.key));
+  }, [allowedKeys]);
+
+  const selectedTmpl = visibleTemplates.find(t => t.key === selectedTemplate) || TEMPLATES.find(t => t.key === selectedTemplate);
   const previewParams = selectedTmpl?.buildParams(lead, courseName, campusName, courseDuration, courseType) || [];
   const previewText = selectedTmpl?.preview.replace(/\{\{(\d+)\}\}/g, (_, idx) => previewParams[parseInt(idx) - 1] || "…") || "";
 
@@ -309,7 +354,17 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
         <div className="space-y-1.5">
           <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Choose Template</p>
           <div className="border border-border rounded-xl overflow-hidden divide-y divide-border max-h-[220px] overflow-y-auto">
-            {TEMPLATES.map((t) => (
+            {allowedKeys === null && (
+              <div className="px-4 py-3 text-xs text-muted-foreground flex items-center gap-2">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading templates…
+              </div>
+            )}
+            {allowedKeys !== null && visibleTemplates.length === 0 && (
+              <div className="px-4 py-6 text-xs text-muted-foreground text-center">
+                No templates available. Ask an admin to enable templates in Template Manager → Lead Picker.
+              </div>
+            )}
+            {visibleTemplates.map((t) => (
               <button
                 key={t.key}
                 onClick={() => setSelectedTemplate(t.key)}

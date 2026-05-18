@@ -250,6 +250,147 @@ const TEMPLATES = [
       },
     ],
   },
+  // ── Course info (data-driven from fn_resolve_course_info_params) ────────
+  // Replaces the per-category course welcome templates. Single body whose
+  // params (duration / eligibility / approval) are filled per-lead at send
+  // time by the resolver RPC. Used for AI post-call follow-up, counsellor
+  // disposition nudge, and ad-hoc sends from LeadDetail.
+  {
+    name: "course_info_v1",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Hi {{1}}, here are the details for {{2}} at NIMT:\n• Duration: {{3}}\n• Eligibility: {{4}}\n• Accreditation: {{5}}\n\nWatch a short course video or view the full fees and syllabus on the course page. Reply STOP to opt out.",
+        example: { body_text: [["Rahul Sharma", "Bachelor of Science in Nursing", "4 years (semester)", "10+2 PCB, min 50%", "INC, AKTU"]] },
+      },
+      {
+        type: "BUTTONS",
+        buttons: [
+          {
+            type: "URL",
+            text: "Watch course video",
+            url: "https://www.nimt.ac.in/courses/{{1}}",
+            example: ["https://www.nimt.ac.in/courses/bachelor-of-science-in-nursing"],
+          },
+          {
+            type: "URL",
+            text: "View fees & apply",
+            url: "https://www.nimt.ac.in/courses/{{1}}",
+            example: ["https://www.nimt.ac.in/courses/bachelor-of-science-in-nursing#admissions"],
+          },
+        ],
+      },
+    ],
+  },
+  // Fallback when the lead has no course_id. Single CTA to the course listing
+  // so the recipient can browse rather than receiving an empty/awkward body.
+  {
+    name: "course_info_generic",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Hi {{1}}, thanks for your interest in NIMT Educational Institutions. We offer programmes in nursing, paramedical, pharma, management, education, law, and engineering across our Greater Noida, Ghaziabad, and Kotputli campuses. Browse the full list, fees, and eligibility on our website. Reply STOP to opt out.",
+        example: { body_text: [["Rahul Sharma"]] },
+      },
+      {
+        type: "BUTTONS",
+        buttons: [{
+          type: "URL",
+          text: "View all courses",
+          url: "https://www.nimt.ac.in/courses",
+        }],
+      },
+    ],
+  },
+  // Visit reminder with counsellor name. Replaces the older visit_reminder
+  // (which did not name the counsellor) — kept as a separate template so
+  // the old one stays available during Meta review.
+  {
+    name: "visit_reminder_v2",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Hi {{1}}, your campus visit for {{2}} is on {{3}} at {{4}}. Your counsellor {{5}} will meet you there. Tap below for directions to the campus.",
+        example: { body_text: [["Rahul Sharma", "Bachelor of Science in Nursing", "12 May 2026, 11:00 am", "NIMT Greater Noida", "Priya Kapoor"]] },
+      },
+      {
+        type: "BUTTONS",
+        buttons: [{
+          type: "URL",
+          text: "Get directions",
+          url: "https://maps.google.com/?cid={{1}}",
+          example: ["https://maps.google.com/?cid=1820424915210710582"],
+        }],
+      },
+    ],
+  },
+  // Connected-call follow-up. Sent after a counsellor marks a call as
+  // Interested or Call Back. Says the counsellor will call back on the
+  // scheduled date and signs off with the counsellor's name + reach-me phone
+  // so the lead has a personal point of contact.
+  // Body params: name, formatted-date, counsellor_name, counsellor_phone.
+  {
+    name: "nimt_followup_v1",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        // Body cannot end with a variable (Meta error 2388299 "Leading or
+        // trailing params not allowed") — trailing text after {{4}}.
+        text: "Hi {{1}}, thanks for speaking with us at NIMT Educational Institutions. As per our discussion I will call you back on {{2}}. Looking forward to assisting you with your admission journey.\n\n— {{3}}, NIMT Counsellor\nReach me directly on {{4}} for any questions before our next call.",
+        example: { body_text: [["Rahul Sharma", "Fri, 2nd May", "Priya Kapoor", "+91 9555 192 192"]] },
+      },
+    ],
+  },
+  // Counsellor-friendly closure when the lead said "not interested" during a
+  // MANUAL call disposition. NOT sent from AI calls (that would amplify spam
+  // exactly when the user has signalled they don't want messages). Body is
+  // intentionally personal — counsellor name + their Plivo phone — so it
+  // reads as a one-to-one wrap-up, not a marketing blast. No URL button.
+  {
+    name: "nimt_not_interested_ack",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Hi {{1}}, thanks for speaking with us about {{2}} at NIMT Educational Institutions. We've marked your enquiry as \"not interested\" and won't reach out unless you'd like us to. If you'd like to revisit this in the future, message {{3}} directly on {{4}}. Reply STOP to fully opt out of all messages.",
+        example: { body_text: [["Rahul Sharma", "Bachelor of Science in Nursing", "Priya Kapoor", "+91 9555192192"]] },
+      },
+    ],
+  },
+  // Offer letter with a single-tap "Submit Offer Acceptance" button that
+  // takes the lead to a magic-link portal where they can view the letter,
+  // accept it, and pay the token fee in one flow. Replaces the older
+  // offer_letter_issued template, which routed via a separate accept-pay UI.
+  {
+    name: "offer_letter_acceptance",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Congratulations {{1}}! NIMT has issued your offer letter for {{2}}. Net fee: Rs.{{3}}. Please accept by {{4}}. Tap below to view your offer, accept it, and pay the token fee in one secure step.",
+        example: { body_text: [["Rahul Sharma", "Bachelor of Science in Nursing", "120000", "30 Jun 2026"]] },
+      },
+      {
+        type: "BUTTONS",
+        buttons: [{
+          type: "URL",
+          text: "Submit Offer Acceptance",
+          url: "https://uni.nimt.ac.in/apply/offer/{{1}}",
+          example: ["https://uni.nimt.ac.in/apply/offer/251fe6ea-b0a2-4bf0-beb5-3b2205bc3f39"],
+        }],
+      },
+    ],
+  },
 ];
 
 Deno.serve(async (req) => {
