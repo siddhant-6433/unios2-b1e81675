@@ -14,6 +14,7 @@ interface SearchResult {
   stage?: string;
   status?: string;
   leadId?: string;
+  ownerName?: string;
 }
 
 const stageLabels: Record<string, string> = {
@@ -63,7 +64,7 @@ export function HeaderSearch() {
     setLoading(true);
 
     const [leadsRes, studentsRes, applicationsRes] = await Promise.all([
-      supabase.from("leads").select("id, name, phone, application_id, pre_admission_no, admission_no, stage")
+      supabase.from("leads").select("id, name, phone, application_id, pre_admission_no, admission_no, stage, counsellor_profile:counsellor_id(display_name)")
         .or(`phone.ilike.%${q}%,name.ilike.%${q}%,application_id.ilike.%${q}%,pre_admission_no.ilike.%${q}%,admission_no.ilike.%${q}%,email.ilike.%${q}%`)
         .limit(8),
       supabase.from("students").select("id, name, phone, admission_no, pre_admission_no, status")
@@ -75,12 +76,13 @@ export function HeaderSearch() {
     ]);
 
     const all: SearchResult[] = [];
-    (leadsRes.data || []).forEach(l => {
+    (leadsRes.data || []).forEach((l: any) => {
       all.push({
         type: "lead", id: l.id, name: l.name, phone: l.phone,
         identifier: l.application_id || l.pre_admission_no || l.admission_no || undefined,
         identifierLabel: l.admission_no ? "AN" : l.pre_admission_no ? "PAN" : l.application_id ? "App" : undefined,
         stage: l.stage,
+        ownerName: l.counsellor_profile?.display_name || undefined,
       });
     });
     // Applications surfaced separately so an app lookup works even if the lead row
@@ -188,7 +190,14 @@ export function HeaderSearch() {
                         <Badge variant="outline" className="text-[8px] px-1 py-0 shrink-0">{r.identifierLabel}: {r.identifier}</Badge>
                       )}
                     </div>
-                    <p className="text-[11px] text-muted-foreground truncate">{r.phone}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      {r.phone}
+                      {r.type === "lead" && (
+                        <span className="ml-1.5 text-muted-foreground/80">
+                          · Owner: <span className="font-medium text-foreground/80">{r.ownerName || "Unassigned"}</span>
+                        </span>
+                      )}
+                    </p>
                   </div>
                   {r.stage && (
                     <Badge className="text-[9px] border-0 bg-muted shrink-0">{stageLabels[r.stage] || r.stage}</Badge>

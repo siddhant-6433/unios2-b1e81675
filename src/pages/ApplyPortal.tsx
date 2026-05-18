@@ -1751,17 +1751,10 @@ const ApplyPortal = () => {
         body: { application_id: app.application_id },
       }).catch(() => {});
     }
-    if (app.lead_id) {
-      setTimeout(() => {
-        supabase.functions.invoke("notify-event", {
-          body: {
-            event: "app_submitted",
-            lead_id: app.lead_id,
-            context: { application_id: app.application_id },
-          },
-        }).catch(() => {});
-      }, 4000);
-    }
+    // app_submitted notification fires server-side via trg_notify_app_submitted
+    // (see 20260612120000_app_submitted_trigger.sql). The client used to invoke
+    // notify-event directly but the function requires service-role auth and
+    // the call always silently 401'd from anonymous applicants.
   };
 
   const onChange = (updates: Partial<ApplicationData>) => {

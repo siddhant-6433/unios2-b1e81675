@@ -117,3 +117,11 @@ verify_jwt = false
 # sb_secret service-role tokens, so let the function handle auth itself.
 [functions.extract-personal-doc]
 verify_jwt = false
+
+# Anonymous applicants upload documents through this function. The gateway
+# JWT check would 401 anyone with a stale/expired session token before the
+# function runs (same failure mode as redeem-apply-link). The function does
+# its own identity check by matching (application_id, phone) against the
+# applications row, so JWT verification at the gateway is redundant.
+[functions.apply-portal-upload-doc]
+verify_jwt = false
