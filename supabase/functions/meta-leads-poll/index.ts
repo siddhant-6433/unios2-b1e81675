@@ -5,23 +5,56 @@
 // 15-minute window with a 5-minute cadence gives 10 minutes of overlap —
 // duplicates are silently dropped by the unique index on meta_leadgen_id.
 //
-// This approach requires no webhook subscription, no Lead Access Manager
-// config, and automatically picks up forms from future campaigns.
+// Token model:
+//   META_PAGE_ACCESS_TOKEN is treated as a *system user* token. The function
+//   calls /me/accounts at the start of each run to exchange it for per-page
+//   page access tokens, then uses those page tokens for /leadgen_forms and
+//   /leads. Meta requires page-scoped tokens on those endpoints (error #190
+//   "must be called with a Page Access Token" otherwise).
+//
+// Backfill mode:
+//   POST ?lookback_days=N (or lookback_seconds=N) to override the default
+//   15-min window. Useful for one-shot historical ingestion.
 //
 // Required env:
-//   META_PAGE_ACCESS_TOKEN  — Page/System-User token with leads_retrieval
+//   META_PAGE_ACCESS_TOKEN  — System user token with leads_retrieval + pages_show_list
 //   META_PAGE_IDS           — Comma-separated page IDs (defaults to both NIMT pages)
 //   CRON_SECRET             — Shared secret for cron auth
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
 const GRAPH_VERSION = "v21.0";
 // NIMT School + NIMT Educational Institutions — extend via META_PAGE_IDS secret
 const DEFAULT_PAGE_IDS = "111711207848445,443493925579";
-const LOOKBACK_SECONDS = 900; // 15 min window; 10 min overlap at 5-min cadence
+const DEFAULT_LOOKBACK_SECONDS = 900; // 15 min window; 10 min overlap at 5-min cadence
 
-async function getLeadForms(pageId: string, token: string) {
+type PageTokenMap = Map<string, { token: string; name: string }>;
+
+async function getPageTokens(systemUserToken: string, errors: any[]): Promise<PageTokenMap> {
+  const map: PageTokenMap = new Map();
+  let url: string | null =
+    `https://graph.facebook.com/${GRAPH_VERSION}/me/accounts` +
+    `?fields=id,name,access_token&limit=100&access_token=${encodeURIComponent(systemUserToken)}`;
+  let pages = 0;
+  while (url && pages < 10) {
+    const res = await fetch(url);
+    const json: any = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      errors.push({ stage: "me_accounts", error: json?.error?.message || `HTTP ${res.status}` });
+      console.error("[meta-leads-poll] /me/accounts failed:", json?.error);
+      return map;
+    }
+    for (const p of json.data || []) {
+      if (p?.id && p?.access_token) {
+        map.set(String(p.id), { token: p.access_token, name: p.name || "" });
+      }
+    }
+    url = json.paging?.next ?? null;
+    pages++;
+  }
+  return map;
+}
+
+async function getLeadForms(pageId: string, token: string, errors: any[]) {
   let url: string | null =
     `https://graph.facebook.com/${GRAPH_VERSION}/${pageId}/leadgen_forms` +
     `?fields=id,name,status&limit=100&access_token=${encodeURIComponent(token)}`;
@@ -31,6 +64,7 @@ async function getLeadForms(pageId: string, token: string) {
     const res = await fetch(url);
     const json: any = await res.json().catch(() => ({}));
     if (!res.ok) {
+      errors.push({ stage: "leadgen_forms", page_id: pageId, error: json?.error?.message || `HTTP ${res.status}` });
       console.error(`[meta-leads-poll] leadgen_forms error page ${pageId}:`, json?.error?.message);
       break;
     }
@@ -41,7 +75,7 @@ async function getLeadForms(pageId: string, token: string) {
   return forms;
 }
 
-async function fetchLeadsSince(formId: string, sinceUnix: number, token: string) {
+async function fetchLeadsSince(formId: string, sinceUnix: number, token: string, errors: any[]) {
   const fields = [
     "id", "created_time", "field_data",
     "form_id", "form_name",
@@ -59,10 +93,11 @@ async function fetchLeadsSince(formId: string, sinceUnix: number, token: string)
 
   const leads: any[] = [];
   let pages = 0;
-  while (url && pages < 20) {
+  while (url && pages < 50) {
     const res = await fetch(url);
     const json: any = await res.json().catch(() => ({}));
     if (!res.ok) {
+      errors.push({ stage: "leads", form_id: formId, error: json?.error?.message || `HTTP ${res.status}` });
       console.error(`[meta-leads-poll] leads error form ${formId}:`, json?.error?.message);
       break;
     }
@@ -93,46 +128,90 @@ Deno.serve(async (req) => {
   const pageIds = (Deno.env.get("META_PAGE_IDS") || DEFAULT_PAGE_IDS)
     .split(",").map(s => s.trim()).filter(Boolean);
 
+  // Lookback override (for backfill). Accept ?lookback_days=N or
+  // ?lookback_seconds=N as query params; fall back to the 15-min default.
+  const url = new URL(req.url);
+  const lookbackDays = Number(url.searchParams.get("lookback_days") || "");
+  const lookbackSecondsParam = Number(url.searchParams.get("lookback_seconds") || "");
+  let lookbackSeconds = DEFAULT_LOOKBACK_SECONDS;
+  if (Number.isFinite(lookbackDays) && lookbackDays > 0) {
+    lookbackSeconds = Math.floor(lookbackDays * 86400);
+  } else if (Number.isFinite(lookbackSecondsParam) && lookbackSecondsParam > 0) {
+    lookbackSeconds = Math.floor(lookbackSecondsParam);
+  }
+
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const sinceUnix   = Math.floor(Date.now() / 1000) - LOOKBACK_SECONDS;
+  const anonKey     = Deno.env.get("SUPABASE_ANON_KEY") || serviceKey;
+  const sinceUnix   = Math.floor(Date.now() / 1000) - lookbackSeconds;
 
-  const stats = {
+  const errorsDetail: any[] = [];
+  const stats: any = {
     pages: pageIds.length,
+    page_ids: pageIds,
+    lookback_seconds: lookbackSeconds,
     forms_discovered: 0,
     leads_found: 0,
     leads_ingested: 0,
     duplicates: 0,
     errors: 0,
+    per_page: {} as Record<string, { forms: number; leads_found: number; leads_ingested: number; duplicates: number; errors: number; page_name?: string; token_resolved: boolean }>,
   };
 
+  // Exchange the system user token for per-page tokens once per run.
+  const pageTokens = await getPageTokens(accessToken, errorsDetail);
+  if (pageTokens.size === 0 && errorsDetail.length > 0) {
+    stats.errors = errorsDetail.length;
+    return new Response(JSON.stringify({ ok: false, ...stats, errors_detail: errorsDetail }), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    });
+  }
+
   for (const pageId of pageIds) {
-    let forms: Awaited<ReturnType<typeof getLeadForms>>;
-    try {
-      forms = await getLeadForms(pageId, accessToken);
-    } catch (e: any) {
-      console.error(`[meta-leads-poll] getLeadForms failed for ${pageId}:`, e.message);
-      stats.errors++;
+    const pageStat = { forms: 0, leads_found: 0, leads_ingested: 0, duplicates: 0, errors: 0, page_name: "", token_resolved: false };
+    stats.per_page[pageId] = pageStat;
+
+    const pageEntry = pageTokens.get(pageId);
+    if (!pageEntry) {
+      errorsDetail.push({ stage: "page_token_lookup", page_id: pageId, error: "No page token returned by /me/accounts — system user lacks access to this page" });
+      pageStat.errors++;
       continue;
     }
+    pageStat.token_resolved = true;
+    pageStat.page_name = pageEntry.name;
+    const pageToken = pageEntry.token;
+
+    let forms: Awaited<ReturnType<typeof getLeadForms>>;
+    try {
+      forms = await getLeadForms(pageId, pageToken, errorsDetail);
+    } catch (e: any) {
+      errorsDetail.push({ stage: "leadgen_forms_throw", page_id: pageId, error: e.message });
+      pageStat.errors++;
+      continue;
+    }
+    pageStat.forms = forms.length;
     stats.forms_discovered += forms.length;
-    console.log(`[meta-leads-poll] page ${pageId}: ${forms.length} forms`);
+    console.log(`[meta-leads-poll] page ${pageId} (${pageEntry.name}): ${forms.length} forms`);
 
     for (const form of forms) {
       let leads: any[];
       try {
-        leads = await fetchLeadsSince(form.id, sinceUnix, accessToken);
+        leads = await fetchLeadsSince(form.id, sinceUnix, pageToken, errorsDetail);
       } catch (e: any) {
-        console.error(`[meta-leads-poll] fetchLeadsSince failed form ${form.id}:`, e.message);
-        stats.errors++;
+        errorsDetail.push({ stage: "leads_throw", form_id: form.id, error: e.message });
+        pageStat.errors++;
         continue;
       }
       if (leads.length === 0) continue;
 
+      pageStat.leads_found += leads.length;
       stats.leads_found += leads.length;
       console.log(`[meta-leads-poll] form "${form.name}" (${form.id}): ${leads.length} leads to process`);
 
       for (const lead of leads) {
+        // Throttle to stay under Supabase's function-to-function rate cap
+        // (observed ~30 sub-calls before a 50s cooldown). 250ms = 4/sec.
+        await new Promise((r) => setTimeout(r, 250));
         const payload = {
           field_data:      lead.field_data     || [],
           leadgen_id:      lead.id,
@@ -154,31 +233,37 @@ Deno.serve(async (req) => {
             method: "POST",
             headers: {
               "Content-Type":  "application/json",
-              "apikey":         serviceKey,
-              "Authorization": `Bearer ${serviceKey}`,
+              // lead-ingest checks the `apikey` header against SUPABASE_ANON_KEY
+              "apikey":         anonKey,
+              "Authorization": `Bearer ${anonKey}`,
             },
             body: JSON.stringify(payload),
           });
           const json: any = await res.json().catch(() => ({}));
           if (json?.status === "duplicate") {
+            pageStat.duplicates++;
             stats.duplicates++;
           } else if (!res.ok || json?.status === "error") {
+            errorsDetail.push({ stage: "lead_ingest", leadgen_id: lead.id, error: json?.error || json?.message || `HTTP ${res.status}` });
+            pageStat.errors++;
             console.error(`[meta-leads-poll] ingest error lead ${lead.id}:`, json);
-            stats.errors++;
           } else {
+            pageStat.leads_ingested++;
             stats.leads_ingested++;
             console.log(`[meta-leads-poll] ingested lead ${lead.id} → lead_id ${json?.lead_id}`);
           }
         } catch (e: any) {
+          errorsDetail.push({ stage: "lead_ingest_throw", leadgen_id: lead.id, error: e.message });
+          pageStat.errors++;
           console.error(`[meta-leads-poll] fetch lead-ingest failed:`, e.message);
-          stats.errors++;
         }
       }
     }
   }
 
+  stats.errors = errorsDetail.reduce((n, _) => n + 1, 0);
   console.log("[meta-leads-poll] complete:", stats);
-  return new Response(JSON.stringify({ ok: true, ...stats }), {
+  return new Response(JSON.stringify({ ok: true, ...stats, errors_detail: errorsDetail.slice(0, 20) }), {
     headers: { "Content-Type": "application/json" },
   });
 });

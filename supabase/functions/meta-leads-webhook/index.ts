@@ -14,9 +14,10 @@
 // Required env:
 //   META_VERIFY_TOKEN       — random string shared with Meta during webhook setup
 //   META_APP_SECRET         — Facebook App secret for signature verification
-//   META_PAGE_ACCESS_TOKEN  — long-lived Page access token to call Graph API
-//                             (multi-page deployments can later switch to a
-//                             page_id → token map; one token is fine for now)
+//   META_PAGE_ACCESS_TOKEN  — System user token. We exchange it for per-page
+//                             tokens via /me/accounts on first hit and cache
+//                             them for the function instance lifetime (Meta
+//                             requires page-scoped tokens on /{leadgen_id}).
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY — already present
 //
 // Webhook URL to register on Meta:
@@ -34,6 +35,47 @@ const corsHeaders = {
 };
 
 const GRAPH_VERSION = "v21.0";
+
+// Module-level cache of page_id → page access token. Populated lazily from
+// /me/accounts using META_PAGE_ACCESS_TOKEN (treated as a system user token).
+// Refreshed on miss and after PAGE_TOKEN_TTL_MS.
+const PAGE_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
+let pageTokenCache: { fetched_at: number; map: Map<string, string> } | null = null;
+
+async function refreshPageTokens(systemUserToken: string): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  let url: string | null =
+    `https://graph.facebook.com/${GRAPH_VERSION}/me/accounts` +
+    `?fields=id,access_token&limit=100&access_token=${encodeURIComponent(systemUserToken)}`;
+  let pages = 0;
+  while (url && pages < 10) {
+    const res = await fetch(url);
+    const json: any = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.error("[meta-leads-webhook] /me/accounts failed:", json?.error);
+      break;
+    }
+    for (const p of json.data || []) {
+      if (p?.id && p?.access_token) map.set(String(p.id), p.access_token);
+    }
+    url = json.paging?.next ?? null;
+    pages++;
+  }
+  pageTokenCache = { fetched_at: Date.now(), map };
+  return map;
+}
+
+async function getPageToken(pageId: string, systemUserToken: string): Promise<string | null> {
+  const fresh = pageTokenCache && Date.now() - pageTokenCache.fetched_at < PAGE_TOKEN_TTL_MS;
+  let map = fresh ? pageTokenCache!.map : await refreshPageTokens(systemUserToken);
+  let token = map.get(pageId);
+  if (!token && fresh) {
+    // Miss on cached map — could be a newly granted page. Force a refresh.
+    map = await refreshPageTokens(systemUserToken);
+    token = map.get(pageId);
+  }
+  return token || null;
+}
 
 async function verifySignature(rawBody: string, signatureHeader: string | null, appSecret: string): Promise<boolean> {
   if (!signatureHeader || !appSecret) return false;
@@ -131,9 +173,10 @@ Deno.serve(async (req) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const pageAccessToken = Deno.env.get("META_PAGE_ACCESS_TOKEN") || "";
+    const anonKey     = Deno.env.get("SUPABASE_ANON_KEY") || serviceKey;
+    const systemUserToken = Deno.env.get("META_PAGE_ACCESS_TOKEN") || "";
 
-    if (!pageAccessToken) {
+    if (!systemUserToken) {
       console.error("[meta-leads-webhook] META_PAGE_ACCESS_TOKEN missing — cannot fetch lead detail");
       // Return 200 anyway so Meta doesn't retry indefinitely (we'd want to
       // backfill from the activity log if this happens).
@@ -179,8 +222,18 @@ Deno.serve(async (req) => {
           status:      "received",
         }).then(() => {}, () => {/* table may not exist yet — non-blocking */});
 
-        // Pull full lead from Graph API
-        const fetched = await fetchLead(leadgenId, pageAccessToken);
+        // Resolve a page-scoped access token for this page. Meta's
+        // /{leadgen_id} endpoint rejects system-user/user tokens with
+        // error #190.
+        const pageToken = await getPageToken(String(pageId), systemUserToken);
+        if (!pageToken) {
+          console.error(`[meta-leads-webhook] No page token for page ${pageId} — system user lacks access`);
+          results.push({ leadgen_id: leadgenId, status: "no_page_token", page_id: pageId });
+          continue;
+        }
+
+        // Pull full lead from Graph API using the page-scoped token
+        const fetched = await fetchLead(leadgenId, pageToken);
         if (!fetched.ok) {
           console.error(`[meta-leads-webhook] Graph error for ${leadgenId}:`, fetched.error);
           results.push({ leadgen_id: leadgenId, status: "graph_error", error: fetched.error });
@@ -212,9 +265,9 @@ Deno.serve(async (req) => {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            // service-role auth — lead-ingest accepts both apikey and Bearer
-            "apikey":        serviceKey,
-            "Authorization": `Bearer ${serviceKey}`,
+            // lead-ingest checks `apikey` against SUPABASE_ANON_KEY
+            "apikey":        anonKey,
+            "Authorization": `Bearer ${anonKey}`,
           },
           body: JSON.stringify(ingestPayload),
         });

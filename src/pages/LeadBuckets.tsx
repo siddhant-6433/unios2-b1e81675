@@ -127,10 +127,15 @@ export default function LeadBuckets() {
   const [selectedCounsellor, setSelectedCounsellor] = useState<string>("");
 
   const fetchCounts = async () => {
+    // NOTE: the CBSE (nimt) count must match the fetch query in fetchLeads,
+    // which uses `.or(campus_id.neq.MIRAI, campus_id.is.null)`. A plain
+    // .neq excludes NULL campus_id (Postgres `NULL <> X` is NULL, not true),
+    // which silently drops every school lead without a campus assignment —
+    // notably Meta lead-form leads, which can't carry campus_id.
     const [sRes, mRes, nRes, cRes] = await Promise.all([
       supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true }).eq("bucket", "school"),
       supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true }).eq("bucket", "school").eq("campus_id", MIRAI_CAMPUS_ID),
-      supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true }).eq("bucket", "school").neq("campus_id", MIRAI_CAMPUS_ID),
+      supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true }).eq("bucket", "school").or(`campus_id.neq.${MIRAI_CAMPUS_ID},campus_id.is.null`),
       supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true }).eq("bucket", "college"),
     ]);
     setSchoolCount(sRes.count ?? 0);
