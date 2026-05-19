@@ -492,6 +492,19 @@ Deno.serve(async (req) => {
         .eq("code", "GZ1-MES")
         .single();
       if (miraiInst) campus_id = miraiInst.campus_id;
+    } else if (source === "meta_ads" && parsed.meta_page_id) {
+      // Meta lead forms don't carry campus/course fields, so derive the
+      // campus from the page the ad runs on. Page → campus mapping is
+      // authoritative because each Meta Page maps 1:1 to a NIMT campus.
+      // Pages not listed here (e.g. the NIMT Educational Institutions
+      // umbrella page) keep campus_id NULL — the bucket classifier will
+      // place them under 'college' by default.
+      const META_PAGE_TO_CAMPUS: Record<string, string> = {
+        "111711207848445":  "c0000001-0000-0000-0000-000000000002", // NIMT School → Ghaziabad Campus 1 (Arthala)
+        "1016687728205021": "c0000002-0000-0000-0000-000000000001", // Mirai Experiential School → Ghaziabad Campus 2 (Avantika)
+      };
+      const mapped = META_PAGE_TO_CAMPUS[parsed.meta_page_id];
+      if (mapped) campus_id = mapped;
     } else if (parsed.campus_name || parsed.city) {
       const searchTerm = parsed.campus_name || parsed.city || "";
       const { data: campus } = await supabase
