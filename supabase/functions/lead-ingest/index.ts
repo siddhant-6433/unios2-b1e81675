@@ -539,7 +539,6 @@ Deno.serve(async (req) => {
         meta_page_id:       parsed.meta_page_id       || null,
         meta_platform:      parsed.meta_platform      || null,
         raw_form_data:      parsed.raw_form_data      || null,
-        fbclid:             body.fbclid               || null,
         ...attribution,
       })
       .select("id, name, phone, source, stage")
