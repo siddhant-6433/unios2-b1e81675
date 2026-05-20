@@ -118,19 +118,22 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
   // Cleanup poll on unmount
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
-  // Meta Pixel: fire CompleteRegistration once, only on an in-session transition
-  // to paid. wasPaidOnMountRef captures the initial state so returning to a
-  // already-paid application (re-render, route revisit) doesn't refire.
+  // Meta Pixel: fire CompleteRegistration once, only on an in-session
+  // transition to paid. wasPaidOnMountRef captures the initial state so
+  // returning to a already-paid application (re-render, route revisit)
+  // doesn't refire. Uses data.application_id as the event_id seed — must
+  // match what fn_capi_emit_app_fee_registered constructs server-side
+  // ("reg_<application_id>") for Meta to dedupe.
   const wasPaidOnMountRef = useRef(isPaid);
   const pixelFiredRef = useRef(false);
   useEffect(() => {
     if (wasPaidOnMountRef.current) return;
     if (pixelFiredRef.current) return;
     if (!isPaid || isWaived) return;
+    if (!data.application_id) return;
     pixelFiredRef.current = true;
-    const txnId = data.payment_ref || data.application_id;
-    trackPixelCompleteRegistration(txnId, data.fee_amount);
-  }, [isPaid, isWaived, data.payment_ref, data.application_id, data.fee_amount]);
+    trackPixelCompleteRegistration(data.application_id, data.fee_amount);
+  }, [isPaid, isWaived, data.application_id, data.fee_amount]);
 
   // Listen for postMessage from popup gateway windows (Easebuzz, ICICI)
   useEffect(() => {
