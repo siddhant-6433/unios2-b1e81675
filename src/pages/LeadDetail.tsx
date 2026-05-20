@@ -1354,6 +1354,19 @@ const LeadDetail = () => {
             );
           })()}
 
+          {/* Scheduled Visits with completion dialog */}
+          <ScheduledVisitsSection
+            visits={visits}
+            campuses={campuses}
+            courses={courses}
+            coursesByDepartment={coursesByDepartment}
+            leadId={id!}
+            userId={user?.id || null}
+            onRefresh={() => fetchAll(true)}
+            showWalkin={showWalkinCompletion}
+            onCloseWalkin={() => setShowWalkinCompletion(false)}
+          />
+
           {/* Previous Call Notes */}
           {callLogs.length > 0 && (
             <Card className="border-border/60 shadow-none">
@@ -1398,19 +1411,6 @@ const LeadDetail = () => {
 
           {/* Website Chat Transcripts */}
           <WebChatTranscripts leadId={id!} />
-
-          {/* Scheduled Visits with completion dialog */}
-          <ScheduledVisitsSection
-            visits={visits}
-            campuses={campuses}
-            courses={courses}
-            coursesByDepartment={coursesByDepartment}
-            leadId={id!}
-            userId={user?.id || null}
-            onRefresh={() => fetchAll(true)}
-            showWalkin={showWalkinCompletion}
-            onCloseWalkin={() => setShowWalkinCompletion(false)}
-          />
 
           <LeadTimeline
             activities={activities}
