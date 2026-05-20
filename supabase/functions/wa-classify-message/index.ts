@@ -193,16 +193,38 @@ Deno.serve(async (req) => {
       // Don't override manual locks
       const { data: leadRow } = await admin
         .from("leads")
-        .select("person_role, category_locked")
+        .select("person_role, category_locked, stage")
         .eq("id", leadId)
         .single();
 
       if (leadRow && !leadRow.category_locked && leadRow.person_role === "lead") {
+        const previousStage = leadRow.stage;
         await admin
           .from("leads")
           .update({ person_role: personRoleTarget, stage: "not_interested" })
           .eq("id", leadId)
           .eq("person_role", "lead");
+
+        // Timeline note so counsellors and admins can see *why* the lead was
+        // closed without digging into the classifier queue. user_id is left
+        // null — this is an automated action, not a counsellor's. The
+        // PublisherPortal "Marked Not Interested by AI" filter keys off this
+        // row + person_role to surface AI-killed leads.
+        await admin
+          .from("lead_activities")
+          .insert({
+            lead_id: leadId,
+            user_id: null,
+            type: "ai_call",
+            description:
+              personRoleTarget === "job_applicant"
+                ? `AI classifier: identified as job applicant${
+                    result.role_inferred ? ` (${result.role_inferred})` : ""
+                  } → marked Not Interested`
+                : `AI classifier: identified as ${personRoleTarget} → marked Not Interested`,
+            old_stage: previousStage,
+            new_stage: "not_interested",
+          });
 
         // Enrich the job_applicants row with LLM provenance
         if (personRoleTarget === "job_applicant") {
