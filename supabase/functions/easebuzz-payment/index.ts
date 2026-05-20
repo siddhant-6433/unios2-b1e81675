@@ -149,6 +149,44 @@ Deno.serve(async (req) => {
               .eq("id", row.id);
           }
           console.log("[easebuzz] fee_payment: marked", ledgerRows?.length ?? 0, "entries paid for student", udf4);
+
+          // Also write a lead_payments row so the receipt, audit trail, and
+          // candidate notification all flow through the unified pipeline.
+          // applied_to_ledger=true tells provision_student_fees to skip this
+          // row (we already updated fee_ledger above).
+          const { data: stu } = await admin
+            .from("students")
+            .select("lead_id")
+            .eq("id", udf4)
+            .maybeSingle();
+          if (stu?.lead_id) {
+            const { data: lpIns } = await admin
+              .from("lead_payments")
+              .insert({
+                lead_id: stu.lead_id,
+                type: "other",
+                amount: paidAmount,
+                payment_mode: "gateway",
+                gateway: "easebuzz",
+                transaction_ref: paymentRef,
+                status: "confirmed",
+                applied_to_ledger: true,
+                notes: "Course-fee instalment via Easebuzz",
+              })
+              .select("id")
+              .maybeSingle();
+            if (lpIns?.id) {
+              fetch(`${supabaseUrl}/functions/v1/notify-event`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+                body: JSON.stringify({
+                  event: "payment_received",
+                  lead_id: stu.lead_id,
+                  context: { payment_id: lpIns.id },
+                }),
+              }).catch((e) => console.error("[easebuzz] notify-event invoke failed:", e));
+            }
+          }
         }
         return returnPage(
           isSuccess ? "Payment Successful" : "Payment Failed",
@@ -171,13 +209,22 @@ Deno.serve(async (req) => {
           console.error("[easebuzz] lead_payments update error:", lpErr.message);
           return returnPage("Payment Received", "Payment confirmed but our records could not be updated. Please contact support. Txn: " + (easepayid || txnid), false);
         }
-        // Fire receipt generator (PDF + WhatsApp + email). Don't block the user.
+        // Fire notify-event directly (it ensures the PDF, then sends WA + email).
+        // The DB trigger now skips gateway='easebuzz' rows to avoid duplicates.
         if (isSuccess) {
-          fetch(`${supabaseUrl}/functions/v1/generate-payment-receipt`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-            body: JSON.stringify({ lead_payment_id: udf2 }),
-          }).catch((e) => console.error("[easebuzz] receipt invoke failed:", e));
+          const { data: lpRow } = await admin
+            .from("lead_payments")
+            .select("lead_id, type")
+            .eq("id", udf2)
+            .maybeSingle();
+          if (lpRow?.lead_id) {
+            const evt = lpRow.type === "application_fee" ? "app_fee_paid" : "payment_received";
+            fetch(`${supabaseUrl}/functions/v1/notify-event`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+              body: JSON.stringify({ event: evt, lead_id: lpRow.lead_id, context: { payment_id: udf2 } }),
+            }).catch((e) => console.error("[easebuzz] notify-event invoke failed:", e));
+          }
         }
         return returnPage(
           isSuccess ? "Payment Successful" : "Payment Failed",

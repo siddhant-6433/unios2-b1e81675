@@ -302,15 +302,15 @@ export default function AdminApplicationView() {
         <div className="flex items-center gap-2">
           <Badge className="text-[10px] border-0 bg-violet-100 text-violet-700">{app.status}</Badge>
           <Badge className="text-[10px] border-0 bg-emerald-100 text-emerald-700">{app.payment_status || "pending"}</Badge>
-          {lead?.id && (
+          {(lead?.id || app.lead_id) && (
             <Button
               variant="outline"
               size="sm"
               className="h-8 gap-1.5 text-xs"
-              onClick={() => navigate(`/admissions/${lead.id}`)}
+              onClick={() => navigate(`/admissions/${lead?.id || app.lead_id}`)}
             >
               <User className="h-3.5 w-3.5" />
-              View Lead
+              Open Lead
             </Button>
           )}
           {role === "super_admin" && app.payment_status !== "paid" && (
@@ -465,6 +465,7 @@ export default function AdminApplicationView() {
         docs={docs}
         reviews={reviews}
         onSetStatus={setDocStatus}
+        readOnly={decided}
         courseInfo={lead?.course ? {
           name: lead.course.name,
           code: lead.course.code,

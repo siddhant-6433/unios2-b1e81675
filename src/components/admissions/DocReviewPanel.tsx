@@ -49,9 +49,12 @@ interface Props {
    *  cross-check the uploaded documents against the course's eligibility
    *  before clearing the application for offer-letter generation. */
   courseInfo?: DocReviewCourseInfo | null;
+  /** When true, hides Verify/Reject actions — useful once the application
+   *  has been decided so operators aren't prompted to re-review docs. */
+  readOnly?: boolean;
 }
 
-export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo }: Props) {
+export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnly }: Props) {
   const [activeIdx, setActiveIdx] = useState(0);
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
@@ -210,42 +213,68 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo }: Props
           <DocPreview doc={active} />
         </div>
 
-        {/* Action panel */}
+        {/* Action panel — hides Verify once the doc is already verified so
+            the operator isn't prompted to re-verify an already-decided doc. */}
         <div className="p-4 space-y-3 bg-card">
-          <div>
-            <label className="block text-[11px] font-medium text-muted-foreground mb-1">
-              Notes {activeStatus === "rejected" || notes ? "" : "(required for rejection)"}
-            </label>
-            <Textarea
-              id="doc-reject-notes"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. Photo unclear — please rescan in better light"
-              rows={3}
-              className="text-xs"
-            />
-          </div>
+          {activeStatus === "verified" ? (
+            <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2.5 flex items-center gap-2 dark:bg-emerald-950/20 dark:border-emerald-900/40">
+              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200">Verified</p>
+                {activeReview?.reviewed_at && (
+                  <p className="text-[10px] text-emerald-700/80 dark:text-emerald-300/70">
+                    {new Date(activeReview.reviewed_at).toLocaleString()}
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : readOnly ? (
+            <div className="rounded-lg bg-muted/40 border border-border px-3 py-2.5">
+              <p className="text-xs font-semibold text-foreground">
+                {activeStatus === "rejected" ? "Rejected" : "Pending"}
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                The application has been decided — no further doc review needed.
+              </p>
+            </div>
+          ) : (
+            <>
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">
+                  Notes {activeStatus === "rejected" || notes ? "" : "(required for rejection)"}
+                </label>
+                <Textarea
+                  id="doc-reject-notes"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="e.g. Photo unclear — please rescan in better light"
+                  rows={3}
+                  className="text-xs"
+                />
+              </div>
 
-          <div className="space-y-1.5">
-            <Button
-              size="sm"
-              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
-              onClick={() => handleDecision("verified")}
-              disabled={busy}
-            >
-              <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />Verify
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="w-full text-rose-700 border-rose-200 hover:bg-rose-50"
-              onClick={() => handleDecision("rejected")}
-              disabled={busy}
-            >
-              <XCircle className="h-3.5 w-3.5 mr-1.5" />
-              {activeStatus === "rejected" ? "Update rejection" : "Reject — request re-upload"}
-            </Button>
-          </div>
+              <div className="space-y-1.5">
+                <Button
+                  size="sm"
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+                  onClick={() => handleDecision("verified")}
+                  disabled={busy}
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />Verify
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full text-rose-700 border-rose-200 hover:bg-rose-50"
+                  onClick={() => handleDecision("rejected")}
+                  disabled={busy}
+                >
+                  <XCircle className="h-3.5 w-3.5 mr-1.5" />
+                  {activeStatus === "rejected" ? "Update rejection" : "Reject — request re-upload"}
+                </Button>
+              </div>
+            </>
+          )}
 
           {activeReview?.notes && (
             <div className="rounded-lg bg-muted/40 px-2.5 py-2 border border-border/60">

@@ -340,7 +340,7 @@ Deno.serve(async (req) => {
       .from("lead_payments")
       .select(`
         id, receipt_no, type, amount, payment_mode, gateway, transaction_ref,
-        payment_date, status, receipt_url, created_at,
+        payment_date, status, receipt_url, created_at, recorded_by, notes,
         leads:lead_id (
           id, name, phone, email, application_id, pre_admission_no, admission_no,
           courses:course_id ( name ),
@@ -400,6 +400,23 @@ Deno.serve(async (req) => {
     }
     rows.push(["Fee Head", PAY_TYPE_LABELS[lp.type] || lp.type]);
     rows.push(["Paid On",  fmtDateTime(lp.payment_date || lp.created_at)]);
+
+    // Counsellor / staff who recorded the offline receipt — gives the candidate
+    // and auditors a name to attach to the transaction. We resolve the profile
+    // here (not via the SELECT) because lead_payments → profiles isn't a
+    // declared FK relationship.
+    if (lp.recorded_by) {
+      const { data: prof } = await admin
+        .from("profiles")
+        .select("display_name, email")
+        .eq("id", lp.recorded_by)
+        .maybeSingle();
+      const recorderName = (prof as any)?.display_name || (prof as any)?.email || null;
+      if (recorderName) rows.push(["Recorded By", recorderName]);
+    }
+    // Surface any free-form context the operator packed into notes (e.g.
+    // "Bank: HDFC · Cheque #1234") so the receipt is self-explanatory.
+    if (lp.notes) rows.push(["Notes", String(lp.notes)]);
 
     const pdfBytes = await buildPdf({
       receiptNo:     lp.receipt_no || "—",

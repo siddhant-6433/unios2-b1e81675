@@ -32,7 +32,7 @@ const CRM_BASE = Deno.env.get("CRM_BASE") || "https://uni.nimt.ac.in";
 // destination changes.
 const FINANCE_EMAIL = Deno.env.get("FINANCE_EMAIL") || "finance@nimt.ac.in";
 
-type EventName = "app_submitted" | "app_fee_paid" | "app_approved" | "offer_issued" | "pan_issued" | "payment_received" | "doc_rejected" | "application_rejected" | "admission_issued" | "token_fee_reminder";
+type EventName = "app_submitted" | "app_fee_paid" | "app_approved" | "offer_issued" | "pan_issued" | "payment_received" | "payment_corrected" | "doc_rejected" | "application_rejected" | "admission_issued" | "token_fee_reminder";
 
 interface NotifyBody {
   event: EventName;
@@ -47,23 +47,48 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
 
-  // Auth — accept service-role token in either format (legacy eyJ JWT
-  // OR new sb_secret_ opaque). String-equality covers both; JWT decode
-  // is a safety net for tokens whose env-form was rotated.
+  // Auth — accept:
+  //   (a) the service-role token (used by DB pg_net trigger + edge-to-edge
+  //       calls like easebuzz/icici callbacks), OR
+  //   (b) an authenticated user JWT whose user_id maps to one of the
+  //       admin-level roles in user_roles. This lets the client-side
+  //       OfflinePaymentDialog / RecordPaymentDialog / "Resend receipt"
+  //       button invoke notify-event directly without going through pg_net,
+  //       which has been observed to drop silently in production.
   const auth = req.headers.get("authorization") ?? "";
   if (!auth.startsWith("Bearer ")) return json({ error: "unauthorized" }, 401);
   const token = auth.slice(7);
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   let okAuth = !!(serviceRoleKey && token === serviceRoleKey);
+  let jwtUserId: string | null = null;
+  let jwtRole: string | null = null;
   if (!okAuth) {
     try {
       const [, payloadB64] = token.split(".");
       if (payloadB64) {
         const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
-        if (payload?.role === "service_role") okAuth = true;
+        jwtRole = payload?.role ?? null;
+        jwtUserId = payload?.sub ?? null;
+        if (jwtRole === "service_role") okAuth = true;
       }
     } catch { /* malformed token */ }
   }
+
+  // If the caller wasn't service-role, accept an authenticated admin user.
+  // The JWT signature is verified by Supabase's gateway before the function
+  // runs (verify_jwt = true by default), so we can trust `sub` + `role`.
+  if (!okAuth && jwtRole === "authenticated" && jwtUserId) {
+    const SUPABASE_URL_FOR_AUTH = Deno.env.get("SUPABASE_URL")!;
+    const SERVICE_KEY_FOR_AUTH = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const adminCheck = createClient(SUPABASE_URL_FOR_AUTH, SERVICE_KEY_FOR_AUTH);
+    const { data: roles } = await adminCheck
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", jwtUserId);
+    const allowed = new Set(["super_admin", "campus_admin", "admission_head", "principal", "accountant", "counsellor"]);
+    if ((roles || []).some((r: any) => allowed.has(r.role))) okAuth = true;
+  }
+
   if (!okAuth) return json({ error: "unauthorized" }, 401);
 
   let body: NotifyBody;
@@ -77,10 +102,19 @@ Deno.serve(async (req) => {
   // ── Load shared lead context ────────────────────────────────────────
   const { data: lead, error: leadErr } = await db
     .from("leads")
-    .select("id, name, phone, email, counsellor_id, course_id, campus_id, courses:course_id(name), campuses:campus_id(name)")
+    .select("id, name, phone, email, counsellor_id, course_id, campus_id, admission_no, pre_admission_no, courses:course_id(name), campuses:campus_id(name)")
     .eq("id", body.lead_id)
     .maybeSingle();
   if (leadErr || !lead) return json({ error: "lead not found" }, 404);
+
+  // Once admission_no is issued the candidate is a student — counsellor /
+  // team-leader involvement ends, only finance + super-admin (+ student
+  // themselves) should be notified about money flows. This switch is used
+  // for `payment_received`, `app_fee_paid`, and `payment_corrected`.
+  const isPostAdmission = !!lead.admission_no;
+  const paymentStaffSet = isPostAdmission
+    ? { counsellor: false, leader: false, super_admin: true }
+    : { counsellor: true,  leader: true,  super_admin: true };
 
   // ── Recipient resolution helpers ────────────────────────────────────
   // Counsellor + their team leader + all super_admins.
@@ -342,7 +376,8 @@ Deno.serve(async (req) => {
         [lead.name || "Student", String(pmt?.amount ?? ""), app?.application_id || ""],
       );
 
-      const recipients = await resolveEmails({ counsellor: true, leader: true, super_admin: true });
+      // Admission-aware staff list — post-admission drops counsellor/leader.
+      const recipients = await resolveEmails(paymentStaffSet);
       const vars = {
         student_name: lead.name || "Student",
         amount: String(pmt?.amount ?? ""),
@@ -532,6 +567,19 @@ Deno.serve(async (req) => {
       break;
     }
 
+    // 5b. CORRECTION NOTICE — a super-admin edited an existing receipt and
+    // chose to inform the candidate. Clear receipt_url so the PDF gets
+    // regenerated with the new figures, then fall through to the same
+    // payment_received flow which already attaches the (new) PDF and
+    // re-sends the WhatsApp + email.
+    case "payment_corrected": {
+      const payment_id = body.context?.payment_id as string;
+      if (!payment_id) break;
+      await db.from("lead_payments").update({ receipt_url: null }).eq("id", payment_id);
+      // Intentional fallthrough — handled by the payment_received block below.
+      // eslint-disable-next-line no-fallthrough
+    }
+
     // 5. ANY OTHER FEE PAID (token / registration / other) — applicant + admin
     case "payment_received": {
       const payment_id = body.context?.payment_id as string;
@@ -562,11 +610,11 @@ Deno.serve(async (req) => {
       // Applicant — primary recipient.
       await sendWhatsApp("payment_receipt", waParams);
 
-      // Mirror to staff phones (counsellor + team leader + super_admin) so
-      // the same payment notice that reaches the candidate also lands in
-      // their WhatsApp. Sent serially with a brief gap — Meta rate-limits
-      // template sends and a burst from one template_key can throttle.
-      const staffPhones = await resolveStaffPhones({ counsellor: true, leader: true, super_admin: true });
+      // Mirror to staff phones — post-admission drops counsellor/leader so
+      // a student's course-fee receipt doesn't ping the counsellor who
+      // shepherded them through admissions months ago. Pre-admission keeps
+      // the full set so the counsellor sees their lead's money flow.
+      const staffPhones = await resolveStaffPhones(paymentStaffSet);
       for (const p of staffPhones) {
         // Skip duplicate sends if a staff member shares the lead's phone.
         if (lead.phone && p.replace(/\D/g, "") === lead.phone.replace(/\D/g, "")) continue;
@@ -587,11 +635,8 @@ Deno.serve(async (req) => {
 
       const attach = haveReceipt ? [{ filename: `Receipt-${receiptNo || payment_id}.pdf`, url: receiptUrl }] : [];
 
-      // Internal stakeholders — super_admin (primary owner), counsellor, team
-      // leader. Finance CC'd on every send so they have one consolidated trail.
-      // Matches the app_fee_paid recipient set so token/registration/other
-      // receipts don't go to a smaller audience than application fees.
-      const recipients = await resolveEmails({ counsellor: true, leader: true, super_admin: true });
+      // Internal stakeholders — admission-aware. Finance CC'd on every send.
+      const recipients = await resolveEmails(paymentStaffSet);
       for (const e of recipients) {
         await sendEmail("payment-received-internal", e, vars, { attachments: attach, cc: FINANCE_EMAIL });
         await new Promise(r => setTimeout(r, 300));

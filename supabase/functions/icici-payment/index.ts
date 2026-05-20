@@ -259,11 +259,21 @@ Deno.serve(async (req) => {
           return returnPage("Payment Received", `Payment confirmed but our records could not be updated. Please contact support. Txn: ${paymentRef}`, false);
         }
         if (isSuccess) {
-          fetch(`${supabaseUrl}/functions/v1/generate-payment-receipt`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-            body: JSON.stringify({ lead_payment_id: addl1 }),
-          }).catch((e) => console.error(`[${FN_NAME}] receipt invoke failed:`, e));
+          // notify-event handles PDF generation + WA + email. DB trigger now
+          // skips gateway='icici' rows so this won't double-send.
+          const { data: lpRow } = await admin
+            .from("lead_payments")
+            .select("lead_id, type")
+            .eq("id", addl1)
+            .maybeSingle();
+          if (lpRow?.lead_id) {
+            const evt = lpRow.type === "application_fee" ? "app_fee_paid" : "payment_received";
+            fetch(`${supabaseUrl}/functions/v1/notify-event`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+              body: JSON.stringify({ event: evt, lead_id: lpRow.lead_id, context: { payment_id: addl1 } }),
+            }).catch((e) => console.error(`[${FN_NAME}] notify-event invoke failed:`, e));
+          }
         }
         return returnPage(
           isSuccess ? "Payment Successful" : "Payment Failed",
@@ -591,13 +601,13 @@ Deno.serve(async (req) => {
             const paymentRef = data?.txnID || data?.merchantTxnNo || txnid;
             await admin.from("lead_payments").update({ status: "confirmed", transaction_ref: paymentRef }).eq("id", row.id);
             outcome = "confirmed";
-            // Fire receipt generation so the candidate's email goes out the
-            // same way as a normal browser-callback success.
-            fetch(`${supabaseUrl}/functions/v1/generate-payment-receipt`, {
+            // Fire notify-event directly — handles PDF + WA + email + finance CC.
+            const evt = row.type === "application_fee" ? "app_fee_paid" : "payment_received";
+            fetch(`${supabaseUrl}/functions/v1/notify-event`, {
               method: "POST",
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-              body: JSON.stringify({ lead_payment_id: row.id }),
-            }).catch((e) => console.error(`[${FN_NAME}] reconcile receipt invoke failed:`, e));
+              body: JSON.stringify({ event: evt, lead_id: row.lead_id, context: { payment_id: row.id } }),
+            }).catch((e) => console.error(`[${FN_NAME}] reconcile notify-event invoke failed:`, e));
           } else if (isExplicitFail) {
             await admin.from("lead_payments").update({
               status: "failed",

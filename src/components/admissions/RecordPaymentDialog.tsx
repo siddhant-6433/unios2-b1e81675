@@ -142,6 +142,7 @@ export function RecordPaymentDialog({
       receipt_url: receiptUrl,
       notes: notes || null,
       recorded_by: profileId,
+      gateway: "offline",
       status: "confirmed",
     } as any).select("id").single();
 
@@ -151,11 +152,13 @@ export function RecordPaymentDialog({
       return;
     }
 
-    // Fire receipt PDF + notifications (WhatsApp + email). Fire-and-forget so
-    // the user isn't blocked on PDF rendering / network.
+    // notify-event handles PDF generation + WA + email. DB trigger skips
+    // gateway='offline' rows so we own the notification path explicitly.
     if (inserted?.id) {
-      supabase.functions.invoke("generate-payment-receipt", { body: { lead_payment_id: inserted.id } })
-        .catch(() => {});
+      const evt = type === "application_fee" ? "app_fee_paid" : "payment_received";
+      supabase.functions.invoke("notify-event", {
+        body: { event: evt, lead_id: leadId, context: { payment_id: inserted.id } },
+      }).catch((e) => console.error("[RecordPaymentDialog] notify-event failed:", e));
     }
 
     // Log activity
