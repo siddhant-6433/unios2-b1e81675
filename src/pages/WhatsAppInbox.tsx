@@ -32,6 +32,7 @@ interface Conversation {
   has_inbound: boolean;
   business_phone_number_id: string | null;
   business_phone_number: string | null;
+  lead_counsellor_ids: string[] | null;
 }
 
 interface Message {
@@ -314,7 +315,12 @@ const WhatsAppInbox = () => {
           .range(offset, offset + BATCH - 1);
 
         if (role === "counsellor" && profile?.id) {
-          q = q.eq("counsellor_id", profile.id);
+          // Filter via the aggregated lead_counsellor_ids array — covers the
+          // case where the latest message on a phone is a campaign blast
+          // (lead_id NULL) or a template tied to another counsellor's lead,
+          // which would otherwise collapse the view's displayed counsellor_id
+          // and hide a conversation this counsellor actually owns inbound on.
+          q = q.contains("lead_counsellor_ids", [profile.id]);
         } else if (isAdminRole(role)) {
           if (counsellorFilter === "unassigned") {
             q = (q as any).is("counsellor_id", null);
