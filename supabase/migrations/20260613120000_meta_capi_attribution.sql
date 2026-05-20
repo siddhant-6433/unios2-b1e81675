@@ -53,3 +53,12 @@ ALTER TABLE public.meta_event_log ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "super_admin reads meta_event_log" ON public.meta_event_log
   FOR SELECT TO authenticated USING (public.has_role(auth.uid(), 'super_admin'));
+
+-- This project doesn't auto-grant service_role on new tables (see all the
+-- grant_service_role_* migrations under /supabase/migrations) so the edge
+-- function's audit INSERT would silently no-op without these grants. The
+-- function catches the insert error and ignores it — meaning Meta events
+-- would still ship but the audit log would stay empty. Caught during
+-- smoke-testing on 2026-05-20.
+GRANT SELECT, INSERT ON public.meta_event_log TO service_role;
+GRANT USAGE, SELECT ON SEQUENCE public.meta_event_log_id_seq TO service_role;
