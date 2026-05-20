@@ -70,6 +70,11 @@ interface PublisherLead {
   ai_called_at: string | null;
   manually_called: boolean;
   jd_contract_id: string | null;
+  // True when this lead landed in stage='not_interested' via an automated
+  // path (AI voice call disposition OR WhatsApp classifier flagging it as a
+  // job applicant/vendor) rather than a counsellor's manual decision. Drives
+  // the "Marked Not Interested by AI Call" filter chip below.
+  not_interested_by_ai: boolean;
 }
 
 interface LeadActivity {
@@ -166,6 +171,7 @@ export default function PublisherPortal() {
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState("all");
   const [aiFilter, setAiFilter] = useState("all"); // "all" | "called" | "not_called"
+  const [aiNotInterestedOnly, setAiNotInterestedOnly] = useState(false);
   const [datePreset, setDatePreset] = useState<DatePreset>("all");
   const [customStart, setCustomStart] = useState<string>("");
   const [customEnd, setCustomEnd] = useState<string>("");
@@ -236,7 +242,7 @@ export default function PublisherPortal() {
           .from("leads")
           .select(`
             id, name, phone, email, stage, city, state, created_at,
-            ai_called, ai_called_at, jd_contract_id,
+            ai_called, ai_called_at, jd_contract_id, person_role,
             courses!left(name),
             campuses!left(name)
           `)
@@ -261,14 +267,29 @@ export default function PublisherPortal() {
         // unique leads contacted by AI OR manually, not just AI-dialed.
         const leadIds = allLeads.map((l: any) => l.id);
         const manuallyCalledSet = new Set<string>();
+        // Leads where an AI-driven path (voice disposition OR WhatsApp
+        // classifier) closed the lead with new_stage='not_interested'. The
+        // activity row is inserted by voice-call-callback and (since the
+        // 2026-05-20 fix) wa-classify-message. We only need the set
+        // membership, not the activity payload itself.
+        const aiClosedSet = new Set<string>();
         const ID_BATCH = 500;
         for (let i = 0; i < leadIds.length; i += ID_BATCH) {
+          const slice = leadIds.slice(i, i + ID_BATCH);
           const { data: callRows } = await supabase
             .from("lead_activities")
             .select("lead_id")
-            .in("lead_id", leadIds.slice(i, i + ID_BATCH))
+            .in("lead_id", slice)
             .eq("type", "call");
           (callRows ?? []).forEach((a: any) => manuallyCalledSet.add(a.lead_id));
+
+          const { data: aiCloseRows } = await supabase
+            .from("lead_activities")
+            .select("lead_id")
+            .in("lead_id", slice)
+            .eq("type", "ai_call")
+            .eq("new_stage", "not_interested");
+          (aiCloseRows ?? []).forEach((a: any) => aiClosedSet.add(a.lead_id));
         }
 
         const mapped = allLeads.map((l: any) => ({
@@ -286,6 +307,13 @@ export default function PublisherPortal() {
           city: l.city ?? null,
           state: l.state ?? null,
           jd_contract_id: l.jd_contract_id ?? null,
+          // person_role is set to 'job_applicant' / 'vendor' by the WhatsApp
+          // classifier when it auto-closes the lead, so we treat any non-'lead'
+          // role on a not_interested row as an AI close. The activity-table
+          // signal covers voice AI calls AND newer WA classifications.
+          not_interested_by_ai:
+            l.stage === "not_interested" &&
+            (aiClosedSet.has(l.id) || (l.person_role && l.person_role !== "lead")),
         }));
         setLeads(mapped);
 
@@ -376,6 +404,8 @@ export default function PublisherPortal() {
     new Set(dateScopedLeads.map(l => l.jd_contract_id).filter((c): c is string => !!c))
   ).sort();
 
+  const aiNotInterestedCount = dateScopedLeads.filter(l => l.not_interested_by_ai).length;
+
   const filtered = dateScopedLeads.filter(l => {
     const q = search.toLowerCase();
     const matchSearch = !q || l.name.toLowerCase().includes(q) ||
@@ -384,7 +414,8 @@ export default function PublisherPortal() {
     const matchStage = stageFilter === "all" || l.stage === stageFilter;
     const matchAi = aiFilter === "all" || (aiFilter === "called" ? l.ai_called : !l.ai_called);
     const matchContract = contractFilter === "all" || l.jd_contract_id === contractFilter;
-    return matchSearch && matchStage && matchAi && matchContract;
+    const matchAiNotInterested = !aiNotInterestedOnly || l.not_interested_by_ai;
+    return matchSearch && matchStage && matchAi && matchContract && matchAiNotInterested;
   });
 
   if (loading) {
@@ -564,6 +595,31 @@ export default function PublisherPortal() {
                   className="inline-flex items-center gap-1.5 rounded-full border border-primary bg-primary/10 px-3 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
                 >
                   ✕ Clear filter
+                </button>
+              )}
+              {aiNotInterestedCount > 0 && (
+                <button
+                  onClick={() => {
+                    const next = !aiNotInterestedOnly;
+                    setAiNotInterestedOnly(next);
+                    // Showing the "Not Interested by AI" slice only makes
+                    // sense against the not_interested stage; pin it so
+                    // counts align with the chip's number.
+                    if (next) setStageFilter("not_interested");
+                  }}
+                  className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium border transition-colors ${
+                    aiNotInterestedOnly
+                      ? "border-violet-500 bg-violet-500 text-white"
+                      : "border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-300"
+                  }`}
+                  title="Leads closed automatically by AI voice call or WhatsApp classifier"
+                >
+                  Marked Not Interested by AI Call
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                    aiNotInterestedOnly ? "bg-white/20" : "bg-violet-200/70 dark:bg-violet-900/60"
+                  }`}>
+                    {aiNotInterestedCount}
+                  </span>
                 </button>
               )}
               {stageCounts.map(({ key, label, count }) => (
