@@ -484,6 +484,7 @@ export default function CloudDialer() {
     const { data } = await supabase.from("leads")
       .select("id, name, phone, stage, courses:course_id(name)")
       .ilike("phone", `%${digits}`)
+      .eq("is_mirror", false)
       .limit(1)
       .single();
     if (data) {
@@ -679,6 +680,7 @@ export default function CloudDialer() {
       .from("leads")
       .select("id, name, phone")
       .eq("phone", norm)
+      .eq("is_mirror", false)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();

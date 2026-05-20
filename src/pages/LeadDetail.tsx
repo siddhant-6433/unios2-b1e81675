@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/alert-dialog";
 // Eager: small / essential-for-first-paint components
 import { LeadInfoCard } from "@/components/leads/LeadInfoCard";
+import { MirrorLeadCard } from "@/components/leads/MirrorLeadCard";
 import { FuzzyDuplicateAlert } from "@/components/admissions/FuzzyDuplicateAlert";
 import { type CallDispositionData } from "@/components/admissions/CallDispositionDialog";
 
@@ -1248,6 +1249,7 @@ const LeadDetail = () => {
             onTokenPaidOverride={() => setShowTokenOverride(true)}
           />
           <FuzzyDuplicateAlert leadId={lead.id} leadName={lead.name} leadPhone={lead.phone} leadEmail={lead.email} />
+          {lead.mirror_lead_id && <MirrorLeadCard mirrorLeadId={lead.mirror_lead_id} />}
           <Card className="border-border/60">
             <CardContent className="p-4 flex items-center justify-between gap-3">
               <div>

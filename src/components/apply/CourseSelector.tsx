@@ -282,6 +282,7 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
       .from("leads")
       .select("id")
       .eq("phone", phone)
+      .eq("is_mirror", false)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();

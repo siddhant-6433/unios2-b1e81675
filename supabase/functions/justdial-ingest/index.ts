@@ -184,6 +184,7 @@ Deno.serve(async (req) => {
       .from("leads")
       .select("id, name, stage, source, secondary_source, tertiary_source, source_history, jd_contract_id")
       .eq("phone", normPhone)
+      .eq("is_mirror", false)
       .limit(1)
       .maybeSingle();
 

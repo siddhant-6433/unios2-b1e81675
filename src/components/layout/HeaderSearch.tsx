@@ -66,6 +66,7 @@ export function HeaderSearch() {
     const [leadsRes, studentsRes, applicationsRes] = await Promise.all([
       supabase.from("leads").select("id, name, phone, application_id, pre_admission_no, admission_no, stage, counsellor_profile:counsellor_id(display_name)")
         .or(`phone.ilike.%${q}%,name.ilike.%${q}%,application_id.ilike.%${q}%,pre_admission_no.ilike.%${q}%,admission_no.ilike.%${q}%,email.ilike.%${q}%`)
+        .eq("is_mirror", false)
         .limit(8),
       supabase.from("students").select("id, name, phone, admission_no, pre_admission_no, status")
         .or(`phone.ilike.%${q}%,name.ilike.%${q}%,admission_no.ilike.%${q}%,pre_admission_no.ilike.%${q}%,email.ilike.%${q}%`)
