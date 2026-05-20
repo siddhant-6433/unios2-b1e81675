@@ -1,10 +1,13 @@
 /**
  * Browser-side GA4 + attribution helpers for the apply portal.
  *
- * The apply portal is hosted at apply.nimt.ac.in but the SAME React SPA
- * also serves the internal CRM (uni.nimt.ac.in). The gtag snippet in
- * index.html only configures the GA4 stream when window.location.hostname
- * matches APPLY_HOST, so admin users don't get tracked.
+ * The SAME React SPA serves both the apply portal and the internal CRM.
+ * The gtag + Meta Pixel snippet in index.html only initializes trackers
+ * on applicant-facing surfaces:
+ *   - apply.nimt.ac.in (any path)
+ *   - uni.nimt.ac.in/apply/*  (the nimt.ac.in "Apply Now" buttons link here)
+ * On every other host/path the trackers are not loaded, so window.gtag /
+ * window.fbq are undefined and the helpers below all no-op.
  *
  * Usage:
  *   import { trackGenerateLead, captureAttribution } from "@/lib/analytics";
@@ -18,11 +21,24 @@ declare global {
   interface Window {
     gtag?: (...args: unknown[]) => void;
     dataLayer?: unknown[];
+    fbq?: (...args: unknown[]) => void;
+    _fbq?: unknown;
   }
 }
 
-export const APPLY_HOST = "apply.nimt.ac.in";
 export const APPLY_MEASUREMENT_ID = "G-MKHMKH1DE9";
+
+/**
+ * Per-brand Meta Pixel IDs. Each brand has its own ad account, so the snippet
+ * in index.html resolves the matching pixel from the `/apply/{brand}` path
+ * segment and inits only that one. Exported for reference / docs — the
+ * helpers below don't pick a pixel, they just dispatch through window.fbq.
+ */
+export const PORTAL_PIXEL_IDS = {
+  nimt:   "2580313152286928",
+  beacon: "511947283685367",
+  mirai:  "1461957365199748",
+} as const;
 
 // Cookie reader. Returns undefined for missing cookies.
 function readCookie(name: string): string | undefined {
@@ -165,4 +181,36 @@ export function trackApplicationFeePurchase(transactionId: string, amount: numbe
     currency: "INR",
     items: [{ item_name: "application_fee", price: amount, quantity: 1 }],
   });
+}
+
+// ─── Meta Pixel helpers ────────────────────────────────────────────────
+// The Pixel base code in index.html only initializes fbq on applicant-facing
+// surfaces (see the header doc-comment). Outside those, window.fbq is
+// undefined and these calls are no-ops. The pixel ID is bound at init time
+// based on the /apply/{brand} segment, so all events from a session flow
+// into the matching brand's ad account.
+
+function fbqSafe(): ((...args: unknown[]) => void) | undefined {
+  return typeof window !== "undefined" ? window.fbq : undefined;
+}
+
+export function trackPixelLead(params?: { program?: string; source?: string }) {
+  const fbq = fbqSafe();
+  if (!fbq) return;
+  fbq("track", "Lead", {
+    currency: "INR",
+    ...(params?.program ? { content_name: params.program, content_category: "application" } : {}),
+    ...(params?.source ? { lead_source: params.source } : {}),
+  });
+}
+
+export function trackPixelCompleteRegistration(transactionId: string, amount: number) {
+  const fbq = fbqSafe();
+  if (!fbq) return;
+  fbq("track", "CompleteRegistration", {
+    currency: "INR",
+    value: amount,
+    content_name: "application_fee",
+    status: "paid",
+  }, { eventID: transactionId });
 }

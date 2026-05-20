@@ -27,7 +27,7 @@ import { PortalProvider, usePortal } from "@/components/apply/PortalContext";
 import { TokenFeePanel } from "@/components/applicant/TokenFeePanel";
 import { ApplicationPreview, type PreviewDoc } from "@/components/applicant/ApplicationPreview";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
-import { captureAttribution } from "@/lib/analytics";
+import { captureAttribution, trackPixelLead } from "@/lib/analytics";
 
 // ─── OTP Login Screen ───
 function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: string) => void }) {
@@ -1613,6 +1613,14 @@ const ApplyPortal = () => {
         new_stage: "application_in_progress" as any,
       });
     }
+
+    // Meta Pixel: Lead standard event. GA's `generate_lead` is fired server-side
+    // via the DB trigger; Pixel has no equivalent CAPI wiring yet so we fire
+    // browser-side only. No-op outside apply.nimt.ac.in.
+    trackPixelLead({
+      program: selections[0]?.course_name,
+      source: leadSource,
+    });
 
     setApp({
       ...DEFAULT_APPLICATION,

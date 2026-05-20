@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { ApplicationData } from "./types";
 import { usePortal } from "./PortalContext";
 import { ReceiptDialog, ReceiptData } from "@/components/receipts/ReceiptDialog";
+import { trackPixelCompleteRegistration } from "@/lib/analytics";
 
 interface Props {
   data: ApplicationData;
@@ -116,6 +117,20 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
 
   // Cleanup poll on unmount
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  // Meta Pixel: fire CompleteRegistration once, only on an in-session transition
+  // to paid. wasPaidOnMountRef captures the initial state so returning to a
+  // already-paid application (re-render, route revisit) doesn't refire.
+  const wasPaidOnMountRef = useRef(isPaid);
+  const pixelFiredRef = useRef(false);
+  useEffect(() => {
+    if (wasPaidOnMountRef.current) return;
+    if (pixelFiredRef.current) return;
+    if (!isPaid || isWaived) return;
+    pixelFiredRef.current = true;
+    const txnId = data.payment_ref || data.application_id;
+    trackPixelCompleteRegistration(txnId, data.fee_amount);
+  }, [isPaid, isWaived, data.payment_ref, data.application_id, data.fee_amount]);
 
   // Listen for postMessage from popup gateway windows (Easebuzz, ICICI)
   useEffect(() => {

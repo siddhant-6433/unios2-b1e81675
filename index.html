@@ -18,12 +18,23 @@
     <meta name="twitter:title" content="NIMT UniOs">
     <meta name="twitter:description" content="Student Lifecycle Management">
 
-    <!-- Google Analytics — apply portal only.
-         The same SPA also serves the internal CRM (uni.nimt.ac.in); we don't
-         want to count staff sessions in the apply.nimt.ac.in property. -->
+    <!-- Google Analytics + Meta Pixel — apply portal only.
+         The same SPA also serves the internal CRM (uni.nimt.ac.in/dashboard
+         etc.); we only fire trackers when the visitor is on an applicant-facing
+         path. Tracked surfaces: apply.nimt.ac.in (any path) and
+         uni.nimt.ac.in/apply/* (since nimt.ac.in 'Apply Now' buttons link
+         there). Each brand has its own Meta Pixel; the one matching the
+         /apply/{brand} segment is initialized. -->
     <script>
       (function () {
-        if (window.location.hostname !== "apply.nimt.ac.in") return;
+        var host = window.location.hostname;
+        var path = window.location.pathname;
+        var inApply =
+          host === "apply.nimt.ac.in" ||
+          (host === "uni.nimt.ac.in" && path.indexOf("/apply") === 0);
+        if (!inApply) return;
+
+        // ── Google Analytics ──
         var s = document.createElement("script");
         s.async = true;
         s.src = "https://www.googletagmanager.com/gtag/js?id=G-MKHMKH1DE9";
@@ -36,11 +47,49 @@
           // nimt.ac.in / miraischool.in / school.nimt.ac.in into apply
           linker: { domains: ["nimt.ac.in", "miraischool.in", "school.nimt.ac.in"] }
         });
+
+        // ── Meta Pixel — brand-aware ──
+        // Mirrors detectPortal() in src/components/apply/portalConfig.ts:
+        // last path segment > ?portal= query > nimt default.
+        var PIXELS = {
+          nimt:   "2580313152286928",
+          beacon: "511947283685367",
+          mirai:  "1461957365199748"
+        };
+        var portal = "nimt";
+        var segs = path.split("/").filter(function (x) { return x; });
+        var last = (segs[segs.length - 1] || "").toLowerCase();
+        if (PIXELS[last]) {
+          portal = last;
+        } else {
+          var qp = (new URLSearchParams(window.location.search).get("portal") || "").toLowerCase();
+          if (PIXELS[qp]) portal = qp;
+        }
+
+        !function(f,b,e,v,n,t,s)
+        {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+        n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+        if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+        n.queue=[];t=b.createElement(e);t.async=!0;
+        t.src=v;s=b.getElementsByTagName(e)[0];
+        s.parentNode.insertBefore(t,s)}(window, document,'script',
+        'https://connect.facebook.net/en_US/fbevents.js');
+        window.fbq('init', PIXELS[portal]);
+        window.fbq('track', 'PageView');
       })();
     </script>
   </head>
 
   <body>
+    <!-- Meta Pixel noscript fallback. Lives in <body> (browsers disallow
+         <img> inside <noscript> in <head>). The SPA needs JS anyway, so a
+         no-JS visitor never reaches the form — this fallback is purely for
+         crawlers/preview cards. Brand isn't known at HTML load, so we fall
+         back to the parent NIMT college pixel. -->
+    <noscript><img height="1" width="1" style="display:none"
+      src="https://www.facebook.com/tr?id=2580313152286928&ev=PageView&noscript=1"
+      alt=""
+    /></noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
