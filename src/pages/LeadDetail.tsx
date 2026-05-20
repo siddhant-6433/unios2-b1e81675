@@ -1221,6 +1221,15 @@ const LeadDetail = () => {
         />
       )}
 
+      {/* Fee Ledger — full width so the receipts table and Record Offline
+          Payment header have room to breathe (was cramped in the 380px column). */}
+      <Card className="border-border/60">
+        <CardContent className="p-4 space-y-3">
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Fee Ledger</h3>
+          <LeadFeeLedger leadId={lead.id} refreshKey={paymentRefreshKey} />
+        </CardContent>
+      </Card>
+
       {/* Two-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-5">
         {/* Left Column */}
@@ -1246,12 +1255,6 @@ const LeadDetail = () => {
                 <p className="text-[11px] text-muted-foreground mt-1">Send a one-click login link via WhatsApp.</p>
               </div>
               <ApplyMagicLinkButton leadId={lead.id} leadName={lead.name} leadPhone={lead.phone} />
-            </CardContent>
-          </Card>
-          <Card className="border-border/60">
-            <CardContent className="p-4 space-y-3">
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Fee Ledger</h3>
-              <LeadFeeLedger leadId={lead.id} refreshKey={paymentRefreshKey} />
             </CardContent>
           </Card>
           {lead.course_id && (

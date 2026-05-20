@@ -83,7 +83,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   const [payments, setPayments] = useState<{
     id: string; receipt_no: string | null; type: string; amount: number;
     concession_amount: number; status: string; payment_date: string | null;
-    created_at: string; receipt_url: string | null; waiver_reason: string | null;
+    created_at: string; receipt_url: string | null;
   }[]>([]);
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
@@ -1254,9 +1254,6 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                           <span className="text-[11px] text-gray-400">{fmtDt(p.payment_date || p.created_at)}</span>
                           {p.concession_amount > 0 && (
                             <span className="text-[11px] text-emerald-600">· {fmtAmt(p.concession_amount)} waiver applied</span>
-                          )}
-                          {p.waiver_reason && (
-                            <span className="text-[11px] text-gray-400 italic">· {p.waiver_reason}</span>
                           )}
                         </div>
                       </div>

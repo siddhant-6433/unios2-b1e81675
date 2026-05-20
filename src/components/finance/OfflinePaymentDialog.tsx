@@ -109,7 +109,7 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, defaultType, 
     const notes = noteBits.join(" · ");
 
     setSubmitting(true);
-    const { error } = await (supabase.from("lead_payments") as any).insert({
+    const { data: inserted, error } = await (supabase.from("lead_payments") as any).insert({
       lead_id:         leadId,
       type,
       amount:          amt,
@@ -120,12 +120,27 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, defaultType, 
       recorded_by:     profile?.id || null,
       gateway:         "offline",
       notes:           notes || null,
-    });
+    }).select("id").maybeSingle();
     setSubmitting(false);
 
     if (error) {
       toast({ title: "Could not record payment", description: error.message, variant: "destructive" });
       return;
+    }
+
+    // Fire receipt PDF + WhatsApp + email explicitly from the client. The DB
+    // trigger fn_notify_payment_received also fires for offline rows via
+    // pg_net, but production has shown that path occasionally not delivering
+    // (silent pg_net failures, _app_config drift). Invoking notify-event
+    // directly here makes the offline flow self-contained — the migration
+    // that pairs with this change makes the DB trigger skip gateway='offline'
+    // rows so we don't double-send.
+    const paymentId = inserted?.id as string | undefined;
+    if (paymentId) {
+      const event = type === "application_fee" ? "app_fee_paid" : "payment_received";
+      supabase.functions.invoke("notify-event", {
+        body: { event, lead_id: leadId, context: { payment_id: paymentId } },
+      }).catch(e => console.error("[OfflinePaymentDialog] notify-event failed:", e));
     }
 
     toast({

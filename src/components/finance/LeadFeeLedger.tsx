@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Loader2, Receipt, ChevronDown, ChevronRight, FileImage, IndianRupee, AlertCircle, Plus } from "lucide-react";
+import { Loader2, Receipt, ChevronDown, ChevronRight, FileImage, IndianRupee, AlertCircle, Plus, Pencil, History, Send } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { OfflinePaymentDialog } from "./OfflinePaymentDialog";
+import { PaymentEditDialog } from "./PaymentEditDialog";
+import { PaymentAuditDialog } from "./PaymentAuditDialog";
 
 const PAY_TYPE_LABELS: Record<string, string> = {
   application_fee: "Application Fee",
@@ -75,7 +78,29 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [offlineOpen, setOfflineOpen] = useState(false);
   const [internalRefresh, setInternalRefresh] = useState(0);
+  const [editPayment, setEditPayment] = useState<LeadPayment | null>(null);
+  const [auditPayment, setAuditPayment] = useState<LeadPayment | null>(null);
   const canRecordOffline = ["super_admin", "campus_admin", "accountant"].includes(role || "");
+  const isSuperAdmin = role === "super_admin";
+  const { toast } = useToast();
+  const [resending, setResending] = useState<string | null>(null);
+
+  const resendReceipt = async (payment: LeadPayment) => {
+    setResending(payment.id);
+    const { error } = await (supabase as any).rpc("resend_payment_notification", {
+      _payment_id: payment.id,
+      _mode: "resend",
+    });
+    setResending(null);
+    if (error) {
+      toast({ title: "Could not resend receipt", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({
+      title: "Receipt re-sent",
+      description: "Candidate WhatsApp + finance/super-admin email queued.",
+    });
+  };
 
   useEffect(() => {
     let alive = true;
@@ -212,7 +237,11 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
             <span className="text-xs font-semibold text-foreground">Receipts</span>
             <span className="text-[10px] text-muted-foreground">{payments.length} payment{payments.length === 1 ? "" : "s"}</span>
           </div>
-          <table className="w-full text-xs">
+          {/* Horizontal scroll wrapper — the receipts table has 8 columns and
+              gets clipped in narrow containers (e.g. inside the LeadDetail
+              application drawer). Letting it scroll keeps all columns reachable. */}
+          <div className="overflow-x-auto">
+          <table className="w-full text-xs min-w-[640px]">
             <thead>
               <tr className="bg-muted/20 text-muted-foreground">
                 <th className="text-left px-3 py-2 font-medium">Receipt</th>
@@ -223,6 +252,7 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
                 <th className="text-left px-3 py-2 font-medium">Date</th>
                 <th className="text-left px-3 py-2 font-medium">Status</th>
                 <th className="text-right px-3 py-2 font-medium">PDF</th>
+                {isSuperAdmin && <th className="text-right px-3 py-2 font-medium">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -254,10 +284,40 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
                       <a href={p.receipt_url} target="_blank" rel="noopener" className="text-primary hover:underline text-[11px]">View</a>
                     ) : <span className="text-muted-foreground/40">—</span>}
                   </td>
+                  {isSuperAdmin && (
+                    <td className="px-3 py-2 text-right whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => resendReceipt(p)}
+                        disabled={resending === p.id}
+                        className="inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 disabled:opacity-50"
+                        title="Resend WhatsApp + email receipt"
+                      >
+                        {resending === p.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditPayment(p)}
+                        className="ml-1 inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                        title="Edit / delete receipt (audited)"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAuditPayment(p)}
+                        className="ml-1 inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                        title="View audit history"
+                      >
+                        <History className="h-3 w-3" />
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -268,7 +328,7 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
             <IndianRupee className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-xs font-semibold text-foreground">Fee Ledger</span>
           </div>
-          <div className="divide-y divide-border">
+          <div className="divide-y divide-border overflow-x-auto">
             {grouped.map(([term, rows]) => {
               const termTotal      = rows.reduce((s, r) => s + Number(r.total_amount || 0), 0);
               const termConcession = rows.reduce((s, r) => s + Number(r.concession   || 0), 0);
@@ -346,6 +406,23 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
             })}
           </div>
         </div>
+      )}
+
+      {isSuperAdmin && (
+        <>
+          <PaymentEditDialog
+            open={!!editPayment}
+            onOpenChange={(v) => { if (!v) setEditPayment(null); }}
+            payment={editPayment}
+            onSaved={() => setInternalRefresh(n => n + 1)}
+          />
+          <PaymentAuditDialog
+            open={!!auditPayment}
+            onOpenChange={(v) => { if (!v) setAuditPayment(null); }}
+            paymentId={auditPayment?.id || ""}
+            receiptNo={auditPayment?.receipt_no}
+          />
+        </>
       )}
     </div>
   );

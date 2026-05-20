@@ -43,7 +43,7 @@ import {
 } from "@/components/ui/dialog";
 
 const STAGES = [
-  "new_lead", "application_in_progress", "application_fee_paid", "application_submitted", "counsellor_call", "visit_scheduled",
+  "new_lead", "priority_interested", "application_in_progress", "application_fee_paid", "application_submitted", "counsellor_call", "visit_scheduled",
   "interview", "offer_sent", "token_paid", "pre_admitted", "admitted", "waitlisted",
   "not_interested", "ineligible", "dnc", "deferred", "rejected"
 ] as const;
@@ -51,7 +51,8 @@ const STAGES = [
 type Stage = typeof STAGES[number];
 
 const STAGE_LABELS: Record<string, string> = {
-  new_lead: "New Lead", application_in_progress: "Application In Progress",
+  new_lead: "New Lead", priority_interested: "Priority Interested",
+  application_in_progress: "Application In Progress",
   application_fee_paid: "Fee Paid", application_submitted: "Application Submitted",
   counsellor_call: "In Follow Up",
   visit_scheduled: "Visit Scheduled", interview: "Interview", offer_sent: "Offer Sent",
@@ -61,6 +62,7 @@ const STAGE_LABELS: Record<string, string> = {
 
 const stageColors: Record<string, string> = {
   new_lead: "bg-pastel-blue text-foreground/70",
+  priority_interested: "bg-pastel-pink text-foreground/70",
   application_in_progress: "bg-pastel-yellow text-foreground/70",
   application_fee_paid: "bg-pastel-green text-foreground/70",
   application_submitted: "bg-pastel-mint text-foreground/70",
@@ -80,7 +82,8 @@ const stageColors: Record<string, string> = {
 };
 
 const stageIcons: Record<string, typeof Users> = {
-  new_lead: Users, application_in_progress: FileText, application_fee_paid: CheckCircle, application_submitted: CheckCircle,
+  new_lead: Users, priority_interested: Flag,
+  application_in_progress: FileText, application_fee_paid: CheckCircle, application_submitted: CheckCircle,
   counsellor_call: Phone,
   visit_scheduled: MapPin, interview: UserCheck, offer_sent: FileText,
   token_paid: CheckCircle, pre_admitted: Clock, admitted: CheckCircle, waitlisted: Clock,

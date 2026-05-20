@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ApplyMagicLinkButton } from "@/components/leads/ApplyMagicLinkButton";
 import { MiniLifecycleStepper } from "@/components/admissions/MiniLifecycleStepper";
 import { RecordPaymentDialog } from "@/components/admissions/RecordPaymentDialog";
+import { OfflinePaymentDialog } from "@/components/finance/OfflinePaymentDialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -89,6 +90,7 @@ export default function Applications() {
   const isSuperAdmin = role === "super_admin";
   const [apps, setApps] = useState<AppRow[]>([]);
   const [offlinePaymentApp, setOfflinePaymentApp] = useState<AppRow | null>(null);
+  const [offlineReceiptApp, setOfflineReceiptApp] = useState<AppRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [paymentFilter, setPaymentFilter] = useState<"all" | "paid" | "pending">("all");
@@ -311,6 +313,8 @@ export default function Applications() {
     // token_paid stage. Other stage tiles still match on the lead's stage.
     if (stageFilter === "token_paid") {
       if (!a.has_token_fee_paid) return false;
+    } else if (stageFilter === "paid_no_offer") {
+      if (a.payment_status !== "paid" || a.has_offer) return false;
     } else if (stageFilter && a.lead_stage !== stageFilter) {
       return false;
     }
@@ -386,6 +390,8 @@ export default function Applications() {
     token_paid: new Set(apps.filter(a => a.has_token_fee_paid && a.lead_id).map(a => a.lead_id)).size,
     pre_admitted: apps.filter(a => a.lead_stage === "pre_admitted").length,
     admitted: apps.filter(a => a.lead_stage === "admitted").length,
+    // Paid but no offer letter issued — workflow gap that needs counsellor action
+    paid_no_offer: apps.filter(a => a.payment_status === "paid" && !a.has_offer).length,
   };
 
   const handleDelete = async () => {
@@ -465,17 +471,20 @@ export default function Applications() {
         ))}
       </div>
 
-      {/* Stats — Row 2: Post-submission pipeline */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      {/* Stats — Row 2: Post-submission pipeline.
+          "Paid · No Offer" pulses when count > 0 to surface a workflow gap:
+          the candidate has paid but no counsellor has issued the offer letter. */}
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         {([
+          { key: "paid_no_offer", label: "Paid · No Offer", count: stats.paid_no_offer, icon: AlertCircle, iconBg: "bg-rose-100", iconColor: "text-rose-600", tint: "bg-rose-50/40", ring: "ring-rose-400", pulse: stats.paid_no_offer > 0 },
           { key: "application_approved", label: "Pending Offer", count: stats.approved_pending_offer, icon: ClipboardCheck, iconBg: "bg-orange-100", iconColor: "text-orange-600", tint: "bg-orange-50/40", ring: "ring-orange-400" },
           { key: "offer_sent", label: "Offer Sent", count: stats.offer_sent, icon: Gift, iconBg: "bg-teal-100", iconColor: "text-teal-600", tint: "bg-teal-50/40", ring: "ring-teal-400" },
           { key: "token_paid", label: "Token Paid", count: stats.token_paid, icon: Wallet, iconBg: "bg-cyan-100", iconColor: "text-cyan-600", tint: "bg-cyan-50/40", ring: "ring-cyan-400" },
           { key: "pre_admitted", label: "Pre-Admitted", count: stats.pre_admitted, icon: UserCheck, iconBg: "bg-indigo-100", iconColor: "text-indigo-600", tint: "bg-indigo-50/40", ring: "ring-indigo-400" },
           { key: "admitted", label: "Admitted", count: stats.admitted, icon: GraduationCap, iconBg: "bg-green-100", iconColor: "text-green-600", tint: "bg-green-50/40", ring: "ring-green-400" },
-        ]).map(s => (
+        ] as const).map(s => (
           <Card key={s.key}
-            className={`rounded-2xl border-border/40 shadow-none cursor-pointer transition-all hover:shadow-sm ${stageFilter === s.key ? `${s.tint} ring-2 ${s.ring}` : "bg-card hover:bg-muted/30"}`}
+            className={`rounded-2xl border-border/40 shadow-none cursor-pointer transition-all hover:shadow-sm ${stageFilter === s.key ? `${s.tint} ring-2 ${s.ring}` : "bg-card hover:bg-muted/30"} ${(s as any).pulse ? "ring-2 ring-rose-300 animate-pulse" : ""}`}
             onClick={() => { setStageFilter(stageFilter === s.key ? null : s.key); setPaymentFilter("all"); setStatusFilter("all"); }}
           >
             <CardContent className="p-4 flex items-center gap-3.5">
@@ -772,6 +781,16 @@ export default function Applications() {
                                     <CreditCard className="h-3 w-3 mr-1" />Mark Offline Payment
                                   </Button>
                                 )}
+                                {isSuperAdmin && app.lead_id && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="mt-2 ml-2 h-7 text-xs"
+                                    onClick={() => setOfflineReceiptApp(app)}
+                                  >
+                                    <Receipt className="h-3 w-3 mr-1" />Record Offline Receipt
+                                  </Button>
+                                )}
                               </div>
                             </div>
 
@@ -889,6 +908,15 @@ export default function Applications() {
           defaultType="application_fee"
           title="Record Offline Payment"
           onSuccess={handleOfflinePaymentSuccess}
+        />
+      )}
+
+      {offlineReceiptApp?.lead_id && (
+        <OfflinePaymentDialog
+          open={!!offlineReceiptApp}
+          onOpenChange={(o) => { if (!o) setOfflineReceiptApp(null); }}
+          leadId={offlineReceiptApp.lead_id}
+          onRecorded={() => setOfflineReceiptApp(null)}
         />
       )}
 

@@ -75,12 +75,16 @@ export function computeStages(p: LifecycleInput): Stage[] {
   const hasOffer = p.hasOffer;
   const hasPan = !!p.lead?.pre_admission_no;
   const hasAn = !!p.lead?.admission_no;
-  const docsBlocked = p.docs.rejected > 0 && !isRejectedApp;
+  // Once the application has been decided (approved/rejected), the admin has
+  // accepted the doc state — don't keep marking docs as a blocker or "current"
+  // action, since the next real step is offer issuance / rejection handling.
+  const decided = isApproved || isRejectedApp;
+  const docsBlocked = p.docs.rejected > 0 && !isRejectedApp && !isApproved;
 
   const raw: Array<Pick<Stage, "key" | "label" | "Icon"> & { hint?: string; isDone: boolean; isBlocked?: boolean }> = [
     { key: "submitted", label: "Submitted",     Icon: FileCheck2,    isDone: isSubmitted, hint: a.status },
     { key: "fee",       label: "Fee Paid",      Icon: CreditCard,    isDone: isFeePaid,   hint: p.appFeePaid > 0 ? `₹${p.appFeePaid.toLocaleString("en-IN")}` : undefined },
-    { key: "docs",      label: "Docs Reviewed", Icon: ShieldCheck,   isDone: allDocsReviewed && !docsBlocked, isBlocked: docsBlocked, hint: p.docs.total > 0 ? `${p.docs.verified}/${p.docs.total} verified` : "no docs" },
+    { key: "docs",      label: "Docs Reviewed", Icon: ShieldCheck,   isDone: (allDocsReviewed && !docsBlocked) || decided, isBlocked: docsBlocked, hint: p.docs.total > 0 ? `${p.docs.verified}/${p.docs.total} verified` : "no docs" },
     { key: "approved",  label: isRejectedApp ? "Rejected" : "Approved", Icon: ShieldCheck, isDone: isApproved, isBlocked: isRejectedApp },
     { key: "offer",     label: "Offer Issued",  Icon: Gift,          isDone: hasOffer },
     { key: "token",     label: "Token → PAN",   Icon: Coins,         isDone: hasPan,      hint: p.lead?.pre_admission_no || undefined },
