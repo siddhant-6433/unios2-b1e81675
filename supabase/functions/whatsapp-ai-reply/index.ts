@@ -307,6 +307,7 @@ Deno.serve(async (req) => {
       .from("leads")
       .select("id, name, course_id, person_role")
       .or(`phone.eq.${normalizedPhone},phone.eq.${normalizedPhone.replace(/^91/, "+91")},phone.eq.+${normalizedPhone}`)
+      .eq("is_mirror", false)
       .limit(1);
 
     const existingLead = existingLeads?.[0] || null;

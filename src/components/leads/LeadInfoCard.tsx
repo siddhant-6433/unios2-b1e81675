@@ -5,6 +5,7 @@ import {
   Phone, Mail, MapPin, FileText, Building2, User, Globe, UserCheck, Sparkles, Pencil, Check, X, GraduationCap,
 } from "lucide-react";
 import type { CourseOption, CampusOption } from "@/hooks/useCourseCampusLink";
+import { jdCategoryHint } from "@/lib/jdCategoryHint";
 
 const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", application_in_progress: "Application In Progress", application_submitted: "Application Submitted",
@@ -215,6 +216,19 @@ export function LeadInfoCard({
             ].filter(Boolean).map((s: string) => s.replace(/_/g, " ")).join(" → ")}
             className="capitalize"
           />
+
+          {lead.jd_category && (
+            <InfoRow
+              icon={<FileText className="h-4 w-4" />}
+              iconColor="bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400"
+              label="JD Keyword"
+              value={
+                jdCategoryHint(lead.jd_category)
+                  ? `${lead.jd_category} · hint: ${jdCategoryHint(lead.jd_category)}`
+                  : lead.jd_category
+              }
+            />
+          )}
 
           {counsellorName && (
             <InfoRow

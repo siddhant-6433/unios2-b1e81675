@@ -390,6 +390,7 @@ Deno.serve(async (req) => {
             .from("leads")
             .select("id, counsellor_id, name, stage, person_role")
             .or(`phone.eq.${phone},phone.eq.${normalizedPhone},phone.eq.+${phone}`)
+            .eq("is_mirror", false)
             .limit(1);
           const lead = leadRows?.[0] || null;
 
@@ -650,6 +651,7 @@ Deno.serve(async (req) => {
                   .from("leads")
                   .select("id")
                   .or(`phone.eq.${phone},phone.eq.${normalizedForFeedback},phone.eq.+${phone}`)
+                  .eq("is_mirror", false)
                   .limit(1);
 
                 const leadId = phoneLead?.[0]?.id;

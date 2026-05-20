@@ -211,6 +211,7 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
           .from("leads")
           .select("name")
           .eq("phone", phone)
+          .eq("is_mirror", false)
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();

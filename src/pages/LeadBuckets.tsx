@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useCampus } from "@/contexts/CampusContext";
 import { useToast } from "@/hooks/use-toast";
 import { School, GraduationCap, Search, Loader2, UserPlus, CheckCircle, AlertTriangle } from "lucide-react";
+import { jdCategoryHint } from "@/lib/jdCategoryHint";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -66,6 +67,10 @@ interface BucketLead {
   lead_score: number;
   lead_temperature: string;
   bucket: "school" | "college";
+  jd_category: string | null;
+  last_ai_summary: string | null;
+  last_ai_disposition: string | null;
+  last_ai_conversion_pct: number | null;
 }
 
 interface Counsellor {
@@ -469,6 +474,28 @@ export default function LeadBuckets() {
                   </td>
                   <td className="px-4 py-3">
                     <p className="font-medium text-foreground">{lead.name}</p>
+                    {lead.jd_category && (() => {
+                      const hint = jdCategoryHint(lead.jd_category);
+                      return (
+                        <p className="text-[10px] text-muted-foreground/80 mt-0.5 truncate max-w-[260px]">
+                          <span className="font-semibold text-orange-700 dark:text-orange-400">JD:</span>{" "}
+                          {lead.jd_category}
+                          {hint && <span className="text-muted-foreground"> · {hint}</span>}
+                        </p>
+                      );
+                    })()}
+                    {lead.last_ai_summary && (
+                      <p
+                        className="text-[10px] text-muted-foreground/80 mt-0.5 truncate max-w-[260px]"
+                        title={lead.last_ai_summary}
+                      >
+                        <span className="font-semibold text-sky-700 dark:text-sky-400">AI:</span>{" "}
+                        {lead.last_ai_summary}
+                        {typeof lead.last_ai_conversion_pct === "number" && (
+                          <span className="text-muted-foreground"> · {lead.last_ai_conversion_pct}%</span>
+                        )}
+                      </p>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-muted-foreground font-mono text-xs">
                     {maskPhone(lead.phone)}

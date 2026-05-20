@@ -21,6 +21,7 @@ Deno.serve(async (req) => {
       .from("leads")
       .select("name, courses:course_id(name), campuses:campus_id(name)")
       .eq("phone", normalized)
+      .eq("is_mirror", false)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
