@@ -107,7 +107,6 @@ export default function LeadBuckets() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Bucket counts
-  const [schoolCount, setSchoolCount] = useState(0);
   const [miraiSchoolCount, setMiraiSchoolCount] = useState(0);
   const [nimtSchoolCount, setNimtSchoolCount] = useState(0);
   const [collegeCount, setCollegeCount] = useState(0);
@@ -127,18 +126,16 @@ export default function LeadBuckets() {
   const [selectedCounsellor, setSelectedCounsellor] = useState<string>("");
 
   const fetchCounts = async () => {
-    // NOTE: the CBSE (nimt) count must match the fetch query in fetchLeads,
-    // which uses `.or(campus_id.neq.MIRAI, campus_id.is.null)`. A plain
-    // .neq excludes NULL campus_id (Postgres `NULL <> X` is NULL, not true),
-    // which silently drops every school lead without a campus assignment —
-    // notably Meta lead-form leads, which can't carry campus_id.
-    const [sRes, mRes, nRes, cRes] = await Promise.all([
-      supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true }).eq("bucket", "school"),
-      supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true }).eq("bucket", "school").eq("campus_id", MIRAI_CAMPUS_ID),
-      supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true }).eq("bucket", "school").or(`campus_id.neq.${MIRAI_CAMPUS_ID},campus_id.is.null`),
+    // Use `school_brand` from the view (added 20260613100000) instead of a
+    // client-side `.or(campus_id.neq.MIRAI, campus_id.is.null)`. PostgREST
+    // was dropping the `is.null` branch on that OR group, which silently
+    // excluded every Meta lead-form lead (campus_id IS NULL) from the
+    // CBSE card — bucket showed 13 while the underlying query had 88.
+    const [mRes, nRes, cRes] = await Promise.all([
+      supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true }).eq("school_brand", "mirai"),
+      supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true }).eq("school_brand", "nimt"),
       supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true }).eq("bucket", "college"),
     ]);
-    setSchoolCount(sRes.count ?? 0);
     setMiraiSchoolCount(mRes.count ?? 0);
     setNimtSchoolCount(nRes.count ?? 0);
     setCollegeCount(cRes.count ?? 0);
@@ -149,14 +146,16 @@ export default function LeadBuckets() {
     let query = supabase
       .from("unassigned_leads_bucket" as any)
       .select("*")
-      .eq("bucket", activeBucket)
       .order("created_at", { ascending: false });
 
-    // Apply school sub-filter
-    if (activeBucket === "school" && schoolFilter === "mirai") {
-      query = query.eq("campus_id", MIRAI_CAMPUS_ID);
-    } else if (activeBucket === "school" && schoolFilter === "nimt") {
-      query = query.or(`campus_id.neq.${MIRAI_CAMPUS_ID},campus_id.is.null`);
+    if (activeBucket === "college") {
+      query = query.eq("bucket", "college");
+    } else if (schoolFilter === "mirai") {
+      query = query.eq("school_brand", "mirai");
+    } else {
+      // CBSE (schoolFilter === "nimt"); also the safe default if the user
+      // lands on the school bucket with the initial schoolFilter === "all".
+      query = query.eq("school_brand", "nimt");
     }
 
     const { data, error } = await query;
