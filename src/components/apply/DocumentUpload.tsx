@@ -24,15 +24,19 @@ interface DocSpec {
 }
 
 function getRequiredDocs(
-  category: string, 
-  academicDetails?: Record<string, any>, 
-  courseSelections?: { course_name: string }[]
+  programCategory: string,
+  academicDetails?: Record<string, any>,
+  courseSelections?: { course_name: string }[],
+  socialCategory?: string,
 ): DocSpec[] {
   const c10Status = academicDetails?.class_10?.result_status;
   const c12Status = academicDetails?.class_12?.result_status;
   const gradStatus = academicDetails?.graduation?.result_status;
+  // Caste certificate is mandatory for reserved-category applicants
+  // (SC/ST/OBC). EWS uses an income certificate which is out of scope here.
+  const needsCasteCert = ['SC', 'ST', 'OBC'].includes((socialCategory || '').toUpperCase());
 
-  if (category === 'school') {
+  if (programCategory === 'school') {
     const courseNames = courseSelections?.map(s => s.course_name.toLowerCase()).join(' ') || '';
     const isAboveKG = /grade|class\s*[1-9]/i.test(courseNames);
 
@@ -41,7 +45,9 @@ function getRequiredDocs(
       { key: 'report_card', label: 'Previous Class Report Card', desc: 'Last year marksheet', required: isAboveKG },
       { key: 'student_photo', label: 'Student Photograph', desc: 'Passport size photo', required: true },
       { key: 'transfer_certificate', label: 'Transfer Certificate', desc: 'If applicable', required: false },
-      { key: 'aadhaar', label: 'Aadhaar Card', desc: 'Front & back', required: false },
+      { key: 'aadhaar', label: 'Student Aadhaar Card', desc: 'JPEG / PNG / PDF', required: true },
+      { key: 'parent_aadhaar', label: 'Parent / Guardian Aadhaar', desc: 'JPEG / PNG / PDF (optional)', required: false },
+      { key: 'caste_certificate', label: 'Caste Certificate', desc: 'Mandatory for SC / ST / OBC', required: needsCasteCert },
       { key: 'medical_record', label: 'Medical Record', desc: 'If applicable', required: false },
     ];
   }
@@ -60,7 +66,7 @@ function getRequiredDocs(
   }
   base.push({ key: 'class_12_certificate', label: '12th Pass Certificate', desc: 'Optional', required: false });
 
-  if (['postgraduate', 'mba_pgdm', 'professional', 'bed', 'deled'].includes(category)) {
+  if (['postgraduate', 'mba_pgdm', 'professional', 'bed', 'deled'].includes(programCategory)) {
     // Graduation marksheet — only if result declared
     if (gradStatus !== 'not_declared') {
       base.push({ key: 'graduation_marksheet', label: 'Graduation Marksheet', desc: 'All semesters', required: true });
@@ -69,7 +75,7 @@ function getRequiredDocs(
   }
 
   // Optional graduation entered by UG applicants
-  if (!['postgraduate', 'mba_pgdm', 'professional', 'bed', 'deled'].includes(category)) {
+  if (!['postgraduate', 'mba_pgdm', 'professional', 'bed', 'deled'].includes(programCategory)) {
     const optGrad = academicDetails?.graduation;
     if (optGrad && (optGrad.degree || optGrad.university)) {
       if (optGrad.result_status !== 'not_declared') {
@@ -103,6 +109,33 @@ function getRequiredDocs(
       });
     }
   });
+
+  // Identity + parent + caste — required across all higher-ed program
+  // categories. Caste cert only kicks in for reserved categories.
+  base.push({ key: 'aadhaar',           label: 'Student Aadhaar Card',     desc: 'JPEG / PNG / PDF',                  required: true });
+  base.push({ key: 'parent_aadhaar',    label: 'Parent / Guardian Aadhaar', desc: 'JPEG / PNG / PDF (optional)',       required: false });
+  base.push({ key: 'caste_certificate', label: 'Caste Certificate',         desc: 'Mandatory for SC / ST / OBC',       required: needsCasteCert });
+
+  // Transfer / Migration Certificate — sourced from the most recent
+  // institution. UG applicants get it from their Class 12 school
+  // ("school TC/MC"); PG applicants get it from their graduation
+  // college/university ("migration certificate"). Required either way.
+  const isPG = ['postgraduate', 'mba_pgdm', 'bed'].includes(programCategory);
+  if (isPG) {
+    base.push({
+      key:      'migration_certificate',
+      label:    'Migration / Transfer Certificate',
+      desc:     'From your graduation college / university',
+      required: true,
+    });
+  } else {
+    base.push({
+      key:      'school_transfer_certificate',
+      label:    'School Transfer / Migration Certificate',
+      desc:     'From your Class 12 school',
+      required: true,
+    });
+  }
 
   return base;
 }
@@ -175,8 +208,14 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
   const docs = getRequiredDocs(
     data.program_category,
     data.academic_details as Record<string, any>,
-    data.course_selections
+    data.course_selections,
+    data.category,
   );
+  // Passport photo is mandatory for higher-ed (non-school) applicants —
+  // PhotoUpload writes data.passport_photo_path on success (webcam capture
+  // or file upload). School category doesn't render PhotoUpload.
+  const needsPassportPhoto = data.program_category !== 'school';
+  const passportPhotoUploaded = !!data.passport_photo_path;
 
   // Check for existing uploads on mount
   useEffect(() => {
@@ -223,7 +262,8 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
   };
 
   const requiredDocs = docs.filter(d => d.required);
-  const allRequiredUploaded = requiredDocs.every(d => uploaded[d.key]);
+  const allRequiredUploaded = requiredDocs.every(d => uploaded[d.key])
+    && (!needsPassportPhoto || passportPhotoUploaded);
 
   return (
     <div className="space-y-5">
@@ -233,14 +273,22 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
       </div>
 
       <fieldset disabled={readOnly} className={readOnly ? "pointer-events-none opacity-75" : ""}>
-      {/* Passport Photo */}
-      {data.program_category !== 'school' && (
-        <PhotoUpload
-          applicationId={data.application_id}
-          phone={data.phone}
-          existingUrl={data.passport_photo_path ? undefined : undefined}
-          onUploaded={(path) => onChange({ passport_photo_path: path })}
-        />
+      {/* Passport Photo — mandatory for higher-ed applicants. PhotoUpload
+          supports both webcam capture and file upload internally. */}
+      {needsPassportPhoto && (
+        <div className="space-y-1">
+          <PhotoUpload
+            applicationId={data.application_id}
+            phone={data.phone}
+            existingUrl={data.passport_photo_path ? undefined : undefined}
+            onUploaded={(path) => onChange({ passport_photo_path: path })}
+          />
+          {!passportPhotoUploaded && (
+            <p className="text-[11px] text-destructive">
+              Passport photo is required — use the webcam or upload an image.
+            </p>
+          )}
+        </div>
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -264,7 +312,7 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
             <ArrowLeft className="h-4 w-4" /> Back
           </Button>
         ) : <div />}
-        <Button onClick={onNext} disabled={!allRequiredUploaded && docs.some(d => d.required)} className="gap-2">
+        <Button onClick={onNext} disabled={!allRequiredUploaded} className="gap-2">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
           Continue to Review
         </Button>

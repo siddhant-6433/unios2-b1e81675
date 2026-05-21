@@ -11,7 +11,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Loader2, IndianRupee } from "lucide-react";
+import { Loader2, IndianRupee, Upload, X as XIcon, FileText } from "lucide-react";
 
 const PAY_TYPES: { value: string; label: string }[] = [
   { value: "application_fee", label: "Application Fee" },
@@ -62,6 +62,7 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, defaultType, 
   const [bank,   setBank]   = useState<string>("");
   const [wallet, setWallet] = useState<string>("");
   const [remarks,setRemarks]= useState<string>("");
+  const [proofFile, setProofFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const allowedRole = ["super_admin", "campus_admin", "accountant"].includes(role || "");
@@ -77,6 +78,7 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, defaultType, 
     setBank("");
     setWallet("");
     setRemarks("");
+    setProofFile(null);
   };
 
   const handleSubmit = async () => {
@@ -109,6 +111,26 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, defaultType, 
     const notes = noteBits.join(" · ");
 
     setSubmitting(true);
+
+    // Upload supporting document/image FIRST so we can store its URL on
+    // the lead_payments row. Bucket = application-documents (public) so
+    // the link in the receipts table works without signing every time.
+    let proofUrl: string | null = null;
+    if (proofFile) {
+      const ext = proofFile.name.split(".").pop() || "bin";
+      const path = `payment-proofs/${leadId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from("application-documents")
+        .upload(path, proofFile, { contentType: proofFile.type, upsert: false });
+      if (upErr) {
+        setSubmitting(false);
+        toast({ title: "Proof upload failed", description: upErr.message, variant: "destructive" });
+        return;
+      }
+      const { data: pub } = supabase.storage.from("application-documents").getPublicUrl(path);
+      proofUrl = pub?.publicUrl || path;
+    }
+
     const { data: inserted, error } = await (supabase.from("lead_payments") as any).insert({
       lead_id:         leadId,
       type,
@@ -120,6 +142,7 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, defaultType, 
       recorded_by:     profile?.id || null,
       gateway:         "offline",
       notes:           notes || null,
+      proof_url:       proofUrl,
     }).select("id").maybeSingle();
     setSubmitting(false);
 
@@ -256,6 +279,44 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, defaultType, 
           )}
 
           {/* Cash needs no extra fields */}
+
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Supporting Document / Image (optional)</label>
+            {proofFile ? (
+              <div className="mt-1 flex items-center gap-2 rounded-lg border border-input bg-muted/30 px-3 py-2 text-xs">
+                <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="flex-1 truncate text-foreground">{proofFile.name}</span>
+                <span className="text-muted-foreground">{(proofFile.size / 1024).toFixed(0)} KB</span>
+                <button
+                  type="button"
+                  onClick={() => setProofFile(null)}
+                  className="text-muted-foreground hover:text-foreground"
+                  title="Remove"
+                >
+                  <XIcon className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : (
+              <label className="mt-1 flex items-center justify-center gap-2 rounded-lg border border-dashed border-input bg-card px-3 py-3 text-xs text-muted-foreground hover:bg-muted/30 cursor-pointer">
+                <Upload className="h-3.5 w-3.5" />
+                <span>Click to attach receipt photo, cheque scan, or PDF</span>
+                <input
+                  type="file"
+                  className="hidden"
+                  accept="image/*,application/pdf"
+                  onChange={e => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+                    if (f.size > 10 * 1024 * 1024) {
+                      toast({ title: "File too large", description: "Max 10 MB.", variant: "destructive" });
+                      return;
+                    }
+                    setProofFile(f);
+                  }}
+                />
+              </label>
+            )}
+          </div>
 
           <div>
             <label className="text-xs font-medium text-muted-foreground">Remarks (optional)</label>
