@@ -9,10 +9,16 @@ name: Supabase DB push
 # what's missing. Migrations already applied via Studio / MCP are skipped
 # (they're recorded in schema_migrations with their original timestamp).
 #
-# Required repository secrets:
+# Required repository secrets (set under Settings → Secrets → Actions, or
+# under the production-db Environment for reviewer-gated pushes):
 #   SUPABASE_ACCESS_TOKEN   — personal access token (account settings → access tokens)
 #   SUPABASE_PROJECT_REF    — the project ref (deylhigsisuexszsmypq for UniOs)
-#   SUPABASE_DB_PASSWORD    — database password (project settings → database → connection string)
+#   SUPABASE_DB_PASSWORD    — database password (project settings → database)
+#
+# Both jobs probe for the secrets at the top of the run and skip cleanly
+# (dry-run) or fail with a clear message (push) if they're missing — so the
+# PR that adds this workflow doesn't go red just because the secrets aren't
+# wired up yet.
 #
 # Safety:
 #   • On PRs we only run --dry-run. No write happens until a human merges.
@@ -39,21 +45,40 @@ jobs:
     name: Dry-run migration diff
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    env:
+      # Hoist secrets to job level so every step (including the link CLI
+      # call) sees them without per-step duplication.
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF:  ${{ secrets.SUPABASE_PROJECT_REF }}
+      SUPABASE_DB_PASSWORD:  ${{ secrets.SUPABASE_DB_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check secrets
+        id: gate
+        run: |
+          missing=()
+          [ -z "$SUPABASE_ACCESS_TOKEN" ] && missing+=(SUPABASE_ACCESS_TOKEN)
+          [ -z "$SUPABASE_PROJECT_REF" ]  && missing+=(SUPABASE_PROJECT_REF)
+          [ -z "$SUPABASE_DB_PASSWORD" ]  && missing+=(SUPABASE_DB_PASSWORD)
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::notice title=Supabase secrets not configured::Missing ${missing[*]}. Add them under Settings → Secrets and variables → Actions (or under the production-db Environment) to enable the db push dry-run. See docs/db-deploy-audit.md for the full list."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: supabase/setup-cli@v1
+        if: steps.gate.outputs.skip != 'true'
         with:
           version: latest
+
       - name: Link to Supabase project
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        if: steps.gate.outputs.skip != 'true'
         run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
-        # Both passed as env vars rather than CLI args so they don't leak into logs.
-        # SUPABASE_DB_PASSWORD also picked up by `supabase db push` directly.
+
       - name: Show pending migrations (dry-run)
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        if: steps.gate.outputs.skip != 'true'
         run: supabase db push --dry-run
 
   push:
@@ -61,19 +86,32 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: production-db
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF:  ${{ secrets.SUPABASE_PROJECT_REF }}
+      SUPABASE_DB_PASSWORD:  ${{ secrets.SUPABASE_DB_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify secrets
+        # For the push path we WANT to fail loudly: a missing secret means
+        # nothing got applied, which is silent data drift waiting to happen.
+        run: |
+          missing=()
+          [ -z "$SUPABASE_ACCESS_TOKEN" ] && missing+=(SUPABASE_ACCESS_TOKEN)
+          [ -z "$SUPABASE_PROJECT_REF" ]  && missing+=(SUPABASE_PROJECT_REF)
+          [ -z "$SUPABASE_DB_PASSWORD" ]  && missing+=(SUPABASE_DB_PASSWORD)
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error title=Supabase secrets missing::Cannot apply migrations: ${missing[*]} are not set. Add them under Settings → Environments → production-db → Environment secrets."
+            exit 1
+          fi
+
       - uses: supabase/setup-cli@v1
         with:
           version: latest
+
       - name: Link to Supabase project
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+
       - name: Apply pending migrations
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: supabase db push
