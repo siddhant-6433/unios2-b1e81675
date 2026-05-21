@@ -27,7 +27,7 @@ import { PortalProvider, usePortal } from "@/components/apply/PortalContext";
 import { TokenFeePanel } from "@/components/applicant/TokenFeePanel";
 import { ApplicationPreview, type PreviewDoc } from "@/components/applicant/ApplicationPreview";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
-import { captureAttribution } from "@/lib/analytics";
+import { captureAttribution, trackPixelLead } from "@/lib/analytics";
 
 // ─── OTP Login Screen ───
 function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: string) => void }) {
@@ -1583,7 +1583,7 @@ const ApplyPortal = () => {
     // single source of truth — we don't fire these events browser-side because
     // GA has no transaction_id on generate_lead, so dual fires would double-count.
     let resolvedLeadId = leadId;
-    const attribution = captureAttribution();
+    const attribution = captureAttribution(portal.id);
     const { data: upsertedLeadId, error: leadErr } = await supabase.rpc(
       "upsert_application_lead" as any,
       {
@@ -1612,6 +1612,17 @@ const ApplyPortal = () => {
         description: `Application ${appId} started with ${selections.length} course(s)`,
         old_stage: "new_lead" as any,
         new_stage: "application_in_progress" as any,
+      });
+    }
+
+    // Meta Pixel: Lead standard event. Mirrored server-side by the CAPI
+    // trigger fn_capi_emit_lead — both fire with event_id "lead_<uuid>"
+    // and Meta dedupes. Skip if we don't have a lead_id (rare RPC failure).
+    if (resolvedLeadId) {
+      trackPixelLead({
+        leadId: resolvedLeadId,
+        program: selections[0]?.course_name,
+        source: leadSource,
       });
     }
 
