@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { usePaymentGateways, type PaymentGateway } from "@/hooks/usePaymentGateways";
 import { useAuth } from "@/contexts/AuthContext";
-import { ApplicationData } from "./types";
+import { ApplicationData, calculateFee } from "./types";
 import { usePortal } from "./PortalContext";
 import { ReceiptDialog, ReceiptData } from "@/components/receipts/ReceiptDialog";
 import { trackPixelCompleteRegistration } from "@/lib/analytics";
@@ -25,8 +25,31 @@ declare global {
 
 export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props) {
   const isPaid   = data.payment_status === "paid";
-  const isWaived = data.fee_amount === 0;
+  // Recompute from current selections so a stale stored fee_amount (e.g. a
+  // historical app touched by an over-broad backfill) can't silently waive a
+  // payable application. calculateFee() applies the live FEE_MAP, which prices
+  // B.Ed / D.El.Ed at 0 while still charging other selected courses.
+  const computedFee = useMemo(() => calculateFee(data.course_selections || []), [data.course_selections]);
+  const effectiveFee = computedFee > 0 ? computedFee : Number(data.fee_amount || 0);
+  const isWaived = effectiveFee === 0;
   const portal   = usePortal();
+
+  // Self-heal: if the stored fee_amount disagrees with what the current
+  // selections actually cost, correct it locally (so renders + gateway calls
+  // pick the right amount immediately) and persist to the DB.
+  const syncedRef = useRef(false);
+  useEffect(() => {
+    if (syncedRef.current) return;
+    if (isPaid) return;
+    if (!data.application_id) return;
+    if (Number(data.fee_amount || 0) === computedFee) return;
+    syncedRef.current = true;
+    onChange({ fee_amount: computedFee });
+    supabase
+      .from("applications")
+      .update({ fee_amount: computedFee })
+      .eq("application_id", data.application_id);
+  }, [computedFee, data.fee_amount, data.application_id, isPaid, onChange]);
 
   const [showReceipt, setShowReceipt] = useState(false);
 
