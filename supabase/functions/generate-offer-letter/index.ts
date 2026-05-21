@@ -305,40 +305,86 @@ function drawParagraph(ctx: Ctx, text: string, opts: { size?: number; bold?: boo
   ctx.y -= opts.gapAfter ?? 0;
 }
 
-// Two-column fee table: term label on left, amount right-aligned. Shaded
-// header row (label bg) for readability.
-function drawFeeTable(
-  ctx: Ctx, rows: { label: string; amount: string; bold?: boolean; highlight?: boolean }[],
-) {
-  const totalW = ctx.width - ctx.margin * 2;
-  const labelW = totalW * 0.62;
-  const amtW   = totalW - labelW;
-  const rowH = 22;
+// Fee ledger table — Particulars / Amount / [Waiver/Scholarship] / Applicable Fee.
+// The Waiver/Scholarship column is rendered only when at least one row carries
+// a non-zero waiver (so a clean offer with no discounts still shows a tight
+// 3-column grid instead of an empty middle column).
+interface LedgerRow {
+  label: string;
+  amount: number;
+  waiver: number;        // 0 means no waiver on this line
+  applicable: number;
+  bold?: boolean;
+  highlight?: boolean;
+}
 
-  // Header
+function drawFeeLedger(ctx: Ctx, rows: LedgerRow[]) {
+  const hasWaiverCol = rows.some(r => r.waiver > 0);
+  const totalW = ctx.width - ctx.margin * 2;
+  // Column widths — keep Particulars wide enough for "Total Programme Fee".
+  const labelW = hasWaiverCol ? totalW * 0.40 : totalW * 0.50;
+  const numW   = (totalW - labelW) / (hasWaiverCol ? 3 : 2);
+  const rowH   = 22;
+
+  const colXs = hasWaiverCol
+    ? [ctx.margin, ctx.margin + labelW, ctx.margin + labelW + numW, ctx.margin + labelW + numW * 2]
+    : [ctx.margin, ctx.margin + labelW, ctx.margin + labelW + numW];
+  const colWs = hasWaiverCol
+    ? [labelW, numW, numW, numW]
+    : [labelW, numW, numW];
+  const headers = hasWaiverCol
+    ? ["Particulars", "Amount", "Waiver/Scholarship", "Applicable Fee"]
+    : ["Particulars", "Amount", "Applicable Fee"];
+
+  const drawRowFrame = (fillColor: any) => {
+    for (let i = 0; i < colXs.length; i++) {
+      ctx.page.drawRectangle({
+        x: colXs[i], y: ctx.y - rowH, width: colWs[i], height: rowH,
+        color: fillColor, borderColor: COLORS.border, borderWidth: 0.5,
+      });
+    }
+  };
+
+  // Header row.
   ensureSpace(ctx, rowH);
-  ctx.page.drawRectangle({ x: ctx.margin,        y: ctx.y - rowH, width: labelW, height: rowH, color: COLORS.labelBg, borderColor: COLORS.border, borderWidth: 0.5 });
-  ctx.page.drawRectangle({ x: ctx.margin + labelW, y: ctx.y - rowH, width: amtW,   height: rowH, color: COLORS.labelBg, borderColor: COLORS.border, borderWidth: 0.5 });
-  ctx.page.drawText("Particulars", { x: ctx.margin + 8, y: ctx.y - 14, size: 8, font: ctx.bold, color: COLORS.text });
-  const ahdr = "Amount";
-  const ahdrW = ctx.bold.widthOfTextAtSize(ahdr, 8);
-  ctx.page.drawText(ahdr, { x: ctx.margin + labelW + amtW - ahdrW - 8, y: ctx.y - 14, size: 8, font: ctx.bold, color: COLORS.text });
+  drawRowFrame(COLORS.labelBg);
+  // Particulars left-aligned, numeric headers right-aligned.
+  ctx.page.drawText(headers[0], {
+    x: colXs[0] + 8, y: ctx.y - 14, size: 8, font: ctx.bold, color: COLORS.text,
+  });
+  for (let i = 1; i < headers.length; i++) {
+    const w = ctx.bold.widthOfTextAtSize(headers[i], 8);
+    ctx.page.drawText(headers[i], {
+      x: colXs[i] + colWs[i] - w - 8, y: ctx.y - 14,
+      size: 8, font: ctx.bold, color: COLORS.text,
+    });
+  }
   ctx.y -= rowH;
 
   for (const r of rows) {
     ensureSpace(ctx, rowH);
     const fillColor = r.highlight ? COLORS.hilite : rgb(1, 1, 1);
     const fnt = r.bold ? ctx.bold : ctx.font;
+    drawRowFrame(fillColor);
 
-    ctx.page.drawRectangle({ x: ctx.margin,            y: ctx.y - rowH, width: labelW, height: rowH, color: fillColor, borderColor: COLORS.border, borderWidth: 0.5 });
-    ctx.page.drawRectangle({ x: ctx.margin + labelW,   y: ctx.y - rowH, width: amtW,   height: rowH, color: fillColor, borderColor: COLORS.border, borderWidth: 0.5 });
-    ctx.page.drawText(r.label, { x: ctx.margin + 8, y: ctx.y - 14, size: 9.5, font: fnt, color: COLORS.text });
-    const amtTxt = r.amount;
-    const amtTxtW = fnt.widthOfTextAtSize(amtTxt, 9.5);
-    ctx.page.drawText(amtTxt, {
-      x: ctx.margin + labelW + amtW - amtTxtW - 8,
-      y: ctx.y - 14, size: 9.5, font: fnt, color: COLORS.text,
+    // Particulars (left).
+    ctx.page.drawText(r.label, {
+      x: colXs[0] + 8, y: ctx.y - 14, size: 9.5, font: fnt, color: COLORS.text,
     });
+
+    // Numeric cells (right-aligned). Waiver shown as "- Rs. X" only if > 0.
+    const numericTexts = hasWaiverCol
+      ? [fmtINR(r.amount), r.waiver > 0 ? "- " + fmtINR(r.waiver) : "—", fmtINR(r.applicable)]
+      : [fmtINR(r.amount), fmtINR(r.applicable)];
+
+    for (let i = 0; i < numericTexts.length; i++) {
+      const txt = numericTexts[i];
+      const w = fnt.widthOfTextAtSize(txt, 9.5);
+      ctx.page.drawText(txt, {
+        x: colXs[i + 1] + colWs[i + 1] - w - 8,
+        y: ctx.y - 14, size: 9.5, font: fnt, color: COLORS.text,
+      });
+    }
     ctx.y -= rowH;
   }
 }
@@ -428,39 +474,50 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
   // ── Fee structure ──────────────────────────────────────────────────────
   drawSection(ctx, "FEE STRUCTURE");
 
-  const feeRows: { label: string; amount: string; bold?: boolean; highlight?: boolean }[] = [];
+  // Build per-year ledger rows. Legacy `scholarship_amount` is attributed to
+  // Year 1 (that's also how the token-fee math handles it upstream); newer
+  // discounts live in `offer_waivers`. Waiver column is shown only if any
+  // year carries a non-zero waiver/scholarship.
+  const scholarship = Number(opts.offer.scholarship_amount || 0);
+  const ledgerRows: LedgerRow[] = [];
+
+  let totalAmount = 0;
+  let totalWaiver = 0;
+  let totalApplicable = 0;
+
   for (const it of opts.yearItems) {
-    feeRows.push({
-      label: it.term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
-      amount: fmtINR(it.total),
+    const yearLabel = it.term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+    const waiverForYear = opts.waivers
+      .filter(w => w.term === it.term)
+      .reduce((s, w) => s + Number(w.amount || 0), 0);
+    const scholarshipShare = it.term === "year_1" ? scholarship : 0;
+    const lineWaiver = waiverForYear + scholarshipShare;
+    const applicable = Math.max(0, Number(it.total) - lineWaiver);
+
+    ledgerRows.push({
+      label: yearLabel,
+      amount: Number(it.total),
+      waiver: lineWaiver,
+      applicable,
+    });
+
+    totalAmount     += Number(it.total);
+    totalWaiver     += lineWaiver;
+    totalApplicable += applicable;
+  }
+
+  if (opts.totalCourseFee > 0 || ledgerRows.length > 0) {
+    ledgerRows.push({
+      label: "Total Programme Fee",
+      amount: totalAmount,
+      waiver: totalWaiver,
+      applicable: totalApplicable,
+      bold: true,
+      highlight: true,
     });
   }
-  if (opts.totalCourseFee > 0) {
-    feeRows.push({ label: "Total Programme Fee", amount: fmtINR(opts.totalCourseFee), bold: true });
-  }
-  const scholarship = Number(opts.offer.scholarship_amount || 0);
-  const waiverTotal = opts.waivers.reduce((s, w) => s + Number(w.amount || 0), 0);
-  if (scholarship > 0) {
-    feeRows.push({ label: "Scholarship Awarded", amount: "- " + fmtINR(scholarship) });
-  }
-  for (const w of opts.waivers) {
-    const yearLabel = w.term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-    feeRows.push({ label: `${yearLabel} Waiver`, amount: "- " + fmtINR(w.amount) });
-  }
-  if (scholarship > 0 || waiverTotal > 0) {
-    // Net Offer Fee — programme total minus scholarship minus all approved
-    // waivers. Anchored to the canonical totalCourseFee (sum of year items
-    // from the active fee structure) rather than the legacy offer.net_fee
-    // column, which historically held arbitrary form values that may not
-    // equal the programme total. Falls back to offer.net_fee only when no
-    // year items are available (e.g., fee structure missing).
-    const programmeBase = opts.totalCourseFee > 0
-      ? opts.totalCourseFee
-      : Number(opts.offer.total_fee || 0);
-    const computedNet = Math.max(0, programmeBase - scholarship - waiverTotal);
-    feeRows.push({ label: "Net Offer Fee", amount: fmtINR(computedNet), bold: true, highlight: true });
-  }
-  drawFeeTable(ctx, feeRows);
+
+  drawFeeLedger(ctx, ledgerRows);
 
   ctx.y -= 8;
 
@@ -481,6 +538,7 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
     "Provisional offer subject to verification of original documents at physical admission.",
     "Token fee is adjustable against the first-year programme fee and is non-refundable once paid.",
     "Remaining first-year fee is due as per the schedule communicated post token-fee confirmation.",
+    "The above fee does not include Uniform Fee, Examination Fee and other applicable fees levied by the University / Examination Body, if any.",
     "Offer lapses automatically if token fee is not received by the acceptance deadline.",
     "The institution may revoke this offer if any submitted information is found inaccurate.",
   ];

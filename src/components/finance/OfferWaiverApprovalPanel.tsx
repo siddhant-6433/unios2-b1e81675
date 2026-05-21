@@ -31,6 +31,10 @@ interface Waiver {
   lead_name: string;
   lead_id: string;
   course_name: string | null;
+  // Gross year fee for this waiver's term, sourced from the active fee
+  // structure on the offer's (course, session). Null when the structure
+  // can't be resolved (legacy offers, missing structure).
+  year_amount: number | null;
 }
 
 export function OfferWaiverApprovalPanel() {
@@ -54,7 +58,7 @@ export function OfferWaiverApprovalPanel() {
         requested_by_name, requested_by_role, approved_by_name,
         rejection_reason, created_at,
         offer_letters!offer_letter_id (
-          lead_id,
+          lead_id, course_id, session_id,
           leads!lead_id ( name ),
           offer_letter_courses:applications!lead_id ( courses!course_id ( name ) )
         )
@@ -63,8 +67,55 @@ export function OfferWaiverApprovalPanel() {
 
     if (error) {
       toast({ title: "Failed to load waivers", description: error.message, variant: "destructive" });
-    } else {
-      setWaivers((data || []).map((w: any) => ({
+      setLoading(false);
+      return;
+    }
+
+    // Resolve the gross year fee for each waiver's (course, session, term) by
+    // pulling the active fee_structures in one round-trip and summing items
+    // per term. Lets us render Amount + Applicable Fee inline without an
+    // extra fetch per row.
+    const offerKeys = new Set<string>();
+    for (const w of (data || []) as any[]) {
+      const c = w.offer_letters?.course_id;
+      const s = w.offer_letters?.session_id;
+      if (c && s) offerKeys.add(`${c}::${s}`);
+    }
+    const yearAmountByKey = new Map<string, number>(); // `${courseId}::${sessionId}::${term}` -> total
+
+    if (offerKeys.size > 0) {
+      const pairs = Array.from(offerKeys).map(k => k.split("::"));
+      const courseIds = Array.from(new Set(pairs.map(p => p[0])));
+      const sessionIds = Array.from(new Set(pairs.map(p => p[1])));
+      const { data: fsRows } = await supabase
+        .from("fee_structures")
+        .select("course_id, session_id, is_active, fee_structure_items ( term, amount )")
+        .in("course_id", courseIds)
+        .in("session_id", sessionIds)
+        .eq("is_active", true);
+
+      for (const fs of (fsRows || []) as any[]) {
+        const key = `${fs.course_id}::${fs.session_id}`;
+        if (!offerKeys.has(key)) continue;
+        const byTerm = new Map<string, number>();
+        for (const it of (fs.fee_structure_items || []) as any[]) {
+          const t = String(it.term || "");
+          if (!/^year_\d+$/.test(t)) continue;
+          byTerm.set(t, (byTerm.get(t) || 0) + Number(it.amount || 0));
+        }
+        for (const [t, total] of byTerm) {
+          yearAmountByKey.set(`${key}::${t}`, total);
+        }
+      }
+    }
+
+    setWaivers((data || []).map((w: any) => {
+      const courseId = w.offer_letters?.course_id;
+      const sessionId = w.offer_letters?.session_id;
+      const yearAmount = (courseId && sessionId)
+        ? yearAmountByKey.get(`${courseId}::${sessionId}::${w.term}`) ?? null
+        : null;
+      return {
         id: w.id,
         offer_letter_id: w.offer_letter_id,
         term: w.term,
@@ -80,8 +131,9 @@ export function OfferWaiverApprovalPanel() {
         lead_id: w.offer_letters?.lead_id || "",
         course_name:
           w.offer_letters?.offer_letter_courses?.[0]?.courses?.name || null,
-      })));
-    }
+        year_amount: yearAmount,
+      };
+    }));
     setLoading(false);
   };
 
@@ -170,8 +222,10 @@ export function OfferWaiverApprovalPanel() {
                 <tr className="border-b border-border bg-muted/50">
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Applicant</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Course</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Term</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">Waiver Amount</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Particulars</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">Amount</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">Waiver/Scholarship</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">Applicable Fee</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Reason</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Requested By</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Status</th>
@@ -182,7 +236,11 @@ export function OfferWaiverApprovalPanel() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((w) => (
+                {filtered.map((w) => {
+                  const applicable = w.year_amount != null
+                    ? Math.max(0, w.year_amount - w.amount)
+                    : null;
+                  return (
                   <tr key={w.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
                     <td className="px-4 py-3 font-medium text-foreground">{w.lead_name}</td>
                     <td className="px-4 py-3 text-xs text-muted-foreground max-w-[160px] truncate" title={w.course_name || undefined}>
@@ -193,8 +251,14 @@ export function OfferWaiverApprovalPanel() {
                         {termLabel(w.term)}
                       </Badge>
                     </td>
-                    <td className="px-4 py-3 text-right font-semibold text-foreground">
-                      ₹{w.amount.toLocaleString("en-IN")}
+                    <td className="px-4 py-3 text-right tabular-nums text-foreground">
+                      {w.year_amount != null ? `₹${w.year_amount.toLocaleString("en-IN")}` : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-foreground tabular-nums">
+                      −₹{w.amount.toLocaleString("en-IN")}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums font-semibold text-emerald-700">
+                      {applicable != null ? `₹${applicable.toLocaleString("en-IN")}` : "—"}
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground max-w-[200px] truncate" title={w.reason || undefined}>
                       {w.reason || "—"}
@@ -254,7 +318,8 @@ export function OfferWaiverApprovalPanel() {
                       </td>
                     )}
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </CardContent>
