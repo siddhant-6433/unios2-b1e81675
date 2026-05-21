@@ -78,6 +78,18 @@ export function RecordPaymentDialog({
     parseFloat(amount) < minInstalment &&
     tokenOutstanding > minInstalment;
 
+  // Surface the case where the entered amount IS a valid instalment but
+  // still won't carry the candidate over the PAN (token_required) line —
+  // so finance knows they're recording a non-advancing top-up before they
+  // commit the receipt.
+  const tokenShortfallAfterThis =
+    type === "token_fee" && feeStatus && !feeStatus.token_complete && amount !== ""
+      ? Math.max(0, feeStatus.token_required - feeStatus.token_paid - parseFloat(amount || "0"))
+      : 0;
+  const willCrossTokenThreshold =
+    type === "token_fee" && feeStatus && !feeStatus.token_complete &&
+    amount !== "" && parseFloat(amount) > 0 && tokenShortfallAfterThis === 0;
+
   useEffect(() => {
     if (open) {
       setType(defaultType || "application_fee");
@@ -215,6 +227,16 @@ export function RecordPaymentDialog({
             {type === "token_fee" && tokenOutstanding > 0 && !feeStatus.token_complete && (
               <p className="pt-1 text-[11px] text-muted-foreground/80">
                 Outstanding token: ₹{tokenOutstanding.toLocaleString("en-IN")} · min instalment ₹{minInstalment.toLocaleString("en-IN")}{tokenOutstanding < minInstalment && " (final balance, any amount allowed)"}
+              </p>
+            )}
+            {tokenShortfallAfterThis > 0 && parseFloat(amount || "0") >= minInstalment && (
+              <p className="pt-1 text-[11px] text-amber-700 font-medium">
+                ⚠ ₹{tokenShortfallAfterThis.toLocaleString("en-IN")} more needed after this to cross the 10% line and advance to Pre-Admitted.
+              </p>
+            )}
+            {willCrossTokenThreshold && (
+              <p className="pt-1 text-[11px] text-emerald-700 font-medium">
+                ✓ This payment crosses the 10% line — candidate will be Pre-Admitted (PAN issued).
               </p>
             )}
           </div>
