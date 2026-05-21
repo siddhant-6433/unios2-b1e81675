@@ -58,6 +58,15 @@ interface LedgerLink {
   notes: string | null;
 }
 
+interface PreviewRow {
+  fee_code_id: string;
+  fee_code_code: string;
+  fee_code_name: string;
+  term: string;
+  total_amount: number;
+  due_date: string;
+}
+
 interface Props {
   /** Either leadId OR studentId — both work, leadId is preferred from CRM views */
   leadId?: string;
@@ -75,6 +84,7 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
   const [payments, setPayments] = useState<LeadPayment[]>([]);
   const [ledger, setLedger] = useState<LedgerRow[]>([]);
   const [links, setLinks] = useState<LedgerLink[]>([]);
+  const [preview, setPreview] = useState<PreviewRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [offlineOpen, setOfflineOpen] = useState(false);
@@ -151,6 +161,16 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
       } else {
         setLinks([]);
       }
+
+      // Pre-PAN preview: when there's no real ledger yet, project the
+      // fee_structure so finance can validate the breakdown before the
+      // candidate crosses the token threshold.
+      if (fcData.length === 0 && lid) {
+        const { data: prev } = await (supabase as any).rpc("lead_fee_preview", { _lead_id: lid });
+        if (alive) setPreview((prev ?? []) as PreviewRow[]);
+      } else {
+        setPreview([]);
+      }
       if (alive) setLoading(false);
     })();
     return () => { alive = false; };
@@ -177,8 +197,42 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
     return Array.from(m.entries()).sort(([a], [b]) => a.localeCompare(b));
   }, [ledger]);
 
+  // Distribute confirmed pre-admission payments across the preview rows
+  // the same way provision_student_fees would at PAN issuance: application
+  // fee → form fee row; token / other → year_N rows oldest-first.
+  const previewWithPaid = useMemo(() => {
+    if (preview.length === 0) return [];
+    const rows = preview.map(p => ({ ...p, paid_amount: 0 }));
+    const confirmed = payments.filter(p => p.status === "confirmed");
+    const appPaid   = confirmed.filter(p => p.type === "application_fee").reduce((s, p) => s + Number(p.amount || 0), 0);
+    const tokenPaid = confirmed.filter(p => p.type === "token_fee" || p.type === "other" || p.type === "registration_fee").reduce((s, p) => s + Number(p.amount || 0), 0);
+    if (appPaid > 0) {
+      const formRow = rows.find(r => /FORM|APPLICATION/i.test(r.fee_code_code));
+      if (formRow) formRow.paid_amount = Math.min(appPaid, formRow.total_amount);
+    }
+    let remaining = tokenPaid;
+    for (const r of rows) {
+      if (!/^year_\d+$/.test(r.term)) continue;
+      if (remaining <= 0) break;
+      const apply = Math.min(remaining, r.total_amount - r.paid_amount);
+      r.paid_amount += apply;
+      remaining -= apply;
+    }
+    return rows;
+  }, [preview, payments]);
+
+  const previewGrouped = useMemo(() => {
+    const m = new Map<string, typeof previewWithPaid>();
+    for (const r of previewWithPaid) {
+      const key = r.term || "other";
+      if (!m.has(key)) m.set(key, []);
+      m.get(key)!.push(r);
+    }
+    return Array.from(m.entries()).sort(([a], [b]) => a.localeCompare(b));
+  }, [previewWithPaid]);
+
   if (loading) return <div className="flex items-center justify-center py-8"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>;
-  if (payments.length === 0 && ledger.length === 0) {
+  if (payments.length === 0 && ledger.length === 0 && preview.length === 0) {
     return (
       <>
         <div className="rounded-xl border border-border bg-card p-6 text-center text-sm text-muted-foreground space-y-3">
@@ -323,6 +377,55 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
               ))}
             </tbody>
           </table>
+          </div>
+        </div>
+      )}
+
+      {/* Preview ledger (pre-PAN): projected from fee_structure_items */}
+      {ledger.length === 0 && previewGrouped.length > 0 && (
+        <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50/40 overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-amber-200 bg-amber-50 flex items-center gap-2">
+            <IndianRupee className="h-3.5 w-3.5 text-amber-700" />
+            <span className="text-xs font-semibold text-amber-900">Fee Ledger — Preview</span>
+            <span className="text-[10px] text-amber-800/80">Locks in once the candidate is pre-admitted (10% token paid).</span>
+          </div>
+          <div className="divide-y divide-amber-200/60 overflow-x-auto">
+            {previewGrouped.map(([term, rows]) => {
+              const termTotal = rows.reduce((s, r) => s + Number(r.total_amount || 0), 0);
+              const termPaid  = rows.reduce((s, r) => s + Number(r.paid_amount  || 0), 0);
+              const termBal   = termTotal - termPaid;
+              return (
+                <div key={term}>
+                  <div className="bg-amber-50/70 px-4 py-2 flex items-center justify-between">
+                    <span className="text-xs font-semibold text-amber-900 capitalize">{term.replace(/_/g, " ")}</span>
+                    <span className="text-[11px] text-amber-800/80">
+                      {fmt(termPaid)} paid · <span className={termBal > 0 ? "text-red-700 font-semibold" : "text-emerald-700 font-semibold"}>{fmt(termBal)} {termBal > 0 ? "due" : "settled"}</span>
+                    </span>
+                  </div>
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {rows.map(r => (
+                        <tr key={r.fee_code_id + r.term} className="border-t border-amber-200/60">
+                          <td className="px-3 py-2 w-4" />
+                          <td className="px-3 py-2 text-foreground">
+                            {r.fee_code_name}
+                            <span className="ml-1 font-mono text-[10px] text-muted-foreground/70">{r.fee_code_code}</span>
+                          </td>
+                          <td className="px-3 py-2 text-right text-foreground">{fmt(r.total_amount)}</td>
+                          <td className="px-3 py-2 text-right text-emerald-700">{fmt(r.paid_amount)}</td>
+                          <td className="px-3 py-2 text-right">
+                            <span className={r.total_amount - r.paid_amount > 0 ? "text-red-600 font-semibold" : "text-emerald-700 font-semibold"}>
+                              {fmt(r.total_amount - r.paid_amount)}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-muted-foreground">{fmtDate(r.due_date)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
