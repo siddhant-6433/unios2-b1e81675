@@ -22,7 +22,7 @@ interface AddLeadDialogProps {
 
 const EMPTY_FORM = {
   name: "", phone: "", email: "", guardian_name: "", guardian_phone: "",
-  source: "" as string, course_id: "", campus_id: "", counsellor_id: "", notes: "",
+  source: "" as string, course_id: "", campus_id: "", counsellor_id: "", consultant_id: "", notes: "",
 };
 
 export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, onDraftChange }: AddLeadDialogProps) {
@@ -30,6 +30,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [counsellors, setCounsellors] = useState<{ id: string; display_name: string }[]>([]);
+  const [consultants, setConsultants] = useState<{ id: string; name: string; organization: string | null }[]>([]);
   const { coursesByDepartment, getCampusesForCourse } = useCourseCampusLink();
 
   const [form, setForm] = useState(EMPTY_FORM);
@@ -51,6 +52,20 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
       const userIds = roles.map((r: any) => r.user_id);
       const { data: profiles } = await supabase.from("profiles").select("id, display_name").in("user_id", userIds).eq("login_disabled", false);
       if (profiles) setCounsellors(profiles.filter((p: any) => p.display_name));
+    })();
+  }, [open]);
+
+  // Consultants list — only loaded when the dialog opens; powers the optional
+  // "Consultant" select shown when Source = 'consultant'.
+  useEffect(() => {
+    if (!open) return;
+    (async () => {
+      const { data } = await supabase
+        .from("consultants")
+        .select("id, name, organization, stage")
+        .neq("stage", "inactive")
+        .order("name", { ascending: true });
+      if (data) setConsultants(data.map(({ id, name, organization }: any) => ({ id, name, organization })));
     })();
   }, [open]);
 
@@ -135,6 +150,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
       _campus_id: form.campus_id || null,
       _counsellor_id: form.counsellor_id || null,
       _notes: form.notes.trim() || null,
+      _consultant_id: form.source === "consultant" ? (form.consultant_id || null) : null,
     });
     setSaving(false);
     if (error) {
@@ -213,7 +229,15 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Source <span className="text-destructive">*</span></label>
-              <select value={form.source} onChange={e => setForm(p => ({ ...p, source: e.target.value }))} className={`${inputCls} ${!form.source ? "text-muted-foreground" : ""}`}>
+              <select
+                value={form.source}
+                onChange={e => setForm(p => ({
+                  ...p,
+                  source: e.target.value,
+                  consultant_id: e.target.value === "consultant" ? p.consultant_id : "",
+                }))}
+                className={`${inputCls} ${!form.source ? "text-muted-foreground" : ""}`}
+              >
                 <option value="">Select source *</option>
                 {LEAD_SOURCES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
               </select>
@@ -259,6 +283,23 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
               </select>
             </div>
           </div>
+          {form.source === "consultant" && (
+            <div>
+              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Consultant</label>
+              <select
+                value={form.consultant_id}
+                onChange={e => setForm(p => ({ ...p, consultant_id: e.target.value }))}
+                className={inputCls}
+              >
+                <option value="">Select consultant (optional)</option>
+                {consultants.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}{c.organization ? ` — ${c.organization}` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div>
             <label className="block text-[11px] font-medium text-muted-foreground mb-1">Notes</label>
             <textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} rows={2} className={inputCls} />
