@@ -1,0 +1,79 @@
+name: Supabase DB push
+
+# Closes the gap that left ~15 migrations in git unapplied for weeks:
+# any PR that touches supabase/migrations gets a dry-run diff posted to the
+# PR; merges to main trigger an actual apply.
+#
+# The workflow uses the Supabase CLI's `db push` which compares local
+# migration files against the remote schema_migrations table and only runs
+# what's missing. Migrations already applied via Studio / MCP are skipped
+# (they're recorded in schema_migrations with their original timestamp).
+#
+# Required repository secrets:
+#   SUPABASE_ACCESS_TOKEN   — personal access token (account settings → access tokens)
+#   SUPABASE_PROJECT_REF    — the project ref (deylhigsisuexszsmypq for UniOs)
+#   SUPABASE_DB_PASSWORD    — database password (project settings → database → connection string)
+#
+# Safety:
+#   • On PRs we only run --dry-run. No write happens until a human merges.
+#   • The production job uses the `production-db` GitHub Environment so you
+#     can add required reviewers if you want one-click approval before each
+#     push (Settings → Environments → production-db → required reviewers).
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ['supabase/migrations/**']
+  push:
+    branches: [main]
+    paths: ['supabase/migrations/**']
+  workflow_dispatch:
+
+concurrency:
+  # Serialize pushes to the same target so two merges can't race a db push.
+  group: db-push-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  dry-run:
+    name: Dry-run migration diff
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Link to Supabase project
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+        # Both passed as env vars rather than CLI args so they don't leak into logs.
+        # SUPABASE_DB_PASSWORD also picked up by `supabase db push` directly.
+      - name: Show pending migrations (dry-run)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase db push --dry-run
+
+  push:
+    name: Apply migrations to production
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: production-db
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Link to Supabase project
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+      - name: Apply pending migrations
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase db push
