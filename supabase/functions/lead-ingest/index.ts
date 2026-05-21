@@ -348,6 +348,19 @@ Deno.serve(async (req) => {
     // parsers since these fields are universal. The ga-conversions DB
     // trigger reads them later to fire generate_lead / purchase /
     // admission_confirmed events into the right GA4 property.
+    //
+    // Meta CAPI attribution (fbc/fbp/portal_brand) follows the same path:
+    // captured by the marketing-site analytics module from the _fbp cookie
+    // + fbclid URL param, persisted on the lead row, then read by
+    // meta-capi-events to lift Match Quality and route to the right pixel.
+    // origin_domain → portal_brand fallback covers marketing-site posts
+    // that don't pass portal_brand explicitly.
+    const originDomain = (body.origin_domain || "").toLowerCase();
+    const brandFromOrigin =
+      originDomain.endsWith("miraischool.in")    ? "mirai"  :
+      originDomain.endsWith("school.nimt.ac.in") ? "beacon" :
+      originDomain.endsWith("nimt.ac.in")        ? "nimt"   :
+      null;
     const attribution = {
       ga_client_id:  body.ga_client_id  || null,
       ga_session_id: body.ga_session_id || null,
@@ -360,6 +373,9 @@ Deno.serve(async (req) => {
       landing_page:  body.landing_page  || null,
       referrer:      body.referrer      || null,
       origin_domain: body.origin_domain || null,
+      fbc:           body.fbc           || null,
+      fbp:           body.fbp           || null,
+      portal_brand:  body.portal_brand  || brandFromOrigin,
     };
 
     // Supabase client (service role for inserts)
