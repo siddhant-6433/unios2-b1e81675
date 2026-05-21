@@ -30,13 +30,20 @@ ALTER TABLE public.token_fee_reminders_sent ENABLE ROW LEVEL SECURITY;
 -- Staff-only read access via existing role checks (super_admin/admin
 -- can audit reminder history); no public read.
 DROP POLICY IF EXISTS "staff read token_fee_reminders_sent" ON public.token_fee_reminders_sent;
+-- The original draft of this policy referenced role values 'admin' and
+-- 'team_leader' which do not exist in the app_role enum (super_admin,
+-- campus_admin, principal, admission_head, counsellor, accountant, faculty,
+-- teacher, data_entry, office_assistant, hostel_warden, student, parent,
+-- consultant, ib_coordinator, office_admin, publisher). Caught when this
+-- migration finally got applied to remote in 2026-05; substituted the closest
+-- intent-equivalent staff roles.
 CREATE POLICY "staff read token_fee_reminders_sent"
   ON public.token_fee_reminders_sent FOR SELECT
   USING (
     EXISTS (
       SELECT 1 FROM public.user_roles
       WHERE user_id = auth.uid()
-        AND role IN ('super_admin', 'admin', 'counsellor', 'team_leader')
+        AND role IN ('super_admin'::app_role, 'admission_head'::app_role, 'counsellor'::app_role, 'campus_admin'::app_role)
     )
   );
 
