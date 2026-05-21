@@ -276,6 +276,19 @@ export function CallDispositionDialog({
     onOpenChange(v);
   };
 
+  // Block accidental dismissal of the disposition screen. Counsellors were
+  // closing it by clicking outside the modal while a Cloud Call was in flight
+  // and the call ended up missing from the lead timeline (no manual
+  // disposition, no activity row, no WhatsApp follow-up — the auto
+  // bridge-hangup webhook wrote a call_logs row eventually but it looked
+  // "not counted"). The X button at top-right and the explicit Cancel
+  // buttons remain the only ways out.
+  const blockOutsideDismiss = {
+    onPointerDownOutside: (e: Event) => e.preventDefault(),
+    onInteractOutside: (e: Event) => e.preventDefault(),
+    onEscapeKeyDown: (e: KeyboardEvent) => e.preventDefault(),
+  };
+
   const openDatePicker = () => {
     dateInputRef.current?.showPicker?.();
     dateInputRef.current?.focus();
@@ -291,7 +304,10 @@ export function CallDispositionDialog({
   if (callStatus === "calling") {
     return (
       <Dialog open={open} onOpenChange={handleClose}>
-        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogContent
+          className="max-w-md max-h-[90vh] overflow-y-auto"
+          {...blockOutsideDismiss}
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Phone className="h-4 w-4 text-primary" />
@@ -386,7 +402,10 @@ export function CallDispositionDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+      <DialogContent
+        className="max-w-md max-h-[90vh] overflow-y-auto"
+        {...blockOutsideDismiss}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Phone className="h-4 w-4 text-primary" />
