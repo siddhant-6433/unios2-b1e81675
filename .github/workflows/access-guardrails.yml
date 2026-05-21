@@ -17,6 +17,10 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # Manual fire — useful when the auto-trigger dedup misses a re-pushed PR
+  # branch (GitHub sometimes caches Actions results for a SHA and skips
+  # the rerun). Same job, just dispatchable from the Actions UI / gh CLI.
+  workflow_dispatch:
 
 jobs:
   guardrails:
