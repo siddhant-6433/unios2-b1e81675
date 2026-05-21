@@ -31,6 +31,7 @@ interface LeadPayment {
   payment_date: string | null;
   created_at: string;
   receipt_url: string | null;
+  proof_url: string | null;
   waiver_reason: string | null;
 }
 
@@ -123,7 +124,7 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
       const queries: any[] = [];
       if (lid) {
         queries.push(supabase.from("lead_payments")
-          .select("id, receipt_no, type, amount, concession_amount, payment_mode, transaction_ref, status, payment_date, created_at, receipt_url, waiver_reason")
+          .select("id, receipt_no, type, amount, concession_amount, payment_mode, transaction_ref, status, payment_date, created_at, receipt_url, proof_url, waiver_reason")
           .eq("lead_id", lid).order("created_at", { ascending: false }));
       }
       if (sid) {
@@ -279,10 +280,15 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
                       : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
                     }`}>{p.status}</span>
                   </td>
-                  <td className="px-3 py-2 text-right">
-                    {p.receipt_url ? (
-                      <a href={p.receipt_url} target="_blank" rel="noopener" className="text-primary hover:underline text-[11px]">View</a>
-                    ) : <span className="text-muted-foreground/40">—</span>}
+                  <td className="px-3 py-2 text-right whitespace-nowrap">
+                    {p.receipt_url && (
+                      <a href={p.receipt_url} target="_blank" rel="noopener" className="text-primary hover:underline text-[11px]">PDF</a>
+                    )}
+                    {p.receipt_url && p.proof_url && <span className="mx-1 text-muted-foreground/40">·</span>}
+                    {p.proof_url && (
+                      <a href={p.proof_url} target="_blank" rel="noopener" className="text-primary hover:underline text-[11px]">Proof</a>
+                    )}
+                    {!p.receipt_url && !p.proof_url && <span className="text-muted-foreground/40">—</span>}
                   </td>
                   {isSuperAdmin && (
                     <td className="px-3 py-2 text-right whitespace-nowrap">
