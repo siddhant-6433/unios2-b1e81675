@@ -8,7 +8,6 @@
     "supabase/migrations/20260422110000_fix_security_linter_issues.sql:34:B:invoker-view-on-rls-table",
     "supabase/migrations/20260422110000_fix_security_linter_issues.sql:38:B:invoker-view-on-rls-table",
     "supabase/migrations/20260422110000_fix_security_linter_issues.sql:40:B:invoker-view-on-rls-table",
-    "supabase/migrations/20260422110000_fix_security_linter_issues.sql:42:B:invoker-view-on-rls-table",
     "supabase/migrations/20260422110000_fix_security_linter_issues.sql:44:B:invoker-view-on-rls-table",
     "supabase/migrations/20260422110000_fix_security_linter_issues.sql:46:B:invoker-view-on-rls-table",
     "supabase/migrations/20260422110000_fix_security_linter_issues.sql:47:B:invoker-view-on-rls-table",
@@ -17,7 +16,6 @@
     "supabase/migrations/20260422110000_fix_security_linter_issues.sql:53:B:invoker-view-on-rls-table",
     "supabase/migrations/20260423120001_visit_closure_enforcement.sql:8:B:invoker-view-on-rls-table",
     "supabase/migrations/20260508060000_v_all_payments_and_easebuzz_pending_txnid.sql:44:B:invoker-view-on-rls-table",
-    "supabase/migrations/20260610090000_views_security_invoker.sql:15:B:invoker-view-on-rls-table",
-    "supabase/migrations/20260610090000_views_security_invoker.sql:17:B:invoker-view-on-rls-table"
+    "supabase/migrations/20260513173419_views_security_invoker.sql:15:B:invoker-view-on-rls-table"
   ]
 }
