@@ -28,10 +28,11 @@ import { SeatMatrix } from "@/components/admissions/SeatMatrix";
 import { PaymentReconciliation } from "@/components/admissions/PaymentReconciliation";
 import { ActionCenterView } from "@/components/admissions/ActionCenterView";
 import { CounsellorScoreBadge } from "@/components/admissions/CounsellorScoreBadge";
-import { InactivityAlertBanner } from "@/components/admissions/InactivityAlertBanner";
-import { HotEngagedLeads } from "@/components/admissions/HotEngagedLeads";
+import { HotLeadsSidebar } from "@/components/admissions/HotLeadsSidebar";
 import { CounsellorOnboarding } from "@/components/onboarding/CounsellorOnboarding";
 import { CloudDialerNudge } from "@/components/admissions/CloudDialerNudge";
+import { LeadPipeline, leadStagesForBucket, type LeadFunnelStage } from "@/components/admissions/LeadPipeline";
+import { VisitActionCenter, type VisitAction } from "@/components/admissions/VisitActionCenter";
 import { useTatDefaults } from "@/hooks/useTatDefaults";
 import { LEAD_SOURCES, SOURCE_LABELS, SOURCE_BADGE_COLORS } from "@/config/leadSources";
 import {
@@ -192,6 +193,29 @@ const Admissions = () => {
 
   // Server-side total count (only used in list view — pipeline view fetches all)
   const [totalCount, setTotalCount] = useState(0);
+
+  // ── Lead-pipeline funnel + Visit Action Center ────────────────────────
+  // Org-wide stage counts (drives the funnel + leakage chip). Fetched once
+  // per mount; per-stage HEAD count queries in parallel (Supabase REST caps
+  // SELECT rows at 1000, so a single GROUP-BY-on-client wouldn't see the
+  // tail of the data — admitted lead at row 8.5k would silently disappear).
+  const [stageCounts, setStageCounts] = useState<Record<string, number>>({});
+  // Leads in counsellor_call/ai_called with at least one call_log disposition='interested'.
+  // Promoted into Hot in the funnel — option (b) from the design call.
+  const [extraHotCount, setExtraHotCount] = useState(0);
+  const [interestedLeadIds, setInterestedLeadIds] = useState<Set<string>>(new Set());
+  // AI-call summaries keyed by lead_id, shown inline under each lead's name
+  // in the leads list. Fetched in the same batch query for the visible page.
+  const [aiSummaries, setAiSummaries] = useState<Record<string, string>>({});
+  const [funnelStage, setFunnelStage] = useState<LeadFunnelStage | "leakage" | null>(null);
+  // Visit-action counts for the operational dashboard.
+  const [visitActionCounts, setVisitActionCounts] = useState({
+    missedCallbacks: 0, overdueFollowups: 0,
+    scheduled: 0, scheduledToday: 0, scheduledThisWeek: 0,
+    checkinPending: 0,
+    visitsCompleted: 0, visitsCompletedPendingFollowup: 0,
+  });
+  const [visitAction, setVisitAction] = useState<VisitAction | null>(null);
   // Debounced search — keeps server roundtrips low while typing
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
@@ -629,6 +653,235 @@ const Admissions = () => {
   // Reset page when filters change
   useEffect(() => { setPage(1); }, [stageFilter, sourceFilter, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, fromDate, toDate]);
 
+  // Fetch lead-pipeline counts (one GROUP-BY) + visit-action counts. Cheap
+  // queries; refresh on mount. Counsellor-scoped via stage filter when the
+  // signed-in user is a counsellor.
+  useEffect(() => {
+    let cancelled = false;
+    const fetchPipelineData = async () => {
+      // Per-stage HEAD count queries. Each is { count: 'exact', head: true }
+      // so we never pull rows — the Supabase REST 1000-row cap doesn't
+      // matter. is_mirror=false matches the admissions_stats RPC so
+      // school + main session leads aren't double-counted.
+      const allStages = [
+        "new_lead","ai_called","counsellor_call","priority_interested",
+        "visit_scheduled","interview",
+        "application_in_progress","application_submitted","application_fee_paid",
+        "application_approved","offer_sent","token_paid","pre_admitted","admitted",
+        "not_interested","dnc","rejected","ineligible","deferred",
+      ];
+      const scope = (q: any) => {
+        let r = q.eq("is_mirror", false);
+        if (role === "counsellor" && profile?.id) {
+          r = r.eq("counsellor_id", profile.id);
+        } else if (selectedCampusId && selectedCampusId !== "all") {
+          r = r.eq("campus_id", selectedCampusId);
+        }
+        return r;
+      };
+
+      const stageResults = await Promise.all(allStages.map(async (s) => {
+        const { count } = await scope(
+          supabase.from("leads").select("id", { count: "exact", head: true }).eq("stage", s)
+        );
+        return [s, count || 0] as const;
+      }));
+      if (cancelled) return;
+      const tally: Record<string, number> = {};
+      for (const [s, c] of stageResults) tally[s] = c;
+      setStageCounts(tally);
+
+      // Pull lead_ids for `disposition='interested'` calls so we can both
+      // (a) promote them into Hot in the funnel and (b) include them when
+      // the Hot bucket is clicked. We fetch ids so we can dedupe AND
+      // intersect with stage filters client-side.
+      const { data: interestedRows } = await supabase
+        .from("call_logs")
+        .select("lead_id")
+        .eq("disposition", "interested")
+        .limit(2000);
+      const ids = new Set<string>((interestedRows || []).map((r: any) => r.lead_id).filter(Boolean));
+      if (!cancelled) {
+        setInterestedLeadIds(ids);
+        // Cap at the Contacted bucket size — anything beyond is already in
+        // a later stage and shouldn't be re-counted.
+        const contacted = (tally["counsellor_call"] || 0) + (tally["ai_called"] || 0);
+        setExtraHotCount(Math.min(ids.size, contacted));
+      }
+
+      // Visit action counts — parallel HEAD counts.
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+      const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
+      const sevenDays = new Date(now.getTime() + 7 * 86400000).toISOString();
+      const fourteenDaysAgo = new Date(now.getTime() - 14 * 86400000).toISOString();
+      const nowIso = now.toISOString();
+      const [
+        { count: missedCallbacks },
+        { count: overdueFollowupsView },
+        { count: aiNeedsFollowup },
+        { count: scheduled },
+        { count: scheduledToday },
+        { count: scheduledThisWeek },
+        { count: checkinPending },
+        { count: visitsCompleted },
+        { count: visitsCompletedPendingFollowup },
+      ] = await Promise.all([
+        // Missed Callbacks — inbound calls that weren't picked up by a
+        // human agent. The candidate dialed in; no one answered.
+        supabase.from("call_logs").select("id", { count: "exact", head: true })
+          .eq("direction", "inbound").eq("disposition", "missed"),
+        // Overdue Follow-ups (part 1) — scheduled lead_followups past due,
+        // already excludes closed leads via the view.
+        (supabase.from("overdue_followups" as any) as any)
+          .select("id", { count: "exact", head: true }),
+        // Overdue Follow-ups (part 2) — AI calls flagged needs_followup
+        // that the counsellor hasn't actioned. Folded into the same card
+        // since they're all "scheduled work that's overdue".
+        (supabase.from("ai_call_records" as any) as any)
+          .select("id", { count: "exact", head: true })
+          .eq("needs_followup", true).is("followup_done_at", null),
+        supabase.from("campus_visits").select("id", { count: "exact", head: true })
+          .in("status", ["scheduled", "confirmed"]).gte("visit_date", nowIso),
+        supabase.from("campus_visits").select("id", { count: "exact", head: true })
+          .in("status", ["scheduled", "confirmed"]).gte("visit_date", todayStart).lt("visit_date", tomorrowStart),
+        supabase.from("campus_visits").select("id", { count: "exact", head: true })
+          .in("status", ["scheduled", "confirmed"]).gte("visit_date", nowIso).lt("visit_date", sevenDays),
+        supabase.from("campus_visits").select("id", { count: "exact", head: true })
+          .in("status", ["scheduled", "confirmed"]).lt("visit_date", nowIso),
+        supabase.from("campus_visits").select("id", { count: "exact", head: true })
+          .eq("status", "completed").gte("visit_date", fourteenDaysAgo),
+        supabase.from("post_visit_pending_followups" as any).select("visit_id", { count: "exact", head: true }),
+      ]);
+      if (cancelled) return;
+      setVisitActionCounts({
+        missedCallbacks: missedCallbacks || 0,
+        overdueFollowups: (overdueFollowupsView || 0) + (aiNeedsFollowup || 0),
+        scheduled: scheduled || 0,
+        scheduledToday: scheduledToday || 0,
+        scheduledThisWeek: scheduledThisWeek || 0,
+        checkinPending: checkinPending || 0,
+        visitsCompleted: visitsCompleted || 0,
+        visitsCompletedPendingFollowup: visitsCompletedPendingFollowup || 0,
+      });
+    };
+    fetchPipelineData();
+    return () => { cancelled = true; };
+  }, [role, profile?.id, selectedCampusId]);
+
+  // Batch-fetch AI call summaries for the currently-loaded leads. One row
+  // per lead = the most recent record with a non-null summary. Cheap join
+  // keyed by lead_id; runs once per page change.
+  useEffect(() => {
+    if (!leads.length) { setAiSummaries({}); return; }
+    let cancelled = false;
+    (async () => {
+      const ids = leads.map(l => l.id).filter(Boolean);
+      if (ids.length === 0) return;
+      const { data } = await supabase.from("ai_call_records")
+        .select("lead_id, summary, started_at")
+        .in("lead_id", ids)
+        .not("summary", "is", null)
+        .order("started_at", { ascending: false })
+        .limit(ids.length * 3); // overshoot — we'll keep the most recent per lead
+      if (cancelled) return;
+      const map: Record<string, string> = {};
+      for (const r of (data || []) as any[]) {
+        if (!map[r.lead_id] && r.summary) map[r.lead_id] = r.summary;
+      }
+      setAiSummaries(map);
+    })();
+    return () => { cancelled = true; };
+  }, [leads]);
+
+  // Funnel click → translate bucket into a stageFilter (comma-separated raw
+  // lead_stage values that the existing `matchesStage` filter already
+  // understands via `.split(",").includes(l.stage)`).
+  const handleFunnelClick = async (bucket: LeadFunnelStage | "leakage" | null) => {
+    setFunnelStage(bucket);
+    if (!bucket) {
+      setStageFilter("all");
+      setActionLeadIds(null);
+      return;
+    }
+    setVisitAction(null);
+    setVisitLeadIds(null);
+    setFollowupLeadIds(null);
+    setInactiveIds(null);
+
+    if (bucket === "hot") {
+      // Union of canonical hot stages + interested-disposition leads.
+      // Resolved via lead_ids → actionLeadIds (intersection happens via
+      // the existing matchesAction filter); stageFilter stays 'all' so
+      // we don't accidentally exclude anyone in the union.
+      const hotStages = leadStagesForBucket("hot");
+      const { data: stageLeads } = await supabase.from("leads")
+        .select("id").in("stage", hotStages).eq("is_mirror", false).limit(2000);
+      const union = new Set<string>([
+        ...((stageLeads || []) as any[]).map((r) => r.id),
+        ...interestedLeadIds,
+      ]);
+      setActionLeadIds(union);
+      setStageFilter("all");
+    } else {
+      setActionLeadIds(null);
+      setStageFilter(leadStagesForBucket(bucket).join(","));
+    }
+    setView("list");
+  };
+
+  // Counsellor Action Center click → load the matching lead_ids into
+  // `actionLeadIds` (not `visitLeadIds`) so the legacy "Upcoming Visits" /
+  // "Completed Visits" stat cards below don't auto-highlight whenever any
+  // CAC action is selected.
+  const handleVisitActionClick = async (a: VisitAction | null) => {
+    setVisitAction(a);
+    if (!a) { setActionLeadIds(null); setActionBucketLabel(""); return; }
+    setFunnelStage(null);
+    setStageFilter("all");
+    setFollowupLeadIds(null);
+    setVisitLeadIds(null);
+    setInactiveIds(null);
+
+    const nowIso = new Date().toISOString();
+    const fourteenDaysAgo = new Date(Date.now() - 14 * 86400000).toISOString();
+    let ids: string[] = [];
+    if (a === "missed_callbacks") {
+      // Inbound calls the agent never picked up.
+      const { data } = await supabase.from("call_logs")
+        .select("lead_id").eq("direction", "inbound").eq("disposition", "missed").limit(500);
+      ids = (data || []).map((r: any) => r.lead_id).filter(Boolean);
+    } else if (a === "overdue_followups") {
+      // Union of two sources: lead_followups view + AI-call records needing
+      // human follow-up. Deduped via Set so a lead in both sources only
+      // surfaces once in the filtered table.
+      const [{ data: fu }, { data: aiFu }] = await Promise.all([
+        (supabase.from("overdue_followups" as any) as any).select("lead_id").limit(500),
+        (supabase.from("ai_call_records" as any) as any)
+          .select("lead_id").eq("needs_followup", true).is("followup_done_at", null).limit(500),
+      ]);
+      const union = new Set<string>();
+      for (const r of (fu || []) as any[]) if (r.lead_id) union.add(r.lead_id);
+      for (const r of (aiFu || []) as any[]) if (r.lead_id) union.add(r.lead_id);
+      ids = Array.from(union);
+    } else if (a === "scheduled") {
+      const { data } = await supabase.from("campus_visits")
+        .select("lead_id").in("status", ["scheduled", "confirmed"]).gte("visit_date", nowIso).limit(500);
+      ids = (data || []).map((r: any) => r.lead_id).filter(Boolean);
+    } else if (a === "checkin_pending") {
+      const { data } = await supabase.from("campus_visits")
+        .select("lead_id").in("status", ["scheduled", "confirmed"]).lt("visit_date", nowIso).limit(500);
+      ids = (data || []).map((r: any) => r.lead_id).filter(Boolean);
+    } else if (a === "visits_completed") {
+      const { data } = await supabase.from("campus_visits")
+        .select("lead_id").eq("status", "completed").gte("visit_date", fourteenDaysAgo).limit(500);
+      ids = (data || []).map((r: any) => r.lead_id).filter(Boolean);
+    }
+    setActionLeadIds(new Set(ids));
+    setActionBucketLabel(`CAC: ${a.replace(/_/g, " ")}`);
+    setView("list");
+  };
+
   const totalLeads = leads.length;
 
   // Cached dashboard counts (TanStack Query). Survives navigation back to
@@ -750,10 +1003,30 @@ const Admissions = () => {
         </div>
       )}
 
+      {/* Lead pipeline + Visit action center — both hidden during the
+          action-center / counsellor focus view to keep that screen clean. */}
+      {view !== "action_center" && (
+        <>
+          <LeadPipeline
+            stageCounts={stageCounts}
+            extraHot={extraHotCount}
+            activeStage={funnelStage}
+            onStageClick={handleFunnelClick}
+          />
+          <VisitActionCenter
+            counts={visitActionCounts}
+            active={visitAction}
+            onClick={handleVisitActionClick}
+          />
+        </>
+      )}
+
       {/* Stat cards & filter banners — hidden when Action Center is active */}
       {view !== "action_center" && <>
-      {/* Compact stats: Leads + Applications in a single row */}
-      <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
+      {/* Compact stats: Leads + Applications in a single row.
+          11 cards total — tight on lg+; wraps to 2 rows of 6 at md, and
+          to 4 rows of 3 on mobile. */}
+      <div className="grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-11 gap-1.5">
         {/* Lead stats */}
         {leadStats.map((stat) => {
           const isActive = (stat.filterStage && stageFilter === stat.filterStage) ||
@@ -821,14 +1094,14 @@ const Admissions = () => {
                 }
               }}
             >
-              <CardContent className="p-3.5">
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  <div className={`flex h-7 w-7 items-center justify-center rounded-lg ${stat.iconBg} shrink-0`}>
-                    <stat.icon className="h-[15px] w-[15px] text-foreground/70" />
+              <CardContent className="p-2.5">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <div className={`flex h-6 w-6 items-center justify-center rounded-md ${stat.iconBg} shrink-0`}>
+                    <stat.icon className="h-3.5 w-3.5 text-foreground/70" />
                   </div>
-                  <span className="text-[10px] font-semibold text-muted-foreground truncate leading-tight">{stat.label}</span>
+                  <span className="text-[10px] font-semibold text-muted-foreground leading-tight line-clamp-2">{stat.label}</span>
                 </div>
-                <p className="text-xl font-bold text-foreground leading-none tracking-tight">{stat.value}</p>
+                <p className="text-lg font-bold text-foreground leading-none tracking-tight tabular-nums">{stat.value}</p>
                 <p className="text-[10px] text-primary font-medium truncate mt-1">{stat.sub}</p>
               </CardContent>
             </Card>
@@ -920,36 +1193,24 @@ const Admissions = () => {
               }
             }}
           >
-            <CardContent className="p-3">
+            <CardContent className="p-2.5">
               <div className="flex items-center gap-1.5 mb-1">
                 <div className={`flex h-6 w-6 items-center justify-center rounded-md ${stat.iconBg} shrink-0`}>
                   <stat.icon className="h-3.5 w-3.5 text-foreground/70" />
                 </div>
                 <span className="text-[10px] font-semibold text-muted-foreground truncate leading-tight">{stat.label}</span>
               </div>
-              <p className="text-xl font-bold text-foreground">{stat.value}</p>
-              <p className="text-[10px] text-primary font-medium truncate">{stat.sub}</p>
+              <p className="text-lg font-bold text-foreground leading-none tracking-tight tabular-nums">{stat.value}</p>
+              <p className="text-[10px] text-primary font-medium truncate mt-1">{stat.sub}</p>
             </CardContent>
           </Card>
         ))}
       </div>
 
-      <InactivityAlertBanner
-        onViewInactive={(ids) => {
-          setInactiveIds(ids);
-          setFollowupLeadIds(null);
-          setStageFilter("all");
-          setSourceFilter("all");
-          setRoleFilter("all");
-          setTempFilter("all");
-          setSearch("");
-        }}
-        onViewOverdue={() => navigate("/counsellor-dashboard")}
-        campusId={selectedCampusId}
-      />
-
-      {/* Hot Leads — Recently Active on Website/Email */}
-      <HotEngagedLeads
+      {/* Hot Leads now lives in a floating right-edge sidebar so it doesn't
+          consume vertical space and surfaces a notification badge for new
+          arrivals. The FAB is always on the right edge. */}
+      <HotLeadsSidebar
         profileId={profile?.id}
         isSuperAdmin={isSuperAdmin}
         isTeamLeader={isTeamLeader}
@@ -1289,25 +1550,21 @@ const Admissions = () => {
                       />
                     </th>
                   )}
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Lead</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Course / Campus</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Score</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Stage</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">App %</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">App Fee</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Role</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Source</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Counsellor</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">IDs</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Date</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">Actions</th>
+                  <th className="px-4 py-2.5 text-left text-[11px] font-medium text-muted-foreground/80">Lead</th>
+                  <th className="px-4 py-2.5 text-left text-[11px] font-medium text-muted-foreground/80">Course / Campus</th>
+                  <th className="px-4 py-2.5 text-left text-[11px] font-medium text-muted-foreground/80">Stage</th>
+                  <th className="px-4 py-2.5 text-left text-[11px] font-medium text-muted-foreground/80">Source · Role</th>
+                  <th className="px-4 py-2.5 text-left text-[11px] font-medium text-muted-foreground/80">Counsellor</th>
+                  <th className="px-4 py-2.5 text-center text-[11px] font-medium text-muted-foreground/80">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {paginatedLeads.map((lead) => (
-                  <tr key={lead.id} className="border-b border-border last:border-0 hover:bg-muted/30 cursor-pointer transition-colors">
+                {paginatedLeads.map((lead) => {
+                  const summary = aiSummaries[lead.id];
+                  return (
+                  <tr key={lead.id} className="border-b border-border/40 last:border-0 hover:bg-muted/20 cursor-pointer transition-colors align-top">
                     {(isSuperAdmin || canTransfer) && (
-                      <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                         <Checkbox
                           checked={selectedIds.has(lead.id)}
                           onCheckedChange={() => toggleSelect(lead.id)}
@@ -1315,84 +1572,75 @@ const Admissions = () => {
                         />
                       </td>
                     )}
-                    <td className="px-4 py-3" onClick={() => navigate(`/admissions/${lead.id}`)}>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-medium text-foreground">{lead.name}</span>
+                    {/* Lead — name + temperature/score + contact + optional AI summary line.
+                        Summary is shown for any lead with an `ai_call_records.summary`
+                        so counsellors get instant context without opening the lead page. */}
+                    <td className="px-4 py-2.5 max-w-[300px]" onClick={() => navigate(`/admissions/${lead.id}`)}>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="font-medium text-foreground text-sm truncate">{lead.name}</span>
+                        <LeadTemperatureBadge temperature={lead.lead_temperature} score={lead.lead_score} />
                         {lead.ai_called && (
-                          <span className="flex h-4 w-4 items-center justify-center rounded bg-violet-100 dark:bg-violet-900/30" title="AI Called">
+                          <span className="flex h-4 w-4 items-center justify-center rounded bg-violet-100 dark:bg-violet-900/30 shrink-0" title="AI Called">
                             <Bot className="h-2.5 w-2.5 text-violet-600" />
                           </span>
                         )}
                         {postVisitPendingIds.has(lead.id) && (
-                          <span className="flex h-4 items-center gap-0.5 rounded bg-amber-100 dark:bg-amber-900/30 px-1" title="Post-visit followup pending">
+                          <span className="flex h-4 items-center gap-0.5 rounded bg-amber-100 dark:bg-amber-900/30 px-1 shrink-0" title="Post-visit followup pending">
                             <MapPin className="h-2.5 w-2.5 text-amber-600" />
-                            <span className="text-[8px] font-bold text-amber-700">VISIT F/U</span>
                           </span>
                         )}
                       </div>
-                      <div className="text-xs text-muted-foreground">
-                        {lead.phone} · {lead.email || "—"}
-                        {lead.city && <span className="text-muted-foreground/60"> · {lead.city}{lead.state ? `, ${lead.state}` : ""}</span>}
-                      </div>
+                      <div className="text-[11px] text-muted-foreground truncate">{lead.phone}{lead.city ? ` · ${lead.city}` : ""}</div>
+                      {summary && (
+                        <div
+                          className="mt-1 text-[11px] italic text-foreground/70 line-clamp-2 leading-snug"
+                          title={summary}
+                        >
+                          “{summary}”
+                        </div>
+                      )}
                     </td>
-                    <td className="px-4 py-3" onClick={() => navigate(`/admissions/${lead.id}`)}>
-                      <div className="text-foreground">{lead.course_name}</div>
-                      <div className="text-xs text-muted-foreground">{lead.campus_name}</div>
+                    <td className="px-4 py-2.5" onClick={() => navigate(`/admissions/${lead.id}`)}>
+                      <div className="text-sm text-foreground truncate max-w-[180px]" title={lead.course_name || ""}>{lead.course_name || "—"}</div>
+                      <div className="text-[11px] text-muted-foreground truncate max-w-[180px]" title={lead.campus_name || ""}>{lead.campus_name || "—"}</div>
                     </td>
-                    <td className="px-4 py-3 text-center" onClick={() => navigate(`/admissions/${lead.id}`)}>
-                      <LeadTemperatureBadge temperature={lead.lead_temperature} score={lead.lead_score} />
-                    </td>
-                    <td className="px-4 py-3" onClick={() => navigate(`/admissions/${lead.id}`)}>
+                    {/* Stage — badge + PAN/AN underneath (was its own column). */}
+                    <td className="px-4 py-2.5" onClick={() => navigate(`/admissions/${lead.id}`)}>
                       <Badge className={`text-[11px] font-medium border-0 ${stageColors[lead.stage] || "bg-muted"}`}>
                         {STAGE_LABELS[lead.stage] || lead.stage}
                       </Badge>
-                    </td>
-                    <td className="px-4 py-3 text-center" onClick={() => navigate(`/admissions/${lead.id}`)}>
-                      {lead.app_completion_pct !== null && lead.app_completion_pct !== undefined ? (
-                        <AppProgressBadge pct={lead.app_completion_pct} paymentStatus={lead.app_payment_status} />
-                      ) : (
-                        <span className="text-[10px] text-muted-foreground">—</span>
+                      {(lead.pre_admission_no || lead.admission_no) && (
+                        <div className="mt-1 text-[10px] font-mono text-muted-foreground">
+                          {lead.admission_no
+                            ? <span className="text-primary font-semibold">AN {lead.admission_no}</span>
+                            : <span className="text-primary/80">PAN {lead.pre_admission_no}</span>}
+                        </div>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right" onClick={() => navigate(`/admissions/${lead.id}`)}>
-                      {lead.app_payment_status === "paid" ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950/30 px-2 py-0.5 rounded-full">
-                          Paid
-                        </span>
-                      ) : lead.app_fee_amount != null && lead.app_fee_amount > 0 ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 px-2 py-0.5 rounded-full">
-                          Pending
-                        </span>
-                      ) : (
-                        <span className="text-[10px] text-muted-foreground">—</span>
-                      )}
+                    {/* Source · Role — both pills in one cell. */}
+                    <td className="px-4 py-2.5" onClick={() => navigate(`/admissions/${lead.id}`)}>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <Badge className={`text-[10px] font-medium border-0 ${SOURCE_BADGE_COLORS[lead.source] || "bg-muted"}`}>
+                          {SOURCE_LABELS[lead.source] || lead.source}
+                        </Badge>
+                        <Badge className={`text-[10px] font-medium border-0 capitalize ${PERSON_ROLE_COLORS[lead.person_role] || "bg-muted"}`}>
+                          {lead.person_role}
+                        </Badge>
+                      </div>
                     </td>
-                    <td className="px-4 py-3" onClick={() => navigate(`/admissions/${lead.id}`)}>
-                      <Badge className={`text-[11px] font-medium border-0 capitalize ${PERSON_ROLE_COLORS[lead.person_role] || "bg-muted"}`}>
-                        {lead.person_role}
-                      </Badge>
+                    <td className="px-4 py-2.5 text-muted-foreground text-[12px] truncate max-w-[140px]" onClick={() => navigate(`/admissions/${lead.id}`)}>
+                      {lead.counsellor_name}
                     </td>
-                    <td className="px-4 py-3" onClick={() => navigate(`/admissions/${lead.id}`)}>
-                      <Badge className={`text-[11px] font-medium border-0 ${SOURCE_BADGE_COLORS[lead.source] || "bg-muted"}`}>
-                        {SOURCE_LABELS[lead.source] || lead.source}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground text-sm" onClick={() => navigate(`/admissions/${lead.id}`)}>{lead.counsellor_name}</td>
-                    <td className="px-4 py-3" onClick={() => navigate(`/admissions/${lead.id}`)}>
-                      {lead.application_id && <div className="text-xs font-mono text-muted-foreground">{lead.application_id}</div>}
-                      {lead.pre_admission_no && <div className="text-xs font-mono text-primary">{lead.pre_admission_no}</div>}
-                      {lead.admission_no && <div className="text-xs font-mono font-semibold text-primary">{lead.admission_no}</div>}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground text-sm" onClick={() => navigate(`/admissions/${lead.id}`)}>{new Date(lead.created_at).toLocaleDateString("en-IN")}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-center gap-1">
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground"><Phone className="h-3.5 w-3.5" /></Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground"><MessageSquare className="h-3.5 w-3.5" /></Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground"><MoreHorizontal className="h-3.5 w-3.5" /></Button>
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center justify-center gap-0.5">
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary"><Phone className="h-3.5 w-3.5" /></Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary"><MessageSquare className="h-3.5 w-3.5" /></Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary"><MoreHorizontal className="h-3.5 w-3.5" /></Button>
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </CardContent>

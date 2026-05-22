@@ -86,6 +86,21 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   // 8. Application approved — admin approved; student is invited to the apply portal.
   application_approved:   { name: "application_approved",   params: ["student_name", "application_id", "course_name"] },
 
+  // 4b. Admission payment nudge — manual send from the Applications-list
+  // "Nudge" button. Body params:
+  //   {{1}} student_name
+  //   {{2}} course_name
+  //   {{3}} an_amount       — ₹ amount the candidate must pay to trigger AN
+  //   {{4}} year1_amount    — full Sem 1 balance still owed
+  //   {{5}} due_date        — Sem 1 due date (formatted, e.g. "15 June 2026")
+  // Submit to Meta as UTILITY (it's transactional — payment due for an
+  // existing offer). No buttons by default; admin can add an "Apply Portal"
+  // URL button later if desired.
+  admission_payment_nudge: {
+    name: "admission_payment_nudge",
+    params: ["student_name", "course_name", "an_amount", "year1_amount", "due_date"],
+  },
+
   // 5. Token / other fee paid — uses the pre-existing APPROVED template
   // in Meta whose body is:
   //   "Hi {{1}}, we've received your payment of ₹{{3}} towards {{2}}.

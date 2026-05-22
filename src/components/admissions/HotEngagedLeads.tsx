@@ -92,7 +92,7 @@ export function HotEngagedLeads({ profileId, isSuperAdmin, isTeamLeader }: Props
       .from("hot_engaged_leads" as any)
       .select("*")
       .order("last_engaged_at", { ascending: false })
-      .limit(10);
+      .limit(12);
 
     // Non-admin counsellors see only their assigned leads
     if (!isSuperAdmin && !isTeamLeader && profileId) {
@@ -143,12 +143,12 @@ export function HotEngagedLeads({ profileId, isSuperAdmin, isTeamLeader }: Props
             No recently active leads
           </p>
         ) : (
-          <div className="space-y-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
             {leads.map((lead) => (
               <button
                 key={lead.id}
                 onClick={() => navigate(`/admissions/${lead.id}`)}
-                className="group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-muted/60"
+                className="group flex w-full items-center gap-2.5 rounded-xl border border-border/40 px-2.5 py-2 text-left transition-colors hover:bg-muted/60 hover:border-border min-w-0"
               >
                 {/* Flame intensity — sole carrier of the "hot" identity now
                     that the card surface itself is neutral. */}
@@ -189,19 +189,20 @@ export function HotEngagedLeads({ profileId, isSuperAdmin, isTeamLeader }: Props
                   </div>
                 </div>
 
-                {/* Engagement bar + time */}
-                <div className="flex flex-shrink-0 flex-col items-end gap-1">
+                {/* Engagement bar + time — narrower in multi-column layout
+                    so each card stays scannable at ~33% width. */}
+                <div className="flex flex-shrink-0 flex-col items-end gap-0.5">
                   <span className="text-[10px] tabular-nums text-muted-foreground">
                     {timeAgo(lead.last_engaged_at)}
                   </span>
-                  <div className="flex items-center gap-1.5">
-                    <div className="h-1.5 w-14 overflow-hidden rounded-full bg-muted">
+                  <div className="flex items-center gap-1">
+                    <div className="h-1 w-8 overflow-hidden rounded-full bg-muted">
                       <div
                         className={`h-full rounded-full transition-all ${engagementColor(lead.engagement_score)}`}
                         style={{ width: `${Math.min(lead.engagement_score, 100)}%` }}
                       />
                     </div>
-                    <span className="text-[10px] tabular-nums font-semibold text-foreground/80 w-5 text-right">
+                    <span className="text-[10px] tabular-nums font-semibold text-foreground/80">
                       {lead.engagement_score}
                     </span>
                   </div>
