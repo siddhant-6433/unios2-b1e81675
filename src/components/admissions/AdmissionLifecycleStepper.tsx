@@ -7,14 +7,15 @@
  *   - which stages are still ahead (gray)
  *   - any blockers (rose)
  *
- * Stages:
- *   1. Submitted       — application exists past 'draft'
- *   2. Fee Paid        — lead has a confirmed application_fee payment
- *   3. Docs Reviewed   — every uploaded doc has a verified/rejected status
- *   4. Approved        — applications.status = 'approved'
- *   5. Offer Issued    — at least one offer_letters row for this lead
- *   6. Token Paid      — leads.pre_admission_no is set (PAN issued)
- *   7. Admitted        — leads.admission_no is set (AN issued)
+ * Stages (labels are neutral nouns so users don't read a stage NAME as a
+ * state claim — the dot color tells you whether it's done/current/future):
+ *   1. Submission   — application exists past 'draft'
+ *   2. Fee          — lead has a confirmed application_fee payment
+ *   3. Docs         — every uploaded doc has a verified/rejected status
+ *   4. Approval     — applications.status = 'approved'
+ *   5. Offer        — at least one offer_letters row for this lead
+ *   6. Token / PAN  — leads.pre_admission_no is set (PAN issued)
+ *   7. Admission    — leads.admission_no is set (AN issued)
  *
  * The "Next action" card below the stepper tells the operator exactly
  * what to do or what they're waiting on, so confusion like

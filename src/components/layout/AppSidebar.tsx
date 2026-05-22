@@ -45,7 +45,7 @@ const mainMenu: MenuItem[] = [
 ];
 
 const admissionSubMenu: MenuItem[] = [
-  { title: "Lead Dashboard", url: "/admissions", icon: GraduationCap, permission: "leads:view" },
+  { title: "Leads", url: "/admissions", icon: GraduationCap, permission: "leads:view" },
   { title: "Applications", url: "/applications", icon: FileText, permission: "leads:view" },
   { title: "Cloud Dialer", url: "/cloud-dialer", icon: PhoneCall, permission: "call_log:view" },
   { title: "Missed Calls", url: "/missed-calls", icon: PhoneMissed, permission: "call_log:view" },

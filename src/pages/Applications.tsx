@@ -6,12 +6,13 @@ import { ApplyMagicLinkButton } from "@/components/leads/ApplyMagicLinkButton";
 import { MiniLifecycleStepper } from "@/components/admissions/MiniLifecycleStepper";
 import { RecordPaymentDialog } from "@/components/admissions/RecordPaymentDialog";
 import { OfflinePaymentDialog } from "@/components/finance/OfflinePaymentDialog";
+import { NudgePaymentDialog } from "@/components/admissions/NudgePaymentDialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   FileText, Download, Eye, Loader2, Search, Filter, ExternalLink,
-  CheckCircle, Clock, CreditCard, Upload, AlertCircle, ChevronDown, ChevronUp, X,
-  Sparkles, Send, Gift, Wallet, UserCheck, GraduationCap, Receipt, RefreshCw, ClipboardCheck, Trash2,
+  CheckCircle, Clock, CreditCard, Upload, AlertCircle, ChevronDown, ChevronUp, ChevronRight, X,
+  Sparkles, Send, Gift, Wallet, UserCheck, GraduationCap, Receipt, RefreshCw, ClipboardCheck, Trash2, MessageCircle,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -50,7 +51,79 @@ interface AppRow {
   counsellor_name?: string;
   lead_stage?: string;
   lead_counsellor_id?: string;
+  lead_pre_admission_no?: string | null;
+  lead_admission_no?: string | null;
+  has_offer?: boolean;
+  app_fee_paid?: number;
+  has_token_fee_paid?: boolean;
+  doc_counts?: { total: number; verified: number; rejected: number; pending: number };
+  /** Amount still due for PAN issuance (null when lead has no offer yet or already has PAN). */
+  pan_due?: number | null;
+  /** Amount still due for AN issuance (null when lead has no PAN yet or already has AN). */
+  an_due?: number | null;
+  /** Remaining balance for the full first-year fee — needed by the nudge dialog. */
+  year1_due?: number | null;
 }
+
+// Mutually-exclusive funnel stages. Each app is bucketed by the FURTHEST
+// stage it has reached, so counts never overlap. The funnel below renders
+// cumulative "reached" counts (apps at this stage OR beyond) with conversion
+// % on the arrows, while clicking a box filters the table to apps currently
+// STUCK at that stage — the leakage cohort to act on.
+type FunnelStage =
+  | "in_progress" | "paid" | "submitted" | "approved"
+  | "offer_sent" | "token_paid" | "pre_admitted" | "admitted";
+
+// In NIMT's workflow the candidate ALWAYS pays the application fee before
+// submitting — docs + declaration come after the payment screen. So the
+// funnel order is In Progress → Paid → Submitted (= paid + declaration
+// submitted) → Approved → … rather than Submitted → Paid.
+const FUNNEL_ORDER: FunnelStage[] = [
+  "in_progress", "paid", "submitted", "approved",
+  "offer_sent", "token_paid", "pre_admitted", "admitted",
+];
+
+function funnelStageOf(a: AppRow): FunnelStage {
+  // Each later stage presupposes the earlier ones. Notable guards:
+  //   • "Approved" requires payment_status='paid' so the arithmetic
+  //     Paid + Approved = Paid·No-Offer chip stays consistent.
+  //   • "Submitted" requires paid + post-draft status — matches the real
+  //     flow where you can't submit declaration until the fee is in.
+  if (a.lead_stage === "admitted") return "admitted";
+  if (a.lead_stage === "pre_admitted") return "pre_admitted";
+  if (a.has_token_fee_paid) return "token_paid";
+  if (a.has_offer || a.lead_stage === "offer_sent") return "offer_sent";
+  if (a.lead_stage === "application_approved" && a.payment_status === "paid") return "approved";
+  if (a.payment_status === "paid" && a.status && a.status !== "draft") return "submitted";
+  if (a.payment_status === "paid") return "paid";
+  // Unpaid but somehow past draft — shouldn't happen in NIMT's flow.
+  // Bucket as Submitted so the anomaly surfaces instead of silently
+  // dropping into In Progress.
+  if (a.status && a.status !== "draft") return "submitted";
+  return "in_progress";
+}
+
+const FUNNEL_META: Record<FunnelStage, {
+  label: string; icon: any;
+  iconBg: string; iconColor: string;
+  tint: string; ring: string; bar: string;
+}> = {
+  in_progress:  { label: "In Progress",  icon: Clock,         iconBg: "bg-amber-100",   iconColor: "text-amber-600",   tint: "bg-amber-50/60",   ring: "ring-amber-400",   bar: "bg-amber-400" },
+  submitted:    { label: "Submitted",    icon: CheckCircle,   iconBg: "bg-violet-100",  iconColor: "text-violet-600",  tint: "bg-violet-50/60",  ring: "ring-violet-400",  bar: "bg-violet-400" },
+  paid:         { label: "Paid",         icon: CreditCard,    iconBg: "bg-emerald-100", iconColor: "text-emerald-600", tint: "bg-emerald-50/60", ring: "ring-emerald-400", bar: "bg-emerald-400" },
+  approved:     { label: "Pending Offer", icon: ClipboardCheck,iconBg: "bg-orange-100",  iconColor: "text-orange-600",  tint: "bg-orange-50/60",  ring: "ring-orange-400",  bar: "bg-orange-400" },
+  offer_sent:   { label: "Offer Sent",   icon: Gift,          iconBg: "bg-teal-100",    iconColor: "text-teal-600",    tint: "bg-teal-50/60",    ring: "ring-teal-400",    bar: "bg-teal-400" },
+  token_paid:   { label: "Token Paid",   icon: Wallet,        iconBg: "bg-cyan-100",    iconColor: "text-cyan-600",    tint: "bg-cyan-50/60",    ring: "ring-cyan-400",    bar: "bg-cyan-400" },
+  pre_admitted: { label: "Pre-Admitted", icon: UserCheck,     iconBg: "bg-indigo-100",  iconColor: "text-indigo-600",  tint: "bg-indigo-50/60",  ring: "ring-indigo-400",  bar: "bg-indigo-400" },
+  admitted:     { label: "Admitted",     icon: GraduationCap, iconBg: "bg-green-100",   iconColor: "text-green-600",   tint: "bg-green-50/60",   ring: "ring-green-400",   bar: "bg-green-400" },
+};
+
+const conversionTone = (pct: number | null) => {
+  if (pct == null) return "text-muted-foreground bg-muted/40 border-border/40";
+  if (pct >= 90)   return "text-emerald-700 bg-emerald-50 border-emerald-200";
+  if (pct >= 70)   return "text-amber-700 bg-amber-50 border-amber-200";
+  return "text-rose-700 bg-rose-50 border-rose-200";
+};
 
 const STATUS_BADGE: Record<string, string> = {
   draft: "bg-amber-100 text-amber-700",
@@ -106,6 +179,7 @@ export default function Applications() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<AppRow | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [nudgeTarget, setNudgeTarget] = useState<AppRow | null>(null);
 
   const handleOfflinePaymentSuccess = async () => {
     if (!offlinePaymentApp) return;
@@ -276,6 +350,38 @@ export default function Applications() {
         });
       }
 
+      // Pull PAN/AN amounts due from the server-side `lead_fee_status` RPC
+      // — same source of truth the candidate's portal uses (TokenFeePanel).
+      // Only fetch for leads who can still progress toward PAN or AN:
+      // they have an offer letter AND don't already have admission_no. This
+      // narrows ~200 leads → ~40 RPC calls in parallel.
+      const panDueMap: Record<string, number | null> = {};
+      const anDueMap: Record<string, number | null> = {};
+      const year1DueMap: Record<string, number | null> = {};
+      const feeStatusLeadIds = leadIds.filter((lid: string) =>
+        leadOfferMap[lid] && !leadAnMap[lid]
+      );
+      if (feeStatusLeadIds.length > 0) {
+        await Promise.all(feeStatusLeadIds.map(async (lid: string) => {
+          const { data: fs } = await (supabase as any).rpc("lead_fee_status", { _lead_id: lid });
+          if (!fs) return;
+          const tokenReq = Number(fs.token_required || 0);
+          const tokenPaid = Number(fs.token_paid || 0);
+          const anThr = Number(fs.an_threshold || 0);
+          const postSchY1 = Number(fs.post_scholarship_year_1 || fs.first_year_fee || 0);
+          // `paid_toward_course` excludes application_fee + registration_fee
+          // (the one-time admin gate at NIMT — same concept, two names) and
+          // is the right field for both the AN-gate balance and the year-1
+          // remaining. `total_paid` would double-count the app/reg fee and
+          // wrongly shrink the displayed dues.
+          const paidTowardCourse = Number(fs.paid_toward_course || 0);
+          const hasPan = !!leadPanMap[lid];
+          panDueMap[lid] = hasPan ? null : Math.max(0, tokenReq - tokenPaid);
+          anDueMap[lid] = Math.max(0, anThr - paidTowardCourse);
+          year1DueMap[lid] = Math.max(0, postSchY1 - paidTowardCourse);
+        }));
+      }
+
       let mapped = rows.map((a: any) => ({
         ...a,
         counsellor_name: counsellorMap[a.lead_id] || "",
@@ -288,6 +394,9 @@ export default function Applications() {
         app_fee_paid: appFeePaidMap[a.lead_id] || 0,
         has_token_fee_paid: leadTokenFeePaidSet.has(a.lead_id),
         doc_counts: appDocCountsMap[a.application_id] || { total: 0, verified: 0, rejected: 0, pending: 0 },
+        pan_due: panDueMap[a.lead_id] ?? null,
+        an_due: anDueMap[a.lead_id] ?? null,
+        year1_due: year1DueMap[a.lead_id] ?? null,
       }));
 
       // Counsellor scoping: only show applications for their leads
@@ -311,11 +420,14 @@ export default function Applications() {
     // The "token_paid" tile filters on the lead_payments-derived flag so it
     // includes everyone who paid token fee, not just those currently AT the
     // token_paid stage. Other stage tiles still match on the lead's stage.
-    if (stageFilter === "token_paid") {
-      if (!a.has_token_fee_paid) return false;
-    } else if (stageFilter === "paid_no_offer") {
+    if (stageFilter === "paid_no_offer") {
       if (a.payment_status !== "paid" || a.has_offer) return false;
+    } else if (stageFilter && (FUNNEL_ORDER as string[]).includes(stageFilter)) {
+      // Funnel filter → show only apps currently STUCK at that stage
+      // (the leakage cohort — didn't progress beyond).
+      if (funnelStageOf(a) !== stageFilter) return false;
     } else if (stageFilter && a.lead_stage !== stageFilter) {
+      // Legacy stage-key passthrough (kept for any external callers).
       return false;
     }
     if (!search) return true;
@@ -377,22 +489,26 @@ export default function Applications() {
     setDocsLoading(false);
   };
 
-  const stats = {
-    total: apps.length,
-    draft: apps.filter(a => a.status === "draft").length,
-    paid: apps.filter(a => a.payment_status === "paid").length,
-    submitted: apps.filter(a => a.status === "submitted").length,
-    approved_pending_offer: apps.filter(a => a.lead_stage === "application_approved").length,
-    offer_sent: apps.filter(a => a.lead_stage === "offer_sent").length,
-    // Count anyone with a confirmed token-fee lead_payment, regardless of
-    // current lead.stage. Deduped by lead_id so a candidate with two
-    // applications doesn't double-count.
-    token_paid: new Set(apps.filter(a => a.has_token_fee_paid && a.lead_id).map(a => a.lead_id)).size,
-    pre_admitted: apps.filter(a => a.lead_stage === "pre_admitted").length,
-    admitted: apps.filter(a => a.lead_stage === "admitted").length,
-    // Paid but no offer letter issued — workflow gap that needs counsellor action
-    paid_no_offer: apps.filter(a => a.payment_status === "paid" && !a.has_offer).length,
+  // ── Funnel bucketing ─────────────────────────────────────────────────────
+  // Bucket every app into exactly one stage (the furthest reached) so counts
+  // never overlap. Then derive cumulative "reached" counts for the funnel
+  // display: reached[s] = apps that landed at s OR any later stage.
+  const stageBucket: Record<FunnelStage, number> = {
+    in_progress: 0, submitted: 0, paid: 0, approved: 0,
+    offer_sent: 0, token_paid: 0, pre_admitted: 0, admitted: 0,
   };
+  for (const a of apps) stageBucket[funnelStageOf(a)]++;
+
+  const stageReached: Record<FunnelStage, number> = {} as any;
+  {
+    let cum = apps.length;
+    for (const s of FUNNEL_ORDER) {
+      stageReached[s] = cum;
+      cum -= stageBucket[s];
+    }
+  }
+  const totalApps = apps.length;
+  const paidNoOffer = apps.filter(a => a.payment_status === "paid" && !a.has_offer).length;
 
   const handleDelete = async () => {
     if (!deleteTarget || deleteTarget.payment_status === "paid") return;
@@ -439,66 +555,100 @@ export default function Applications() {
         </div>
       </div>
 
-      {/* Stats — Row 1: Application funnel.
-          Reference-inspired card shape: soft canvas border, larger rounded-2xl
-          shell, generous padding, prominent value, tinted icon chip in a
-          softly-rounded square. Layout/data/click behaviour unchanged. */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {([
-          { key: "total", label: "Total", count: stats.total, icon: FileText, iconBg: "bg-blue-100", iconColor: "text-blue-600", tint: "bg-blue-50/40", ring: "ring-blue-400",
-            active: paymentFilter === "all" && statusFilter === "all" && !stageFilter, onClick: () => { setPaymentFilter("all"); setStatusFilter("all"); setStageFilter(null); } },
-          { key: "draft", label: "In Progress", count: stats.draft, icon: Clock, iconBg: "bg-amber-100", iconColor: "text-amber-600", tint: "bg-amber-50/40", ring: "ring-amber-400",
-            active: statusFilter === "draft", onClick: () => { setStatusFilter(statusFilter === "draft" ? "all" : "draft"); setPaymentFilter("all"); setStageFilter(null); } },
-          { key: "paid", label: "Paid", count: stats.paid, icon: CreditCard, iconBg: "bg-emerald-100", iconColor: "text-emerald-600", tint: "bg-emerald-50/40", ring: "ring-emerald-400",
-            active: paymentFilter === "paid", onClick: () => { setPaymentFilter(paymentFilter === "paid" ? "all" : "paid"); setStatusFilter("all"); setStageFilter(null); } },
-          { key: "submitted", label: "Submitted", count: stats.submitted, icon: CheckCircle, iconBg: "bg-violet-100", iconColor: "text-violet-600", tint: "bg-violet-50/40", ring: "ring-violet-400",
-            active: statusFilter === "submitted", onClick: () => { setStatusFilter(statusFilter === "submitted" ? "all" : "submitted"); setPaymentFilter("all"); setStageFilter(null); } },
-        ]).map(s => (
-          <Card key={s.key}
-            className={`rounded-2xl border-border/40 shadow-none cursor-pointer transition-all hover:shadow-sm ${s.active ? `${s.tint} ring-2 ${s.ring}` : "bg-card hover:bg-muted/30"}`}
-            onClick={s.onClick}
-          >
-            <CardContent className="p-4 flex items-center gap-3.5">
-              <div className={`w-10 h-10 rounded-xl ${s.iconBg} flex items-center justify-center shrink-0`}>
-                <s.icon className={`h-[18px] w-[18px] ${s.iconColor}`} />
-              </div>
-              <div className="min-w-0">
-                <p className="text-2xl font-bold text-foreground leading-none tracking-tight">{s.count}</p>
-                <p className="text-[11px] text-muted-foreground mt-1.5">{s.label}</p>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {/* Application Pipeline Funnel ────────────────────────────────────────
+          Mutually-exclusive stages — each app is bucketed by the furthest
+          stage it has reached. The big number in each box is the STUCK-here
+          count (apps currently at that stage and not progressed beyond) so
+          the click filter and the displayed number always match. Funnel
+          NARROWING comes from box width = proportional to cumulative reach,
+          and "X reached" caption shows that cumulative count for context.
+          Conversion % between stages uses cumulative reach (proper funnel
+          math), colored ≥90 green, ≥70 amber, <70 rose. */}
+      <Card className="rounded-2xl border-border/40 shadow-none">
+        <CardContent className="p-4 md:p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-baseline gap-2">
+              <h2 className="text-sm font-semibold text-foreground">Application Pipeline</h2>
+              <span className="text-xs text-muted-foreground">{totalApps} total · big number = currently at stage · click to see who's stuck</span>
+            </div>
+            {paidNoOffer > 0 && (
+              <button
+                onClick={() => { setStageFilter(stageFilter === "paid_no_offer" ? null : "paid_no_offer"); setPaymentFilter("all"); setStatusFilter("all"); }}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-all ${
+                  stageFilter === "paid_no_offer"
+                    ? "border-rose-400 bg-rose-100 text-rose-800 ring-2 ring-rose-300"
+                    : "border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 animate-pulse"
+                }`}
+                title="Paid candidates with no offer letter yet — counsellor action needed"
+              >
+                <AlertCircle className="h-3.5 w-3.5" />
+                {paidNoOffer} paid · offer not issued
+              </button>
+            )}
+          </div>
 
-      {/* Stats — Row 2: Post-submission pipeline.
-          "Paid · No Offer" pulses when count > 0 to surface a workflow gap:
-          the candidate has paid but no counsellor has issued the offer letter. */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-        {([
-          { key: "paid_no_offer", label: "Paid · No Offer", count: stats.paid_no_offer, icon: AlertCircle, iconBg: "bg-rose-100", iconColor: "text-rose-600", tint: "bg-rose-50/40", ring: "ring-rose-400", pulse: stats.paid_no_offer > 0 },
-          { key: "application_approved", label: "Pending Offer", count: stats.approved_pending_offer, icon: ClipboardCheck, iconBg: "bg-orange-100", iconColor: "text-orange-600", tint: "bg-orange-50/40", ring: "ring-orange-400" },
-          { key: "offer_sent", label: "Offer Sent", count: stats.offer_sent, icon: Gift, iconBg: "bg-teal-100", iconColor: "text-teal-600", tint: "bg-teal-50/40", ring: "ring-teal-400" },
-          { key: "token_paid", label: "Token Paid", count: stats.token_paid, icon: Wallet, iconBg: "bg-cyan-100", iconColor: "text-cyan-600", tint: "bg-cyan-50/40", ring: "ring-cyan-400" },
-          { key: "pre_admitted", label: "Pre-Admitted", count: stats.pre_admitted, icon: UserCheck, iconBg: "bg-indigo-100", iconColor: "text-indigo-600", tint: "bg-indigo-50/40", ring: "ring-indigo-400" },
-          { key: "admitted", label: "Admitted", count: stats.admitted, icon: GraduationCap, iconBg: "bg-green-100", iconColor: "text-green-600", tint: "bg-green-50/40", ring: "ring-green-400" },
-        ] as const).map(s => (
-          <Card key={s.key}
-            className={`rounded-2xl border-border/40 shadow-none cursor-pointer transition-all hover:shadow-sm ${stageFilter === s.key ? `${s.tint} ring-2 ${s.ring}` : "bg-card hover:bg-muted/30"} ${(s as any).pulse ? "ring-2 ring-rose-300 animate-pulse" : ""}`}
-            onClick={() => { setStageFilter(stageFilter === s.key ? null : s.key); setPaymentFilter("all"); setStatusFilter("all"); }}
-          >
-            <CardContent className="p-4 flex items-center gap-3.5">
-              <div className={`w-10 h-10 rounded-xl ${s.iconBg} flex items-center justify-center shrink-0`}>
-                <s.icon className={`h-[18px] w-[18px] ${s.iconColor}`} />
-              </div>
-              <div className="min-w-0">
-                <p className="text-2xl font-bold text-foreground leading-none tracking-tight">{s.count}</p>
-                <p className="text-[11px] text-muted-foreground mt-1.5">{s.label}</p>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+          {/* `overflow-x-auto` also clips Y in CSS, so the ring-2 on the active
+              box would get cropped at the top/bottom without vertical padding.
+              `py-1.5 -my-1.5` keeps layout space identical while giving the
+              ring room to render. */}
+          <div className="flex items-stretch gap-1.5 overflow-x-auto py-1.5 -my-1.5 px-1 -mx-1">
+            {FUNNEL_ORDER.map((stage, i) => {
+              const meta = FUNNEL_META[stage];
+              const Icon = meta.icon;
+              const reached = stageReached[stage];
+              const stuck = stageBucket[stage];
+              const prevReached = i > 0 ? stageReached[FUNNEL_ORDER[i - 1]] : null;
+              const conversion = prevReached != null && prevReached > 0
+                ? Math.round((reached / prevReached) * 100)
+                : null;
+              const isActive = stageFilter === stage;
+              // Proportional width gives the true funnel-narrowing shape;
+              // floor at min-width so single-digit stages stay legible.
+              const widthBasis = totalApps > 0
+                ? Math.max(96, (reached / totalApps) * 220)
+                : 96;
+              const reachPct = totalApps > 0 ? (reached / totalApps) * 100 : 0;
+
+              return (
+                <Fragment key={stage}>
+                  {i > 0 && (
+                    <div className="flex flex-col items-center justify-center shrink-0 self-center">
+                      <div className={`text-[10px] font-semibold rounded-md border px-1.5 py-0.5 leading-tight ${conversionTone(conversion)}`}>
+                        {conversion != null ? `${conversion}%` : "—"}
+                      </div>
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 mt-0.5" />
+                    </div>
+                  )}
+                  <button
+                    onClick={() => { setStageFilter(isActive ? null : stage); setPaymentFilter("all"); setStatusFilter("all"); }}
+                    className={`group relative rounded-xl border transition-all text-left p-3 shrink-0 ${
+                      isActive
+                        ? `${meta.tint} ring-2 ${meta.ring} border-transparent`
+                        : "border-border/50 bg-card hover:bg-muted/30 hover:border-border"
+                    }`}
+                    style={{ flex: `1 1 ${widthBasis}px`, minWidth: 96 }}
+                    title={`${stuck} currently at ${meta.label} · ${reached} reached this stage or beyond`}
+                  >
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <div className={`w-7 h-7 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
+                        <Icon className={`h-3.5 w-3.5 ${meta.iconColor}`} />
+                      </div>
+                      <p className="text-2xl font-bold text-foreground leading-none tracking-tight">{stuck}</p>
+                    </div>
+                    <p className="text-[11px] font-medium text-foreground/80 truncate">{meta.label}</p>
+                    <div className="mt-2 h-1 rounded-full bg-muted/60 overflow-hidden">
+                      <div className={`h-full ${meta.bar} transition-all`} style={{ width: `${reachPct}%` }} />
+                    </div>
+                    <p className="mt-1.5 text-[10px] text-muted-foreground">
+                      <span className="font-semibold text-foreground/70">{reached}</span> reached
+                    </p>
+                  </button>
+                </Fragment>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Search + Filters */}
       <div className="flex items-center gap-3">
@@ -650,6 +800,8 @@ export default function Applications() {
                         appFeePaid={app.app_fee_paid}
                         hasOffer={app.has_offer}
                         docs={app.doc_counts}
+                        panDue={app.pan_due}
+                        anDue={app.an_due}
                       />
                     </td>
                     {!isCounsellor && <td className="px-3 py-2.5 text-xs text-muted-foreground">{app.counsellor_name || "—"}</td>}
@@ -684,6 +836,22 @@ export default function Applications() {
                             leadName={app.full_name}
                             leadPhone={app.phone}
                           />
+                        )}
+
+                        {/* Nudge button — surfaces only when the candidate has
+                            an offer letter and still owes money before getting
+                            AN. Opens a dialog that pre-fills a WhatsApp message
+                            with the AN balance + full Sem 1 balance + due date. */}
+                        {app.lead_id && app.has_offer && !app.lead_admission_no
+                          && (((app.an_due ?? 0) > 0) || ((app.year1_due ?? 0) > 0)) && (
+                          <button
+                            onClick={() => setNudgeTarget(app)}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 whitespace-nowrap"
+                            title="Nudge candidate over WhatsApp to confirm admission"
+                          >
+                            <MessageCircle className="h-3.5 w-3.5" />
+                            Nudge
+                          </button>
                         )}
                         {role === "super_admin" && app.payment_status !== "paid" && (
                           <button
@@ -729,13 +897,6 @@ export default function Applications() {
                               <Button variant="ghost" size="sm" onClick={() => setExpandedId(null)}><X className="h-3.5 w-3.5" /></Button>
                             </div>
                           </div>
-
-                          {/* Inline PDF preview when available */}
-                          {app.form_pdf_url && (
-                            <div className="mb-4 rounded-xl border border-border overflow-hidden bg-white" style={{ height: 600 }}>
-                              <iframe src={app.form_pdf_url} title="Application form preview" className="w-full h-full" />
-                            </div>
-                          )}
 
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-xs">
                             {/* Personal Details */}
@@ -919,6 +1080,20 @@ export default function Applications() {
           onRecorded={() => setOfflineReceiptApp(null)}
         />
       )}
+
+      <NudgePaymentDialog
+        open={!!nudgeTarget}
+        onClose={() => setNudgeTarget(null)}
+        candidate={nudgeTarget ? {
+          lead_id: nudgeTarget.lead_id || "",
+          full_name: nudgeTarget.full_name,
+          phone: nudgeTarget.phone,
+          course_name: (nudgeTarget.course_selections || [])
+            .map((c: any) => c.course_name).filter(Boolean).join(", ") || null,
+          an_due: nudgeTarget.an_due ?? null,
+          year1_due: nudgeTarget.year1_due ?? null,
+        } : null}
+      />
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
         <AlertDialogContent>
