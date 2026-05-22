@@ -79,13 +79,25 @@ jobs:
 
       - name: Show pending migrations (dry-run)
         if: steps.gate.outputs.skip != 'true'
+        # --dry-run already fails non-zero on drift (remote-only versions,
+        # local versions inserted before the last remote, duplicate-key
+        # collisions). We just need this step to NOT swallow the failure —
+        # the default `runs.shell: bash -e` does that. Once branch
+        # protection requires the `Dry-run migration diff` check, broken
+        # migrations can no longer reach main.
         run: supabase db push --dry-run
 
   push:
     name: Apply migrations to production
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    environment: production-db
+    # `environment: production-db` removed — the manual-approval gate it
+    # gave us added latency but couldn't catch the real failures (version
+    # collisions / drift), because by the time a reviewer saw the prompt
+    # the bad commit was already on main. We rely on the PR-level dry-run
+    # (made blocking via branch protection) + the daily drift-detection
+    # workflow instead. Re-add `environment: production-db` here if you
+    # later want a human checkpoint before prod writes.
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_REF:  ${{ secrets.SUPABASE_PROJECT_REF }}
