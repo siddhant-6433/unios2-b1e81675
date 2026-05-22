@@ -357,10 +357,23 @@ Deno.serve(async (req) => {
     // that don't pass portal_brand explicitly.
     const originDomain = (body.origin_domain || "").toLowerCase();
     const brandFromOrigin =
-      originDomain.endsWith("miraischool.in")    ? "mirai"  :
-      originDomain.endsWith("school.nimt.ac.in") ? "beacon" :
-      originDomain.endsWith("nimt.ac.in")        ? "nimt"   :
+      originDomain.endsWith("miraischool.in")      ? "mirai"  :
+      originDomain.endsWith("nimtbeaconschool.com")? "beacon" :
+      originDomain.endsWith("school.nimt.ac.in")   ? "beacon" :
+      originDomain.endsWith("nimt.ac.in")          ? "nimt"   :
       null;
+    // Meta Lead Ads have no origin_domain — derive brand from the Meta Page
+    // the ad ran on. Keep in sync with the backfill in migration
+    // 20260614120000_meta_brand_capture_and_backfill.sql.
+    const META_PAGE_TO_BRAND: Record<string, string> = {
+      "111711207848445":  "beacon", // NIMT School FB page → Beacon (CBSE)
+      "1016687728205021": "mirai",  // Mirai Experiential School
+      "443493925579":     "nimt",   // NIMT Educational Institutions (umbrella / college)
+    };
+    const brandFromMetaPage =
+      parsed.meta_page_id ? META_PAGE_TO_BRAND[parsed.meta_page_id] || null : null;
+    // Mirai-source intake (waitlist form) is always Mirai.
+    const brandFromSource = parsed.source === "mirai_website" ? "mirai" : null;
     const attribution = {
       ga_client_id:  body.ga_client_id  || null,
       ga_session_id: body.ga_session_id || null,
@@ -375,7 +388,14 @@ Deno.serve(async (req) => {
       origin_domain: body.origin_domain || null,
       fbc:           body.fbc           || null,
       fbp:           body.fbp           || null,
-      portal_brand:  body.portal_brand  || brandFromOrigin,
+      // Most specific signal wins. Falls back to 'nimt' so every lead carries
+      // a brand — that's also meta-capi-events' DEFAULT_BRAND, just making
+      // the implicit explicit on the row itself.
+      portal_brand:  body.portal_brand
+                       || brandFromOrigin
+                       || brandFromMetaPage
+                       || brandFromSource
+                       || "nimt",
     };
 
     // Supabase client (service role for inserts)

@@ -156,7 +156,17 @@ export const PORTAL_CONFIGS: Record<PortalId, PortalConfig> = {
 };
 
 /**
- * Detect portal from: 1) hostname, 2) query param, 3) path segment
+ * Detect portal from: 1) hostname, 2) query param, 3) path segment,
+ * 4) referrer (marketing-site → apply.nimt.ac.in clicks that don't
+ *    carry ?portal= still tag the lead with the right brand).
+ *
+ * Referrer detection covers the out-of-tree marketing sites:
+ *   nimt.ac.in              → nimt
+ *   nimtbeaconschool.com    → beacon
+ *   school.nimt.ac.in       → beacon (legacy alias)
+ *   miraischool.in          → mirai
+ * The same mapping lives server-side in lead-ingest's brandFromOrigin so
+ * apply-portal and direct-ingest paths agree on which brand owns a lead.
  */
 export function detectPortal(search: string, pathname: string): PortalId {
   const hostname = window.location.hostname.toLowerCase();
@@ -173,6 +183,21 @@ export function detectPortal(search: string, pathname: string): PortalId {
   const segments = pathname.split("/").filter(Boolean);
   const last = segments[segments.length - 1]?.toLowerCase();
   if (last && last in PORTAL_CONFIGS) return last as PortalId;
+
+  // Referrer fallback: marketing-site Apply Now clicks don't pass ?portal=,
+  // so use document.referrer to infer the brand from the originating host.
+  // Only runs when nothing more authoritative matched.
+  if (typeof document !== "undefined" && document.referrer) {
+    try {
+      const ref = new URL(document.referrer).hostname.toLowerCase();
+      if (ref.endsWith("miraischool.in"))                                  return "mirai";
+      if (ref.endsWith("nimtbeaconschool.com")
+          || ref.endsWith("school.nimt.ac.in"))                            return "beacon";
+      if (ref.endsWith("nimt.ac.in"))                                      return "nimt";
+    } catch {
+      // referrer wasn't a parseable URL — ignore
+    }
+  }
 
   return "nimt";
 }
