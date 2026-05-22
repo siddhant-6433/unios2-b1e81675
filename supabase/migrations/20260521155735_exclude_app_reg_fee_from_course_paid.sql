@@ -1,30 +1,3 @@
--- Application fee and registration fee are the SAME one-time admin gate at
--- NIMT — neither counts as a course-fee instalment. The deployed
--- `lead_fee_status` (last touched by 20260607070000_token_fee_waiver_allocation.sql)
--- lumps both into `total_paid` and then uses that sum against the AN
--- threshold (25% of post-scholarship year-1) AND against year-1 / full-course
--- due calculations.
---
--- Effect today:
---   • Displayed AN balance shrinks by every ₹ of app/reg fee already paid.
---   • Year-1 and full-course "due" amounts shrink by the same.
---   • `twenty_five_complete` flips to true a few ₹ early — auto-AN trigger
---     fires before the candidate has actually paid 25% in course money.
---
--- This migration:
---   • Adds `v_paid_toward_course` = SUM(token_fee + 'other')
---     so application_fee AND registration_fee are excluded.
---   • Switches the AN gate (`twenty_five_complete`) and the year-1 / full-
---     course due calculations to use `v_paid_toward_course`.
---   • Keeps `v_total_paid` in the JSON output for back-compat (callers that
---     want the all-types aggregate still get it).
---   • Adds `paid_toward_course` to the JSON so client UIs can read the
---     AN-relevant figure directly.
---
--- All other behaviour (token_fee_amount from offer letter, post-scholarship
--- year-1 from waivers, min_instalment floor on AN threshold, multi-year
--- window, lump-sum discount) preserved verbatim from the prior version.
-
 CREATE OR REPLACE FUNCTION public.lead_fee_status(_lead_id uuid)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -63,8 +36,6 @@ DECLARE
   v_full_year_due        numeric;
   v_full_course_due      numeric;
 BEGIN
-  -- Prefer the explicit token_fee_amount from the latest approved offer.
-  -- If not set, fall back to policy formula floored at v_min_instalment.
   SELECT token_fee_amount
     INTO v_offer_token
     FROM public.offer_letters
@@ -79,15 +50,9 @@ BEGIN
   );
 
   SELECT
-    -- token_fee only
     COALESCE(SUM(amount) FILTER (WHERE type = 'token_fee' AND status = 'confirmed'), 0),
-    -- application_fee only (informational; matches registration_fee
-    -- semantically — both are excluded from course math)
     COALESCE(SUM(amount) FILTER (WHERE type = 'application_fee' AND status = 'confirmed'), 0),
-    -- All confirmed payments — kept as a back-compat aggregate
     COALESCE(SUM(amount) FILTER (WHERE type IN ('application_fee','token_fee','registration_fee','other') AND status = 'confirmed'), 0),
-    -- THE field used for the AN gate and year-1 / full-course due math:
-    -- token_fee + 'other'. Excludes application_fee AND registration_fee.
     COALESCE(SUM(amount) FILTER (WHERE type IN ('token_fee','other') AND status = 'confirmed'), 0)
   INTO v_token_paid, v_app_paid, v_total_paid, v_paid_toward_course
   FROM public.lead_payments
@@ -110,8 +75,6 @@ BEGIN
   END IF;
 
   v_lump_disc       := ROUND(v_first_year * v_lump_pct / 100, 2);
-  -- Year-1 / full-course due now use paid_toward_course, NOT total_paid —
-  -- so application_fee / registration_fee don't spuriously shrink them.
   v_full_year_due   := GREATEST(v_first_year - v_paid_toward_course - v_lump_disc, 0);
 
   v_multi_disc      := ROUND(v_additional * v_lump_pct / 100, 2)
@@ -134,8 +97,6 @@ BEGIN
     'an_threshold_pct',             v_an_pct,
     'min_token_instalment',         v_min_instalment,
     'token_complete',               (v_token_required > 0 AND v_token_paid >= v_token_required),
-    -- AN gate now reads `paid_toward_course` so app_fee / reg_fee no longer
-    -- short-circuit the 25% rule.
     'twenty_five_complete',         (v_post_year_1 > 0 AND v_paid_toward_course >= v_an_threshold),
     'token_completed_at',           v_first_token_at,
     'multi_year_window_expires_at', v_window_expires,
