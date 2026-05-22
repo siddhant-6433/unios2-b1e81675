@@ -5,10 +5,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ShieldCheck, HandCoins, FileText, Trash2, Loader2, ChevronRight } from "lucide-react";
+import { ShieldCheck, HandCoins, FileText, FilePen, Trash2, Loader2, ChevronRight } from "lucide-react";
 
 interface PendingItem {
-  kind: "concession" | "offer_letter" | "lead_deletion";
+  kind: "concession" | "offer_letter" | "offer_edit" | "lead_deletion";
   id: string;
   status: string;
   subject_id: string;
@@ -31,6 +31,12 @@ const KIND_META: Record<string, { label: string; icon: any; color: string; getLi
     label: "Offer Letter",
     icon: FileText,
     color: "text-teal-600 bg-teal-100 dark:bg-teal-900/30",
+    getLink: (i) => `/admissions/${i.subject_id}`,
+  },
+  offer_edit: {
+    label: "Offer Edit",
+    icon: FilePen,
+    color: "text-amber-600 bg-amber-100 dark:bg-amber-900/30",
     getLink: (i) => `/admissions/${i.subject_id}`,
   },
   lead_deletion: {
@@ -103,6 +109,7 @@ export function PendingApprovalsPanel() {
         <div className="divide-y divide-border/40">
             {items.slice(0, 8).map(item => {
               const meta = KIND_META[item.kind];
+              if (!meta) return null;
               const Icon = meta.icon;
               return (
                 <button
