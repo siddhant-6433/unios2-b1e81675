@@ -91,13 +91,20 @@ jobs:
     name: Apply migrations to production
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    # `environment: production-db` removed — the manual-approval gate it
-    # gave us added latency but couldn't catch the real failures (version
-    # collisions / drift), because by the time a reviewer saw the prompt
-    # the bad commit was already on main. We rely on the PR-level dry-run
-    # (made blocking via branch protection) + the daily drift-detection
-    # workflow instead. Re-add `environment: production-db` here if you
-    # later want a human checkpoint before prod writes.
+    # `environment: production-db` is retained ONLY for secret scoping —
+    # SUPABASE_ACCESS_TOKEN / SUPABASE_PROJECT_REF / SUPABASE_DB_PASSWORD
+    # live as Environment Secrets on this environment, not as repo-level
+    # Actions secrets. Dropping the binding (PR #48) silently broke prod
+    # pushes because `${{ secrets.* }}` returns empty without the
+    # environment scope.
+    #
+    # The manual-approval gate that previously hung off this environment
+    # added latency without catching real failures (collisions / drift) —
+    # we rely on the PR-level dry-run (blocking via branch protection) +
+    # the daily drift-detection workflow instead. If the env still has a
+    # required-reviewers config, clear it under Settings → Environments
+    # → production-db rather than removing this directive.
+    environment: production-db
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_REF:  ${{ secrets.SUPABASE_PROJECT_REF }}
