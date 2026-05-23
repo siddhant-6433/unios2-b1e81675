@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ShieldCheck, HandCoins, FileText, FilePen, Trash2, Loader2, ChevronRight } from "lucide-react";
+import { ShieldCheck, HandCoins, FileText, Pencil, Trash2, Loader2, ChevronRight } from "lucide-react";
 
 interface PendingItem {
   kind: "concession" | "offer_letter" | "offer_edit" | "lead_deletion";
@@ -35,8 +35,8 @@ const KIND_META: Record<string, { label: string; icon: any; color: string; getLi
   },
   offer_edit: {
     label: "Offer Edit",
-    icon: FilePen,
-    color: "text-amber-600 bg-amber-100 dark:bg-amber-900/30",
+    icon: Pencil,
+    color: "text-blue-600 bg-blue-100 dark:bg-blue-900/30",
     getLink: (i) => `/admissions/${i.subject_id}`,
   },
   lead_deletion: {
