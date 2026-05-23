@@ -109,6 +109,7 @@ export default function LeadBuckets() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [courseFilter, setCourseFilter] = useState<string>("all");
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Bucket counts
@@ -177,7 +178,7 @@ export default function LeadBuckets() {
   // course relevant in the college bucket is rarely relevant in the school
   // bucket and vice versa, so an unintended carry-over would silently
   // produce an empty list.
-  useEffect(() => { setCourseFilter("all"); }, [activeBucket, schoolFilter]);
+  useEffect(() => { setCourseFilter("all"); setSourceFilter("all"); }, [activeBucket, schoolFilter]);
 
   // Course options derived from the currently loaded leads so the dropdown
   // only ever shows courses that actually have unassigned leads in the
@@ -193,6 +194,21 @@ export default function LeadBuckets() {
     return Array.from(counts.entries())
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .map(([name, count]) => ({ name, count }));
+  })();
+
+  // Source options mirror the course filter — derived from the loaded
+  // leads so the dropdown only ever lists sources that actually have
+  // unassigned leads in the active bucket. Ordered by descending count.
+  const sourceOptions = (() => {
+    const counts = new Map<string, number>();
+    for (const l of leads) {
+      const src = (l.source || "").trim();
+      if (!src) continue;
+      counts.set(src, (counts.get(src) || 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([source, count]) => ({ source, count }));
   })();
 
   useEffect(() => {
@@ -222,6 +238,7 @@ export default function LeadBuckets() {
 
   const filtered = leads.filter((l) => {
     if (courseFilter !== "all" && (l.course_name || "") !== courseFilter) return false;
+    if (sourceFilter !== "all" && (l.source || "") !== sourceFilter) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return l.name.toLowerCase().includes(q) || (l.course_name || "").toLowerCase().includes(q);
@@ -416,6 +433,24 @@ export default function LeadBuckets() {
         {courseFilter !== "all" && (
           <Button variant="ghost" size="sm" className="h-9 px-2 text-xs" onClick={() => setCourseFilter("all")}>
             Clear course
+          </Button>
+        )}
+        <select
+          value={sourceFilter}
+          onChange={(e) => setSourceFilter(e.target.value)}
+          className="rounded-xl border border-input bg-card py-2.5 px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 max-w-xs"
+          title="Filter by source"
+        >
+          <option value="all">All sources ({leads.length})</option>
+          {sourceOptions.map((s) => (
+            <option key={s.source} value={s.source}>
+              {SOURCE_LABELS[s.source] || s.source} ({s.count})
+            </option>
+          ))}
+        </select>
+        {sourceFilter !== "all" && (
+          <Button variant="ghost" size="sm" className="h-9 px-2 text-xs" onClick={() => setSourceFilter("all")}>
+            Clear source
           </Button>
         )}
       </div>
