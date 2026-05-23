@@ -1406,6 +1406,8 @@ const LeadDetail = () => {
         personRole={(lead as any).person_role || null}
         latestNote={notes[0]?.content || null}
         aiCallSummary={(lead as any).ai_notes || null}
+        leadSource={lead.source || null}
+        jdKeyword={(lead as any).jd_category || null}
       />
 
       {/* Score animation popup */}

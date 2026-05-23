@@ -46,6 +46,8 @@ interface MissedCall {
   lead_counsellor_id: string | null;
   counsellor_name: string;
   course_name: string;
+  lead_source: string | null;
+  jd_category: string | null;
 }
 
 function relativeTime(d: Date): string {
@@ -110,7 +112,7 @@ export default function MissedCalls() {
     const leadIds = [...new Set(list.map(r => r.lead_id).filter(Boolean))];
     const { data: leads } = await supabase
       .from("leads")
-      .select("id, name, phone, stage, counsellor_id, courses:course_id(name)")
+      .select("id, name, phone, stage, counsellor_id, source, jd_category, courses:course_id(name)")
       .in("id", leadIds);
     const leadMap: Record<string, any> = {};
     (leads || []).forEach((l: any) => { leadMap[l.id] = l; });
@@ -151,6 +153,8 @@ export default function MissedCalls() {
         lead_counsellor_id: lead.counsellor_id || null,
         counsellor_name: lead.counsellor_id ? (counsellorMap[lead.counsellor_id] || "Unknown") : "Unassigned",
         course_name: (lead.courses as any)?.name || "",
+        lead_source: lead.source || null,
+        jd_category: lead.jd_category || null,
       };
     });
 
@@ -637,6 +641,8 @@ export default function MissedCalls() {
             leadStage={activeMc.lead_stage || null}
             aiCallSummary={activeMc.summary}
             latestNote={activeMc.followup_reason}
+            leadSource={activeMc.lead_source}
+            jdKeyword={activeMc.jd_category}
           />
         </Suspense>
       )}
