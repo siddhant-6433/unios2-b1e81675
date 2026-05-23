@@ -12,7 +12,10 @@
  *      `post_visit_pending_followups` view (visit done + no follow-up logged).
  *
  * Clicking a card invokes the host page's action handler so the leads
- * table below filters to the matching cohort.
+ * table below filters to the matching cohort. Exception: the Missed
+ * Callbacks card opens /missed-calls in a new tab instead — that page
+ * has bespoke per-row actions (Cloud Call & Close) that the in-page
+ * admissions list can't express.
  */
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -63,6 +66,11 @@ export function VisitActionCenter({ counts, active, onClick }: Props) {
     tint: string;
     ring: string;
     pulse?: boolean;
+    /** If set, the card renders as an <a> opening this URL in a new tab
+     *  instead of in-page filtering via onClick. Used for cohorts that
+     *  have their own dedicated page with bespoke actions (e.g. Cloud
+     *  Call & Close on /missed-calls). */
+    href?: string;
   }> = [
     {
       key: "missed_callbacks",
@@ -77,6 +85,7 @@ export function VisitActionCenter({ counts, active, onClick }: Props) {
       tint: "bg-rose-50/60",
       ring: "ring-rose-400",
       pulse: counts.missedCallbacks > 0,
+      href: "/missed-calls",
     },
     {
       key: "overdue_followups",
@@ -148,27 +157,45 @@ export function VisitActionCenter({ counts, active, onClick }: Props) {
           {cards.map((c) => {
             const Icon = c.icon;
             const isActive = active === c.key;
+            const cls = `${tile(isActive, c.tint, c.ring)} ${
+              c.pulse && !isActive ? "ring-1 ring-offset-0 ring-rose-200/0 [&_.pulse]:animate-pulse" : ""
+            } p-4 text-left block`;
+            const body = (
+              <div className="flex items-start gap-3">
+                <div className={`w-10 h-10 rounded-xl ${c.iconBg} flex items-center justify-center shrink-0 ${c.pulse ? "pulse" : ""}`}>
+                  <Icon className={`h-[18px] w-[18px] ${c.iconColor}`} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-2xl font-bold text-foreground leading-none tracking-tight tabular-nums">{c.value}</p>
+                    <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/40 group-hover:text-muted-foreground" />
+                  </div>
+                  <p className="text-[11px] font-medium text-foreground/90 mt-1.5">{c.label}</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{c.sub}</p>
+                </div>
+              </div>
+            );
+            if (c.href) {
+              return (
+                <a
+                  key={c.key}
+                  href={c.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={cls}
+                  title="Opens the dedicated Missed Calls page in a new tab — each entry has a Cloud Call & Close action that places the call and clears it from the queue"
+                >
+                  {body}
+                </a>
+              );
+            }
             return (
               <button
                 key={c.key}
                 onClick={() => onClick(isActive ? null : c.key)}
-                className={`${tile(isActive, c.tint, c.ring)} ${
-                  c.pulse && !isActive ? "ring-1 ring-offset-0 ring-rose-200/0 [&_.pulse]:animate-pulse" : ""
-                } p-4 text-left`}
+                className={cls}
               >
-                <div className="flex items-start gap-3">
-                  <div className={`w-10 h-10 rounded-xl ${c.iconBg} flex items-center justify-center shrink-0 ${c.pulse ? "pulse" : ""}`}>
-                    <Icon className={`h-[18px] w-[18px] ${c.iconColor}`} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-2xl font-bold text-foreground leading-none tracking-tight tabular-nums">{c.value}</p>
-                      <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/40 group-hover:text-muted-foreground" />
-                    </div>
-                    <p className="text-[11px] font-medium text-foreground/90 mt-1.5">{c.label}</p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{c.sub}</p>
-                  </div>
-                </div>
+                {body}
               </button>
             );
           })}

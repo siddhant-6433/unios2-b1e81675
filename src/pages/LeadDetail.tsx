@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -25,6 +25,7 @@ import { LeadInfoCard } from "@/components/leads/LeadInfoCard";
 import { MirrorLeadCard } from "@/components/leads/MirrorLeadCard";
 import { FuzzyDuplicateAlert } from "@/components/admissions/FuzzyDuplicateAlert";
 import { type CallDispositionData } from "@/components/admissions/CallDispositionDialog";
+import { recordCallDisposition } from "@/lib/callDisposition";
 
 // Lazy: heavy body components — header paints before these chunks arrive
 const AiCallSummary         = lazy(() => import("@/components/leads/AiCallSummary").then(m => ({ default: m.AiCallSummary })));
@@ -257,6 +258,13 @@ const LeadDetail = () => {
     }
   }, [showCallDisposition]);
 
+  // When opened from /missed-calls via "Cloud Call", the URL carries the
+  // ai_call_records.id of the missed-call entry to resolve. We stash it in
+  // a ref before clearing the URL so logCallDisposition can mark it done
+  // once the counsellor actually submits a disposition (per the rule:
+  // missed-call closes on disposition, not on call placement).
+  const pendingMissedCallIdRef = useRef<string | null>(null);
+
   // Auto-trigger Cloud Call when navigated with ?action=call.
   // Previously this opened the disposition dialog directly, which let
   // staff log "not answered" entries without ever placing a real call.
@@ -264,6 +272,8 @@ const LeadDetail = () => {
   // automatically 3s after the call is placed (see triggerManualCall).
   useEffect(() => {
     if (searchParams.get("action") === "call" && !loading && lead && !manualCalling) {
+      const mid = searchParams.get("missed_call_id");
+      if (mid) pendingMissedCallIdRef.current = mid;
       triggerManualCall();
       setSearchParams({}, { replace: true });
     }
@@ -357,184 +367,43 @@ const LeadDetail = () => {
   const logCallDisposition = async (data: CallDispositionData) => {
     if (!id || !lead) return;
 
-    const dispositionLabels: Record<string, string> = {
+    // Core disposition pipeline (call_logs, activity, auto-stage, WhatsApp,
+    // follow-up) lives in src/lib/callDisposition.ts and is shared with the
+    // /missed-calls inline disposition flow. UI-specific extras (score
+    // popup, next-lead prompt, schedule-visit, fetch refresh, missed-call
+    // resolution) stay here.
+    if (data.disposition === "interested" || data.disposition === "call_back"
+        || data.disposition === "not_answered" || data.disposition === "busy"
+        || data.disposition === "voicemail" || data.disposition === "not_interested") {
+      setDispositionWaSent(true);
+    }
+
+    await recordCallDisposition({
+      supabase,
+      leadId: id,
+      lead: { name: lead.name, phone: lead.phone, stage: lead.stage },
+      userId: user?.id || null,
+      profileId,
+      courseName,
+      data,
+      loggedFromLabel: "lead page",
+    });
+
+    const label = ({
       interested: "Interested", not_interested: "Not Interested",
       ineligible: "Ineligible",
       not_answered: "Not Answered", wrong_number: "Wrong Number",
       call_back: "Call Back Later", do_not_contact: "Do Not Contact",
       voicemail: "Voicemail", busy: "Busy",
-    };
-    const label = dispositionLabels[data.disposition] || data.disposition;
-
-    // 1. Insert into call_logs via the Cloud Dialer dedupe RPC so these entries
-    // are consistent with Cloud Dialer calls and show as "Cloud Call" in the log.
-    await (supabase as any).rpc("record_cloud_call_log", {
-      p_call_uuid:     crypto.randomUUID(),
-      p_lead_id:       id,
-      p_user_id:       user?.id || null,
-      p_disposition:   data.disposition,
-      p_duration:      data.duration_seconds || 0,
-      p_notes:         data.notes || `${label} (logged from lead page)`,
-      p_source:        "manual",
-      p_recording_url: null,
-      p_call_source:   "manual_log",
-    });
-
-    // 1b. Mark any pending follow-ups on this lead as completed — the call has been made
-    await supabase
-      .from("lead_followups")
-      .update({ status: "completed", completed_at: new Date().toISOString() } as any)
-      .eq("lead_id", id)
-      .eq("status", "pending");
-
-    // 2. Log activity
-    const durationStr = data.duration_seconds > 0
-      ? ` (${Math.floor(data.duration_seconds / 60)}m${data.duration_seconds % 60 ? ` ${data.duration_seconds % 60}s` : ""})`
-      : "";
-    await supabase.from("lead_activities").insert({
-      lead_id: id, user_id: profileId, type: "call",
-      description: `Call: ${label}${durationStr}${data.notes ? ` — ${data.notes}` : ""}`,
-    });
-
-    // 3. Auto-advance stage based on disposition
-    if (data.disposition === "interested" || data.disposition === "call_back" || data.disposition === "not_answered") {
-      await autoAdvanceStage("counsellor_call");
-    } else if (data.disposition === "not_interested") {
-      await supabase.from("leads").update({ stage: "not_interested" as any }).eq("id", id);
-      await supabase.from("lead_activities").insert({
-        lead_id: id, user_id: profileId, type: "stage_change",
-        description: `Stage changed to Not Interested`,
-        old_stage: lead.stage as any, new_stage: "not_interested" as any,
-      });
-    } else if (data.disposition === "do_not_contact") {
-      await supabase.from("leads").update({ stage: "dnc" as any }).eq("id", id);
-      await supabase.from("lead_activities").insert({
-        lead_id: id, user_id: profileId, type: "stage_change",
-        description: `Stage changed to Do Not Contact`,
-        old_stage: lead.stage as any, new_stage: "dnc" as any,
-      });
-    } else if (data.disposition === "ineligible") {
-      // Deferred if future session noted, otherwise ineligible
-      const newStage = data.future_eligible_session ? "deferred" : "ineligible";
-      const updates: Record<string, any> = { stage: newStage as any };
-      if (data.future_eligible_session) updates.future_eligible_session = data.future_eligible_session;
-      await supabase.from("leads").update(updates).eq("id", id);
-      const futureNote = data.future_eligible_session ? ` — eligible for ${data.future_eligible_session}` : "";
-      await supabase.from("lead_activities").insert({
-        lead_id: id, user_id: profileId, type: "stage_change",
-        description: newStage === "deferred"
-          ? `Stage changed to Deferred (Next Session${futureNote})`
-          : `Stage changed to Ineligible`,
-        old_stage: lead.stage as any, new_stage: newStage as any,
-      });
-    }
-
-    // 4. Auto-send WhatsApp to lead based on disposition (fire-and-forget)
-    // Uses UTILITY templates which work outside the 24-hour window.
-    // For interested / call_back: nimt_followup_v2 (personal sign-off with
-    // counsellor name + phone + the actual follow-up date). Counsellor name
-    // and phone are filled in by the fn_resolve_counsellor_signature RPC.
-    if (lead.phone && !data.suppress_auto_whatsapp) {
-      const course = courseName || "your selected course";
-      let autoTemplate: string | null = null;
-      let autoParams: string[] = [];
-
-      // Format "Fri, 2nd May" — used by nimt_followup_v2.
-      const formatFollowupDate = (iso?: string) => {
-        if (!iso) return "the agreed time";
-        const d = new Date(iso);
-        const day = d.toLocaleDateString("en-IN", { weekday: "short" });
-        const date = d.getDate();
-        const month = d.toLocaleDateString("en-IN", { month: "short" });
-        const ord = (n: number) => {
-          const s = ["th", "st", "nd", "rd"], v = n % 100;
-          return n + (s[(v - 20) % 10] || s[v] || s[0]);
-        };
-        return `${day}, ${ord(date)} ${month}`;
-      };
-
-      if (data.disposition === "interested" || data.disposition === "call_back") {
-        // Only pass the bits the client knows. whatsapp-send fills counsellor
-        // name + phone server-side from profiles + the PLIVO_DIALER_PHONE_NUMBER
-        // env var so the fallback chain lives in one place (and the Plivo
-        // number can be rotated via Supabase secrets without code changes).
-        autoTemplate = "nimt_followup_v2";
-        autoParams = [lead.name, formatFollowupDate(data.followup_date)];
-      } else if (data.disposition === "not_answered" || data.disposition === "busy" || data.disposition === "voicemail") {
-        autoTemplate = "missed_call";
-        autoParams = [lead.name, course];
-      } else if (data.disposition === "not_interested") {
-        // Personal closure note. whatsapp-send fills counsellor name + phone
-        // server-side from profiles + PLIVO_DIALER_PHONE_NUMBER, same as
-        // nimt_followup_v2 — caller just passes [name, course_name].
-        autoTemplate = "nimt_not_interested_ack";
-        autoParams = [lead.name, course];
-      }
-
-      if (autoTemplate) {
-        setDispositionWaSent(true);
-        const { data: sessionData } = await supabase.auth.getSession();
-        const accessToken = sessionData.session?.access_token;
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-        const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-
-        fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken || anonKey}`,
-            apikey: anonKey,
-          },
-          body: JSON.stringify({
-            template_key: autoTemplate,
-            phone: lead.phone,
-            params: autoParams,
-            lead_id: id,
-          }),
-        }).then(async res => {
-          if (!res.ok) {
-            const body = await res.json().catch(() => ({}));
-            console.error("Auto WA after disposition failed:", body);
-            toast({ title: "Auto WhatsApp failed", description: body?.error || body?.meta_error || `HTTP ${res.status}`, variant: "destructive" });
-          }
-        }).catch(e => {
-          console.error("Auto WA exception:", e);
-        });
-      }
-    }
-
-    // Optional course-info follow-up — fires when the counsellor ticked
-    // "Also send course details" in the disposition dialog. course_info_v4
-    // resolves all params + button URLs server-side from the lead's course_id,
-    // so we just pass {template_key, phone, lead_id}.
-    if (data.send_course_info && lead.phone && id) {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData.session?.access_token;
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-      fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken || anonKey}`,
-          apikey: anonKey,
-        },
-        body: JSON.stringify({
-          template_key: "course_info_v4",
-          phone: lead.phone,
-          lead_id: id,
-        }),
-      }).catch(e => console.error("course_info_v4 send exception:", e));
-    }
+    } as Record<string, string>)[data.disposition] || data.disposition;
 
     toast({ title: "Call logged", description: label });
     await fetchAll(true);
     refetchQueue();
 
-    // Show score animation
+    // Score animation
     const scoreInfo = DISPOSITION_POINTS[data.disposition];
     if (scoreInfo) {
-      // Check if first contact bonus applies
       const isFirstContact = !lead.first_contact_at;
       const totalPoints = scoreInfo.points + (isFirstContact && scoreInfo.points > 0 ? 5 : 0);
       const totalLabel = isFirstContact && scoreInfo.points > 0
@@ -543,34 +412,34 @@ const LeadDetail = () => {
       setScorePopup({ points: totalPoints, label: totalLabel, visible: true });
     }
 
-    // 5. Save follow-up if date provided inline (no second dialog needed)
-    if (data.schedule_followup && data.followup_date) {
-      await supabase.from("lead_followups").insert({
-        lead_id: id,
-        user_id: user?.id,
-        scheduled_at: data.followup_date,
-        type: "call",
-        notes: `Follow-up after ${label}${data.notes ? `: ${data.notes}` : ""}`,
-        status: "pending",
-      });
-      await supabase.from("lead_activities").insert({
-        lead_id: id, user_id: profileId, type: "followup",
-        description: `Follow-up scheduled for ${new Date(data.followup_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`,
-      });
-      await fetchAll(true);
-    } else if (data.schedule_followup) {
-      // Fallback: open dialog only if no date was provided
+    // Schedule-visit branch is lead-page-only (the inline date pair needs the
+    // campus list + visit dialog state). Fallback to the dedicated dialog if
+    // schedule_followup was ticked without a date.
+    if (data.schedule_followup && !data.followup_date) {
       setShowFollowup(true);
     }
-    // 6. Schedule visit inline if provided
     if (data.visit) {
       await scheduleVisit(data.visit);
     }
 
-    // 7. Show next lead prompt (if not chaining to followup)
     if (!data.schedule_followup) {
       setLastDisposition(label);
       setShowNextLeadPrompt(true);
+    }
+
+    // If this call was opened from /missed-calls, clear that pending callback
+    // now that a disposition has been logged. Best-effort — disposition
+    // already succeeded, don't surface DB hiccups.
+    const missedCallId = pendingMissedCallIdRef.current;
+    if (missedCallId) {
+      pendingMissedCallIdRef.current = null;
+      supabase
+        .from("ai_call_records" as any)
+        .update({ followup_done_at: new Date().toISOString(), followup_done_by: profileId })
+        .eq("id", missedCallId)
+        .then(({ error }) => {
+          if (error) console.error("Failed to clear missed-call after disposition:", error);
+        });
     }
   };
 
