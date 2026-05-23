@@ -4,8 +4,9 @@ import { Button } from "@/components/ui/button";
 import {
   Phone, CheckCircle, XCircle, PhoneMissed, PhoneOff, Clock3,
   BanIcon, Loader2, ArrowRight, MapPin, CalendarDays, ChevronDown, Clock,
-  AlertCircle, MessageSquare, GraduationCap,
+  AlertCircle, MessageSquare, GraduationCap, Globe, FileText,
 } from "lucide-react";
+import { SOURCE_LABELS, SOURCE_BADGE_COLORS } from "@/config/leadSources";
 
 export type CallDisposition =
   | "interested"
@@ -77,6 +78,12 @@ interface CallDispositionDialogProps {
   personRole?: string | null;
   latestNote?: string | null;
   aiCallSummary?: string | null;
+  /** Lead source (e.g. "justdial", "meta_ads") — shown as a badge so the
+   *  counsellor knows which channel produced this lead before picking up. */
+  leadSource?: string | null;
+  /** JustDial search keyword that produced the lead. Only rendered when
+   *  leadSource === "justdial" — for every other source it's irrelevant. */
+  jdKeyword?: string | null;
 }
 
 // requiresConnected: option only makes sense when the counsellor actually
@@ -159,6 +166,7 @@ export function CallDispositionDialog({
   open, onOpenChange, leadName, leadPhone, campuses, defaultCampusId,
   onSubmit, onCallNow, callStatus, callEnded, onManualConnect,
   courseName, leadStage, personRole, latestNote, aiCallSummary,
+  leadSource, jdKeyword,
 }: CallDispositionDialogProps) {
   const [disposition, setDisposition] = useState<CallDisposition | null>(null);
   const [duration, setDuration] = useState(0);
@@ -337,6 +345,21 @@ export function CallDispositionDialog({
                 <p className="text-xs text-foreground flex items-center gap-1.5 pt-0.5">
                   <span className="text-muted-foreground">Course:</span>
                   <span className="font-medium">{courseName}</span>
+                </p>
+              )}
+              {leadSource && (
+                <p className="text-xs text-foreground flex items-center gap-1.5 pt-0.5 flex-wrap">
+                  <Globe className="h-3 w-3 text-muted-foreground" />
+                  <span className="text-muted-foreground">Source:</span>
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${SOURCE_BADGE_COLORS[leadSource] || "bg-muted text-muted-foreground"}`}>
+                    {SOURCE_LABELS[leadSource] || leadSource.replace(/_/g, " ")}
+                  </span>
+                  {leadSource === "justdial" && jdKeyword && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200">
+                      <FileText className="h-2.5 w-2.5" />
+                      {jdKeyword}
+                    </span>
+                  )}
                 </p>
               )}
             </div>
