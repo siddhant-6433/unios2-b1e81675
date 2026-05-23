@@ -168,7 +168,7 @@ Deno.serve(async (req) => {
     if (leadPaymentId) {
       const { data: lpRow } = await admin
         .from("lead_payments")
-        .select("id, status, transaction_ref")
+        .select("id, status, transaction_ref, lead_id, type")
         .eq("id", leadPaymentId)
         .maybeSingle();
 
@@ -188,6 +188,22 @@ Deno.serve(async (req) => {
       if (lpErr) {
         console.error(`[easebuzz-webhook] lead_payments update failed:`, lpErr.message);
         return new Response(JSON.stringify({ error: lpErr.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      // UPI-intent payers never return to /surl, so easebuzz-payment's
+      // notify-event call is skipped for them. Fire it here. The DB
+      // trigger fn_notify_payment_received also skips gateway='easebuzz'
+      // (migration 20260520091157), so this is the only path that sends
+      // the receipt PDF + WhatsApp + finance email for these payments.
+      // The idempotency guard above prevents duplicate sends when /surl
+      // and the webhook both reach us.
+      if (lpRow.lead_id) {
+        const evt = lpRow.type === "application_fee" ? "app_fee_paid" : "payment_received";
+        fetch(`${supabaseUrl}/functions/v1/notify-event`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+          body: JSON.stringify({ event: evt, lead_id: lpRow.lead_id, context: { payment_id: leadPaymentId } }),
+        }).catch((e) => console.error("[easebuzz-webhook] notify-event invoke failed:", e));
       }
 
       console.log(`[easebuzz-webhook] ✓ lead_payment ${leadPaymentId} confirmed via S2S webhook (ref ${paymentRef})`);
