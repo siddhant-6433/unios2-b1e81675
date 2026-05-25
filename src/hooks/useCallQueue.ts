@@ -83,18 +83,33 @@ export function useCallQueue(currentLeadId?: string, counsellorId?: string) {
           .order("scheduled_at", { ascending: true })
           .limit(10),
         supabase.from("leads")
-          .select("id, name, phone")
+          .select("id, name, phone, source, created_at")
           .eq("counsellor_id", resolvedCounsellorId)
           .eq("stage", "new_lead")
           .is("first_contact_at", null)
           .order("created_at", { ascending: true })
-          .limit(10),
+          .limit(30),
       ]);
 
       const postVisit = (r1.data || []).map((r: any) => ({ id: r.lead_id, name: r.lead_name, phone: r.lead_phone }));
       const overdue = (r2.data || []).map((r: any) => ({ id: r.lead_id, name: r.lead_name, phone: r.lead_phone }));
       const todayFu = (r3.data || []).map((r: any) => ({ id: r.lead_id, name: (r.leads as any)?.name || "", phone: (r.leads as any)?.phone || "" }));
-      const newLeads = (r4.data || []).map((r: any) => ({ id: r.id, name: r.name, phone: r.phone }));
+      // Source tier: 1 = paid (meta/google), 2 = website, 3 = other. Paid leads decay
+      // fastest so they should be dialed first within the New Lead bucket.
+      const sourceTier = (s: string | null | undefined): number => {
+        if (s === "meta_ads" || s === "google_ads") return 1;
+        if (s === "website" || s === "mirai_website") return 2;
+        return 3;
+      };
+      const newLeads = (r4.data || [])
+        .slice()
+        .sort((a: any, b: any) => {
+          const t = sourceTier(a.source) - sourceTier(b.source);
+          if (t !== 0) return t;
+          return (a.created_at || "").localeCompare(b.created_at || "");
+        })
+        .slice(0, 10)
+        .map((r: any) => ({ id: r.id, name: r.name, phone: r.phone }));
 
       const seen = new Set<string>();
       const dedup = (arr: { id: string; name: string; phone: string }[]) => {
