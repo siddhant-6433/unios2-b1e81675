@@ -48,6 +48,7 @@ const ScheduleFollowupDialog       = lazy(() => import("@/components/admissions/
 const CallDispositionDialog        = lazy(() => import("@/components/admissions/CallDispositionDialog").then(m => ({ default: m.CallDispositionDialog })));
 const RecordPaymentDialog          = lazy(() => import("@/components/admissions/RecordPaymentDialog").then(m => ({ default: m.RecordPaymentDialog })));
 const SendEmailDialog              = lazy(() => import("@/components/leads/SendEmailDialog").then(m => ({ default: m.SendEmailDialog })));
+const DirectDialGuardDialog        = lazy(() => import("@/components/admissions/DirectDialGuardDialog").then(m => ({ default: m.DirectDialGuardDialog })));
 import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
 import { useCallQueue } from "@/hooks/useCallQueue";
 import { ScorePopup } from "@/components/admissions/ScorePopup";
@@ -155,6 +156,8 @@ const LeadDetail = () => {
   const [profileId, setProfileId] = useState<string | null>(null);
   const [showNextLeadPrompt, setShowNextLeadPrompt] = useState(false);
   const [lastDisposition, setLastDisposition] = useState<string>("");
+  // Soft direct-dial guard: pending priority counts gating non-priority calls.
+  const [dialGuardCounts, setDialGuardCounts] = useState<{ paid_pending: number; overdue_pending: number } | null>(null);
   const [scorePopup, setScorePopup] = useState<{ points: number; label: string; visible: boolean }>({ points: 0, label: "", visible: false });
   // When the lead_detail RPC returns nothing (RLS blocked because the lead is
   // assigned to someone else), we still want to tell the user *who* it is
@@ -762,7 +765,9 @@ const LeadDetail = () => {
     setPinningToDialer(false);
   };
 
-  const triggerManualCall = async () => {
+  // Place the actual Plivo call. Separated from triggerManualCall so the
+  // guard modal can call it after the counsellor confirms an override.
+  const placeManualCall = async () => {
     if (!id) return;
     setManualCalling(true);
     try {
@@ -793,6 +798,47 @@ const LeadDetail = () => {
       toast({ title: "Call Failed", description: e.message, variant: "destructive" });
     }
     setManualCalling(false);
+  };
+
+  const triggerManualCall = async () => {
+    if (!id || !profileId) { await placeManualCall(); return; }
+    // Soft guard: counsellor must clear paid (meta/google <24h) + overdue
+    // (>2h) priority work before direct-dialing a non-priority lead.
+    // The RPC excludes the current lead from counts and flags exempt cases
+    // (priority_interested, missed callback, paid pending, overdue).
+    try {
+      const { data: guard, error: gErr } = await supabase.rpc(
+        "counsellor_dial_guard",
+        { p_counsellor_id: profileId, p_lead_id: id },
+      );
+      if (!gErr && guard) {
+        const g = guard as { paid_pending: number; overdue_pending: number; current_lead_exempt: boolean };
+        const total = (g.paid_pending || 0) + (g.overdue_pending || 0);
+        if (total > 0 && !g.current_lead_exempt) {
+          setDialGuardCounts({ paid_pending: g.paid_pending || 0, overdue_pending: g.overdue_pending || 0 });
+          return;
+        }
+      }
+    } catch (_) {
+      // Guard failures should never block calling — fall through and dial.
+    }
+    await placeManualCall();
+  };
+
+  const handleDialGuardOverride = async (reason: string) => {
+    if (!id || !profileId || !dialGuardCounts) { await placeManualCall(); return; }
+    try {
+      await supabase.from("direct_dial_overrides" as any).insert({
+        counsellor_id: profileId,
+        lead_id: id,
+        reason,
+        paid_pending_count: dialGuardCounts.paid_pending,
+        overdue_pending_count: dialGuardCounts.overdue_pending,
+      });
+    } catch (e) {
+      console.error("Failed to log dial override:", e);
+    }
+    await placeManualCall();
   };
 
   const handleNotInterested = async () => {
@@ -1409,6 +1455,20 @@ const LeadDetail = () => {
         leadSource={lead.source || null}
         jdKeyword={(lead as any).jd_category || null}
       />
+
+      {/* Soft direct-dial guard — surfaces when counsellor tries to call a
+          non-priority lead while paid/overdue work is pending. */}
+      {dialGuardCounts && (
+        <Suspense fallback={null}>
+          <DirectDialGuardDialog
+            open={!!dialGuardCounts}
+            counts={dialGuardCounts}
+            leadName={lead.name}
+            onOpenChange={(o) => { if (!o) setDialGuardCounts(null); }}
+            onCallAnyway={handleDialGuardOverride}
+          />
+        </Suspense>
+      )}
 
       {/* Score animation popup */}
       <ScorePopup
