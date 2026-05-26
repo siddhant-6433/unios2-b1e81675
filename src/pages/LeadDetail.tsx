@@ -35,6 +35,7 @@ const WebChatTranscripts    = lazy(() => import("@/components/leads/WebChatTrans
 const ApplicationProgress   = lazy(() => import("@/components/leads/ApplicationProgress").then(m => ({ default: m.ApplicationProgress })));
 const LeadFeeLedger         = lazy(() => import("@/components/finance/LeadFeeLedger").then(m => ({ default: m.LeadFeeLedger })));
 const FeeStructureViewer    = lazy(() => import("@/components/finance/FeeStructureViewer").then(m => ({ default: m.FeeStructureViewer })));
+const ScholarshipCalculator = lazy(() => import("@/components/finance/ScholarshipCalculator").then(m => ({ default: m.ScholarshipCalculator })));
 const ApplyMagicLinkButton  = lazy(() => import("@/components/leads/ApplyMagicLinkButton").then(m => ({ default: m.ApplyMagicLinkButton })));
 
 // Lazy: dialogs — only loaded when the user opens them
@@ -1135,6 +1136,15 @@ const LeadDetail = () => {
                 <FeeStructureViewer courseId={lead.course_id} compact newAdmissionOnly />
               </CardContent>
             </Card>
+          )}
+          {lead.course_id && (
+            <ScholarshipCalculator
+              leadId={lead.id}
+              courseId={lead.course_id}
+              initialQualifyingPercent={(lead as any).qualifying_percent ?? null}
+              initialEntranceScores={(lead as any).entrance_scores ?? null}
+              onSaved={() => fetchAll(true)}
+            />
           )}
         </div>
 

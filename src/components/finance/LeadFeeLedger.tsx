@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Fragment } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Loader2, Receipt, ChevronDown, ChevronRight, FileImage, IndianRupee, AlertCircle, Plus, Pencil, History, Send } from "lucide-react";
@@ -87,6 +87,7 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
   const [preview, setPreview] = useState<PreviewRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const [previewExpanded, setPreviewExpanded] = useState(false);
   const [offlineOpen, setOfflineOpen] = useState(false);
   const [internalRefresh, setInternalRefresh] = useState(0);
   const [editPayment, setEditPayment] = useState<LeadPayment | null>(null);
@@ -187,49 +188,48 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
     return { ledgerTotal, ledgerPaid, ledgerConcession, ledgerBalance, preAdmissionPaid };
   }, [ledger, payments]);
 
-  const grouped = useMemo(() => {
-    const m = new Map<string, LedgerRow[]>();
-    for (const r of ledger) {
-      const key = r.term || "other";
-      if (!m.has(key)) m.set(key, []);
-      m.get(key)!.push(r);
-    }
-    return Array.from(m.entries()).sort(([a], [b]) => a.localeCompare(b));
-  }, [ledger]);
-
   // Distribute confirmed pre-admission payments across the preview rows
   // the same way provision_student_fees would at PAN issuance: application
   // fee → form fee row; token / other → year_N rows oldest-first.
   const previewWithPaid = useMemo(() => {
     if (preview.length === 0) return [];
-    const rows = preview.map(p => ({ ...p, paid_amount: 0 }));
+    const rows = preview.map(p => ({ ...p, paid_amount: 0, paid_payment_ids: [] as string[] }));
     const confirmed = payments.filter(p => p.status === "confirmed");
-    const appPaid   = confirmed.filter(p => p.type === "application_fee").reduce((s, p) => s + Number(p.amount || 0), 0);
-    const tokenPaid = confirmed.filter(p => p.type === "token_fee" || p.type === "other" || p.type === "registration_fee").reduce((s, p) => s + Number(p.amount || 0), 0);
-    if (appPaid > 0) {
-      const formRow = rows.find(r => /FORM|APPLICATION/i.test(r.fee_code_code));
-      if (formRow) formRow.paid_amount = Math.min(appPaid, formRow.total_amount);
+    const appPayments   = confirmed.filter(p => p.type === "application_fee");
+    const tokenPayments = confirmed.filter(p => p.type === "token_fee" || p.type === "other" || p.type === "registration_fee");
+
+    const formRow = rows.find(r => /FORM|APPLICATION/i.test(r.fee_code_code));
+    if (formRow) {
+      let cap = formRow.total_amount;
+      for (const p of appPayments) {
+        if (cap <= 0) break;
+        const take = Math.min(cap, Number(p.amount || 0));
+        if (take > 0) {
+          formRow.paid_amount += take;
+          formRow.paid_payment_ids.push(p.id);
+          cap -= take;
+        }
+      }
     }
-    let remaining = tokenPaid;
+
+    const tokenQueue = [...tokenPayments];
     for (const r of rows) {
       if (!/^year_\d+$/.test(r.term)) continue;
-      if (remaining <= 0) break;
-      const apply = Math.min(remaining, r.total_amount - r.paid_amount);
-      r.paid_amount += apply;
-      remaining -= apply;
+      let remainingForRow = r.total_amount - r.paid_amount;
+      while (remainingForRow > 0 && tokenQueue.length > 0) {
+        const p = tokenQueue[0];
+        const avail = Number(p.amount || 0) - ((p as any)._consumed || 0);
+        if (avail <= 0) { tokenQueue.shift(); continue; }
+        const take = Math.min(remainingForRow, avail);
+        r.paid_amount += take;
+        if (!r.paid_payment_ids.includes(p.id)) r.paid_payment_ids.push(p.id);
+        (p as any)._consumed = ((p as any)._consumed || 0) + take;
+        remainingForRow -= take;
+        if (((p as any)._consumed || 0) >= Number(p.amount || 0)) tokenQueue.shift();
+      }
     }
     return rows;
   }, [preview, payments]);
-
-  const previewGrouped = useMemo(() => {
-    const m = new Map<string, typeof previewWithPaid>();
-    for (const r of previewWithPaid) {
-      const key = r.term || "other";
-      if (!m.has(key)) m.set(key, []);
-      m.get(key)!.push(r);
-    }
-    return Array.from(m.entries()).sort(([a], [b]) => a.localeCompare(b));
-  }, [previewWithPaid]);
 
   if (loading) return <div className="flex items-center justify-center py-8"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>;
   if (payments.length === 0 && ledger.length === 0 && preview.length === 0) {
@@ -382,137 +382,217 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
       )}
 
       {/* Preview ledger (pre-PAN): projected from fee_structure_items */}
-      {ledger.length === 0 && previewGrouped.length > 0 && (
-        <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50/40 overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-amber-200 bg-amber-50 flex items-center gap-2">
-            <IndianRupee className="h-3.5 w-3.5 text-amber-700" />
-            <span className="text-xs font-semibold text-amber-900">Fee Ledger — Preview</span>
-            <span className="text-[10px] text-amber-800/80">Locks in once the candidate is pre-admitted (10% token paid).</span>
-          </div>
-          <div className="divide-y divide-amber-200/60 overflow-x-auto">
-            {previewGrouped.map(([term, rows]) => {
-              const termTotal = rows.reduce((s, r) => s + Number(r.total_amount || 0), 0);
-              const termPaid  = rows.reduce((s, r) => s + Number(r.paid_amount  || 0), 0);
-              const termBal   = termTotal - termPaid;
-              return (
-                <div key={term}>
-                  <div className="bg-amber-50/70 px-4 py-2 flex items-center justify-between">
-                    <span className="text-xs font-semibold text-amber-900 capitalize">{term.replace(/_/g, " ")}</span>
-                    <span className="text-[11px] text-amber-800/80">
-                      {fmt(termPaid)} paid · <span className={termBal > 0 ? "text-red-700 font-semibold" : "text-emerald-700 font-semibold"}>{fmt(termBal)} {termBal > 0 ? "due" : "settled"}</span>
-                    </span>
-                  </div>
-                  <table className="w-full text-xs">
-                    <tbody>
-                      {rows.map(r => (
-                        <tr key={r.fee_code_id + r.term} className="border-t border-amber-200/60">
-                          <td className="px-3 py-2 w-4" />
-                          <td className="px-3 py-2 text-foreground">
+      {ledger.length === 0 && previewWithPaid.length > 0 && (() => {
+        const grandTotal = previewWithPaid.reduce((s, r) => s + Number(r.total_amount || 0), 0);
+        const grandPaid  = previewWithPaid.reduce((s, r) => s + Number(r.paid_amount  || 0), 0);
+        const grandDue   = grandTotal - grandPaid;
+        const itemCount  = previewWithPaid.length;
+
+        return (
+          <div className="rounded-2xl border border-border bg-card overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setPreviewExpanded(v => !v)}
+              className="w-full px-4 py-2.5 border-b border-border bg-muted/30 flex items-center gap-2 hover:bg-muted/50 transition-colors text-left"
+            >
+              {previewExpanded
+                ? <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+                : <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />}
+              <IndianRupee className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <span className="text-xs font-semibold text-foreground">Fee Ledger</span>
+              <span className="inline-block rounded px-1.5 py-0.5 text-[9px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">PREVIEW</span>
+              <span className="text-[10px] text-muted-foreground hidden sm:inline">Locks in once pre-admitted</span>
+              <span className="ml-auto flex items-center gap-2 text-[10px] text-muted-foreground tabular-nums">
+                <span>{itemCount} items</span>
+                <span>· {fmt(grandTotal)}</span>
+                {grandPaid > 0 && <span className="text-emerald-700 font-semibold">· {fmt(grandPaid)} paid</span>}
+                <span className={grandDue > 0 ? "text-red-600 font-semibold" : "text-emerald-700 font-semibold"}>
+                  · {fmt(grandDue)} {grandDue > 0 ? "due" : "settled"}
+                </span>
+              </span>
+            </button>
+
+            {previewExpanded && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs min-w-[640px]">
+                  <thead>
+                    <tr className="bg-muted/20 text-muted-foreground">
+                      <th className="text-center px-3 py-2 font-medium">Fee</th>
+                      <th className="text-center px-3 py-2 font-medium">Term</th>
+                      <th className="text-center px-3 py-2 font-medium">Total</th>
+                      <th className="text-center px-3 py-2 font-medium">Credits / Receipts</th>
+                      <th className="text-center px-3 py-2 font-medium">Due</th>
+                      <th className="text-center px-3 py-2 font-medium">Due Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {previewWithPaid.map(r => {
+                      const paidPayments = (r.paid_payment_ids || [])
+                        .map(pid => payments.find(p => p.id === pid))
+                        .filter((p): p is NonNullable<typeof p> => !!p);
+                      const firstPayment = paidPayments[0];
+                      const due = r.total_amount - r.paid_amount;
+                      return (
+                        <tr key={r.fee_code_id + r.term} className="border-t border-border">
+                          <td className="px-3 py-2 text-center text-foreground">
                             {r.fee_code_name}
                             <span className="ml-1 font-mono text-[10px] text-muted-foreground/70">{r.fee_code_code}</span>
                           </td>
-                          <td className="px-3 py-2 text-right text-foreground">{fmt(r.total_amount)}</td>
-                          <td className="px-3 py-2 text-right text-emerald-700">{fmt(r.paid_amount)}</td>
-                          <td className="px-3 py-2 text-right">
-                            <span className={r.total_amount - r.paid_amount > 0 ? "text-red-600 font-semibold" : "text-emerald-700 font-semibold"}>
-                              {fmt(r.total_amount - r.paid_amount)}
+                          <td className="px-3 py-2 text-center text-muted-foreground capitalize">{r.term.replace(/_/g, " ")}</td>
+                          <td className="px-3 py-2 text-center text-foreground tabular-nums">{fmt(r.total_amount)}</td>
+                          <td className="px-3 py-2 text-center">
+                            {r.paid_amount > 0 ? (
+                              <span className="inline-flex items-center gap-1.5 flex-wrap justify-center">
+                                <span className="text-emerald-700 font-semibold tabular-nums">{fmt(r.paid_amount)}</span>
+                                {firstPayment && (
+                                  <>
+                                    <span className="text-muted-foreground/60">·</span>
+                                    <span className="font-mono text-[10px] text-foreground">{firstPayment.receipt_no || "—"}</span>
+                                    {firstPayment.receipt_url && (
+                                      <a
+                                        href={firstPayment.receipt_url}
+                                        target="_blank"
+                                        rel="noopener"
+                                        className="text-emerald-700 hover:underline text-[11px] font-medium"
+                                      >
+                                        PDF
+                                      </a>
+                                    )}
+                                    {paidPayments.length > 1 && (
+                                      <span className="text-[10px] text-muted-foreground">+{paidPayments.length - 1}</span>
+                                    )}
+                                  </>
+                                )}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground/50">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-center tabular-nums">
+                            <span className={due > 0 ? "text-red-600 font-semibold" : "text-emerald-700 font-semibold"}>
+                              {fmt(due)}
                             </span>
                           </td>
-                          <td className="px-3 py-2 text-muted-foreground">{fmtDate(r.due_date)}</td>
+                          <td className="px-3 py-2 text-center text-muted-foreground whitespace-nowrap">{fmtDate(r.due_date)}</td>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              );
-            })}
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
-      {/* Ledger by term */}
+      {/* Ledger (flat, term shown per-row) */}
       {ledger.length > 0 && (
         <div className="rounded-2xl border border-border bg-card overflow-hidden">
           <div className="px-4 py-2.5 border-b border-border bg-muted/30 flex items-center gap-2">
             <IndianRupee className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-xs font-semibold text-foreground">Fee Ledger</span>
           </div>
-          <div className="divide-y divide-border overflow-x-auto">
-            {grouped.map(([term, rows]) => {
-              const termTotal      = rows.reduce((s, r) => s + Number(r.total_amount || 0), 0);
-              const termConcession = rows.reduce((s, r) => s + Number(r.concession   || 0), 0);
-              const termPaid       = rows.reduce((s, r) => s + Number(r.paid_amount  || 0), 0);
-              const termBalance    = rows.reduce((s, r) => s + Number(r.balance      || 0), 0);
-              return (
-                <div key={term}>
-                  <div className="bg-muted/20 px-4 py-2 flex items-center justify-between">
-                    <span className="text-xs font-semibold text-foreground capitalize">{term.replace(/_/g, " ")}</span>
-                    <span className="text-[11px] text-muted-foreground">
-                      {fmt(termPaid)} paid · {termConcession > 0 ? fmt(termConcession) + " concession · " : ""}<span className={termBalance > 0 ? "text-red-600 font-semibold" : "text-emerald-600 font-semibold"}>{fmt(termBalance)} {termBalance > 0 ? "due" : "settled"}</span>
-                    </span>
-                  </div>
-                  <table className="w-full text-xs">
-                    <tbody>
-                      {rows.map(r => {
-                        const isOpen = expandedRow === r.id;
-                        const rowLinks = links.filter(l => l.fee_ledger_id === r.id);
-                        return (
-                          <>
-                            <tr
-                              key={r.id}
-                              onClick={() => rowLinks.length ? setExpandedRow(isOpen ? null : r.id) : null}
-                              className={`border-t border-border ${rowLinks.length ? "cursor-pointer hover:bg-muted/20" : ""}`}
-                            >
-                              <td className="px-3 py-2 w-4 text-muted-foreground">
-                                {rowLinks.length > 0 ? (isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />) : null}
-                              </td>
-                              <td className="px-3 py-2 text-foreground">
-                                {r.fee_codes?.name || r.fee_code_id.slice(0, 8)}
-                                <span className="ml-1 font-mono text-[10px] text-muted-foreground/70">{r.fee_codes?.code || ""}</span>
-                              </td>
-                              <td className="px-3 py-2 text-right text-foreground">{fmt(r.total_amount)}</td>
-                              <td className="px-3 py-2 text-right text-amber-700">{r.concession > 0 ? fmt(r.concession) : "—"}</td>
-                              <td className="px-3 py-2 text-right text-emerald-700">{fmt(r.paid_amount)}</td>
-                              <td className="px-3 py-2 text-right">
-                                <span className={r.balance > 0 ? "text-red-600 font-semibold" : "text-emerald-700 font-semibold"}>{fmt(r.balance)}</span>
-                              </td>
-                              <td className="px-3 py-2 text-muted-foreground">{fmtDate(r.due_date)}</td>
-                              <td className="px-3 py-2">
-                                <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                                  r.status === "paid" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                                  : r.status === "overdue" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                                  : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                                }`}>{r.status}</span>
-                              </td>
-                            </tr>
-                            {isOpen && rowLinks.length > 0 && (
-                              <tr className="bg-muted/10">
-                                <td></td>
-                                <td colSpan={7} className="px-3 py-2 space-y-1">
-                                  {rowLinks.map(l => {
-                                    const p = payments.find(x => x.id === l.lead_payment_id);
-                                    return (
-                                      <div key={l.id} className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                                        <FileImage className="h-3 w-3" />
-                                        <span>Receipt <span className="font-mono text-foreground">{p?.receipt_no || "—"}</span></span>
-                                        <span>· {fmt(l.amount)} paid{l.concession_amount > 0 ? ` + ${fmt(l.concession_amount)} concession` : ""}</span>
-                                        <span>· {fmtDate(l.applied_at)}</span>
-                                        {p?.receipt_url && <a href={p.receipt_url} target="_blank" rel="noopener" className="text-primary hover:underline">PDF</a>}
-                                        {l.notes && <span className="italic">· {l.notes}</span>}
-                                      </div>
-                                    );
-                                  })}
-                                </td>
-                              </tr>
-                            )}
-                          </>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              );
-            })}
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs min-w-[720px]">
+              <thead>
+                <tr className="bg-muted/20 text-muted-foreground">
+                  <th className="text-center px-3 py-2 font-medium">Fee</th>
+                  <th className="text-center px-3 py-2 font-medium">Term</th>
+                  <th className="text-center px-3 py-2 font-medium">Total</th>
+                  <th className="text-center px-3 py-2 font-medium">Concession</th>
+                  <th className="text-center px-3 py-2 font-medium">Credits / Receipts</th>
+                  <th className="text-center px-3 py-2 font-medium">Due</th>
+                  <th className="text-center px-3 py-2 font-medium">Due Date</th>
+                  <th className="text-center px-3 py-2 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ledger.map(r => {
+                  const isOpen = expandedRow === r.id;
+                  const rowLinks = links.filter(l => l.fee_ledger_id === r.id);
+                  const firstLink = rowLinks[0];
+                  const firstPayment = firstLink ? payments.find(x => x.id === firstLink.lead_payment_id) : null;
+                  return (
+                    <Fragment key={r.id}>
+                      <tr
+                        onClick={() => rowLinks.length ? setExpandedRow(isOpen ? null : r.id) : null}
+                        className={`border-t border-border ${rowLinks.length ? "cursor-pointer hover:bg-muted/20" : ""}`}
+                      >
+                        <td className="px-3 py-2 text-center text-foreground">
+                          <span className="inline-flex items-center gap-1 justify-center">
+                            {rowLinks.length > 0 && (isOpen ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />)}
+                            <span>{r.fee_codes?.name || r.fee_code_id.slice(0, 8)}</span>
+                            <span className="font-mono text-[10px] text-muted-foreground/70">{r.fee_codes?.code || ""}</span>
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-center text-muted-foreground capitalize">{r.term.replace(/_/g, " ")}</td>
+                        <td className="px-3 py-2 text-center text-foreground tabular-nums">{fmt(r.total_amount)}</td>
+                        <td className="px-3 py-2 text-center text-amber-700 tabular-nums">{r.concession > 0 ? fmt(r.concession) : "—"}</td>
+                        <td className="px-3 py-2 text-center">
+                          {r.paid_amount > 0 ? (
+                            <span className="inline-flex items-center gap-1.5 flex-wrap justify-center">
+                              <span className="text-emerald-700 font-semibold tabular-nums">{fmt(r.paid_amount)}</span>
+                              {firstPayment && (
+                                <>
+                                  <span className="text-muted-foreground/60">·</span>
+                                  <span className="font-mono text-[10px] text-foreground">{firstPayment.receipt_no || "—"}</span>
+                                  {firstPayment.receipt_url && (
+                                    <a
+                                      href={firstPayment.receipt_url}
+                                      target="_blank"
+                                      rel="noopener"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="text-emerald-700 hover:underline text-[11px] font-medium"
+                                    >
+                                      PDF
+                                    </a>
+                                  )}
+                                  {rowLinks.length > 1 && (
+                                    <span className="text-[10px] text-muted-foreground">+{rowLinks.length - 1}</span>
+                                  )}
+                                </>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground/50">—</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-center tabular-nums">
+                          <span className={r.balance > 0 ? "text-red-600 font-semibold" : "text-emerald-700 font-semibold"}>{fmt(r.balance)}</span>
+                        </td>
+                        <td className="px-3 py-2 text-center text-muted-foreground whitespace-nowrap">{fmtDate(r.due_date)}</td>
+                        <td className="px-3 py-2 text-center">
+                          <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                            r.status === "paid" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                            : r.status === "overdue" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                            : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                          }`}>{r.status}</span>
+                        </td>
+                      </tr>
+                      {isOpen && rowLinks.length > 0 && (
+                        <tr className="bg-muted/10 border-t border-border">
+                          <td colSpan={8} className="px-3 py-2 space-y-1">
+                            {rowLinks.map(l => {
+                              const p = payments.find(x => x.id === l.lead_payment_id);
+                              return (
+                                <div key={l.id} className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                                  <FileImage className="h-3 w-3" />
+                                  <span>Receipt <span className="font-mono text-foreground">{p?.receipt_no || "—"}</span></span>
+                                  <span>· {fmt(l.amount)} paid{l.concession_amount > 0 ? ` + ${fmt(l.concession_amount)} concession` : ""}</span>
+                                  <span>· {fmtDate(l.applied_at)}</span>
+                                  {p?.receipt_url && <a href={p.receipt_url} target="_blank" rel="noopener" className="text-emerald-700 hover:underline font-medium">PDF</a>}
+                                  {l.notes && <span className="italic">· {l.notes}</span>}
+                                </div>
+                              );
+                            })}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

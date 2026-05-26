@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, ChevronDown, ChevronUp, Building2 } from "lucide-react";
+import { ScholarshipPanel } from "./ScholarshipPanel";
 
 const categoryBadge: Record<string, string> = {
   tuition: "bg-pastel-blue", lab: "bg-pastel-purple", enrollment: "bg-pastel-green",
@@ -25,6 +26,7 @@ interface FeeStructure {
   course_id: string;
   course_name: string;
   course_code: string;
+  course_slug: string | null;
   campus_name: string;
   institution_name: string;
   session_name: string;
@@ -68,7 +70,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
         .from("fee_structures")
         .select(`
           id, version, is_active, course_id, metadata,
-          courses:course_id(id, name, code,
+          courses:course_id(id, name, code, webflow_slug,
             departments!inner(name,
               institutions!inner(name, campus_id,
                 campuses!inner(name)
@@ -116,6 +118,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
               course_id: fs.course_id,
               course_name: course?.name || "—",
               course_code: course?.code || "",
+              course_slug: course?.webflow_slug || null,
               campus_name: campus?.name || "—",
               institution_name: inst?.name || "—",
               session_name: (fs.admission_sessions as any)?.name || "—",
@@ -668,6 +671,13 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                       </div>
                     </>
                   )}
+
+                  {/* Scholarships available for this course (policy-only, no lead context) */}
+                  <ScholarshipPanel
+                    slug={fs.course_slug}
+                    name={fs.course_name}
+                    code={fs.course_code}
+                  />
 
                   {/* Transport section (separate with zone selector) */}
                   {sections.transport.length > 0 && (() => {
