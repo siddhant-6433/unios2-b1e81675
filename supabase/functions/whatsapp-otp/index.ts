@@ -83,7 +83,7 @@ async function createSession(admin: SupabaseClient, userId: string) {
 async function provisionUser(
   admin: SupabaseClient,
   phone: string,
-  role: "student" | "parent"
+  role: "student" | "parent" | "alumni"
 ): Promise<string | null> {
   const digits = phone.replace(/\D/g, "");
   const email = `${digits}@${role}.unios.local`;
@@ -93,7 +93,7 @@ async function provisionUser(
   const { data: created, error: createErr } = await admin.auth.admin.createUser({
     email,
     email_confirm: true,
-    user_metadata: { provisioned_by: "whatsapp_otp", role },
+    user_metadata: { provisioned_by: "whatsapp_otp", role, phone: digits },
   });
 
   if (!createErr && created?.user) {
@@ -104,13 +104,25 @@ async function provisionUser(
     console.log(`[whatsapp-otp] createUser failed (${createErr?.message}), scanning for existing ${email}`);
     const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
     const match = list?.users?.find((u) => u.email === email);
-    if (match) userId = match.id;
+    if (match) {
+      userId = match.id;
+      // Backfill phone in user_metadata for users provisioned before this field existed —
+      // RLS via current_user_phone() reads it on the alumni portal.
+      const existingMeta = (match.user_metadata ?? {}) as Record<string, unknown>;
+      if (!existingMeta.phone) {
+        await admin.auth.admin.updateUserById(userId, {
+          user_metadata: { ...existingMeta, phone: digits },
+        });
+      }
+    }
   }
 
   if (!userId) return null;
 
-  // Assign role (ignore duplicate)
-  await admin.from("user_roles").upsert({ user_id: userId, role }, { onConflict: "user_id,role", ignoreDuplicates: true });
+  // user_roles has an app_role enum that includes 'student' and 'parent' but not 'alumni'.
+  if (role !== "alumni") {
+    await admin.from("user_roles").upsert({ user_id: userId, role }, { onConflict: "user_id,role", ignoreDuplicates: true });
+  }
 
   return userId;
 }
@@ -598,10 +610,21 @@ Deno.serve(async (req) => {
         }
       }
 
-      // ── 5. Fallback: applicant OTP (no session needed) ────────────────────
-      console.log("[whatsapp-otp] no user found for", normalizedPhone, "— applicant flow");
+      // ── 5. Fallback: alumni applicant — provision a session-only user ──
+      // The alumni portal inserts into alumni_verification_requests, which has
+      // no anon SELECT policy. PostgREST's .insert().select() requires SELECT
+      // RLS on the new row, so the caller must be authenticated.
+      const alumniUserId = await provisionUser(adminClient, normalizedPhone, "alumni");
+      if (!alumniUserId) {
+        return new Response(JSON.stringify({ error: "Failed to provision applicant user" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      const alumniToken = await createSession(adminClient, alumniUserId);
+      if (!alumniToken) {
+        return new Response(JSON.stringify({ error: "Failed to create session" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      console.log("[whatsapp-otp] alumni applicant login for user", alumniUserId);
       return new Response(
-        JSON.stringify({ success: true, verified: true }),
+        JSON.stringify({ success: true, verified: true, token: alumniToken, role: "alumni" }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
