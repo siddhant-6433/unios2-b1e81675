@@ -2940,11 +2940,22 @@ Deno.serve({ port: PORT }, async (req) => {
     const counsellorUserId = callCtx.toolCallsMade?.[0]?.args?.counsellorUserId || null;
     const counsellorName = callCtx.toolCallsMade?.[0]?.args?.counsellorName || "Counsellor";
     const statusRan = !!(callCtx as any)._statusRan;
-    let disposition: string | null = (callCtx as any)._disp ??
-      (callStatus === "cancel" ? "cancelled" : callStatus === "busy" ? "busy" : callStatus === "no-answer" ? "not_answered" : null);
     const dialStatus: string = (callCtx as any)._dialStatus ?? callStatus;
     const aLegUUID = (callCtx as any)._aLegUUID ?? plivoALegUUID;
     const bLegUUID: string = (callCtx as any)._bLegUUID ?? "";
+
+    // A-leg fail = counsellor never picked up their own phone, so Plivo never
+    // executed the <Dial> verb in /bridge-answer and /bridge-status never fired.
+    // We must NOT count this as a student no-answer — the student was never even
+    // dialed. Emit a distinct disposition the UI can render as "retry?" and the
+    // metrics queries filter out of attempt counts.
+    const counsellorNoAnswer = !statusRan && bLegUUID === "" &&
+      ["no-answer", "busy", "failed", "timeout", "cancel"].includes(callStatus);
+
+    let disposition: string | null = counsellorNoAnswer
+      ? "counsellor_no_answer"
+      : ((callCtx as any)._disp ??
+         (callStatus === "cancel" ? "cancelled" : callStatus === "busy" ? "busy" : callStatus === "no-answer" ? "not_answered" : null));
 
     // Student actually connected only if bLegUUID is non-empty (Plivo sets it when B-leg answers)
     // Plivo sends DialStatus="completed" even when student never answered — bLegUUID="" catches that
@@ -2960,7 +2971,27 @@ Deno.serve({ port: PORT }, async (req) => {
 
     const dbH = { "Content-Type": "application/json", apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
 
-    console.log(`[BRIDGE-HANGUP ${callId}] statusRan=${statusRan} disp=${disposition || "connected"} dur=${totalDuration} aLeg=${aLegUUID.slice(0,12)} bLeg=${bLegUUID ? bLegUUID.slice(0,12) : "EMPTY"}`);
+    console.log(`[BRIDGE-HANGUP ${callId}] statusRan=${statusRan} disp=${disposition || "connected"} dur=${totalDuration} aLeg=${aLegUUID.slice(0,12)} bLeg=${bLegUUID ? bLegUUID.slice(0,12) : "EMPTY"} counsellorNoAnswer=${counsellorNoAnswer}`);
+
+    // Counsellor never picked up — write ai_call_records only, skip all the
+    // lead-facing side effects (no call_logs, no activity, no followup, no
+    // strike counter). The lead's phone never rang, so this attempt shouldn't
+    // appear in the lead timeline or counsellor's call metrics.
+    if (counsellorNoAnswer) {
+      await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
+        method: "PATCH", headers: { ...dbH, Prefer: "return=minimal" },
+        body: JSON.stringify({
+          plivo_call_uuid: aLegUUID,
+          status: "counsellor_no_answer",
+          disposition: "counsellor_no_answer",
+          duration_seconds: 0,
+          summary: `Cloud Call: counsellor (${counsellorName}) didn't pick up — student not dialed`,
+          completed_at: new Date().toISOString(),
+        }),
+      }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] counsellor_no_answer patch:`, e.message));
+      activeCallContexts.delete(callId);
+      return new Response("OK");
+    }
 
     // 1. call_logs — route through record_cloud_call_log() RPC so this auto
     // path doesn't duplicate the counsellor's manual save (and vice-versa).
@@ -3011,7 +3042,10 @@ Deno.serve({ port: PORT }, async (req) => {
 
     // 5. Auto-followup for unanswered/busy/voicemail
     if (isAuto && disposition !== "cancelled") {
-      const cntRes = await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?lead_id=eq.${leadId}&call_type=eq.manual&select=id`, { headers: dbH });
+      // Exclude counsellor_no_answer attempts from the strike counter — those
+      // never actually reached the lead, so they shouldn't push the lead toward
+      // the 4-strike "mark inactive" rule.
+      const cntRes = await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?lead_id=eq.${leadId}&call_type=eq.manual&status=neq.counsellor_no_answer&select=id`, { headers: dbH });
       const prev = await cntRes.json().catch(() => []);
       const att = Array.isArray(prev) ? prev.length : 1;
       if (att >= 4) {
