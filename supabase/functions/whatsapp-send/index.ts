@@ -11,7 +11,10 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   lead_welcome: { name: "admissions_lead_intro", params: ["student_name", "course_name", "lead_source"] },
   visit_confirmation: { name: "visit_confirmed", params: ["student_name", "visit_date", "campus_name"] },
   visit_reminder_24hr: { name: "visit_reminder", params: ["student_name", "visit_date", "campus_name"] },
-  application_received: { name: "application_received", params: ["student_name", "application_id"] },
+  // Meta-approved template is named `application_submitted` (see
+  // submit-wa-templates). Internal key stays `application_received` for
+  // backwards compatibility with callers, AutomationRules, and the inbox UI.
+  application_received: { name: "application_submitted", params: ["student_name", "application_id"] },
   fee_reminder: { name: "fee_reminder", params: ["student_name", "amount", "due_date"] },
   course_details: { name: "inquiry_course_update", params: ["student_name", "course_name"] },
   course_info_video: { name: "course_info_video", params: ["student_name", "course_name", "duration", "eligibility", "campus_name"] },
@@ -346,6 +349,72 @@ Deno.serve(async (req) => {
         params = [leadRow?.name || "there"];
         button_urls = undefined;
       }
+    }
+
+    // visit_confirmation: the Meta template requires a URL-button suffix
+    // (Google Maps CID). Resolve in priority order:
+    //   1. course.maps_cid (per-course override for campuses with multiple
+    //      buildings — e.g. Mirai vs. School of Education on Ghaziabad 2)
+    //   2. campus.maps_cid (default for the lead's campus)
+    //   3. hard-coded fallback so the send never fails
+    // Without a suffix Meta rejects with 131008 "Required parameter is missing".
+    if (template_key === "visit_confirmation" && (!button_urls || !Array.isArray(button_urls) || button_urls.length === 0)) {
+      let mapsCid: string | null = null;
+      if (lead_id) {
+        try {
+          const { data: row } = await admin
+            .from("leads")
+            .select("course:courses!course_id(maps_cid), campus:campuses!campus_id(maps_cid)")
+            .eq("id", lead_id)
+            .maybeSingle();
+          const courseCid = (row as any)?.course?.maps_cid;
+          const campusCid = (row as any)?.campus?.maps_cid;
+          if (typeof courseCid === "string" && courseCid.trim().length > 0) {
+            mapsCid = courseCid.trim();
+          } else if (typeof campusCid === "string" && campusCid.trim().length > 0) {
+            mapsCid = campusCid.trim();
+          }
+        } catch (e) {
+          console.error("visit_confirmation maps_cid lookup failed:", e);
+        }
+      }
+      // Fallback to the original example CID (Greater Noida) so a missing
+      // per-course / per-campus value still produces a sendable message.
+      button_urls = [mapsCid || "1820424915210710582"];
+    }
+
+    // course_info_video: 2 URL buttons need suffixes
+    //   button 1: https://maps.google.com/?q={{1}} — e.g. "NIMT+Greater+Noida"
+    //   button 2: https://app.nimt.ac.in/apply/{{1}} — apply-portal slug
+    // Resolve from the lead's campus + a fixed "nimt" slug when the caller
+    // hasn't supplied button_urls — otherwise Meta rejects with 131009
+    // "Parameter value is not valid" because the dynamic suffix is empty.
+    if (template_key === "course_info_video" && (!button_urls || !Array.isArray(button_urls) || button_urls.length === 0)) {
+      let campusName = "NIMT";
+      if (lead_id) {
+        try {
+          const { data: row } = await admin
+            .from("leads")
+            .select("campus:campuses!campus_id(name)")
+            .eq("id", lead_id)
+            .maybeSingle();
+          const n = (row as any)?.campus?.name;
+          if (typeof n === "string" && n.trim().length > 0) campusName = n.trim();
+        } catch (e) {
+          console.error("course_info_video campus lookup failed:", e);
+        }
+      }
+      const mapsQuery = encodeURIComponent(campusName).replace(/%20/g, "+");
+      button_urls = [mapsQuery, "nimt"];
+    }
+
+    // Meta 131009 "Parameter value is not valid" also triggers when body
+    // params contain newlines or tabs. Sanitise just before send — leading
+    // and trailing whitespace is stripped too.
+    if (Array.isArray(params)) {
+      params = params.map((p: unknown) =>
+        typeof p === "string" ? p.replace(/[\r\n\t]+/g, " ").replace(/ {2,}/g, " ").trim() : p
+      );
     }
 
     // Block sends to DNC leads

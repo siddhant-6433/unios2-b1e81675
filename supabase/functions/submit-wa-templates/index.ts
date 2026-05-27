@@ -175,6 +175,31 @@ const TEMPLATES = [
       },
     ],
   },
+  // Application approved — fired from notify-event when admin approves an
+  // application. Body params (3): student_name, application_id, course_name.
+  // URL button takes the apply-portal magic-link token as its dynamic suffix
+  // so one tap lands the student on their application status page.
+  {
+    name: "application_approved",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Congratulations {{1}}! Your application {{2}} for {{3}} has been approved. Our admissions team will be in touch with your offer letter shortly. Tap below to track your application in the apply portal.",
+        example: { body_text: [["Rahul Sharma", "APP-26-AB12", "Bachelor of Science in Nursing"]] },
+      },
+      {
+        type: "BUTTONS",
+        buttons: [{
+          type: "URL",
+          text: "Track Application",
+          url: "https://uni.nimt.ac.in/apply?token={{1}}",
+          example: ["https://uni.nimt.ac.in/apply?token=a1b2c3d4e5f6789012345678abcdef00"],
+        }],
+      },
+    ],
+  },
   {
     name: "payment_receipt",
     category: "UTILITY",
@@ -411,11 +436,19 @@ Deno.serve(async (req) => {
     // ── status: list current state (name → status) for all templates ──
     if (action === "status") {
       const namesParam = body?.names ? `&name=${(body.names as string[]).join(",")}` : "";
+      const includeComponents = body?.include_components === true;
+      const fields = includeComponents
+        ? "name,status,category,id,language,components"
+        : "name,status,category,id";
       const res = await fetch(
-        `https://graph.facebook.com/v21.0/${wabaId}/message_templates?fields=name,status,category,id&limit=200${namesParam}&access_token=${waToken}`
+        `https://graph.facebook.com/v21.0/${wabaId}/message_templates?fields=${fields}&limit=200${namesParam}&access_token=${waToken}`
       );
       const data = await res.json();
-      const summary = (data?.data || []).map((t: any) => ({ name: t.name, status: t.status, category: t.category, id: t.id }));
+      const summary = (data?.data || []).map((t: any) =>
+        includeComponents
+          ? { name: t.name, status: t.status, category: t.category, id: t.id, language: t.language, components: t.components }
+          : { name: t.name, status: t.status, category: t.category, id: t.id }
+      );
       return new Response(JSON.stringify({ count: summary.length, templates: summary }, null, 2), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

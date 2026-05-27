@@ -18,6 +18,7 @@ interface CampusGeofence {
   latitude: number | null;
   longitude: number | null;
   geofence_radius_meters: number | null;
+  maps_cid: string | null;
 }
 
 type DeadlineKey = "fee_submission_deadline" | "full_course_payment_deadline";
@@ -93,7 +94,7 @@ const Settings = () => {
     setLoading(true);
     const { data } = await supabase
       .from("campuses")
-      .select("id, name, code, address, city, latitude, longitude, geofence_radius_meters")
+      .select("id, name, code, address, city, latitude, longitude, geofence_radius_meters, maps_cid")
       .order("name");
     if (data) setCampuses(data as CampusGeofence[]);
     setLoading(false);
@@ -104,7 +105,12 @@ const Settings = () => {
       ...prev,
       [campusId]: {
         ...prev[campusId],
-        [field]: field === "geofence_radius_meters" ? parseInt(value) || null : parseFloat(value) || null,
+        [field]:
+          field === "maps_cid"
+            ? (value.trim().length > 0 ? value.trim() : null)
+            : field === "geofence_radius_meters"
+            ? parseInt(value) || null
+            : parseFloat(value) || null,
       },
     }));
   };
@@ -120,6 +126,7 @@ const Settings = () => {
         latitude: changes.latitude ?? campus.latitude,
         longitude: changes.longitude ?? campus.longitude,
         geofence_radius_meters: changes.geofence_radius_meters ?? campus.geofence_radius_meters,
+        maps_cid: "maps_cid" in changes ? (changes.maps_cid ?? null) : campus.maps_cid,
       })
       .eq("id", campus.id);
 
@@ -263,6 +270,8 @@ const Settings = () => {
                 const lat = edit.latitude ?? campus.latitude;
                 const lng = edit.longitude ?? campus.longitude;
                 const rad = edit.geofence_radius_meters ?? campus.geofence_radius_meters ?? 500;
+                const mapsCid =
+                  "maps_cid" in edit ? (edit.maps_cid ?? "") : (campus.maps_cid ?? "");
                 const hasChanges = !!edits[campus.id];
                 const isConfigured = campus.latitude !== null && campus.longitude !== null;
 
@@ -346,6 +355,23 @@ const Settings = () => {
                           />
                         </div>
                       )}
+
+                      <div>
+                        <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                          <MapPin className="inline h-3 w-3 mr-1" />Google Maps Place CID
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. 1820424915210710582"
+                          value={mapsCid}
+                          onChange={(e) => updateField(campus.id, "maps_cid", e.target.value)}
+                          className="w-full rounded-lg border border-input bg-card px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring/20"
+                        />
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          Used as the dynamic URL-button suffix for the <code>visit_confirmation</code> WhatsApp template.
+                          Find it on Google Maps: open the campus listing, copy the share URL, extract the value after <code>?cid=</code>.
+                        </p>
+                      </div>
 
                       <p className="text-[11px] text-muted-foreground">
                         Tip: Find coordinates on Google Maps — right-click a location and copy the latitude, longitude values.

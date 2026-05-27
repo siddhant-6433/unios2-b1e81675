@@ -620,6 +620,7 @@ Deno.serve(async (req) => {
                       content: thankMsg,
                       status: "sent",
                       is_read: true,
+                      template_key: "feedback_ack",
                     });
                   }
                 } catch (e) {
@@ -707,6 +708,7 @@ Deno.serve(async (req) => {
                           status: "sent",
                           is_read: true,
                           business_phone_number_id: pnId,
+                          template_key: "feedback_thanks",
                         });
                       }
                     } catch (e) {
@@ -762,6 +764,7 @@ Deno.serve(async (req) => {
                   direction: "outbound", phone,
                   message_type: "text", content: dncMsg, status: "sent", is_read: true,
                   business_phone_number_id: pnId,
+                  template_key: "dnc_ack",
                 });
               }
             } catch (e) { console.error("DNC ack error:", e); }

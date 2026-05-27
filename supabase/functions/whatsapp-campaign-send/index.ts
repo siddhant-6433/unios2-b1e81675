@@ -11,7 +11,9 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   lead_welcome: { name: "lead_welcome", params: ["student_name", "course_name"] },
   visit_confirmation: { name: "visit_confirmation", params: ["student_name", "visit_date", "campus_name"] },
   visit_reminder_24hr: { name: "visit_reminder_24hr", params: ["student_name", "visit_date"] },
-  application_received: { name: "application_received", params: ["student_name", "application_id"] },
+  // Internal key kept as `application_received`, but the Meta-approved
+  // template is named `application_submitted` (see submit-wa-templates).
+  application_received: { name: "application_submitted", params: ["student_name", "application_id"] },
   fee_reminder: { name: "fee_reminder", params: ["student_name", "amount", "due_date"] },
   course_details: { name: "course_details", params: ["student_name", "course_name"] },
   counsellor_lead_assigned: { name: "counsellor_lead_assigned", params: ["counsellor_name", "lead_name", "lead_phone_last4", "sla_hours"] },
