@@ -42,6 +42,9 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ChevronDown } from "lucide-react";
+import { groupCourses, type CourseLike } from "@/lib/courseSort";
 
 const STAGES = [
   "new_lead", "priority_interested", "application_in_progress", "application_fee_paid", "application_submitted", "counsellor_call", "visit_scheduled",
@@ -173,6 +176,12 @@ const Admissions = () => {
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const [courseFilter, setCourseFilter] = useState<string[]>([]);
+  const [debouncedCourseFilter, setDebouncedCourseFilter] = useState<string[]>([]);
+  const [courseOptions, setCourseOptions] = useState<(CourseLike & { id: string; name: string })[]>([]);
+  const [courseSearch, setCourseSearch] = useState("");
+  const [coursePopoverOpen, setCoursePopoverOpen] = useState(false);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [tempFilter, setTempFilter] = useState<string>("all");
   const { counsellorFilter, setCounsellorFilter } = useCounsellorFilter();
@@ -234,7 +243,8 @@ const Admissions = () => {
 
   const isSuperAdmin = role === "super_admin";
   const { myDefaults } = useTatDefaults();
-  const canTransfer = isSuperAdmin || isTeamLeader;
+  const canTransfer = isSuperAdmin || isTeamLeader
+    || role === "admission_head" || role === "campus_admin" || role === "principal";
   const canFilterByCounsellor = role === "super_admin" || role === "admission_head" || role === "campus_admin" || isTeamLeader;
   const [notCalledIds, setNotCalledIds] = useState<Set<string> | null>(null);
   const [pendingNotCalledFilter, setPendingNotCalledFilter] = useState<string | null>(null);
@@ -328,6 +338,13 @@ const Admissions = () => {
     return () => clearTimeout(t);
   }, [search]);
 
+  // Debounce course multi-select toggles — coalesce rapid checkbox clicks
+  // into one refetch so the table doesn't flicker between selections.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedCourseFilter(courseFilter), 350);
+    return () => clearTimeout(t);
+  }, [courseFilter]);
+
   // Hydrate application completion % for whichever rows we just loaded.
   // Split out so both fetch paths can reuse it.
   const hydrateApplications = async (rows: any[]) => {
@@ -393,6 +410,7 @@ const Admissions = () => {
       setTotalCount(enriched.length);
       setSelectedIds(new Set());
       setLoading(false);
+      setHasLoadedOnce(true);
       return;
     }
 
@@ -424,6 +442,7 @@ const Admissions = () => {
       else if (stages.length > 1) query = query.in("stage", stages);
     }
     if (sourceFilter !== "all") query = query.eq("source", sourceFilter);
+    if (debouncedCourseFilter.length > 0) query = query.in("course_id", debouncedCourseFilter);
     if (roleFilter !== "all") query = query.eq("person_role", roleFilter);
     if (tempFilter !== "all") query = query.eq("lead_temperature", tempFilter);
 
@@ -453,7 +472,7 @@ const Admissions = () => {
         intersection = intersection.filter(id => other.has(id));
       }
       if (intersection.length === 0) {
-        setLeads([]); setTotalCount(0); setSelectedIds(new Set()); setLoading(false);
+        setLeads([]); setTotalCount(0); setSelectedIds(new Set()); setLoading(false); setHasLoadedOnce(true);
         return;
       }
       query = query.in("id", intersection);
@@ -475,6 +494,7 @@ const Admissions = () => {
     setLeads(enriched);
     setTotalCount(count ?? enriched.length);
     setLoading(false);
+    setHasLoadedOnce(true);
   };
 
   // Refetch whenever any input that affects the query changes
@@ -483,10 +503,42 @@ const Admissions = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     view, page, selectedCampusId, counsellorFilter, role, profile?.id,
-    stageFilter, sourceFilter, roleFilter, tempFilter,
+    stageFilter, sourceFilter, debouncedCourseFilter, roleFilter, tempFilter,
     fromDate, toDate, debouncedSearch,
     inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds,
   ]);
+
+  // Fetch course options for the multi-select filter, joined with the
+  // campus / department hierarchy so we can group them under section
+  // headers (Mirai → Toddlers / Montessori / EYP / PYP / MYP;
+  //  NIMT Beacon → Toddler / Pre-Nursery / LKG / UKG / Classes).
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from("courses")
+        .select(`id, name, code,
+          departments:department_id (
+            name,
+            institutions:institution_id (
+              name, type,
+              campuses:campus_id ( name )
+            )
+          )`)
+        .order("name");
+      if (!data) return;
+      setCourseOptions(
+        (data as any[]).map((c) => ({
+          id: c.id,
+          name: c.name,
+          code: c.code ?? null,
+          department_name: c.departments?.name ?? null,
+          institution_name: c.departments?.institutions?.name ?? null,
+          institution_type: c.departments?.institutions?.type ?? null,
+          campus_name: c.departments?.institutions?.campuses?.name ?? null,
+        }))
+      );
+    })();
+  }, []);
 
   // Fetch counsellor list for filter (admin / admission_head / team leader only)
   useEffect(() => {
@@ -529,20 +581,32 @@ const Admissions = () => {
       filter = `campus_id=eq.${selectedCampusId}`;
     }
 
+    // Throttled refetch: at most once every 30s, with a 5s trailing debounce.
+    // The 800ms debounce + event:"*" used to flood the page with refetches on
+    // busy days — every ai_summary / last_activity UPDATE was a reload.
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastRefetchAt = 0;
+    const MIN_GAP_MS = 30_000;
+    const DEBOUNCE_MS = 5_000;
     const scheduleRefetch = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
+      const since = Date.now() - lastRefetchAt;
+      const wait = Math.max(DEBOUNCE_MS, MIN_GAP_MS - since);
       debounceTimer = setTimeout(() => {
+        lastRefetchAt = Date.now();
         fetchLeadsRef.current();
         queryClient.invalidateQueries({ queryKey: ["admissions-stats"] });
-      }, 800);
+      }, wait);
     };
 
+    // Only listen for INSERT (new leads). Stage / assignment changes are
+    // visible on next manual filter change or page nav — the constant
+    // re-renders caused by UPDATE events aren't worth the disruption.
     const channel = supabase
       .channel(`leads-realtime-${filter ?? "all"}`)
       .on(
         "postgres_changes" as any,
-        { event: "*", schema: "public", table: "leads", ...(filter ? { filter } : {}) },
+        { event: "INSERT", schema: "public", table: "leads", ...(filter ? { filter } : {}) },
         scheduleRefetch,
       )
       .subscribe();
@@ -618,6 +682,7 @@ const Admissions = () => {
       (digits.length >= 3 && phoneDigits.includes(digits));
     const matchesStage = stageFilter === "all" || stageFilter.split(",").includes(l.stage);
     const matchesSource = sourceFilter === "all" || l.source === sourceFilter;
+    const matchesCourse = debouncedCourseFilter.length === 0 || (l.course_id != null && debouncedCourseFilter.includes(l.course_id));
     const matchesRole = roleFilter === "all" || l.person_role === roleFilter;
     const matchesTemp = tempFilter === "all" || l.lead_temperature === tempFilter;
     const matchesInactive = !inactiveIds || inactiveIds.has(l.id);
@@ -640,7 +705,7 @@ const Admissions = () => {
         if (t > to) matchesDate = false;
       }
     }
-    return matchesSearch && matchesStage && matchesSource && matchesRole && matchesTemp && matchesInactive && matchesFollowup && matchesVisit && matchesCounsellor && matchesNotCalled && matchesAction && matchesDate;
+    return matchesSearch && matchesStage && matchesSource && matchesCourse && matchesRole && matchesTemp && matchesInactive && matchesFollowup && matchesVisit && matchesCounsellor && matchesNotCalled && matchesAction && matchesDate;
   });
 
   // List view paginates server-side: `leads` is already the current page
@@ -651,7 +716,7 @@ const Admissions = () => {
   const paginatedLeads = view === "list" ? leads : filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // Reset page when filters change
-  useEffect(() => { setPage(1); }, [stageFilter, sourceFilter, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, fromDate, toDate]);
+  useEffect(() => { setPage(1); }, [stageFilter, sourceFilter, debouncedCourseFilter, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, fromDate, toDate]);
 
   // Fetch lead-pipeline counts (one GROUP-BY) + visit-action counts. Cheap
   // queries; refresh on mount. Counsellor-scoped via stage filter when the
@@ -928,7 +993,11 @@ const Admissions = () => {
     { label: "Admitted", value: admitted, sub: "Fully admitted", icon: UserCheck, iconBg: "bg-pastel-green", filterStage: "admitted", action: "" },
   ];
 
-  if (loading) {
+  // Only show the full-page spinner on the very first load (before any
+  // result has come back). Refetches keep the page mounted so controls
+  // like the course multi-select popover preserve their state — an empty
+  // result no longer unmounts the page just because `leads.length === 0`.
+  if (!hasLoadedOnce) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
   }
 
@@ -1356,6 +1425,129 @@ const Admissions = () => {
             <option value="all">All Sources</option>
             {LEAD_SOURCES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
+          <Popover open={coursePopoverOpen} onOpenChange={setCoursePopoverOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="flex items-center gap-2 rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 hover:bg-muted/40"
+              >
+                <span>
+                  {courseFilter.length === 0
+                    ? "All Courses"
+                    : courseFilter.length === 1
+                      ? (courseOptions.find(c => c.id === courseFilter[0])?.name || "1 course")
+                      : `${courseFilter.length} courses`}
+                </span>
+                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-72 p-0">
+              <div className="p-2 border-b border-border/60 flex items-center gap-2">
+                <Search className="h-3.5 w-3.5 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Search courses..."
+                  value={courseSearch}
+                  onChange={(e) => setCourseSearch(e.target.value)}
+                  className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+                />
+                {courseFilter.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setCourseFilter([])}
+                    className="text-[10px] text-primary hover:underline"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <div className="max-h-80 overflow-y-auto p-1">
+                {(() => {
+                  const q = courseSearch.toLowerCase();
+                  const filtered = q
+                    ? courseOptions.filter(c => c.name.toLowerCase().includes(q))
+                    : courseOptions;
+                  const sections = groupCourses(filtered);
+                  if (sections.length === 0) {
+                    return <div className="px-3 py-4 text-center text-xs text-muted-foreground">No courses</div>;
+                  }
+                  // Group sections by campus, then by institution within
+                  // each campus. Some campuses host multiple institutions
+                  // (e.g. Mirai Experiential School and Campus School Dept
+                  // of Education on Ghaziabad Campus 2) — each gets its
+                  // own sub-heading under the campus.
+                  type Sec = typeof sections[number];
+                  const byCampus = new Map<string, Map<string, Sec[]>>();
+                  for (const s of sections) {
+                    if (!byCampus.has(s.campusGroup)) byCampus.set(s.campusGroup, new Map());
+                    const inst = byCampus.get(s.campusGroup)!;
+                    const key = s.institutionGroup || "";
+                    if (!inst.has(key)) inst.set(key, []);
+                    inst.get(key)!.push(s);
+                  }
+                  return Array.from(byCampus.entries()).map(([campus, institutions]) => {
+                    const allIds = Array.from(institutions.values()).flat().flatMap(s => s.items.map(i => i.id));
+                    const allSelected = allIds.length > 0 && allIds.every(id => courseFilter.includes(id));
+                    return (
+                      <div key={campus} className="mb-2">
+                        <div className="flex items-center justify-between px-2 pt-2 pb-1 border-b border-border/40">
+                          <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{campus}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCourseFilter(prev =>
+                                allSelected
+                                  ? prev.filter(id => !allIds.includes(id))
+                                  : Array.from(new Set([...prev, ...allIds]))
+                              );
+                            }}
+                            className="text-[10px] text-primary hover:underline"
+                          >
+                            {allSelected ? "Clear" : "Select all"}
+                          </button>
+                        </div>
+                        {Array.from(institutions.entries()).map(([instName, secs]) => (
+                          <div key={`${campus}-${instName}`} className="mb-1">
+                            {instName && (
+                              <div className="px-2 pt-1.5 pb-0.5 text-[11px] font-semibold text-foreground/90">
+                                {instName}
+                              </div>
+                            )}
+                            {secs.map(section => (
+                              <div key={`${campus}-${instName}-${section.sectionKey}`} className="mb-0.5">
+                                <div className="px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80">
+                                  {section.sectionLabel}
+                                </div>
+                                {section.items.map(c => {
+                                  const checked = courseFilter.includes(c.id);
+                                  return (
+                                    <label
+                                      key={c.id}
+                                      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted/50 cursor-pointer"
+                                    >
+                                      <Checkbox
+                                        checked={checked}
+                                        onCheckedChange={(v) => {
+                                          setCourseFilter(prev =>
+                                            v ? [...prev, c.id] : prev.filter(id => id !== c.id)
+                                          );
+                                        }}
+                                      />
+                                      <span className="flex-1 truncate text-foreground">{c.name}</span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            </PopoverContent>
+          </Popover>
           <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}
             className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
             <option value="all">All Roles</option>
