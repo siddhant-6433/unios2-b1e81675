@@ -38,9 +38,9 @@ const SOURCE_COLORS: Record<string, string> = {
 
 const FreshLeads = () => {
   const navigate = useNavigate();
-  const { role, user } = useAuth();
+  const { role, profile } = useAuth();
   const isCounsellor = role === "counsellor";
-  const [profileId, setProfileId] = useState<string | null>(null);
+  const profileId = profile?.id ?? null;
   const [leads, setLeads] = useState<FreshLead[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -50,17 +50,10 @@ const FreshLeads = () => {
   const [assignmentFilter, setAssignmentFilter] = useState<"all" | "assigned" | "unassigned">("all");
   const [counsellorOptions, setCounsellorOptions] = useState<{ id: string; name: string }[]>([]);
 
-  // Get profile id
+  // Lock the admin counsellor filter to "me" once the counsellor's profile arrives.
   useEffect(() => {
-    if (!user?.id) return;
-    supabase.from("profiles").select("id").eq("user_id", user.id).single()
-      .then(({ data }) => {
-        if (data) {
-          setProfileId(data.id);
-          if (isCounsellor) setCounsellorFilter(data.id);
-        }
-      });
-  }, [user?.id]);
+    if (isCounsellor && profileId) setCounsellorFilter(profileId);
+  }, [isCounsellor, profileId, setCounsellorFilter]);
 
   // Fetch counsellor options (for admin filter)
   useEffect(() => {
@@ -74,6 +67,10 @@ const FreshLeads = () => {
   }, [isCounsellor]);
 
   const fetchLeads = useCallback(async () => {
+    // Don't fetch until we know who the counsellor is — otherwise the
+    // .eq("counsellor_id", null) on a half-loaded profile silently
+    // returns zero rows and the page shows an empty state.
+    if (isCounsellor && !profileId) return;
     setLoading(true);
 
     // Base filters

@@ -12,6 +12,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { TERMINAL_LEAD_STAGES } from "@/lib/leadStages";
 
 type Tab = "overdue" | "today" | "upcoming" | "visit_confirm" | "unclosed_visits" | "post_visit";
 
@@ -91,6 +92,9 @@ const PendingFollowups = () => {
   }, [isCounsellor]);
 
   const fetchCounts = useCallback(async () => {
+    // Counsellor scoping leans on profile.id; if it hasn't loaded yet the
+    // .eq("counsellor_id", null) silently returns zero across every tab.
+    if (isCounsellor && !profileId) return;
     const today = new Date().toISOString().slice(0, 10);
     const todayStart = `${today}T00:00:00+05:30`;
     const todayEnd = `${today}T23:59:59+05:30`;
@@ -110,7 +114,7 @@ const PendingFollowups = () => {
       scopedLeadIds = (scopedLeads || []).map((l: any) => l.id);
     }
     if (scopedLeadIds && scopedLeadIds.length === 0) {
-      setCounts({ overdue: 0, today: 0, upcoming: 0, visit_confirm: 0, post_visit: 0 });
+      setCounts({ overdue: 0, today: 0, upcoming: 0, visit_confirm: 0, unclosed_visits: 0, post_visit: 0 });
       return;
     }
 
@@ -156,6 +160,7 @@ const PendingFollowups = () => {
   }, [isCounsellor, profileId, counsellorFilter]);
 
   const fetchItems = useCallback(async () => {
+    if (isCounsellor && !profileId) return;
     setLoading(true);
     const today = new Date().toISOString().slice(0, 10);
     const todayStart = `${today}T00:00:00+05:30`;
@@ -199,9 +204,8 @@ const PendingFollowups = () => {
       q = q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
       const { data } = await q;
 
-      const TERMINAL_STAGES = ["not_interested", "dnc", "rejected", "ineligible"];
       result = (data || [])
-        .filter((r: any) => !TERMINAL_STAGES.includes(r.leads?.stage))
+        .filter((r: any) => !(TERMINAL_LEAD_STAGES as string[]).includes(r.leads?.stage))
         .map((r: any) => {
           const daysOverdue = Math.max(0, Math.floor((Date.now() - new Date(r.scheduled_at).getTime()) / 86400000));
           return {

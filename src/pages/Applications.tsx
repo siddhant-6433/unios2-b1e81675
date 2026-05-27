@@ -259,11 +259,35 @@ export default function Applications() {
   };
 
   useEffect(() => {
+    // Counsellor scoping has to happen at the SQL layer — otherwise we pull
+    // every application system-wide, then fan out lead_fee_status RPCs for
+    // every other counsellor's offer-letter leads, then filter to ours.
+    // Wait until profile.id is available before firing.
+    if (isCounsellor && !profile?.id) return;
+
     const fetchApps = async () => {
       setLoading(true);
-      const { data } = await (supabase as any).from("applications")
+
+      // For counsellors, first resolve their lead_ids so the applications
+      // query can scope to them with .in("lead_id", …). Admins skip this.
+      let scopedLeadIds: string[] | null = null;
+      if (isCounsellor && profile?.id) {
+        const { data: myLeads } = await supabase.from("leads")
+          .select("id")
+          .eq("counsellor_id", profile.id);
+        scopedLeadIds = (myLeads || []).map((l: any) => l.id);
+        if (scopedLeadIds.length === 0) {
+          setApps([]);
+          setLoading(false);
+          return;
+        }
+      }
+
+      let q = (supabase as any).from("applications")
         .select("id, application_id, lead_id, full_name, phone, email, status, payment_status, payment_ref, fee_amount, program_category, course_selections, completed_sections, submitted_at, created_at, flags, dob, gender, category, father, mother, address, academic_details, form_pdf_url, fee_receipt_url")
         .order("created_at", { ascending: false });
+      if (scopedLeadIds) q = q.in("lead_id", scopedLeadIds);
+      const { data } = await q;
       const rows = data || [];
 
       // Batch-fetch counsellor names + lead stage + lifecycle data via
@@ -382,7 +406,7 @@ export default function Applications() {
         }));
       }
 
-      let mapped = rows.map((a: any) => ({
+      const mapped = rows.map((a: any) => ({
         ...a,
         counsellor_name: counsellorMap[a.lead_id] || "",
         lead_stage: leadStageMap[a.lead_id] || "",
@@ -398,11 +422,6 @@ export default function Applications() {
         an_due: anDueMap[a.lead_id] ?? null,
         year1_due: year1DueMap[a.lead_id] ?? null,
       }));
-
-      // Counsellor scoping: only show applications for their leads
-      if (isCounsellor && profile?.id) {
-        mapped = mapped.filter((a: any) => a.lead_counsellor_id === profile.id);
-      }
 
       setApps(mapped);
       setLoading(false);
