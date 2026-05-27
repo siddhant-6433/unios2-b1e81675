@@ -2764,12 +2764,27 @@ Deno.serve({ port: PORT }, async (req) => {
     const params = body ? Object.fromEntries(body) : {} as any;
     const callStatus = String(params.CallStatus || params.Status || "").toLowerCase();
     const event = String(params.Event || "").toLowerCase();
+    const plivoCallUUID = String(params.CallUUID || params.ALegUUID || "");
 
-    console.log(`[BRIDGE-CALL-STATUS ${callId}] CallStatus=${callStatus} Event=${event}`);
+    console.log(`[BRIDGE-CALL-STATUS ${callId}] CallStatus=${callStatus} Event=${event} CallUUID=${plivoCallUUID.slice(0, 12)}`);
+
+    const dbH = { "Content-Type": "application/json", apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
+
+    // CRITICAL: Persist the Plivo CallUUID on the FIRST webhook so manual-call-cancel
+    // has something to hang up with. Plivo's Make Call API returns "async api
+    // spawned" without request_uuid for our account, so this webhook is the
+    // earliest opportunity to capture the real CallUUID. Only patch if the row
+    // currently has no value to avoid overwriting an already-correct one.
+    if (plivoCallUUID && SUPABASE_URL) {
+      await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}&plivo_call_uuid=is.null`, {
+        method: "PATCH",
+        headers: { ...dbH, Prefer: "return=minimal" },
+        body: JSON.stringify({ plivo_call_uuid: plivoCallUUID }),
+      }).catch(e => console.error(`[BRIDGE-CALL-STATUS ${callId}] plivo_call_uuid persist failed:`, e.message));
+    }
 
     const isAnswered = callStatus === "in-progress" || event === "answered";
     if (isAnswered && SUPABASE_URL) {
-      const dbH = { "Content-Type": "application/json", apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
       await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
         method: "PATCH",
         headers: { ...dbH, Prefer: "return=minimal" },

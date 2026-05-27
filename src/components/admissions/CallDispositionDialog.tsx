@@ -71,6 +71,11 @@ interface CallDispositionDialogProps {
   callEnded?: boolean;
   /** Called when counsellor clicks "Call connected" — flips parent state */
   onManualConnect?: () => void;
+  /** Called when counsellor clicks "Cancel" during the calling phase. Should
+   *  hang up both Plivo legs and record the call as cancelled_by_counsellor.
+   *  Awaited so the dialog stays open (with a busy state) until the hangup
+   *  RPC returns — closes the dialog automatically once it resolves. */
+  onCancelCall?: () => Promise<void> | void;
   /** Lead context surfaced in the calling state so the counsellor knows who
    *  they're calling and why without leaving the dialog. */
   courseName?: string | null;
@@ -164,7 +169,7 @@ const formatDisplayDate = (dateStr: string) => {
 
 export function CallDispositionDialog({
   open, onOpenChange, leadName, leadPhone, campuses, defaultCampusId,
-  onSubmit, onCallNow, callStatus, callEnded, onManualConnect,
+  onSubmit, onCallNow, callStatus, callEnded, onManualConnect, onCancelCall,
   courseName, leadStage, personRole, latestNote, aiCallSummary,
   leadSource, jdKeyword,
 }: CallDispositionDialogProps) {
@@ -172,6 +177,10 @@ export function CallDispositionDialog({
   const [duration, setDuration] = useState(0);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
+  // Active while the cancel handler is hanging up the live Plivo call. Used
+  // to lock the calling-phase buttons + show a spinner so a double-click
+  // doesn't fire two hangup requests.
+  const [cancelling, setCancelling] = useState(false);
   // Follow-up / Visit scheduling state
   const [showVisitForm, setShowVisitForm] = useState(false);
   const [followupDate, setFollowupDate] = useState(tomorrowStr());
@@ -395,6 +404,7 @@ export function CallDispositionDialog({
                 size="sm"
                 className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-xs"
                 onClick={() => onManualConnect?.()}
+                disabled={cancelling}
               >
                 <CheckCircle className="h-3.5 w-3.5 mr-1.5" />
                 Call connected — Mark Outcome
@@ -402,10 +412,26 @@ export function CallDispositionDialog({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => handleClose(false)}
+                onClick={async () => {
+                  // No cancel handler wired (e.g. legacy "manual log" mode) →
+                  // fall back to just closing the dialog without any hangup
+                  // attempt. Active Cloud Calls always supply onCancelCall.
+                  if (!onCancelCall) {
+                    handleClose(false);
+                    return;
+                  }
+                  setCancelling(true);
+                  try {
+                    await onCancelCall();
+                  } finally {
+                    setCancelling(false);
+                    handleClose(false);
+                  }
+                }}
+                disabled={cancelling}
                 className="text-xs"
               >
-                Cancel
+                {cancelling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Cancel"}
               </Button>
             </div>
           </div>
