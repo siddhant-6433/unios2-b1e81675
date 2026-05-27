@@ -1447,6 +1447,25 @@ const LeadDetail = () => {
         callStatus={dispositionCallStatus}
         callEnded={dispositionCallEnded}
         onManualConnect={() => setDispositionCallStatus("connected")}
+        onCancelCall={activeCallUuid ? async () => {
+          // Cancel the in-flight Cloud Call: hangs up both Plivo legs and
+          // records the call as cancelled_by_counsellor in call_logs +
+          // ai_call_records. Failures surface as a toast — the dialog still
+          // closes so the counsellor isn't stuck on a broken state.
+          try {
+            const { error } = await supabase.functions.invoke("manual-call-cancel", {
+              body: { call_id: activeCallUuid, caller_user_id: user?.id },
+            });
+            if (error) {
+              toast({ title: "Cancel failed", description: error.message, variant: "destructive" });
+            } else {
+              toast({ title: "Call cancelled", description: "Both legs dropped." });
+              fetchAll(true);
+            }
+          } catch (e: any) {
+            toast({ title: "Cancel failed", description: e?.message || "Try again", variant: "destructive" });
+          }
+        } : undefined}
         courseName={courseName}
         leadStage={lead.stage as any}
         personRole={(lead as any).person_role || null}

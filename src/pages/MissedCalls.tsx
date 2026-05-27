@@ -637,6 +637,23 @@ export default function MissedCalls() {
             callStatus={dispositionStatus}
             callEnded={dispositionEnded}
             onManualConnect={() => setDispositionStatus("connected")}
+            onCancelCall={activeCallUuid ? async () => {
+              // Hang up the live Plivo bridge (counsellor + student legs) and
+              // mark the call cancelled_by_counsellor. The dialog closes
+              // either way so the counsellor isn't trapped on a broken state.
+              try {
+                const { error } = await supabase.functions.invoke("manual-call-cancel", {
+                  body: { call_id: activeCallUuid, caller_user_id: user?.id },
+                });
+                if (error) {
+                  toast({ title: "Cancel failed", description: error.message, variant: "destructive" });
+                } else {
+                  toast({ title: "Call cancelled", description: "Both legs dropped." });
+                }
+              } catch (e: any) {
+                toast({ title: "Cancel failed", description: e?.message || "Try again", variant: "destructive" });
+              }
+            } : undefined}
             courseName={activeMc.course_name || null}
             leadStage={activeMc.lead_stage || null}
             aiCallSummary={activeMc.summary}
