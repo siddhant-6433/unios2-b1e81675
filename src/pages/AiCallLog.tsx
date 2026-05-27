@@ -93,10 +93,12 @@ const AiCallLog = () => {
     setLoading(true);
     const { from: dateFrom, to: dateTo } = getDateRange(dateFilter, customFrom, customTo);
 
-    // Build query for count + stats
+    // Build query for count + stats. Exclude counsellor_no_answer — those
+    // attempts never reached the lead and shouldn't show up in call stats.
     let countQuery = supabase
       .from("ai_call_records" as any)
-      .select("id, status, recording_url, conversion_probability, call_type", { count: "exact", head: false });
+      .select("id, status, recording_url, conversion_probability, call_type", { count: "exact", head: false })
+      .neq("status", "counsellor_no_answer");
 
     if (dateFrom) countQuery = countQuery.gte("created_at", dateFrom);
     if (dateTo) countQuery = countQuery.lte("created_at", dateTo);
@@ -115,7 +117,8 @@ const AiCallLog = () => {
       inbound: allForStats.filter((r: any) => r.call_type === "inbound").length,
     });
 
-    // Fetch page data with joins
+    // Fetch page data with joins. Same exclusion as countQuery so the list
+    // matches the stats above.
     let query = supabase
       .from("ai_call_records" as any)
       .select(`
@@ -126,6 +129,7 @@ const AiCallLog = () => {
           profiles:counsellor_id(display_name)
         )
       `)
+      .neq("status", "counsellor_no_answer")
       .order("created_at", { ascending: false })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
 

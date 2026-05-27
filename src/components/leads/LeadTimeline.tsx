@@ -409,6 +409,7 @@ function CallsList({ callLogs, leadId }: { callLogs: any[]; leadId?: string }) {
       .from("ai_call_records" as any)
       .select("*")
       .eq("lead_id", leadId)
+      .neq("status", "counsellor_no_answer")
       .order("created_at", { ascending: false })
       .then(({ data }) => { if (data) setAiCalls(data as any); });
   }, [leadId]);

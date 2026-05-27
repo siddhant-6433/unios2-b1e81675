@@ -52,7 +52,11 @@ export type DialogCallStatus =
   | "connected"
   | "no_answer"
   | "busy"
-  | "failed";
+  | "failed"
+  /** Counsellor's A-leg phone rang out / busy / failed before they picked up.
+   *  Student was never dialed — dialog shows a "you didn't pick up — retry?"
+   *  prompt with a one-tap Redial button. No disposition picker, no metrics. */
+  | "counsellor_no_answer";
 
 interface CallDispositionDialogProps {
   open: boolean;
@@ -76,6 +80,10 @@ interface CallDispositionDialogProps {
    *  Awaited so the dialog stays open (with a busy state) until the hangup
    *  RPC returns — closes the dialog automatically once it resolves. */
   onCancelCall?: () => Promise<void> | void;
+  /** Called when counsellor clicks "Redial" after they missed their own A-leg
+   *  (callStatus="counsellor_no_answer"). Should close this dialog and place
+   *  a fresh manual-call. */
+  onRetryCall?: () => Promise<void> | void;
   /** Lead context surfaced in the calling state so the counsellor knows who
    *  they're calling and why without leaving the dialog. */
   courseName?: string | null;
@@ -170,9 +178,11 @@ const formatDisplayDate = (dateStr: string) => {
 export function CallDispositionDialog({
   open, onOpenChange, leadName, leadPhone, campuses, defaultCampusId,
   onSubmit, onCallNow, callStatus, callEnded, onManualConnect, onCancelCall,
+  onRetryCall,
   courseName, leadStage, personRole, latestNote, aiCallSummary,
   leadSource, jdKeyword,
 }: CallDispositionDialogProps) {
+  const [retrying, setRetrying] = useState(false);
   const [disposition, setDisposition] = useState<CallDisposition | null>(null);
   const [duration, setDuration] = useState(0);
   const [notes, setNotes] = useState("");
@@ -432,6 +442,69 @@ export function CallDispositionDialog({
                 className="text-xs"
               >
                 {cancelling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Cancel"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  // ── Phase 1b: counsellor never picked up their own A-leg ─────────────────
+  // Plivo rang the counsellor's phone but they didn't answer. Student was
+  // never dialed → no disposition picker, no follow-up, no metrics impact.
+  // Just a "Redial" / "Close" choice.
+  if (callStatus === "counsellor_no_answer") {
+    return (
+      <Dialog open={open} onOpenChange={handleClose}>
+        <DialogContent
+          className="max-w-md"
+          {...blockOutsideDismiss}
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <PhoneMissed className="h-4 w-4 text-amber-600" />
+              You didn't pick up
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 pt-1">
+            <div className="rounded-xl border border-amber-200 dark:border-amber-800/40 bg-amber-50 dark:bg-amber-950/30 px-3 py-3">
+              <p className="text-sm text-amber-900 dark:text-amber-200">
+                Your phone rang but the call wasn't answered, so
+                <span className="font-semibold"> {leadName}</span> was never dialed.
+              </p>
+              <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-1.5">
+                This attempt won't count in your call metrics. Hit Redial to try again.
+              </p>
+            </div>
+            <div className="rounded-xl bg-muted/40 px-3 py-2">
+              <p className="text-xs text-muted-foreground">Calling</p>
+              <p className="text-sm font-semibold text-foreground truncate">{leadName}</p>
+              <p className="text-[11px] text-muted-foreground font-mono">{leadPhone}</p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                className="flex-1 bg-cyan-600 hover:bg-cyan-700 text-xs"
+                disabled={retrying || !onRetryCall}
+                onClick={async () => {
+                  if (!onRetryCall) { handleClose(false); return; }
+                  setRetrying(true);
+                  try { await onRetryCall(); }
+                  finally { setRetrying(false); }
+                }}
+              >
+                {retrying ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Phone className="h-3.5 w-3.5 mr-1.5" />}
+                Redial
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs"
+                disabled={retrying}
+                onClick={() => handleClose(false)}
+              >
+                Close
               </Button>
             </div>
           </div>

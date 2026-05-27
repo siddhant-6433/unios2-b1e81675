@@ -130,7 +130,7 @@ const LeadDetail = () => {
   // calling → connected / no_answer / busy / failed. `undefined` means the
   // dialog was opened outside an active call (legacy "log past call" mode).
   const [dispositionCallStatus, setDispositionCallStatus] = useState<
-    "calling" | "connected" | "no_answer" | "busy" | "failed" | undefined
+    "calling" | "connected" | "no_answer" | "busy" | "failed" | "counsellor_no_answer" | undefined
   >(undefined);
   // True once Plivo reports the bridge has hung up. The dialog stays on the
   // "connected" UI (disposition picker) but the elapsed timer freezes —
@@ -232,7 +232,11 @@ const LeadDetail = () => {
         setDispositionCallStatus("connected");
         return;
       }
-      if (s === "no_answer" || s === "no-answer" || s === "cancel") {
+      if (s === "counsellor_no_answer") {
+        // Counsellor never picked up A-leg → student never dialed. UI shows
+        // a "you didn't pick up — retry?" prompt instead of a disposition picker.
+        setDispositionCallStatus("counsellor_no_answer");
+      } else if (s === "no_answer" || s === "no-answer" || s === "cancel") {
         setDispositionCallStatus("no_answer");
       } else if (s === "busy") {
         setDispositionCallStatus("busy");
@@ -1457,6 +1461,15 @@ const LeadDetail = () => {
         callStatus={dispositionCallStatus}
         callEnded={dispositionCallEnded}
         onManualConnect={() => setDispositionCallStatus("connected")}
+        onRetryCall={async () => {
+          // Counsellor missed A-leg → reset dialog state and place a fresh call.
+          // The poll effect will re-arm on the new activeCallUuid.
+          setShowCallDisposition(false);
+          setDispositionCallStatus(undefined);
+          setDispositionCallEnded(false);
+          setActiveCallUuid(null);
+          await placeManualCall();
+        }}
         onCancelCall={activeCallUuid ? async () => {
           // Cancel the in-flight Cloud Call: hangs up both Plivo legs and
           // records the call as cancelled_by_counsellor in call_logs +
