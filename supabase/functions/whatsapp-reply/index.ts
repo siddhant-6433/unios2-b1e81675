@@ -147,6 +147,7 @@ Deno.serve(async (req) => {
       status: "sent",
       is_read: true,
       business_phone_number_id: phoneNumberId,
+      template_key: "manual_reply",
     });
 
     // Log activity

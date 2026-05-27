@@ -76,6 +76,7 @@ const TemplateManager = () => {
     marketing_eligibility: string | null;
     video_url: string | null;
     slug: string | null;
+    maps_cid: string | null;
   };
   const [courseRows, setCourseRows] = useState<CourseRow[]>([]);
   const [coursesLoading, setCoursesLoading] = useState(false);
@@ -87,7 +88,7 @@ const TemplateManager = () => {
     setCoursesLoading(true);
     const { data, error } = await (supabase as any)
       .from("courses")
-      .select("id, code, name, duration_years, type, marketing_eligibility, video_url, slug")
+      .select("id, code, name, duration_years, type, marketing_eligibility, video_url, slug, maps_cid")
       .order("code");
     if (!error && data) setCourseRows(data as CourseRow[]);
     setCoursesLoading(false);
@@ -598,6 +599,7 @@ Buttons:
                     <th className="text-left px-3 py-2 font-medium min-w-[220px]">Marketing eligibility</th>
                     <th className="text-left px-3 py-2 font-medium min-w-[200px]">Video URL</th>
                     <th className="text-left px-3 py-2 font-medium min-w-[180px]">Slug</th>
+                    <th className="text-left px-3 py-2 font-medium min-w-[180px]">Maps CID (optional)</th>
                     <th className="text-right px-3 py-2 font-medium">Actions</th>
                   </tr>
                 </thead>
@@ -636,6 +638,15 @@ Buttons:
                             value={merged.slug || ""}
                             onChange={(ev) => set("slug", ev.target.value)}
                             placeholder="bachelor-of-science-in-nursing"
+                            className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs font-mono"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            value={merged.maps_cid || ""}
+                            onChange={(ev) => set("maps_cid", ev.target.value.trim() || (null as any))}
+                            placeholder="1820424915210710582"
+                            title="Overrides the campus Maps CID for visit_confirmation when this course sits in its own building."
                             className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs font-mono"
                           />
                         </td>
