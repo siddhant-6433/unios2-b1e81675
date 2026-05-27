@@ -6136,6 +6136,7 @@ export type Database = {
           person_role: string
           phone: string
           pre_admission_no: string | null
+          qualifying_percent: number | null
           secondary_source: string | null
           skip_ai_call: boolean | null
           source: Database["public"]["Enums"]["lead_source"]
@@ -6193,6 +6194,7 @@ export type Database = {
           person_role?: string
           phone: string
           pre_admission_no?: string | null
+          qualifying_percent?: number | null
           secondary_source?: string | null
           skip_ai_call?: boolean | null
           source?: Database["public"]["Enums"]["lead_source"]
@@ -6250,6 +6252,7 @@ export type Database = {
           person_role?: string
           phone?: string
           pre_admission_no?: string | null
+          qualifying_percent?: number | null
           secondary_source?: string | null
           skip_ai_call?: boolean | null
           source?: Database["public"]["Enums"]["lead_source"]
