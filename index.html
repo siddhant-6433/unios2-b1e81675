@@ -18,6 +18,17 @@
     <meta name="twitter:title" content="NIMT UniOs">
     <meta name="twitter:description" content="Student Lifecycle Management">
 
+    <!-- Google Analytics — UniOs-wide property, fires on every surface
+         (CRM + apply). The apply-portal-gated block below adds a second,
+         apply-only property that's wired up with cross-domain linker. -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-9TPSZXEVZ3"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-9TPSZXEVZ3');
+    </script>
+
     <!-- Google Analytics + Meta Pixel — apply portal only.
          The same SPA also serves the internal CRM (uni.nimt.ac.in/dashboard
          etc.); we only fire trackers when the visitor is on an applicant-facing
