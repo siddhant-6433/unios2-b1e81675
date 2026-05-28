@@ -80,11 +80,13 @@ const APP_SUBMITTED_STAGES = new Set([
   "token_paid", "pre_admitted", "admitted",
 ]);
 const ADMITTED_STAGES = new Set(["admitted"]);
+const NOT_INTERESTED_STAGES = new Set(["not_interested"]);
 
 interface SourceMetrics {
   source: string | null;
   label: string;
   total: number;
+  notInterested: number;
   engaged: number;
   appStarted: number;
   submitted: number;
@@ -97,6 +99,7 @@ const ENGAGED_STAGES_PARAM   = Array.from(ENGAGED_STAGES).join(",");
 const APP_STARTED_STAGES_PARAM = Array.from(APP_STARTED_STAGES).join(",");
 const APP_SUBMITTED_PARAM    = Array.from(APP_SUBMITTED_STAGES).join(",");
 const ADMITTED_PARAM         = Array.from(ADMITTED_STAGES).join(",");
+const NOT_INTERESTED_PARAM   = Array.from(NOT_INTERESTED_STAGES).join(",");
 
 function buildLeadListUrl(opts: {
   source: string | null;
@@ -110,6 +113,13 @@ function buildLeadListUrl(opts: {
   if (opts.fromDate) p.set("from", opts.fromDate.toISOString().slice(0, 10));
   if (opts.toDate)   p.set("to",   opts.toDate.toISOString().slice(0, 10));
   return `/admissions?${p.toString()}`;
+}
+
+// "Not interested" is a loss metric — higher is worse, so colors invert.
+function notInterestedClass(pct: number): string {
+  if (pct >= 30) return "text-rose-700 bg-rose-50";
+  if (pct >= 10) return "text-amber-700 bg-amber-50";
+  return "text-muted-foreground bg-muted/40";
 }
 
 function pctClass(pct: number, kind: "engaged" | "submitted" | "admitted"): string {
@@ -131,7 +141,7 @@ export default function PublisherAnalytics() {
   const [datePreset, setDatePreset] = useState<DatePreset>("this_month");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
-  const [sortBy, setSortBy] = useState<"total" | "engaged_pct" | "submitted_pct" | "admitted_pct">("total");
+  const [sortBy, setSortBy] = useState<"total" | "not_interested_pct" | "engaged_pct" | "submitted_pct" | "admitted_pct">("total");
 
   // Fetch leads on mount — paginate to bypass Supabase's default 1000 cap.
   useEffect(() => {
@@ -175,10 +185,11 @@ export default function PublisherAnalytics() {
       const key = l.source || null;
       let m = bySource.get(key);
       if (!m) {
-        m = { source: key, label: labelFor(key), total: 0, engaged: 0, appStarted: 0, submitted: 0, admitted: 0 };
+        m = { source: key, label: labelFor(key), total: 0, notInterested: 0, engaged: 0, appStarted: 0, submitted: 0, admitted: 0 };
         bySource.set(key, m);
       }
       m.total++;
+      if (NOT_INTERESTED_STAGES.has(l.stage)) m.notInterested++;
       if (ENGAGED_STAGES.has(l.stage))      m.engaged++;
       if (APP_STARTED_STAGES.has(l.stage))  m.appStarted++;
       if (APP_SUBMITTED_STAGES.has(l.stage)) m.submitted++;
@@ -189,6 +200,7 @@ export default function PublisherAnalytics() {
       const aPct = (n: number) => a.total > 0 ? n / a.total : 0;
       const bPct = (n: number) => b.total > 0 ? n / b.total : 0;
       switch (sortBy) {
+        case "not_interested_pct": return bPct(b.notInterested) - aPct(a.notInterested);
         case "engaged_pct":   return bPct(b.engaged) - aPct(a.engaged);
         case "submitted_pct": return bPct(b.submitted) - aPct(a.submitted);
         case "admitted_pct":  return bPct(b.admitted) - aPct(a.admitted);
@@ -203,11 +215,12 @@ export default function PublisherAnalytics() {
     const totals = metrics.reduce(
       (acc, m) => ({
         total: acc.total + m.total,
+        notInterested: acc.notInterested + m.notInterested,
         engaged: acc.engaged + m.engaged,
         submitted: acc.submitted + m.submitted,
         admitted: acc.admitted + m.admitted,
       }),
-      { total: 0, engaged: 0, submitted: 0, admitted: 0 },
+      { total: 0, notInterested: 0, engaged: 0, submitted: 0, admitted: 0 },
     );
     return totals;
   }, [metrics]);
@@ -284,6 +297,7 @@ export default function PublisherAnalytics() {
                   <tr className="border-b border-border bg-muted/40 text-xs uppercase tracking-wide">
                     <Th label="Source" sortable={false} />
                     <Th label="Total Leads" active={sortBy === "total"} onClick={() => setSortBy("total")} />
+                    <Th label="Not Interested %" active={sortBy === "not_interested_pct"} onClick={() => setSortBy("not_interested_pct")} />
                     <Th label="Engaged %"   active={sortBy === "engaged_pct"}   onClick={() => setSortBy("engaged_pct")} />
                     <Th label="App Started" sortable={false} />
                     <Th label="Submitted %" active={sortBy === "submitted_pct"} onClick={() => setSortBy("submitted_pct")} />
@@ -292,6 +306,7 @@ export default function PublisherAnalytics() {
                 </thead>
                 <tbody>
                   {metrics.map(m => {
+                    const notInterestedPct = m.total > 0 ? Math.round((m.notInterested / m.total) * 100) : 0;
                     const engagedPct   = m.total > 0 ? Math.round((m.engaged   / m.total) * 100) : 0;
                     const submittedPct = m.total > 0 ? Math.round((m.submitted / m.total) * 100) : 0;
                     const admittedPct  = m.total > 0 ? Math.round((m.admitted  / m.total) * 100) : 0;
@@ -309,6 +324,12 @@ export default function PublisherAnalytics() {
                         <td className="px-4 py-3 tabular-nums">
                           <a href={baseLink()} target="_blank" rel="noreferrer" className={`text-foreground ${linkCls}`}>
                             {m.total.toLocaleString("en-IN")}
+                          </a>
+                        </td>
+                        <td className="px-4 py-3">
+                          <a href={baseLink(NOT_INTERESTED_PARAM)} target="_blank" rel="noreferrer"
+                            className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-semibold tabular-nums hover:opacity-80 ${notInterestedClass(notInterestedPct)}`}>
+                            {m.notInterested.toLocaleString("en-IN")} · {notInterestedPct}%
                           </a>
                         </td>
                         <td className="px-4 py-3">
@@ -342,7 +363,7 @@ export default function PublisherAnalytics() {
             </div>
             <div className="px-4 py-2.5 border-t border-border/60 bg-muted/20 flex items-center gap-2 text-[11px] text-muted-foreground">
               <TrendingUp className="h-3 w-3" />
-              <span>Engaged = lead reached counsellor / AI call or beyond. Submitted = application submitted or beyond. Admitted = final stage.</span>
+              <span>Not Interested = lead marked dead (by AI call or counsellor). Engaged = lead reached counsellor / AI call or beyond. Submitted = application submitted or beyond. Admitted = final stage.</span>
             </div>
           </CardContent>
         </Card>

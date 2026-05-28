@@ -190,9 +190,19 @@ async function autoAssignCounsellor(
   if (!disposition || !["interested", "callback_requested"].includes(disposition)) return;
 
   const { data: lead } = await db.from("leads")
-    .select("id, counsellor_id, campus_id, course_id, name")
+    .select("id, counsellor_id, campus_id, course_id, name, stage")
     .eq("id", leadId).single();
   if (!lead || lead.counsellor_id) return;
+
+  // Don't resurrect a terminal lead. If the lead is already not_interested /
+  // dnc / etc. (set by an earlier AI call or a counsellor), a later
+  // "interested" turn from the same number shouldn't silently flip it back to
+  // counsellor_call. Same TERMINAL set as applyDispositionToLeadStage.
+  const TERMINAL = new Set(["not_interested", "dnc", "rejected", "ineligible", "admitted"]);
+  if (TERMINAL.has(lead.stage)) {
+    console.log(`Skipping autoAssign for lead ${leadId}: already in terminal stage ${lead.stage}`);
+    return;
+  }
 
   // ── Determine which team to assign from ──
   const MIRAI_CAMPUS  = "c0000002-0000-0000-0000-000000000001";
