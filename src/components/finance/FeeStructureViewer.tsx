@@ -535,9 +535,16 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
             {/* Expanded */}
             {isExpanded && (() => {
               const isSchool = isSchoolCourse(fs.course_code);
+              // For non-school courses with year-wise metadata, the year-wise breakdown
+              // already shows tuition per year — drop tuition items from the raw table
+              // to avoid duplicating the same amounts.
+              const hasYearWise = !isSchool && yearData.length > 0;
+              const nonSchoolItems = hasYearWise
+                ? fs.items.filter(i => i.category !== "tuition")
+                : fs.items;
               const sections = isSchool
                 ? splitSchoolFeeItems(fs.items, fs.course_code)
-                : { oneTime: [] as FeeItem[], tuition: [] as FeeItem[], boarding: [] as FeeItem[], transport: [] as FeeItem[], other: fs.items };
+                : { oneTime: [] as FeeItem[], tuition: [] as FeeItem[], boarding: [] as FeeItem[], transport: [] as FeeItem[], other: nonSchoolItems };
 
               const renderItemRows = (items: FeeItem[]) =>
                 items.map((item, i) => (
