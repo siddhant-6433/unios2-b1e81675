@@ -30,6 +30,7 @@ const LeadBuckets          = lazy(() => import("./pages/LeadBuckets"));
 const CallLog              = lazy(() => import("./pages/CallLog"));
 const AiCallLog            = lazy(() => import("./pages/AiCallLog"));
 const CloudDialer          = lazy(() => import("./pages/CloudDialer"));
+const CahetSprint          = lazy(() => import("./pages/CahetSprint"));
 const MissedCalls          = lazy(() => import("./pages/MissedCalls"));
 const Applications         = lazy(() => import("./pages/Applications"));
 const AdminApplicationView = lazy(() => import("./pages/AdminApplicationView"));
@@ -222,6 +223,7 @@ const App = () => (
                       <Route path="/call-log" element={<RequirePermission module="call_log" action="view"><CallLog /></RequirePermission>} />
                       <Route path="/ai-call-log" element={<RequirePermission module="call_log" action="view"><AiCallLog /></RequirePermission>} />
                       <Route path="/cloud-dialer" element={<RequirePermission module="call_log" action="view"><CloudDialer /></RequirePermission>} />
+                      <Route path="/cahet-sprint" element={<RequirePermission module="call_log" action="view"><CahetSprint /></RequirePermission>} />
                       <Route path="/missed-calls" element={<RequirePermission module="call_log" action="view"><MissedCalls /></RequirePermission>} />
                       <Route path="/referrals" element={<RequirePermission module="referrals" action="view"><StudentReferrals /></RequirePermission>} />
 

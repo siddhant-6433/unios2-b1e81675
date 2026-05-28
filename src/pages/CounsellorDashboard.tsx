@@ -11,6 +11,7 @@ import {
   Users, PhoneOff, PhoneCall, BarChart3, ArrowUpDown, ArrowUp, ArrowDown,
   ExternalLink, CalendarDays,
 } from "lucide-react";
+import { CahetSprintLeaderboard } from "@/components/dashboard/CahetSprintLeaderboard";
 
 interface CounsellorStats {
   counsellor_id: string;
@@ -1021,6 +1022,8 @@ const CounsellorDashboard = () => {
           </Card>
         ))}
       </div>
+
+      <CahetSprintLeaderboard />
 
       {/* Tab toggle */}
       <div className="flex items-center gap-3 overflow-x-auto">

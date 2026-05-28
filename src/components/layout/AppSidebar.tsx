@@ -7,7 +7,7 @@ import {
   ChevronDown, Phone, Calendar, MessageSquare, Newspaper, Building2, School, ShieldCheck, Zap, Inbox,
   Globe, FolderOpen, Heart, Award, Target, GitMerge, Bot, Gift, AlertTriangle, Sparkles, Receipt,
   Briefcase, CalendarOff, UserCheck, Fingerprint, PhoneCall, PhoneMissed, Send, UserPlus, Footprints,
-  FolderLock,
+  FolderLock, Flame,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -48,6 +48,7 @@ const admissionSubMenu: MenuItem[] = [
   { title: "Leads", url: "/admissions", icon: GraduationCap, permission: "leads:view" },
   { title: "Applications", url: "/applications", icon: FileText, permission: "leads:view" },
   { title: "Cloud Dialer", url: "/cloud-dialer", icon: PhoneCall, permission: "call_log:view" },
+  { title: "CAHET Sprint", url: "/cahet-sprint", icon: Flame, permission: "call_log:view" },
   { title: "Missed Calls", url: "/missed-calls", icon: PhoneMissed, permission: "call_log:view" },
   { title: "WhatsApp", url: "/whatsapp-inbox", icon: MessageSquare, permission: "whatsapp:view" },
   { title: "WA Outbound", url: "/whatsapp-inbox?mode=outbound", icon: Send, permission: "whatsapp:view" },
@@ -418,10 +419,18 @@ export function AppSidebar() {
                       <SidebarMenuSub>
                         {visibleAdmission.map((item) => {
                           const isCloudDialer = item.url === "/cloud-dialer";
-                          const itemActiveClass = isCloudDialer
+                          // CAHET Sprint gets a rose/urgent treatment to
+                          // signal the deadline pressure — matches the
+                          // ticker, leaderboard, and register-button colour.
+                          const isCahetSprint = item.url === "/cahet-sprint";
+                          const itemActiveClass = isCahetSprint
+                            ? "!bg-rose-100 dark:!bg-rose-900/30 !text-rose-700 dark:!text-rose-300 font-semibold"
+                            : isCloudDialer
                             ? "!bg-cyan-100 dark:!bg-cyan-900/30 !text-cyan-700 dark:!text-cyan-300 font-semibold"
                             : activeClass;
-                          const itemBaseClass = isCloudDialer
+                          const itemBaseClass = isCahetSprint
+                            ? `${subLinkClass} text-rose-700 dark:text-rose-400 font-semibold`
+                            : isCloudDialer
                             ? `${subLinkClass} text-cyan-700 dark:text-cyan-400`
                             : subLinkClass;
                           return (

@@ -3,6 +3,7 @@ import { AppSidebar } from "@/components/layout/AppSidebar";
 import { ImpersonationBanner } from "@/components/layout/ImpersonationBanner";
 import { GlobalActionBar } from "@/components/layout/GlobalActionBar";
 import { LiveCallBar } from "@/components/layout/LiveCallBar";
+import { CahetSprintTicker } from "@/components/layout/CahetSprintTicker";
 import { NotificationPanel } from "@/components/layout/NotificationPanel";
 import { WhatsAppPanel } from "@/components/layout/WhatsAppPanel";
 import { HeaderSearch } from "@/components/layout/HeaderSearch";
@@ -24,6 +25,7 @@ const pageTitles: Record<string, string> = {
   "/hr-leave": "Leave Management",
   "/hr-directory": "Employee Directory",
   "/cloud-dialer": "Cloud Dialer",
+  "/cahet-sprint": "CAHET Sprint",
   "/whatsapp-inbox": "WhatsApp Inbox",
   "/pending-followups": "Pending Follow-ups",
   "/fresh-leads": "Fresh Leads",
@@ -95,6 +97,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 <HeaderProfile />
               </div>
             </header>
+            <CahetSprintTicker />
             <GlobalActionBar />
             <LiveCallBar />
             <main className="flex-1 overflow-auto p-6">

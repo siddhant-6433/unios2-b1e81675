@@ -23,6 +23,7 @@ import {
 // Eager: small / essential-for-first-paint components
 import { LeadInfoCard } from "@/components/leads/LeadInfoCard";
 import { MirrorLeadCard } from "@/components/leads/MirrorLeadCard";
+import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
 import { FuzzyDuplicateAlert } from "@/components/admissions/FuzzyDuplicateAlert";
 import { type CallDispositionData } from "@/components/admissions/CallDispositionDialog";
 import { recordCallDisposition } from "@/lib/callDisposition";
@@ -993,6 +994,14 @@ const LeadDetail = () => {
         {lead.application_id && (
           <span className="text-xs font-mono text-muted-foreground ml-1 shrink-0">{lead.application_id}</span>
         )}
+        <span className="shrink-0">
+          <CahetPendingBadge
+            leadId={lead.id}
+            leadName={lead.name}
+            phone={lead.phone}
+            courseName={courseName}
+          />
+        </span>
         {/* Assigned counsellor badge */}
         <div className="ml-auto flex items-center gap-2 shrink-0">
           <span

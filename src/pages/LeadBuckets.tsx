@@ -5,6 +5,7 @@ import { useCampus } from "@/contexts/CampusContext";
 import { useToast } from "@/hooks/use-toast";
 import { School, GraduationCap, Search, Loader2, UserPlus, CheckCircle, AlertTriangle } from "lucide-react";
 import { jdCategoryHint } from "@/lib/jdCategoryHint";
+import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -599,7 +600,15 @@ export default function LeadBuckets() {
                     <UrgencyBadge createdAt={lead.created_at} />
                   </td>
                   <td className="px-4 py-3">
-                    <p className="font-medium text-foreground">{lead.name}</p>
+                    <p className="font-medium text-foreground flex items-center gap-1.5 flex-wrap">
+                      {lead.name}
+                      <CahetPendingBadge
+                        leadId={lead.id}
+                        leadName={lead.name}
+                        phone={lead.phone}
+                        courseName={lead.course_name}
+                      />
+                    </p>
                     {lead.jd_category && (() => {
                       const hint = jdCategoryHint(lead.jd_category);
                       return (

@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
 import { PriorityInterestedCard } from "@/components/leads/PriorityInterestedCard";
+import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
 import { useCloudDialerQueue, useMyProfileId } from "@/hooks/useAdmissionsData";
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -1816,6 +1817,14 @@ export default function CloudDialer() {
                             </h2>
                           )}
                           <p className="text-xs text-muted-foreground">{currentLead.phone}</p>
+                          <div className="mt-1">
+                            <CahetPendingBadge
+                              leadId={currentLead.id}
+                              leadName={currentLead.name}
+                              phone={currentLead.phone}
+                              courseName={currentLead.course_name}
+                            />
+                          </div>
                         </div>
                       </div>
                       <a href={`/admissions/${currentLead.id}`} target="_blank" rel="noreferrer"
