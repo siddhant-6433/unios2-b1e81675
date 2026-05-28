@@ -80,6 +80,7 @@ interface Counsellor {
 
 const SOURCE_LABELS: Record<string, string> = {
   website: "Website", meta_ads: "Meta Ads", google_ads: "Google Ads",
+  web_chat: "Web Chat", website_chat: "Web Chat",
   justdial: "JustDial", shiksha: "Shiksha", collegehai: "CollegeHai",
   collegedunia: "CollegeDunia", walk_in: "Walk-in", referral: "Referral",
   education_fair: "Education Fair", consultant: "Consultant", other: "Other",
@@ -96,6 +97,36 @@ const STAGE_LABELS: Record<string, string> = {
 function maskPhone(phone: string): string {
   if (!phone || phone.length < 4) return "****";
   return "••••••" + phone.slice(-4);
+}
+
+interface SourceChipsProps {
+  breakdown: { meta_ads: number; google_ads: number; website: number; web_chat: number };
+  onPick: (source: string) => void;
+}
+
+function SourceChips({ breakdown, onPick }: SourceChipsProps) {
+  const chips: Array<{ key: string; label: string; count: number; cls: string }> = [
+    { key: "meta_ads", label: "Meta", count: breakdown.meta_ads, cls: "bg-blue-50 text-blue-700 ring-blue-200 dark:bg-blue-950/30 dark:text-blue-300 dark:ring-blue-900" },
+    { key: "google_ads", label: "Google", count: breakdown.google_ads, cls: "bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:ring-amber-900" },
+    { key: "website", label: "Website", count: breakdown.website, cls: "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:ring-emerald-900" },
+    { key: "web_chat", label: "Web Chat", count: breakdown.web_chat, cls: "bg-violet-50 text-violet-700 ring-violet-200 dark:bg-violet-950/30 dark:text-violet-300 dark:ring-violet-900" },
+  ];
+  return (
+    <div className="flex flex-wrap gap-1.5 mb-3">
+      {chips.map((c) => (
+        <button
+          key={c.key}
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onPick(c.key); }}
+          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset transition-opacity ${c.cls} ${c.count === 0 ? "opacity-50" : "hover:opacity-80"}`}
+          title={`${c.label}: ${c.count}`}
+        >
+          <span>{c.label}</span>
+          <span className="font-bold">{c.count}</span>
+        </button>
+      ))}
+    </div>
+  );
 }
 
 export default function LeadBuckets() {
@@ -116,6 +147,13 @@ export default function LeadBuckets() {
   const [miraiSchoolCount, setMiraiSchoolCount] = useState(0);
   const [nimtSchoolCount, setNimtSchoolCount] = useState(0);
   const [collegeCount, setCollegeCount] = useState(0);
+
+  // Per-bucket source breakdown for Meta Ads, Google Ads, Website, Web Chat
+  type SourceBreakdown = { meta_ads: number; google_ads: number; website: number; web_chat: number };
+  const emptyBreakdown: SourceBreakdown = { meta_ads: 0, google_ads: 0, website: 0, web_chat: 0 };
+  const [collegeSources, setCollegeSources] = useState<SourceBreakdown>(emptyBreakdown);
+  const [nimtSources, setNimtSources] = useState<SourceBreakdown>(emptyBreakdown);
+  const [miraiSources, setMiraiSources] = useState<SourceBreakdown>(emptyBreakdown);
 
   // Detect if user is Mirai counsellor
   const MIRAI_CAMPUS_ID = "c0000002-0000-0000-0000-000000000001";
@@ -145,6 +183,42 @@ export default function LeadBuckets() {
     setMiraiSchoolCount(mRes.count ?? 0);
     setNimtSchoolCount(nRes.count ?? 0);
     setCollegeCount(cRes.count ?? 0);
+
+    // Source breakdown per bucket. We can't aggregate client-side from a
+    // SELECT because PostgREST caps rows at 1000 — with 2k+ college leads
+    // the aggregation silently undercounted (chip showed Meta 3 while the
+    // source-filter dropdown showed 11). Use count-only queries instead.
+    // `web_chat` and `website_chat` are both emitted by the chat widget
+    // (legacy vs current) — coalesce via `.in()`.
+    const bucketScopes = [
+      { key: "college" as const, apply: (q: any) => q.eq("bucket", "college") },
+      { key: "nimt" as const, apply: (q: any) => q.eq("school_brand", "nimt") },
+      { key: "mirai" as const, apply: (q: any) => q.eq("school_brand", "mirai") },
+    ];
+    const sourceFilters = [
+      { key: "meta_ads" as const, apply: (q: any) => q.eq("source", "meta_ads") },
+      { key: "google_ads" as const, apply: (q: any) => q.eq("source", "google_ads") },
+      { key: "website" as const, apply: (q: any) => q.eq("source", "website") },
+      { key: "web_chat" as const, apply: (q: any) => q.in("source", ["web_chat", "website_chat"]) },
+    ];
+    const jobs = bucketScopes.flatMap((b) =>
+      sourceFilters.map((s) => {
+        const q = supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true });
+        return s.apply(b.apply(q)).then((res: any) => ({ bucket: b.key, source: s.key, count: res.count ?? 0 }));
+      })
+    );
+    const results = await Promise.all(jobs);
+    const next: Record<string, SourceBreakdown> = {
+      college: { ...emptyBreakdown },
+      nimt: { ...emptyBreakdown },
+      mirai: { ...emptyBreakdown },
+    };
+    for (const r of results) {
+      next[r.bucket][r.source] = r.count;
+    }
+    setCollegeSources(next.college);
+    setNimtSources(next.nimt);
+    setMiraiSources(next.mirai);
   };
 
   const fetchLeads = async () => {
@@ -238,7 +312,15 @@ export default function LeadBuckets() {
 
   const filtered = leads.filter((l) => {
     if (courseFilter !== "all" && (l.course_name || "") !== courseFilter) return false;
-    if (sourceFilter !== "all" && (l.source || "") !== sourceFilter) return false;
+    if (sourceFilter !== "all") {
+      const src = l.source || "";
+      // web_chat chip in the bucket header coalesces both legacy `web_chat`
+      // and current `website_chat` source values, so the filter must too.
+      const matches = sourceFilter === "web_chat"
+        ? (src === "web_chat" || src === "website_chat")
+        : src === sourceFilter;
+      if (!matches) return false;
+    }
     if (!search) return true;
     const q = search.toLowerCase();
     return l.name.toLowerCase().includes(q) || (l.course_name || "").toLowerCase().includes(q);
@@ -317,15 +399,18 @@ export default function LeadBuckets() {
           className={`flex-1 cursor-pointer transition-all hover:shadow-sm ${activeBucket === "college" ? "ring-2 ring-primary/40 bg-primary/5" : "border-border/60"}`}
           onClick={() => { setActiveBucket("college"); setSchoolFilter("all"); }}
         >
-          <CardContent className="p-4 flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-pastel-blue shrink-0">
-              <GraduationCap className="h-5 w-5 text-foreground/70" />
+          <CardContent className="p-4">
+            <SourceChips breakdown={collegeSources} onPick={(src) => { setActiveBucket("college"); setSchoolFilter("all"); setSourceFilter(src); }} />
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-pastel-blue shrink-0">
+                <GraduationCap className="h-5 w-5 text-foreground/70" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-foreground">College Leads</p>
+                <p className="text-xs text-muted-foreground">Unassigned college leads</p>
+              </div>
+              <span className="text-xl font-bold text-foreground">{collegeCount}</span>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-foreground">College Leads</p>
-              <p className="text-xs text-muted-foreground">Unassigned college leads</p>
-            </div>
-            <span className="text-xl font-bold text-foreground">{collegeCount}</span>
           </CardContent>
         </Card>
 
@@ -333,15 +418,18 @@ export default function LeadBuckets() {
           className={`flex-1 cursor-pointer transition-all hover:shadow-sm ${activeBucket === "school" && schoolFilter !== "mirai" ? "ring-2 ring-primary/40 bg-primary/5" : "border-border/60"}`}
           onClick={() => { setActiveBucket("school"); setSchoolFilter("nimt"); }}
         >
-          <CardContent className="p-4 flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-pastel-yellow shrink-0">
-              <School className="h-5 w-5 text-foreground/70" />
+          <CardContent className="p-4">
+            <SourceChips breakdown={nimtSources} onPick={(src) => { setActiveBucket("school"); setSchoolFilter("nimt"); setSourceFilter(src); }} />
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-pastel-yellow shrink-0">
+                <School className="h-5 w-5 text-foreground/70" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-foreground">CBSE School Leads</p>
+                <p className="text-xs text-muted-foreground">NIMT Arthala &amp; Avantika II</p>
+              </div>
+              <span className="text-xl font-bold text-foreground">{nimtSchoolCount}</span>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-foreground">CBSE School Leads</p>
-              <p className="text-xs text-muted-foreground">NIMT Arthala &amp; Avantika II</p>
-            </div>
-            <span className="text-xl font-bold text-foreground">{nimtSchoolCount}</span>
           </CardContent>
         </Card>
 
@@ -349,15 +437,18 @@ export default function LeadBuckets() {
           className={`flex-1 cursor-pointer transition-all hover:shadow-sm ${activeBucket === "school" && schoolFilter === "mirai" ? "ring-2 ring-violet-400/60 bg-violet-50/50 dark:bg-violet-950/10" : "border-border/60"}`}
           onClick={() => { setActiveBucket("school"); setSchoolFilter("mirai"); }}
         >
-          <CardContent className="p-4 flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 dark:bg-violet-900/30 shrink-0">
-              <School className="h-5 w-5 text-violet-600" />
+          <CardContent className="p-4">
+            <SourceChips breakdown={miraiSources} onPick={(src) => { setActiveBucket("school"); setSchoolFilter("mirai"); setSourceFilter(src); }} />
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 dark:bg-violet-900/30 shrink-0">
+                <School className="h-5 w-5 text-violet-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-foreground">Mirai IB Leads</p>
+                <p className="text-xs text-muted-foreground">Mirai Experiential School</p>
+              </div>
+              <span className="text-xl font-bold text-violet-600">{miraiSchoolCount}</span>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-foreground">Mirai IB Leads</p>
-              <p className="text-xs text-muted-foreground">Mirai Experiential School</p>
-            </div>
-            <span className="text-xl font-bold text-violet-600">{miraiSchoolCount}</span>
           </CardContent>
         </Card>
       </div>
