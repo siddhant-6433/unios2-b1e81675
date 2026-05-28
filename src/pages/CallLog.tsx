@@ -80,6 +80,7 @@ const CallLog = () => {
   // Stats (from full query, not paginated)
   const [totalCount, setTotalCount] = useState(0);
   const [stats, setStats] = useState({ total: 0, interested: 0, not_interested: 0, no_answer: 0, busy: 0, call_back: 0 });
+  const [counsellorStats, setCounsellorStats] = useState<{ id: string; name: string; count: number }[]>([]);
 
   // Fetch counsellor list + resolve current user's auth ID
   useEffect(() => {
@@ -203,8 +204,24 @@ const CallLog = () => {
       });
       setStats(s);
     }
+
+    // Per-counsellor call counts for the same date range (admins only).
+    // Runs in parallel with head:true counts — one lightweight query per counsellor.
+    if (!isCounsellor && counsellorOptions.length > 0) {
+      const results = await Promise.all(
+        counsellorOptions.map(async (c) => {
+          let q = supabase.from("call_logs" as any).select("id", { count: "exact", head: true }).eq("user_id", c.id);
+          if (from) q = q.gte("created_at", `${from}T00:00:00`);
+          if (to) q = q.lte("created_at", `${to}T23:59:59`);
+          const { count } = await q;
+          return { id: c.id, name: c.name, count: count || 0 };
+        })
+      );
+      setCounsellorStats(results.sort((a, b) => b.count - a.count));
+    }
+
     setLoading(false);
-  }, [datePreset, customFrom, customTo, page, counsellorFilter, myUserId]);
+  }, [datePreset, customFrom, customTo, page, counsellorFilter, myUserId, counsellorOptions, isCounsellor]);
 
   useEffect(() => { fetchRecords(); }, [fetchRecords]);
   useEffect(() => { setPage(1); }, [datePreset, counsellorFilter, dispositionFilter]);
@@ -262,6 +279,52 @@ const CallLog = () => {
           </Card>
         ))}
       </div>
+
+      {/* Counsellor-wise calls (admin only) */}
+      {!isCounsellor && counsellorStats.length > 0 && (
+        <Card className="border-border/60 shadow-none">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <p className="text-sm font-semibold text-foreground">Calls by Counsellor</p>
+                <p className="text-[11px] text-muted-foreground">
+                  {datePreset === "all" ? "All time" : PRESETS.find(p => p.key === datePreset)?.label || "Custom range"}
+                </p>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                {counsellorStats.reduce((sum, c) => sum + c.count, 0)} total
+              </p>
+            </div>
+            <div className="space-y-2">
+              {(() => {
+                const max = Math.max(1, ...counsellorStats.map(c => c.count));
+                return counsellorStats.map(c => {
+                  const pct = (c.count / max) * 100;
+                  const isActive = counsellorFilter === c.id;
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => setCounsellorFilter(isActive ? "all" : c.id)}
+                      className={`w-full text-left group ${isActive ? "" : "hover:opacity-90"}`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className={`text-xs font-medium ${isActive ? "text-primary" : "text-foreground"} truncate`}>{c.name}</span>
+                        <span className="text-xs font-semibold text-foreground tabular-nums">{c.count}</span>
+                      </div>
+                      <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${isActive ? "bg-primary" : "bg-primary/60 group-hover:bg-primary/80"}`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </button>
+                  );
+                });
+              })()}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Filters row */}
       <div className="flex flex-wrap items-center gap-3">
