@@ -12,6 +12,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
 
 type Tab = "overdue" | "today" | "upcoming" | "visit_confirm" | "unclosed_visits" | "post_visit";
 
@@ -612,7 +613,16 @@ const PendingFollowups = () => {
                       </td>
                     )}
                     <td className="px-4 py-2.5">
-                      <p className="font-medium text-foreground">{r.lead_name}</p>
+                      <p className="font-medium text-foreground flex items-center gap-1.5 flex-wrap">
+                        {r.lead_name}
+                        <span onClick={(e) => e.stopPropagation()}>
+                          <CahetPendingBadge
+                            leadId={r.lead_id}
+                            leadName={r.lead_name}
+                            phone={r.lead_phone}
+                          />
+                        </span>
+                      </p>
                       <p className="text-[10px] text-muted-foreground">{r.lead_phone}</p>
                     </td>
                     <td className="px-3 py-2.5">

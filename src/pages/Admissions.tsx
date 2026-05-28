@@ -24,6 +24,7 @@ import { BulkLeadImportDialog } from "@/components/admissions/BulkLeadImportDial
 import { TransferLeadDialog } from "@/components/admissions/TransferLeadDialog";
 import { BulkWhatsAppDialog } from "@/components/admissions/BulkWhatsAppDialog";
 import { LeadTemperatureBadge } from "@/components/admissions/LeadTemperatureBadge";
+import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
 import { SeatMatrix } from "@/components/admissions/SeatMatrix";
 import { PaymentReconciliation } from "@/components/admissions/PaymentReconciliation";
 import { ActionCenterView } from "@/components/admissions/ActionCenterView";
@@ -1768,9 +1769,17 @@ const Admissions = () => {
                         Summary is shown for any lead with an `ai_call_records.summary`
                         so counsellors get instant context without opening the lead page. */}
                     <td className="px-4 py-2.5 max-w-[300px]" onClick={() => navigate(`/admissions/${lead.id}`)}>
-                      <div className="flex items-center gap-1.5 min-w-0">
+                      <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                         <span className="font-medium text-foreground text-sm truncate">{lead.name}</span>
                         <LeadTemperatureBadge temperature={lead.lead_temperature} score={lead.lead_score} />
+                        <span onClick={(e) => e.stopPropagation()}>
+                          <CahetPendingBadge
+                            leadId={lead.id}
+                            leadName={lead.name}
+                            phone={lead.phone}
+                            courseName={lead.course_name}
+                          />
+                        </span>
                         {lead.ai_called && (
                           <span className="flex h-4 w-4 items-center justify-center rounded bg-violet-100 dark:bg-violet-900/30 shrink-0" title="AI Called">
                             <Bot className="h-2.5 w-2.5 text-violet-600" />
