@@ -2,8 +2,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version",
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 async function sha512(message: string): Promise<string> {
@@ -135,16 +136,19 @@ Deno.serve(async (req) => {
       const txnid = `AVR${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
       const amountStr = parseFloat(amount).toFixed(2);
       const emailStr = email || "noreply@nimteducation.com";
-      const productStr = productinfo || "Alumni Service Fee";
+      // EaseBuzz rejects "/" and many special chars in productinfo / firstname.
+      const sanitize = (s: string) => String(s).replace(/[^A-Za-z0-9 \-_.]/g, " ").replace(/\s+/g, " ").trim().slice(0, 100);
+      const productStr = sanitize(productinfo || "Alumni Service Fee");
+      const firstnameStr = sanitize(firstname);
 
-      const hashInput = `${merchantKey}|${txnid}|${amountStr}|${productStr}|${firstname}|${emailStr}|${request_id}||||||||||${merchantSalt}`;
+      const hashInput = `${merchantKey}|${txnid}|${amountStr}|${productStr}|${firstnameStr}|${emailStr}|${request_id}||||||||||${merchantSalt}`;
       const hash = await sha512(hashInput);
 
       const selfUrl = `${supabaseUrl}/functions/v1/alumni-payment`;
 
       const formData = new URLSearchParams({
         key: merchantKey, txnid, amount: amountStr, productinfo: productStr,
-        firstname, email: emailStr, phone: phone.replace(/\D/g, "").slice(-10),
+        firstname: firstnameStr, email: emailStr, phone: phone.replace(/\D/g, "").slice(-10),
         hash, udf1: request_id, udf2: "", udf3: "", udf4: "", udf5: "",
         surl: selfUrl, furl: selfUrl,
       });
@@ -166,7 +170,7 @@ Deno.serve(async (req) => {
       await admin.from("pg_transactions").insert({
         txn_id: txnid, context: "alumni_service", context_id: request_id,
         amount: parseFloat(amountStr), status: "initiated", gateway: "easebuzz",
-        payer_name: firstname, payer_email: emailStr, payer_phone: phone,
+        payer_name: firstnameStr, payer_email: emailStr, payer_phone: phone,
         product_info: productStr,
       });
 
