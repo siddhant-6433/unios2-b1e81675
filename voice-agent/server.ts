@@ -2987,7 +2987,10 @@ Deno.serve({ port: PORT }, async (req) => {
         const rec = Array.isArray(recs) && recs.length > 0 ? recs[0] : null;
         if (rec?.lead_id) {
           const dispMap: Record<string, string> = { cancel: "cancelled", busy: "busy", "no-answer": "not_answered", failed: "not_answered" };
-          const recDisp = dispMap[callStatus] || "cancelled";
+          // Unknown status during recovery: default to not_answered, not cancelled.
+          // Recovery only runs when context was lost — almost always means the
+          // student leg never connected (not that the counsellor cancelled).
+          const recDisp = dispMap[callStatus] || "not_answered";
           const recDur = totalDuration;
           await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
             method: "PATCH", headers: { ...recovDbH, Prefer: "return=minimal" },
@@ -3035,10 +3038,15 @@ Deno.serve({ port: PORT }, async (req) => {
     // Plivo sends DialStatus="completed" even when student never answered — bLegUUID="" catches that
     const isConnected = !disposition && bLegUUID !== "" && (dialStatus === "completed" || callStatus === "completed");
 
-    // If no disposition and student never connected → counsellor hung up before student answered
+    // No disposition + student never picked up. Either /bridge-status didn't
+    // fire in time (race with /bridge-hangup) or the counsellor hung up before
+    // the student answered. Both look identical from here, but the far more
+    // common case is student-no-answer, so default to "not_answered" — the
+    // followup behavior is right for both and counsellors stop seeing every
+    // unanswered call mislabeled as "cancelled".
     if (!disposition && !isConnected) {
-      disposition = "cancelled";
-      console.log(`[BRIDGE-HANGUP ${callId}] No bLegUUID, student never answered → cancelled`);
+      disposition = "not_answered";
+      console.log(`[BRIDGE-HANGUP ${callId}] No bLegUUID, student never answered → not_answered`);
     }
 
     const isAuto = !!disposition;
