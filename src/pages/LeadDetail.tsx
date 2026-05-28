@@ -74,7 +74,7 @@ const STAGE_LABELS: Record<string, string> = {
   ai_called: "AI Called", counsellor_call: "In Follow Up",
   visit_scheduled: "Visit Scheduled", interview: "Interview", offer_sent: "Offer Sent",
   token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted",
-  not_interested: "Not Interested", ineligible: "Ineligible", dnc: "Do Not Contact", deferred: "Deferred (Next Session)", rejected: "Rejected",
+  not_interested: "Not Interested", ineligible: "Ineligible", dnc: "Do Not Contact", deferred: "Deferred (Next Session)", cold: "Cold", rejected: "Rejected",
 };
 
 const STAGE_ORDER = [

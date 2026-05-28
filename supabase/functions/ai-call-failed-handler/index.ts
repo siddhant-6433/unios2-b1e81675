@@ -39,17 +39,17 @@ Deno.serve(async (req) => {
       );
       if (rrErr || !pickedId) continue;
 
+      // After 3 failed AI calls, flip the lead to `cold` alongside the
+      // round-robin assignment. Cold is non-terminal — the counsellor still
+      // owns the lead and can re-engage on their own schedule — but it
+      // suppresses the lead from the active follow-up queue so the team
+      // isn't chased to chase phones that don't pick up.
       await db.from("leads")
-        .update({ assigned_at: new Date().toISOString() } as any)
+        .update({ stage: "cold", assigned_at: new Date().toISOString() } as any)
         .eq("id", lid);
-      await db.from("lead_followups").insert({
-        lead_id: lid, type: "call", status: "pending",
-        scheduled_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
-        notes: "🤖 AI Call: Max 3 attempts failed — counsellor follow-up required",
-      });
       await db.from("lead_activities").insert({
         lead_id: lid, type: "assignment",
-        description: "Lead auto-assigned after 3 failed AI calls",
+        description: "Lead auto-marked cold + assigned after 3 failed AI calls",
       });
       assigned++;
     }
@@ -77,7 +77,7 @@ Deno.serve(async (req) => {
     }
 
     // Filter out leads in terminal stages before retrying
-    const TERMINAL_STAGES = ["not_interested", "dnc", "rejected", "ineligible", "admitted"];
+    const TERMINAL_STAGES = ["not_interested", "dnc", "rejected", "ineligible", "admitted", "cold"];
     const candidateIds = Object.entries(stats)
       .filter(([lid, s]) => s.total < 3 && s.completed === 0 && !pendingSet.has(lid))
       .map(([lid]) => lid);
