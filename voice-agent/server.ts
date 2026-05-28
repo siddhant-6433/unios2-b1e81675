@@ -1847,6 +1847,20 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
         Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
         Prefer: "return=minimal",
       };
+
+      // Flip any still-"initiated" record to terminal. Inbound AI-from-start
+      // calls (AI DID, off-hours, no counsellor) don't go through /status/
+      // or /answer/inbound-ai/, so without this the LiveCallBar toast keeps
+      // ringing until the 10-min reconciler.
+      fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}&status=eq.initiated`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          status: "completed",
+          completed_at: new Date().toISOString(),
+        }),
+      }).catch(console.error);
+
       fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
         method: "POST",
         headers,
@@ -2252,6 +2266,66 @@ Deno.serve({ port: PORT }, async (req) => {
           method: "PATCH", headers: { ...dbH, Prefer: "return=minimal" },
           body: JSON.stringify({ status: "completed", completed_at: new Date().toISOString() }),
         }).catch(() => {});
+      }
+
+      activeCallContexts.delete(callId);
+      return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>`, {
+        headers: { "Content-Type": "application/xml" },
+      });
+    }
+
+    // Caller hung up before counsellor answered (DialStatus=cancel).
+    // Without this branch, status stays "initiated" until the 10-min reconciler
+    // and LiveCallBar shows a ghost "INCOMING CALL" toast for minutes after the
+    // caller is already gone — falling through to the AI <Stream> below is
+    // pointless since there's no caller on the line to hear it.
+    if (dialStatus === "cancel") {
+      if (leadId && SUPABASE_URL) {
+        const dbH = { "Content-Type": "application/json", apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
+
+        await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
+          method: "PATCH", headers: { ...dbH, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            status: "completed",
+            disposition: "missed",
+            completed_at: new Date().toISOString(),
+            summary: `Inbound call from ${callCtx?.leadName || "student"} — caller hung up before ${counsellorName} answered`,
+          }),
+        }).catch(() => {});
+
+        await fetch(`${SUPABASE_URL}/rest/v1/call_logs`, {
+          method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            lead_id: leadId, direction: "inbound", disposition: "missed",
+            notes: `Inbound call from ${callCtx?.leadName || "student"} — caller hung up before ${counsellorName} could answer`,
+            user_id: callCtx?.toolCallsMade?.[0]?.args?.counsellorUserId || null,
+            called_at: new Date().toISOString(),
+          }),
+        }).catch(() => {});
+
+        await fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
+          method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            lead_id: leadId, type: "call",
+            description: `Missed inbound call — caller hung up before ${counsellorName} could answer`,
+          }),
+        }).catch(() => {});
+
+        if (callCtx?.toolCallsMade?.[0]?.args?.counsellorUserId) {
+          await fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
+            method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
+            body: JSON.stringify({
+              user_id: callCtx.toolCallsMade[0].args.counsellorUserId,
+              type: "missed_call",
+              title: `Missed call from ${callCtx?.leadName || "student"}`,
+              body: `${callCtx?.leadName || "A student"} called but hung up before you could answer. Call them back.`,
+              link: `/admissions/${leadId}`,
+              lead_id: leadId,
+            }),
+          }).catch(() => {});
+        }
+
+        console.log(`[${callId}] Inbound caller hung up before counsellor answered (DialStatus=cancel)`);
       }
 
       activeCallContexts.delete(callId);
