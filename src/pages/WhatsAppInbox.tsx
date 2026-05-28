@@ -302,6 +302,10 @@ const WhatsAppInbox = () => {
 
   // Fetch conversations + build staff list
   useEffect(() => {
+    // For counsellors, wait until profile.id is available — otherwise the
+    // .contains filter falls through and we'd briefly expose the unfiltered
+    // list to the wrong viewer.
+    if (role === "counsellor" && !profile?.id) return;
     (async () => {
       // Fetch ALL conversations in batches (Supabase caps at 1000 per query)
       let allConvData: any[] = [];

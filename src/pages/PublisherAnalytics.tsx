@@ -79,6 +79,13 @@ const APP_SUBMITTED_STAGES = new Set([
   "application_submitted", "visit_scheduled", "interview", "offer_sent",
   "token_paid", "pre_admitted", "admitted",
 ]);
+const APP_FEE_PAID_STAGES = new Set([
+  "application_fee_paid", "application_submitted", "visit_scheduled", "interview",
+  "offer_sent", "token_paid", "pre_admitted", "admitted",
+]);
+const TOKEN_PAID_STAGES = new Set([
+  "token_paid", "pre_admitted", "admitted",
+]);
 const ADMITTED_STAGES = new Set(["admitted"]);
 const NOT_INTERESTED_STAGES = new Set(["not_interested"]);
 
@@ -90,6 +97,8 @@ interface SourceMetrics {
   engaged: number;
   appStarted: number;
   submitted: number;
+  appFeePaid: number;
+  tokenPaid: number;
   admitted: number;
 }
 
@@ -98,6 +107,8 @@ interface SourceMetrics {
 const ENGAGED_STAGES_PARAM   = Array.from(ENGAGED_STAGES).join(",");
 const APP_STARTED_STAGES_PARAM = Array.from(APP_STARTED_STAGES).join(",");
 const APP_SUBMITTED_PARAM    = Array.from(APP_SUBMITTED_STAGES).join(",");
+const APP_FEE_PAID_PARAM     = Array.from(APP_FEE_PAID_STAGES).join(",");
+const TOKEN_PAID_PARAM       = Array.from(TOKEN_PAID_STAGES).join(",");
 const ADMITTED_PARAM         = Array.from(ADMITTED_STAGES).join(",");
 const NOT_INTERESTED_PARAM   = Array.from(NOT_INTERESTED_STAGES).join(",");
 
@@ -185,7 +196,7 @@ export default function PublisherAnalytics() {
       const key = l.source || null;
       let m = bySource.get(key);
       if (!m) {
-        m = { source: key, label: labelFor(key), total: 0, notInterested: 0, engaged: 0, appStarted: 0, submitted: 0, admitted: 0 };
+        m = { source: key, label: labelFor(key), total: 0, notInterested: 0, engaged: 0, appStarted: 0, submitted: 0, appFeePaid: 0, tokenPaid: 0, admitted: 0 };
         bySource.set(key, m);
       }
       m.total++;
@@ -193,6 +204,8 @@ export default function PublisherAnalytics() {
       if (ENGAGED_STAGES.has(l.stage))      m.engaged++;
       if (APP_STARTED_STAGES.has(l.stage))  m.appStarted++;
       if (APP_SUBMITTED_STAGES.has(l.stage)) m.submitted++;
+      if (APP_FEE_PAID_STAGES.has(l.stage)) m.appFeePaid++;
+      if (TOKEN_PAID_STAGES.has(l.stage))   m.tokenPaid++;
       if (ADMITTED_STAGES.has(l.stage))     m.admitted++;
     }
     const out = Array.from(bySource.values());
@@ -301,6 +314,8 @@ export default function PublisherAnalytics() {
                     <Th label="Engaged %"   active={sortBy === "engaged_pct"}   onClick={() => setSortBy("engaged_pct")} />
                     <Th label="App Started" sortable={false} />
                     <Th label="Submitted %" active={sortBy === "submitted_pct"} onClick={() => setSortBy("submitted_pct")} />
+                    <Th label="App Fee Paid" sortable={false} />
+                    <Th label="Token Paid"   sortable={false} />
                     <Th label="Admitted %"  active={sortBy === "admitted_pct"}  onClick={() => setSortBy("admitted_pct")} />
                   </tr>
                 </thead>
@@ -347,6 +362,16 @@ export default function PublisherAnalytics() {
                           <a href={baseLink(APP_SUBMITTED_PARAM)} target="_blank" rel="noreferrer"
                             className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-semibold tabular-nums hover:opacity-80 ${pctClass(submittedPct, "submitted")}`}>
                             {m.submitted.toLocaleString("en-IN")} · {submittedPct}%
+                          </a>
+                        </td>
+                        <td className="px-4 py-3 tabular-nums">
+                          <a href={baseLink(APP_FEE_PAID_PARAM)} target="_blank" rel="noreferrer" className={`text-muted-foreground ${linkCls}`}>
+                            {m.appFeePaid.toLocaleString("en-IN")}
+                          </a>
+                        </td>
+                        <td className="px-4 py-3 tabular-nums">
+                          <a href={baseLink(TOKEN_PAID_PARAM)} target="_blank" rel="noreferrer" className={`text-muted-foreground ${linkCls}`}>
+                            {m.tokenPaid.toLocaleString("en-IN")}
                           </a>
                         </td>
                         <td className="px-4 py-3">

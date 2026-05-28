@@ -117,6 +117,17 @@ export function GlobalActionBar() {
             if (effectiveProfileId) q = q.eq("leads.counsellor_id", effectiveProfileId);
             return q;
           })(),
+          // Missed Callbacks — inbound call_logs the candidate placed that no
+          // human picked up. Scoped to the counsellor's own leads when a
+          // counsellor scope is active; org-wide otherwise.
+          (() => {
+            let q = supabase.from("call_logs")
+              .select("id", { count: "exact", head: true })
+              .eq("direction", "inbound")
+              .eq("disposition", "missed");
+            if (myLeadIds) q = q.in("lead_id", myLeadIds);
+            return q;
+          })(),
           // Hot leads: AI-elevated priority_interested. Counsellor-scoped only —
           // the team-wide count is too noisy for the action bar.
           (() => {
@@ -146,7 +157,7 @@ export function GlobalActionBar() {
         ];
 
         const settled = await Promise.allSettled(queries);
-        const labels = ["overdue","today","fresh","unassigned","unclosed","confirm","post_visit","missed","hot","wa_unread","reclaim_soon"];
+        const labels = ["overdue","today","fresh","unassigned","unclosed","confirm","post_visit","ai_needs_followup","missed_callbacks","hot","wa_unread","reclaim_soon"];
         const pick = (i: number) => {
           const r = settled[i];
           if (r.status === "fulfilled") {
@@ -167,10 +178,11 @@ export function GlobalActionBar() {
         const unclosedRes  = pick(4);
         const confirmRes   = pick(5);
         const postVisitRes = pick(6);
-        const missedRes    = pick(7);
-        const hotRes       = pick(8);
-        const waRes        = pick(9);
-        const reclaimRes   = pick(10);
+        const aiNeedsFollowupRes = pick(7);
+        const missedCallbacksRes = pick(8);
+        const hotRes       = pick(9);
+        const waRes        = pick(10);
+        const reclaimRes   = pick(11);
 
         const result: ActionItem[] = [];
 
@@ -182,9 +194,14 @@ export function GlobalActionBar() {
         // RPC returns the integer directly in .data, not .count.
         const reclaimSoon = typeof reclaimRes?.data === "number" ? reclaimRes.data : 0;
 
-        if (c(missedRes) > 0) result.push({
-          key: "missed", label: "Missed Callbacks", count: c(missedRes),
+        if (c(missedCallbacksRes) > 0) result.push({
+          key: "missed_callbacks", label: "Missed Callbacks", count: c(missedCallbacksRes),
           icon: PhoneMissed, color: "text-white bg-red-600 border-red-700 animate-pulse",
+          url: "/call-log",
+        });
+        if (c(aiNeedsFollowupRes) > 0) result.push({
+          key: "ai_needs_followup", label: "AI Needs Follow-up", count: c(aiNeedsFollowupRes),
+          icon: PhoneMissed, color: "text-white bg-rose-600 border-rose-700 animate-pulse",
           url: "/missed-calls",
         });
         // Reclaim Soon — highest urgency after missed callbacks. Pulses so the
