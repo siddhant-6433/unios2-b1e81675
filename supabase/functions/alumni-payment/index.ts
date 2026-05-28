@@ -14,13 +14,31 @@ async function sha512(message: string): Promise<string> {
 }
 
 function returnPage(title: string, message: string, isSuccess: boolean): Response {
+  // Two flows land here: (a) popup case — window.opener is set, we postMessage
+  // back so the portal updates and we auto-close after 2s; (b) same-tab case
+  // — no opener (mobile popup blocker fallback), we full-redirect back to the
+  // alumni portal after 2s so the user lands on the dashboard with fresh state.
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>${title}</title>
 <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8fafc;}
 .card{background:white;border-radius:16px;padding:40px;text-align:center;max-width:360px;box-shadow:0 4px 24px rgba(0,0,0,.08);}
 .icon{font-size:48px;margin-bottom:16px;}h2{margin:0 0 8px;font-size:18px;color:#0f172a;}
 p{margin:0 0 24px;font-size:14px;color:#64748b;}button{background:#6366f1;color:white;border:none;border-radius:10px;padding:10px 24px;font-size:14px;cursor:pointer;}</style></head>
-<body><div class="card"><div class="icon">${isSuccess ? "✅" : "❌"}</div><h2>${title}</h2><p>${message}</p><button onclick="window.close()">Close</button></div>
-<script>try{window.opener&&window.opener.postMessage({alumni_payment:"${isSuccess ? "success" : "failed"}"},"*");}catch(e){}</script></body></html>`;
+<body><div class="card"><div class="icon">${isSuccess ? "✅" : "❌"}</div><h2>${title}</h2><p>${message}</p><p style="font-size:12px;color:#94a3b8;margin-top:-12px">Returning to the alumni portal…</p><button onclick="goBack()">Return now</button></div>
+<script>
+  var SUCCESS = ${isSuccess ? "true" : "false"};
+  function goBack() {
+    if (window.opener && !window.opener.closed) {
+      try { window.opener.postMessage({ alumni_payment: SUCCESS ? "success" : "failed" }, "*"); } catch (e) {}
+      try { window.close(); } catch (e) {}
+      // If close() is blocked (some mobile browsers), redirect this tab too.
+      setTimeout(function () { window.location.href = "https://uni.nimt.ac.in/alumni-verification"; }, 300);
+    } else {
+      window.location.href = "https://uni.nimt.ac.in/alumni-verification";
+    }
+  }
+  try { window.opener && window.opener.postMessage({ alumni_payment: SUCCESS ? "success" : "failed" }, "*"); } catch (e) {}
+  setTimeout(goBack, 2000);
+</script></body></html>`;
   return new Response(html, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 

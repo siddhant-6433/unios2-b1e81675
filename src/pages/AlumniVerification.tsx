@@ -372,6 +372,14 @@ export default function AlumniVerification() {
     if (!requestId) return;
     setPaymentLoading(true);
 
+    // Open a blank popup SYNCHRONOUSLY inside the click handler. Mobile browsers
+    // (iOS Safari, Android Chrome) only allow popups that originate from a fresh
+    // user gesture — once we await the function invoke, the gesture is "consumed"
+    // and a later window.open() is silently blocked. We point the popup at the
+    // pay_url once the async call resolves. If the popup is null/blocked, we
+    // fall back to a same-tab redirect.
+    const popup = window.open("about:blank", "alumni_payment", "width=600,height=720,scrollbars=yes");
+
     const { data, error } = await supabase.functions.invoke("alumni-payment", {
       body: {
         action: "initiate",
@@ -385,13 +393,20 @@ export default function AlumniVerification() {
     });
 
     if (error || data?.error || !data?.pay_url) {
+      if (popup && !popup.closed) popup.close();
       toast({ title: "Payment initiation failed", description: data?.error || error?.message, variant: "destructive" });
       setPaymentLoading(false);
       return;
     }
 
-    // Open EaseBuzz payment page in popup
-    const popup = window.open(data.pay_url, "alumni_payment", "width=600,height=700,scrollbars=yes");
+    if (popup && !popup.closed) {
+      popup.location.href = data.pay_url;
+    } else {
+      // Popup blocked — same-tab redirect. The return-from-EaseBuzz HTML
+      // (alumni-payment surl) sends us back to /alumni-verification.
+      window.location.href = data.pay_url;
+      return;
+    }
 
     // Listen for postMessage from return page
     const msgHandler = (e: MessageEvent) => {
