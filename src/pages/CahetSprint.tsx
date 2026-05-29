@@ -648,12 +648,14 @@ const CahetSprint = () => {
 
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-2">
-        {!isCounsellor && (
-          <div className="flex items-center gap-1 rounded-md border bg-card p-0.5">
-            <Button size="sm" variant={scope === "all" ? "default" : "ghost"} onClick={() => setScope("all")}>All counsellors</Button>
-            <Button size="sm" variant={scope === "mine" ? "default" : "ghost"} onClick={() => setScope("mine")}>My leads</Button>
-          </div>
-        )}
+        {/* Scope toggle is shown to counsellors too: the BPT/BMRIT pool is a
+            shared sprint target, and many counsellors have few or zero pool
+            leads assigned to them. Locking them to "My leads" left them staring
+            at an empty queue with no way to reach the 400+ unworked pool. */}
+        <div className="flex items-center gap-1 rounded-md border bg-card p-0.5">
+          <Button size="sm" variant={scope === "all" ? "default" : "ghost"} onClick={() => setScope("all")}>{isCounsellor ? "Whole pool" : "All counsellors"}</Button>
+          <Button size="sm" variant={scope === "mine" ? "default" : "ghost"} onClick={() => setScope("mine")}>My leads</Button>
+        </div>
         <div className="flex items-center gap-1 flex-wrap">
           {BUCKET_FILTERS.map(f => (
             <Button
@@ -719,11 +721,34 @@ const CahetSprint = () => {
               Loading sprint queue…
             </div>
           ) : filtered.length === 0 ? (
-            <div className="p-10 text-center text-muted-foreground">
-              <CheckCircle2 className="h-10 w-10 mx-auto text-emerald-500 mb-2" />
-              <div className="font-medium">Nothing left in this view.</div>
-              <div className="text-sm">Try changing the filter or scope, or register the next 15 from another bucket.</div>
-            </div>
+            // Pool-aware empty state. The misleading "Nothing left" message used
+            // to fire even when the shared pool still had hundreds of unworked
+            // leads — it just meant none were assigned to this counsellor. When
+            // that's the case, point them at the pool instead of implying the
+            // sprint is done.
+            scope === "mine" && (stats?.pool_remaining ?? 0) > 0 ? (
+              <div className="p-10 text-center text-muted-foreground">
+                <Snowflake className="h-10 w-10 mx-auto text-sky-400 mb-2" />
+                <div className="font-medium">No BPT/BMRIT leads assigned to you.</div>
+                <div className="text-sm">
+                  There {stats!.pool_remaining === 1 ? "is" : "are"} still <strong>{stats!.pool_remaining}</strong> unregistered lead{stats!.pool_remaining === 1 ? "" : "s"} in the shared pool.
+                </div>
+                <div className="mt-3 flex items-center justify-center gap-2">
+                  <Button size="sm" onClick={() => setScope("all")} className="bg-rose-600 hover:bg-rose-700 text-white">
+                    Show whole pool
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setPickerOpen(true)}>
+                    <ListPlus className="h-3.5 w-3.5 mr-1" /> Add from bucket
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-10 text-center text-muted-foreground">
+                <CheckCircle2 className="h-10 w-10 mx-auto text-emerald-500 mb-2" />
+                <div className="font-medium">Nothing left in this view.</div>
+                <div className="text-sm">Try changing the filter or scope, or register the next 15 from another bucket.</div>
+              </div>
+            )
           ) : (
             <div ref={listRef} className="divide-y">
               {filtered.map(r => {
