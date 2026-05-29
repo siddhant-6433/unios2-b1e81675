@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCampus } from "@/contexts/CampusContext";
 import { useToast } from "@/hooks/use-toast";
-import { School, GraduationCap, Search, Loader2, UserPlus, CheckCircle, AlertTriangle } from "lucide-react";
+import { School, GraduationCap, Search, Loader2, UserPlus, CheckCircle, AlertTriangle, ListPlus } from "lucide-react";
 import { jdCategoryHint } from "@/lib/jdCategoryHint";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -169,6 +169,12 @@ export default function LeadBuckets() {
   const isAdminRole = role === "super_admin" || role === "admission_head" || role === "campus_admin" || role === "principal";
   const [counsellors, setCounsellors] = useState<Counsellor[]>([]);
   const [selectedCounsellor, setSelectedCounsellor] = useState<string>("");
+
+  // Save-as-list dialog
+  const [showSaveList, setShowSaveList] = useState(false);
+  const [savingList, setSavingList] = useState(false);
+  const [newListName, setNewListName] = useState("");
+  const [listScope, setListScope] = useState<"selected" | "filtered">("selected");
 
   const fetchCounts = async () => {
     // Use `school_brand` from the view (added 20260613100000) instead of a
@@ -387,6 +393,67 @@ export default function LeadBuckets() {
     await fetchCounts();
   };
 
+  const handleSaveList = async () => {
+    // Snapshot lead IDs at click time so the list count matches the preview.
+    const ids = listScope === "selected"
+      ? Array.from(selectedIds)
+      : filtered.map((l) => l.id);
+    if (!ids.length) return;
+
+    const name = newListName.trim();
+    if (!name) {
+      toast({ title: "Name required", description: "Give the list a name first.", variant: "destructive" });
+      return;
+    }
+
+    setSavingList(true);
+    const filtersSnapshot = {
+      bucket: activeBucket,
+      school_filter: schoolFilter,
+      source: sourceFilter,
+      course: courseFilter,
+      search: search || null,
+    };
+
+    const { data: list, error: listErr } = await supabase
+      .from("lead_lists" as any)
+      .insert({
+        name,
+        source: listScope === "selected" ? "manual" : "filter",
+        filters_snapshot: filtersSnapshot,
+        description: listScope === "selected"
+          ? `Saved from Lead Buckets — ${ids.length} selected leads`
+          : `Saved filter snapshot — ${activeBucket}${schoolFilter !== "all" ? "/" + schoolFilter : ""}`,
+      })
+      .select("id")
+      .single();
+
+    if (listErr || !list) {
+      toast({ title: "Could not create list", description: listErr?.message || "Unknown error", variant: "destructive" });
+      setSavingList(false);
+      return;
+    }
+
+    const listId = (list as any).id;
+    const members = ids.map((lead_id) => ({ list_id: listId, lead_id }));
+    let memberErrors = 0;
+    for (let i = 0; i < members.length; i += 500) {
+      const chunk = members.slice(i, i + 500);
+      const { error: memErr } = await supabase.from("lead_list_members" as any).insert(chunk);
+      if (memErr) { memberErrors++; console.error("List member insert failed:", memErr); }
+    }
+
+    setSavingList(false);
+    setShowSaveList(false);
+    setNewListName("");
+    toast({
+      title: "List saved",
+      description: memberErrors > 0
+        ? `"${name}" — some members failed to insert. Check console.`
+        : `"${name}" — ${ids.length} leads. Send from the Lists page.`,
+    });
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
@@ -488,6 +555,10 @@ export default function LeadBuckets() {
             {selectedIds.size} lead{selectedIds.size > 1 ? "s" : ""} selected
           </span>
           <div className="ml-auto flex gap-2">
+            <Button size="sm" variant="outline" className="gap-2" onClick={() => { setListScope("selected"); setShowSaveList(true); }}>
+              <ListPlus className="h-4 w-4" />
+              Save as List
+            </Button>
             <Button size="sm" className="gap-2" onClick={() => {
               if (isAdminRole) { setShowAssign(true); } else { handleAssign(); }
             }}>
@@ -545,6 +616,17 @@ export default function LeadBuckets() {
             Clear source
           </Button>
         )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 px-3 text-xs gap-1.5 ml-auto"
+          disabled={filtered.length === 0}
+          onClick={() => { setListScope("filtered"); setShowSaveList(true); }}
+          title="Save the current filtered view as a reusable list for bulk WhatsApp/email"
+        >
+          <ListPlus className="h-3.5 w-3.5" />
+          Save filter as list ({filtered.length})
+        </Button>
       </div>
 
       {/* Table */}
@@ -692,6 +774,47 @@ export default function LeadBuckets() {
             >
               {assigning ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
               Assign
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Save as List dialog */}
+      <Dialog open={showSaveList} onOpenChange={setShowSaveList}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Save as List</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              {listScope === "selected"
+                ? `${selectedIds.size} selected lead${selectedIds.size === 1 ? "" : "s"} will be saved.`
+                : `${filtered.length} lead${filtered.length === 1 ? "" : "s"} matching the current filters will be saved.`}
+              {" "}List is static — the snapshot won't change as new leads come in.
+            </p>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">List name</label>
+              <input
+                type="text"
+                value={newListName}
+                onChange={(e) => setNewListName(e.target.value)}
+                placeholder={listScope === "filtered"
+                  ? `${activeBucket} leads${sourceFilter !== "all" ? " · " + (SOURCE_LABELS[sourceFilter] || sourceFilter) : ""}`
+                  : "e.g. Hot college leads — May"}
+                className="mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSaveList(false)}>Cancel</Button>
+            <Button
+              onClick={handleSaveList}
+              disabled={savingList || !newListName.trim()}
+              className="gap-2"
+            >
+              {savingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
+              Save List
             </Button>
           </DialogFooter>
         </DialogContent>
