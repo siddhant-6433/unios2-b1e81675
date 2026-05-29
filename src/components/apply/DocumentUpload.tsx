@@ -119,21 +119,22 @@ function getRequiredDocs(
   // Transfer / Migration Certificate — sourced from the most recent
   // institution. UG applicants get it from their Class 12 school
   // ("school TC/MC"); PG applicants get it from their graduation
-  // college/university ("migration certificate"). Required either way.
+  // college/university ("migration certificate"). Optional either way —
+  // many applicants don't have it issued yet at application time.
   const isPG = ['postgraduate', 'mba_pgdm', 'bed'].includes(programCategory);
   if (isPG) {
     base.push({
       key:      'migration_certificate',
       label:    'Migration / Transfer Certificate',
-      desc:     'From your graduation college / university',
-      required: true,
+      desc:     'From your graduation college / university (optional)',
+      required: false,
     });
   } else {
     base.push({
       key:      'school_transfer_certificate',
       label:    'School Transfer / Migration Certificate',
-      desc:     'From your Class 12 school',
-      required: true,
+      desc:     'From your Class 12 school (optional)',
+      required: false,
     });
   }
 
