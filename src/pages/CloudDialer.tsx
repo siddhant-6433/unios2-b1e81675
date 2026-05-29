@@ -554,6 +554,11 @@ export default function CloudDialer() {
   const pollRef = useRef<number | null>(null);
   const callIdRef = useRef<string | null>(null);
   const pollStartTimeRef = useRef<number | null>(null);
+  // Guards cancelCall against a double-click: the manual-call-cancel invoke
+  // awaits up to ~2s (Plivo uuid retry) before status flips to auto-disposed,
+  // and the "Cancelled" button stays visible the whole time. Without this a
+  // second click double-fires the edge function + double-counts stats.
+  const cancellingRef = useRef(false);
 
   // Inline editing
   const [queueSearch, setQueueSearch] = useState("");
@@ -758,6 +763,7 @@ export default function CloudDialer() {
 
   const placeCall = async () => {
     if (!currentLead || !user?.id) return;
+    cancellingRef.current = false;
     setCallState({ status: "calling", startTime: Date.now(), elapsed: 0, disposition: null, autoDisposition: false });
 
     try {
@@ -929,15 +935,74 @@ export default function CloudDialer() {
 
   // ── Auto-disposition (unanswered/busy/voicemail from Plivo) ───────────────
 
-  const handleAutoDisposition = (disposition: string) => {
+  // ── Cancel an in-flight Cloud Call ───────────────────────────────────────
+  // Counsellor pressed "Cancelled" while the call was still ringing. Unlike a
+  // plain local disposition, this must hang up the live Plivo call so both legs
+  // (counsellor + student) drop — otherwise the call stays orphaned on Plivo.
+  // Mirrors LeadDetail's onCancelCall: invoke manual-call-cancel, then drive the
+  // UI. The edge function records cancelled_by_counsellor, so we skip the local
+  // call-log write on success to avoid a conflicting row.
+  const cancelCall = async () => {
+    if (cancellingRef.current) return;
+    cancellingRef.current = true;
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    const callUuid = callIdRef.current;
+    let hungUp = false;
+    if (callUuid) {
+      try {
+        const { error } = await supabase.functions.invoke("manual-call-cancel", {
+          body: { call_id: callUuid, caller_user_id: user?.id },
+        });
+        if (error) {
+          toast({ title: "Cancel failed", description: error.message, variant: "destructive" });
+        } else {
+          toast({ title: "Call cancelled", description: "Both legs dropped." });
+          hungUp = true;
+        }
+      } catch (e: any) {
+        toast({ title: "Cancel failed", description: e?.message || "Try again", variant: "destructive" });
+      }
+    }
+    handleAutoDisposition("cancelled", hungUp);
+  };
+
+  // ── End a connected Cloud Call ───────────────────────────────────────────
+  // Student answered and the counsellor pressed "End Call". Transition the UI
+  // to the disposition screen immediately, then drop the live Plivo legs so
+  // neither phone stays connected. hangup_only: the real disposition is marked
+  // from the "ended" screen, so the edge function must NOT write
+  // cancelled_by_counsellor here.
+  const endCall = async () => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    setCallState(prev => ({ ...prev, status: "ended" }));
+    setAutoNextTimer(60);
+    const callUuid = callIdRef.current;
+    if (callUuid) {
+      try {
+        const { error } = await supabase.functions.invoke("manual-call-cancel", {
+          body: { call_id: callUuid, caller_user_id: user?.id, hangup_only: true },
+        });
+        if (error) {
+          toast({ title: "Couldn't drop call legs", description: error.message, variant: "destructive" });
+        }
+      } catch (e: any) {
+        toast({ title: "Couldn't drop call legs", description: e?.message || "Try again", variant: "destructive" });
+      }
+    }
+  };
+
+  const handleAutoDisposition = (disposition: string, skipLog = false) => {
     const statsKey = disposition === "busy" ? "busy" : disposition === "voicemail" ? "voicemail" : "noAnswer";
     setStats(prev => ({ ...prev, [statsKey]: prev[statsKey] + 1 }));
     setCallState(prev => ({ ...prev, status: "auto-disposed", disposition, autoDisposition: true }));
     // Write call log via dedupe RPC so this row merges with the auto path from
     // bridge-hangup (if it already wrote one). Without this, cancels + stuck-call
     // timeouts produce no call log at all.
+    // skipLog: when manual-call-cancel already recorded cancelled_by_counsellor,
+    // skip this write so we don't race a conflicting "cancelled" row (RPC is
+    // first-write-wins on cloud_call_uuid).
     const callUuid = callIdRef.current;
-    if (currentLead) {
+    if (currentLead && !skipLog) {
       (supabase as any).rpc("record_cloud_call_log", {
         p_call_uuid:     callUuid ?? crypto.randomUUID(),
         p_lead_id:       currentLead.id,
@@ -1472,12 +1537,12 @@ export default function CloudDialer() {
                     </div>
                     <div className="flex items-center gap-2">
                       {callState.status === "calling" && (
-                        <Button size="sm" variant="outline" onClick={() => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } handleAutoDisposition("cancelled"); }}>
+                        <Button size="sm" variant="outline" onClick={cancelCall}>
                           <PhoneOff className="h-3.5 w-3.5 mr-1.5" />Cancelled
                         </Button>
                       )}
                       {callState.status === "connected" && (
-                        <Button size="sm" variant="destructive" onClick={() => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } setCallState(prev => ({ ...prev, status: "ended" })); setAutoNextTimer(60); }}>
+                        <Button size="sm" variant="destructive" onClick={endCall}>
                           <PhoneOff className="h-3.5 w-3.5 mr-1.5" />End Call
                         </Button>
                       )}
