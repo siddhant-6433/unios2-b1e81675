@@ -7,7 +7,7 @@
  *
  * Stages, in order (labels shown to users are neutral nouns — see raw[] below):
  *   1. fee        — application_fee paid                          → "Fee"
- *   2. docs       — every uploaded doc has a verified/rejected    → "Docs"
+ *   2. docs       — docs uploaded AND all reviewed (none pending)  → "Docs"
  *   3. submitted  — application past 'draft' (declaration done)   → "Submission"
  *   4. approved   — applications.status = 'approved' (or rejected)→ "Approval"
  *   5. offer      — at least one offer_letters row for the lead   → "Offer"
@@ -91,7 +91,13 @@ export function computeStages(p: LifecycleInput): Stage[] {
   // other paid application (e.g., Naaz Bano's abandoned XS8L draft showing
   // paid because XQUX was the real paid app).
   const isFeePaid = a.payment_status === "paid";
-  const allDocsReviewed = p.docs.total === 0 || p.docs.pending === 0;
+  // Docs is "done" only when documents have actually been uploaded AND every
+  // one has been reviewed (none pending). Zero uploads is NOT done — it's the
+  // candidate's pending next action, not a completed stage. Previously
+  // `total === 0` counted as done, which lit the lifecycle Docs dot green for
+  // applications that never uploaded anything, contradicting the Section
+  // Progress panel (which reads the applicant-declared `completed_sections`).
+  const allDocsReviewed = p.docs.total > 0 && p.docs.pending === 0;
   const isApproved = a.status === "approved";
   const isRejectedApp = a.status === "rejected";
   const hasOffer = p.hasOffer;
