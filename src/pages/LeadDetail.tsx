@@ -1141,6 +1141,60 @@ const LeadDetail = () => {
         );
       })()}
 
+      {/* Call Disposition — inline panel (not a modal) so the counsellor keeps
+          the lead's course / details / timeline visible while on the call.
+          Renders null until a Cloud Call is placed (showCallDisposition).
+          onCallNow side-effect (WhatsApp template to the counsellor's own
+          phone) was removed on user request; "Call Now" still opens tel:. */}
+      <CallDispositionDialog
+        inline
+        open={showCallDisposition}
+        onOpenChange={setShowCallDisposition}
+        leadName={lead.name}
+        leadPhone={lead.phone}
+        campuses={campuses}
+        defaultCampusId={lead.campus_id || undefined}
+        onSubmit={logCallDisposition}
+        callStatus={dispositionCallStatus}
+        callEnded={dispositionCallEnded}
+        onManualConnect={() => setDispositionCallStatus("connected")}
+        onRetryCall={async () => {
+          // Counsellor missed A-leg → reset dialog state and place a fresh call.
+          // The poll effect will re-arm on the new activeCallUuid.
+          setShowCallDisposition(false);
+          setDispositionCallStatus(undefined);
+          setDispositionCallEnded(false);
+          setActiveCallUuid(null);
+          await placeManualCall();
+        }}
+        onCancelCall={activeCallUuid ? async () => {
+          // Cancel the in-flight Cloud Call: hangs up both Plivo legs and
+          // records the call as cancelled_by_counsellor in call_logs +
+          // ai_call_records. Failures surface as a toast — the panel still
+          // closes so the counsellor isn't stuck on a broken state.
+          try {
+            const { error } = await supabase.functions.invoke("manual-call-cancel", {
+              body: { call_id: activeCallUuid, caller_user_id: user?.id },
+            });
+            if (error) {
+              toast({ title: "Cancel failed", description: error.message, variant: "destructive" });
+            } else {
+              toast({ title: "Call cancelled", description: "Both legs dropped." });
+              fetchAll(true);
+            }
+          } catch (e: any) {
+            toast({ title: "Cancel failed", description: e?.message || "Try again", variant: "destructive" });
+          }
+        } : undefined}
+        courseName={courseName}
+        leadStage={lead.stage as any}
+        personRole={(lead as any).person_role || null}
+        latestNote={notes[0]?.content || null}
+        aiCallSummary={(lead as any).ai_notes || null}
+        leadSource={lead.source || null}
+        jdKeyword={(lead as any).jd_category || null}
+      />
+
       {/* Application Progress — top of page, full width, for applicants */}
       {(lead.person_role === "applicant" || lead.application_id) && (
         <ApplicationProgress
@@ -1456,56 +1510,10 @@ const LeadDetail = () => {
         onSchedule={addFollowup}
       />
 
-      {/* Call Disposition Dialog — onCallNow side-effect (WhatsApp template
-          send to the counsellor's own phone) was removed on user request.
-          The dialog's "Call Now" button still opens the tel: dialer. */}
-      <CallDispositionDialog
-        open={showCallDisposition}
-        onOpenChange={setShowCallDisposition}
-        leadName={lead.name}
-        leadPhone={lead.phone}
-        campuses={campuses}
-        defaultCampusId={lead.campus_id || undefined}
-        onSubmit={logCallDisposition}
-        callStatus={dispositionCallStatus}
-        callEnded={dispositionCallEnded}
-        onManualConnect={() => setDispositionCallStatus("connected")}
-        onRetryCall={async () => {
-          // Counsellor missed A-leg → reset dialog state and place a fresh call.
-          // The poll effect will re-arm on the new activeCallUuid.
-          setShowCallDisposition(false);
-          setDispositionCallStatus(undefined);
-          setDispositionCallEnded(false);
-          setActiveCallUuid(null);
-          await placeManualCall();
-        }}
-        onCancelCall={activeCallUuid ? async () => {
-          // Cancel the in-flight Cloud Call: hangs up both Plivo legs and
-          // records the call as cancelled_by_counsellor in call_logs +
-          // ai_call_records. Failures surface as a toast — the dialog still
-          // closes so the counsellor isn't stuck on a broken state.
-          try {
-            const { error } = await supabase.functions.invoke("manual-call-cancel", {
-              body: { call_id: activeCallUuid, caller_user_id: user?.id },
-            });
-            if (error) {
-              toast({ title: "Cancel failed", description: error.message, variant: "destructive" });
-            } else {
-              toast({ title: "Call cancelled", description: "Both legs dropped." });
-              fetchAll(true);
-            }
-          } catch (e: any) {
-            toast({ title: "Cancel failed", description: e?.message || "Try again", variant: "destructive" });
-          }
-        } : undefined}
-        courseName={courseName}
-        leadStage={lead.stage as any}
-        personRole={(lead as any).person_role || null}
-        latestNote={notes[0]?.content || null}
-        aiCallSummary={(lead as any).ai_notes || null}
-        leadSource={lead.source || null}
-        jdKeyword={(lead as any).jd_category || null}
-      />
+      {/* Call Disposition panel is rendered inline near the top of the page
+          (after the quick-action bar) so the counsellor keeps the lead's
+          course / details / timeline visible during the call. See
+          <CallDispositionDialog inline ... /> above. */}
 
       {/* Soft direct-dial guard — surfaces when counsellor tries to call a
           non-priority lead while paid/overdue work is pending. */}
