@@ -100,6 +100,9 @@ const ReportTemplates       = lazy(() => import("./pages/ib/ReportTemplates"));
 const MYPProjects           = lazy(() => import("./pages/ib/MYPProjects"));
 const ProjectDetail         = lazy(() => import("./pages/ib/ProjectDetail"));
 const InterdisciplinaryUnits = lazy(() => import("./pages/ib/InterdisciplinaryUnits"));
+const VideoEditorPortal      = lazy(() => import("./pages/VideoEditorPortal"));
+const VideoApprovals         = lazy(() => import("./pages/VideoApprovals"));
+const VideoBills             = lazy(() => import("./pages/VideoBills"));
 
 // Shared cache so navigation between pages reuses recent results.
 // TanStack defaults are too aggressive about refetching for a CRM where
@@ -300,6 +303,11 @@ const App = () => (
                       <Route path="/ib/projects" element={<RequirePermission module="ib_projects" action="view"><MYPProjects /></RequirePermission>} />
                       <Route path="/ib/projects/:id" element={<RequirePermission module="ib_projects" action="view"><ProjectDetail /></RequirePermission>} />
                       <Route path="/ib/idu" element={<RequirePermission module="ib_idu" action="view"><InterdisciplinaryUnits /></RequirePermission>} />
+
+                      {/* Video Approval — editor portal + super-admin queue + bills */}
+                      <Route path="/video-editor"    element={<RequirePermission module="video_editor"   action="view"><VideoEditorPortal /></RequirePermission>} />
+                      <Route path="/video-approvals" element={<RequirePermission module="video_approval" action="view"><VideoApprovals /></RequirePermission>} />
+                      <Route path="/video-bills"     element={<RequirePermission module="video_bills"    action="view"><VideoBills /></RequirePermission>} />
 
                       <Route path="*" element={<NotFound />} />
                     </Routes>
