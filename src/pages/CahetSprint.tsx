@@ -11,10 +11,10 @@ import {
   Phone, Loader2, CheckCircle2, Clock, AlertTriangle, MessageSquareWarning,
   MessageSquare, Footprints, FileCheck2, FileEdit, Search, Snowflake,
   ExternalLink, KeyboardIcon, X, PhoneOff, XCircle, PhoneMissed, PhoneCall,
-  ListPlus,
+  ListPlus, BookmarkPlus,
 } from "lucide-react";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { CahetRegisterDialog, type CahetRegisterTarget } from "@/components/leads/CahetRegisterDialog";
 
@@ -80,6 +80,21 @@ interface Stats {
   deadline_at: string;
 }
 
+// Compact disposition badge palette for the "already called this session"
+// marker. Matches DISPOSITIONS by value but uses muted backgrounds so a
+// long list of touched rows reads as visited-but-secondary, not as a
+// loud color blast competing with the active queue.
+const CALLED_BADGE: Record<string, { label: string; tone: string; icon: any }> = {
+  interested:     { label: "Interested",     icon: CheckCircle2, tone: "bg-emerald-100 text-emerald-800 border-emerald-300" },
+  call_back:      { label: "Call back",      icon: Clock,        tone: "bg-blue-100 text-blue-800 border-blue-300" },
+  not_answered:   { label: "No answer",      icon: PhoneMissed,  tone: "bg-amber-100 text-amber-800 border-amber-300" },
+  not_interested: { label: "Not interested", icon: XCircle,      tone: "bg-red-100 text-red-800 border-red-300" },
+  ineligible:     { label: "Ineligible",     icon: AlertTriangle,tone: "bg-purple-100 text-purple-800 border-purple-300" },
+  cancelled:      { label: "Cancelled",      icon: PhoneOff,     tone: "bg-gray-100 text-gray-700 border-gray-300" },
+  busy:           { label: "Busy",           icon: PhoneOff,     tone: "bg-orange-100 text-orange-800 border-orange-300" },
+  voicemail:      { label: "Voicemail",      icon: PhoneMissed,  tone: "bg-amber-100 text-amber-800 border-amber-300" },
+};
+
 const BUCKET_META: Record<Bucket, { label: string; tone: string; icon: any }> = {
   paid_application:     { label: "Paid",              tone: "bg-emerald-100 text-emerald-800 border-emerald-300", icon: FileCheck2 },
   partial_application:  { label: "Partial",           tone: "bg-teal-100 text-teal-800 border-teal-300",          icon: FileEdit },
@@ -141,10 +156,27 @@ const CahetSprint = () => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [registerFor, setRegisterFor] = useState<CahetRegisterTarget | null>(null);
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
+  // Leads dispositioned in this browser session, mapped to their disposition
+  // value. Powers the muted/tick state so counsellors can see at a glance
+  // which leads they've already touched in this sprint without losing the
+  // ability to re-open them.
+  const [calledThisSession, setCalledThisSession] = useState<Map<string, string>>(new Map());
+  const markCalled = useCallback((leadId: string, disposition: string) => {
+    setCalledThisSession(prev => {
+      const next = new Map(prev);
+      next.set(leadId, disposition);
+      return next;
+    });
+  }, []);
   const [pickerOpen, setPickerOpen] = useState(false);
   // Brief visual emphasis when a lead is jumped to via the picker so the user
   // can see it land in the queue.
   const [flashLeadId, setFlashLeadId] = useState<string | null>(null);
+
+  // ── Save-as-list dialog ─────────────────────────────────────────────────
+  const [showSaveList, setShowSaveList] = useState(false);
+  const [newListName, setNewListName] = useState("");
+  const [savingList, setSavingList] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
@@ -282,6 +314,7 @@ const CahetSprint = () => {
       description: `${lead.lead_name}${durationSeconds > 0 ? ` · ${Math.floor(durationSeconds / 60)}m ${durationSeconds % 60}s` : ""}`,
     });
 
+    markCalled(lead.lead_id, disposition);
     setActiveCall(null);
     setCallElapsed(0);
 
@@ -291,7 +324,7 @@ const CahetSprint = () => {
       const idx = filtered.findIndex(r => r.lead_id === lead.lead_id);
       if (idx >= 0 && idx + 1 < filtered.length) setSelectedId(filtered[idx + 1].lead_id);
     }
-  }, [activeCall, persistDisposition, toast, filtered]);
+  }, [activeCall, persistDisposition, toast, filtered, markCalled]);
 
   // Pre-select while connected: store on activeCall + tell user it'll commit
   // when the call ends. Useful when student is still talking but counsellor
@@ -327,6 +360,7 @@ const CahetSprint = () => {
           stopPolling();
           const dur = data.duration_seconds || 0;
           await persistDisposition(lead, data.disposition, dur, callUuid);
+          markCalled(lead.lead_id, data.disposition);
           toast({ title: `Auto-disposed: ${data.disposition.replace("_", " ")}`, description: lead.lead_name });
           setActiveCall(null); setCallElapsed(0);
         } else {
@@ -335,6 +369,7 @@ const CahetSprint = () => {
           if (elapsed > 8 * 60 * 1000) {
             stopPolling();
             await persistDisposition(lead, "not_answered", 0, callUuid);
+            markCalled(lead.lead_id, "not_answered");
             toast({ title: "Call timed out", description: "Marked not answered." });
             setActiveCall(null); setCallElapsed(0);
           }
@@ -354,6 +389,7 @@ const CahetSprint = () => {
         const pre = activeCall?.preDisposition || null;
         if (pre) {
           await persistDisposition(lead, pre, serverDur, callUuid);
+          markCalled(lead.lead_id, pre);
           toast({ title: `Marked "${pre.replace("_", " ")}"`, description: `${lead.lead_name} · ${Math.floor(serverDur / 60)}m ${serverDur % 60}s` });
           if (pre === "interested") setRegisterFor(lead);
           setActiveCall(null); setCallElapsed(0);
@@ -363,16 +399,19 @@ const CahetSprint = () => {
         }
       } else if (serverDisp) {
         await persistDisposition(lead, serverDisp, serverDur, callUuid);
+        markCalled(lead.lead_id, serverDisp);
         toast({ title: `Auto-disposed: ${serverDisp.replace("_", " ")}`, description: lead.lead_name });
         setActiveCall(null); setCallElapsed(0);
       } else {
-        // No connection, no disposition — treat as cancelled.
-        await persistDisposition(lead, "cancelled", 0, callUuid);
+        // No connection, no disposition — student never picked up.
+        // (Counsellor-cancel goes through cancelCall, not this path.)
+        await persistDisposition(lead, "not_answered", 0, callUuid);
+        markCalled(lead.lead_id, "not_answered");
         setActiveCall(null); setCallElapsed(0);
       }
     };
     pollRef.current = window.setInterval(poll, 3000);
-  }, [activeCall?.preDisposition, persistDisposition, toast]);
+  }, [activeCall?.preDisposition, persistDisposition, toast, markCalled]);
 
   const placeCall = useCallback(async (row: QueueRow) => {
     if (!user?.id) return;
@@ -402,6 +441,67 @@ const CahetSprint = () => {
       setActiveCall(null);
     }
   }, [user?.id, activeCall, toast, startPolling]);
+
+  // Save the currently filtered CAHET queue as a reusable lead_list so the
+  // counsellor can target it from /lists with a bulk WhatsApp / email send.
+  // Snapshot the lead IDs at click time — the queue rebuilds frequently, so
+  // a list materialised "now" is more predictable than refetching at send.
+  const handleSaveList = useCallback(async () => {
+    const ids = filtered.map(r => r.lead_id);
+    if (!ids.length) {
+      toast({ title: "Nothing to save", description: "Filtered queue is empty.", variant: "destructive" });
+      return;
+    }
+    const name = newListName.trim();
+    if (!name) {
+      toast({ title: "Name required", description: "Give the list a name first.", variant: "destructive" });
+      return;
+    }
+    setSavingList(true);
+
+    const filtersSnapshot = {
+      page: "cahet_sprint",
+      scope,
+      bucket: bucketFilter,
+      search: search || null,
+    };
+
+    const { data: list, error: listErr } = await supabase
+      .from("lead_lists" as any)
+      .insert({
+        name,
+        source: "filter",
+        filters_snapshot: filtersSnapshot,
+        description: `CAHET Sprint — ${BUCKET_FILTERS.find(b => b.key === bucketFilter)?.label || "filtered"} (${ids.length} leads)`,
+      })
+      .select("id")
+      .single();
+
+    if (listErr || !list) {
+      toast({ title: "Could not create list", description: listErr?.message || "Unknown error", variant: "destructive" });
+      setSavingList(false);
+      return;
+    }
+
+    const listId = (list as any).id;
+    const members = ids.map((lead_id) => ({ list_id: listId, lead_id }));
+    let memberErrors = 0;
+    for (let i = 0; i < members.length; i += 500) {
+      const chunk = members.slice(i, i + 500);
+      const { error: memErr } = await supabase.from("lead_list_members" as any).insert(chunk);
+      if (memErr) { memberErrors++; console.error("List member insert failed:", memErr); }
+    }
+
+    setSavingList(false);
+    setShowSaveList(false);
+    setNewListName("");
+    toast({
+      title: "List saved",
+      description: memberErrors > 0
+        ? `"${name}" — some members failed to insert. Check console.`
+        : `"${name}" — ${ids.length} leads. Send bulk WA / email from the Lists page.`,
+    });
+  }, [filtered, newListName, scope, bucketFilter, search, toast]);
 
   // Jump from the picker into the queue: clear any filters that would hide
   // the lead, scroll its row into view, and briefly flash it.
@@ -439,9 +539,10 @@ const CahetSprint = () => {
     try {
       await persistDisposition(activeCall.lead, "cancelled", 0, activeCall.callUuid);
     } catch {}
+    markCalled(activeCall.lead.lead_id, "cancelled");
     setActiveCall(null);
     setCallElapsed(0);
-  }, [activeCall, persistDisposition]);
+  }, [activeCall, persistDisposition, markCalled]);
 
   const skipRow = useCallback((leadId: string) => {
     setSkipped(prev => {
@@ -575,6 +676,17 @@ const CahetSprint = () => {
           <Button
             size="sm"
             variant="outline"
+            className="h-8 border-violet-300 text-violet-700 hover:bg-violet-50"
+            onClick={() => setShowSaveList(true)}
+            disabled={filtered.length === 0}
+            title="Save the currently filtered queue as a reusable list for bulk WhatsApp / email"
+          >
+            <BookmarkPlus className="h-3.5 w-3.5 mr-1" />
+            Save as list ({filtered.length})
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
             className="h-8 border-rose-300 text-rose-700 hover:bg-rose-50"
             onClick={() => setPickerOpen(true)}
             title="Find any BPT/BMRIT lead (even outside this filter)"
@@ -618,6 +730,9 @@ const CahetSprint = () => {
                 const meta = BUCKET_META[r.bucket];
                 const Icon = meta.icon;
                 const isSelected = r.lead_id === selectedId;
+                const calledDisp = calledThisSession.get(r.lead_id) || null;
+                const calledMeta = calledDisp ? CALLED_BADGE[calledDisp] : null;
+                const CalledIcon = calledMeta?.icon;
                 return (
                   <div
                     key={r.lead_id}
@@ -625,6 +740,7 @@ const CahetSprint = () => {
                     onClick={() => setSelectedId(r.lead_id)}
                     className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-muted/40 transition-colors ${
                       flashLeadId === r.lead_id ? "bg-rose-200/70 border-l-2 border-rose-600"
+                      : calledDisp ? "bg-slate-50/70 opacity-60 hover:opacity-100 border-l-2 border-slate-300"
                       : isSelected ? "bg-rose-50/60 border-l-2 border-rose-500"
                       : "border-l-2 border-transparent"
                     }`}
@@ -632,8 +748,14 @@ const CahetSprint = () => {
                     <div className="w-7 text-center text-xs text-muted-foreground tabular-nums">{r.score}</div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
+                        {calledMeta && CalledIcon && (
+                          <Badge variant="outline" className={`text-[10px] gap-1 ${calledMeta.tone}`} title="Dispositioned this session">
+                            <CalledIcon className="h-3 w-3" />
+                            {calledMeta.label}
+                          </Badge>
+                        )}
                         <button
-                          className="font-medium text-sm hover:underline truncate text-left"
+                          className={`font-medium text-sm hover:underline truncate text-left ${calledDisp ? "line-through decoration-slate-400/60 decoration-1" : ""}`}
                           onClick={(e) => { e.stopPropagation(); navigate(`/admissions/${r.lead_id}`); }}
                         >
                           {r.lead_name}
@@ -723,6 +845,39 @@ const CahetSprint = () => {
           fetchAll();
         }}
       />
+
+      {/* Save filtered queue as a reusable list */}
+      <Dialog open={showSaveList} onOpenChange={(o) => { if (!savingList) setShowSaveList(o); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Save filtered queue as a list</DialogTitle>
+            <DialogDescription>
+              Creates a reusable list of <strong>{filtered.length}</strong> lead{filtered.length === 1 ? "" : "s"} from the current CAHET Sprint view. Use it from the Lists page to send bulk WhatsApp or email.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Input
+              autoFocus
+              placeholder={`CAHET — ${BUCKET_FILTERS.find(b => b.key === bucketFilter)?.label || "filtered"} — ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`}
+              value={newListName}
+              onChange={(e) => setNewListName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && !savingList && newListName.trim()) handleSaveList(); }}
+            />
+            <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-800">
+              Filters: <span className="font-medium">{BUCKET_FILTERS.find(b => b.key === bucketFilter)?.label}</span>
+              {scope === "mine" && <span> · my leads</span>}
+              {search && <span> · search "{search}"</span>}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSaveList(false)} disabled={savingList}>Cancel</Button>
+            <Button onClick={handleSaveList} disabled={savingList || !newListName.trim() || !filtered.length}>
+              {savingList ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <BookmarkPlus className="h-4 w-4 mr-1.5" />}
+              Save list
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

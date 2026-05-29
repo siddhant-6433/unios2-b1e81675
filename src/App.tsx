@@ -27,6 +27,7 @@ const Admissions           = lazy(() => import("./pages/Admissions"));
 const LeadDetail           = lazy(() => import("./pages/LeadDetail"));
 const LeadAllocation       = lazy(() => import("./pages/LeadAllocation"));
 const LeadBuckets          = lazy(() => import("./pages/LeadBuckets"));
+const LeadLists            = lazy(() => import("./pages/LeadLists"));
 const CallLog              = lazy(() => import("./pages/CallLog"));
 const AiCallLog            = lazy(() => import("./pages/AiCallLog"));
 const CloudDialer          = lazy(() => import("./pages/CloudDialer"));
@@ -220,6 +221,7 @@ const App = () => (
                       <Route path="/admissions" element={<RequirePermission module="leads" action="view"><Admissions /></RequirePermission>} />
                       <Route path="/admissions/:id" element={<RequirePermission module="leads" action="view"><LeadDetail /></RequirePermission>} />
                       <Route path="/lead-buckets" element={<RequirePermission module="lead_buckets" action="view"><LeadBuckets /></RequirePermission>} />
+                      <Route path="/lists" element={<RequirePermission module="leads" action="view"><LeadLists /></RequirePermission>} />
                       <Route path="/pending-followups" element={<RequirePermission module="leads" action="view"><PendingFollowups /></RequirePermission>} />
                       <Route path="/fresh-leads" element={<RequirePermission module="leads" action="view"><FreshLeads /></RequirePermission>} />
                       <Route path="/visit-monitor" element={<RequirePermission module="leads" action="view"><VisitMonitor /></RequirePermission>} />

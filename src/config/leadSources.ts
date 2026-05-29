@@ -18,6 +18,7 @@ export const LEAD_SOURCES = [
   { value: "justdial", label: "JustDial" },
   { value: "referral", label: "Referral" },
   { value: "education_fair", label: "Education Fair" },
+  { value: "school_outreach", label: "School Outreach" },
   { value: "other", label: "Other" },
 ] as const;
 
@@ -41,5 +42,6 @@ export const SOURCE_BADGE_COLORS: Record<string, string> = {
   justdial: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200",
   referral: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200",
   education_fair: "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200",
+  school_outreach: "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-200",
   other: "bg-muted text-muted-foreground",
 };
