@@ -10228,6 +10228,7 @@ export type Database = {
         | "collegehai"
         | "mirai_website"
         | "salahlo"
+        | "dialer"
       lead_stage:
         | "new_lead"
         | "application_in_progress"
@@ -10419,6 +10420,7 @@ export const Constants = {
         "collegehai",
         "mirai_website",
         "salahlo",
+        "dialer",
       ],
       lead_stage: [
         "new_lead",
