@@ -1847,6 +1847,20 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
         Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
         Prefer: "return=minimal",
       };
+
+      // Flip any still-"initiated" record to terminal. Inbound AI-from-start
+      // calls (AI DID, off-hours, no counsellor) don't go through /status/
+      // or /answer/inbound-ai/, so without this the LiveCallBar toast keeps
+      // ringing until the 10-min reconciler.
+      fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}&status=eq.initiated`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          status: "completed",
+          completed_at: new Date().toISOString(),
+        }),
+      }).catch(console.error);
+
       fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
         method: "POST",
         headers,
@@ -2252,6 +2266,66 @@ Deno.serve({ port: PORT }, async (req) => {
           method: "PATCH", headers: { ...dbH, Prefer: "return=minimal" },
           body: JSON.stringify({ status: "completed", completed_at: new Date().toISOString() }),
         }).catch(() => {});
+      }
+
+      activeCallContexts.delete(callId);
+      return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>`, {
+        headers: { "Content-Type": "application/xml" },
+      });
+    }
+
+    // Caller hung up before counsellor answered (DialStatus=cancel).
+    // Without this branch, status stays "initiated" until the 10-min reconciler
+    // and LiveCallBar shows a ghost "INCOMING CALL" toast for minutes after the
+    // caller is already gone — falling through to the AI <Stream> below is
+    // pointless since there's no caller on the line to hear it.
+    if (dialStatus === "cancel") {
+      if (leadId && SUPABASE_URL) {
+        const dbH = { "Content-Type": "application/json", apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
+
+        await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
+          method: "PATCH", headers: { ...dbH, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            status: "completed",
+            disposition: "missed",
+            completed_at: new Date().toISOString(),
+            summary: `Inbound call from ${callCtx?.leadName || "student"} — caller hung up before ${counsellorName} answered`,
+          }),
+        }).catch(() => {});
+
+        await fetch(`${SUPABASE_URL}/rest/v1/call_logs`, {
+          method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            lead_id: leadId, direction: "inbound", disposition: "missed",
+            notes: `Inbound call from ${callCtx?.leadName || "student"} — caller hung up before ${counsellorName} could answer`,
+            user_id: callCtx?.toolCallsMade?.[0]?.args?.counsellorUserId || null,
+            called_at: new Date().toISOString(),
+          }),
+        }).catch(() => {});
+
+        await fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
+          method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
+          body: JSON.stringify({
+            lead_id: leadId, type: "call",
+            description: `Missed inbound call — caller hung up before ${counsellorName} could answer`,
+          }),
+        }).catch(() => {});
+
+        if (callCtx?.toolCallsMade?.[0]?.args?.counsellorUserId) {
+          await fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
+            method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
+            body: JSON.stringify({
+              user_id: callCtx.toolCallsMade[0].args.counsellorUserId,
+              type: "missed_call",
+              title: `Missed call from ${callCtx?.leadName || "student"}`,
+              body: `${callCtx?.leadName || "A student"} called but hung up before you could answer. Call them back.`,
+              link: `/admissions/${leadId}`,
+              lead_id: leadId,
+            }),
+          }).catch(() => {});
+        }
+
+        console.log(`[${callId}] Inbound caller hung up before counsellor answered (DialStatus=cancel)`);
       }
 
       activeCallContexts.delete(callId);
@@ -2913,7 +2987,10 @@ Deno.serve({ port: PORT }, async (req) => {
         const rec = Array.isArray(recs) && recs.length > 0 ? recs[0] : null;
         if (rec?.lead_id) {
           const dispMap: Record<string, string> = { cancel: "cancelled", busy: "busy", "no-answer": "not_answered", failed: "not_answered" };
-          const recDisp = dispMap[callStatus] || "cancelled";
+          // Unknown status during recovery: default to not_answered, not cancelled.
+          // Recovery only runs when context was lost — almost always means the
+          // student leg never connected (not that the counsellor cancelled).
+          const recDisp = dispMap[callStatus] || "not_answered";
           const recDur = totalDuration;
           await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
             method: "PATCH", headers: { ...recovDbH, Prefer: "return=minimal" },
@@ -2961,10 +3038,15 @@ Deno.serve({ port: PORT }, async (req) => {
     // Plivo sends DialStatus="completed" even when student never answered — bLegUUID="" catches that
     const isConnected = !disposition && bLegUUID !== "" && (dialStatus === "completed" || callStatus === "completed");
 
-    // If no disposition and student never connected → counsellor hung up before student answered
+    // No disposition + student never picked up. Either /bridge-status didn't
+    // fire in time (race with /bridge-hangup) or the counsellor hung up before
+    // the student answered. Both look identical from here, but the far more
+    // common case is student-no-answer, so default to "not_answered" — the
+    // followup behavior is right for both and counsellors stop seeing every
+    // unanswered call mislabeled as "cancelled".
     if (!disposition && !isConnected) {
-      disposition = "cancelled";
-      console.log(`[BRIDGE-HANGUP ${callId}] No bLegUUID, student never answered → cancelled`);
+      disposition = "not_answered";
+      console.log(`[BRIDGE-HANGUP ${callId}] No bLegUUID, student never answered → not_answered`);
     }
 
     const isAuto = !!disposition;

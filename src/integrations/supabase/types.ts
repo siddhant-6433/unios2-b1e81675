@@ -10247,6 +10247,7 @@ export type Database = {
         | "ineligible"
         | "dnc"
         | "deferred"
+        | "cold"
       student_status:
         | "pre_admitted"
         | "active"
