@@ -233,7 +233,12 @@ export default function CloudDialer() {
   // existing-lead matches (auto-pin + jump to that lead) and brand-new
   // numbers (creates a stub lead first so call_logs has a lead_id).
   const [dialPhone, setDialPhone] = useState("");
-  const [dialLeadMatch, setDialLeadMatch] = useState<{id:string;name:string} | null>(null);
+  const [dialLeadMatch, setDialLeadMatch] = useState<{
+    id: string; name: string;
+    phone?: string; stage?: string; source?: string;
+    course_id?: string | null; course_name?: string; campus_name?: string;
+    isSelf?: boolean; canView?: boolean; primaryName?: string;
+  } | null>(null);
   const [dialNoMatch, setDialNoMatch] = useState(false);
   const [dialNewName, setDialNewName] = useState("");
   const [dialPlacing, setDialPlacing] = useState(false);
@@ -682,16 +687,23 @@ export default function CloudDialer() {
       toast({ title: "Enter a phone number first", variant: "destructive" });
       return;
     }
-    const { data: leadRow } = await (supabase as any)
-      .from("leads")
-      .select("id, name, phone")
-      .eq("phone", norm)
-      .eq("is_mirror", false)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (leadRow) {
-      setDialLeadMatch({ id: leadRow.id, name: leadRow.name });
+    // Look up across RLS via SECURITY DEFINER RPC: an existing lead owned by
+    // another counsellor is invisible to a plain select, so the UI would wrongly
+    // offer "create" and the insert would then fail on the global phone unique
+    // index. The RPC finds it regardless of ownership.
+    const { data, error } = await (supabase as any).rpc("dialer_find_lead_by_phone", { _phone: norm });
+    if (error) {
+      toast({ title: "Lookup failed", description: error.message || "Try again", variant: "destructive" });
+      return;
+    }
+    if (data) {
+      setDialLeadMatch({
+        id: data.id, name: data.name || "Lead", phone: data.phone,
+        stage: data.stage, source: data.source, course_id: data.course_id ?? null,
+        course_name: data.course_name, campus_name: data.campus_name,
+        isSelf: data.is_self === true, canView: data.can_view === true,
+        primaryName: data.primary_name,
+      });
     } else {
       setDialNoMatch(true);
     }
@@ -727,8 +739,50 @@ export default function CloudDialer() {
     }, 100);
   };
 
-  const dialCallExisting = () => {
-    if (dialLeadMatch) pinAndStart(dialLeadMatch.id);
+  // Drop a specific lead to the top of the in-memory queue and dial it now,
+  // bypassing loadQueue() — the queue RPC is scoped to the counsellor's OWN
+  // leads, so a just-claimed secondary lead would not appear there. placeCall
+  // is given the lead explicitly so it doesn't depend on the currentLead
+  // render closure settling first.
+  const injectAndStart = (row: any) => {
+    const ql: QueueLead = {
+      id: row.id,
+      name: row.name || "Lead",
+      phone: row.phone || "",
+      stage: row.stage || "",
+      source: row.source || "",
+      course_id: row.course_id ?? null,
+      course_name: row.course_name || "—",
+      campus_name: row.campus_name || "—",
+      bucket: "Dialled",
+      attempt_count: 0,
+    };
+    setDialPhone("");
+    setDialNewName("");
+    setDialLeadMatch(null);
+    setDialNoMatch(false);
+    setQueue(prev => [ql, ...prev.filter(l => l.id !== ql.id)]);
+    setCurrentIdx(0);
+    setDialerActive(true);
+    setPaused(false);
+    setDialPlacing(false);
+    setTimeout(() => placeCall(ql), 80);
+  };
+
+  // Call an existing lead found by lookup. Records the dialing counsellor as a
+  // secondary counsellor (idempotent; skipped if they are the primary) so they
+  // gain visibility without taking the lead over, then dials it.
+  const dialCallExisting = async () => {
+    if (!dialLeadMatch || dialPlacing) return;
+    setDialPlacing(true);
+    const { data, error } = await (supabase as any)
+      .rpc("dialer_claim_existing_lead", { _lead_id: dialLeadMatch.id });
+    if (error || !data) {
+      toast({ title: "Couldn't open lead", description: error?.message || "Try again", variant: "destructive" });
+      setDialPlacing(false);
+      return;
+    }
+    injectAndStart(data);
   };
 
   // Create stub lead, then pin+dial. Stub has stage=new_lead, source=dialer,
@@ -754,6 +808,21 @@ export default function CloudDialer() {
       .select("id")
       .single();
     if (error || !newLead) {
+      // 23505 = the phone already belongs to a lead the counsellor couldn't see
+      // at lookup time (owned by someone else, hidden by RLS). Recover by
+      // finding it, attaching as secondary counsellor, and calling it instead
+      // of dead-ending on a raw "duplicate key" error.
+      if ((error as any)?.code === "23505") {
+        const { data: found } = await (supabase as any).rpc("dialer_find_lead_by_phone", { _phone: norm });
+        if (found?.id) {
+          const { data: claimed } = await (supabase as any).rpc("dialer_claim_existing_lead", { _lead_id: found.id });
+          if (claimed) {
+            toast({ title: "Existing lead", description: `${claimed.name} already exists — calling them.` });
+            injectAndStart(claimed);
+            return;
+          }
+        }
+      }
       toast({ title: "Couldn't create lead", description: error?.message || "Try again", variant: "destructive" });
       setDialPlacing(false);
       return;
@@ -761,14 +830,19 @@ export default function CloudDialer() {
     await pinAndStart(newLead.id);
   };
 
-  const placeCall = async () => {
-    if (!currentLead || !user?.id) return;
+  // leadOverride lets callers dial a specific lead immediately without waiting
+  // for the currentLead render closure to settle (used by the inject-and-call
+  // path for existing leads claimed via RPC). An accidental event arg falls
+  // back to currentLead because it has no .id.
+  const placeCall = async (leadOverride?: QueueLead) => {
+    const lead = leadOverride && (leadOverride as any).id ? leadOverride : currentLead;
+    if (!lead || !user?.id) return;
     cancellingRef.current = false;
     setCallState({ status: "calling", startTime: Date.now(), elapsed: 0, disposition: null, autoDisposition: false });
 
     try {
       const { data, error } = await supabase.functions.invoke("manual-call", {
-        body: { lead_id: currentLead.id, caller_user_id: user.id },
+        body: { lead_id: lead.id, caller_user_id: user.id },
       });
 
       if (error || data?.error) {
@@ -1272,6 +1346,11 @@ export default function CloudDialer() {
                 <CheckCircle className="h-3 w-3 text-emerald-600" />
                 <span className="font-medium text-emerald-900 dark:text-emerald-200">{dialLeadMatch.name}</span>
               </span>
+              {dialLeadMatch.isSelf === false && (
+                <span className="text-[10px] text-amber-600 dark:text-amber-400">
+                  Existing lead{dialLeadMatch.primaryName ? ` (with ${dialLeadMatch.primaryName})` : ""} — you'll be added as a contributor
+                </span>
+              )}
               <Button size="sm" className="bg-cyan-600 hover:bg-cyan-700" onClick={dialCallExisting} disabled={dialPlacing}>
                 {dialPlacing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5 mr-1" />}
                 Call now
