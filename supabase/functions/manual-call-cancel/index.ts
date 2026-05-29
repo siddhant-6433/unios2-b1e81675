@@ -9,8 +9,13 @@
  *      distinguishes "counsellor abandoned the call" from "student never
  *      answered" (the latter is what bridge-hangup writes as `cancelled`).
  *
- * Request: { call_id: string, caller_user_id?: string }
- *   call_id   — the internal call_uuid created by manual-call
+ * Request: { call_id: string, caller_user_id?: string, hangup_only?: boolean }
+ *   call_id      — the internal call_uuid created by manual-call
+ *   hangup_only  — when true (counsellor pressed "End Call" on a CONNECTED
+ *                  call), only drop the live Plivo legs and skip the
+ *                  cancelled_by_counsellor disposition/timeline writes. The
+ *                  call was answered, so a real disposition follows from the
+ *                  UI and bridge-hangup will reconcile ai_call_records.
  *
  * Idempotent: safe to call multiple times. Plivo returns 404 if the call
  * already ended; we treat that as success. record_cloud_call_log dedupes on
@@ -48,7 +53,7 @@ Deno.serve(async (req) => {
     const authHeader = req.headers.get("authorization") || "";
     if (!authHeader) return json({ error: "Unauthorized" }, 401);
 
-    const { call_id, caller_user_id } = await req.json();
+    const { call_id, caller_user_id, hangup_only } = await req.json();
     if (!call_id) return json({ error: "call_id required" }, 400);
 
     const db = createClient(supabaseUrl, serviceRoleKey);
@@ -166,6 +171,14 @@ Deno.serve(async (req) => {
 
     if (uuidsToHangup.size === 0) {
       console.warn(`[manual-call-cancel ${call_id}] No candidate UUIDs — Plivo hangup skipped`);
+    }
+
+    // hangup_only: the call was connected and the counsellor pressed "End Call".
+    // We've dropped the Plivo legs above — but the disposition is owned by the
+    // UI (a real outcome follows) and bridge-hangup will reconcile the
+    // ai_call_records row, so skip all the cancelled_by_counsellor bookkeeping.
+    if (hangup_only) {
+      return json({ success: true, hangup_only: true });
     }
 
     // Record cancelled_by_counsellor as a manual disposition. p_source='manual'

@@ -1,10 +1,10 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type ReactNode, type ReactElement } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import {
   Phone, CheckCircle, XCircle, PhoneMissed, PhoneOff, Clock3,
   BanIcon, Loader2, ArrowRight, MapPin, CalendarDays, ChevronDown, Clock,
-  AlertCircle, MessageSquare, GraduationCap, Globe, FileText,
+  AlertCircle, MessageSquare, GraduationCap, Globe, FileText, X,
 } from "lucide-react";
 import { SOURCE_LABELS, SOURCE_BADGE_COLORS } from "@/config/leadSources";
 
@@ -97,6 +97,11 @@ interface CallDispositionDialogProps {
   /** JustDial search keyword that produced the lead. Only rendered when
    *  leadSource === "justdial" — for every other source it's irrelevant. */
   jdKeyword?: string | null;
+  /** Render as an inline panel that flows within the page (used on the lead
+   *  page so candidate details stay visible during the call) instead of a
+   *  modal overlay that covers the rest of the page. Returns null when not
+   *  open, so it can be slotted directly into the layout. */
+  inline?: boolean;
 }
 
 // requiresConnected: option only makes sense when the counsellor actually
@@ -180,7 +185,7 @@ export function CallDispositionDialog({
   onSubmit, onCallNow, callStatus, callEnded, onManualConnect, onCancelCall,
   onRetryCall,
   courseName, leadStage, personRole, latestNote, aiCallSummary,
-  leadSource, jdKeyword,
+  leadSource, jdKeyword, inline = false,
 }: CallDispositionDialogProps) {
   const [retrying, setRetrying] = useState(false);
   const [disposition, setDisposition] = useState<CallDisposition | null>(null);
@@ -321,6 +326,48 @@ export function CallDispositionDialog({
     dateInputRef.current?.focus();
   };
 
+  // Shell wrapper shared by every phase. In modal mode (default) it renders the
+  // shadcn Dialog with the click-outside guard. In inline mode it renders a
+  // bounded card that flows within the page so the counsellor keeps the lead's
+  // course / details / timeline visible during the call (the modal used to
+  // cover them entirely). This is a plain function — NOT a nested component —
+  // so React reconciles the returned tree in place and the notes textarea
+  // doesn't lose focus on re-render.
+  const renderShell = (
+    header: ReactNode,
+    body: ReactNode,
+    contentClassName?: string,
+  ): ReactElement | null => {
+    if (inline) {
+      if (!open) return null;
+      return (
+        <div className="rounded-2xl border-2 border-primary/30 bg-card shadow-sm overflow-hidden animate-fade-in">
+          <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-2.5">
+            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">{header}</div>
+            <button
+              onClick={() => handleClose(false)}
+              className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              aria-label="Close"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="px-4 py-3 max-h-[70vh] overflow-y-auto">{body}</div>
+        </div>
+      );
+    }
+    return (
+      <Dialog open={open} onOpenChange={handleClose}>
+        <DialogContent className={contentClassName} {...blockOutsideDismiss}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">{header}</DialogTitle>
+          </DialogHeader>
+          {body}
+        </DialogContent>
+      </Dialog>
+    );
+  };
+
   // ── Phase 1: still ringing — show waiting state + context, hide picker ───
   // Plivo's manual-call flow only writes ai_call_records.status on hangup, so
   // we cannot detect "answered" from the DB during the talk. The counsellor
@@ -329,19 +376,12 @@ export function CallDispositionDialog({
   // stage, latest note, AI summary) helps the counsellor remember who and
   // why during the few seconds of ringing.
   if (callStatus === "calling") {
-    return (
-      <Dialog open={open} onOpenChange={handleClose}>
-        <DialogContent
-          className="max-w-md max-h-[90vh] overflow-y-auto"
-          {...blockOutsideDismiss}
-        >
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Phone className="h-4 w-4 text-primary" />
-              Calling {leadName}…
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 pt-1">
+    return renderShell(
+      <>
+        <Phone className="h-4 w-4 text-primary" />
+        Calling {leadName}…
+      </>,
+      <div className="space-y-3 pt-1">
             {/* Lead summary: name + phone + stage / role badges */}
             <div className="rounded-xl bg-muted/40 px-3 py-3 space-y-1">
               <div className="flex items-center justify-between gap-2">
@@ -444,9 +484,8 @@ export function CallDispositionDialog({
                 {cancelling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Cancel"}
               </Button>
             </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+          </div>,
+      "max-w-md max-h-[90vh] overflow-y-auto"
     );
   }
 
@@ -455,19 +494,12 @@ export function CallDispositionDialog({
   // never dialed → no disposition picker, no follow-up, no metrics impact.
   // Just a "Redial" / "Close" choice.
   if (callStatus === "counsellor_no_answer") {
-    return (
-      <Dialog open={open} onOpenChange={handleClose}>
-        <DialogContent
-          className="max-w-md"
-          {...blockOutsideDismiss}
-        >
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <PhoneMissed className="h-4 w-4 text-amber-600" />
-              You didn't pick up
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 pt-1">
+    return renderShell(
+      <>
+        <PhoneMissed className="h-4 w-4 text-amber-600" />
+        You didn't pick up
+      </>,
+      <div className="space-y-3 pt-1">
             <div className="rounded-xl border border-amber-200 dark:border-amber-800/40 bg-amber-50 dark:bg-amber-950/30 px-3 py-3">
               <p className="text-sm text-amber-900 dark:text-amber-200">
                 Your phone rang but the call wasn't answered, so
@@ -507,9 +539,8 @@ export function CallDispositionDialog({
                 Close
               </Button>
             </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+          </div>,
+      "max-w-md"
     );
   }
 
@@ -522,20 +553,12 @@ export function CallDispositionDialog({
     failed: "Call failed (switched off / unreachable) — auto-set to Not Answered.",
   };
 
-  return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent
-        className="max-w-md max-h-[90vh] overflow-y-auto"
-        {...blockOutsideDismiss}
-      >
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Phone className="h-4 w-4 text-primary" />
-            {isAutoDisposed ? "Schedule next callback" : "Log Call Outcome"}
-          </DialogTitle>
-        </DialogHeader>
-
-        <div className="space-y-4 pt-1">
+  return renderShell(
+    <>
+      <Phone className="h-4 w-4 text-primary" />
+      {isAutoDisposed ? "Schedule next callback" : "Log Call Outcome"}
+    </>,
+    <div className="space-y-4 pt-1">
           {/* Connected banner with elapsed timer. Live (pulsing green) while
               the bridge is up; switches to a muted "Call ended" state with
               frozen final duration once Plivo reports the hangup. */}
@@ -916,8 +939,7 @@ export function CallDispositionDialog({
               </div>
             );
           })()}
-        </div>
-      </DialogContent>
-    </Dialog>
+        </div>,
+    "max-w-md max-h-[90vh] overflow-y-auto"
   );
 }
