@@ -111,12 +111,31 @@ function parseMetaAds(body: any): ParsedLead {
   const LAST_KEYS    = ["last_name", "family_name", "surname"];
   const EMAIL_KEYS   = ["email", "email_address", "your_email", "candidate_email"];
   const PHONE_KEYS   = ["phone_number", "phone", "mobile", "mobile_number", "contact", "contact_number", "whatsapp_number", "your_phone_number"];
-  const COURSE_KEYS  = ["course", "program", "programme", "course_interested_in", "interested_in", "preferred_course", "select_course", "which_course", "course_name"];
   const CITY_KEYS    = ["city", "town", "your_city", "current_city"];
   const STATE_KEYS   = ["state", "region", "current_state"];
+
+  // Course-question detection — mirror of src/lib/metaFormCourse.ts (keep in
+  // sync; tested there). Real Meta forms phrase this as
+  // "which_course_are_you_interested_in?" / "which_programme_are_you_...", so
+  // we match by keyword rather than an exact alias list. Stream/qualification
+  // are separate questions and must NOT be treated as a course.
+  const isCourseField = (n: string) =>
+    /(course|programme|program)/i.test(n) && !/(stream|qualification)/i.test(n);
+  // Normalise the option value: underscores → spaces so "b.sc_nursing" matches
+  // "B.Sc Nursing". Values that still don't match a course (e.g.
+  // "llb_(3_years)") fall back to the form-level mapping in the main handler.
+  const normalizeCourseValue = (v: string) => v.replace(/_/g, " ").trim().toLowerCase();
+
+  let courseAnswer = "";
+  for (const f of fieldData) {
+    if (!isCourseField((f?.name || "").toString())) continue;
+    const raw = f?.values?.[0];
+    if (raw) { courseAnswer = normalizeCourseValue(String(raw)); break; }
+  }
+
   const KNOWN: Set<string> = new Set([
     ...NAME_KEYS, ...FIRST_KEYS, ...LAST_KEYS, ...EMAIL_KEYS, ...PHONE_KEYS,
-    ...COURSE_KEYS, ...CITY_KEYS, ...STATE_KEYS,
+    ...CITY_KEYS, ...STATE_KEYS,
   ].map(s => s.toLowerCase()));
 
   // Resolve name (full first, else first+last)
@@ -127,7 +146,7 @@ function parseMetaAds(body: any): ParsedLead {
   const unmapped: string[] = [];
   for (const f of fieldData) {
     const fname = (f?.name || "").toLowerCase();
-    if (!fname || KNOWN.has(fname)) continue;
+    if (!fname || KNOWN.has(fname) || isCourseField(fname)) continue;
     const val = (f?.values || []).filter(Boolean).join(", ");
     if (val) {
       // Prettify the field name (snake_case → Title Case) for the note
@@ -150,7 +169,7 @@ function parseMetaAds(body: any): ParsedLead {
     email:       findField(...EMAIL_KEYS) || body.email || undefined,
     source:      "meta_ads",
     source_lead_id: body.leadgen_id ? String(body.leadgen_id) : undefined,
-    course_name: findField(...COURSE_KEYS) || body.course || undefined,
+    course_name: courseAnswer || body.course || undefined,
     city:        findField(...CITY_KEYS)   || body.city  || undefined,
     state:       findField(...STATE_KEYS)  || body.state || undefined,
     notes:       noteParts.length ? noteParts.join(" | ") : undefined,
@@ -290,6 +309,73 @@ function normalisePhone(phone: string): string {
   if (digits.startsWith("91") && digits.length === 12) return `+${digits}`;
   if (phone.startsWith("+")) return phone;
   return `+${digits}`;
+}
+
+// ─── Meta course-answer resolution ──────────────────────────────────
+// Meta lead forms are multi-course, so we resolve the course from the in-form
+// "which course?" answer (already extracted + normalised by parseMetaAds),
+// not from the form. Precedence mirrors JustDial's category resolver:
+//   admin override (meta_course_mappings) → bootstrap → fuzzy name match →
+//   register the value 'pending' for a super admin.
+//
+// Bootstrap covers answer values that don't match a course name on their own
+// (the law programmes carry year qualifiers; D.Ed/B.Ed shorthands) plus the
+// common ones, so resolution is deterministic even before the DB seed lands.
+// Keep in sync with the seed in 20260617120000_meta_course_mappings.sql.
+const META_COURSE_VALUE_BOOTSTRAP: Record<string, string> = {
+  "bpt": "BPT-GN", "dpt": "DPT-GN", "ott": "DAOTT-GN", "gnm": "GNM-GN",
+  "b.sc nursing": "BSCN-GN", "bmrit": "BMRIT-GN",
+  "bba": "BBA-GN", "mba": "MBA-GN", "bca": "BCA-GN", "pgdm": "PGDM-GN",
+  "bed": "BED-GN", "b.ed": "BED-GN",
+  "ded": "DELED-GZ", "d.ed": "DELED-GZ", "d.el.ed": "DELED-GZ",
+  "llb (3 years)": "LLB-KT", "ba llb (5 years)": "BALLB-GN",
+};
+
+async function resolveMetaCourse(
+  supabase: any,
+  answer: string,
+  formName: string | null,
+): Promise<string | null> {
+  // 1. Admin override (resolved mapping wins; pending/ignored → no course).
+  const { data: dbMap } = await supabase
+    .from("meta_course_mappings")
+    .select("course_id, status")
+    .ilike("answer_value", answer)
+    .maybeSingle();
+  if (dbMap) {
+    return dbMap.status === "resolved" && dbMap.course_id ? dbMap.course_id : null;
+  }
+
+  const saveResolved = async (course_id: string | null) => {
+    await supabase.from("meta_course_mappings").upsert(
+      { answer_value: answer, course_id, status: "resolved", resolved_at: new Date().toISOString() },
+      { onConflict: "answer_value", ignoreDuplicates: false },
+    );
+  };
+
+  // 2. Bootstrap (known answer → course code).
+  const bootCode = META_COURSE_VALUE_BOOTSTRAP[answer];
+  if (bootCode) {
+    const { data: c } = await supabase.from("courses").select("id").eq("code", bootCode).maybeSingle();
+    const cid = c?.id ?? null;
+    await saveResolved(cid);
+    return cid;
+  }
+
+  // 3. Fuzzy course-name match (e.g. "bba" → "...(BBA)").
+  const { data: fuzzy } = await supabase
+    .from("courses").select("id").ilike("name", `%${answer}%`).limit(1).maybeSingle();
+  if (fuzzy) {
+    await saveResolved(fuzzy.id);
+    return fuzzy.id;
+  }
+
+  // 4. Unknown → pending for a super admin to map from the dashboard.
+  await supabase.from("meta_course_mappings").upsert(
+    { answer_value: answer, sample_form_name: formName, status: "pending" },
+    { onConflict: "answer_value", ignoreDuplicates: true },
+  );
+  return null;
 }
 
 // ─── Main handler ───────────────────────────────────────────────────
@@ -502,7 +588,16 @@ Deno.serve(async (req) => {
 
     // For Mirai, prefer exact course code match (e.g. MES-EYP3)
     const parsedAny = parsed as any;
-    if (isMirai && parsedAny.course_code) {
+    if (source === "meta_ads") {
+      // Per-answer course resolution. The Meta form's "which course are you
+      // interested in?" answer → a course (forms are multi-course, so we map
+      // the answer, not the form). School forms ask class/grade (not a course),
+      // so parsed.course_name is empty and the lead correctly stays course-less.
+      const answer = (parsed.course_name || "").trim().toLowerCase();
+      if (answer) {
+        course_id = await resolveMetaCourse(supabase, answer, parsed.meta_form_name || null);
+      }
+    } else if (isMirai && parsedAny.course_code) {
       const { data: course } = await supabase
         .from("courses")
         .select("id")
