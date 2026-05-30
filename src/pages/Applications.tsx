@@ -268,27 +268,27 @@ export default function Applications() {
     const fetchApps = async () => {
       setLoading(true);
 
-      // For counsellors, first resolve their lead_ids so the applications
-      // query can scope to them with .in("lead_id", …). Admins skip this.
-      let scopedLeadIds: string[] | null = null;
-      if (isCounsellor && profile?.id) {
-        const { data: myLeads } = await supabase.from("leads")
-          .select("id")
-          .eq("counsellor_id", profile.id);
-        scopedLeadIds = (myLeads || []).map((l: any) => l.id);
-        if (scopedLeadIds.length === 0) {
+      // Counsellors get a server-scoped list via the counsellor_applications
+      // RPC. The old approach — fetch every assigned lead_id, then filter with
+      // .in("lead_id", […]) — built a multi-KB request URL for high-volume
+      // counsellors (900+ leads) that the gateway rejected, silently blanking
+      // the page. Admins still read the table directly (RLS lets them see all).
+      let rows: any[] = [];
+      if (isCounsellor) {
+        const { data, error } = await (supabase as any).rpc("counsellor_applications");
+        if (error) {
+          console.error("counsellor_applications failed:", error);
           setApps([]);
           setLoading(false);
           return;
         }
+        rows = data || [];
+      } else {
+        const { data } = await (supabase as any).from("applications")
+          .select("id, application_id, lead_id, full_name, phone, email, status, payment_status, payment_ref, fee_amount, program_category, course_selections, completed_sections, submitted_at, created_at, flags, dob, gender, category, father, mother, address, academic_details, form_pdf_url, fee_receipt_url")
+          .order("created_at", { ascending: false });
+        rows = data || [];
       }
-
-      let q = (supabase as any).from("applications")
-        .select("id, application_id, lead_id, full_name, phone, email, status, payment_status, payment_ref, fee_amount, program_category, course_selections, completed_sections, submitted_at, created_at, flags, dob, gender, category, father, mother, address, academic_details, form_pdf_url, fee_receipt_url")
-        .order("created_at", { ascending: false });
-      if (scopedLeadIds) q = q.in("lead_id", scopedLeadIds);
-      const { data } = await q;
-      const rows = data || [];
 
       // Batch-fetch counsellor names + lead stage + lifecycle data via
       // leads → profiles → offer_letters → application_doc_reviews.

@@ -16,6 +16,7 @@ import {
   PieChart, Pie, Cell, Legend, CartesianGrid,
 } from "recharts";
 import { JdCategoryMappingPanel } from "@/components/admissions/JdCategoryMappingPanel";
+import { MetaCourseMappingPanel } from "@/components/admissions/MetaCourseMappingPanel";
 import { PendingApprovalsPanel } from "@/components/dashboard/PendingApprovalsPanel";
 import { ConsultantVoiceMessagesPanel } from "@/components/dashboard/ConsultantVoiceMessagesPanel";
 import { AiCallLogsPanel } from "@/components/dashboard/AiCallLogsPanel";
@@ -294,8 +295,13 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
 
   return (
     <>
-      {/* ── JD Category Mapping Alert (super admin only) ── */}
-      {isSuperAdmin && <JdCategoryMappingPanel />}
+      {/* ── Source → course mapping alerts (super admin only) ── */}
+      {isSuperAdmin && (
+        <div className="space-y-3">
+          <JdCategoryMappingPanel />
+          <MetaCourseMappingPanel />
+        </div>
+      )}
 
       {/* ── Stat Cards ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
