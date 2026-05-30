@@ -154,6 +154,11 @@ export default function LeadBuckets() {
   // Server-side facet counts (true totals, independent of the loaded page).
   const [courseFacets, setCourseFacets] = useState<{ name: string; count: number }[]>([]);
   const [sourceFacets, setSourceFacets] = useState<{ source: string; count: number }[]>([]);
+  // Header counts for the "All courses" / "All sources" options — total leads
+  // matching the OTHER active filter, so the headers stay honest under a
+  // linked filter (e.g. "All courses (21)" when Meta Ads is selected).
+  const [courseAllCount, setCourseAllCount] = useState(0);
+  const [sourceAllCount, setSourceAllCount] = useState(0);
 
   // Bucket counts
   const [miraiSchoolCount, setMiraiSchoolCount] = useState(0);
@@ -239,13 +244,6 @@ export default function LeadBuckets() {
     setMiraiSources(next.mirai);
   };
 
-  // Total leads in the active bucket (unfiltered) — drives the "All courses"
-  // / "All sources" dropdown labels and uses the same accurate count queries
-  // as the bucket cards rather than the loaded sample size.
-  const activeBucketTotal = activeBucket === "college"
-    ? collegeCount
-    : schoolFilter === "mirai" ? miraiSchoolCount : nimtSchoolCount;
-
   // Apply the active bucket + course/source/search predicates to a query.
   // Filtering is done server-side so it spans the whole bucket, not just the
   // rows already lazy-loaded into the table.
@@ -309,27 +307,36 @@ export default function LeadBuckets() {
   };
 
   // True per-course / per-source counts for the active bucket via the
-  // `unassigned_bucket_facets` RPC — one round trip, correct regardless of
-  // how many rows are currently loaded into the table.
+  // `unassigned_bucket_facets` RPC — one round trip, correct regardless of how
+  // many rows are loaded into the table. The dropdowns are LINKED: course
+  // options are scoped to the active source filter and vice versa (passing
+  // `_source` / `_course`), which preserves the empty-combo guard from #86
+  // (Meta Ads leads carry no course) while staying accurate beyond the
+  // 1000-row sample the old client-side derivation was capped at.
   const fetchFacets = async () => {
     const _bucket = activeBucket === "college" ? "college" : "school";
     const _school_brand = activeBucket === "college"
       ? null
       : schoolFilter === "mirai" ? "mirai" : "nimt";
     const { data, error } = await supabase.rpc("unassigned_bucket_facets" as any, {
-      _bucket, _school_brand,
+      _bucket, _school_brand, _source: sourceFilter, _course: courseFilter,
     });
     if (error) { console.error("Facets fetch error:", error); return; }
     const courses: { name: string; count: number }[] = [];
     const sources: { source: string; count: number }[] = [];
+    let courseAll = 0, sourceAll = 0;
     for (const row of (data || []) as any[]) {
       if (row.facet === "course") courses.push({ name: row.value, count: Number(row.n) });
       else if (row.facet === "source") sources.push({ source: row.value, count: Number(row.n) });
+      else if (row.facet === "course_all") courseAll = Number(row.n);
+      else if (row.facet === "source_all") sourceAll = Number(row.n);
     }
     courses.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
     sources.sort((a, b) => b.count - a.count || a.source.localeCompare(b.source));
     setCourseFacets(courses);
     setSourceFacets(sources);
+    setCourseAllCount(courseAll);
+    setSourceAllCount(sourceAll);
   };
 
   // Debounce the search box so we don't refetch on every keystroke.
@@ -339,7 +346,9 @@ export default function LeadBuckets() {
   }, [search]);
 
   useEffect(() => { fetchCounts(); }, [selectedCampusId]);
-  useEffect(() => { fetchFacets(); }, [activeBucket, schoolFilter, selectedCampusId]);
+  // Facets are linked to the active source/course filter, so refetch when
+  // either changes (not just on bucket switch).
+  useEffect(() => { fetchFacets(); }, [activeBucket, schoolFilter, sourceFilter, courseFilter, selectedCampusId]);
   // Reload page 0 whenever the bucket or any server-side filter changes.
   useEffect(() => { fetchPage(true); }, [activeBucket, schoolFilter, courseFilter, sourceFilter, debouncedSearch, selectedCampusId]);
 
@@ -557,7 +566,7 @@ export default function LeadBuckets() {
           onClick={() => { setActiveBucket("college"); setSchoolFilter("all"); }}
         >
           <CardContent className="p-4">
-            <SourceChips breakdown={collegeSources} onPick={(src) => { setActiveBucket("college"); setSchoolFilter("all"); setSourceFilter(src); }} />
+            <SourceChips breakdown={collegeSources} onPick={(src) => { setActiveBucket("college"); setSchoolFilter("all"); setCourseFilter("all"); setSourceFilter(src); }} />
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-pastel-blue shrink-0">
                 <GraduationCap className="h-5 w-5 text-foreground/70" />
@@ -576,7 +585,7 @@ export default function LeadBuckets() {
           onClick={() => { setActiveBucket("school"); setSchoolFilter("nimt"); }}
         >
           <CardContent className="p-4">
-            <SourceChips breakdown={nimtSources} onPick={(src) => { setActiveBucket("school"); setSchoolFilter("nimt"); setSourceFilter(src); }} />
+            <SourceChips breakdown={nimtSources} onPick={(src) => { setActiveBucket("school"); setSchoolFilter("nimt"); setCourseFilter("all"); setSourceFilter(src); }} />
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-pastel-yellow shrink-0">
                 <School className="h-5 w-5 text-foreground/70" />
@@ -595,7 +604,7 @@ export default function LeadBuckets() {
           onClick={() => { setActiveBucket("school"); setSchoolFilter("mirai"); }}
         >
           <CardContent className="p-4">
-            <SourceChips breakdown={miraiSources} onPick={(src) => { setActiveBucket("school"); setSchoolFilter("mirai"); setSourceFilter(src); }} />
+            <SourceChips breakdown={miraiSources} onPick={(src) => { setActiveBucket("school"); setSchoolFilter("mirai"); setCourseFilter("all"); setSourceFilter(src); }} />
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 dark:bg-violet-900/30 shrink-0">
                 <School className="h-5 w-5 text-violet-600" />
@@ -677,7 +686,7 @@ export default function LeadBuckets() {
           className="rounded-xl border border-input bg-card py-2.5 px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 max-w-xs"
           title="Filter by course"
         >
-          <option value="all">All courses ({activeBucketTotal})</option>
+          <option value="all">All courses ({courseAllCount})</option>
           {courseFacets.map(c => (
             <option key={c.name} value={c.name}>{c.name} ({c.count})</option>
           ))}
@@ -689,11 +698,14 @@ export default function LeadBuckets() {
         )}
         <select
           value={sourceFilter}
-          onChange={(e) => setSourceFilter(e.target.value)}
+          // Changing source clears the course filter: the previously selected
+          // course may not exist for the new source (e.g. Meta Ads leads carry
+          // no course), which would otherwise blank the list.
+          onChange={(e) => { setSourceFilter(e.target.value); setCourseFilter("all"); }}
           className="rounded-xl border border-input bg-card py-2.5 px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 max-w-xs"
           title="Filter by source"
         >
-          <option value="all">All sources ({activeBucketTotal})</option>
+          <option value="all">All sources ({sourceAllCount})</option>
           {sourceFacets.map((s) => (
             <option key={s.source} value={s.source}>
               {SOURCE_LABELS[s.source] || s.source} ({s.count})
