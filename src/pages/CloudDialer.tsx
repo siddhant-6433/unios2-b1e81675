@@ -785,49 +785,31 @@ export default function CloudDialer() {
     injectAndStart(data);
   };
 
-  // Create stub lead, then pin+dial. Stub has stage=new_lead, source=dialer,
-  // and counsellor_id set to the current user's profile id so RLS scoping
-  // matches the standard counsellor flow.
+  // Create a stub lead (stage=new_lead, source=dialer, owned by the current
+  // counsellor) and dial it. Routed through the dialer_create_lead SECURITY
+  // DEFINER RPC instead of a client insert: a counsellor's
+  // .insert(...).select() into leads is rejected by RLS (the SELECT policy's
+  // can_view_lead() can't see the just-inserted row mid-statement, so
+  // INSERT ... RETURNING fails with 42501). The RPC also folds in the
+  // existing-phone case — it attaches the caller as a secondary counsellor
+  // rather than duplicating or taking over the lead.
   const dialCreateAndCall = async () => {
     if (!user?.id || !dialNewName.trim()) {
       toast({ title: "Name required", description: "Enter a name for the new lead.", variant: "destructive" });
       return;
     }
-    const norm = normalisePhone(dialPhone);
     setDialPlacing(true);
-    const { data: prof } = await supabase.from("profiles").select("id").eq("user_id", user.id).single();
-    const { data: newLead, error } = await (supabase as any)
-      .from("leads")
-      .insert({
-        name: dialNewName.trim(),
-        phone: norm,
-        stage: "new_lead",
-        source: "dialer",
-        counsellor_id: prof?.id || null,
-      })
-      .select("id")
-      .single();
-    if (error || !newLead) {
-      // 23505 = the phone already belongs to a lead the counsellor couldn't see
-      // at lookup time (owned by someone else, hidden by RLS). Recover by
-      // finding it, attaching as secondary counsellor, and calling it instead
-      // of dead-ending on a raw "duplicate key" error.
-      if ((error as any)?.code === "23505") {
-        const { data: found } = await (supabase as any).rpc("dialer_find_lead_by_phone", { _phone: norm });
-        if (found?.id) {
-          const { data: claimed } = await (supabase as any).rpc("dialer_claim_existing_lead", { _lead_id: found.id });
-          if (claimed) {
-            toast({ title: "Existing lead", description: `${claimed.name} already exists — calling them.` });
-            injectAndStart(claimed);
-            return;
-          }
-        }
-      }
+    const { data, error } = await (supabase as any)
+      .rpc("dialer_create_lead", { _name: dialNewName.trim(), _phone: dialPhone });
+    if (error || !data) {
       toast({ title: "Couldn't create lead", description: error?.message || "Try again", variant: "destructive" });
       setDialPlacing(false);
       return;
     }
-    await pinAndStart(newLead.id);
+    if (data.existed) {
+      toast({ title: "Existing lead", description: `${data.name} already exists — calling them.` });
+    }
+    injectAndStart(data);
   };
 
   // leadOverride lets callers dial a specific lead immediately without waiting
