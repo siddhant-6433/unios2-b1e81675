@@ -5,6 +5,9 @@ import { useCampus } from "@/contexts/CampusContext";
 import { useToast } from "@/hooks/use-toast";
 import { School, GraduationCap, Search, Loader2, UserPlus, CheckCircle, AlertTriangle, ListPlus } from "lucide-react";
 import { jdCategoryHint } from "@/lib/jdCategoryHint";
+import {
+  matchesSource, matchesCourse, deriveCourseOptions, deriveSourceOptions,
+} from "@/lib/leadBucketFilters";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -261,36 +264,17 @@ export default function LeadBuckets() {
   // produce an empty list.
   useEffect(() => { setCourseFilter("all"); setSourceFilter("all"); }, [activeBucket, schoolFilter]);
 
-  // Course options derived from the currently loaded leads so the dropdown
-  // only ever shows courses that actually have unassigned leads in the
-  // active bucket. Sorted by descending count so the busiest courses
-  // appear first.
-  const courseOptions = (() => {
-    const counts = new Map<string, number>();
-    for (const l of leads) {
-      const name = (l.course_name || "").trim();
-      if (!name || name === "—") continue;
-      counts.set(name, (counts.get(name) || 0) + 1);
-    }
-    return Array.from(counts.entries())
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .map(([name, count]) => ({ name, count }));
-  })();
+  // Course and source dropdowns are LINKED: course options are scoped to the
+  // active source filter and vice versa. This stops impossible combinations —
+  // Meta Ads lead-form leads carry no course, so an unscoped course dropdown
+  // let you pick Meta Ads + any course and always get an empty list.
+  const courseOptions = deriveCourseOptions(leads, sourceFilter);
+  const sourceOptions = deriveSourceOptions(leads, courseFilter);
 
-  // Source options mirror the course filter — derived from the loaded
-  // leads so the dropdown only ever lists sources that actually have
-  // unassigned leads in the active bucket. Ordered by descending count.
-  const sourceOptions = (() => {
-    const counts = new Map<string, number>();
-    for (const l of leads) {
-      const src = (l.source || "").trim();
-      if (!src) continue;
-      counts.set(src, (counts.get(src) || 0) + 1);
-    }
-    return Array.from(counts.entries())
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .map(([source, count]) => ({ source, count }));
-  })();
+  // "All X" counts reflect the OTHER active filter so the dropdown headers stay
+  // honest (e.g. "All courses (21)" when Meta Ads is selected).
+  const sourceScopedCount = leads.filter((l) => matchesSource(l, sourceFilter)).length;
+  const courseScopedCount = leads.filter((l) => matchesCourse(l, courseFilter)).length;
 
   useEffect(() => {
     if (!isAdminRole) return;
@@ -318,16 +302,8 @@ export default function LeadBuckets() {
   }, [isAdminRole]);
 
   const filtered = leads.filter((l) => {
-    if (courseFilter !== "all" && (l.course_name || "") !== courseFilter) return false;
-    if (sourceFilter !== "all") {
-      const src = l.source || "";
-      // web_chat chip in the bucket header coalesces both legacy `web_chat`
-      // and current `website_chat` source values, so the filter must too.
-      const matches = sourceFilter === "web_chat"
-        ? (src === "web_chat" || src === "website_chat")
-        : src === sourceFilter;
-      if (!matches) return false;
-    }
+    if (!matchesCourse(l, courseFilter)) return false;
+    if (!matchesSource(l, sourceFilter)) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return l.name.toLowerCase().includes(q) || (l.course_name || "").toLowerCase().includes(q);
@@ -468,7 +444,7 @@ export default function LeadBuckets() {
           onClick={() => { setActiveBucket("college"); setSchoolFilter("all"); }}
         >
           <CardContent className="p-4">
-            <SourceChips breakdown={collegeSources} onPick={(src) => { setActiveBucket("college"); setSchoolFilter("all"); setSourceFilter(src); }} />
+            <SourceChips breakdown={collegeSources} onPick={(src) => { setActiveBucket("college"); setSchoolFilter("all"); setCourseFilter("all"); setSourceFilter(src); }} />
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-pastel-blue shrink-0">
                 <GraduationCap className="h-5 w-5 text-foreground/70" />
@@ -487,7 +463,7 @@ export default function LeadBuckets() {
           onClick={() => { setActiveBucket("school"); setSchoolFilter("nimt"); }}
         >
           <CardContent className="p-4">
-            <SourceChips breakdown={nimtSources} onPick={(src) => { setActiveBucket("school"); setSchoolFilter("nimt"); setSourceFilter(src); }} />
+            <SourceChips breakdown={nimtSources} onPick={(src) => { setActiveBucket("school"); setSchoolFilter("nimt"); setCourseFilter("all"); setSourceFilter(src); }} />
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-pastel-yellow shrink-0">
                 <School className="h-5 w-5 text-foreground/70" />
@@ -506,7 +482,7 @@ export default function LeadBuckets() {
           onClick={() => { setActiveBucket("school"); setSchoolFilter("mirai"); }}
         >
           <CardContent className="p-4">
-            <SourceChips breakdown={miraiSources} onPick={(src) => { setActiveBucket("school"); setSchoolFilter("mirai"); setSourceFilter(src); }} />
+            <SourceChips breakdown={miraiSources} onPick={(src) => { setActiveBucket("school"); setSchoolFilter("mirai"); setCourseFilter("all"); setSourceFilter(src); }} />
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 dark:bg-violet-900/30 shrink-0">
                 <School className="h-5 w-5 text-violet-600" />
@@ -588,7 +564,7 @@ export default function LeadBuckets() {
           className="rounded-xl border border-input bg-card py-2.5 px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 max-w-xs"
           title="Filter by course"
         >
-          <option value="all">All courses ({leads.length})</option>
+          <option value="all">All courses ({sourceScopedCount})</option>
           {courseOptions.map(c => (
             <option key={c.name} value={c.name}>{c.name} ({c.count})</option>
           ))}
@@ -600,11 +576,14 @@ export default function LeadBuckets() {
         )}
         <select
           value={sourceFilter}
-          onChange={(e) => setSourceFilter(e.target.value)}
+          // Changing source clears the course filter: the previously selected
+          // course may not exist for the new source (e.g. Meta Ads leads carry
+          // no course), which would otherwise blank the list.
+          onChange={(e) => { setSourceFilter(e.target.value); setCourseFilter("all"); }}
           className="rounded-xl border border-input bg-card py-2.5 px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 max-w-xs"
           title="Filter by source"
         >
-          <option value="all">All sources ({leads.length})</option>
+          <option value="all">All sources ({courseScopedCount})</option>
           {sourceOptions.map((s) => (
             <option key={s.source} value={s.source}>
               {SOURCE_LABELS[s.source] || s.source} ({s.count})
