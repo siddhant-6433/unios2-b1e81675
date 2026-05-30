@@ -10,8 +10,16 @@ import {
   Phone, PhoneOff, Pause, Play, SkipForward, Clock,
   Loader2, CheckCircle, XCircle, PhoneMissed, Users, BarChart3,
   Calendar, AlertCircle, Volume2, Pencil, Check, X, Search,
-  FileText, PhoneIncoming, ArrowRight, PhoneCall,
+  FileText, PhoneIncoming, ArrowRight, PhoneCall, ChevronDown,
+  MessageCircle, ChevronRight,
 } from "lucide-react";
+import { useIsMobile } from "@/hooks/use-mobile";
+import {
+  Sheet, SheetContent, SheetTrigger, SheetClose, SheetHeader, SheetTitle,
+} from "@/components/ui/sheet";
+import {
+  Collapsible, CollapsibleTrigger, CollapsibleContent,
+} from "@/components/ui/collapsible";
 import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
 import { PriorityInterestedCard } from "@/components/leads/PriorityInterestedCard";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
@@ -196,6 +204,7 @@ export default function CloudDialer() {
   const { toast } = useToast();
   const isCounsellor = role === "counsellor";
   const counsellorDisplayName = profile?.display_name || "Counsellor";
+  const isMobile = useIsMobile();
 
   // Queue
   const [queue, setQueue] = useState<QueueLead[]>([]);
@@ -1212,6 +1221,318 @@ export default function CloudDialer() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+
+  // ── Mobile Call Mode ──────────────────────────────────────────────────────
+  // A thumb-first layout for counsellors working their queue on a phone.
+  // Reuses every handler/state from the desktop dialer; only the presentation
+  // changes. Gated on viewport < 768px so the desktop two-pane is untouched.
+  if (isMobile) {
+    const isNonCallFollowup = currentLead?.followup_type && currentLead.followup_type !== "call";
+    const showDispositions = callState.status === "connected" || callState.status === "ended";
+    const dispoOnClick = (value: string) =>
+      callState.status === "connected" ? preSelectDisposition(value) : markDisposition(value);
+    const reclaimMins = currentLead ? minutesToReclaim(currentLead) : null;
+
+    return (
+      <div className="flex flex-col h-[calc(100dvh-56px)] bg-background">
+        {/* Missed-call banner */}
+        {missedCount > 0 && (
+          <button
+            onClick={() => navigate("/missed-calls")}
+            className="shrink-0 flex items-center gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-950/20 border-b border-amber-200 text-left"
+          >
+            <PhoneMissed className="h-4 w-4 text-amber-600 shrink-0 animate-pulse" />
+            <span className="text-sm font-medium text-amber-800 dark:text-amber-300 flex-1 min-w-0 truncate">
+              {missedCount} missed call{missedCount > 1 ? "s" : ""} — tap to review
+            </span>
+            <ChevronRight className="h-4 w-4 text-amber-600 shrink-0" />
+          </button>
+        )}
+
+        {currentLead ? (
+          <>
+            {/* ── TOP: glance header (who am I calling) ──────────────────── */}
+            <header className="shrink-0 px-4 py-3 border-b border-border bg-card">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-xl bg-cyan-100 dark:bg-cyan-900/30 flex items-center justify-center shrink-0">
+                  <span className="text-lg font-bold text-cyan-700">{currentLead.name[0]?.toUpperCase()}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h1 className="text-lg font-bold text-foreground leading-tight truncate">{currentLead.name}</h1>
+                  <p className="text-sm text-muted-foreground truncate">{currentLead.course_name} · {currentLead.campus_name}</p>
+                </div>
+                <a href={`/admissions/${currentLead.id}`} target="_blank" rel="noreferrer"
+                  className="shrink-0 text-xs font-medium text-primary px-2 py-1">Open →</a>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                <Badge className="text-[11px] border-0 bg-muted text-foreground">{currentLead.bucket}</Badge>
+                <Badge className="text-[11px] border-0 bg-muted text-muted-foreground">
+                  {currentLead.attempt_count > 0 ? `${currentLead.attempt_count} previous` : "First call"}
+                </Badge>
+                <Badge className="text-[11px] border-0 bg-muted text-muted-foreground">{STAGE_LABELS[currentLead.stage] || currentLead.stage}</Badge>
+                {reclaimMins !== null && reclaimMins <= 0 && (
+                  <Badge className="text-[11px] border-0 bg-red-600 text-white animate-pulse">Reclaim now</Badge>
+                )}
+                {reclaimMins !== null && reclaimMins > 0 && reclaimMins <= 30 && (
+                  <Badge className="text-[11px] border-0 bg-red-100 text-red-700">⚠ {reclaimMins}m to reclaim</Badge>
+                )}
+              </div>
+            </header>
+
+            {/* ── MIDDLE: scrollable context ─────────────────────────────── */}
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+              {/* Course pitch — promoted above the fold, talking points collapsed */}
+              <Card className="border-cyan-200/60 dark:border-cyan-900/40 shadow-none">
+                <CardContent className="p-3 space-y-3">
+                  {currentLead.course_id && <CourseInfoPanel courseId={currentLead.course_id} />}
+                  {currentLead.course_name !== "—" && (
+                    <Collapsible>
+                      <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg bg-blue-50/60 dark:bg-blue-950/20 px-3 py-2.5 text-sm font-semibold text-blue-700 dark:text-blue-300 [&[data-state=open]>svg]:rotate-180">
+                        <span className="flex items-center gap-1.5">💬 Pitch &amp; talking points</span>
+                        <ChevronDown className="h-4 w-4 transition-transform" />
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="pt-3 space-y-3 text-sm">
+                        <p className="italic text-muted-foreground leading-relaxed">
+                          "Hello, am I speaking with <b>{currentLead.name.split(" ")[0]}</b>? This is {counsellorDisplayName} from
+                          NIMT. I see you enquired about <b>{currentLead.course_name}</b>. {getCourseScript(currentLead.course_name)}"
+                        </p>
+                        <div>
+                          <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-1.5">Highlights</p>
+                          <ul className="text-sm text-muted-foreground leading-relaxed space-y-1">
+                            <li>• Est. 1987 — 37+ years, 5 campuses, AICTE/UGC approved</li>
+                            <li>• Placements: ₹18.75 LPA highest, ₹5.40 LPA avg</li>
+                            {getCourseHighlights(currentLead.course_name).map((h, i) => <li key={i}>• {h}</li>)}
+                          </ul>
+                        </div>
+                        <div>
+                          <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-1.5">Nudge checklist</p>
+                          <ul className="text-sm text-muted-foreground leading-relaxed space-y-1">
+                            {getCourseNudges(currentLead.course_name).map((n, i) => <li key={i}>☐ {n}</li>)}
+                            <li>☐ Scholarships (merit/SC/ST/OBC/sports)</li>
+                            <li>☐ Hostel: 600+ beds · Invite for campus visit</li>
+                          </ul>
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Priority interested reason */}
+              {currentLead.stage === "priority_interested" && (
+                <PriorityInterestedCard leadId={currentLead.id} compact />
+              )}
+
+              {/* Previous call notes — collapsed by default */}
+              {callHistory.length > 0 && (
+                <Collapsible>
+                  <Card className="border-border/60 shadow-none">
+                    <CardContent className="p-3">
+                      <CollapsibleTrigger className="flex w-full items-center justify-between text-sm font-semibold text-amber-700 dark:text-amber-400 [&[data-state=open]>svg]:rotate-180">
+                        <span className="flex items-center gap-1.5"><FileText className="h-4 w-4" />Previous call notes ({callHistory.length})</span>
+                        <ChevronDown className="h-4 w-4 transition-transform" />
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="pt-2.5 space-y-2.5">
+                        {callHistory.map(c => (
+                          <div key={c.id} className="border-l-2 border-amber-200 pl-2.5 py-0.5 text-sm">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Badge className={`text-[11px] border-0 ${
+                                c.disposition === "interested" ? "bg-emerald-100 text-emerald-700" :
+                                c.disposition === "not_interested" ? "bg-red-100 text-red-700" :
+                                c.disposition === "not_answered" ? "bg-amber-100 text-amber-700" :
+                                "bg-gray-100 text-gray-600"
+                              }`}>{c.disposition?.replace("_", " ") || "—"}</Badge>
+                              <span className="text-muted-foreground text-xs">
+                                {new Date(c.called_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                              </span>
+                            </div>
+                            {c.notes && <p className="text-muted-foreground mt-0.5 leading-snug">{c.notes}</p>}
+                          </div>
+                        ))}
+                      </CollapsibleContent>
+                    </CardContent>
+                  </Card>
+                </Collapsible>
+              )}
+            </div>
+
+            {/* ── BOTTOM: thumb action zone ──────────────────────────────── */}
+            <div className="shrink-0 border-t border-border bg-card px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] space-y-3">
+              {/* Live call status */}
+              {(callState.status === "calling" || callState.status === "connected") && (
+                <div className={`flex items-center gap-2 rounded-lg px-3 py-2 ${
+                  callState.status === "calling" ? "bg-cyan-50 dark:bg-cyan-950/20" : "bg-emerald-50 dark:bg-emerald-950/20"
+                }`}>
+                  {callState.status === "calling"
+                    ? <Loader2 className="h-4 w-4 animate-spin text-cyan-600 shrink-0" />
+                    : <Volume2 className="h-4 w-4 text-emerald-600 animate-pulse shrink-0" />}
+                  <span className="text-sm font-semibold text-foreground flex-1 min-w-0">
+                    {callState.status === "calling" ? "📞 Pick up your phone…" : "On call — connected"}
+                  </span>
+                  <span className="text-sm font-mono tabular-nums text-muted-foreground">{formatTime(callState.elapsed)}</span>
+                </div>
+              )}
+
+              {/* Disposition chips — thumb-reach grid */}
+              {showDispositions && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold text-primary uppercase tracking-wide">
+                    {callState.status === "connected" ? "Mark during call" : "Mark outcome"}
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {CONNECTED_DISPOSITIONS.map(d => (
+                      <button key={d.value} onClick={() => dispoOnClick(d.value)}
+                        className={`flex items-center justify-center gap-1.5 min-h-[48px] px-3 rounded-xl border text-sm font-medium transition-colors ${
+                          callState.status === "connected" && callState.disposition === d.value
+                            ? "ring-2 ring-primary bg-primary/10 border-primary" : d.color
+                        }`}>
+                        <d.icon className="h-4 w-4 shrink-0" />{d.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* After disposition: followup scheduling + advance */}
+              {callState.status === "auto-disposed" && (
+                <div className="space-y-2.5">
+                  <p className="text-sm text-foreground">
+                    {callState.autoDisposition ? "Auto" : "Saved"}:{" "}
+                    <span className="font-semibold">{callState.disposition?.replace("_", " ")}</span>
+                  </p>
+                  {callState.disposition !== "not_interested" && followupDate && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <span className="text-sm font-medium text-foreground">{formatFollowupDate(followupDate)}</span>
+                        <input type="date" value={followupDate} onChange={e => setFollowupDate(e.target.value)}
+                          className="rounded-md border border-input bg-background px-2 py-1.5 text-sm ml-auto" />
+                      </div>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {FOLLOWUP_TIME_SLOTS.map(slot => (
+                          <button key={slot} onClick={() => setFollowupTime(slot)}
+                            className={`min-h-[40px] rounded-lg text-xs font-medium border transition-colors ${
+                              followupTime === slot ? "bg-cyan-100 text-cyan-700 border-cyan-300" : "bg-background text-muted-foreground border-input"
+                            }`}>{formatSlotLabel(slot)}</button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <Button onClick={moveToNext} className="w-full min-h-[52px] text-base bg-cyan-600 hover:bg-cyan-700">
+                    {currentIdx < queue.length - 1 ? "Save & next lead" : "Save & finish"}
+                    <ArrowRight className="h-5 w-5 ml-1.5" />
+                  </Button>
+                </div>
+              )}
+
+              {/* Primary action row by state */}
+              {callState.status === "idle" && (
+                <>
+                  {isNonCallFollowup ? (
+                    <div className="grid grid-cols-1 gap-2">
+                      <Button onClick={() => window.open(`https://wa.me/${currentLead.phone.replace(/[^0-9]/g,"")}`, "_blank")}
+                        className="w-full min-h-[56px] text-base bg-emerald-600 hover:bg-emerald-700">
+                        <MessageCircle className="h-5 w-5 mr-1.5" />
+                        {currentLead.followup_type === "whatsapp" ? "Open WhatsApp" : `Handle ${currentLead.followup_type} follow-up`}
+                      </Button>
+                      <Button onClick={completeFollowupAndAdvance} variant="outline" className="w-full min-h-[48px]">
+                        <CheckCircle className="h-4 w-4 mr-1.5" />Mark done &amp; next
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button onClick={() => { setDialerActive(false); placeCall(); }}
+                      className="w-full min-h-[56px] text-base font-semibold bg-cyan-600 hover:bg-cyan-700">
+                      <PhoneCall className="h-5 w-5 mr-2" />Call {currentLead.name.split(" ")[0]}
+                    </Button>
+                  )}
+                </>
+              )}
+
+              {callState.status === "calling" && (
+                <Button onClick={cancelCall} variant="outline" className="w-full min-h-[52px] text-base">
+                  <PhoneOff className="h-5 w-5 mr-1.5" />Cancel
+                </Button>
+              )}
+
+              {callState.status === "connected" && (
+                <Button onClick={endCall} variant="destructive" className="w-full min-h-[52px] text-base">
+                  <PhoneOff className="h-5 w-5 mr-1.5" />End call
+                </Button>
+              )}
+
+              {/* Queue handle + skip — always available when not on a live call */}
+              {(callState.status === "idle" || callState.status === "ended") && (
+                <div className="flex items-center gap-2">
+                  <Sheet>
+                    <SheetTrigger asChild>
+                      <button className="flex-1 flex items-center justify-between rounded-xl border border-border bg-muted/40 px-3 min-h-[44px] text-sm">
+                        <span className="flex items-center gap-1.5 font-medium text-foreground">
+                          <Users className="h-4 w-4 text-muted-foreground" />Queue · {currentIdx + 1} of {queue.length}
+                        </span>
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      </button>
+                    </SheetTrigger>
+                    <SheetContent side="bottom" className="h-[80dvh] flex flex-col p-0">
+                      <SheetHeader className="px-4 pt-4 pb-2 shrink-0">
+                        <SheetTitle className="text-left">Call queue · {queue.length}</SheetTitle>
+                        <div className="relative mt-1">
+                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                          <input type="text" value={queueSearch} onChange={e => setQueueSearch(e.target.value)}
+                            placeholder="Search name, phone, course…"
+                            className="w-full rounded-lg border border-input bg-background pl-9 pr-3 py-2.5 text-sm outline-none focus:ring-1 focus:ring-primary" />
+                        </div>
+                      </SheetHeader>
+                      <div className="flex-1 overflow-y-auto">
+                        {queue.map((lead, idx) => {
+                          if (queueSearch) {
+                            const q = queueSearch.toLowerCase();
+                            if (!(lead.name.toLowerCase().includes(q) || lead.phone.includes(q) || lead.course_name.toLowerCase().includes(q))) return null;
+                          }
+                          return (
+                            <SheetClose asChild key={lead.id}>
+                              <button onClick={() => setCurrentIdx(idx)}
+                                className={`w-full text-left px-4 py-3 border-b border-border/40 flex items-center gap-2 ${
+                                  idx === currentIdx ? "bg-cyan-50 dark:bg-cyan-950/20" : idx < currentIdx ? "opacity-50" : ""
+                                }`}>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-foreground truncate">{lead.name}</p>
+                                  <p className="text-xs text-muted-foreground truncate">{lead.course_name} · {lead.phone.slice(-4)}</p>
+                                </div>
+                                <Badge className="text-[11px] border-0 bg-muted text-muted-foreground shrink-0">{lead.bucket}</Badge>
+                                {idx < currentIdx && <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0" />}
+                              </button>
+                            </SheetClose>
+                          );
+                        })}
+                        {queue.length === 0 && (
+                          <div className="px-4 py-12 text-center text-muted-foreground">
+                            <Phone className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                            <p className="text-sm">No leads in queue</p>
+                          </div>
+                        )}
+                      </div>
+                    </SheetContent>
+                  </Sheet>
+                  <Button onClick={skipLead} variant="outline" className="min-h-[44px] px-4" disabled={currentIdx >= queue.length - 1}>
+                    <SkipForward className="h-4 w-4 mr-1.5" />Skip
+                  </Button>
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          /* Empty queue */
+          <div className="flex-1 flex items-center justify-center px-6 text-center">
+            <div>
+              <Phone className="h-12 w-12 mx-auto mb-3 opacity-20" />
+              <p className="text-base font-medium text-foreground">No leads in your queue</p>
+              <p className="text-sm text-muted-foreground mt-1">Pull to refresh or try a different queue source on desktop.</p>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="h-[calc(100vh-64px)] flex flex-col">
