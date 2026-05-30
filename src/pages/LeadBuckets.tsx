@@ -1,13 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCampus } from "@/contexts/CampusContext";
 import { useToast } from "@/hooks/use-toast";
 import { School, GraduationCap, Search, Loader2, UserPlus, CheckCircle, AlertTriangle, ListPlus } from "lucide-react";
 import { jdCategoryHint } from "@/lib/jdCategoryHint";
-import {
-  matchesSource, matchesCourse, deriveCourseOptions, deriveSourceOptions,
-} from "@/lib/leadBucketFilters";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -138,14 +135,30 @@ export default function LeadBuckets() {
   const { selectedCampusId } = useCampus();
   const { toast } = useToast();
 
+  const PAGE_SIZE = 100;
+
   const [activeBucket, setActiveBucket] = useState<"school" | "college">("college");
   const [schoolFilter, setSchoolFilter] = useState<"all" | "mirai" | "nimt">("all");
   const [leads, setLeads] = useState<BucketLead[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [totalCount, setTotalCount] = useState(0);
+  const pageRef = useRef(0);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [courseFilter, setCourseFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Server-side facet counts (true totals, independent of the loaded page).
+  const [courseFacets, setCourseFacets] = useState<{ name: string; count: number }[]>([]);
+  const [sourceFacets, setSourceFacets] = useState<{ source: string; count: number }[]>([]);
+  // Header counts for the "All courses" / "All sources" options — total leads
+  // matching the OTHER active filter, so the headers stay honest under a
+  // linked filter (e.g. "All courses (21)" when Meta Ads is selected).
+  const [courseAllCount, setCourseAllCount] = useState(0);
+  const [sourceAllCount, setSourceAllCount] = useState(0);
 
   // Bucket counts
   const [miraiSchoolCount, setMiraiSchoolCount] = useState(0);
@@ -231,32 +244,113 @@ export default function LeadBuckets() {
     setMiraiSources(next.mirai);
   };
 
-  const fetchLeads = async () => {
-    setLoading(true);
-    let query = supabase
-      .from("unassigned_leads_bucket" as any)
-      .select("*")
-      .order("created_at", { ascending: false });
-
+  // Apply the active bucket + course/source/search predicates to a query.
+  // Filtering is done server-side so it spans the whole bucket, not just the
+  // rows already lazy-loaded into the table.
+  const applyScope = (q: any) => {
     if (activeBucket === "college") {
-      query = query.eq("bucket", "college");
+      q = q.eq("bucket", "college");
     } else if (schoolFilter === "mirai") {
-      query = query.eq("school_brand", "mirai");
+      q = q.eq("school_brand", "mirai");
     } else {
       // CBSE (schoolFilter === "nimt"); also the safe default if the user
       // lands on the school bucket with the initial schoolFilter === "all".
-      query = query.eq("school_brand", "nimt");
+      q = q.eq("school_brand", "nimt");
     }
-
-    const { data, error } = await query;
-    if (error) console.error("Lead buckets fetch error:", error);
-    setLeads((data || []) as any);
-    setSelectedIds(new Set());
-    setLoading(false);
+    if (courseFilter !== "all") q = q.eq("course_name", courseFilter);
+    if (sourceFilter !== "all") {
+      // web_chat coalesces both the legacy `web_chat` and current
+      // `website_chat` source values (mirrors the header chips + facets).
+      q = sourceFilter === "web_chat"
+        ? q.in("source", ["web_chat", "website_chat"])
+        : q.eq("source", sourceFilter);
+    }
+    // Strip PostgREST filter-syntax chars so user input can't break the or().
+    const s = debouncedSearch.replace(/[%,()]/g, "").trim();
+    if (s) q = q.or(`name.ilike.%${s}%,course_name.ilike.%${s}%`);
+    return q;
   };
 
+  // Lazy-load the table 100 rows at a time. `reset` starts a fresh page 0
+  // (bucket / filter / search change); otherwise it appends the next page.
+  const fetchPage = async (reset: boolean) => {
+    const targetPage = reset ? 0 : pageRef.current + 1;
+    if (reset) setLoading(true); else setLoadingMore(true);
+
+    const from = targetPage * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+    // count: "exact" only on the first page — re-counting on every scroll is
+    // wasteful; subsequent pages infer hasMore from a full page returning.
+    let query = supabase
+      .from("unassigned_leads_bucket" as any)
+      .select("*", reset ? { count: "exact" } : undefined)
+      .order("created_at", { ascending: true }) // oldest (most urgent) first
+      .range(from, to);
+    query = applyScope(query);
+
+    const { data, error, count } = await query;
+    if (error) console.error("Lead buckets fetch error:", error);
+    const rows = ((data || []) as any) as BucketLead[];
+
+    if (reset) {
+      setLeads(rows);
+      setSelectedIds(new Set());
+      setTotalCount(count ?? rows.length);
+      setHasMore(from + rows.length < (count ?? 0));
+    } else {
+      setLeads((prev) => [...prev, ...rows]);
+      setHasMore(rows.length === PAGE_SIZE);
+    }
+    pageRef.current = targetPage;
+    setLoading(false);
+    setLoadingMore(false);
+  };
+
+  // True per-course / per-source counts for the active bucket via the
+  // `unassigned_bucket_facets` RPC — one round trip, correct regardless of how
+  // many rows are loaded into the table. The dropdowns are LINKED: course
+  // options are scoped to the active source filter and vice versa (passing
+  // `_source` / `_course`), which preserves the empty-combo guard from #86
+  // (Meta Ads leads carry no course) while staying accurate beyond the
+  // 1000-row sample the old client-side derivation was capped at.
+  const fetchFacets = async () => {
+    const _bucket = activeBucket === "college" ? "college" : "school";
+    const _school_brand = activeBucket === "college"
+      ? null
+      : schoolFilter === "mirai" ? "mirai" : "nimt";
+    const { data, error } = await supabase.rpc("unassigned_bucket_facets" as any, {
+      _bucket, _school_brand, _source: sourceFilter, _course: courseFilter,
+    });
+    if (error) { console.error("Facets fetch error:", error); return; }
+    const courses: { name: string; count: number }[] = [];
+    const sources: { source: string; count: number }[] = [];
+    let courseAll = 0, sourceAll = 0;
+    for (const row of (data || []) as any[]) {
+      if (row.facet === "course") courses.push({ name: row.value, count: Number(row.n) });
+      else if (row.facet === "source") sources.push({ source: row.value, count: Number(row.n) });
+      else if (row.facet === "course_all") courseAll = Number(row.n);
+      else if (row.facet === "source_all") sourceAll = Number(row.n);
+    }
+    courses.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    sources.sort((a, b) => b.count - a.count || a.source.localeCompare(b.source));
+    setCourseFacets(courses);
+    setSourceFacets(sources);
+    setCourseAllCount(courseAll);
+    setSourceAllCount(sourceAll);
+  };
+
+  // Debounce the search box so we don't refetch on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
   useEffect(() => { fetchCounts(); }, [selectedCampusId]);
-  useEffect(() => { fetchLeads(); }, [activeBucket, schoolFilter, selectedCampusId]);
+  // Facets are linked to the active source/course filter, so refetch when
+  // either changes (not just on bucket switch).
+  useEffect(() => { fetchFacets(); }, [activeBucket, schoolFilter, sourceFilter, courseFilter, selectedCampusId]);
+  // Reload page 0 whenever the bucket or any server-side filter changes.
+  useEffect(() => { fetchPage(true); }, [activeBucket, schoolFilter, courseFilter, sourceFilter, debouncedSearch, selectedCampusId]);
 
   // Reset course filter when the bucket / school sub-filter changes — a
   // course relevant in the college bucket is rarely relevant in the school
@@ -264,17 +358,41 @@ export default function LeadBuckets() {
   // produce an empty list.
   useEffect(() => { setCourseFilter("all"); setSourceFilter("all"); }, [activeBucket, schoolFilter]);
 
-  // Course and source dropdowns are LINKED: course options are scoped to the
-  // active source filter and vice versa. This stops impossible combinations —
-  // Meta Ads lead-form leads carry no course, so an unscoped course dropdown
-  // let you pick Meta Ads + any course and always get an empty list.
-  const courseOptions = deriveCourseOptions(leads, sourceFilter);
-  const sourceOptions = deriveSourceOptions(leads, courseFilter);
+  // Fetch every lead id matching the current scope (beyond the loaded page).
+  // Used by "Save filter as list" so the saved list covers all matches, not
+  // just the rows scrolled into view.
+  const fetchAllScopedIds = async (): Promise<string[]> => {
+    const ids: string[] = [];
+    const STEP = 1000;
+    for (let from = 0; ; from += STEP) {
+      let q = supabase
+        .from("unassigned_leads_bucket" as any)
+        .select("id")
+        .order("created_at", { ascending: true })
+        .range(from, from + STEP - 1);
+      q = applyScope(q);
+      const { data, error } = await q;
+      if (error) { console.error("Scoped id fetch error:", error); break; }
+      const rows = (data || []) as any[];
+      ids.push(...rows.map((r) => r.id));
+      if (rows.length < STEP) break;
+    }
+    return ids;
+  };
 
-  // "All X" counts reflect the OTHER active filter so the dropdown headers stay
-  // honest (e.g. "All courses (21)" when Meta Ads is selected).
-  const sourceScopedCount = leads.filter((l) => matchesSource(l, sourceFilter)).length;
-  const courseScopedCount = leads.filter((l) => matchesCourse(l, courseFilter)).length;
+  // Infinite-scroll sentinel — fetch the next page as it nears the viewport.
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!hasMore || loading || loadingMore) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver((entries) => {
+      if (entries[0]?.isIntersecting) fetchPage(false);
+    }, { rootMargin: "300px" });
+    obs.observe(el);
+    return () => obs.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasMore, loading, loadingMore, leads.length]);
 
   useEffect(() => {
     if (!isAdminRole) return;
@@ -301,13 +419,11 @@ export default function LeadBuckets() {
     })();
   }, [isAdminRole]);
 
-  const filtered = leads.filter((l) => {
-    if (!matchesCourse(l, courseFilter)) return false;
-    if (!matchesSource(l, sourceFilter)) return false;
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return l.name.toLowerCase().includes(q) || (l.course_name || "").toLowerCase().includes(q);
-  }).sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()); // Most urgent (oldest) first
+  // Filtering, search and sort are all server-side now (see applyScope +
+  // fetchPage), so `leads` already holds the correct, ordered page(s).
+  // `filtered` aliases it for the selection / quick-pick helpers, which
+  // operate on the rows currently loaded into the table.
+  const filtered = leads;
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -365,17 +481,12 @@ export default function LeadBuckets() {
     setAssigning(false);
     setShowAssign(false);
     setSelectedCounsellor("");
-    await fetchLeads();
+    await fetchPage(true);
     await fetchCounts();
+    await fetchFacets();
   };
 
   const handleSaveList = async () => {
-    // Snapshot lead IDs at click time so the list count matches the preview.
-    const ids = listScope === "selected"
-      ? Array.from(selectedIds)
-      : filtered.map((l) => l.id);
-    if (!ids.length) return;
-
     const name = newListName.trim();
     if (!name) {
       toast({ title: "Name required", description: "Give the list a name first.", variant: "destructive" });
@@ -383,6 +494,17 @@ export default function LeadBuckets() {
     }
 
     setSavingList(true);
+    // For a filtered list, pull EVERY matching lead id from the server (the
+    // table only has the lazy-loaded page in memory). For a manual list, use
+    // the explicit selection.
+    const ids = listScope === "selected"
+      ? Array.from(selectedIds)
+      : await fetchAllScopedIds();
+    if (!ids.length) {
+      setSavingList(false);
+      toast({ title: "Nothing to save", description: "No leads match this scope.", variant: "destructive" });
+      return;
+    }
     const filtersSnapshot = {
       bucket: activeBucket,
       school_filter: schoolFilter,
@@ -564,8 +686,8 @@ export default function LeadBuckets() {
           className="rounded-xl border border-input bg-card py-2.5 px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 max-w-xs"
           title="Filter by course"
         >
-          <option value="all">All courses ({sourceScopedCount})</option>
-          {courseOptions.map(c => (
+          <option value="all">All courses ({courseAllCount})</option>
+          {courseFacets.map(c => (
             <option key={c.name} value={c.name}>{c.name} ({c.count})</option>
           ))}
         </select>
@@ -583,8 +705,8 @@ export default function LeadBuckets() {
           className="rounded-xl border border-input bg-card py-2.5 px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 max-w-xs"
           title="Filter by source"
         >
-          <option value="all">All sources ({courseScopedCount})</option>
-          {sourceOptions.map((s) => (
+          <option value="all">All sources ({sourceAllCount})</option>
+          {sourceFacets.map((s) => (
             <option key={s.source} value={s.source}>
               {SOURCE_LABELS[s.source] || s.source} ({s.count})
             </option>
@@ -599,12 +721,12 @@ export default function LeadBuckets() {
           variant="outline"
           size="sm"
           className="h-9 px-3 text-xs gap-1.5 ml-auto"
-          disabled={filtered.length === 0}
+          disabled={totalCount === 0}
           onClick={() => { setListScope("filtered"); setShowSaveList(true); }}
           title="Save the current filtered view as a reusable list for bulk WhatsApp/email"
         >
           <ListPlus className="h-3.5 w-3.5" />
-          Save filter as list ({filtered.length})
+          Save filter as list ({totalCount})
         </Button>
       </div>
 
@@ -619,6 +741,7 @@ export default function LeadBuckets() {
           No unassigned {activeBucket} leads
         </div>
       ) : (
+        <>
         <div className="rounded-xl border border-border overflow-hidden">
           <table className="w-full text-sm">
             <thead>
@@ -721,6 +844,24 @@ export default function LeadBuckets() {
             </tbody>
           </table>
         </div>
+
+        {/* Lazy-load footer — sentinel triggers the next page on scroll. */}
+        <div ref={sentinelRef} />
+        <div className="flex items-center justify-center gap-3 py-2 text-xs text-muted-foreground">
+          {loadingMore ? (
+            <span className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading more…
+            </span>
+          ) : hasMore ? (
+            <Button variant="outline" size="sm" className="h-7 px-3 text-xs" onClick={() => fetchPage(false)}>
+              Load more
+            </Button>
+          ) : null}
+          <span>
+            Showing {leads.length} of {totalCount} lead{totalCount === 1 ? "" : "s"}
+          </span>
+        </div>
+        </>
       )}
 
       {/* Assign dialog */}
@@ -768,7 +909,7 @@ export default function LeadBuckets() {
             <p className="text-sm text-muted-foreground">
               {listScope === "selected"
                 ? `${selectedIds.size} selected lead${selectedIds.size === 1 ? "" : "s"} will be saved.`
-                : `${filtered.length} lead${filtered.length === 1 ? "" : "s"} matching the current filters will be saved.`}
+                : `${totalCount} lead${totalCount === 1 ? "" : "s"} matching the current filters will be saved.`}
               {" "}List is static — the snapshot won't change as new leads come in.
             </p>
             <div>
