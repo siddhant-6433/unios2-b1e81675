@@ -1,0 +1,19 @@
+-- Restore service_role table access on feedback_responses.
+--
+-- The table was created (20260417120000) and later had its RLS tightened
+-- (20260513173244) on the assumption that it is "written exclusively from
+-- edge functions running with service_role". But the table was only ever
+-- granted to `authenticated` and the owner `postgres` -- `service_role`
+-- never received table privileges (default privileges covered authenticated
+-- but not service_role here).
+--
+-- Result: feedback-sender-cron and whatsapp-webhook (which run as
+-- service_role) failed every query with "42501 permission denied for table
+-- feedback_responses", so feedback-sender-cron returned HTTP 500 on every
+-- run and the WhatsApp counsellor-feedback pipeline never sent a single
+-- request -- rows piled up in status='pending_send' indefinitely.
+--
+-- This grant is additive and server-only; it does NOT alter any user-facing
+-- RLS policy (the staff-read / super-admin-delete policies from
+-- 20260513173244 still apply to `authenticated`).
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.feedback_responses TO service_role;
