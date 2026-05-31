@@ -396,6 +396,13 @@ const LeadDetail = () => {
       courseName,
       data,
       loggedFromLabel: "lead page",
+      // The lead-page "Cloud Call" button places a real Plivo call via the
+      // manual-call edge function. activeCallUuid is the voice-agent call_id
+      // that the auto bridge-hangup webhook + ai_call_records.recording_url
+      // are keyed on — pass it so this disposition row merges with the
+      // recording instead of creating an orphan with a fresh random UUID.
+      callUuid: activeCallUuid,
+      callSource: activeCallUuid ? "cloud_dialer" : "manual_log",
     });
 
     const label = ({
@@ -1680,7 +1687,6 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
   const [courseInterestId, setCourseInterestId] = useState("");
   const [schoolAdmissionType, setSchoolAdmissionType] = useState("");
   const [expectedAdmissionDate, setExpectedAdmissionDate] = useState("");
-  const [followupType, setFollowupType] = useState<"call" | "visit">("call");
   const [followupDate, setFollowupDate] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -1737,9 +1743,13 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
     const visitCampus = completingVisit ? campuses.find((c: any) => c.id === completingVisit.campus_id) : walkinCampus;
     const campusLabel = visitCampus?.name || "Campus";
 
+    // The campus_visits row this follow-up belongs to — links the post-visit
+    // follow-up to its visit so it shows in the Visit funnel's "Visit Follow-up"
+    // box (lead_followups.visit_id).
+    let postVisitId: string | null = completingVisitId;
     if (isWalkin) {
       // Walk-in: create a new campus_visits record as completed
-      await supabase.from("campus_visits").insert({
+      const { data: walkinRow } = await supabase.from("campus_visits").insert({
         lead_id: leadId,
         campus_id: walkinCampusId || null,
         scheduled_by: userId,
@@ -1747,7 +1757,8 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
         status: "completed",
         visit_type: "walk_in",
         feedback: feedbackText,
-      });
+      }).select("id").single();
+      postVisitId = walkinRow?.id ?? null;
       await supabase.from("lead_activities").insert({
         lead_id: leadId, user_id: userId, type: "visit_completed",
         description: `Walk-in visit completed at ${campusLabel}. Attended by ${counsellorLabel}.${feedback ? ` Feedback: ${feedback}` : ""}${courseInterest ? ` Course interest: ${courseInterest}` : ""}`,
@@ -1764,19 +1775,20 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
       });
     }
 
-    // Schedule mandatory follow-up
+    // Schedule mandatory follow-up — always a call, linked to the visit.
     await supabase.from("lead_followups").insert({
       lead_id: leadId,
       user_id: userId,
       scheduled_at: new Date(`${followupDate}T10:00:00`).toISOString(),
-      type: followupType,
+      type: "call",
+      visit_id: postVisitId,
       notes: `Post-visit follow-up${feedback ? `. Visit feedback: ${feedback}` : ""}`,
       status: "pending",
     });
 
     await supabase.from("lead_activities").insert({
       lead_id: leadId, user_id: userId, type: "followup",
-      description: `Post-visit follow-up (${followupType}) scheduled for ${new Date(followupDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`,
+      description: `Post-visit follow-up scheduled for ${new Date(followupDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`,
     });
 
     toast({ title: isWalkin ? "Walk-in visit recorded" : "Visit completed", description: "Follow-up scheduled." });
@@ -1915,16 +1927,9 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
               <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">
                 Mandatory Follow-up (within 3 days)
               </p>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3">
                 <div>
-                  <label className="block text-[10px] text-muted-foreground mb-1">Type</label>
-                  <select value={followupType} onChange={(e) => setFollowupType(e.target.value as any)} className={inputCls}>
-                    <option value="call">Call</option>
-                    <option value="visit">Visit</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] text-muted-foreground mb-1">Date *</label>
+                  <label className="block text-[10px] text-muted-foreground mb-1">Follow-up call date *</label>
                   <div
                     className={`${inputCls} relative flex items-center justify-between cursor-pointer`}
                     onClick={() => (document.getElementById("followup-date-picker") as HTMLInputElement)?.showPicker?.()}
