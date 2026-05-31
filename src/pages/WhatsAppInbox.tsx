@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeEdge } from "@/integrations/supabase/edge";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { useToast } from "@/hooks/use-toast";
@@ -564,7 +565,7 @@ const WhatsAppInbox = () => {
 
     const conv = conversations.find(c => c.phone === selectedPhone);
 
-    const { error } = await supabase.functions.invoke("whatsapp-reply", {
+    const { error } = await invokeEdge("whatsapp-reply", {
       body: {
         phone: selectedPhone,
         message: reply.trim(),
@@ -574,7 +575,11 @@ const WhatsAppInbox = () => {
     });
 
     if (error) {
-      toast({ title: "Failed to send", description: error.message, variant: "destructive" });
+      if (error.sessionExpired) {
+        toast({ title: "Session expired", description: "Please sign in again, then resend.", variant: "destructive" });
+      } else {
+        toast({ title: "Failed to send", description: error.message, variant: "destructive" });
+      }
     } else {
       setReply("");
     }
@@ -597,7 +602,7 @@ const WhatsAppInbox = () => {
     // KB quick-reply templates → send as freeform text via whatsapp-reply
     // These only work within the 24-hour WhatsApp conversation window
     if (KB_TEMPLATE_KEYS.has(selectedTemplate)) {
-      const { data: replyData, error } = await supabase.functions.invoke("whatsapp-reply", {
+      const { error } = await invokeEdge("whatsapp-reply", {
         body: {
           phone: selectedPhone,
           message: previewText,
@@ -605,9 +610,11 @@ const WhatsAppInbox = () => {
           business_phone_number_id: conv?.business_phone_number_id || null,
         },
       });
-      if (error || replyData?.error) {
-        const errMsg = replyData?.error || error?.message || "Unknown error";
-        if (errMsg.includes("window") || errMsg.includes("24") || errMsg.includes("expired")) {
+      if (error) {
+        const errMsg = error.message || "Unknown error";
+        if (error.sessionExpired) {
+          toast({ title: "Session expired", description: "Please sign in again, then resend.", variant: "destructive" });
+        } else if (errMsg.includes("window") || errMsg.includes("24") || errMsg.includes("expired")) {
           toast({ title: "24-hour window expired", description: "This message can only be sent within 24 hours of the lead's last reply. Use a Meta-approved template instead.", variant: "destructive" });
         } else {
           toast({ title: "Failed to send", description: errMsg, variant: "destructive" });
@@ -713,7 +720,7 @@ const WhatsAppInbox = () => {
       return;
     }
 
-    const { data: replyData, error: replyErr } = await supabase.functions.invoke("whatsapp-reply", {
+    const { error: replyErr } = await invokeEdge("whatsapp-reply", {
       body: {
         phone: selectedPhone,
         message,
@@ -722,10 +729,12 @@ const WhatsAppInbox = () => {
       },
     });
 
-    if (replyErr || replyData?.error) {
+    if (replyErr) {
       toast({
         title: "Stage updated",
-        description: `WhatsApp send failed: ${replyData?.error || replyErr?.message || "unknown error"}`,
+        description: replyErr.sessionExpired
+          ? "Session expired — sign in again to send the WhatsApp notification."
+          : `WhatsApp send failed: ${replyErr.message || "unknown error"}`,
         variant: "destructive",
       });
     } else {
@@ -1147,7 +1156,7 @@ const WhatsAppInbox = () => {
                         // so the edge function's own DNC guard doesn't swallow it.
                         const dncLeadId = selectedConv.lead_id;
                         await supabase.from("leads").update({ stage: "dnc" as any }).eq("id", dncLeadId);
-                        const { data: replyData, error: replyErr } = await supabase.functions.invoke("whatsapp-reply", {
+                        const { error: replyErr } = await invokeEdge("whatsapp-reply", {
                           body: {
                             phone: selectedPhone,
                             message: "You have been added to our Do Not Contact list. We will not reach out to you via call or WhatsApp going forward. If this was a mistake, please reply START or call us at +91 9555192192.",
@@ -1161,10 +1170,12 @@ const WhatsAppInbox = () => {
                         setConversations(prev => prev.map(c =>
                           c.lead_id === dncLeadId ? { ...c, lead_stage: "dnc" } : c
                         ));
-                        if (replyErr || replyData?.error) {
+                        if (replyErr) {
                           toast({
                             title: "Lead marked DNC",
-                            description: `Marked, but farewell send failed: ${replyData?.error || replyErr?.message || "unknown error"}`,
+                            description: replyErr.sessionExpired
+                              ? "Marked, but session expired — sign in again to send the farewell."
+                              : `Marked, but farewell send failed: ${replyErr.message || "unknown error"}`,
                             variant: "destructive",
                           });
                         } else {
