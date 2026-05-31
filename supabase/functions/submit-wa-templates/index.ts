@@ -331,6 +331,38 @@ const TEMPLATES = [
       },
     ],
   },
+  // Course-info follow-up auto-sent on new lead entry. Replaces the legacy
+  // course_info_video, whose course/campus/apply links lived in Meta URL-button
+  // prefixes (so the wrong apply domain and the "?q=NIMT" maps search couldn't
+  // be fixed from our side). Like course_info_v3/v4, every URL lives in the BODY
+  // — WhatsApp auto-linkifies them, so there are no fixed button prefixes to get
+  // wrong. All five params are resolved per-lead by fn_resolve_course_info_video_params:
+  //   {{2}} course label (name, or "our programmes" when untagged)
+  //   {{3}} course page URL, or the /courses listing when untagged
+  //   {{4}} campus Maps link, or the /contact page (all campuses) when untagged
+  //   {{5}} https://uni.nimt.ac.in/apply/nimt
+  // Worded as a response to an enquiry so Meta keeps it UTILITY (promotional
+  // CTAs flip the category to MARKETING — see course_info_v3 → v4 history).
+  {
+    name: "course_info_video_v2",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Hi {{1}}, here are the details you requested for {{2}} at NIMT Educational Institutions:\n\n📚 Course information: {{3}}\n📍 Campus locations: {{4}}\n📝 Application portal: {{5}}\n\nReply to this message if you have any questions — our admissions team will be glad to assist you.",
+        example: {
+          body_text: [[
+            "Rahul Sharma",
+            "Bachelor of Science in Nursing",
+            "https://nimt.ac.in/courses/bachelor-of-science-in-nursing",
+            "https://maps.google.com/?cid=1820424915210710582",
+            "https://uni.nimt.ac.in/apply/nimt",
+          ]],
+        },
+      },
+    ],
+  },
   // Visit reminder with counsellor name. Replaces the older visit_reminder
   // (which did not name the counsellor) — kept as a separate template so
   // the old one stays available during Meta review.

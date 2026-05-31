@@ -18,6 +18,12 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   fee_reminder: { name: "fee_reminder", params: ["student_name", "amount", "due_date"] },
   course_details: { name: "inquiry_course_update", params: ["student_name", "course_name"] },
   course_info_video: { name: "course_info_video", params: ["student_name", "course_name", "duration", "eligibility", "campus_name"] },
+  // Body-link replacement for course_info_video. Params resolved per-lead by
+  // fn_resolve_course_info_video_params when caller passes only {template_key,
+  // phone, lead_id}. URLs live in the body (no Meta button-prefix locks), each
+  // with a fallback: /courses listing when untagged course, /contact page when
+  // untagged campus, and the correct uni.nimt.ac.in apply domain.
+  course_info_video_v2: { name: "course_info_video_v2", params: ["student_name", "course_label", "course_url", "campus_url", "apply_url"] },
   // Counsellor utility — tap-to-call link sent to counsellor's own phone
   counsellor_call_lead: { name: "lead_queue_item", params: ["counsellor_name", "lead_name", "lead_phone", "course"] },
   // Call disposition auto-replies to leads
@@ -358,6 +364,38 @@ Deno.serve(async (req) => {
       }
     }
 
+    // course_info_video_v2: body-link template (no URL buttons). Resolve the
+    // course page / campus Maps / apply links — each with a graceful fallback
+    // (courses listing / contact page) — when the caller didn't pass params.
+    if (template_key === "course_info_video_v2" && lead_id && (!params || params.length === 0)) {
+      const { data: resolved, error: resolveErr } = await admin.rpc(
+        "fn_resolve_course_info_video_params",
+        { p_lead_id: lead_id }
+      );
+      if (resolveErr) console.error("course_info_video_v2 resolver failed:", resolveErr.message);
+      if (resolved && typeof resolved === "object") {
+        params = [
+          resolved.student_name,
+          resolved.course_label,
+          resolved.course_url,
+          resolved.campus_url,
+          resolved.apply_url,
+        ];
+      } else {
+        // Resolver returned null (lead not found) — fully generic fallback so
+        // the send still produces a useful, correct message.
+        params = [
+          "there",
+          "our programmes",
+          "https://nimt.ac.in/courses/",
+          "https://nimt.ac.in/contact/",
+          "https://uni.nimt.ac.in/apply/nimt",
+        ];
+      }
+      // All links are in the body — never attach button suffixes.
+      button_urls = undefined;
+    }
+
     // visit_confirmation: the Meta template requires a URL-button suffix
     // (Google Maps CID). Resolve in priority order:
     //   1. course.maps_cid (per-course override for campuses with multiple
@@ -535,6 +573,7 @@ Deno.serve(async (req) => {
       application_received: "Hi {{1}}, we have received your application (ID: {{2}}). Our admissions team will review it and get back to you shortly.",
       fee_reminder: "Hi {{1}}, this is a reminder that a fee payment of Rs.{{2}} is due by {{3}}. Please complete the payment to avoid any delays.",
       course_info_video: "Hi {{1}}, here are the details for {{2}} at NIMT Educational Institutions:\n\nDuration: {{3}}\nEligibility: {{4}}\nCampus: {{5}}",
+      course_info_video_v2: "Hi {{1}}, here are the details you requested for {{2}} at NIMT Educational Institutions:\n\n📚 Course information: {{3}}\n📍 Campus locations: {{4}}\n📝 Application portal: {{5}}\n\nReply to this message if you have any questions — our admissions team will be glad to assist you.",
       counsellor_lead_assigned: "Hi {{1}}, a new lead has been assigned to you: {{2}} (Phone: ****{{3}}). Please make first contact within {{4}} hours.",
       counsellor_sla_warning: "Reminder: Lead {{1}} has not been contacted yet. You have {{2}} hour(s) remaining.",
       counsellor_lead_reclaimed: "Lead {{1}} ({{2}}) has been returned to the unassigned bucket due to SLA breach.",

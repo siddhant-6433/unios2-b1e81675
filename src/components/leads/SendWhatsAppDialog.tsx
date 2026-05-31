@@ -57,19 +57,15 @@ const TEMPLATES = [
     preview: "Hi {{1}}, welcome to NIMT Educational Institutions! We're excited about your interest in {{2}}. Our counsellor will connect with you shortly.",
   },
   {
-    key: "course_info_video",
+    key: "course_info_video_v2",
     label: "Course Info + Video",
-    description: "Course details + campus video auto-attached",
+    description: "Course page, campus location & apply link + campus video",
     badge: "Video",
     followUpMsg: (courseName?: string, campusName?: string) => `🎥 Watch our campus video: ${getVideoUrl(courseName, campusName)}`,
-    buildParams: (lead: any, courseName?: string, campusName?: string, courseDuration?: number) => [
-      lead.name,
-      courseName || "your selected course",
-      courseDuration ? `${courseDuration} year(s)` : "N/A",
-      "As per university norms",
-      campusName || "NIMT Educational Institutions",
-    ],
-    preview: "Hi {{1}}, here's everything about {{2}}:\n📅 Duration: {{3}}\n📋 Eligibility: {{4}}\n📍 Campus: {{5}}\n\n🎥 Campus video will be sent as follow-up",
+    // Empty params → whatsapp-send resolves course page / campus Maps / apply
+    // links per-lead (with /courses listing & /contact fallbacks) server-side.
+    buildParams: () => [],
+    preview: "Hi {{1}}, here are the details you requested for {{2}}:\n📚 Course information: <course page or /courses>\n📍 Campus locations: <campus map or /contact>\n📝 Application portal: uni.nimt.ac.in/apply/nimt\n\n🎥 Campus video will be sent as follow-up",
   },
   {
     key: "course_details",
