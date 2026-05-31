@@ -251,6 +251,8 @@ export default function CloudDialer() {
   const [dialNoMatch, setDialNoMatch] = useState(false);
   const [dialNewName, setDialNewName] = useState("");
   const [dialPlacing, setDialPlacing] = useState(false);
+  // Mobile-only: controls the "Dial a number" bottom sheet (keypad entry).
+  const [dialSheetOpen, setDialSheetOpen] = useState(false);
   // Profile ID for activity logging (cached — same hook used across pages)
   const { data: profileId } = useMyProfileId();
   // Counsellor display name + phone — used to personalise the
@@ -770,6 +772,7 @@ export default function CloudDialer() {
     setDialNewName("");
     setDialLeadMatch(null);
     setDialNoMatch(false);
+    setDialSheetOpen(false);
     setQueue(prev => [ql, ...prev.filter(l => l.id !== ql.id)]);
     setCurrentIdx(0);
     setDialerActive(true);
@@ -1569,8 +1572,11 @@ export default function CloudDialer() {
                       </div>
                     </SheetContent>
                   </Sheet>
-                  <Button onClick={skipLead} variant="outline" className="min-h-[44px] px-4" disabled={currentIdx >= queue.length - 1}>
+                  <Button onClick={skipLead} variant="outline" className="min-h-[44px] px-3" disabled={currentIdx >= queue.length - 1}>
                     <SkipForward className="h-4 w-4 mr-1.5" />Skip
+                  </Button>
+                  <Button onClick={() => setDialSheetOpen(true)} variant="outline" className="min-h-[44px] px-3">
+                    <PhoneCall className="h-4 w-4 mr-1.5" />Dial #
                   </Button>
                 </div>
               )}
@@ -1583,9 +1589,88 @@ export default function CloudDialer() {
               <Phone className="h-12 w-12 mx-auto mb-3 opacity-20" />
               <p className="text-base font-medium text-foreground">No leads in your queue</p>
               <p className="text-sm text-muted-foreground mt-1">Pull to refresh or try a different queue source on desktop.</p>
+              <Button onClick={() => setDialSheetOpen(true)} className="mt-4 min-h-[48px] bg-cyan-600 hover:bg-cyan-700">
+                <PhoneCall className="h-4 w-4 mr-1.5" />Dial a number
+              </Button>
             </div>
           </div>
         )}
+
+        {/* Dial a number — bottom sheet with numeric keypad entry (mobile).
+            Reuses the desktop lookup/call/create handlers + dial state. */}
+        <Sheet
+          open={dialSheetOpen}
+          onOpenChange={(o) => {
+            setDialSheetOpen(o);
+            if (!o) { setDialPhone(""); setDialNewName(""); setDialLeadMatch(null); setDialNoMatch(false); }
+          }}
+        >
+          <SheetContent side="bottom" className="p-0">
+            <SheetHeader className="px-4 pt-4 pb-2">
+              <SheetTitle className="text-left flex items-center gap-1.5">
+                <PhoneCall className="h-4 w-4 text-cyan-600" />Dial a number
+              </SheetTitle>
+            </SheetHeader>
+            <div className="px-4 pb-8 space-y-3">
+              <input
+                type="tel"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={10}
+                autoFocus
+                value={dialPhone}
+                onChange={e => {
+                  const digits = e.target.value.replace(/\D/g, "").slice(0, 10);
+                  setDialPhone(digits);
+                  setDialLeadMatch(null);
+                  setDialNoMatch(false);
+                }}
+                placeholder="Enter 10-digit number"
+                className="w-full rounded-xl border border-input bg-background px-4 py-3 text-lg font-mono tracking-wider outline-none focus:ring-1 focus:ring-primary"
+              />
+
+              {!dialLeadMatch && !dialNoMatch && (
+                <Button onClick={dialLookup} disabled={dialPhone.length !== 10 || dialPlacing} className="w-full min-h-[52px] text-base bg-cyan-600 hover:bg-cyan-700">
+                  {dialPlacing ? <Loader2 className="h-5 w-5 mr-1.5 animate-spin" /> : <Search className="h-5 w-5 mr-1.5" />}Look up
+                </Button>
+              )}
+
+              {dialLeadMatch && (
+                <div className="space-y-2">
+                  <div className="rounded-lg border border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20 px-3 py-2">
+                    <p className="text-sm font-medium text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
+                      <CheckCircle className="h-4 w-4 text-emerald-600" />{dialLeadMatch.name}
+                    </p>
+                    {dialLeadMatch.isSelf === false && (
+                      <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-0.5">
+                        Existing lead{dialLeadMatch.primaryName ? ` (with ${dialLeadMatch.primaryName})` : ""} — you'll be added as a contributor
+                      </p>
+                    )}
+                  </div>
+                  <Button onClick={dialCallExisting} disabled={dialPlacing} className="w-full min-h-[52px] text-base bg-cyan-600 hover:bg-cyan-700">
+                    {dialPlacing ? <Loader2 className="h-5 w-5 mr-1.5 animate-spin" /> : <PhoneCall className="h-5 w-5 mr-1.5" />}Call now
+                  </Button>
+                </div>
+              )}
+
+              {dialNoMatch && (
+                <div className="space-y-2">
+                  <p className="text-sm text-amber-700 dark:text-amber-400">No lead found — add new:</p>
+                  <input
+                    type="text"
+                    value={dialNewName}
+                    onChange={e => setDialNewName(e.target.value)}
+                    placeholder="Lead name"
+                    className="w-full rounded-xl border border-input bg-background px-4 py-3 text-base outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <Button onClick={dialCreateAndCall} disabled={!dialNewName.trim() || dialPlacing} className="w-full min-h-[52px] text-base bg-cyan-600 hover:bg-cyan-700">
+                    {dialPlacing ? <Loader2 className="h-5 w-5 mr-1.5 animate-spin" /> : <PhoneCall className="h-5 w-5 mr-1.5" />}Create &amp; Call
+                  </Button>
+                </div>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
       </div>
     );
   }
@@ -1739,12 +1824,12 @@ export default function CloudDialer() {
                   <Play className="h-3.5 w-3.5 mr-1.5" />Resume {pauseTime > 0 && `(${formatTime(pauseTime)})`}
                 </Button>
               ) : (
-                <Button size="sm" variant="outline" onClick={() => setPaused(true)}>
-                  <Pause className="h-3.5 w-3.5 mr-1.5" />Pause
+                <Button size="sm" onClick={() => setPaused(true)} className="bg-amber-500 hover:bg-amber-600 text-white">
+                  <Pause className="h-3.5 w-3.5 mr-1.5" />Pause Dialer
                 </Button>
               )}
               <Button size="sm" variant="destructive" onClick={stopDialer}>
-                <PhoneOff className="h-3.5 w-3.5 mr-1.5" />Stop
+                <PhoneOff className="h-3.5 w-3.5 mr-1.5" />Stop Dialer
               </Button>
             </>
           ) : (
@@ -1919,8 +2004,8 @@ export default function CloudDialer() {
                     </div>
                     <div className="flex items-center gap-2">
                       {callState.status === "calling" && (
-                        <Button size="sm" variant="outline" onClick={cancelCall}>
-                          <PhoneOff className="h-3.5 w-3.5 mr-1.5" />Cancelled
+                        <Button size="sm" variant="destructive" onClick={cancelCall}>
+                          <PhoneOff className="h-3.5 w-3.5 mr-1.5" />Cancel Call
                         </Button>
                       )}
                       {callState.status === "connected" && (
