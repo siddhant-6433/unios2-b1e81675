@@ -12,6 +12,13 @@ CREATE INDEX IF NOT EXISTS idx_campus_visits_status
 -- Admitted are presence overlays from the lead's lifecycle (D10 presence-based)
 -- and supersede the visit-status boxes. The dashboard counts by funnel_box;
 -- click-to-filter selects lead_ids where funnel_box = X.
+--
+-- RLS filtering is INTENTIONAL: the Visit funnel is per-counsellor scoped just
+-- like the spine funnel (LeadPipeline reads leads under the same counsellor
+-- RLS) — counsellor sees their own leads' visits, admin sees all. Matches the
+-- baselined sibling visit views (visits_unclosed_today etc.). SECURITY DEFINER
+-- would bypass RLS and leak every counsellor's leads to every counsellor.
+-- lint-allow: per-counsellor RLS scoping intended (mirrors spine funnel + sibling visit views)
 CREATE OR REPLACE VIEW public.visit_funnel_leads
 WITH (security_invoker = on) AS
 WITH latest_visit AS (
