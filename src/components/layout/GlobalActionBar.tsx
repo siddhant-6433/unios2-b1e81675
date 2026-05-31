@@ -136,13 +136,20 @@ export function GlobalActionBar() {
               .eq("stage", "priority_interested" as any)
               .eq("counsellor_id", effectiveProfileId);
           })(),
-          // WhatsApp unread: sum of unread_count from the conversations view.
+          // WhatsApp unread: direct indexed head-count on whatsapp_messages
+          // (partial index idx_wa_messages_unread) scoped to this counsellor's
+          // leads. The whatsapp_conversations view recomputes DISTINCT ON + 3
+          // LATERAL count scans over all 56K+ messages on every call (~3s mean)
+          // because filters can't be pushed into its set-returning function;
+          // this answers in milliseconds. Mirrors NotificationPanel.fetchUnreplied.
           // Counsellor-scoped only; admins have a dedicated inbox.
           (() => {
-            if (!effectiveProfileId) return Promise.resolve({ data: [] });
-            return (supabase.from("whatsapp_conversations" as any) as any)
-              .select("unread_count")
-              .eq("counsellor_id", effectiveProfileId);
+            if (!myLeadIds) return Promise.resolve({ count: 0 });
+            return supabase.from("whatsapp_messages")
+              .select("id", { count: "exact", head: true })
+              .eq("direction", "inbound")
+              .eq("is_read", false)
+              .in("lead_id", myLeadIds);
           })(),
           // Reclaim soon: leads that the SLA cron will unassign in <=30 min if
           // no contact is made. Counsellor-scoped; uses RPC for the per-source
@@ -187,10 +194,8 @@ export function GlobalActionBar() {
         const result: ActionItem[] = [];
 
         const c = (r: any) => r?.count || 0;
-        // WhatsApp returns rows of { unread_count }, not a count head.
-        const waUnread = Array.isArray(waRes?.data)
-          ? (waRes.data as { unread_count: number | null }[]).reduce((s, r) => s + (r.unread_count || 0), 0)
-          : 0;
+        // WhatsApp is now a direct head-count on whatsapp_messages → use .count.
+        const waUnread = c(waRes);
         // RPC returns the integer directly in .data, not .count.
         const reclaimSoon = typeof reclaimRes?.data === "number" ? reclaimRes.data : 0;
 

@@ -176,15 +176,24 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
     }
 
     // ── Funnel ──
+    // One GROUP BY scan via RPC instead of one HEAD count per stage. The
+    // RPC is SECURITY INVOKER so leads RLS still scopes counts per role
+    // exactly as the per-stage queries did. p_exclude_mirror:false preserves
+    // the funnel's existing behaviour (mirror leads were not filtered here).
     const stages = Object.keys(STAGE_LABELS);
-    const funnelCounts = await Promise.all(
-      stages.map(async (stage) => {
-        let q = supabase.from("leads").select("id", { count: "exact", head: true }).eq("stage", stage as any);
-        if (byCampus) q = q.eq("campus_id", selectedCampusId);
-        const { count } = await q;
-        return { stage: STAGE_LABELS[stage], count: count || 0 };
-      })
-    );
+    const { data: stageRows } = await (supabase as any).rpc("get_lead_stage_counts", {
+      p_campus_id: byCampus ? selectedCampusId : null,
+      p_counsellor_id: null,
+      p_exclude_mirror: false,
+    });
+    const stageMap: Record<string, number> = {};
+    for (const r of (stageRows || []) as { stage: string; count: number }[]) {
+      stageMap[r.stage] = Number(r.count) || 0;
+    }
+    const funnelCounts = stages.map((stage) => ({
+      stage: STAGE_LABELS[stage],
+      count: stageMap[stage] || 0,
+    }));
     setFunnel(funnelCounts);
 
     // ── Chart data (parallel) ──
