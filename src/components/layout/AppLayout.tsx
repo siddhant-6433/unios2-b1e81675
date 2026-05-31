@@ -12,6 +12,7 @@ import { HeaderResponseTime } from "@/components/layout/HeaderResponseTime";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { CounsellorFilterProvider } from "@/contexts/CounsellorFilterContext";
+import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
 
 const pageTitles: Record<string, string> = {
   "/": "Dashboard",
@@ -68,6 +69,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const title = pageTitles[location.pathname] || "NIMT UniOs";
   const { profile, role } = useAuth();
   const isCounsellor = role === "counsellor";
+  usePresenceHeartbeat();
 
   return (
     <CounsellorFilterProvider>

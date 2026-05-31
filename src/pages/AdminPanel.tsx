@@ -62,6 +62,12 @@ interface UserWithRole {
   last_sign_in_at: string | null;
   profile_updated_at: string | null;
   login_disabled: boolean;
+  last_seen_at: string | null;
+}
+
+function isOnline(lastSeenAt: string | null): boolean {
+  if (!lastSeenAt) return false;
+  return Date.now() - new Date(lastSeenAt).getTime() < 2 * 60 * 1000;
 }
 
 function timeAgo(dateStr: string): string {
@@ -112,7 +118,7 @@ const AdminPanel = () => {
     try {
       const { data: profiles, error: profileError } = await supabase
         .from("profiles")
-        .select("id, user_id, display_name, email, phone, campus, updated_at, login_disabled")
+        .select("id, user_id, display_name, email, phone, campus, updated_at, login_disabled, last_seen_at")
         .order("created_at", { ascending: false });
 
       if (profileError) {
@@ -147,6 +153,7 @@ const AdminPanel = () => {
           last_sign_in_at: authMap[p.user_id] || null,
           profile_updated_at: p.updated_at || null,
           login_disabled: !!p.login_disabled,
+          last_seen_at: p.last_seen_at || null,
         };
       });
 
@@ -498,7 +505,7 @@ const AdminPanel = () => {
                 <SummaryCard label="Total Employees" value={allSubUsers.length} bg="bg-pastel-blue" />
                 <SummaryCard label="Admins" value={allSubUsers.filter((u) => u.role === "super_admin" || u.role === "campus_admin").length} bg="bg-pastel-purple" />
                 <SummaryCard label="Counsellors" value={allSubUsers.filter((u) => u.role === "counsellor").length} bg="bg-pastel-green" />
-                <SummaryCard label="Faculty" value={allSubUsers.filter((u) => u.role === "faculty" || u.role === "teacher").length} bg="bg-pastel-orange" />
+                <SummaryCard label="Online Now" value={allSubUsers.filter((u) => isOnline(u.last_seen_at)).length} bg="bg-pastel-mint" />
               </>)}
               {userSubTab === "consultants" && (<>
                 <SummaryCard label="Total Consultants" value={allSubUsers.length} bg="bg-pastel-purple" />
@@ -686,7 +693,12 @@ const AdminPanel = () => {
                         <tr key={user.user_id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-3">
-                              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary shrink-0">{initials}</div>
+                              <div className="relative shrink-0">
+                                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">{initials}</div>
+                                {isOnline(user.last_seen_at) && (
+                                  <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-background" title="Online now" />
+                                )}
+                              </div>
                               <div className="flex flex-col gap-0.5">
                                 <p className="font-medium text-foreground">{user.display_name || "Unnamed"}</p>
                                 {user.login_disabled && (

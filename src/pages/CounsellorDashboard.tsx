@@ -360,6 +360,9 @@ const CounsellorDashboard = () => {
   const [dispLoading, setDispLoading] = useState(false);
   const [activeDisp, setActiveDisp] = useState<{ counsellorId: string; disposition: string } | null>(null);
 
+  // Online presence map: user_id → last_seen_at
+  const [onlineMap, setOnlineMap] = useState<Record<string, string>>({});
+
   useEffect(() => {
     (async () => {
       const [statsRes, overdueRes, tatRes, teamRes] = await Promise.all([
@@ -414,6 +417,21 @@ const CounsellorDashboard = () => {
     }));
 
     setBreakdownData(rows);
+
+    // Fetch presence for the counsellors in this result
+    const userIds = rows.map((r) => r.user_id).filter(Boolean);
+    if (userIds.length > 0) {
+      const { data: presenceRows } = await supabase
+        .from("profiles")
+        .select("user_id, last_seen_at")
+        .in("user_id", userIds);
+      const map: Record<string, string> = {};
+      for (const p of (presenceRows || []) as any[]) {
+        if (p.last_seen_at) map[p.user_id] = p.last_seen_at;
+      }
+      setOnlineMap(map);
+    }
+
     setBreakdownLoading(false);
   }, []);
 
@@ -862,6 +880,11 @@ const CounsellorDashboard = () => {
       .sort((a, b) => b.score - a.score);
   }, [stats, leaderboard, leaderboardPeriod, dialerUsage]);
 
+  const isCounsellorOnline = (userId: string) => {
+    const t = onlineMap[userId];
+    return !!t && Date.now() - new Date(t).getTime() < 2 * 60 * 1000;
+  };
+
   const breakdownTotals = useMemo(() => breakdownData.reduce((acc, b) => ({
     total: acc.total + b.total,
     new_lead: acc.new_lead + b.new_lead,
@@ -1201,13 +1224,14 @@ const CounsellorDashboard = () => {
           </div>
 
           {/* Breakdown summary cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
             {[
               { label: "Total Assigned", value: breakdownTotals.total, icon: Users, color: "bg-blue-100 dark:bg-blue-900/30", iconColor: "text-blue-600" },
               { label: "New / Untouched", value: breakdownTotals.new_lead, icon: Clock, color: "bg-amber-100 dark:bg-amber-900/30", iconColor: "text-amber-600" },
               { label: "Called", value: breakdownTotals.called, icon: PhoneCall, color: "bg-emerald-100 dark:bg-emerald-900/30", iconColor: "text-emerald-600" },
               { label: "Not Called", value: breakdownTotals.not_called, icon: PhoneOff, color: breakdownTotals.not_called > 0 ? "bg-red-100 dark:bg-red-900/30" : "bg-muted", iconColor: breakdownTotals.not_called > 0 ? "text-red-600" : "text-muted-foreground" },
               { label: "Admitted", value: breakdownTotals.admitted, icon: UserCheck, color: "bg-emerald-100 dark:bg-emerald-900/30", iconColor: "text-emerald-600" },
+              { label: "Online Now", value: breakdownData.filter((b) => isCounsellorOnline(b.user_id)).length, icon: Users, color: "bg-green-100 dark:bg-green-900/30", iconColor: "text-green-600" },
             ].map((c) => (
               <Card key={c.label} className="rounded-2xl border-border/40 shadow-none transition-all hover:shadow-sm">
                 <CardContent className="p-4">
@@ -1262,7 +1286,14 @@ const CounsellorDashboard = () => {
                               }
                             }}
                           >
-                            <td className="px-3 py-3 font-medium text-foreground">{b.counsellor_name}</td>
+                            <td className="px-3 py-3 font-medium text-foreground">
+                              <div className="flex items-center gap-2">
+                                {isCounsellorOnline(b.user_id) && (
+                                  <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" title="Online now" />
+                                )}
+                                {b.counsellor_name}
+                              </div>
+                            </td>
                             <td className="px-3 py-3 text-center font-bold text-foreground">{b.total}</td>
                             <td className="px-3 py-3 text-center">
                               <span className={`text-xs font-semibold ${b.new_lead > 0 ? "text-amber-600" : "text-muted-foreground"}`}>{b.new_lead}</span>
