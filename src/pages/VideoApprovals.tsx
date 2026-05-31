@@ -39,6 +39,11 @@ type EditorRow = {
 
 const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20";
 
+// Label a source link by host so the UI doesn't say "Drive" for a YouTube URL.
+function sourceLabel(url: string): string {
+  return /youtube\.com|youtu\.be/i.test(url) ? "YouTube" : "Drive";
+}
+
 export default function VideoApprovals() {
   const { user, role } = useAuth();
   const { toast } = useToast();
@@ -275,7 +280,7 @@ export default function VideoApprovals() {
                             <div className="font-medium">{v.title}</div>
                             <a href={v.drive_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
                                className="text-[10px] text-muted-foreground hover:text-primary flex items-center gap-1 w-fit">
-                              <ExternalLink className="h-3 w-3" /> Drive link
+                              <ExternalLink className="h-3 w-3" /> {sourceLabel(v.drive_url)} link
                             </a>
                           </td>
                           <td className="px-3 py-3 text-xs">{editorById[v.editor_id]?.name || "—"}</td>
@@ -337,7 +342,7 @@ export default function VideoApprovals() {
               </div>
               <a href={selected.drive_url} target="_blank" rel="noreferrer"
                  className="inline-flex items-center gap-1.5 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2 text-sm font-medium text-primary hover:bg-primary/10">
-                <ExternalLink className="h-4 w-4" /> Open Drive Link
+                <ExternalLink className="h-4 w-4" /> Open {sourceLabel(selected.drive_url)} Link
               </a>
 
               {selected.status === "rejected" && selected.rejection_reason && (

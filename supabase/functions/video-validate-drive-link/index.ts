@@ -1,8 +1,12 @@
-// Validates that a pasted Google Drive link is publicly viewable
-// ("Anyone with the link → Viewer"). Without this check, an editor could
-// submit a private link that the approver can't open. We follow the URL
-// with no credentials — if Drive redirects to accounts.google.com, it's
-// private; otherwise it's accessible.
+// Validates that a pasted video link is publicly viewable. We accept two
+// kinds of source:
+//   • Google Drive / Docs — must be shared "Anyone with the link → Viewer".
+//   • YouTube (incl. unlisted) — must not be private/removed.
+// Without this check, an editor could submit a private link that the
+// approver can't open. For Drive we follow the URL with no credentials — if
+// it redirects to accounts.google.com it's private; otherwise accessible.
+// For YouTube we hit the public oEmbed endpoint, which returns 200 for
+// public AND unlisted videos but 401/404 for private/removed ones.
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -28,37 +32,74 @@ function extractDriveFileId(url: string): string | null {
   return null;
 }
 
+function isYouTubeHost(hostname: string): boolean {
+  return /(?:^|\.)youtube\.com$|(?:^|\.)youtu\.be$/.test(hostname);
+}
+
+// Validate a YouTube link (public or unlisted) via the public oEmbed endpoint.
+// oEmbed returns 200 for watchable videos — including unlisted ones, since
+// they're viewable by anyone with the link — and 401/404 for private/removed.
+async function validateYouTube(url: string): Promise<Response> {
+  const oembed = `https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(url)}`;
+  let res: Response;
+  try {
+    res = await fetch(oembed, { headers: { "User-Agent": "NIMT-VideoApprovalBot/1.0" } });
+  } catch (e) {
+    return json({ valid: false, reason: `Couldn't reach YouTube: ${(e as Error).message}` });
+  }
+
+  if (res.status === 401 || res.status === 403) {
+    return json({
+      valid: false,
+      reason: "This video is private. Set it to 'Unlisted' (or Public) so the approver can open it, then paste again.",
+    });
+  }
+  if (res.status === 404) {
+    return json({
+      valid: false,
+      reason: "This YouTube video couldn't be found. Check the link and try again.",
+    });
+  }
+  if (!res.ok) {
+    return json({ valid: false, reason: `YouTube returned status ${res.status}. Check the link and try again.` });
+  }
+  return json({ valid: true, source: "youtube" });
+}
+
+function json(body: Record<string, unknown>, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status, headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
     const { url } = await req.json();
     if (typeof url !== "string" || !url.trim()) {
-      return new Response(JSON.stringify({ valid: false, reason: "Missing url" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ valid: false, reason: "Missing url" }, 400);
     }
 
     let parsed: URL;
     try { parsed = new URL(url); } catch {
-      return new Response(JSON.stringify({ valid: false, reason: "Invalid URL" }), {
-        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ valid: false, reason: "Invalid URL" });
+    }
+
+    if (isYouTubeHost(parsed.hostname)) {
+      return await validateYouTube(url);
     }
 
     if (!/(?:^|\.)drive\.google\.com$|(?:^|\.)docs\.google\.com$/.test(parsed.hostname)) {
-      return new Response(JSON.stringify({
+      return json({
         valid: false,
-        reason: "Please use a Google Drive (or Docs) link",
-      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        reason: "Please use a Google Drive (or Docs) or YouTube link",
+      });
     }
 
     const fileId = extractDriveFileId(url);
     if (!fileId) {
-      return new Response(JSON.stringify({
-        valid: false,
-        reason: "Couldn't find a file ID in this link",
-      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return json({ valid: false, reason: "Couldn't find a file ID in this link" });
     }
 
     // The /preview endpoint serves the iframe player for public files and
@@ -71,28 +112,23 @@ Deno.serve(async (req) => {
 
     const finalHost = new URL(res.url).hostname;
     if (finalHost.includes("accounts.google.com") || res.status === 401 || res.status === 403) {
-      return new Response(JSON.stringify({
+      return json({
         valid: false,
         reason: "This link is private. Open the file in Drive → Share → 'Anyone with the link → Viewer', then paste again.",
         file_id: fileId,
-      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      });
     }
 
     if (!res.ok) {
-      return new Response(JSON.stringify({
+      return json({
         valid: false,
         reason: `Drive returned status ${res.status}. Check the link and try again.`,
         file_id: fileId,
-      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      });
     }
 
-    return new Response(JSON.stringify({ valid: true, file_id: fileId }), {
-      status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return json({ valid: true, source: "drive", file_id: fileId });
   } catch (e) {
-    return new Response(JSON.stringify({
-      valid: false,
-      reason: `Validation failed: ${(e as Error).message}`,
-    }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return json({ valid: false, reason: `Validation failed: ${(e as Error).message}` });
   }
 });

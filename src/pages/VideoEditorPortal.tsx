@@ -40,6 +40,11 @@ type EditorRow = { id: string; name: string; per_video_rate: number; active: boo
 
 const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20";
 
+// Label a source link by host so the UI doesn't say "Drive" for a YouTube URL.
+function sourceLabel(url: string): string {
+  return /youtube\.com|youtu\.be/i.test(url) ? "YouTube" : "Drive";
+}
+
 export default function VideoEditorPortal() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -124,12 +129,13 @@ export default function VideoEditorPortal() {
   const handleSubmitVideo = async () => {
     if (!editor) return;
     if (!form.title.trim() || !form.drive_url.trim()) {
-      toast({ title: "Title and Drive link are required", variant: "destructive" }); return;
+      toast({ title: "Title and video link are required", variant: "destructive" }); return;
     }
     setSubmitting(true);
 
-    // Validate Drive link is publicly viewable before persisting — otherwise
-    // the approver will hit a sign-in wall and bounce the submission back.
+    // Validate the link (Drive or YouTube) is publicly viewable before
+    // persisting — otherwise the approver hits a sign-in/private wall and
+    // bounces the submission back.
     try {
       const { data: validation, error: vErr } = await supabase.functions.invoke(
         "video-validate-drive-link",
@@ -138,8 +144,8 @@ export default function VideoEditorPortal() {
       if (vErr) throw vErr;
       if (!(validation as any)?.valid) {
         toast({
-          title: "Drive link not accessible",
-          description: (validation as any)?.reason || "Please share the file as 'Anyone with link → Viewer'",
+          title: "Link not accessible",
+          description: (validation as any)?.reason || "Share the Drive file as 'Anyone with link → Viewer', or set the YouTube video to Unlisted/Public.",
           variant: "destructive",
         });
         setSubmitting(false);
@@ -307,7 +313,7 @@ export default function VideoEditorPortal() {
                           <div className="font-medium text-foreground">{v.title}</div>
                           <a href={v.drive_url} target="_blank" rel="noreferrer"
                              className="text-[10px] text-muted-foreground hover:text-primary flex items-center gap-1">
-                            <ExternalLink className="h-3 w-3" /> Drive
+                            <ExternalLink className="h-3 w-3" /> {sourceLabel(v.drive_url)}
                           </a>
                         </td>
                         <td className="px-3 py-3 text-xs text-muted-foreground">{VIDEO_BRAND_LABEL[v.brand]}</td>
@@ -372,11 +378,11 @@ export default function VideoEditorPortal() {
               </select>
             </div>
             <div>
-              <label className="text-xs font-medium mb-1 block">Google Drive Link *</label>
+              <label className="text-xs font-medium mb-1 block">Google Drive or YouTube Link *</label>
               <input value={form.drive_url} onChange={e => setForm(p => ({ ...p, drive_url: e.target.value }))} className={inputCls}
-                placeholder="https://drive.google.com/file/d/..." />
+                placeholder="https://drive.google.com/file/d/…  or  https://youtu.be/…" />
               <p className="text-[10px] text-muted-foreground mt-1">
-                Share the file as <span className="font-semibold">Anyone with the link → Viewer</span> so the approver can open it.
+                Drive: share as <span className="font-semibold">Anyone with the link → Viewer</span>. YouTube: set it to <span className="font-semibold">Unlisted</span> (or Public) so the approver can open it.
               </p>
             </div>
           </div>
