@@ -109,7 +109,7 @@ const WA_TEMPLATES = [
   { key: "visit_reminder", label: "Visit Reminder" },
   { key: "application_received", label: "Application Received" },
   { key: "fee_reminder", label: "Fee Reminder" },
-  { key: "course_info_video", label: "Course Info" },
+  { key: "course_info_video_v2", label: "Course Info" },
 ];
 
 const SOURCES = [

@@ -458,6 +458,7 @@ export default function CloudDialer() {
         callback_scheduled: "Send callback ack",
         missed_call: "Send missed-call note",
         course_info_video: "Send course video",
+        course_info_video_v2: "Send course video",
         visit_confirmation: "Send visit confirmation",
         ai_call_post_summary: "Send call summary",
         ai_call_course_info: "Send course details",

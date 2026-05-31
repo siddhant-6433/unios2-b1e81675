@@ -194,7 +194,14 @@ Deno.serve(async (req) => {
               }
 
               const phoneLastFour = lead.phone?.replace(/\D/g, "").slice(-4) || "XXXX";
-              const params = action.params_template
+              // course_info_video_v2 resolves all body params (course / campus /
+              // apply links, each with a listing/contact fallback) inside
+              // whatsapp-send via fn_resolve_course_info_video_params. Send empty
+              // params so that resolver runs.
+              const isCourseInfoVideoV2 = action.template_key === "course_info_video_v2";
+              const params = isCourseInfoVideoV2
+                ? []
+                : action.params_template
                 ? action.params_template.map((p: string) =>
                     p.replace("{{name}}", lead.name)
                      .replace("{{course}}", courseName)
@@ -206,7 +213,8 @@ Deno.serve(async (req) => {
                   )
                 : [lead.name, courseName, lead.source || "website"];
 
-              // Build button_urls for templates with dynamic URL buttons
+              // Build button_urls for templates with dynamic URL buttons.
+              // (course_info_video_v2 carries its links in the body — no buttons.)
               let buttonUrls: string[] | undefined;
               if (action.template_key === "course_info_video") {
                 const campusQuery = encodeURIComponent((campusName || "NIMT Greater Noida").replace(/\s+/g, "+"));
@@ -228,8 +236,8 @@ Deno.serve(async (req) => {
                 }),
               });
 
-              // Auto follow-up with course video for course_info_video template
-              if (action.template_key === "course_info_video" && !sendToCounsellor && lead.phone) {
+              // Auto follow-up with course video for the course-info templates
+              if ((action.template_key === "course_info_video" || isCourseInfoVideoV2) && !sendToCounsellor && lead.phone) {
                 const courseText = `${courseName} ${campusName}`.toLowerCase();
                 let videoUrl = "https://youtu.be/CyLpFGx67u4?si=7CepKXL3Dm2GfmaK"; // default
                 if (/beacon|bsa|cbse|grade/.test(courseText)) videoUrl = "https://www.instagram.com/reel/DXuOmFMkVXQ/";
