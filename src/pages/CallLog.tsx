@@ -107,7 +107,7 @@ const CallLog = () => {
     let query = supabase
       .from("call_logs" as any)
       .select(`
-        id, lead_id, disposition, duration_seconds, notes, recording_url, created_at, called_at, user_id, cloud_call_uuid,
+        id, lead_id, disposition, duration_seconds, notes, recording_url, created_at, called_at, user_id, cloud_call_uuid, source,
         leads:lead_id(name, phone, stage, source)
       `, { count: "exact" })
       .order("created_at", { ascending: false });
@@ -430,7 +430,12 @@ const CallLog = () => {
                         <p className="text-[10px] text-muted-foreground">{r.lead_phone}</p>
                       </td>
                       <td className="px-3 py-2.5 text-center">
-                        {(r.cloud_call_uuid || (r.notes || "").includes("Cloud Call")) ? (
+                        {/* Cloud Call badge requires a real channel attribution.
+                            Pre-source-column rows fall back to the legacy
+                            "Cloud Call [hash]" notes pattern. Just having a
+                            cloud_call_uuid is not enough — manual_log entries
+                            ship a random UUID through the merge RPC. */}
+                        {(r.source === "cloud_dialer" || (r.notes || "").match(/Cloud Call \[[a-f0-9]{8}\]/i)) ? (
                           <Badge className="text-[9px] border-0 bg-cyan-100 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-400">Cloud Call</Badge>
                         ) : (
                           <Badge className="text-[9px] border-0 bg-gray-100 text-gray-500">Manual</Badge>

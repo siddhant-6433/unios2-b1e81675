@@ -20,52 +20,19 @@ import {
   ChevronRight, Users, Phone, Flame, FileText, ClipboardCheck, Gift,
   GraduationCap, AlertCircle, XCircle,
 } from "lucide-react";
+// Stage model is canonical in src/lib/leadStages.ts — do not redefine here.
+import {
+  type LeadFunnelStage,
+  LEAD_FUNNEL_ORDER,
+  STAGE_TO_BUCKET,
+  FUNNEL_LEAKAGE_STAGES as LEAKAGE_STAGES,
+  type FunnelLeakageStage as LeakageStage,
+  FUNNEL_LEAKAGE_LABEL as LEAKAGE_LABEL,
+  leadStagesForBucket,
+} from "@/lib/leadStages";
 
-export type LeadFunnelStage =
-  | "untouched" | "contacted" | "hot" | "applied"
-  | "approved" | "offered" | "admitted";
-
-export const LEAD_FUNNEL_ORDER: LeadFunnelStage[] = [
-  "untouched", "contacted", "hot", "applied", "approved", "offered", "admitted",
-];
-
-// Maps each lead_stage value to its funnel bucket. Multiple lead_stage values
-// can collapse into one funnel bucket (e.g. all the "post-offer" stages roll
-// into "offered" so the funnel doesn't sprawl into 11 boxes).
-//
-// Stages that don't map = leads we exclude from the active funnel (not
-// interested / DNC / rejected / ineligible / deferred — surfaced as the
-// leakage chip below the funnel instead).
-const STAGE_TO_BUCKET: Record<string, LeadFunnelStage> = {
-  new_lead:                 "untouched",
-  ai_called:                "contacted",
-  counsellor_call:          "contacted",
-  priority_interested:      "hot",
-  visit_scheduled:          "hot",   // visit booked = still in the hot bucket; visit metrics live elsewhere
-  interview:                "hot",
-  application_in_progress:  "applied",
-  application_submitted:    "applied",
-  application_fee_paid:     "applied",
-  application_approved:     "approved",
-  offer_sent:               "offered",
-  token_paid:               "offered",
-  pre_admitted:             "offered",
-  admitted:                 "admitted",
-};
-
-// Dropped / dead-lead stages — feeds the leakage pill, not the funnel.
-const LEAKAGE_STAGES = [
-  "not_interested", "dnc", "rejected", "ineligible", "deferred",
-] as const;
-type LeakageStage = typeof LEAKAGE_STAGES[number];
-
-const LEAKAGE_LABEL: Record<LeakageStage, string> = {
-  not_interested: "not interested",
-  dnc:            "DNC",
-  rejected:       "rejected",
-  ineligible:     "ineligible",
-  deferred:       "deferred",
-};
+export type { LeadFunnelStage };
+export { leadStagesForBucket };
 
 const META: Record<LeadFunnelStage, {
   label: string; icon: any;
@@ -237,13 +204,4 @@ export function LeadPipeline({ stageCounts, extraHot = 0, activeStage, onStageCl
       </CardContent>
     </Card>
   );
-}
-
-/** Returns the raw lead_stage values that belong to a given funnel bucket.
- *  Used by the host page to convert a funnel click into a stage filter. */
-export function leadStagesForBucket(bucket: LeadFunnelStage | "leakage"): string[] {
-  if (bucket === "leakage") return LEAKAGE_STAGES.slice();
-  return Object.entries(STAGE_TO_BUCKET)
-    .filter(([, b]) => b === bucket)
-    .map(([s]) => s);
 }
