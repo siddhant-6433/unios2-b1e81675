@@ -8,8 +8,10 @@ import { Badge } from "@/components/ui/badge";
 import {
   Tag, FileText, AlertTriangle, MessageSquare, CheckCircle, XCircle,
   Loader2, ExternalLink, ChevronRight, Clock, User, RefreshCw, Inbox as InboxIcon,
+  Video,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { VIDEO_BRAND_LABEL, type VideoBrand } from "@/lib/videoBrands";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -22,7 +24,7 @@ interface InboxCategory {
   color: string;
 }
 
-type CategoryId = "offer_waivers" | "offer_approvals" | "applications" | "followups" | "whatsapp";
+type CategoryId = "offer_waivers" | "offer_approvals" | "applications" | "followups" | "whatsapp" | "video_approvals";
 
 interface WaiverItem {
   id: string;
@@ -83,7 +85,20 @@ interface WhatsAppItem {
   unread_count: number;
 }
 
-type InboxItem = WaiverItem | OfferApprovalItem | ApplicationItem | FollowupItem | WhatsAppItem;
+interface VideoApprovalInboxItem {
+  id: string;
+  title: string;
+  drive_url: string;
+  brand: string;
+  content_type: string;
+  editor_name: string;
+  created_at: string;
+}
+
+type InboxItem = WaiverItem | OfferApprovalItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem;
+
+// Label a source link by host so the inbox doesn't say "Drive" for a YouTube URL.
+const videoSourceLabel = (url: string) => /youtube\.com|youtu\.be/i.test(url) ? "YouTube" : "Drive";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -121,7 +136,7 @@ const APPROVER_ROLES = ["super_admin", "principal", "campus_admin", "admission_h
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function Inbox() {
-  const { role, profile } = useAuth();
+  const { role, profile, user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -136,6 +151,7 @@ export default function Inbox() {
     applications: 0,
     followups: 0,
     whatsapp: 0,
+    video_approvals: 0,
   });
 
   const isSuperAdmin = role === "super_admin";
@@ -185,6 +201,14 @@ export default function Inbox() {
       count: counts.whatsapp,
       roles: ADMISSIONS_ROLES,
       color: "text-green-600",
+    },
+    {
+      id: "video_approvals",
+      label: "Video Approvals",
+      icon: Video,
+      count: counts.video_approvals,
+      roles: ["super_admin"],
+      color: "text-rose-600",
     },
   ];
 
@@ -241,6 +265,14 @@ export default function Inbox() {
             .eq("direction", "inbound")
             .eq("is_read", false)
         : Promise.resolve({ count: 0 }),
+
+      // video approvals — super_admin only (videos awaiting approval)
+      isSuperAdmin
+        ? supabase
+            .from("videos" as any)
+            .select("id", { count: "exact", head: true })
+            .eq("status", "pending_approval")
+        : Promise.resolve({ count: 0 }),
     ]);
 
     const get = (i: number) => {
@@ -255,6 +287,7 @@ export default function Inbox() {
       applications: get(2),
       followups: get(3),
       whatsapp: get(4),
+      video_approvals: get(5),
     });
   }, [role, isSuperAdmin, isApprover, isAdmissions, profile?.id]);
 
@@ -442,6 +475,36 @@ export default function Inbox() {
             unread_count: c.unread_count,
           } as WhatsAppItem))
         );
+      } else if (cat === "video_approvals") {
+        const { data, error } = await supabase
+          .from("videos" as any)
+          .select("id, title, drive_url, brand, content_type, editor_id, created_at")
+          .eq("status", "pending_approval")
+          .order("created_at", { ascending: false })
+          .limit(100);
+        if (error) throw error;
+        const rows = (data as any[]) || [];
+        // Resolve editor display names in one batch.
+        const editorIds = [...new Set(rows.map(r => r.editor_id).filter(Boolean))];
+        const nameById: Record<string, string> = {};
+        if (editorIds.length) {
+          const { data: eds } = await supabase
+            .from("video_editors" as any)
+            .select("id, name")
+            .in("id", editorIds);
+          for (const e of (eds as any[]) || []) nameById[e.id] = e.name;
+        }
+        setItems(
+          rows.map((v: any) => ({
+            id: v.id,
+            title: v.title,
+            drive_url: v.drive_url,
+            brand: v.brand,
+            content_type: v.content_type,
+            editor_name: nameById[v.editor_id] || "—",
+            created_at: v.created_at,
+          } as VideoApprovalInboxItem))
+        );
       }
     } catch (e: any) {
       toast({ title: "Failed to load items", description: e.message, variant: "destructive" });
@@ -503,6 +566,41 @@ export default function Inbox() {
       toast({ title: decision === "approved" ? "Offer letter approved" : "Offer letter rejected" });
       setSelectedItem(null);
       loadItems("offer_approvals");
+      fetchCounts();
+    } catch (e: any) {
+      toast({ title: "Action failed", description: e.message, variant: "destructive" });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const decideVideo = async (video: VideoApprovalInboxItem, decision: "approved" | "rejected") => {
+    if (!isSuperAdmin) return;
+    let rejection_reason: string | null = null;
+    if (decision === "rejected") {
+      const r = window.prompt("Reason for rejection:");
+      if (r === null) return;
+      if (!r.trim()) { toast({ title: "A reason is required to reject", variant: "destructive" }); return; }
+      rejection_reason = r.trim();
+    }
+    setProcessing(video.id);
+    try {
+      const { error } = await supabase.from("videos" as any).update({
+        status: decision,
+        approved_by: user?.id ?? null,
+        approved_at: new Date().toISOString(),
+        rejection_reason,
+      }).eq("id", video.id);
+      if (error) throw error;
+      // On approval, ping the editor on WhatsApp to post & submit the links.
+      if (decision === "approved") {
+        supabase.functions.invoke("video-notify", {
+          body: { event: "approved", video_id: video.id },
+        }).catch(() => { /* non-fatal */ });
+      }
+      toast({ title: decision === "approved" ? "Video approved" : "Video rejected" });
+      setSelectedItem(null);
+      loadItems("video_approvals");
       fetchCounts();
     } catch (e: any) {
       toast({ title: "Action failed", description: e.message, variant: "destructive" });
@@ -617,6 +715,24 @@ export default function Inbox() {
             </Badge>
           </div>
           <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(w.last_message_at)}</p>
+        </button>
+      );
+    }
+
+    if (selected === "video_approvals") {
+      const v = item as VideoApprovalInboxItem;
+      return (
+        <button key={v.id} className={baseClass} onClick={() => setSelectedItem(v)}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground truncate">{v.title}</p>
+              <p className="text-xs text-muted-foreground truncate">{v.editor_name}</p>
+            </div>
+            <ChevronRight className="h-4 w-4 text-muted-foreground/40 shrink-0 mt-0.5" />
+          </div>
+          <p className="text-[10px] text-muted-foreground/60 mt-1">
+            {VIDEO_BRAND_LABEL[v.brand as VideoBrand] || v.brand} · {fmtTime(v.created_at)}
+          </p>
         </button>
       );
     }
@@ -864,6 +980,62 @@ export default function Inbox() {
               </Button>
             )}
           </div>
+        </div>
+      );
+    }
+
+    if (selected === "video_approvals") {
+      const v = selectedItem as VideoApprovalInboxItem;
+      return (
+        <div className="p-5 space-y-5">
+          <div>
+            <h3 className="text-base font-semibold text-foreground">{v.title}</h3>
+            <p className="text-sm text-muted-foreground">{v.editor_name}</p>
+          </div>
+
+          <div className="rounded-xl border border-border bg-card divide-y divide-border">
+            <Row label="Brand" value={VIDEO_BRAND_LABEL[v.brand as VideoBrand] || v.brand} />
+            <Row label="Submitted" value={fmtDate(v.created_at)} />
+          </div>
+
+          <a href={v.drive_url} target="_blank" rel="noreferrer"
+             className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2 text-sm font-medium text-primary hover:bg-primary/10">
+            <ExternalLink className="h-4 w-4" /> Open {videoSourceLabel(v.drive_url)} Link
+          </a>
+
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              className="flex-1 bg-success/90 hover:bg-success text-white"
+              disabled={!isSuperAdmin || processing === v.id}
+              onClick={() => decideVideo(v, "approved")}
+            >
+              {processing === v.id ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>
+              )}
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              className="flex-1"
+              disabled={!isSuperAdmin || processing === v.id}
+              onClick={() => decideVideo(v, "rejected")}
+            >
+              <XCircle className="h-4 w-4 mr-1.5" />Reject
+            </Button>
+          </div>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full"
+            onClick={() => navigate("/video-approvals")}
+          >
+            <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+            Open Video Approvals
+          </Button>
         </div>
       );
     }

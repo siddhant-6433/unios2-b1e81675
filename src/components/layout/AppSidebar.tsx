@@ -7,7 +7,7 @@ import {
   ChevronDown, Phone, Calendar, MessageSquare, Newspaper, Building2, School, ShieldCheck, Zap, Inbox,
   Globe, FolderOpen, Heart, Award, Target, GitMerge, Bot, Gift, AlertTriangle, Sparkles, Receipt,
   Briefcase, CalendarOff, UserCheck, Fingerprint, PhoneCall, PhoneMissed, Send, UserPlus, Footprints,
-  FolderLock, Flame,
+  FolderLock, Flame, Video, ListPlus,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -27,7 +27,7 @@ type AppRole =
   | "super_admin" | "campus_admin" | "principal" | "admission_head"
   | "counsellor" | "accountant" | "faculty" | "teacher"
   | "data_entry" | "office_admin" | "office_assistant" | "hostel_warden" | "consultant" | "student" | "parent"
-  | "ib_coordinator";
+  | "ib_coordinator" | "video_editor";
 
 type MenuItem = { title: string; url: string; icon: any; permission?: string; anyPermission?: string[]; badge?: number; hideForSuperAdmin?: boolean };
 
@@ -42,6 +42,7 @@ const mainMenu: MenuItem[] = [
   { title: "Collections", url: "/collections", icon: Receipt, permission: "finance:view" },
   { title: "Refer & Earn", url: "/referrals", icon: Gift, permission: "referrals:view" },
   { title: "Reports", url: "/reports", icon: BarChart3, permission: "reports:view" },
+  { title: "My Videos", url: "/video-editor", icon: Video, permission: "video_editor:view", hideForSuperAdmin: true },
 ];
 
 const admissionSubMenu: MenuItem[] = [
@@ -54,6 +55,7 @@ const admissionSubMenu: MenuItem[] = [
   { title: "WA Outbound", url: "/whatsapp-inbox?mode=outbound", icon: Send, permission: "whatsapp:view" },
   { title: "Performance", url: "/counsellor-dashboard", icon: BarChart3, permission: "performance:view" },
   { title: "Lead Buckets", url: "/lead-buckets", icon: Inbox, permission: "lead_buckets:view" },
+  { title: "Lists & Campaigns", url: "/lists", icon: ListPlus, permission: "leads:view" },
   { title: "Lead Allocation", url: "/lead-allocation", icon: Shuffle, permission: "lead_allocation:view" },
   { title: "Fresh Leads", url: "/fresh-leads", icon: Sparkles, permission: "call_log:view" },
   { title: "Pending Follow-ups", url: "/pending-followups", icon: AlertTriangle, permission: "call_log:view" },
@@ -106,6 +108,8 @@ const managementMenu: MenuItem[] = [
   { title: "WhatsApp Health", url: "/whatsapp-health", icon: AlertTriangle, permission: "user_management:view" },
   { title: "Documents", url: "/documents", icon: FileText, permission: "documents:view" },
   { title: "Alumni Verification", url: "/alumni-verifications", icon: ShieldCheck, permission: "alumni_verification:view" },
+  { title: "Video Approvals", url: "/video-approvals", icon: Video, permission: "video_approval:view" },
+  { title: "Video Bills", url: "/video-bills", icon: Receipt, permission: "video_bills:view" },
 ];
 
 const roleLabels: Record<string, string> = {
@@ -114,6 +118,7 @@ const roleLabels: Record<string, string> = {
   counsellor: "Counsellor", accountant: "Accountant", admission_head: "Admission Head",
   data_entry: "Data Entry", office_admin: "Office Administrator", office_assistant: "Office Assistant", hostel_warden: "Hostel Warden",
   ib_coordinator: "IB Coordinator",
+  video_editor: "Video Editor",
 };
 
 export function AppSidebar() {

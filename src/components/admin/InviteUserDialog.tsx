@@ -21,6 +21,7 @@ const ALL_ROLES: { value: AppRole; label: string }[] = [
   { value: "office_assistant", label: "Office Assistant" },
   { value: "hostel_warden", label: "Hostel Warden" },
   { value: "consultant", label: "Consultant" },
+  { value: "video_editor", label: "Video Editor (Consultant)" },
   { value: "publisher", label: "Publisher (Lead Aggregator)" },
   { value: "student", label: "Student" },
   { value: "parent", label: "Parent" },
@@ -122,6 +123,22 @@ const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublis
             phone: phone.trim() || null,
             user_id: data.user_id,
             stage: "active",
+          });
+        }
+      }
+
+      // Mirror the same pattern for video editors so the new user has a
+      // video_editors row to log into. Rate defaults to 0 — super admin sets
+      // it on the Video Approvals → Editors tab.
+      if (role === "video_editor" && data?.user_id) {
+        const { data: existing } = await supabase.from("video_editors" as any).select("id").eq("user_id", data.user_id).maybeSingle();
+        if (!existing) {
+          await supabase.from("video_editors" as any).insert({
+            name: displayName.trim() || email.trim(),
+            email: email.trim(),
+            phone: phone.trim() || null,
+            user_id: data.user_id,
+            active: true,
           });
         }
       }

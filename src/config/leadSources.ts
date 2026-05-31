@@ -14,10 +14,12 @@ export const LEAD_SOURCES = [
   { value: "walk_in", label: "Walk-in" },
   { value: "direct_walkin", label: "Direct Walk-In" },
   { value: "inbound_call", label: "Inbound Call" },
+  { value: "dialer", label: "Cloud Dialer" },
   { value: "consultant", label: "Consultant" },
   { value: "justdial", label: "JustDial" },
   { value: "referral", label: "Referral" },
   { value: "education_fair", label: "Education Fair" },
+  { value: "school_outreach", label: "School Outreach" },
   { value: "other", label: "Other" },
 ] as const;
 
@@ -37,9 +39,11 @@ export const SOURCE_BADGE_COLORS: Record<string, string> = {
   walk_in: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200",
   direct_walkin: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200",
   inbound_call: "bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200",
+  dialer: "bg-lime-100 text-lime-800 dark:bg-lime-900/40 dark:text-lime-200",
   consultant: "bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-200",
   justdial: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200",
   referral: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200",
   education_fair: "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200",
+  school_outreach: "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-200",
   other: "bg-muted text-muted-foreground",
 };

@@ -10,8 +10,16 @@ import {
   Phone, PhoneOff, Pause, Play, SkipForward, Clock,
   Loader2, CheckCircle, XCircle, PhoneMissed, Users, BarChart3,
   Calendar, AlertCircle, Volume2, Pencil, Check, X, Search,
-  FileText, PhoneIncoming, ArrowRight, PhoneCall,
+  FileText, PhoneIncoming, ArrowRight, PhoneCall, ChevronDown,
+  MessageCircle, ChevronRight,
 } from "lucide-react";
+import { useIsMobile } from "@/hooks/use-mobile";
+import {
+  Sheet, SheetContent, SheetTrigger, SheetClose, SheetHeader, SheetTitle,
+} from "@/components/ui/sheet";
+import {
+  Collapsible, CollapsibleTrigger, CollapsibleContent,
+} from "@/components/ui/collapsible";
 import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
 import { PriorityInterestedCard } from "@/components/leads/PriorityInterestedCard";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
@@ -196,6 +204,7 @@ export default function CloudDialer() {
   const { toast } = useToast();
   const isCounsellor = role === "counsellor";
   const counsellorDisplayName = profile?.display_name || "Counsellor";
+  const isMobile = useIsMobile();
 
   // Queue
   const [queue, setQueue] = useState<QueueLead[]>([]);
@@ -233,7 +242,12 @@ export default function CloudDialer() {
   // existing-lead matches (auto-pin + jump to that lead) and brand-new
   // numbers (creates a stub lead first so call_logs has a lead_id).
   const [dialPhone, setDialPhone] = useState("");
-  const [dialLeadMatch, setDialLeadMatch] = useState<{id:string;name:string} | null>(null);
+  const [dialLeadMatch, setDialLeadMatch] = useState<{
+    id: string; name: string;
+    phone?: string; stage?: string; source?: string;
+    course_id?: string | null; course_name?: string; campus_name?: string;
+    isSelf?: boolean; canView?: boolean; primaryName?: string;
+  } | null>(null);
   const [dialNoMatch, setDialNoMatch] = useState(false);
   const [dialNewName, setDialNewName] = useState("");
   const [dialPlacing, setDialPlacing] = useState(false);
@@ -554,6 +568,11 @@ export default function CloudDialer() {
   const pollRef = useRef<number | null>(null);
   const callIdRef = useRef<string | null>(null);
   const pollStartTimeRef = useRef<number | null>(null);
+  // Guards cancelCall against a double-click: the manual-call-cancel invoke
+  // awaits up to ~2s (Plivo uuid retry) before status flips to auto-disposed,
+  // and the "Cancelled" button stays visible the whole time. Without this a
+  // second click double-fires the edge function + double-counts stats.
+  const cancellingRef = useRef(false);
 
   // Inline editing
   const [queueSearch, setQueueSearch] = useState("");
@@ -677,16 +696,23 @@ export default function CloudDialer() {
       toast({ title: "Enter a phone number first", variant: "destructive" });
       return;
     }
-    const { data: leadRow } = await (supabase as any)
-      .from("leads")
-      .select("id, name, phone")
-      .eq("phone", norm)
-      .eq("is_mirror", false)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (leadRow) {
-      setDialLeadMatch({ id: leadRow.id, name: leadRow.name });
+    // Look up across RLS via SECURITY DEFINER RPC: an existing lead owned by
+    // another counsellor is invisible to a plain select, so the UI would wrongly
+    // offer "create" and the insert would then fail on the global phone unique
+    // index. The RPC finds it regardless of ownership.
+    const { data, error } = await (supabase as any).rpc("dialer_find_lead_by_phone", { _phone: norm });
+    if (error) {
+      toast({ title: "Lookup failed", description: error.message || "Try again", variant: "destructive" });
+      return;
+    }
+    if (data) {
+      setDialLeadMatch({
+        id: data.id, name: data.name || "Lead", phone: data.phone,
+        stage: data.stage, source: data.source, course_id: data.course_id ?? null,
+        course_name: data.course_name, campus_name: data.campus_name,
+        isSelf: data.is_self === true, canView: data.can_view === true,
+        primaryName: data.primary_name,
+      });
     } else {
       setDialNoMatch(true);
     }
@@ -722,47 +748,92 @@ export default function CloudDialer() {
     }, 100);
   };
 
-  const dialCallExisting = () => {
-    if (dialLeadMatch) pinAndStart(dialLeadMatch.id);
+  // Drop a specific lead to the top of the in-memory queue and dial it now,
+  // bypassing loadQueue() — the queue RPC is scoped to the counsellor's OWN
+  // leads, so a just-claimed secondary lead would not appear there. placeCall
+  // is given the lead explicitly so it doesn't depend on the currentLead
+  // render closure settling first.
+  const injectAndStart = (row: any) => {
+    const ql: QueueLead = {
+      id: row.id,
+      name: row.name || "Lead",
+      phone: row.phone || "",
+      stage: row.stage || "",
+      source: row.source || "",
+      course_id: row.course_id ?? null,
+      course_name: row.course_name || "—",
+      campus_name: row.campus_name || "—",
+      bucket: "Dialled",
+      attempt_count: 0,
+    };
+    setDialPhone("");
+    setDialNewName("");
+    setDialLeadMatch(null);
+    setDialNoMatch(false);
+    setQueue(prev => [ql, ...prev.filter(l => l.id !== ql.id)]);
+    setCurrentIdx(0);
+    setDialerActive(true);
+    setPaused(false);
+    setDialPlacing(false);
+    setTimeout(() => placeCall(ql), 80);
   };
 
-  // Create stub lead, then pin+dial. Stub has stage=new_lead, source=dialer,
-  // and counsellor_id set to the current user's profile id so RLS scoping
-  // matches the standard counsellor flow.
+  // Call an existing lead found by lookup. Records the dialing counsellor as a
+  // secondary counsellor (idempotent; skipped if they are the primary) so they
+  // gain visibility without taking the lead over, then dials it.
+  const dialCallExisting = async () => {
+    if (!dialLeadMatch || dialPlacing) return;
+    setDialPlacing(true);
+    const { data, error } = await (supabase as any)
+      .rpc("dialer_claim_existing_lead", { _lead_id: dialLeadMatch.id });
+    if (error || !data) {
+      toast({ title: "Couldn't open lead", description: error?.message || "Try again", variant: "destructive" });
+      setDialPlacing(false);
+      return;
+    }
+    injectAndStart(data);
+  };
+
+  // Create a stub lead (stage=new_lead, source=dialer, owned by the current
+  // counsellor) and dial it. Routed through the dialer_create_lead SECURITY
+  // DEFINER RPC instead of a client insert: a counsellor's
+  // .insert(...).select() into leads is rejected by RLS (the SELECT policy's
+  // can_view_lead() can't see the just-inserted row mid-statement, so
+  // INSERT ... RETURNING fails with 42501). The RPC also folds in the
+  // existing-phone case — it attaches the caller as a secondary counsellor
+  // rather than duplicating or taking over the lead.
   const dialCreateAndCall = async () => {
     if (!user?.id || !dialNewName.trim()) {
       toast({ title: "Name required", description: "Enter a name for the new lead.", variant: "destructive" });
       return;
     }
-    const norm = normalisePhone(dialPhone);
     setDialPlacing(true);
-    const { data: prof } = await supabase.from("profiles").select("id").eq("user_id", user.id).single();
-    const { data: newLead, error } = await (supabase as any)
-      .from("leads")
-      .insert({
-        name: dialNewName.trim(),
-        phone: norm,
-        stage: "new_lead",
-        source: "dialer",
-        counsellor_id: prof?.id || null,
-      })
-      .select("id")
-      .single();
-    if (error || !newLead) {
+    const { data, error } = await (supabase as any)
+      .rpc("dialer_create_lead", { _name: dialNewName.trim(), _phone: dialPhone });
+    if (error || !data) {
       toast({ title: "Couldn't create lead", description: error?.message || "Try again", variant: "destructive" });
       setDialPlacing(false);
       return;
     }
-    await pinAndStart(newLead.id);
+    if (data.existed) {
+      toast({ title: "Existing lead", description: `${data.name} already exists — calling them.` });
+    }
+    injectAndStart(data);
   };
 
-  const placeCall = async () => {
-    if (!currentLead || !user?.id) return;
+  // leadOverride lets callers dial a specific lead immediately without waiting
+  // for the currentLead render closure to settle (used by the inject-and-call
+  // path for existing leads claimed via RPC). An accidental event arg falls
+  // back to currentLead because it has no .id.
+  const placeCall = async (leadOverride?: QueueLead) => {
+    const lead = leadOverride && (leadOverride as any).id ? leadOverride : currentLead;
+    if (!lead || !user?.id) return;
+    cancellingRef.current = false;
     setCallState({ status: "calling", startTime: Date.now(), elapsed: 0, disposition: null, autoDisposition: false });
 
     try {
       const { data, error } = await supabase.functions.invoke("manual-call", {
-        body: { lead_id: currentLead.id, caller_user_id: user.id },
+        body: { lead_id: lead.id, caller_user_id: user.id },
       });
 
       if (error || data?.error) {
@@ -929,15 +1000,74 @@ export default function CloudDialer() {
 
   // ── Auto-disposition (unanswered/busy/voicemail from Plivo) ───────────────
 
-  const handleAutoDisposition = (disposition: string) => {
+  // ── Cancel an in-flight Cloud Call ───────────────────────────────────────
+  // Counsellor pressed "Cancelled" while the call was still ringing. Unlike a
+  // plain local disposition, this must hang up the live Plivo call so both legs
+  // (counsellor + student) drop — otherwise the call stays orphaned on Plivo.
+  // Mirrors LeadDetail's onCancelCall: invoke manual-call-cancel, then drive the
+  // UI. The edge function records cancelled_by_counsellor, so we skip the local
+  // call-log write on success to avoid a conflicting row.
+  const cancelCall = async () => {
+    if (cancellingRef.current) return;
+    cancellingRef.current = true;
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    const callUuid = callIdRef.current;
+    let hungUp = false;
+    if (callUuid) {
+      try {
+        const { error } = await supabase.functions.invoke("manual-call-cancel", {
+          body: { call_id: callUuid, caller_user_id: user?.id },
+        });
+        if (error) {
+          toast({ title: "Cancel failed", description: error.message, variant: "destructive" });
+        } else {
+          toast({ title: "Call cancelled", description: "Both legs dropped." });
+          hungUp = true;
+        }
+      } catch (e: any) {
+        toast({ title: "Cancel failed", description: e?.message || "Try again", variant: "destructive" });
+      }
+    }
+    handleAutoDisposition("cancelled", hungUp);
+  };
+
+  // ── End a connected Cloud Call ───────────────────────────────────────────
+  // Student answered and the counsellor pressed "End Call". Transition the UI
+  // to the disposition screen immediately, then drop the live Plivo legs so
+  // neither phone stays connected. hangup_only: the real disposition is marked
+  // from the "ended" screen, so the edge function must NOT write
+  // cancelled_by_counsellor here.
+  const endCall = async () => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    setCallState(prev => ({ ...prev, status: "ended" }));
+    setAutoNextTimer(60);
+    const callUuid = callIdRef.current;
+    if (callUuid) {
+      try {
+        const { error } = await supabase.functions.invoke("manual-call-cancel", {
+          body: { call_id: callUuid, caller_user_id: user?.id, hangup_only: true },
+        });
+        if (error) {
+          toast({ title: "Couldn't drop call legs", description: error.message, variant: "destructive" });
+        }
+      } catch (e: any) {
+        toast({ title: "Couldn't drop call legs", description: e?.message || "Try again", variant: "destructive" });
+      }
+    }
+  };
+
+  const handleAutoDisposition = (disposition: string, skipLog = false) => {
     const statsKey = disposition === "busy" ? "busy" : disposition === "voicemail" ? "voicemail" : "noAnswer";
     setStats(prev => ({ ...prev, [statsKey]: prev[statsKey] + 1 }));
     setCallState(prev => ({ ...prev, status: "auto-disposed", disposition, autoDisposition: true }));
     // Write call log via dedupe RPC so this row merges with the auto path from
     // bridge-hangup (if it already wrote one). Without this, cancels + stuck-call
     // timeouts produce no call log at all.
+    // skipLog: when manual-call-cancel already recorded cancelled_by_counsellor,
+    // skip this write so we don't race a conflicting "cancelled" row (RPC is
+    // first-write-wins on cloud_call_uuid).
     const callUuid = callIdRef.current;
-    if (currentLead) {
+    if (currentLead && !skipLog) {
       (supabase as any).rpc("record_cloud_call_log", {
         p_call_uuid:     callUuid ?? crypto.randomUUID(),
         p_lead_id:       currentLead.id,
@@ -1148,6 +1278,318 @@ export default function CloudDialer() {
 
   if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
 
+  // ── Mobile Call Mode ──────────────────────────────────────────────────────
+  // A thumb-first layout for counsellors working their queue on a phone.
+  // Reuses every handler/state from the desktop dialer; only the presentation
+  // changes. Gated on viewport < 768px so the desktop two-pane is untouched.
+  if (isMobile) {
+    const isNonCallFollowup = currentLead?.followup_type && currentLead.followup_type !== "call";
+    const showDispositions = callState.status === "connected" || callState.status === "ended";
+    const dispoOnClick = (value: string) =>
+      callState.status === "connected" ? preSelectDisposition(value) : markDisposition(value);
+    const reclaimMins = currentLead ? minutesToReclaim(currentLead) : null;
+
+    return (
+      <div className="flex flex-col h-[calc(100dvh-56px)] bg-background">
+        {/* Missed-call banner */}
+        {missedCount > 0 && (
+          <button
+            onClick={() => navigate("/missed-calls")}
+            className="shrink-0 flex items-center gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-950/20 border-b border-amber-200 text-left"
+          >
+            <PhoneMissed className="h-4 w-4 text-amber-600 shrink-0 animate-pulse" />
+            <span className="text-sm font-medium text-amber-800 dark:text-amber-300 flex-1 min-w-0 truncate">
+              {missedCount} missed call{missedCount > 1 ? "s" : ""} — tap to review
+            </span>
+            <ChevronRight className="h-4 w-4 text-amber-600 shrink-0" />
+          </button>
+        )}
+
+        {currentLead ? (
+          <>
+            {/* ── TOP: glance header (who am I calling) ──────────────────── */}
+            <header className="shrink-0 px-4 py-3 border-b border-border bg-card">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-xl bg-cyan-100 dark:bg-cyan-900/30 flex items-center justify-center shrink-0">
+                  <span className="text-lg font-bold text-cyan-700">{currentLead.name[0]?.toUpperCase()}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h1 className="text-lg font-bold text-foreground leading-tight truncate">{currentLead.name}</h1>
+                  <p className="text-sm text-muted-foreground truncate">{currentLead.course_name} · {currentLead.campus_name}</p>
+                </div>
+                <a href={`/admissions/${currentLead.id}`} target="_blank" rel="noreferrer"
+                  className="shrink-0 text-xs font-medium text-primary px-2 py-1">Open →</a>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                <Badge className="text-[11px] border-0 bg-muted text-foreground">{currentLead.bucket}</Badge>
+                <Badge className="text-[11px] border-0 bg-muted text-muted-foreground">
+                  {currentLead.attempt_count > 0 ? `${currentLead.attempt_count} previous` : "First call"}
+                </Badge>
+                <Badge className="text-[11px] border-0 bg-muted text-muted-foreground">{STAGE_LABELS[currentLead.stage] || currentLead.stage}</Badge>
+                {reclaimMins !== null && reclaimMins <= 0 && (
+                  <Badge className="text-[11px] border-0 bg-red-600 text-white animate-pulse">Reclaim now</Badge>
+                )}
+                {reclaimMins !== null && reclaimMins > 0 && reclaimMins <= 30 && (
+                  <Badge className="text-[11px] border-0 bg-red-100 text-red-700">⚠ {reclaimMins}m to reclaim</Badge>
+                )}
+              </div>
+            </header>
+
+            {/* ── MIDDLE: scrollable context ─────────────────────────────── */}
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+              {/* Course pitch — promoted above the fold, talking points collapsed */}
+              <Card className="border-cyan-200/60 dark:border-cyan-900/40 shadow-none">
+                <CardContent className="p-3 space-y-3">
+                  {currentLead.course_id && <CourseInfoPanel courseId={currentLead.course_id} />}
+                  {currentLead.course_name !== "—" && (
+                    <Collapsible>
+                      <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg bg-blue-50/60 dark:bg-blue-950/20 px-3 py-2.5 text-sm font-semibold text-blue-700 dark:text-blue-300 [&[data-state=open]>svg]:rotate-180">
+                        <span className="flex items-center gap-1.5">💬 Pitch &amp; talking points</span>
+                        <ChevronDown className="h-4 w-4 transition-transform" />
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="pt-3 space-y-3 text-sm">
+                        <p className="italic text-muted-foreground leading-relaxed">
+                          "Hello, am I speaking with <b>{currentLead.name.split(" ")[0]}</b>? This is {counsellorDisplayName} from
+                          NIMT. I see you enquired about <b>{currentLead.course_name}</b>. {getCourseScript(currentLead.course_name)}"
+                        </p>
+                        <div>
+                          <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-1.5">Highlights</p>
+                          <ul className="text-sm text-muted-foreground leading-relaxed space-y-1">
+                            <li>• Est. 1987 — 37+ years, 5 campuses, AICTE/UGC approved</li>
+                            <li>• Placements: ₹18.75 LPA highest, ₹5.40 LPA avg</li>
+                            {getCourseHighlights(currentLead.course_name).map((h, i) => <li key={i}>• {h}</li>)}
+                          </ul>
+                        </div>
+                        <div>
+                          <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-1.5">Nudge checklist</p>
+                          <ul className="text-sm text-muted-foreground leading-relaxed space-y-1">
+                            {getCourseNudges(currentLead.course_name).map((n, i) => <li key={i}>☐ {n}</li>)}
+                            <li>☐ Scholarships (merit/SC/ST/OBC/sports)</li>
+                            <li>☐ Hostel: 600+ beds · Invite for campus visit</li>
+                          </ul>
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Priority interested reason */}
+              {currentLead.stage === "priority_interested" && (
+                <PriorityInterestedCard leadId={currentLead.id} compact />
+              )}
+
+              {/* Previous call notes — collapsed by default */}
+              {callHistory.length > 0 && (
+                <Collapsible>
+                  <Card className="border-border/60 shadow-none">
+                    <CardContent className="p-3">
+                      <CollapsibleTrigger className="flex w-full items-center justify-between text-sm font-semibold text-amber-700 dark:text-amber-400 [&[data-state=open]>svg]:rotate-180">
+                        <span className="flex items-center gap-1.5"><FileText className="h-4 w-4" />Previous call notes ({callHistory.length})</span>
+                        <ChevronDown className="h-4 w-4 transition-transform" />
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="pt-2.5 space-y-2.5">
+                        {callHistory.map(c => (
+                          <div key={c.id} className="border-l-2 border-amber-200 pl-2.5 py-0.5 text-sm">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Badge className={`text-[11px] border-0 ${
+                                c.disposition === "interested" ? "bg-emerald-100 text-emerald-700" :
+                                c.disposition === "not_interested" ? "bg-red-100 text-red-700" :
+                                c.disposition === "not_answered" ? "bg-amber-100 text-amber-700" :
+                                "bg-gray-100 text-gray-600"
+                              }`}>{c.disposition?.replace("_", " ") || "—"}</Badge>
+                              <span className="text-muted-foreground text-xs">
+                                {new Date(c.called_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                              </span>
+                            </div>
+                            {c.notes && <p className="text-muted-foreground mt-0.5 leading-snug">{c.notes}</p>}
+                          </div>
+                        ))}
+                      </CollapsibleContent>
+                    </CardContent>
+                  </Card>
+                </Collapsible>
+              )}
+            </div>
+
+            {/* ── BOTTOM: thumb action zone ──────────────────────────────── */}
+            <div className="shrink-0 border-t border-border bg-card px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] space-y-3">
+              {/* Live call status */}
+              {(callState.status === "calling" || callState.status === "connected") && (
+                <div className={`flex items-center gap-2 rounded-lg px-3 py-2 ${
+                  callState.status === "calling" ? "bg-cyan-50 dark:bg-cyan-950/20" : "bg-emerald-50 dark:bg-emerald-950/20"
+                }`}>
+                  {callState.status === "calling"
+                    ? <Loader2 className="h-4 w-4 animate-spin text-cyan-600 shrink-0" />
+                    : <Volume2 className="h-4 w-4 text-emerald-600 animate-pulse shrink-0" />}
+                  <span className="text-sm font-semibold text-foreground flex-1 min-w-0">
+                    {callState.status === "calling" ? "📞 Pick up your phone…" : "On call — connected"}
+                  </span>
+                  <span className="text-sm font-mono tabular-nums text-muted-foreground">{formatTime(callState.elapsed)}</span>
+                </div>
+              )}
+
+              {/* Disposition chips — thumb-reach grid */}
+              {showDispositions && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold text-primary uppercase tracking-wide">
+                    {callState.status === "connected" ? "Mark during call" : "Mark outcome"}
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {CONNECTED_DISPOSITIONS.map(d => (
+                      <button key={d.value} onClick={() => dispoOnClick(d.value)}
+                        className={`flex items-center justify-center gap-1.5 min-h-[48px] px-3 rounded-xl border text-sm font-medium transition-colors ${
+                          callState.status === "connected" && callState.disposition === d.value
+                            ? "ring-2 ring-primary bg-primary/10 border-primary" : d.color
+                        }`}>
+                        <d.icon className="h-4 w-4 shrink-0" />{d.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* After disposition: followup scheduling + advance */}
+              {callState.status === "auto-disposed" && (
+                <div className="space-y-2.5">
+                  <p className="text-sm text-foreground">
+                    {callState.autoDisposition ? "Auto" : "Saved"}:{" "}
+                    <span className="font-semibold">{callState.disposition?.replace("_", " ")}</span>
+                  </p>
+                  {callState.disposition !== "not_interested" && followupDate && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <span className="text-sm font-medium text-foreground">{formatFollowupDate(followupDate)}</span>
+                        <input type="date" value={followupDate} onChange={e => setFollowupDate(e.target.value)}
+                          className="rounded-md border border-input bg-background px-2 py-1.5 text-sm ml-auto" />
+                      </div>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {FOLLOWUP_TIME_SLOTS.map(slot => (
+                          <button key={slot} onClick={() => setFollowupTime(slot)}
+                            className={`min-h-[40px] rounded-lg text-xs font-medium border transition-colors ${
+                              followupTime === slot ? "bg-cyan-100 text-cyan-700 border-cyan-300" : "bg-background text-muted-foreground border-input"
+                            }`}>{formatSlotLabel(slot)}</button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <Button onClick={moveToNext} className="w-full min-h-[52px] text-base bg-cyan-600 hover:bg-cyan-700">
+                    {currentIdx < queue.length - 1 ? "Save & next lead" : "Save & finish"}
+                    <ArrowRight className="h-5 w-5 ml-1.5" />
+                  </Button>
+                </div>
+              )}
+
+              {/* Primary action row by state */}
+              {callState.status === "idle" && (
+                <>
+                  {isNonCallFollowup ? (
+                    <div className="grid grid-cols-1 gap-2">
+                      <Button onClick={() => window.open(`https://wa.me/${currentLead.phone.replace(/[^0-9]/g,"")}`, "_blank")}
+                        className="w-full min-h-[56px] text-base bg-emerald-600 hover:bg-emerald-700">
+                        <MessageCircle className="h-5 w-5 mr-1.5" />
+                        {currentLead.followup_type === "whatsapp" ? "Open WhatsApp" : `Handle ${currentLead.followup_type} follow-up`}
+                      </Button>
+                      <Button onClick={completeFollowupAndAdvance} variant="outline" className="w-full min-h-[48px]">
+                        <CheckCircle className="h-4 w-4 mr-1.5" />Mark done &amp; next
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button onClick={() => { setDialerActive(false); placeCall(); }}
+                      className="w-full min-h-[56px] text-base font-semibold bg-cyan-600 hover:bg-cyan-700">
+                      <PhoneCall className="h-5 w-5 mr-2" />Call {currentLead.name.split(" ")[0]}
+                    </Button>
+                  )}
+                </>
+              )}
+
+              {callState.status === "calling" && (
+                <Button onClick={cancelCall} variant="outline" className="w-full min-h-[52px] text-base">
+                  <PhoneOff className="h-5 w-5 mr-1.5" />Cancel
+                </Button>
+              )}
+
+              {callState.status === "connected" && (
+                <Button onClick={endCall} variant="destructive" className="w-full min-h-[52px] text-base">
+                  <PhoneOff className="h-5 w-5 mr-1.5" />End call
+                </Button>
+              )}
+
+              {/* Queue handle + skip — always available when not on a live call */}
+              {(callState.status === "idle" || callState.status === "ended") && (
+                <div className="flex items-center gap-2">
+                  <Sheet>
+                    <SheetTrigger asChild>
+                      <button className="flex-1 flex items-center justify-between rounded-xl border border-border bg-muted/40 px-3 min-h-[44px] text-sm">
+                        <span className="flex items-center gap-1.5 font-medium text-foreground">
+                          <Users className="h-4 w-4 text-muted-foreground" />Queue · {currentIdx + 1} of {queue.length}
+                        </span>
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      </button>
+                    </SheetTrigger>
+                    <SheetContent side="bottom" className="h-[80dvh] flex flex-col p-0">
+                      <SheetHeader className="px-4 pt-4 pb-2 shrink-0">
+                        <SheetTitle className="text-left">Call queue · {queue.length}</SheetTitle>
+                        <div className="relative mt-1">
+                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                          <input type="text" value={queueSearch} onChange={e => setQueueSearch(e.target.value)}
+                            placeholder="Search name, phone, course…"
+                            className="w-full rounded-lg border border-input bg-background pl-9 pr-3 py-2.5 text-sm outline-none focus:ring-1 focus:ring-primary" />
+                        </div>
+                      </SheetHeader>
+                      <div className="flex-1 overflow-y-auto">
+                        {queue.map((lead, idx) => {
+                          if (queueSearch) {
+                            const q = queueSearch.toLowerCase();
+                            if (!(lead.name.toLowerCase().includes(q) || lead.phone.includes(q) || lead.course_name.toLowerCase().includes(q))) return null;
+                          }
+                          return (
+                            <SheetClose asChild key={lead.id}>
+                              <button onClick={() => setCurrentIdx(idx)}
+                                className={`w-full text-left px-4 py-3 border-b border-border/40 flex items-center gap-2 ${
+                                  idx === currentIdx ? "bg-cyan-50 dark:bg-cyan-950/20" : idx < currentIdx ? "opacity-50" : ""
+                                }`}>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-foreground truncate">{lead.name}</p>
+                                  <p className="text-xs text-muted-foreground truncate">{lead.course_name} · {lead.phone.slice(-4)}</p>
+                                </div>
+                                <Badge className="text-[11px] border-0 bg-muted text-muted-foreground shrink-0">{lead.bucket}</Badge>
+                                {idx < currentIdx && <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0" />}
+                              </button>
+                            </SheetClose>
+                          );
+                        })}
+                        {queue.length === 0 && (
+                          <div className="px-4 py-12 text-center text-muted-foreground">
+                            <Phone className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                            <p className="text-sm">No leads in queue</p>
+                          </div>
+                        )}
+                      </div>
+                    </SheetContent>
+                  </Sheet>
+                  <Button onClick={skipLead} variant="outline" className="min-h-[44px] px-4" disabled={currentIdx >= queue.length - 1}>
+                    <SkipForward className="h-4 w-4 mr-1.5" />Skip
+                  </Button>
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          /* Empty queue */
+          <div className="flex-1 flex items-center justify-center px-6 text-center">
+            <div>
+              <Phone className="h-12 w-12 mx-auto mb-3 opacity-20" />
+              <p className="text-base font-medium text-foreground">No leads in your queue</p>
+              <p className="text-sm text-muted-foreground mt-1">Pull to refresh or try a different queue source on desktop.</p>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="h-[calc(100vh-64px)] flex flex-col">
       {/* Missed-call priority banner — sits above the dialer header */}
@@ -1207,6 +1649,11 @@ export default function CloudDialer() {
                 <CheckCircle className="h-3 w-3 text-emerald-600" />
                 <span className="font-medium text-emerald-900 dark:text-emerald-200">{dialLeadMatch.name}</span>
               </span>
+              {dialLeadMatch.isSelf === false && (
+                <span className="text-[10px] text-amber-600 dark:text-amber-400">
+                  Existing lead{dialLeadMatch.primaryName ? ` (with ${dialLeadMatch.primaryName})` : ""} — you'll be added as a contributor
+                </span>
+              )}
               <Button size="sm" className="bg-cyan-600 hover:bg-cyan-700" onClick={dialCallExisting} disabled={dialPlacing}>
                 {dialPlacing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5 mr-1" />}
                 Call now
@@ -1472,12 +1919,12 @@ export default function CloudDialer() {
                     </div>
                     <div className="flex items-center gap-2">
                       {callState.status === "calling" && (
-                        <Button size="sm" variant="outline" onClick={() => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } handleAutoDisposition("cancelled"); }}>
+                        <Button size="sm" variant="outline" onClick={cancelCall}>
                           <PhoneOff className="h-3.5 w-3.5 mr-1.5" />Cancelled
                         </Button>
                       )}
                       {callState.status === "connected" && (
-                        <Button size="sm" variant="destructive" onClick={() => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } setCallState(prev => ({ ...prev, status: "ended" })); setAutoNextTimer(60); }}>
+                        <Button size="sm" variant="destructive" onClick={endCall}>
                           <PhoneOff className="h-3.5 w-3.5 mr-1.5" />End Call
                         </Button>
                       )}

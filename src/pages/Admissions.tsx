@@ -747,25 +747,22 @@ const Admissions = () => {
         "application_approved","offer_sent","token_paid","pre_admitted","admitted",
         "not_interested","dnc","rejected","ineligible","deferred",
       ];
-      const scope = (q: any) => {
-        let r = q.eq("is_mirror", false);
-        if (role === "counsellor" && profile?.id) {
-          r = r.eq("counsellor_id", profile.id);
-        } else if (selectedCampusId && selectedCampusId !== "all") {
-          r = r.eq("campus_id", selectedCampusId);
-        }
-        return r;
-      };
-
-      const stageResults = await Promise.all(allStages.map(async (s) => {
-        const { count } = await scope(
-          supabase.from("leads").select("id", { count: "exact", head: true }).eq("stage", s)
-        );
-        return [s, count || 0] as const;
-      }));
+      // Single GROUP BY scan instead of one HEAD count per stage. The
+      // get_lead_stage_counts RPC is SECURITY INVOKER, so the leads RLS policy
+      // applies exactly as it did to the per-stage queries — same scoping
+      // (is_mirror=false; counsellor → own leads; else selected campus).
+      const { data: stageRows } = await (supabase as any).rpc("get_lead_stage_counts", {
+        p_campus_id: (role !== "counsellor" && selectedCampusId && selectedCampusId !== "all")
+          ? selectedCampusId : null,
+        p_counsellor_id: (role === "counsellor" && profile?.id) ? profile.id : null,
+        p_exclude_mirror: true,
+      });
       if (cancelled) return;
       const tally: Record<string, number> = {};
-      for (const [s, c] of stageResults) tally[s] = c;
+      for (const s of allStages) tally[s] = 0;
+      for (const r of (stageRows || []) as { stage: string; count: number }[]) {
+        if (r.stage in tally) tally[r.stage] = Number(r.count) || 0;
+      }
       setStageCounts(tally);
 
       // Pull lead_ids for `disposition='interested'` calls so we can both

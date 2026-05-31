@@ -27,6 +27,7 @@ const Admissions           = lazy(() => import("./pages/Admissions"));
 const LeadDetail           = lazy(() => import("./pages/LeadDetail"));
 const LeadAllocation       = lazy(() => import("./pages/LeadAllocation"));
 const LeadBuckets          = lazy(() => import("./pages/LeadBuckets"));
+const LeadLists            = lazy(() => import("./pages/LeadLists"));
 const CallLog              = lazy(() => import("./pages/CallLog"));
 const AiCallLog            = lazy(() => import("./pages/AiCallLog"));
 const CloudDialer          = lazy(() => import("./pages/CloudDialer"));
@@ -99,6 +100,9 @@ const ReportTemplates       = lazy(() => import("./pages/ib/ReportTemplates"));
 const MYPProjects           = lazy(() => import("./pages/ib/MYPProjects"));
 const ProjectDetail         = lazy(() => import("./pages/ib/ProjectDetail"));
 const InterdisciplinaryUnits = lazy(() => import("./pages/ib/InterdisciplinaryUnits"));
+const VideoEditorPortal      = lazy(() => import("./pages/VideoEditorPortal"));
+const VideoApprovals         = lazy(() => import("./pages/VideoApprovals"));
+const VideoBills             = lazy(() => import("./pages/VideoBills"));
 
 // Shared cache so navigation between pages reuses recent results.
 // TanStack defaults are too aggressive about refetching for a CRM where
@@ -217,6 +221,7 @@ const App = () => (
                       <Route path="/admissions" element={<RequirePermission module="leads" action="view"><Admissions /></RequirePermission>} />
                       <Route path="/admissions/:id" element={<RequirePermission module="leads" action="view"><LeadDetail /></RequirePermission>} />
                       <Route path="/lead-buckets" element={<RequirePermission module="lead_buckets" action="view"><LeadBuckets /></RequirePermission>} />
+                      <Route path="/lists" element={<RequirePermission module="leads" action="view"><LeadLists /></RequirePermission>} />
                       <Route path="/pending-followups" element={<RequirePermission module="leads" action="view"><PendingFollowups /></RequirePermission>} />
                       <Route path="/fresh-leads" element={<RequirePermission module="leads" action="view"><FreshLeads /></RequirePermission>} />
                       <Route path="/visit-monitor" element={<RequirePermission module="leads" action="view"><VisitMonitor /></RequirePermission>} />
@@ -298,6 +303,11 @@ const App = () => (
                       <Route path="/ib/projects" element={<RequirePermission module="ib_projects" action="view"><MYPProjects /></RequirePermission>} />
                       <Route path="/ib/projects/:id" element={<RequirePermission module="ib_projects" action="view"><ProjectDetail /></RequirePermission>} />
                       <Route path="/ib/idu" element={<RequirePermission module="ib_idu" action="view"><InterdisciplinaryUnits /></RequirePermission>} />
+
+                      {/* Video Approval — editor portal + super-admin queue + bills */}
+                      <Route path="/video-editor"    element={<RequirePermission module="video_editor"   action="view"><VideoEditorPortal /></RequirePermission>} />
+                      <Route path="/video-approvals" element={<RequirePermission module="video_approval" action="view"><VideoApprovals /></RequirePermission>} />
+                      <Route path="/video-bills"     element={<RequirePermission module="video_bills"    action="view"><VideoBills /></RequirePermission>} />
 
                       <Route path="*" element={<NotFound />} />
                     </Routes>

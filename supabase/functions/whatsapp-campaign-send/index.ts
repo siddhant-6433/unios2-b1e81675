@@ -118,10 +118,12 @@ Deno.serve(async (req) => {
       .update({ status: "sending" })
       .eq("id", campaign_id);
 
-    // Fetch all pending recipients, joined with leads for name
+    // Fetch all pending recipients with lead + course + campus joined in.
+    // course/campus are used to auto-fill `course_name` and `campus_name`
+    // template params per recipient — see substitution loop below.
     const { data: recipients, error: recipientsError } = await adminClient
       .from("whatsapp_campaign_recipients")
-      .select("id, campaign_id, lead_id, phone, status, leads(name)")
+      .select("id, campaign_id, lead_id, phone, status, leads(name, courses(name), campuses(name))")
       .eq("campaign_id", campaign_id)
       .eq("status", "pending");
 
@@ -151,13 +153,30 @@ Deno.serve(async (req) => {
     let sentCount = 0;
     let failedCount = 0;
 
+    // Static params filled once at campaign-creation time (see Lists UI).
+    // Used to plug params that aren't per-lead — visit_date, fee amount,
+    // due_date, application_id, etc. Auto-filled per-lead from the leads
+    // join: student_name, course_name, campus_name.
+    const staticParams: Record<string, string> = ((campaign as any).static_params || {}) as any;
+
     for (const recipient of recipients) {
-      const leadName = (recipient as any).leads?.name || "Student";
+      const lead = (recipient as any).leads || {};
+      const leadName = lead.name || "Student";
+      const courseName = lead.courses?.name || "";
+      const campusName = lead.campuses?.name || "";
       const waPhone = recipient.phone.replace(/[^0-9]/g, "");
 
-      // Build template params — use lead name as the first param
-      // The first param for most templates is the student/lead name
-      const bodyParams = [{ type: "text", text: leadName }];
+      // Build template params in the exact order Meta expects. Per-lead
+      // values take precedence over staticParams (so an explicit
+      // course_name override at campaign level still loses to the actual
+      // course the lead enquired about — that's the desired behavior).
+      const resolveParam = (name: string): string => {
+        if (name === "student_name") return leadName;
+        if (name === "course_name")  return courseName || staticParams[name] || "";
+        if (name === "campus_name")  return campusName || staticParams[name] || "";
+        return staticParams[name] || "";
+      };
+      const bodyParams = templateDef.params.map(p => ({ type: "text", text: resolveParam(p) }));
 
       const waPayload: any = {
         messaging_product: "whatsapp",

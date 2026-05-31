@@ -22,7 +22,10 @@ ALTER TABLE public.notifications ADD CONSTRAINT notifications_type_check
     'visit_followup_due', 'lead_transferred', 'deletion_request', 'general',
     'whatsapp_message', 'approval_pending', 'approval_decided',
     'tat_defaults_report', 'post_visit_nudge', 'score_penalty',
-    'lead_bucket_backlog'
+    'lead_bucket_backlog',
+    -- Legacy types found in production data when this migration was first
+    -- applied — preserved so the CHECK doesn't reject existing rows.
+    'visit_due', 'missed_call', 'callback_requested'
   ));
 
 -- 2. Cooldown / de-dup table. alert_key encodes bucket + source_tier

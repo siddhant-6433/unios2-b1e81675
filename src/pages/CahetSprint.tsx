@@ -11,10 +11,10 @@ import {
   Phone, Loader2, CheckCircle2, Clock, AlertTriangle, MessageSquareWarning,
   MessageSquare, Footprints, FileCheck2, FileEdit, Search, Snowflake,
   ExternalLink, KeyboardIcon, X, PhoneOff, XCircle, PhoneMissed, PhoneCall,
-  ListPlus,
+  ListPlus, BookmarkPlus,
 } from "lucide-react";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { CahetRegisterDialog, type CahetRegisterTarget } from "@/components/leads/CahetRegisterDialog";
 
@@ -172,6 +172,11 @@ const CahetSprint = () => {
   // Brief visual emphasis when a lead is jumped to via the picker so the user
   // can see it land in the queue.
   const [flashLeadId, setFlashLeadId] = useState<string | null>(null);
+
+  // ── Save-as-list dialog ─────────────────────────────────────────────────
+  const [showSaveList, setShowSaveList] = useState(false);
+  const [newListName, setNewListName] = useState("");
+  const [savingList, setSavingList] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
@@ -437,6 +442,67 @@ const CahetSprint = () => {
     }
   }, [user?.id, activeCall, toast, startPolling]);
 
+  // Save the currently filtered CAHET queue as a reusable lead_list so the
+  // counsellor can target it from /lists with a bulk WhatsApp / email send.
+  // Snapshot the lead IDs at click time — the queue rebuilds frequently, so
+  // a list materialised "now" is more predictable than refetching at send.
+  const handleSaveList = useCallback(async () => {
+    const ids = filtered.map(r => r.lead_id);
+    if (!ids.length) {
+      toast({ title: "Nothing to save", description: "Filtered queue is empty.", variant: "destructive" });
+      return;
+    }
+    const name = newListName.trim();
+    if (!name) {
+      toast({ title: "Name required", description: "Give the list a name first.", variant: "destructive" });
+      return;
+    }
+    setSavingList(true);
+
+    const filtersSnapshot = {
+      page: "cahet_sprint",
+      scope,
+      bucket: bucketFilter,
+      search: search || null,
+    };
+
+    const { data: list, error: listErr } = await supabase
+      .from("lead_lists" as any)
+      .insert({
+        name,
+        source: "filter",
+        filters_snapshot: filtersSnapshot,
+        description: `CAHET Sprint — ${BUCKET_FILTERS.find(b => b.key === bucketFilter)?.label || "filtered"} (${ids.length} leads)`,
+      })
+      .select("id")
+      .single();
+
+    if (listErr || !list) {
+      toast({ title: "Could not create list", description: listErr?.message || "Unknown error", variant: "destructive" });
+      setSavingList(false);
+      return;
+    }
+
+    const listId = (list as any).id;
+    const members = ids.map((lead_id) => ({ list_id: listId, lead_id }));
+    let memberErrors = 0;
+    for (let i = 0; i < members.length; i += 500) {
+      const chunk = members.slice(i, i + 500);
+      const { error: memErr } = await supabase.from("lead_list_members" as any).insert(chunk);
+      if (memErr) { memberErrors++; console.error("List member insert failed:", memErr); }
+    }
+
+    setSavingList(false);
+    setShowSaveList(false);
+    setNewListName("");
+    toast({
+      title: "List saved",
+      description: memberErrors > 0
+        ? `"${name}" — some members failed to insert. Check console.`
+        : `"${name}" — ${ids.length} leads. Send bulk WA / email from the Lists page.`,
+    });
+  }, [filtered, newListName, scope, bucketFilter, search, toast]);
+
   // Jump from the picker into the queue: clear any filters that would hide
   // the lead, scroll its row into view, and briefly flash it.
   const jumpToLead = useCallback((leadId: string) => {
@@ -582,12 +648,14 @@ const CahetSprint = () => {
 
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-2">
-        {!isCounsellor && (
-          <div className="flex items-center gap-1 rounded-md border bg-card p-0.5">
-            <Button size="sm" variant={scope === "all" ? "default" : "ghost"} onClick={() => setScope("all")}>All counsellors</Button>
-            <Button size="sm" variant={scope === "mine" ? "default" : "ghost"} onClick={() => setScope("mine")}>My leads</Button>
-          </div>
-        )}
+        {/* Scope toggle is shown to counsellors too: the BPT/BMRIT pool is a
+            shared sprint target, and many counsellors have few or zero pool
+            leads assigned to them. Locking them to "My leads" left them staring
+            at an empty queue with no way to reach the 400+ unworked pool. */}
+        <div className="flex items-center gap-1 rounded-md border bg-card p-0.5">
+          <Button size="sm" variant={scope === "all" ? "default" : "ghost"} onClick={() => setScope("all")}>{isCounsellor ? "Whole pool" : "All counsellors"}</Button>
+          <Button size="sm" variant={scope === "mine" ? "default" : "ghost"} onClick={() => setScope("mine")}>My leads</Button>
+        </div>
         <div className="flex items-center gap-1 flex-wrap">
           {BUCKET_FILTERS.map(f => (
             <Button
@@ -607,6 +675,17 @@ const CahetSprint = () => {
           ))}
         </div>
         <div className="ml-auto flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 border-violet-300 text-violet-700 hover:bg-violet-50"
+            onClick={() => setShowSaveList(true)}
+            disabled={filtered.length === 0}
+            title="Save the currently filtered queue as a reusable list for bulk WhatsApp / email"
+          >
+            <BookmarkPlus className="h-3.5 w-3.5 mr-1" />
+            Save as list ({filtered.length})
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -642,11 +721,34 @@ const CahetSprint = () => {
               Loading sprint queue…
             </div>
           ) : filtered.length === 0 ? (
-            <div className="p-10 text-center text-muted-foreground">
-              <CheckCircle2 className="h-10 w-10 mx-auto text-emerald-500 mb-2" />
-              <div className="font-medium">Nothing left in this view.</div>
-              <div className="text-sm">Try changing the filter or scope, or register the next 15 from another bucket.</div>
-            </div>
+            // Pool-aware empty state. The misleading "Nothing left" message used
+            // to fire even when the shared pool still had hundreds of unworked
+            // leads — it just meant none were assigned to this counsellor. When
+            // that's the case, point them at the pool instead of implying the
+            // sprint is done.
+            scope === "mine" && (stats?.pool_remaining ?? 0) > 0 ? (
+              <div className="p-10 text-center text-muted-foreground">
+                <Snowflake className="h-10 w-10 mx-auto text-sky-400 mb-2" />
+                <div className="font-medium">No BPT/BMRIT leads assigned to you.</div>
+                <div className="text-sm">
+                  There {stats!.pool_remaining === 1 ? "is" : "are"} still <strong>{stats!.pool_remaining}</strong> unregistered lead{stats!.pool_remaining === 1 ? "" : "s"} in the shared pool.
+                </div>
+                <div className="mt-3 flex items-center justify-center gap-2">
+                  <Button size="sm" onClick={() => setScope("all")} className="bg-rose-600 hover:bg-rose-700 text-white">
+                    Show whole pool
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setPickerOpen(true)}>
+                    <ListPlus className="h-3.5 w-3.5 mr-1" /> Add from bucket
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-10 text-center text-muted-foreground">
+                <CheckCircle2 className="h-10 w-10 mx-auto text-emerald-500 mb-2" />
+                <div className="font-medium">Nothing left in this view.</div>
+                <div className="text-sm">Try changing the filter or scope, or register the next 15 from another bucket.</div>
+              </div>
+            )
           ) : (
             <div ref={listRef} className="divide-y">
               {filtered.map(r => {
@@ -768,6 +870,39 @@ const CahetSprint = () => {
           fetchAll();
         }}
       />
+
+      {/* Save filtered queue as a reusable list */}
+      <Dialog open={showSaveList} onOpenChange={(o) => { if (!savingList) setShowSaveList(o); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Save filtered queue as a list</DialogTitle>
+            <DialogDescription>
+              Creates a reusable list of <strong>{filtered.length}</strong> lead{filtered.length === 1 ? "" : "s"} from the current CAHET Sprint view. Use it from the Lists page to send bulk WhatsApp or email.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Input
+              autoFocus
+              placeholder={`CAHET — ${BUCKET_FILTERS.find(b => b.key === bucketFilter)?.label || "filtered"} — ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`}
+              value={newListName}
+              onChange={(e) => setNewListName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && !savingList && newListName.trim()) handleSaveList(); }}
+            />
+            <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-800">
+              Filters: <span className="font-medium">{BUCKET_FILTERS.find(b => b.key === bucketFilter)?.label}</span>
+              {scope === "mine" && <span> · my leads</span>}
+              {search && <span> · search "{search}"</span>}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSaveList(false)} disabled={savingList}>Cancel</Button>
+            <Button onClick={handleSaveList} disabled={savingList || !newListName.trim() || !filtered.length}>
+              {savingList ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <BookmarkPlus className="h-4 w-4 mr-1.5" />}
+              Save list
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
