@@ -12,11 +12,18 @@ interface Props {
   leadName: string;
   phone?: string | null;
   courseName?: string | null;
+  /**
+   * When provided by the parent (from a batched cahet_registrations query),
+   * skips the per-row DB lookup entirely. Pass `null` while the batch is
+   * in-flight; pass `true`/`false` once resolved.
+   * When omitted (undefined), the badge falls back to its own per-row fetch.
+   */
+  registeredOverride?: boolean | null;
   /** Optional callback fired after a successful registration save. */
   onRegistered?: () => void;
 }
 
-export function CahetPendingBadge({ leadId, leadName, phone, courseName, onRegistered }: Props) {
+export function CahetPendingBadge({ leadId, leadName, phone, courseName, registeredOverride, onRegistered }: Props) {
   // If courseName is provided we can check eligibility client-side (free).
   // If it's not (e.g., followups view doesn't carry course), we fetch the
   // course name once for this lead. Slightly more DB chatter, but keeps the
@@ -26,7 +33,10 @@ export function CahetPendingBadge({ leadId, leadName, phone, courseName, onRegis
     courseProvided ? courseName : undefined,
   );
   const eligible = isBptOrBmritCourse(resolvedCourse);
-  const [registered, setRegistered] = useState<boolean | null>(null);
+  // When the parent provides registeredOverride, we use it directly and skip
+  // the per-row fetch. fetchedRegistered is only populated in the fallback path.
+  const [fetchedRegistered, setFetchedRegistered] = useState<boolean | null>(null);
+  const registered = registeredOverride !== undefined ? registeredOverride : fetchedRegistered;
   const [open, setOpen] = useState<CahetRegisterTarget | null>(null);
 
   // Lazy course fetch when caller didn't pass it.
@@ -46,7 +56,9 @@ export function CahetPendingBadge({ leadId, leadName, phone, courseName, onRegis
     return () => { cancelled = true; };
   }, [courseProvided, leadId]);
 
+  // Per-row cahet registration check — skipped when parent provides registeredOverride.
   useEffect(() => {
+    if (registeredOverride !== undefined) return;
     if (!eligible) return;
     let cancelled = false;
     supabase
@@ -55,10 +67,10 @@ export function CahetPendingBadge({ leadId, leadName, phone, courseName, onRegis
       .eq("lead_id", leadId)
       .maybeSingle()
       .then(({ data }) => {
-        if (!cancelled) setRegistered(!!data);
+        if (!cancelled) setFetchedRegistered(!!data);
       });
     return () => { cancelled = true; };
-  }, [eligible, leadId]);
+  }, [registeredOverride, eligible, leadId]);
 
   if (!eligible) return null;
   if (registered) {
