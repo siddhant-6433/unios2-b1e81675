@@ -15,41 +15,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CallDispositionData } from "@/components/admissions/CallDispositionDialog";
 
-export const STAGE_LABELS: Record<string, string> = {
-  new_lead: "New Lead",
-  application_in_progress: "Application In Progress",
-  application_submitted: "Application Submitted",
-  ai_called: "AI Called",
-  counsellor_call: "In Follow Up",
-  visit_scheduled: "Visit Scheduled",
-  interview: "Interview",
-  offer_sent: "Offer Sent",
-  token_paid: "Token Paid",
-  pre_admitted: "Pre-Admitted",
-  admitted: "Admitted",
-  not_interested: "Not Interested",
-  ineligible: "Ineligible",
-  dnc: "Do Not Contact",
-  deferred: "Deferred (Next Session)",
-  rejected: "Rejected",
-};
-
-export const STAGE_ORDER = [
-  "new_lead", "application_in_progress", "application_submitted",
-  "ai_called", "counsellor_call", "visit_scheduled", "interview",
-  "offer_sent", "token_paid", "pre_admitted", "admitted",
-];
-
-const stageIndex = (s: string) => {
-  const i = STAGE_ORDER.indexOf(s);
-  return i === -1 ? -1 : i;
-};
-
-/** Forward-only auto-advance — never rolls a lead backwards or out of a terminal state. */
-export const shouldAutoAdvance = (currentStage: string, newStage: string) => {
-  if (["rejected", "not_interested", "ineligible", "dnc", "deferred"].includes(currentStage)) return false;
-  return stageIndex(newStage) > stageIndex(currentStage);
-};
+// Stage model is canonical in src/lib/leadStages.ts. Re-exported here so the
+// many existing `@/lib/callDisposition` importers keep working.
+export { STAGE_LABELS, STAGE_ORDER, shouldAutoAdvance } from "@/lib/leadStages";
 
 const DISPOSITION_LABELS: Record<string, string> = {
   interested: "Interested",
@@ -90,6 +58,20 @@ export interface RecordCallDispositionArgs {
   data: CallDispositionData;
   /** Caller-provided source attribution for the call_log notes column. */
   loggedFromLabel?: string;
+  /**
+   * When the disposition is being saved after a real Cloud Dialer call, pass
+   * the voice-agent call_id here so the call_logs row merges onto the same
+   * cloud_call_uuid as the auto bridge-hangup webhook (and CallLog.tsx can
+   * join ai_call_records.recording_url back onto the row). Omit for paths
+   * where no Plivo call was placed (typed-after-the-fact entries).
+   */
+  callUuid?: string | null;
+  /**
+   * Channel attribution for the new `source` column. Defaults to "manual_log"
+   * when omitted. Pass "cloud_dialer" from any flow that placed a real call
+   * via the manual-call edge function.
+   */
+  callSource?: "cloud_dialer" | "manual_log" | "inbound";
 }
 
 /**
@@ -106,12 +88,15 @@ export interface RecordCallDispositionArgs {
  * fire-and-forget — failures log to console but don't fail the call.
  */
 export async function recordCallDisposition(args: RecordCallDispositionArgs): Promise<void> {
-  const { supabase, leadId, lead, userId, profileId, courseName, data, loggedFromLabel } = args;
+  const { supabase, leadId, lead, userId, profileId, courseName, data, loggedFromLabel, callUuid, callSource } = args;
   const label = DISPOSITION_LABELS[data.disposition] || data.disposition;
 
   // 1. call_logs via RPC (dedupe + "Cloud Call" classification)
+  // When callUuid is provided, the merge RPC lands on the existing Cloud Call
+  // row (so the auto bridge-hangup webhook's duration/recording_url stay) and
+  // CallLog.tsx's join back to ai_call_records.recording_url succeeds.
   await (supabase as any).rpc("record_cloud_call_log", {
-    p_call_uuid:     crypto.randomUUID(),
+    p_call_uuid:     callUuid || crypto.randomUUID(),
     p_lead_id:       leadId,
     p_user_id:       userId,
     p_disposition:   data.disposition,
@@ -119,7 +104,7 @@ export async function recordCallDisposition(args: RecordCallDispositionArgs): Pr
     p_notes:         data.notes || `${label}${loggedFromLabel ? ` (logged from ${loggedFromLabel})` : ""}`,
     p_source:        "manual",
     p_recording_url: null,
-    p_call_source:   "manual_log",
+    p_call_source:   callSource || "manual_log",
   });
 
   // 2. Close pending follow-ups — the call just happened

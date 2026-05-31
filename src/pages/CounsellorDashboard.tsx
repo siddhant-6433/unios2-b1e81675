@@ -360,6 +360,9 @@ const CounsellorDashboard = () => {
   const [dispLoading, setDispLoading] = useState(false);
   const [activeDisp, setActiveDisp] = useState<{ counsellorId: string; disposition: string } | null>(null);
 
+  // Online presence map: user_id → last_seen_at
+  const [onlineMap, setOnlineMap] = useState<Record<string, string>>({});
+
   useEffect(() => {
     (async () => {
       const [statsRes, overdueRes, tatRes, teamRes] = await Promise.all([
@@ -373,7 +376,6 @@ const CounsellorDashboard = () => {
       if (tatRes.data) setTatDefaults(tatRes.data as any);
       if (teamRes.data) setTeamDefaults(teamRes.data as any);
 
-      await fetchBreakdown("", "");
       setLoading(false);
     })();
   }, []);
@@ -381,119 +383,55 @@ const CounsellorDashboard = () => {
   const fetchBreakdown = useCallback(async (from: string, to: string) => {
     setBreakdownLoading(true);
 
-    const { data: roleData } = await supabase
-      .from("user_roles" as any)
-      .select("user_id, role")
-      .in("role", ["counsellor", "admission_head"]);
+    // get_counsellor_breakdown aggregates on the server — no raw-row scan of
+    // leads/call_logs/campus_visits to the client (20260617130000 migration).
+    const { data, error } = await supabase.rpc("get_counsellor_breakdown" as any, {
+      _from_date: from || null,
+      _to_date:   to   || null,
+    });
 
-    if (!roleData) { setBreakdownLoading(false); return; }
-
-    const counsellorUserIds = (roleData as any[]).map((r: any) => r.user_id);
-    const { data: profiles } = await supabase
-      .from("profiles")
-      .select("id, user_id, display_name")
-      .in("user_id", counsellorUserIds);
-
-    if (!profiles || profiles.length === 0) { setBreakdownLoading(false); return; }
-
-    // Fetch leads with optional date filter on created_at
-    let leadsQ = supabase
-      .from("leads")
-      .select("id, counsellor_id, stage, assigned_at, first_contact_at, created_at")
-      .not("counsellor_id", "is", null);
-    if (from) leadsQ = leadsQ.gte("created_at", `${from}T00:00:00`);
-    if (to) leadsQ = leadsQ.lte("created_at", `${to}T23:59:59`);
-    const { data: leads } = await leadsQ;
-
-    // Fetch call logs with optional date filter
-    let callQ = supabase
-      .from("call_logs" as any)
-      .select("id, lead_id, disposition, user_id, called_at")
-      .order("called_at", { ascending: false });
-    if (from) callQ = callQ.gte("called_at", `${from}T00:00:00`);
-    if (to) callQ = callQ.lte("called_at", `${to}T23:59:59`);
-    const { data: callLogs } = await callQ;
-
-    // Fetch completed visits with optional date filter
-    let visitsQ = supabase
-      .from("campus_visits" as any)
-      .select("id, lead_id, scheduled_by, status, visit_date")
-      .eq("status", "completed");
-    if (from) visitsQ = visitsQ.gte("visit_date", `${from}T00:00:00`);
-    if (to) visitsQ = visitsQ.lte("visit_date", `${to}T23:59:59`);
-    const { data: completedVisits } = await visitsQ;
-
-    const calledLeadIds = new Set<string>();
-    if (callLogs) {
-      for (const cl of callLogs as any[]) calledLeadIds.add(cl.lead_id);
+    if (error) {
+      console.error("fetchBreakdown RPC error:", error);
+      setBreakdownLoading(false);
+      return;
     }
 
-    const breakdownMap = new Map<string, CounsellorBreakdown>();
-    for (const p of profiles as any[]) {
-      breakdownMap.set(p.id, {
-        counsellor_id: p.id,
-        counsellor_name: p.display_name || "Unknown",
-        user_id: p.user_id,
-        total: 0, new_lead: 0, called: 0, not_called: 0,
-        application_in_progress: 0, visit_scheduled: 0, admitted: 0,
-        rejected: 0, other_stages: 0, dispositions: {},
-        avg_response_hrs: null, call_rate: 0, conversion_rate: 0, visits_completed: 0,
-      });
-    }
+    const rows = ((data || []) as any[]).map((r: any) => ({
+      counsellor_id:            r.counsellor_id,
+      counsellor_name:          r.counsellor_name,
+      user_id:                  r.user_id,
+      total:                    Number(r.total),
+      new_lead:                 Number(r.new_lead),
+      called:                   Number(r.called),
+      not_called:               Number(r.not_called),
+      application_in_progress:  Number(r.application_in_progress),
+      visit_scheduled:          Number(r.visit_scheduled),
+      admitted:                 Number(r.admitted),
+      rejected:                 Number(r.rejected),
+      other_stages:             Number(r.other_stages),
+      visits_completed:         Number(r.visits_completed),
+      avg_response_hrs:         r.avg_response_hrs != null ? Number(r.avg_response_hrs) : null,
+      dispositions:             r.dispositions ?? {},
+      call_rate:     r.total > 0 ? Math.round((Number(r.called)   / Number(r.total)) * 100) : 0,
+      conversion_rate: r.total > 0 ? Math.round((Number(r.admitted) / Number(r.total)) * 100) : 0,
+    }));
 
-    const responseTimes = new Map<string, number[]>();
-    if (leads) {
-      for (const l of leads as any[]) {
-        const bd = breakdownMap.get(l.counsellor_id);
-        if (!bd) continue;
-        bd.total++;
-        if (l.stage === "new_lead") bd.new_lead++;
-        else if (["application_in_progress", "application_fee_paid", "application_submitted"].includes(l.stage)) bd.application_in_progress++;
-        else if (l.stage === "visit_scheduled") bd.visit_scheduled++;
-        else if (l.stage === "admitted") bd.admitted++;
-        else if (["rejected", "not_interested"].includes(l.stage)) bd.rejected++;
-        else bd.other_stages++;
-        if (calledLeadIds.has(l.id)) bd.called++;
-        else bd.not_called++;
-        if (l.assigned_at && l.first_contact_at) {
-          const hrs = (new Date(l.first_contact_at).getTime() - new Date(l.assigned_at).getTime()) / (1000 * 60 * 60);
-          if (hrs >= 0 && hrs < 720) {
-            if (!responseTimes.has(l.counsellor_id)) responseTimes.set(l.counsellor_id, []);
-            responseTimes.get(l.counsellor_id)!.push(hrs);
-          }
-        }
+    setBreakdownData(rows);
+
+    // Fetch presence for the counsellors in this result
+    const userIds = rows.map((r) => r.user_id).filter(Boolean);
+    if (userIds.length > 0) {
+      const { data: presenceRows } = await supabase
+        .from("profiles")
+        .select("user_id, last_seen_at")
+        .in("user_id", userIds);
+      const map: Record<string, string> = {};
+      for (const p of (presenceRows || []) as any[]) {
+        if (p.last_seen_at) map[p.user_id] = p.last_seen_at;
       }
+      setOnlineMap(map);
     }
 
-    const userIdToProfileId = new Map((profiles as any[]).map((p: any) => [p.user_id, p.id]));
-    if (callLogs) {
-      for (const cl of callLogs as any[]) {
-        if (!cl.disposition) continue;
-        const profileId = userIdToProfileId.get(cl.user_id);
-        if (!profileId) continue;
-        const bd = breakdownMap.get(profileId);
-        if (!bd) continue;
-        bd.dispositions[cl.disposition] = (bd.dispositions[cl.disposition] || 0) + 1;
-      }
-    }
-
-    if (completedVisits) {
-      for (const v of completedVisits as any[]) {
-        const bd = breakdownMap.get(v.scheduled_by);
-        if (bd) bd.visits_completed++;
-      }
-    }
-
-    for (const [cid, bd] of breakdownMap) {
-      bd.call_rate = bd.total > 0 ? Math.round((bd.called / bd.total) * 100) : 0;
-      bd.conversion_rate = bd.total > 0 ? Math.round((bd.admitted / bd.total) * 100) : 0;
-      const times = responseTimes.get(cid);
-      if (times && times.length > 0) {
-        bd.avg_response_hrs = Math.round((times.reduce((a, b) => a + b, 0) / times.length) * 10) / 10;
-      }
-    }
-
-    setBreakdownData(Array.from(breakdownMap.values()).filter(b => b.total > 0));
     setBreakdownLoading(false);
   }, []);
 
@@ -742,8 +680,13 @@ const CounsellorDashboard = () => {
     setFunnelLoading(false);
   }, []);
 
-  // Auto-fetch activity when tab switches to it
+  // Auto-fetch when tab switches to a data-heavy tab (lazy loading).
+  // Breakdown is included here so the page doesn't block on fetching all
+  // leads + call_logs + visits before showing the default leaderboard tab.
   useEffect(() => {
+    if (tab === "breakdown" && breakdownData.length === 0 && !breakdownLoading) {
+      fetchBreakdown("", "");
+    }
     if (tab === "activity" && activityData.length === 0 && !activityLoading) {
       fetchActivity(activityDatePreset);
     }
@@ -936,6 +879,11 @@ const CounsellorDashboard = () => {
       })
       .sort((a, b) => b.score - a.score);
   }, [stats, leaderboard, leaderboardPeriod, dialerUsage]);
+
+  const isCounsellorOnline = (userId: string) => {
+    const t = onlineMap[userId];
+    return !!t && Date.now() - new Date(t).getTime() < 2 * 60 * 1000;
+  };
 
   const breakdownTotals = useMemo(() => breakdownData.reduce((acc, b) => ({
     total: acc.total + b.total,
@@ -1276,13 +1224,14 @@ const CounsellorDashboard = () => {
           </div>
 
           {/* Breakdown summary cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
             {[
               { label: "Total Assigned", value: breakdownTotals.total, icon: Users, color: "bg-blue-100 dark:bg-blue-900/30", iconColor: "text-blue-600" },
               { label: "New / Untouched", value: breakdownTotals.new_lead, icon: Clock, color: "bg-amber-100 dark:bg-amber-900/30", iconColor: "text-amber-600" },
               { label: "Called", value: breakdownTotals.called, icon: PhoneCall, color: "bg-emerald-100 dark:bg-emerald-900/30", iconColor: "text-emerald-600" },
               { label: "Not Called", value: breakdownTotals.not_called, icon: PhoneOff, color: breakdownTotals.not_called > 0 ? "bg-red-100 dark:bg-red-900/30" : "bg-muted", iconColor: breakdownTotals.not_called > 0 ? "text-red-600" : "text-muted-foreground" },
               { label: "Admitted", value: breakdownTotals.admitted, icon: UserCheck, color: "bg-emerald-100 dark:bg-emerald-900/30", iconColor: "text-emerald-600" },
+              { label: "Online Now", value: breakdownData.filter((b) => isCounsellorOnline(b.user_id)).length, icon: Users, color: "bg-green-100 dark:bg-green-900/30", iconColor: "text-green-600" },
             ].map((c) => (
               <Card key={c.label} className="rounded-2xl border-border/40 shadow-none transition-all hover:shadow-sm">
                 <CardContent className="p-4">
@@ -1337,7 +1286,14 @@ const CounsellorDashboard = () => {
                               }
                             }}
                           >
-                            <td className="px-3 py-3 font-medium text-foreground">{b.counsellor_name}</td>
+                            <td className="px-3 py-3 font-medium text-foreground">
+                              <div className="flex items-center gap-2">
+                                {isCounsellorOnline(b.user_id) && (
+                                  <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" title="Online now" />
+                                )}
+                                {b.counsellor_name}
+                              </div>
+                            </td>
                             <td className="px-3 py-3 text-center font-bold text-foreground">{b.total}</td>
                             <td className="px-3 py-3 text-center">
                               <span className={`text-xs font-semibold ${b.new_lead > 0 ? "text-amber-600" : "text-muted-foreground"}`}>{b.new_lead}</span>

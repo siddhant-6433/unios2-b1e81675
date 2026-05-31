@@ -6,6 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { School, GraduationCap, Search, Loader2, UserPlus, CheckCircle, AlertTriangle, ListPlus } from "lucide-react";
 import { jdCategoryHint } from "@/lib/jdCategoryHint";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
+import { isBptOrBmritCourse } from "@/components/leads/CahetRegisterDialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -172,6 +173,10 @@ export default function LeadBuckets() {
   const [nimtSources, setNimtSources] = useState<SourceBreakdown>(emptyBreakdown);
   const [miraiSources, setMiraiSources] = useState<SourceBreakdown>(emptyBreakdown);
 
+  // Batched CAHET registration status per lead — populated after each page fetch
+  // to avoid per-row cahet_registrations queries on render.
+  const [cahetStatusMap, setCahetStatusMap] = useState<Map<string, boolean>>(new Map());
+
   // Detect if user is Mirai counsellor
   const MIRAI_CAMPUS_ID = "c0000002-0000-0000-0000-000000000001";
   const isMiraiUser = profile?.campus?.toLowerCase().includes("mirai") || selectedCampusId === MIRAI_CAMPUS_ID;
@@ -193,52 +198,34 @@ export default function LeadBuckets() {
   const [listScope, setListScope] = useState<"selected" | "filtered">("selected");
 
   const fetchCounts = async () => {
-    // Use `school_brand` from the view (added 20260613100000) instead of a
-    // client-side `.or(campus_id.neq.MIRAI, campus_id.is.null)`. PostgREST
-    // was dropping the `is.null` branch on that OR group, which silently
-    // excluded every Meta lead-form lead (campus_id IS NULL) from the
-    // CBSE card — bucket showed 13 while the underlying query had 88.
-    const [mRes, nRes, cRes] = await Promise.all([
-      supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true }).eq("school_brand", "mirai"),
-      supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true }).eq("school_brand", "nimt"),
-      supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true }).eq("bucket", "college"),
-    ]);
-    setMiraiSchoolCount(mRes.count ?? 0);
-    setNimtSchoolCount(nRes.count ?? 0);
-    setCollegeCount(cRes.count ?? 0);
+    // Single RPC call returns all (bucket_key, source_key, n) rows in one
+    // GROUP BY pass over get_unassigned_leads_bucket(). Replaces the old
+    // 15-query fan-out (3 bucket totals + 3×4 source breakdown) that each
+    // re-ran the full 6-table join — the primary cause of slow load on mobile.
+    const { data, error } = await supabase.rpc("unassigned_bucket_counts" as any);
+    if (error) { console.error("Bucket counts error:", error); return; }
 
-    // Source breakdown per bucket. We can't aggregate client-side from a
-    // SELECT because PostgREST caps rows at 1000 — with 2k+ college leads
-    // the aggregation silently undercounted (chip showed Meta 3 while the
-    // source-filter dropdown showed 11). Use count-only queries instead.
-    // `web_chat` and `website_chat` are both emitted by the chat widget
-    // (legacy vs current) — coalesce via `.in()`.
-    const bucketScopes = [
-      { key: "college" as const, apply: (q: any) => q.eq("bucket", "college") },
-      { key: "nimt" as const, apply: (q: any) => q.eq("school_brand", "nimt") },
-      { key: "mirai" as const, apply: (q: any) => q.eq("school_brand", "mirai") },
-    ];
-    const sourceFilters = [
-      { key: "meta_ads" as const, apply: (q: any) => q.eq("source", "meta_ads") },
-      { key: "google_ads" as const, apply: (q: any) => q.eq("source", "google_ads") },
-      { key: "website" as const, apply: (q: any) => q.eq("source", "website") },
-      { key: "web_chat" as const, apply: (q: any) => q.in("source", ["web_chat", "website_chat"]) },
-    ];
-    const jobs = bucketScopes.flatMap((b) =>
-      sourceFilters.map((s) => {
-        const q = supabase.from("unassigned_leads_bucket" as any).select("id", { count: "exact", head: true });
-        return s.apply(b.apply(q)).then((res: any) => ({ bucket: b.key, source: s.key, count: res.count ?? 0 }));
-      })
-    );
-    const results = await Promise.all(jobs);
+    const rows = (data || []) as { bucket_key: string | null; source_key: string | null; n: number }[];
+    const sourceKeys: (keyof SourceBreakdown)[] = ["meta_ads", "google_ads", "website", "web_chat"];
+    let college = 0, nimt = 0, mirai = 0;
     const next: Record<string, SourceBreakdown> = {
       college: { ...emptyBreakdown },
       nimt: { ...emptyBreakdown },
       mirai: { ...emptyBreakdown },
     };
-    for (const r of results) {
-      next[r.bucket][r.source] = r.count;
+    for (const r of rows) {
+      const count = Number(r.n);
+      const bk = r.bucket_key;
+      if (!bk || !next[bk]) continue;
+      if (bk === "college") college += count;
+      else if (bk === "nimt") nimt += count;
+      else if (bk === "mirai") mirai += count;
+      const sk = r.source_key as keyof SourceBreakdown | null;
+      if (sk && sourceKeys.includes(sk)) next[bk][sk] += count;
     }
+    setCollegeCount(college);
+    setNimtSchoolCount(nimt);
+    setMiraiSchoolCount(mirai);
     setCollegeSources(next.college);
     setNimtSources(next.nimt);
     setMiraiSources(next.mirai);
@@ -304,6 +291,8 @@ export default function LeadBuckets() {
     pageRef.current = targetPage;
     setLoading(false);
     setLoadingMore(false);
+    // Batch-resolve CAHET status for the newly loaded page (non-blocking).
+    fetchCahetStatus(rows, reset);
   };
 
   // True per-course / per-source counts for the active bucket via the
@@ -337,6 +326,27 @@ export default function LeadBuckets() {
     setSourceFacets(sources);
     setCourseAllCount(courseAll);
     setSourceAllCount(sourceAll);
+  };
+
+  // Batch-resolve CAHET registration status for a page of leads.
+  // Replaces the per-row cahet_registrations fetch inside CahetPendingBadge,
+  // which was firing 1 query per eligible row on every table render.
+  const fetchCahetStatus = async (rows: BucketLead[], resetMap: boolean) => {
+    const eligibleIds = rows.filter(r => isBptOrBmritCourse(r.course_name)).map(r => r.id);
+    if (!eligibleIds.length) {
+      if (resetMap) setCahetStatusMap(new Map());
+      return;
+    }
+    const { data } = await (supabase as any)
+      .from("cahet_registrations")
+      .select("lead_id")
+      .in("lead_id", eligibleIds);
+    const registeredSet = new Set<string>((data || []).map((r: any) => r.lead_id as string));
+    setCahetStatusMap(prev => {
+      const next = resetMap ? new Map<string, boolean>() : new Map(prev);
+      for (const id of eligibleIds) next.set(id, registeredSet.has(id));
+      return next;
+    });
   };
 
   // Debounce the search box so we don't refetch on every keystroke.
@@ -791,6 +801,7 @@ export default function LeadBuckets() {
                         leadName={lead.name}
                         phone={lead.phone}
                         courseName={lead.course_name}
+                        registeredOverride={cahetStatusMap.has(lead.id) ? (cahetStatusMap.get(lead.id) ?? null) : undefined}
                       />
                     </p>
                     {lead.jd_category && (() => {

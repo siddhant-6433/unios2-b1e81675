@@ -281,9 +281,9 @@ export function LiveCallBar() {
     {calls.filter(c => c.call_type === "inbound" && c.status === "calling").map(ic => {
       const isXfer = !!ic.is_live_transfer;
       return (
-        <div key={`popup-${ic.call_uuid}`} className="fixed bottom-6 right-6 z-50 animate-bounce-slow">
+        <div key={`popup-${ic.call_uuid}`} className="fixed z-50 animate-bounce-slow inset-x-3 top-3 sm:inset-x-auto sm:left-auto sm:right-6 sm:top-auto sm:bottom-6">
           <a href={`/admissions/${ic.lead_id}`} target="_blank" rel="noreferrer"
-            className={`flex items-start gap-4 rounded-2xl border-2 bg-white dark:bg-card shadow-2xl px-5 py-4 min-w-[360px] max-w-[420px] hover:shadow-3xl transition-shadow ${
+            className={`flex items-start gap-4 rounded-2xl border-2 bg-white dark:bg-card shadow-2xl px-5 py-4 w-full max-w-none min-w-0 sm:w-auto sm:min-w-[360px] sm:max-w-[420px] hover:shadow-3xl transition-shadow ${
               isXfer ? "border-red-500 ring-4 ring-red-200 dark:ring-red-900/40" : "border-amber-400"
             }`}>
             <div className="relative shrink-0">

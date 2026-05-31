@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -8,8 +8,10 @@ import { Badge } from "@/components/ui/badge";
 import {
   Tag, FileText, AlertTriangle, MessageSquare, CheckCircle, XCircle,
   Loader2, ExternalLink, ChevronRight, Clock, User, RefreshCw, Inbox as InboxIcon,
+  Video, Mic, Play, Pause,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { VIDEO_BRAND_LABEL, type VideoBrand } from "@/lib/videoBrands";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -22,7 +24,7 @@ interface InboxCategory {
   color: string;
 }
 
-type CategoryId = "offer_waivers" | "offer_approvals" | "applications" | "followups" | "whatsapp";
+type CategoryId = "offer_waivers" | "offer_approvals" | "applications" | "followups" | "whatsapp" | "video_approvals" | "voice_messages";
 
 interface WaiverItem {
   id: string;
@@ -83,7 +85,32 @@ interface WhatsAppItem {
   unread_count: number;
 }
 
-type InboxItem = WaiverItem | OfferApprovalItem | ApplicationItem | FollowupItem | WhatsAppItem;
+interface VideoApprovalInboxItem {
+  id: string;
+  title: string;
+  drive_url: string;
+  brand: string;
+  content_type: string;
+  editor_name: string;
+  created_at: string;
+}
+
+interface VoiceMessageItem {
+  id: string;
+  consultant_id: string | null;
+  sender_user_id: string | null;
+  audio_url: string;
+  duration_seconds: number | null;
+  subject: string | null;
+  status: string;
+  created_at: string;
+  sender_name: string;
+}
+
+type InboxItem = WaiverItem | OfferApprovalItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
+
+// Label a source link by host so the inbox doesn't say "Drive" for a YouTube URL.
+const videoSourceLabel = (url: string) => /youtube\.com|youtu\.be/i.test(url) ? "YouTube" : "Drive";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -121,7 +148,7 @@ const APPROVER_ROLES = ["super_admin", "principal", "campus_admin", "admission_h
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function Inbox() {
-  const { role, profile } = useAuth();
+  const { role, profile, user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -136,7 +163,12 @@ export default function Inbox() {
     applications: 0,
     followups: 0,
     whatsapp: 0,
+    video_approvals: 0,
+    voice_messages: 0,
   });
+
+  const [playingId, setPlayingId] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const isSuperAdmin = role === "super_admin";
   const isPrincipal = role === "principal";
@@ -185,6 +217,22 @@ export default function Inbox() {
       count: counts.whatsapp,
       roles: ADMISSIONS_ROLES,
       color: "text-green-600",
+    },
+    {
+      id: "video_approvals",
+      label: "Video Approvals",
+      icon: Video,
+      count: counts.video_approvals,
+      roles: ["super_admin"],
+      color: "text-rose-600",
+    },
+    {
+      id: "voice_messages",
+      label: "Voice Messages",
+      icon: Mic,
+      count: counts.voice_messages,
+      roles: APPROVER_ROLES,
+      color: "text-purple-600",
     },
   ];
 
@@ -241,6 +289,22 @@ export default function Inbox() {
             .eq("direction", "inbound")
             .eq("is_read", false)
         : Promise.resolve({ count: 0 }),
+
+      // video approvals — super_admin only (videos awaiting approval)
+      isSuperAdmin
+        ? supabase
+            .from("videos" as any)
+            .select("id", { count: "exact", head: true })
+            .eq("status", "pending_approval")
+        : Promise.resolve({ count: 0 }),
+
+      // voice messages — approvers (unread messages from consultants)
+      isApprover
+        ? supabase
+            .from("consultant_voice_messages" as any)
+            .select("id", { count: "exact", head: true })
+            .eq("status", "unread")
+        : Promise.resolve({ count: 0 }),
     ]);
 
     const get = (i: number) => {
@@ -255,6 +319,8 @@ export default function Inbox() {
       applications: get(2),
       followups: get(3),
       whatsapp: get(4),
+      video_approvals: get(5),
+      voice_messages: get(6),
     });
   }, [role, isSuperAdmin, isApprover, isAdmissions, profile?.id]);
 
@@ -442,6 +508,66 @@ export default function Inbox() {
             unread_count: c.unread_count,
           } as WhatsAppItem))
         );
+      } else if (cat === "video_approvals") {
+        const { data, error } = await supabase
+          .from("videos" as any)
+          .select("id, title, drive_url, brand, content_type, editor_id, created_at")
+          .eq("status", "pending_approval")
+          .order("created_at", { ascending: false })
+          .limit(100);
+        if (error) throw error;
+        const rows = (data as any[]) || [];
+        const editorIds = [...new Set(rows.map(r => r.editor_id).filter(Boolean))];
+        const nameById: Record<string, string> = {};
+        if (editorIds.length) {
+          const { data: eds } = await supabase
+            .from("video_editors" as any)
+            .select("id, name")
+            .in("id", editorIds);
+          for (const e of (eds as any[]) || []) nameById[e.id] = e.name;
+        }
+        setItems(
+          rows.map((v: any) => ({
+            id: v.id,
+            title: v.title,
+            drive_url: v.drive_url,
+            brand: v.brand,
+            content_type: v.content_type,
+            editor_name: nameById[v.editor_id] || "—",
+            created_at: v.created_at,
+          } as VideoApprovalInboxItem))
+        );
+      } else if (cat === "voice_messages") {
+        const { data, error } = await supabase
+          .from("consultant_voice_messages" as any)
+          .select("*, consultants:consultant_id(name)")
+          .neq("status", "resolved")
+          .order("created_at", { ascending: false })
+          .limit(100);
+        if (error) throw error;
+        const rows = (data as any[]) || [];
+        const senderIds = [...new Set(rows.map(r => r.sender_user_id).filter(Boolean))];
+        const nameMap: Record<string, string> = {};
+        if (senderIds.length) {
+          const { data: profs } = await supabase
+            .from("profiles")
+            .select("user_id, display_name")
+            .in("user_id", senderIds);
+          for (const p of (profs || []) as any[]) nameMap[p.user_id] = p.display_name || "";
+        }
+        setItems(
+          rows.map((r: any) => ({
+            id: r.id,
+            consultant_id: r.consultant_id,
+            sender_user_id: r.sender_user_id,
+            audio_url: r.audio_url,
+            duration_seconds: r.duration_seconds,
+            subject: r.subject,
+            status: r.status,
+            created_at: r.created_at,
+            sender_name: r.consultants?.name || nameMap[r.sender_user_id] || "Unknown consultant",
+          } as VoiceMessageItem))
+        );
       }
     } catch (e: any) {
       toast({ title: "Failed to load items", description: e.message, variant: "destructive" });
@@ -508,6 +634,73 @@ export default function Inbox() {
       toast({ title: "Action failed", description: e.message, variant: "destructive" });
     } finally {
       setProcessing(null);
+    }
+  };
+
+  const decideVideo = async (video: VideoApprovalInboxItem, decision: "approved" | "rejected") => {
+    if (!isSuperAdmin) return;
+    let rejection_reason: string | null = null;
+    if (decision === "rejected") {
+      const r = window.prompt("Reason for rejection:");
+      if (r === null) return;
+      if (!r.trim()) { toast({ title: "A reason is required to reject", variant: "destructive" }); return; }
+      rejection_reason = r.trim();
+    }
+    setProcessing(video.id);
+    try {
+      const { error } = await supabase.from("videos" as any).update({
+        status: decision,
+        approved_by: user?.id ?? null,
+        approved_at: new Date().toISOString(),
+        rejection_reason,
+      }).eq("id", video.id);
+      if (error) throw error;
+      // On approval, ping the editor on WhatsApp to post & submit the links.
+      if (decision === "approved") {
+        supabase.functions.invoke("video-notify", {
+          body: { event: "approved", video_id: video.id },
+        }).catch(() => { /* non-fatal */ });
+      }
+      toast({ title: decision === "approved" ? "Video approved" : "Video rejected" });
+      setSelectedItem(null);
+      loadItems("video_approvals");
+      fetchCounts();
+    } catch (e: any) {
+      toast({ title: "Action failed", description: e.message, variant: "destructive" });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const toggleVoicePlay = async (msg: VoiceMessageItem) => {
+    if (playingId === msg.id) {
+      audioRef.current?.pause();
+      setPlayingId(null);
+      return;
+    }
+    if (audioRef.current) audioRef.current.pause();
+    audioRef.current = new Audio(msg.audio_url);
+    audioRef.current.onended = () => setPlayingId(null);
+    audioRef.current.onerror = () => { toast({ title: "Audio failed to load", variant: "destructive" }); setPlayingId(null); };
+    await audioRef.current.play();
+    setPlayingId(msg.id);
+    // Auto-mark as read on first play
+    if (msg.status === "unread") {
+      await supabase.from("consultant_voice_messages" as any).update({ status: "read" }).eq("id", msg.id);
+      fetchCounts();
+    }
+  };
+
+  const markVoiceResolved = async (id: string) => {
+    const { error } = await supabase
+      .from("consultant_voice_messages" as any)
+      .update({ status: "resolved", read_by: user?.id, read_at: new Date().toISOString() })
+      .eq("id", id);
+    if (!error) {
+      toast({ title: "Marked resolved" });
+      setSelectedItem(null);
+      loadItems("voice_messages");
+      fetchCounts();
     }
   };
 
@@ -617,6 +810,42 @@ export default function Inbox() {
             </Badge>
           </div>
           <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(w.last_message_at)}</p>
+        </button>
+      );
+    }
+
+    if (selected === "video_approvals") {
+      const v = item as VideoApprovalInboxItem;
+      return (
+        <button key={v.id} className={baseClass} onClick={() => setSelectedItem(v)}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground truncate">{v.title}</p>
+              <p className="text-xs text-muted-foreground truncate">{v.editor_name}</p>
+            </div>
+            <ChevronRight className="h-4 w-4 text-muted-foreground/40 shrink-0 mt-0.5" />
+          </div>
+          <p className="text-[10px] text-muted-foreground/60 mt-1">
+            {VIDEO_BRAND_LABEL[v.brand as VideoBrand] || v.brand} · {fmtTime(v.created_at)}
+          </p>
+        </button>
+      );
+    }
+
+    if (selected === "voice_messages") {
+      const m = item as VoiceMessageItem;
+      const isUnread = m.status === "unread";
+      return (
+        <button key={m.id} className={cn(baseClass, isUnread && "bg-purple-50/30 dark:bg-purple-950/10")} onClick={() => setSelectedItem(m)}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex items-center gap-1.5">
+              {isUnread && <span className="h-2 w-2 rounded-full bg-purple-500 shrink-0" />}
+              <p className="text-sm font-medium text-foreground truncate">{m.sender_name}</p>
+            </div>
+            <Mic className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0 mt-0.5" />
+          </div>
+          {m.subject && <p className="text-xs text-muted-foreground truncate mt-0.5">{m.subject}</p>}
+          <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(m.created_at)}</p>
         </button>
       );
     }
@@ -864,6 +1093,102 @@ export default function Inbox() {
               </Button>
             )}
           </div>
+        </div>
+      );
+    }
+
+    if (selected === "voice_messages") {
+      const m = selectedItem as VoiceMessageItem;
+      const fmtDur = (s: number | null) => {
+        if (!s) return "0:00";
+        return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
+      };
+      const isPlaying = playingId === m.id;
+      return (
+        <div className="p-5 space-y-5">
+          <div>
+            <h3 className="text-base font-semibold text-foreground">{m.sender_name}</h3>
+            {m.subject && <p className="text-sm text-muted-foreground">{m.subject}</p>}
+          </div>
+
+          <div className="rounded-xl border border-border bg-card divide-y divide-border">
+            <Row label="Duration" value={fmtDur(m.duration_seconds)} />
+            <Row label="Received" value={fmtDate(m.created_at)} />
+            <Row label="Status" value={m.status.charAt(0).toUpperCase() + m.status.slice(1)} />
+          </div>
+
+          <button
+            onClick={() => toggleVoicePlay(m)}
+            className="w-full flex items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/5 px-4 py-3 text-sm font-medium text-primary hover:bg-primary/10 transition-colors"
+          >
+            {isPlaying ? <><Pause className="h-4 w-4" /> Pause</> : <><Play className="h-4 w-4" /> Play</>}
+          </button>
+
+          {m.status !== "resolved" && (
+            <Button
+              size="sm"
+              className="w-full bg-success/90 hover:bg-success text-white"
+              onClick={() => markVoiceResolved(m.id)}
+            >
+              <CheckCircle className="h-4 w-4 mr-1.5" /> Mark Resolved
+            </Button>
+          )}
+        </div>
+      );
+    }
+
+    if (selected === "video_approvals") {
+      const v = selectedItem as VideoApprovalInboxItem;
+      return (
+        <div className="p-5 space-y-5">
+          <div>
+            <h3 className="text-base font-semibold text-foreground">{v.title}</h3>
+            <p className="text-sm text-muted-foreground">{v.editor_name}</p>
+          </div>
+
+          <div className="rounded-xl border border-border bg-card divide-y divide-border">
+            <Row label="Brand" value={VIDEO_BRAND_LABEL[v.brand as VideoBrand] || v.brand} />
+            <Row label="Submitted" value={fmtDate(v.created_at)} />
+          </div>
+
+          <a href={v.drive_url} target="_blank" rel="noreferrer"
+             className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2 text-sm font-medium text-primary hover:bg-primary/10">
+            <ExternalLink className="h-4 w-4" /> Open {videoSourceLabel(v.drive_url)} Link
+          </a>
+
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              className="flex-1 bg-success/90 hover:bg-success text-white"
+              disabled={!isSuperAdmin || processing === v.id}
+              onClick={() => decideVideo(v, "approved")}
+            >
+              {processing === v.id ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>
+              )}
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              className="flex-1"
+              disabled={!isSuperAdmin || processing === v.id}
+              onClick={() => decideVideo(v, "rejected")}
+            >
+              <XCircle className="h-4 w-4 mr-1.5" />Reject
+            </Button>
+          </div>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full"
+            onClick={() => navigate("/video-approvals")}
+          >
+            <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+            Open Video Approvals
+          </Button>
         </div>
       );
     }

@@ -152,6 +152,13 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   // v2 rewrites the body as an appointment-confirmation so Meta
   // categorises as UTILITY (v1 got auto-flipped to MARKETING).
   nimt_followup_v2:        { name: "nimt_followup_v2",        params: ["student_name", "followup_date", "counsellor_name", "counsellor_phone"] },
+
+  // ── Video portal notifications ────────────────────────────────────────
+  // Sent to super-admin phones when an editor submits a video for approval.
+  video_submitted_admin:   { name: "video_submitted_admin",  params: ["editor_name", "video_title", "brand_name"] },
+  // Sent to the editor's phone when their video is approved — prompts them to
+  // post it and submit the published Instagram/LinkedIn/YouTube links.
+  video_approved_editor:   { name: "video_approved_editor",  params: ["editor_name", "video_title"] },
 };
 
 type WhatsAppRoute = "default" | "call" | "visit";
@@ -557,6 +564,8 @@ Deno.serve(async (req) => {
       visit_reminder_v2: "Hi {{1}}, your campus visit for {{2}} is on {{3}} at {{4}}. Your counsellor {{5}} will meet you there. Tap below for directions to the campus.",
       offer_letter_acceptance: "Congratulations {{1}}! NIMT has issued your offer letter for {{2}}. Net fee: Rs.{{3}}. Please accept by {{4}}. Tap below to view your offer, accept it, and pay the token fee in one secure step.",
       nimt_not_interested_ack: "Hi {{1}}, thanks for speaking with us about {{2}}. We've marked your enquiry as \"not interested\" and won't reach out unless you'd like us to. If you'd like to revisit this in the future, message {{3}} directly on {{4}}. Reply STOP to fully opt out.",
+      video_submitted_admin: "New video submitted for approval on the NIMT Video Portal.\n\nEditor: {{1}}\nTitle: {{2}}\nBrand: {{3}}\n\nPlease review it in the Video Approvals queue.",
+      video_approved_editor: "Hi {{1}}, your video \"{{2}}\" has been approved on the NIMT Video Portal. Please post it on Instagram, LinkedIn and YouTube, then add the published links (with date & time) in your portal so it counts toward your billing.",
     };
 
     let readableContent = TEMPLATE_TEXTS[template_key] || `[Template: ${template_key}]`;

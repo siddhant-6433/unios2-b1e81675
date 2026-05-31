@@ -34,6 +34,8 @@ import { CounsellorOnboarding } from "@/components/onboarding/CounsellorOnboardi
 import { CloudDialerNudge } from "@/components/admissions/CloudDialerNudge";
 import { LeadPipeline, leadStagesForBucket, type LeadFunnelStage } from "@/components/admissions/LeadPipeline";
 import { VisitActionCenter, type VisitAction } from "@/components/admissions/VisitActionCenter";
+import { VisitPipeline } from "@/components/admissions/VisitPipeline";
+import { type VisitFunnelStage, VISIT_FUNNEL_ORDER } from "@/lib/leadStages";
 import { useTatDefaults } from "@/hooks/useTatDefaults";
 import { LEAD_SOURCES, SOURCE_LABELS, SOURCE_BADGE_COLORS } from "@/config/leadSources";
 import {
@@ -226,6 +228,15 @@ const Admissions = () => {
     visitsCompleted: 0, visitsCompletedPendingFollowup: 0,
   });
   const [visitAction, setVisitAction] = useState<VisitAction | null>(null);
+  // Visit funnel (second pipeline, sourced from visit_funnel_leads view).
+  // Counts per box + the lead_id set per box (for click-to-filter), so a
+  // single fetch drives both the chart and the filter.
+  const [visitFunnelCounts, setVisitFunnelCounts] = useState<Record<VisitFunnelStage, number>>({
+    scheduled: 0, confirmed: 0, completed: 0, visit_followup: 0, applied: 0, admitted: 0,
+  });
+  const [visitFunnelLeakage, setVisitFunnelLeakage] = useState(0);
+  const [visitFunnelBoxIds, setVisitFunnelBoxIds] = useState<Record<string, string[]>>({});
+  const [visitFunnelBox, setVisitFunnelBox] = useState<VisitFunnelStage | "leakage" | null>(null);
   // Debounced search — keeps server roundtrips low while typing
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
@@ -736,25 +747,22 @@ const Admissions = () => {
         "application_approved","offer_sent","token_paid","pre_admitted","admitted",
         "not_interested","dnc","rejected","ineligible","deferred",
       ];
-      const scope = (q: any) => {
-        let r = q.eq("is_mirror", false);
-        if (role === "counsellor" && profile?.id) {
-          r = r.eq("counsellor_id", profile.id);
-        } else if (selectedCampusId && selectedCampusId !== "all") {
-          r = r.eq("campus_id", selectedCampusId);
-        }
-        return r;
-      };
-
-      const stageResults = await Promise.all(allStages.map(async (s) => {
-        const { count } = await scope(
-          supabase.from("leads").select("id", { count: "exact", head: true }).eq("stage", s)
-        );
-        return [s, count || 0] as const;
-      }));
+      // Single GROUP BY scan instead of one HEAD count per stage. The
+      // get_lead_stage_counts RPC is SECURITY INVOKER, so the leads RLS policy
+      // applies exactly as it did to the per-stage queries — same scoping
+      // (is_mirror=false; counsellor → own leads; else selected campus).
+      const { data: stageRows } = await (supabase as any).rpc("get_lead_stage_counts", {
+        p_campus_id: (role !== "counsellor" && selectedCampusId && selectedCampusId !== "all")
+          ? selectedCampusId : null,
+        p_counsellor_id: (role === "counsellor" && profile?.id) ? profile.id : null,
+        p_exclude_mirror: true,
+      });
       if (cancelled) return;
       const tally: Record<string, number> = {};
-      for (const [s, c] of stageResults) tally[s] = c;
+      for (const s of allStages) tally[s] = 0;
+      for (const r of (stageRows || []) as { stage: string; count: number }[]) {
+        if (r.stage in tally) tally[r.stage] = Number(r.count) || 0;
+      }
       setStageCounts(tally);
 
       // Pull lead_ids for `disposition='interested'` calls so we can both
@@ -830,6 +838,29 @@ const Admissions = () => {
         visitsCompleted: visitsCompleted || 0,
         visitsCompletedPendingFollowup: visitsCompletedPendingFollowup || 0,
       });
+
+      // Visit funnel — one fetch of the lead-centric view gives both the
+      // per-box counts AND the lead_id sets for click-to-filter. ~hundreds of
+      // rows max, so client-side tally is cheap. Counsellor-scoped via RLS +
+      // the explicit counsellor_id filter for parity with the spine funnel.
+      let vfQuery = supabase.from("visit_funnel_leads" as any).select("lead_id, funnel_box, counsellor_id");
+      if (role === "counsellor" && profile?.id) vfQuery = vfQuery.eq("counsellor_id", profile.id);
+      const { data: vfRows } = await vfQuery;
+      if (cancelled) return;
+      const vfCounts: Record<VisitFunnelStage, number> = {
+        scheduled: 0, confirmed: 0, completed: 0, visit_followup: 0, applied: 0, admitted: 0,
+      };
+      const vfIds: Record<string, string[]> = {};
+      let vfLeakage = 0;
+      for (const r of (vfRows || []) as any[]) {
+        const box = r.funnel_box as string;
+        (vfIds[box] ||= []).push(r.lead_id);
+        if (box === "leakage") vfLeakage++;
+        else if (box in vfCounts) vfCounts[box as VisitFunnelStage]++;
+      }
+      setVisitFunnelCounts(vfCounts);
+      setVisitFunnelLeakage(vfLeakage);
+      setVisitFunnelBoxIds(vfIds);
     };
     fetchPipelineData();
     return () => { cancelled = true; };
@@ -871,6 +902,7 @@ const Admissions = () => {
       return;
     }
     setVisitAction(null);
+    setVisitFunnelBox(null);
     setVisitLeadIds(null);
     setFollowupLeadIds(null);
     setInactiveIds(null);
@@ -896,12 +928,31 @@ const Admissions = () => {
     setView("list");
   };
 
+  // Visit funnel click → filter the lead list to the leads in that visit box.
+  // Reuses the existing visitLeadIds filter (matchesVisit). Visit boxes map to
+  // visit states, not lead stages, so we filter by the pre-fetched lead_id set
+  // rather than a stageFilter.
+  const handleVisitFunnelClick = (box: VisitFunnelStage | "leakage" | null) => {
+    setVisitFunnelBox(box);
+    if (!box) { setVisitLeadIds(null); return; }
+    // Clear the spine-funnel / action filters so they don't intersect.
+    setFunnelStage(null);
+    setStageFilter("all");
+    setActionLeadIds(null);
+    setVisitAction(null);
+    setFollowupLeadIds(null);
+    setInactiveIds(null);
+    setVisitLeadIds(new Set<string>(visitFunnelBoxIds[box] || []));
+    setView("list");
+  };
+
   // Counsellor Action Center click → load the matching lead_ids into
   // `actionLeadIds` (not `visitLeadIds`) so the legacy "Upcoming Visits" /
   // "Completed Visits" stat cards below don't auto-highlight whenever any
   // CAC action is selected.
   const handleVisitActionClick = async (a: VisitAction | null) => {
     setVisitAction(a);
+    setVisitFunnelBox(null);
     if (!a) { setActionLeadIds(null); setActionBucketLabel(""); return; }
     setFunnelStage(null);
     setStageFilter("all");
@@ -1073,16 +1124,26 @@ const Admissions = () => {
         </div>
       )}
 
-      {/* Lead pipeline + Visit action center — both hidden during the
-          action-center / counsellor focus view to keep that screen clean. */}
+      {/* Pipelines zone (spine + visit) then the visit action center — all
+          hidden during the action-center / counsellor focus view to keep that
+          screen clean. The two funnels are grouped as "where things stand";
+          the action center below is "what to do now". */}
       {view !== "action_center" && (
         <>
-          <LeadPipeline
-            stageCounts={stageCounts}
-            extraHot={extraHotCount}
-            activeStage={funnelStage}
-            onStageClick={handleFunnelClick}
-          />
+          <div className="space-y-2.5">
+            <LeadPipeline
+              stageCounts={stageCounts}
+              extraHot={extraHotCount}
+              activeStage={funnelStage}
+              onStageClick={handleFunnelClick}
+            />
+            <VisitPipeline
+              counts={visitFunnelCounts}
+              leakageCount={visitFunnelLeakage}
+              activeBox={visitFunnelBox}
+              onBoxClick={handleVisitFunnelClick}
+            />
+          </div>
           <VisitActionCenter
             counts={visitActionCounts}
             active={visitAction}

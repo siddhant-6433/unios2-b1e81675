@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { CalendarDays, Clock, ChevronDown, Phone, MapPin } from "lucide-react";
+import { CalendarDays, Clock, ChevronDown } from "lucide-react";
 
 interface ScheduleFollowupDialogProps {
   open: boolean;
@@ -14,10 +14,10 @@ const TIME_SLOTS = [
   "14:00", "15:00", "16:00", "17:00",
 ];
 
-const FOLLOWUP_TYPES = [
-  { value: "call", label: "Call", icon: Phone, color: "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" },
-  { value: "visit", label: "Visit", icon: MapPin, color: "bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400" },
-];
+// Follow-ups are calls. Campus visits are scheduled through the visit flow
+// (campus_visits), which gets reminders, confirmations, and the Visit funnel.
+// The old "Visit" follow-up type wrote dead lead_followups rows that bypassed
+// all of that — retired in the pipelines redesign.
 
 const slotLabel = (t: string) => {
   const [h, m] = t.split(":").map(Number);
@@ -44,19 +44,13 @@ function getNextWorkingDay(from: Date): Date {
   return d;
 }
 
-// Smart default: Call = now+2h within 9-18 Mon-Sat, Visit = next working day 10AM
-function getSmartDefault(followupType: string): { date: string; time: string } {
+// Smart default for a call follow-up: now+2h within 9-18 Mon-Sat.
+function getSmartDefault(): { date: string; time: string } {
   const now = new Date();
   const istOffset = 5.5 * 60 * 60 * 1000;
   const ist = new Date(now.getTime() + istOffset);
   const hour = ist.getUTCHours();
   const day = ist.getUTCDay(); // 0=Sun
-
-  if (followupType === "visit") {
-    // Visit: next working day at 10:00 AM
-    const nextDay = getNextWorkingDay(now);
-    return { date: nextDay.toISOString().split("T")[0], time: "10:00" };
-  }
 
   // Call: now + 2 hours, within 9AM-6PM, Mon-Sat
   let targetHour = hour + 2;
@@ -87,26 +81,17 @@ function getSmartDefault(followupType: string): { date: string; time: string } {
 }
 
 export function ScheduleFollowupDialog({ open, onOpenChange, onSchedule }: ScheduleFollowupDialogProps) {
-  const [type, setType] = useState("call");
-  const defaults = getSmartDefault("call");
+  const defaults = getSmartDefault();
   const [date, setDate] = useState(defaults.date);
   const [time, setTime] = useState(defaults.time);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const dateInputRef = useRef<HTMLInputElement>(null);
 
-  // Update defaults when type changes
-  useEffect(() => {
-    const d = getSmartDefault(type);
-    setDate(d.date);
-    setTime(d.time);
-  }, [type]);
-
   // Reset when dialog opens
   useEffect(() => {
     if (open) {
-      const d = getSmartDefault("call");
-      setType("call");
+      const d = getSmartDefault();
       setDate(d.date);
       setTime(d.time);
       setNotes("");
@@ -117,10 +102,9 @@ export function ScheduleFollowupDialog({ open, onOpenChange, onSchedule }: Sched
     if (!date || !time) return;
     setSaving(true);
     const scheduled_at = new Date(`${date}T${time}:00`).toISOString();
-    await onSchedule({ scheduled_at, type, notes });
+    await onSchedule({ scheduled_at, type: "call", notes });
     setSaving(false);
     setNotes("");
-    setType("call");
     onOpenChange(false);
   };
 
@@ -140,31 +124,6 @@ export function ScheduleFollowupDialog({ open, onOpenChange, onSchedule }: Sched
         </DialogHeader>
 
         <div className="space-y-4 pt-1">
-          {/* Follow-up type */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Type</label>
-            <div className="grid grid-cols-2 gap-1.5">
-              {FOLLOWUP_TYPES.map(ft => {
-                const Icon = ft.icon;
-                return (
-                  <button
-                    key={ft.value}
-                    type="button"
-                    onClick={() => setType(ft.value)}
-                    className={`flex flex-col items-center gap-1 rounded-lg py-2 text-xs font-medium transition-colors border ${
-                      type === ft.value
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "bg-muted/40 text-muted-foreground border-transparent hover:bg-muted"
-                    }`}
-                  >
-                    <Icon className="h-3.5 w-3.5" />
-                    {ft.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
           {/* Date */}
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Date</label>
