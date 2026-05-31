@@ -173,7 +173,7 @@ const Admissions = () => {
   const isTeamLeader = useIsTeamLeader();
   const { toast } = useToast();
   const [view, setView] = useState<"action_center" | "pipeline" | "list" | "seats" | "payments">(
-    role === "counsellor" ? "action_center" : "pipeline"
+    "pipeline"
   );
   const [actionCounsellorFilter, setActionCounsellorFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
@@ -845,8 +845,20 @@ const Admissions = () => {
       // the explicit counsellor_id filter for parity with the spine funnel.
       let vfQuery = supabase.from("visit_funnel_leads" as any).select("lead_id, funnel_box, counsellor_id");
       if (role === "counsellor" && profile?.id) vfQuery = vfQuery.eq("counsellor_id", profile.id);
-      const { data: vfRows } = await vfQuery;
+      const { data: vfRows, error: vfError } = await vfQuery;
       if (cancelled) return;
+      // Surface query failures instead of silently rendering an empty pipeline.
+      // A missing view / RLS denial here previously fell through to all-zero
+      // counts, which the funnel reads as a legitimate "no visits" empty state —
+      // indistinguishable from a broken backend (e.g. unapplied migration).
+      if (vfError) {
+        console.error("[VisitPipeline] visit_funnel_leads query failed:", vfError);
+        toast({
+          title: "Visit Pipeline unavailable",
+          description: "Couldn't load visit funnel data. This usually means a backend/migration issue, not that there are no visits.",
+          variant: "destructive",
+        });
+      }
       const vfCounts: Record<VisitFunnelStage, number> = {
         scheduled: 0, confirmed: 0, completed: 0, visit_followup: 0, applied: 0, admitted: 0,
       };
