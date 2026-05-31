@@ -416,6 +416,43 @@ const TEMPLATES = [
       },
     ],
   },
+  // ── Video portal notifications ──────────────────────────────────────────
+  // Sent to super-admin phones when an editor submits a video for approval.
+  // Static URL button (no variable) straight to the approvals queue.
+  {
+    name: "video_submitted_admin",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "New video submitted for approval on the NIMT Video Portal.\n\nEditor: {{1}}\nTitle: {{2}}\nBrand: {{3}}\n\nPlease review it in the Video Approvals queue.",
+        example: { body_text: [["Rohit Bhati", "Campus Tour 2026", "NIMT Educational Institutions"]] },
+      },
+      {
+        type: "BUTTONS",
+        buttons: [{ type: "URL", text: "Open Video Approvals", url: "https://uni.nimt.ac.in/video-approvals" }],
+      },
+    ],
+  },
+  // Sent to the editor when their video is approved — prompts them to post it
+  // and submit the published Instagram/LinkedIn/YouTube links in their portal.
+  {
+    name: "video_approved_editor",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: "Hi {{1}}, your video \"{{2}}\" has been approved on the NIMT Video Portal. Please post it on Instagram, LinkedIn and YouTube, then add the published links (with date & time) in your portal so it counts toward your billing.",
+        example: { body_text: [["Rohit Bhati", "Campus Tour 2026"]] },
+      },
+      {
+        type: "BUTTONS",
+        buttons: [{ type: "URL", text: "Open Video Portal", url: "https://uni.nimt.ac.in/video-editor" }],
+      },
+    ],
+  },
 ];
 
 Deno.serve(async (req) => {

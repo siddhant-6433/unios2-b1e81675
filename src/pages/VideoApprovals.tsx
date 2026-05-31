@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   Loader2, Video, ExternalLink, CheckCircle, XCircle, Users, Plus, Pencil,
+  Instagram, Linkedin, Youtube, Trash2, Undo2,
 } from "lucide-react";
 import {
   VIDEO_BRANDS, VIDEO_BRAND_LABEL, CONTENT_TYPE_LABEL, STATUS_BADGE,
@@ -26,8 +27,11 @@ type VideoRow = {
   status: VideoStatus;
   rejection_reason: string | null;
   instagram_url: string | null;
+  instagram_posted_on: string | null;
   linkedin_url: string | null;
+  linkedin_posted_on: string | null;
   youtube_url: string | null;
+  youtube_posted_on: string | null;
   approved_at: string | null;
   created_at: string;
 };
@@ -42,6 +46,37 @@ const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.
 // Label a source link by host so the UI doesn't say "Drive" for a YouTube URL.
 function sourceLabel(url: string): string {
   return /youtube\.com|youtu\.be/i.test(url) ? "YouTube" : "Drive";
+}
+
+function fmtPostedAt(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+// Published social links rendered inline as clickable URLs (not plain text),
+// each with its posting date+time. Returns null when nothing's been posted.
+function PostedLinks({ v }: { v: VideoRow }) {
+  const items = [
+    { url: v.instagram_url, posted: v.instagram_posted_on, Icon: Instagram, color: "text-pink-600", label: "Instagram" },
+    { url: v.linkedin_url,  posted: v.linkedin_posted_on,  Icon: Linkedin,  color: "text-blue-700", label: "LinkedIn" },
+    { url: v.youtube_url,   posted: v.youtube_posted_on,   Icon: Youtube,   color: "text-red-600",  label: "YouTube" },
+  ].filter(i => i.url);
+  if (items.length === 0) return null;
+  return (
+    <div className="rounded-xl border border-border bg-card p-3 space-y-2">
+      <p className="text-[10px] text-muted-foreground uppercase font-semibold">Published Links</p>
+      {items.map(({ url, posted, Icon, color, label }) => (
+        <div key={label} className="flex items-center gap-2 min-w-0">
+          <Icon className={`h-3.5 w-3.5 shrink-0 ${color}`} />
+          <a href={url!} target="_blank" rel="noreferrer"
+             className="text-xs text-primary hover:underline truncate flex-1">{url}</a>
+          {posted && <span className="text-[10px] text-muted-foreground shrink-0">{fmtPostedAt(posted)}</span>}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function VideoApprovals() {
@@ -81,13 +116,60 @@ export default function VideoApprovals() {
   const handleApprove = async () => {
     if (!selected) return;
     setActing(true);
-    await supabase.from("videos" as any).update({
+    const { error } = await supabase.from("videos" as any).update({
       status: "approved",
       approved_by: user?.id,
       approved_at: new Date().toISOString(),
       rejection_reason: null,
     }).eq("id", selected.id);
+    if (error) {
+      toast({ title: "Approve failed", description: error.message, variant: "destructive" });
+      setActing(false); return;
+    }
+    // Notify the editor on WhatsApp to post & submit the published links.
+    // Fire-and-forget — never block the approval on a notification.
+    supabase.functions.invoke("video-notify", {
+      body: { event: "approved", video_id: selected.id },
+    }).catch(() => { /* notification failure is non-fatal */ });
     toast({ title: "Video approved" });
+    setActing(false);
+    setSelected(null);
+    fetchAll();
+  };
+
+  // Revoke a prior approval — sends the video back to the pending queue and
+  // clears the approval stamp. The before-change trigger recomputes
+  // is_billable (→ false) automatically. Super-admin only (RLS-enforced).
+  const handleRevoke = async () => {
+    if (!selected) return;
+    if (!window.confirm(`Revoke approval for "${selected.title}"? It returns to the pending queue.`)) return;
+    setActing(true);
+    const { error } = await supabase.from("videos" as any).update({
+      status: "pending_approval",
+      approved_by: null,
+      approved_at: null,
+      rejection_reason: null,
+    }).eq("id", selected.id);
+    if (error) {
+      toast({ title: "Revoke failed", description: error.message, variant: "destructive" });
+      setActing(false); return;
+    }
+    toast({ title: "Approval revoked — back in queue" });
+    setActing(false);
+    setSelected(null);
+    fetchAll();
+  };
+
+  const handleDelete = async () => {
+    if (!selected) return;
+    if (!window.confirm(`Delete "${selected.title}" permanently? This cannot be undone.`)) return;
+    setActing(true);
+    const { error } = await supabase.from("videos" as any).delete().eq("id", selected.id);
+    if (error) {
+      toast({ title: "Delete failed", description: error.message, variant: "destructive" });
+      setActing(false); return;
+    }
+    toast({ title: "Video deleted" });
     setActing(false);
     setSelected(null);
     fetchAll();
@@ -345,6 +427,8 @@ export default function VideoApprovals() {
                 <ExternalLink className="h-4 w-4" /> Open {sourceLabel(selected.drive_url)} Link
               </a>
 
+              <PostedLinks v={selected} />
+
               {selected.status === "rejected" && selected.rejection_reason && (
                 <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs">
                   <p className="font-semibold text-red-700 mb-1">Rejection reason</p>
@@ -370,6 +454,22 @@ export default function VideoApprovals() {
                     </Button>
                   </div>
                 </>
+              )}
+
+              {/* Admin overrides — revoke a prior approval, or delete the video. */}
+              {isSuperAdmin && (
+                <div className="flex gap-2 pt-2 border-t border-border">
+                  {(selected.status === "approved" || selected.status === "published") && (
+                    <Button variant="outline" className="flex-1 gap-1.5 text-amber-700 hover:bg-amber-50"
+                            onClick={handleRevoke} disabled={acting}>
+                      {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />} Revoke approval
+                    </Button>
+                  )}
+                  <Button variant="outline" className="flex-1 gap-1.5 text-red-600 hover:bg-red-50"
+                          onClick={handleDelete} disabled={acting}>
+                    {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Delete video
+                  </Button>
+                </div>
               )}
             </div>
           )}

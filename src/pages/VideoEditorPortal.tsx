@@ -45,6 +45,50 @@ function sourceLabel(url: string): string {
   return /youtube\.com|youtu\.be/i.test(url) ? "YouTube" : "Drive";
 }
 
+// posted-at timestamps are timestamptz; <input type="datetime-local"> wants a
+// zoneless "YYYY-MM-DDTHH:mm" in local time, so convert both ways explicitly.
+function isoToLocalInput(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function localInputToISO(local: string): string | null {
+  if (!local) return null;
+  const d = new Date(local);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+function fmtPostedAt(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+// Render the three platform markers inline — each is a clickable link to the
+// live post when its URL is filled, otherwise a dimmed icon.
+function SocialLinkIcons({ v }: { v: VideoRow }) {
+  const items = [
+    { url: v.instagram_url, posted: v.instagram_posted_on, Icon: Instagram, color: "text-pink-600", label: "Instagram" },
+    { url: v.linkedin_url,  posted: v.linkedin_posted_on,  Icon: Linkedin,  color: "text-blue-700", label: "LinkedIn" },
+    { url: v.youtube_url,   posted: v.youtube_posted_on,   Icon: Youtube,   color: "text-red-600",  label: "YouTube" },
+  ];
+  return (
+    <div className="flex items-center justify-center gap-1.5">
+      {items.map(({ url, posted, Icon, color, label }) => url ? (
+        <a key={label} href={url} target="_blank" rel="noreferrer"
+           title={posted ? `${label} · posted ${fmtPostedAt(posted)}` : `Open ${label} post`}
+           onClick={e => e.stopPropagation()} className="hover:opacity-70">
+          <Icon className={`h-3.5 w-3.5 ${color}`} />
+        </a>
+      ) : (
+        <Icon key={label} className="h-3.5 w-3.5 text-muted-foreground/30" />
+      ))}
+    </div>
+  );
+}
+
 export default function VideoEditorPortal() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -156,16 +200,23 @@ export default function VideoEditorPortal() {
       setSubmitting(false); return;
     }
 
-    const { error } = await supabase.from("videos" as any).insert({
+    const { data: inserted, error } = await supabase.from("videos" as any).insert({
       editor_id: editor.id,
       brand: form.brand,
       title: form.title.trim(),
       content_type: form.content_type,
       drive_url: form.drive_url.trim(),
-    });
+    }).select("id").single();
     if (error) {
       toast({ title: "Submission failed", description: error.message, variant: "destructive" });
       setSubmitting(false); return;
+    }
+    // Notify super admins on WhatsApp that a video is awaiting approval.
+    // Fire-and-forget — never block the editor's submit on a notification.
+    if ((inserted as any)?.id) {
+      supabase.functions.invoke("video-notify", {
+        body: { event: "submitted", video_id: (inserted as any).id },
+      }).catch(() => { /* notification failure is non-fatal */ });
     }
     toast({ title: "Video submitted for approval" });
     setForm({ brand: VIDEO_BRANDS[0].value, title: "", content_type: "video", drive_url: "" });
@@ -177,9 +228,9 @@ export default function VideoEditorPortal() {
   const openSocialDialog = (v: VideoRow) => {
     setSelected(v);
     setSocialForm({
-      instagram_url: v.instagram_url || "", instagram_posted_on: v.instagram_posted_on || "",
-      linkedin_url:  v.linkedin_url  || "", linkedin_posted_on:  v.linkedin_posted_on  || "",
-      youtube_url:   v.youtube_url   || "", youtube_posted_on:   v.youtube_posted_on   || "",
+      instagram_url: v.instagram_url || "", instagram_posted_on: isoToLocalInput(v.instagram_posted_on),
+      linkedin_url:  v.linkedin_url  || "", linkedin_posted_on:  isoToLocalInput(v.linkedin_posted_on),
+      youtube_url:   v.youtube_url   || "", youtube_posted_on:   isoToLocalInput(v.youtube_posted_on),
     });
   };
 
@@ -188,11 +239,11 @@ export default function VideoEditorPortal() {
     setSavingSocial(true);
     const payload: any = {
       instagram_url: socialForm.instagram_url.trim() || null,
-      instagram_posted_on: socialForm.instagram_posted_on || null,
+      instagram_posted_on: localInputToISO(socialForm.instagram_posted_on),
       linkedin_url:  socialForm.linkedin_url.trim() || null,
-      linkedin_posted_on:  socialForm.linkedin_posted_on || null,
+      linkedin_posted_on:  localInputToISO(socialForm.linkedin_posted_on),
       youtube_url:   socialForm.youtube_url.trim() || null,
-      youtube_posted_on:   socialForm.youtube_posted_on || null,
+      youtube_posted_on:   localInputToISO(socialForm.youtube_posted_on),
     };
     const { error } = await supabase.from("videos" as any).update(payload).eq("id", selected.id);
     if (error) {
@@ -302,11 +353,6 @@ export default function VideoEditorPortal() {
                 <tbody>
                   {filtered.map(v => {
                     const cfg = STATUS_BADGE[v.status];
-                    const platforms = [
-                      v.instagram_url ? "ig" : null,
-                      v.linkedin_url ? "li" : null,
-                      v.youtube_url ? "yt" : null,
-                    ].filter(Boolean);
                     return (
                       <tr key={v.id} className="border-b border-border/40 hover:bg-muted/20">
                         <td className="px-4 py-3">
@@ -327,11 +373,7 @@ export default function VideoEditorPortal() {
                           )}
                         </td>
                         <td className="px-3 py-3 text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            <Instagram className={`h-3.5 w-3.5 ${platforms.includes("ig") ? "text-pink-600" : "text-muted-foreground/30"}`} />
-                            <Linkedin  className={`h-3.5 w-3.5 ${platforms.includes("li") ? "text-blue-700" : "text-muted-foreground/30"}`} />
-                            <Youtube   className={`h-3.5 w-3.5 ${platforms.includes("yt") ? "text-red-600"  : "text-muted-foreground/30"}`} />
-                          </div>
+                          <SocialLinkIcons v={v} />
                         </td>
                         <td className="px-3 py-3 text-center">
                           {v.is_billable
@@ -405,24 +447,45 @@ export default function VideoEditorPortal() {
             </p>
             <div className="space-y-3">
               <div className="space-y-1.5">
-                <label className="text-xs font-medium flex items-center gap-1.5"><Instagram className="h-3.5 w-3.5 text-pink-600" /> Instagram</label>
+                <label className="text-xs font-medium flex items-center gap-1.5"><Instagram className="h-3.5 w-3.5 text-pink-600" /> Instagram
+                  {socialForm.instagram_url.trim() && (
+                    <a href={socialForm.instagram_url.trim()} target="_blank" rel="noreferrer"
+                       className="ml-auto inline-flex items-center gap-1 text-[10px] text-primary hover:underline">
+                      <ExternalLink className="h-3 w-3" /> Open
+                    </a>
+                  )}
+                </label>
                 <input className={inputCls} placeholder="Instagram URL"
                   value={socialForm.instagram_url} onChange={e => setSocialForm(p => ({ ...p, instagram_url: e.target.value }))} />
-                <input type="date" className={inputCls}
+                <input type="datetime-local" className={inputCls}
                   value={socialForm.instagram_posted_on} onChange={e => setSocialForm(p => ({ ...p, instagram_posted_on: e.target.value }))} />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-medium flex items-center gap-1.5"><Linkedin className="h-3.5 w-3.5 text-blue-700" /> LinkedIn</label>
+                <label className="text-xs font-medium flex items-center gap-1.5"><Linkedin className="h-3.5 w-3.5 text-blue-700" /> LinkedIn
+                  {socialForm.linkedin_url.trim() && (
+                    <a href={socialForm.linkedin_url.trim()} target="_blank" rel="noreferrer"
+                       className="ml-auto inline-flex items-center gap-1 text-[10px] text-primary hover:underline">
+                      <ExternalLink className="h-3 w-3" /> Open
+                    </a>
+                  )}
+                </label>
                 <input className={inputCls} placeholder="LinkedIn URL"
                   value={socialForm.linkedin_url} onChange={e => setSocialForm(p => ({ ...p, linkedin_url: e.target.value }))} />
-                <input type="date" className={inputCls}
+                <input type="datetime-local" className={inputCls}
                   value={socialForm.linkedin_posted_on} onChange={e => setSocialForm(p => ({ ...p, linkedin_posted_on: e.target.value }))} />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-medium flex items-center gap-1.5"><Youtube className="h-3.5 w-3.5 text-red-600" /> YouTube</label>
+                <label className="text-xs font-medium flex items-center gap-1.5"><Youtube className="h-3.5 w-3.5 text-red-600" /> YouTube
+                  {socialForm.youtube_url.trim() && (
+                    <a href={socialForm.youtube_url.trim()} target="_blank" rel="noreferrer"
+                       className="ml-auto inline-flex items-center gap-1 text-[10px] text-primary hover:underline">
+                      <ExternalLink className="h-3 w-3" /> Open
+                    </a>
+                  )}
+                </label>
                 <input className={inputCls} placeholder="YouTube URL"
                   value={socialForm.youtube_url} onChange={e => setSocialForm(p => ({ ...p, youtube_url: e.target.value }))} />
-                <input type="date" className={inputCls}
+                <input type="datetime-local" className={inputCls}
                   value={socialForm.youtube_posted_on} onChange={e => setSocialForm(p => ({ ...p, youtube_posted_on: e.target.value }))} />
               </div>
             </div>
