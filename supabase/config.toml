@@ -69,6 +69,9 @@ verify_jwt = false
 [functions.whatsapp-webhook]
 verify_jwt = false
 
+[functions.whatsapp-plivo-webhook]
+verify_jwt = false
+
 [functions.whatsapp-campaign-send]
 verify_jwt = false
 

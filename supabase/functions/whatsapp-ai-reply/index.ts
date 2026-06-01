@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { sendPlivoWhatsAppText } from "../_shared/plivo.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -269,7 +270,15 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { phone, message, lead_name, lead_stage, course_interest, recent_messages, business_phone_number_id } = await req.json();
+    const { phone, message, lead_name, lead_stage, course_interest, recent_messages, business_phone_number_id, provider, business_number } = await req.json();
+    // 'meta' (default, direct Graph API) or 'plivo' (BSP coexistence number).
+    const sendProvider: "meta" | "plivo" = provider === "plivo" ? "plivo" : "meta";
+    // Channel key for the per-conversation AI/human guard: the Plivo number's
+    // digits for the plivo path, else the Meta phone_number_id.
+    const channelKey: string | null =
+      (typeof business_number === "string" && business_number) ||
+      (typeof business_phone_number_id === "string" && business_phone_number_id) ||
+      null;
 
     if (!phone || !message) {
       return new Response(JSON.stringify({ error: "phone and message required" }), {
@@ -299,6 +308,24 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ skipped: true, reason: "counsellor_replied_recently" }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // ── Per-conversation AI/human guard ──────────────────────────────────────
+    // When a counsellor has flipped this chat to 'human' (from the inbox), the
+    // bot stays silent and humans handle it. Missing row → defaults to 'ai', so
+    // the existing Meta number is unaffected unless a row is explicitly created.
+    if (channelKey) {
+      const { data: modeRow } = await admin
+        .from("whatsapp_ai_mode")
+        .select("mode")
+        .eq("phone", phone.replace(/[^0-9]/g, ""))
+        .eq("business_number", channelKey)
+        .maybeSingle();
+      if (modeRow?.mode === "human") {
+        return new Response(JSON.stringify({ skipped: true, reason: "human_mode" }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     // ── Find or create lead ──────────────────────────────────────────────────
@@ -499,37 +526,58 @@ Deno.serve(async (req) => {
     }
 
     // ── Send via WhatsApp API ───────────────────────────────────────────────
-    const { token: waToken, phoneNumberId: pnId } = getWhatsAppConfigForPhone(typeof business_phone_number_id === "string" ? business_phone_number_id : null);
-    if (!waToken || !pnId) {
-      return new Response(JSON.stringify({ error: "WhatsApp reply route is not configured" }), {
-        status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
     const waPhone = phone.replace(/[^0-9]/g, "");
+    let sentMessageId: string | null = null;
+    let loggedChannel: string | null = channelKey;
 
-    const waRes = await fetch(`https://graph.facebook.com/v21.0/${pnId}/messages`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${waToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        to: waPhone,
-        type: "text",
-        text: { body: aiReply },
-      }),
-    });
-
-    const waResult = await waRes.json();
-    if (!waRes.ok) {
-      console.error("WhatsApp send failed:", waResult);
-      return new Response(JSON.stringify({ error: "WhatsApp send failed", detail: waResult }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    if (sendProvider === "plivo") {
+      // Plivo BSP path (coexistence number). src = our Plivo number, dst = lead.
+      if (!channelKey) {
+        return new Response(JSON.stringify({ error: "Plivo send requires business_number" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const plivoRes = await sendPlivoWhatsAppText(channelKey, waPhone, aiReply);
+      if (!plivoRes.ok) {
+        console.error("Plivo WhatsApp send failed:", plivoRes.raw);
+        return new Response(JSON.stringify({ error: "Plivo send failed", detail: plivoRes.raw }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      sentMessageId = plivoRes.messageUuid;
+    } else {
+      const { token: waToken, phoneNumberId: pnId } = getWhatsAppConfigForPhone(typeof business_phone_number_id === "string" ? business_phone_number_id : null);
+      if (!waToken || !pnId) {
+        return new Response(JSON.stringify({ error: "WhatsApp reply route is not configured" }), {
+          status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      loggedChannel = pnId;
+      const waRes = await fetch(`https://graph.facebook.com/v21.0/${pnId}/messages`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${waToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to: waPhone,
+          type: "text",
+          text: { body: aiReply },
+        }),
       });
+
+      const waResult = await waRes.json();
+      if (!waRes.ok) {
+        console.error("WhatsApp send failed:", waResult);
+        return new Response(JSON.stringify({ error: "WhatsApp send failed", detail: waResult }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      sentMessageId = waResult?.messages?.[0]?.id || null;
     }
 
     // Log outbound AI reply
     await admin.from("whatsapp_messages").insert({
       lead_id: leadId,
-      wa_message_id: waResult?.messages?.[0]?.id || null,
+      wa_message_id: sentMessageId,
       direction: "outbound",
       phone,
       message_type: "text",
@@ -537,7 +585,8 @@ Deno.serve(async (req) => {
       status: "sent",
       is_read: true,
       template_key: "ai_auto_reply",
-      business_phone_number_id: pnId,
+      provider: sendProvider,
+      business_phone_number_id: loggedChannel,
     });
 
     return new Response(JSON.stringify({ success: true, reply: aiReply, query_type: queryType, action: botAction }), {
