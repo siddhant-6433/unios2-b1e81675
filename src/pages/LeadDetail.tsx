@@ -414,7 +414,10 @@ const LeadDetail = () => {
     } as Record<string, string>)[data.disposition] || data.disposition;
 
     toast({ title: "Call logged", description: label });
-    await fetchAll(true);
+    // Refresh in the background — don't hold the "Saving…" spinner (and the
+    // open dialog) hostage to a full lead-detail refetch. The disposition is
+    // already written; React Query updates the page when the refetch lands.
+    void fetchAll(true);
     refetchQueue();
 
     // Score animation
