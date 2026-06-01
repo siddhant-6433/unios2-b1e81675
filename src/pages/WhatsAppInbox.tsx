@@ -230,6 +230,48 @@ const WhatsAppInbox = () => {
   const [bfRunning, setBfRunning] = useState(false);
   const [bfResult, setBfResult] = useState<any>(null);
 
+  // Per-conversation AI/human guard. 'human' means the bot stays silent and a
+  // counsellor handles the chat (inbox or WhatsApp Business app). Read by the
+  // whatsapp-ai-reply edge function before it auto-replies. Cast to `any` until
+  // the generated Supabase types include whatsapp_ai_mode.
+  const [aiMode, setAiMode] = useState<"ai" | "human" | null>(null);
+  const [aiModeSaving, setAiModeSaving] = useState(false);
+
+  useEffect(() => {
+    const conv = conversations.find(c => c.phone === selectedPhone);
+    const channel = conv?.business_phone_number_id;
+    if (!selectedPhone || !channel) { setAiMode(null); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await (supabase as any)
+        .from("whatsapp_ai_mode")
+        .select("mode")
+        .eq("phone", selectedPhone.replace(/[^0-9]/g, ""))
+        .eq("business_number", channel)
+        .maybeSingle();
+      if (!cancelled) setAiMode(((data?.mode as "ai" | "human") ?? "ai"));
+    })();
+    return () => { cancelled = true; };
+  }, [selectedPhone, conversations]);
+
+  const toggleAiMode = async () => {
+    const conv = conversations.find(c => c.phone === selectedPhone);
+    const channel = conv?.business_phone_number_id;
+    if (!selectedPhone || !channel) return;
+    const next = aiMode === "human" ? "ai" : "human";
+    setAiModeSaving(true);
+    const { error } = await (supabase as any)
+      .from("whatsapp_ai_mode")
+      .upsert(
+        { phone: selectedPhone.replace(/[^0-9]/g, ""), business_number: channel, mode: next, updated_at: new Date().toISOString() },
+        { onConflict: "phone,business_number" },
+      );
+    setAiModeSaving(false);
+    if (error) { toast({ title: "Couldn't update mode", description: error.message, variant: "destructive" }); return; }
+    setAiMode(next);
+    toast({ title: next === "human" ? "AI paused for this chat" : "AI re-enabled for this chat" });
+  };
+
   // Multi-inbox: rank pnids by message count → most-used is "primary".
   const { primaryPnid, otherInboxes } = (() => {
     const counts = new Map<string, { label: string; n: number }>();
@@ -1138,6 +1180,20 @@ const WhatsAppInbox = () => {
                       )}
                     </p>
                   </div>
+                  {selectedConv?.business_phone_number_id && aiMode && (
+                    <button
+                      onClick={toggleAiMode}
+                      disabled={aiModeSaving}
+                      title={aiMode === "human"
+                        ? "AI is paused — humans handle this chat. Click to re-enable AI auto-reply."
+                        : "AI auto-reply is on. Click to pause and handle this chat manually."}
+                      className={`flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap disabled:opacity-50 ${aiMode === "human"
+                        ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                        : "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"}`}
+                    >
+                      {aiMode === "human" ? "🧑 Human" : "🤖 AI"}
+                    </button>
+                  )}
                   {selectedConv?.lead_id && (
                     <button
                       onClick={() => navigate(`/admissions/${selectedConv.lead_id}`)}
