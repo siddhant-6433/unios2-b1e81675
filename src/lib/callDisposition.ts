@@ -15,9 +15,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CallDispositionData } from "@/components/admissions/CallDispositionDialog";
 
-// Stage model is canonical in src/lib/leadStages.ts. Re-exported here so the
-// many existing `@/lib/callDisposition` importers keep working.
-export { STAGE_LABELS, STAGE_ORDER, shouldAutoAdvance } from "@/lib/leadStages";
+// Stage model is canonical in src/lib/leadStages.ts. Imported locally (so this
+// module can use them directly) AND re-exported so the many existing
+// `@/lib/callDisposition` importers keep working. A re-export alone does not
+// create a usable local binding under every transform, so import explicitly.
+import { STAGE_LABELS, STAGE_ORDER, shouldAutoAdvance } from "@/lib/leadStages";
+export { STAGE_LABELS, STAGE_ORDER, shouldAutoAdvance };
 
 const DISPOSITION_LABELS: Record<string, string> = {
   interested: "Interested",
@@ -88,107 +91,131 @@ export interface RecordCallDispositionArgs {
  * fire-and-forget — failures log to console but don't fail the call.
  */
 export async function recordCallDisposition(args: RecordCallDispositionArgs): Promise<void> {
-  const { supabase, leadId, lead, userId, profileId, courseName, data, loggedFromLabel, callUuid, callSource } = args;
+  const { supabase, leadId, lead, userId, profileId, data, loggedFromLabel, callUuid, callSource } = args;
   const label = DISPOSITION_LABELS[data.disposition] || data.disposition;
 
-  // 1. call_logs via RPC (dedupe + "Cloud Call" classification)
-  // When callUuid is provided, the merge RPC lands on the existing Cloud Call
-  // row (so the auto bridge-hangup webhook's duration/recording_url stay) and
-  // CallLog.tsx's join back to ai_call_records.recording_url succeeds.
-  await (supabase as any).rpc("record_cloud_call_log", {
-    p_call_uuid:     callUuid || crypto.randomUUID(),
-    p_lead_id:       leadId,
-    p_user_id:       userId,
-    p_disposition:   data.disposition,
-    p_duration:      data.duration_seconds || 0,
-    p_notes:         data.notes || `${label}${loggedFromLabel ? ` (logged from ${loggedFromLabel})` : ""}`,
-    p_source:        "manual",
-    p_recording_url: null,
-    p_call_source:   callSource || "manual_log",
-  });
-
-  // 2. Close pending follow-ups — the call just happened
-  await supabase
-    .from("lead_followups")
-    .update({ status: "completed", completed_at: new Date().toISOString() } as any)
-    .eq("lead_id", leadId)
-    .eq("status", "pending");
-
-  // 3. Activity log
+  // Resolve everything the write needs on the client (call wording, stage
+  // target, follow-up), then hand it to ONE SECURITY DEFINER RPC that performs
+  // every write in a single transaction / single round-trip. This replaces the
+  // previous chain of separate awaited writes — each its own trip amplified by
+  // per-row can_view_lead RLS on leads / lead_activities / lead_followups —
+  // which is what made the save slow. No business logic is ported into SQL;
+  // the client still decides everything below and passes the result in.
   const durationStr = data.duration_seconds > 0
     ? ` (${Math.floor(data.duration_seconds / 60)}m${data.duration_seconds % 60 ? ` ${data.duration_seconds % 60}s` : ""})`
     : "";
-  await supabase.from("lead_activities").insert({
-    lead_id: leadId, user_id: profileId, type: "call",
-    description: `Call: ${label}${durationStr}${data.notes ? ` — ${data.notes}` : ""}`,
-  } as any);
+  const callActivityDesc = `Call: ${label}${durationStr}${data.notes ? ` — ${data.notes}` : ""}`;
+  const callNotes = data.notes || `${label}${loggedFromLabel ? ` (logged from ${loggedFromLabel})` : ""}`;
 
-  // 4. Auto-advance stage
-  const autoAdvance = async (target: string) => {
-    if (shouldAutoAdvance(lead.stage, target)) {
-      await supabase.from("leads").update({ stage: target as any }).eq("id", leadId);
-      await supabase.from("lead_activities").insert({
-        lead_id: leadId, user_id: profileId, type: "stage_change",
-        description: `Stage auto-advanced from ${STAGE_LABELS[lead.stage] || lead.stage} to ${STAGE_LABELS[target] || target}`,
-        old_stage: lead.stage as any, new_stage: target as any,
-      } as any);
-    }
-  };
-
+  // Stage auto-advance — same targets, guards, and wording as before.
+  // newStage === null means "no stage change" (the RPC then skips that write).
+  let newStage: string | null = null;
+  let stageActivityDesc: string | null = null;
+  let futureEligibleSession: string | null = null;
   if (data.disposition === "interested" || data.disposition === "call_back" || data.disposition === "not_answered") {
-    await autoAdvance("counsellor_call");
+    if (shouldAutoAdvance(lead.stage, "counsellor_call")) {
+      newStage = "counsellor_call";
+      stageActivityDesc = `Stage auto-advanced from ${STAGE_LABELS[lead.stage] || lead.stage} to ${STAGE_LABELS["counsellor_call"] || "counsellor_call"}`;
+    }
   } else if (data.disposition === "not_interested") {
-    await supabase.from("leads").update({ stage: "not_interested" as any }).eq("id", leadId);
-    await supabase.from("lead_activities").insert({
-      lead_id: leadId, user_id: profileId, type: "stage_change",
-      description: `Stage changed to Not Interested`,
-      old_stage: lead.stage as any, new_stage: "not_interested" as any,
-    } as any);
+    newStage = "not_interested";
+    stageActivityDesc = `Stage changed to Not Interested`;
   } else if (data.disposition === "do_not_contact") {
-    await supabase.from("leads").update({ stage: "dnc" as any }).eq("id", leadId);
-    await supabase.from("lead_activities").insert({
-      lead_id: leadId, user_id: profileId, type: "stage_change",
-      description: `Stage changed to Do Not Contact`,
-      old_stage: lead.stage as any, new_stage: "dnc" as any,
-    } as any);
+    newStage = "dnc";
+    stageActivityDesc = `Stage changed to Do Not Contact`;
   } else if (data.disposition === "ineligible") {
-    const newStage = data.future_eligible_session ? "deferred" : "ineligible";
-    const updates: Record<string, any> = { stage: newStage as any };
-    if (data.future_eligible_session) updates.future_eligible_session = data.future_eligible_session;
-    await supabase.from("leads").update(updates).eq("id", leadId);
+    newStage = data.future_eligible_session ? "deferred" : "ineligible";
     const futureNote = data.future_eligible_session ? ` — eligible for ${data.future_eligible_session}` : "";
-    await supabase.from("lead_activities").insert({
-      lead_id: leadId, user_id: profileId, type: "stage_change",
-      description: newStage === "deferred"
-        ? `Stage changed to Deferred (Next Session${futureNote})`
-        : `Stage changed to Ineligible`,
-      old_stage: lead.stage as any, new_stage: newStage as any,
-    } as any);
+    stageActivityDesc = newStage === "deferred"
+      ? `Stage changed to Deferred (Next Session${futureNote})`
+      : `Stage changed to Ineligible`;
+    futureEligibleSession = data.future_eligible_session ?? null;
   }
 
-  // 5. Auto-WhatsApp (fire-and-forget — failures don't fail the disposition)
-  if (lead.phone && !data.suppress_auto_whatsapp) {
+  // Inline-scheduled follow-up — same wording. null followupAt => RPC skips it.
+  let followupAt: string | null = null;
+  let followupNotes: string | null = null;
+  let followupActivityDesc: string | null = null;
+  if (data.schedule_followup && data.followup_date) {
+    followupAt = data.followup_date;
+    followupNotes = `Follow-up after ${label}${data.notes ? `: ${data.notes}` : ""}`;
+    followupActivityDesc = `Follow-up scheduled for ${new Date(data.followup_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`;
+  }
+
+  // Single round-trip. The RPC reuses record_cloud_call_log internally, so the
+  // Cloud Call dedup/merge (recording_url, bridge-hangup webhook row) is intact.
+  const { error } = await (supabase as any).rpc("record_disposition_writes", {
+    p_call_uuid:               callUuid || crypto.randomUUID(),
+    p_lead_id:                 leadId,
+    p_user_id:                 userId,
+    p_profile_id:              profileId,
+    p_disposition:             data.disposition,
+    p_duration:                data.duration_seconds || 0,
+    p_call_notes:              callNotes,
+    p_call_source:             callSource || "manual_log",
+    p_call_activity_desc:      callActivityDesc,
+    p_old_stage:               lead.stage,
+    p_new_stage:               newStage,
+    p_stage_activity_desc:     stageActivityDesc,
+    p_future_eligible_session: futureEligibleSession,
+    p_followup_at:             followupAt,
+    p_followup_notes:          followupNotes,
+    p_followup_activity_desc:  followupActivityDesc,
+  });
+  // Writes are atomic now (all-or-nothing); surface a hard failure rather than
+  // letting the caller report a save that didn't happen.
+  if (error) throw error;
+
+  // WhatsApp sends fire only after the writes are confirmed — a failed save no
+  // longer triggers a "thanks for your interest" message. Dispatched fully
+  // out-of-band so the save never blocked on the session lookup or the
+  // edge-function round-trip; genuinely fire-and-forget from here.
+  dispatchDispositionWhatsApp(args, label);
+}
+
+/**
+ * Fire the disposition-driven WhatsApp sends without blocking the caller.
+ *
+ * Resolves the session token ONCE (the old code called getSession twice, each
+ * a potential token-refresh round-trip on the critical save path) and then
+ * fires every applicable template. All sends are fire-and-forget: a failure
+ * logs to the console but never fails the disposition. Templates and params
+ * are unchanged from the previous inline implementation.
+ */
+function dispatchDispositionWhatsApp(args: RecordCallDispositionArgs, _label: string): void {
+  const { supabase, leadId, lead, courseName, data } = args;
+  if (!lead.phone) return;
+
+  const sends: { template_key: string; params?: string[] }[] = [];
+
+  // Disposition-based auto template (counsellor can opt out via suppress flag).
+  if (!data.suppress_auto_whatsapp) {
     const course = courseName || "your selected course";
-    let autoTemplate: string | null = null;
-    let autoParams: string[] = [];
-
     if (data.disposition === "interested" || data.disposition === "call_back") {
-      autoTemplate = "nimt_followup_v2";
-      autoParams = [lead.name, formatFollowupDate(data.followup_date)];
+      sends.push({ template_key: "nimt_followup_v2", params: [lead.name, formatFollowupDate(data.followup_date)] });
     } else if (data.disposition === "not_answered" || data.disposition === "busy" || data.disposition === "voicemail") {
-      autoTemplate = "missed_call";
-      autoParams = [lead.name, course];
+      sends.push({ template_key: "missed_call", params: [lead.name, course] });
     } else if (data.disposition === "not_interested") {
-      autoTemplate = "nimt_not_interested_ack";
-      autoParams = [lead.name, course];
+      sends.push({ template_key: "nimt_not_interested_ack", params: [lead.name, course] });
     }
+  }
 
-    if (autoTemplate) {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData.session?.access_token;
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  // Optional course-info follow-up.
+  if (data.send_course_info) {
+    sends.push({ template_key: "course_info_v4" });
+  }
 
+  if (sends.length === 0) return;
+
+  void (async () => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token;
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+    for (const send of sends) {
+      const body: Record<string, any> = { template_key: send.template_key, phone: lead.phone, lead_id: leadId };
+      if (send.params) body.params = send.params;
       fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
         method: "POST",
         headers: {
@@ -196,55 +223,13 @@ export async function recordCallDisposition(args: RecordCallDispositionArgs): Pr
           Authorization: `Bearer ${accessToken || anonKey}`,
           apikey: anonKey,
         },
-        body: JSON.stringify({
-          template_key: autoTemplate,
-          phone: lead.phone,
-          params: autoParams,
-          lead_id: leadId,
-        }),
+        body: JSON.stringify(body),
       }).then(async res => {
         if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          console.error("Auto WA after disposition failed:", body);
+          const errBody = await res.json().catch(() => ({}));
+          console.error(`Auto WA (${send.template_key}) after disposition failed:`, errBody);
         }
-      }).catch(e => console.error("Auto WA exception:", e));
+      }).catch(e => console.error(`Auto WA (${send.template_key}) exception:`, e));
     }
-  }
-
-  // 6. Optional course-info follow-up
-  if (data.send_course_info && lead.phone) {
-    const { data: sessionData } = await supabase.auth.getSession();
-    const accessToken = sessionData.session?.access_token;
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-    fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken || anonKey}`,
-        apikey: anonKey,
-      },
-      body: JSON.stringify({
-        template_key: "course_info_v4",
-        phone: lead.phone,
-        lead_id: leadId,
-      }),
-    }).catch(e => console.error("course_info_v4 send exception:", e));
-  }
-
-  // 7. Inline-scheduled follow-up
-  if (data.schedule_followup && data.followup_date) {
-    await supabase.from("lead_followups").insert({
-      lead_id: leadId,
-      user_id: userId,
-      scheduled_at: data.followup_date,
-      type: "call",
-      notes: `Follow-up after ${label}${data.notes ? `: ${data.notes}` : ""}`,
-      status: "pending",
-    } as any);
-    await supabase.from("lead_activities").insert({
-      lead_id: leadId, user_id: profileId, type: "followup",
-      description: `Follow-up scheduled for ${new Date(data.followup_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`,
-    } as any);
-  }
+  })();
 }
