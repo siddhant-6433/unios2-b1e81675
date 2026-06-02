@@ -72,6 +72,34 @@ interface ActiveCall extends CallContext {
 }
 const activeCallContexts = new Map<string, ActiveCall>();
 
+async function closeLiveTransferMarker(
+  callCtx: ActiveCall | null | undefined,
+  callId: string,
+  headers: Record<string, string>,
+  summary = "Live transfer ended",
+): Promise<void> {
+  if (!SUPABASE_URL) return;
+
+  const bridgeCallUuids = new Set<string>();
+  if (callCtx?.plivoCallUuid) bridgeCallUuids.add(`${callCtx.plivoCallUuid}-bridge`);
+  bridgeCallUuids.add(`${callId}-bridge`);
+
+  await Promise.all([...bridgeCallUuids].map(async (bridgeCallUuid) => {
+    await fetch(
+      `${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${encodeURIComponent(bridgeCallUuid)}&status=eq.initiated&is_live_transfer=eq.true`,
+      {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          status: "completed",
+          completed_at: new Date().toISOString(),
+          summary,
+        }),
+      },
+    ).catch((e) => console.error(`[${callId}] live-transfer marker close failed for ${bridgeCallUuid}:`, e.message));
+  }));
+}
+
 /**
  * Execute a tool call from Gemini against Supabase.
  */
@@ -1861,6 +1889,8 @@ function handlePlivoStream(plivoWs: WebSocket, callId: string) {
         }),
       }).catch(console.error);
 
+      closeLiveTransferMarker(callCtx, callId, headers, "Live transfer marker closed when AI stream ended").catch(console.error);
+
       fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
         method: "POST",
         headers,
@@ -2442,6 +2472,13 @@ Deno.serve({ port: PORT }, async (req) => {
         }),
       }).catch(() => {});
 
+      await closeLiveTransferMarker(
+        callCtx,
+        callId,
+        { ...dbH, Prefer: "return=minimal" },
+        "Live transfer marker closed on inbound hangup",
+      );
+
       console.log(`[${callId}] Inbound hangup: dur=${totalDuration}s`);
     }
 
@@ -2998,7 +3035,17 @@ Deno.serve({ port: PORT }, async (req) => {
           }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] recovery ai_call_records:`, e));
           await fetch(`${SUPABASE_URL}/rest/v1/rpc/record_cloud_call_log`, {
             method: "POST", headers: { ...recovDbH, Prefer: "return=minimal" },
-            body: JSON.stringify({ p_call_uuid: callId, p_lead_id: rec.lead_id, p_user_id: rec.caller_user_id || null, p_disposition: recDisp, p_duration: recDur, p_notes: `Cloud Call [${callId.slice(0,8)}]: ${recDisp} (recovered)`, p_source: "auto", p_recording_url: null }),
+            body: JSON.stringify({
+              p_call_uuid: callId,
+              p_lead_id: rec.lead_id,
+              p_user_id: rec.caller_user_id || null,
+              p_disposition: recDisp,
+              p_duration: recDur,
+              p_notes: `Cloud Call [${callId.slice(0,8)}]: ${recDisp} (recovered)`,
+              p_source: "auto",
+              p_recording_url: null,
+              p_call_source: "cloud_dialer",
+            }),
           }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] recovery call_log:`, e));
           console.log(`[BRIDGE-HANGUP ${callId}] Recovery complete: lead=${rec.lead_id} disp=${recDisp}`);
         }
@@ -3092,6 +3139,7 @@ Deno.serve({ port: PORT }, async (req) => {
           : `Cloud Call [${callId.slice(0,8)}]: connected (${totalDuration}s)`,
         p_source:        "auto",
         p_recording_url: null,
+        p_call_source:   "cloud_dialer",
       }),
     }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] call_logs rpc:`, e.message));
 
