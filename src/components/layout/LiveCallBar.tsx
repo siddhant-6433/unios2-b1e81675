@@ -68,11 +68,16 @@ export function LiveCallBar() {
         .from("ai_call_records" as any)
         .select("id, call_uuid, lead_id, student_connected_at, disposition, created_at, caller_user_id, call_type, is_live_transfer, transfer_reason")
         .eq("status", "initiated")
-        .in("call_type", ["manual", "inbound"])
         .gte("created_at", cutoff)
         .order("created_at", { ascending: false });
 
-      // Counsellors only see their own calls (inbound routed to them)
+      if (isAdmin) {
+        query = query.in("call_type", ["manual", "inbound"]);
+      } else {
+        query = query.eq("call_type", "inbound");
+      }
+
+      // Counsellors only see their own inbound calls (routed or transferred to them)
       if (!isAdmin && user?.id) {
         query = query.eq("caller_user_id", user.id);
       }

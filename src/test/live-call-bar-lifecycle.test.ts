@@ -10,6 +10,12 @@ describe("LiveCallBar lifecycle guards", () => {
     expect(liveCallBarSource).not.toContain("7 * 60 * 1000");
   });
 
+  it("does not show counsellors their own manual outbound calls in the navbar", () => {
+    expect(liveCallBarSource).toContain('query = query.in("call_type", ["manual", "inbound"])');
+    expect(liveCallBarSource).toContain('query = query.eq("call_type", "inbound")');
+    expect(liveCallBarSource).toContain("Counsellors only see their own inbound calls");
+  });
+
   it("closes live-transfer marker rows when the voice stream ends", () => {
     expect(voiceAgentSource).toContain("closeLiveTransferMarker");
     expect(voiceAgentSource).toContain('bridgeCallUuids.add(`${callCtx.plivoCallUuid}-bridge`)');
