@@ -9,6 +9,7 @@ import { WhatsAppPanel } from "@/components/layout/WhatsAppPanel";
 import { HeaderSearch } from "@/components/layout/HeaderSearch";
 import { HeaderProfile } from "@/components/layout/HeaderProfile";
 import { HeaderResponseTime } from "@/components/layout/HeaderResponseTime";
+import { HeaderFeedbackWidget } from "@/components/layout/HeaderFeedbackWidget";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { CounsellorFilterProvider } from "@/contexts/CounsellorFilterContext";
@@ -93,6 +94,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               <div className="flex items-center gap-1.5">
                 <HeaderSearch />
                 <HeaderResponseTime />
+                <HeaderFeedbackWidget />
                 <WhatsAppPanel />
                 <NotificationPanel />
                 <div className="w-px h-6 bg-border/60 mx-0.5" />
