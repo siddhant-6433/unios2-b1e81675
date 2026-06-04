@@ -56,13 +56,54 @@ const PRESETS: { key: DatePreset; label: string }[] = [
 ];
 
 const PAGE_SIZE = 50;
+const EMPTY_STATS = { total: 0, interested: 0, not_interested: 0, no_answer: 0, busy: 0, call_back: 0 };
+
+interface CallLogLead {
+  name: string | null;
+  phone: string | null;
+  stage: string | null;
+  source: string | null;
+}
+
+interface CallLogRow {
+  id: string;
+  lead_id: string;
+  disposition: string | null;
+  duration_seconds: number | null;
+  notes: string | null;
+  recording_url: string | null;
+  created_at: string;
+  called_at: string | null;
+  user_id: string | null;
+  cloud_call_uuid?: string | null;
+  source?: string | null;
+  leads?: CallLogLead | null;
+}
+
+interface EnrichedCallLog extends CallLogRow {
+  lead_name: string;
+  lead_phone: string;
+  lead_stage: string;
+  lead_source: string;
+  caller_user_id: string;
+  counsellor_name: string;
+}
+
+interface CallerProfile {
+  user_id: string | null;
+  display_name: string | null;
+}
+
+interface AiCallRecording {
+  call_uuid: string | null;
+  recording_url: string | null;
+}
 
 const CallLog = () => {
   const navigate = useNavigate();
-  const { role, user } = useAuth();
+  const { role, roleLoaded, user } = useAuth();
   const isCounsellor = role === "counsellor";
-  const [myUserId, setMyUserId] = useState<string | null>(null);
-  const [records, setRecords] = useState<any[]>([]);
+  const [records, setRecords] = useState<EnrichedCallLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -79,33 +120,48 @@ const CallLog = () => {
 
   // Stats (from full query, not paginated)
   const [totalCount, setTotalCount] = useState(0);
-  const [stats, setStats] = useState({ total: 0, interested: 0, not_interested: 0, no_answer: 0, busy: 0, call_back: 0 });
+  const [stats, setStats] = useState(EMPTY_STATS);
   const [counsellorStats, setCounsellorStats] = useState<{ id: string; name: string; count: number }[]>([]);
 
-  // Fetch counsellor list + resolve current user's auth ID
+  const scopedCounsellorId = isCounsellor ? user?.id ?? null : counsellorFilter !== "all" ? counsellorFilter : null;
+
+  // Fetch counsellor list for admins. Counsellors are always scoped to self.
   useEffect(() => {
     (async () => {
-      // Set current user auth ID for counsellor self-filter
-      if (user?.id) setMyUserId(user.id);
+      if (!roleLoaded || !user?.id) return;
+
+      if (isCounsellor) {
+        setCounsellorFilter(user.id);
+        setCounsellorOptions([]);
+        setCounsellorStats([]);
+        return;
+      }
 
       const { data: roleRows } = await supabase.from("user_roles").select("user_id").eq("role", "counsellor");
       if (!roleRows?.length) return;
       const { data: profs } = await supabase.from("profiles").select("id, display_name, user_id").in("user_id", roleRows.map(r => r.user_id));
       if (profs) {
         setCounsellorOptions(profs.map(p => ({ id: p.user_id, name: p.display_name || "Unnamed" })).sort((a, b) => a.name.localeCompare(b.name)));
-        // Auto-filter counsellor to own calls if logged in as counsellor
-        if (isCounsellor && user?.id) setCounsellorFilter(user.id);
       }
     })();
-  }, [user?.id]);
+  }, [isCounsellor, roleLoaded, setCounsellorFilter, user?.id]);
 
   const fetchRecords = useCallback(async () => {
+    if (!roleLoaded || !user?.id) {
+      setRecords([]);
+      setTotalCount(0);
+      setStats(EMPTY_STATS);
+      setCounsellorStats([]);
+      setLoading(true);
+      return;
+    }
+
     setLoading(true);
 
     const { from, to } = datePreset === "custom" ? { from: customFrom, to: customTo } : getDateRange(datePreset);
 
     let query = supabase
-      .from("call_logs" as any)
+      .from("call_logs")
       .select(`
         id, lead_id, disposition, duration_seconds, notes, recording_url, created_at, called_at, user_id, cloud_call_uuid, source,
         leads:lead_id(name, phone, stage, source)
@@ -115,25 +171,28 @@ const CallLog = () => {
     if (from) query = query.gte("created_at", `${from}T00:00:00`);
     if (to) query = query.lte("created_at", `${to}T23:59:59`);
 
-    // Server-side counsellor filter by user_id (who made the call)
-    if (counsellorFilter !== "all") {
-      query = query.eq("user_id", counsellorFilter);
-    } else if (isCounsellor && myUserId) {
-      query = query.eq("user_id", myUserId);
+    // Server-side counsellor filter by user_id (who made the call).
+    // For counsellors, bind directly to the authenticated user once role is
+    // loaded; never rely on the shared dropdown state for data isolation.
+    if (scopedCounsellorId) {
+      query = query.eq("user_id", scopedCounsellorId);
     }
 
     const { data, count } = await query.range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
 
     if (data) {
+      const rows = data as unknown as CallLogRow[];
       // Batch-fetch caller profiles
-      const callerIds = [...new Set((data as any[]).map((r: any) => r.user_id).filter(Boolean))];
+      const callerIds = [...new Set(rows.map((r) => r.user_id).filter((id): id is string => Boolean(id)))];
       const callerMap: Record<string, string> = {};
       if (callerIds.length > 0) {
         const { data: profs } = await supabase.from("profiles").select("user_id, display_name").in("user_id", callerIds);
-        (profs || []).forEach((p: any) => { callerMap[p.user_id] = p.display_name || "Unknown"; });
+        ((profs || []) as CallerProfile[]).forEach((p) => {
+          if (p.user_id) callerMap[p.user_id] = p.display_name || "Unknown";
+        });
       }
 
-      let enriched = (data as any[]).map((r: any) => ({
+      let enriched: EnrichedCallLog[] = rows.map((r) => ({
         ...r,
         lead_name: r.leads?.name || "Unknown",
         lead_phone: r.leads?.phone || "",
@@ -161,21 +220,21 @@ const CallLog = () => {
 
       if (cloudUuids.length > 0) {
         const { data: aiRecs } = await supabase
-          .from("ai_call_records" as any)
+          .from("ai_call_records")
           .select("call_uuid, recording_url")
           .in("call_uuid", cloudUuids)
           .not("recording_url", "is", null);
-        (aiRecs || []).forEach((rec: any) => {
+        ((aiRecs || []) as AiCallRecording[]).forEach((rec) => {
           if (rec.call_uuid && rec.recording_url) recByUuid[rec.call_uuid] = rec.recording_url;
         });
       }
       if (legacyCloudLeadIds.length > 0) {
         const { data: aiRecs } = await supabase
-          .from("ai_call_records" as any)
+          .from("ai_call_records")
           .select("call_uuid, recording_url")
           .in("lead_id", legacyCloudLeadIds)
           .not("recording_url", "is", null);
-        (aiRecs || []).forEach((rec: any) => {
+        ((aiRecs || []) as AiCallRecording[]).forEach((rec) => {
           if (rec.call_uuid && rec.recording_url) recByPrefix[rec.call_uuid.slice(0, 8)] = rec.recording_url;
         });
       }
@@ -194,7 +253,7 @@ const CallLog = () => {
       setTotalCount(count || enriched.length);
 
       // Compute stats from this page (ideally from full dataset, but good enough for filtered view)
-      const s = { total: count || enriched.length, interested: 0, not_interested: 0, no_answer: 0, busy: 0, call_back: 0 };
+      const s = { ...EMPTY_STATS, total: count || enriched.length };
       enriched.forEach(r => {
         if (r.disposition === "interested") s.interested++;
         else if (r.disposition === "not_interested") s.not_interested++;
@@ -210,7 +269,7 @@ const CallLog = () => {
     if (!isCounsellor && counsellorOptions.length > 0) {
       const results = await Promise.all(
         counsellorOptions.map(async (c) => {
-          let q = supabase.from("call_logs" as any).select("id", { count: "exact", head: true }).eq("user_id", c.id);
+          let q = supabase.from("call_logs").select("id", { count: "exact", head: true }).eq("user_id", c.id);
           if (from) q = q.gte("created_at", `${from}T00:00:00`);
           if (to) q = q.lte("created_at", `${to}T23:59:59`);
           const { count } = await q;
@@ -221,7 +280,7 @@ const CallLog = () => {
     }
 
     setLoading(false);
-  }, [datePreset, customFrom, customTo, page, counsellorFilter, myUserId, counsellorOptions, isCounsellor]);
+  }, [datePreset, customFrom, customTo, page, scopedCounsellorId, counsellorOptions, isCounsellor, roleLoaded, user?.id]);
 
   useEffect(() => { fetchRecords(); }, [fetchRecords]);
   useEffect(() => { setPage(1); }, [datePreset, counsellorFilter, dispositionFilter]);
