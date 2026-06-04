@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -20,10 +20,13 @@ import {
 import {
   Collapsible, CollapsibleTrigger, CollapsibleContent,
 } from "@/components/ui/collapsible";
-import { CourseInfoPanel } from "@/components/leads/CourseInfoPanel";
-import { PriorityInterestedCard } from "@/components/leads/PriorityInterestedCard";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
-import { useCloudDialerQueue, useMyProfileId } from "@/hooks/useAdmissionsData";
+import { useCloudDialerBootstrap, useCloudDialerListQueue, useCloudDialerQueue, useMyProfileId } from "@/hooks/useAdmissionsData";
+
+const CourseInfoPanel = lazy(() =>
+  import("@/components/leads/CourseInfoPanel").then((m) => ({ default: m.CourseInfoPanel })));
+const PriorityInterestedCard = lazy(() =>
+  import("@/components/leads/PriorityInterestedCard").then((m) => ({ default: m.PriorityInterestedCard })));
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -212,10 +215,6 @@ export default function CloudDialer() {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [loading, setLoading] = useState(true);
   const [queueSource, setQueueSource] = useState<"smart" | "followups" | "fresh" | "all">("smart");
-  // Source → first_contact_hours map for the SLA reclaim warning.
-  // Loaded once at mount; falls back to 24h for unknown sources (matches the
-  // server-side default in fn_reclaim_overdue_leads).
-  const [slaWindowHours, setSlaWindowHours] = useState<Record<string, number>>({});
 
   // Dialer state
   const [dialerActive, setDialerActive] = useState(false);
@@ -253,16 +252,9 @@ export default function CloudDialer() {
   const [dialPlacing, setDialPlacing] = useState(false);
   // Profile ID for activity logging (cached — same hook used across pages)
   const { data: profileId } = useMyProfileId();
-  // Counsellor display name + phone — used to personalise the
-  // nimt_not_interested_ack WhatsApp template after a manual disposition.
-  const [counsellorIdentity, setCounsellorIdentity] = useState<{ display_name: string; phone: string | null }>({
-    display_name: "the admissions team",
-    phone: null,
-  });
   const [nudgeSendingKey, setNudgeSendingKey] = useState<string | null>(null);
   const [nudgeSentKeys, setNudgeSentKeys] = useState<Set<string>>(new Set());
   const [nudgeDismissed, setNudgeDismissed] = useState(false);
-  const [mostUsedTemplates, setMostUsedTemplates] = useState<{ key: string; label: string }[]>([]);
 
   const callTimerRef = useRef<number | null>(null);
   const autoNextRef = useRef<number | null>(null);
@@ -300,6 +292,27 @@ export default function CloudDialer() {
     maxPerBucket: 100,
     enabled: isSmartQueue && (!isCounsellor || !!counsellorId),
   });
+  const {
+    data: listPayload,
+    isLoading: listLoading,
+    refetch: refetchListQueue,
+  } = useCloudDialerListQueue({
+    counsellorId,
+    mode: queueSource === "fresh" ? "fresh" : "all",
+    limit: 100,
+    enabled: !isSmartQueue && (!isCounsellor || !!counsellorId),
+  });
+  const { data: dialerBootstrap } = useCloudDialerBootstrap({ enabled: !!user?.id });
+  const counsellorIdentity = dialerBootstrap?.counsellor_identity ?? {
+    display_name: "the admissions team",
+    phone: null,
+  };
+  const mostUsedTemplates = dialerBootstrap?.most_used_templates ?? [];
+  const slaWindowHours = useMemo(
+    () => dialerBootstrap?.source_sla_hours ?? {},
+    [dialerBootstrap],
+  );
+  const courseOptions = dialerBootstrap?.course_options ?? [];
 
   // Sync the cached smart-queue payload into mutable state so disposition
   // handlers can pop leads out without re-running the RPC.
@@ -347,129 +360,46 @@ export default function CloudDialer() {
     setLoading(false);
   }, [isSmartQueue, smartPayload, smartLoading]);
 
-  // Fresh / all paths still fetch directly (small queries, not cached).
-  const loadNonSmartQueue = useCallback(async () => {
-    setLoading(true);
-    let mapped: QueueLead[] = [];
-    const buckets: {key:string; label:string; color:string; count:number}[] = [];
-
-    if (queueSource === "fresh") {
-      let fq = supabase.from("leads").select("id, name, phone, stage, source, course_id, courses:course_id(name, fee_per_year), campuses:campus_id(name)").eq("stage", "new_lead").not("phone", "is", null).order("created_at", { ascending: true }).limit(100);
-      if (counsellorId) fq = fq.eq("counsellor_id", counsellorId);
-      const { data } = await fq;
-      mapped = (data || []).filter((l: any) => l.phone).map((l: any) => ({
-        id: l.id, name: l.name, phone: l.phone, stage: l.stage || "", source: l.source || "",
-        course_id: l.course_id || null,
-        course_name: l.courses?.name || "—",
-        campus_name: l.campuses?.name || "—",
-        bucket: "New Lead",
-        attempt_count: 0,
-        course_fee: l.courses?.fee_per_year
-          ? `₹${Number(l.courses.fee_per_year).toLocaleString("en-IN")}/year`
-          : undefined,
-      }));
-      buckets.push({ key: "new", label: "New Leads", color: "bg-orange-500", count: mapped.length });
-    } else {
-      let aq = supabase.from("leads").select("id, name, phone, stage, source, course_id, courses:course_id(name, fee_per_year), campuses:campus_id(name)").in("stage", ["priority_interested", "new_lead", "counsellor_call", "application_in_progress"] as any).not("phone", "is", null).order("created_at", { ascending: true }).limit(100);
-      if (counsellorId) aq = aq.eq("counsellor_id", counsellorId);
-      const { data } = await aq;
-      mapped = (data || []).filter((l: any) => l.phone).map((l: any) => ({
-        id: l.id, name: l.name, phone: l.phone, stage: l.stage || "", source: l.source || "",
-        course_id: l.course_id || null,
-        course_name: l.courses?.name || "—",
-        campus_name: l.campuses?.name || "—",
-        bucket: STAGE_LABELS[l.stage] || l.stage,
-        attempt_count: 0,
-        course_fee: l.courses?.fee_per_year
-          ? `₹${Number(l.courses.fee_per_year).toLocaleString("en-IN")}/year`
-          : undefined,
-      }));
-      buckets.push({ key: "all", label: "All Pipeline", color: "bg-gray-500", count: mapped.length });
+  useEffect(() => {
+    if (isSmartQueue) return;
+    if (!listPayload) {
+      setLoading(listLoading);
+      return;
     }
-
+    const mapped: QueueLead[] = (listPayload.queue || []).map((r: any) => ({
+      id: r.id,
+      name: r.name || "Unknown",
+      phone: r.phone || "",
+      stage: r.stage || "",
+      source: r.source || "",
+      course_id: r.course_id || null,
+      course_name: r.course_name || "—",
+      campus_name: r.campus_name || "—",
+      bucket: r.bucket || (queueSource === "fresh" ? "New Lead" : (STAGE_LABELS[r.stage] || r.stage)),
+      attempt_count: r.attempt_count || 0,
+      course_fee: r.course_fee_per_year
+        ? `₹${Number(r.course_fee_per_year).toLocaleString("en-IN")}/year`
+        : undefined,
+    })).filter((lead) => lead.phone);
+    const buckets = (listPayload.buckets || [])
+      .filter((bucket: any) => bucket.count > 0)
+      .map((bucket: any) => ({
+        key: queueSource === "fresh" ? "new" : "all",
+        label: bucket.label,
+        color: queueSource === "fresh" ? "bg-orange-500" : "bg-gray-500",
+        count: bucket.count,
+      }));
     setQueue(mapped);
     setQueueBuckets(buckets);
     setCurrentIdx(0);
     setLoading(false);
-  }, [queueSource, counsellorId]);
-
-  // ── Load source SLA windows once for reclaim warnings ─────────────────────
-  useEffect(() => {
-    (async () => {
-      const { data } = await (supabase.from("source_sla_config" as any) as any)
-        .select("source, first_contact_hours");
-      if (!data) return;
-      const map: Record<string, number> = {};
-      (data as { source: string; first_contact_hours: number }[]).forEach(r => {
-        map[r.source] = r.first_contact_hours;
-      });
-      setSlaWindowHours(map);
-    })();
-  }, []);
-
-  useEffect(() => {
-    if (!isSmartQueue) loadNonSmartQueue();
-  }, [isSmartQueue, loadNonSmartQueue]);
+  }, [isSmartQueue, listPayload, listLoading, queueSource]);
 
   // Unified callable used after dispositions and manual refreshes.
   const loadQueue = useCallback(() => {
     if (isSmartQueue) refetchSmartQueue();
-    else loadNonSmartQueue();
-  }, [isSmartQueue, refetchSmartQueue, loadNonSmartQueue]);
-
-  // ── Fetch counsellor display name, phone + most-used templates ────────────
-  // display_name/phone feed the nimt_not_interested_ack template params.
-  // most-used templates are surfaced in the post-disposition WhatsApp nudge.
-  useEffect(() => {
-    if (!user?.id) return;
-    (async () => {
-      const { data: prof } = await supabase
-        .from("profiles")
-        .select("id, display_name, phone")
-        .eq("user_id", user.id)
-        .single();
-      if (!prof) return;
-      setCounsellorIdentity({
-        display_name: prof.display_name || "the admissions team",
-        phone: prof.phone || null,
-      });
-
-      const since = new Date(Date.now() - 30 * 86400000).toISOString();
-      const { data: acts } = await supabase
-        .from("lead_activities")
-        .select("description")
-        .eq("user_id", prof.id)
-        .eq("type", "whatsapp")
-        .gte("created_at", since)
-        .limit(500);
-
-      const counts = new Map<string, number>();
-      (acts || []).forEach((a: any) => {
-        const m = String(a.description || "").match(/(?:Template:\s*|—\s*)([a-z0-9_ ]+?)(?:\s*$|\s*\()/i);
-        if (!m) return;
-        const k = m[1].trim().toLowerCase().replace(/\s+/g, "_");
-        if (!k) return;
-        if (k === "course_info_v4" || k === "course_info_generic") return;
-        if (k === "auto_reply" || k === "ai_auto_reply") return;
-        counts.set(k, (counts.get(k) || 0) + 1);
-      });
-      const TEMPLATE_LABELS: Record<string, string> = {
-        apply_portal_login: "Send apply portal link",
-        callback_scheduled: "Send callback ack",
-        missed_call: "Send missed-call note",
-        course_info_video: "Send course video",
-        course_info_video_v2: "Send course video",
-        visit_confirmation: "Send visit confirmation",
-        ai_call_post_summary: "Send call summary",
-        ai_call_course_info: "Send course details",
-      };
-      const top = Array.from(counts.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 2)
-        .map(([key]) => ({ key, label: TEMPLATE_LABELS[key] || key.replace(/_/g, " ") }));
-      setMostUsedTemplates(top);
-    })();
-  }, [user?.id]);
+    else refetchListQueue();
+  }, [isSmartQueue, refetchSmartQueue, refetchListQueue]);
 
   // Reset the WhatsApp nudge when the lead changes so the previous lead's
   // sent-state never carries over.
@@ -579,7 +509,6 @@ export default function CloudDialer() {
   const [queueSearch, setQueueSearch] = useState("");
   const [editing, setEditing] = useState<"name"|"course"|null>(null);
   const [editValue, setEditValue] = useState("");
-  const [courseOptions, setCourseOptions] = useState<{id:string;name:string;campus:string}[]>([]);
 
   // Poll for call end — checks ai_call_records for our call_uuid
   const startPolling = (callId: string) => {
@@ -651,16 +580,6 @@ export default function CloudDialer() {
 
   // Cleanup polling on unmount
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
-
-  // Load course options for edit dropdown
-  useEffect(() => {
-    supabase.from("courses").select("id, name, departments!inner(institutions!inner(campuses!inner(name)))").eq("is_active", true).order("name")
-      .then(({ data }) => {
-        setCourseOptions((data || []).map((c: any) => ({
-          id: c.id, name: c.name, campus: c.departments?.institutions?.campuses?.name || "",
-        })));
-      });
-  }, []);
 
   const saveLeadEdit = async (field: "name" | "course", value: string) => {
     if (!currentLead) return;
@@ -1345,7 +1264,11 @@ export default function CloudDialer() {
               {/* Course pitch — promoted above the fold, talking points collapsed */}
               <Card className="border-cyan-200/60 dark:border-cyan-900/40 shadow-none">
                 <CardContent className="p-3 space-y-3">
-                  {currentLead.course_id && <CourseInfoPanel courseId={currentLead.course_id} />}
+                  {currentLead.course_id && (
+                    <Suspense fallback={null}>
+                      <CourseInfoPanel courseId={currentLead.course_id} />
+                    </Suspense>
+                  )}
                   {currentLead.course_name !== "—" && (
                     <Collapsible>
                       <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg bg-blue-50/60 dark:bg-blue-950/20 px-3 py-2.5 text-sm font-semibold text-blue-700 dark:text-blue-300 [&[data-state=open]>svg]:rotate-180">
@@ -1381,7 +1304,9 @@ export default function CloudDialer() {
 
               {/* Priority interested reason */}
               {currentLead.stage === "priority_interested" && (
-                <PriorityInterestedCard leadId={currentLead.id} compact />
+                <Suspense fallback={null}>
+                  <PriorityInterestedCard leadId={currentLead.id} compact />
+                </Suspense>
               )}
 
               {/* Previous call notes — collapsed by default */}
@@ -2327,7 +2252,9 @@ export default function CloudDialer() {
 
                 {/* Priority Interested reason — shown before the counsellor calls */}
                 {currentLead.stage === "priority_interested" && (
-                  <PriorityInterestedCard leadId={currentLead.id} compact />
+                  <Suspense fallback={null}>
+                    <PriorityInterestedCard leadId={currentLead.id} compact />
+                  </Suspense>
                 )}
 
                 {/* Previous Call Notes */}
@@ -2372,7 +2299,11 @@ export default function CloudDialer() {
                 <div className="space-y-3">
                   {currentLead.course_id && (
                     <Card className="border-border/60 shadow-none max-h-[300px] overflow-y-auto">
-                      <CardContent className="p-3"><CourseInfoPanel courseId={currentLead.course_id} /></CardContent>
+                      <CardContent className="p-3">
+                        <Suspense fallback={null}>
+                          <CourseInfoPanel courseId={currentLead.course_id} />
+                        </Suspense>
+                      </CardContent>
                     </Card>
                   )}
                 </div>

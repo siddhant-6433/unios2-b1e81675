@@ -39,6 +39,11 @@ const STAGE_COLORS: Record<string, string> = {
   application_fee_paid: "bg-cyan-100 text-cyan-700",
 };
 
+const LIVE_CALL_LOOKBACK_MS = 10 * 60 * 1000;
+const UNCONNECTED_RING_DISPLAY_MS = 75 * 1000;
+const STALE_RECONCILE_SECONDS = 90;
+const STALE_RECONCILE_INTERVAL_MS = 15 * 1000;
+
 const formatTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
 
 export function LiveCallBar() {
@@ -49,6 +54,7 @@ export function LiveCallBar() {
   const tickRef = useRef<number | null>(null);
   const seenInboundRef = useRef<Set<string>>(new Set());
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const lastReconcileRef = useRef(0);
 
   // Admins/TLs see all calls; counsellors see only their own inbound calls
   const isAdmin = role === "super_admin" || role === "admission_head" || role === "campus_admin" || isTeamLeader;
@@ -58,12 +64,24 @@ export function LiveCallBar() {
     if (!canView) return;
 
     const fetchActiveCalls = async () => {
-      // Get manual + inbound calls with status=initiated (created in last 2 min).
-      // Real calls finish in well under that; anything older is almost certainly
-      // stuck (Plivo webhook never landed). Server-side reconciler flips them to
-      // 'failed' at the 10-min mark, but the navbar should clear stale ring
-      // banners quickly because Plivo ring / transfer timeouts are ~30s.
-      const cutoff = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+      const currentTime = Date.now();
+
+      // Best-effort DB cleanup for calls whose Plivo/voice-agent callback never
+      // landed. The UI also has a local display cutoff below, so a failed RPC
+      // cannot leave the navbar stuck.
+      if (currentTime - lastReconcileRef.current > STALE_RECONCILE_INTERVAL_MS) {
+        lastReconcileRef.current = currentTime;
+        void (supabase as any)
+          .rpc("reconcile_stale_live_calls", { p_stale_after_seconds: STALE_RECONCILE_SECONDS })
+          .then(({ error }: any) => {
+            if (error) console.warn("[LiveCallBar] stale call reconcile failed:", error.message);
+          });
+      }
+
+      // Pull recent initiated calls. Connected calls can legitimately remain
+      // initiated until hangup, so use a wider DB lookback and apply a stricter
+      // client-side cutoff only to calls where the student never connected.
+      const cutoff = new Date(currentTime - LIVE_CALL_LOOKBACK_MS).toISOString();
       let query = supabase
         .from("ai_call_records" as any)
         .select("id, call_uuid, lead_id, student_connected_at, disposition, created_at, caller_user_id, call_type, is_live_transfer, transfer_reason")
@@ -93,7 +111,13 @@ export function LiveCallBar() {
         .in("call_uuid", uuids)
         .neq("status", "initiated");
       const doneUuids = new Set((terminal || []).map((t: any) => t.call_uuid));
-      const activeRecords = records.filter((r: any) => !doneUuids.has(r.call_uuid));
+      const activeRecords = records.filter((r: any) => {
+        if (doneUuids.has(r.call_uuid)) return false;
+        if (r.student_connected_at || r.disposition) return true;
+
+        const ageMs = currentTime - new Date(r.created_at).getTime();
+        return ageMs <= UNCONNECTED_RING_DISPLAY_MS;
+      });
 
       if (!activeRecords.length) {
         setCalls([]);
@@ -190,7 +214,7 @@ export function LiveCallBar() {
     fetchActiveCalls();
     const interval = setInterval(fetchActiveCalls, 5000);
     return () => { clearInterval(interval); if (audioRef.current) { audioRef.current.pause(); } };
-  }, [canView]);
+  }, [canView, isAdmin, user?.id]);
 
   // Tick every second to update elapsed times
   useEffect(() => {

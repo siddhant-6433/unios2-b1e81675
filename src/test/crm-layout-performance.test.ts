@@ -5,6 +5,7 @@ const globalActionBar = readFileSync("src/components/layout/GlobalActionBar.tsx"
 const appSidebar = readFileSync("src/components/layout/AppSidebar.tsx", "utf8");
 const headerResponseTime = readFileSync("src/components/layout/HeaderResponseTime.tsx", "utf8");
 const migration = readFileSync("supabase/migrations/20260618150000_crm_layout_perf_indexes.sql", "utf8");
+const actionBadgeCounts = readFileSync("supabase/migrations/20260618183000_action_badge_counts.sql", "utf8");
 
 describe("CRM layout performance guardrails", () => {
   it("does not materialize counsellor lead IDs for repeated layout counts", () => {
@@ -14,9 +15,12 @@ describe("CRM layout performance guardrails", () => {
     expect(appSidebar).not.toContain(".in(\"lead_id\"");
   });
 
-  it("uses embedded lead filters so existing RLS still gates scoped counts", () => {
-    expect(globalActionBar).toContain("leads!inner(counsellor_id)");
-    expect(appSidebar).toContain("leads!inner(counsellor_id)");
+  it("uses one invoker payload for repeated layout counts so RLS still gates scoped counts", () => {
+    expect(globalActionBar).toContain('rpc("action_badge_counts"');
+    expect(appSidebar).toContain('rpc("action_badge_counts"');
+    expect(actionBadgeCounts).toMatch(/\bSECURITY\s+INVOKER\b/i);
+    expect(actionBadgeCounts).toContain("public.get_user_role(auth.uid())");
+    expect(actionBadgeCounts).toContain("role_name = 'counsellor'");
     expect(headerResponseTime).toContain("leads!inner(created_at, counsellor_id)");
     expect(headerResponseTime).not.toContain("for (let i = 0; i < leadIds.length");
   });

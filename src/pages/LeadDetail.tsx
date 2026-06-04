@@ -22,9 +22,7 @@ import {
 } from "@/components/ui/alert-dialog";
 // Eager: small / essential-for-first-paint components
 import { LeadInfoCard } from "@/components/leads/LeadInfoCard";
-import { MirrorLeadCard } from "@/components/leads/MirrorLeadCard";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
-import { FuzzyDuplicateAlert } from "@/components/admissions/FuzzyDuplicateAlert";
 import { type CallDispositionData } from "@/components/admissions/CallDispositionDialog";
 import { recordCallDisposition } from "@/lib/callDisposition";
 
@@ -38,6 +36,9 @@ const LeadFeeLedger         = lazy(() => import("@/components/finance/LeadFeeLed
 const FeeStructureViewer    = lazy(() => import("@/components/finance/FeeStructureViewer").then(m => ({ default: m.FeeStructureViewer })));
 const ScholarshipCalculator = lazy(() => import("@/components/finance/ScholarshipCalculator").then(m => ({ default: m.ScholarshipCalculator })));
 const ApplyMagicLinkButton  = lazy(() => import("@/components/leads/ApplyMagicLinkButton").then(m => ({ default: m.ApplyMagicLinkButton })));
+const MirrorLeadCard        = lazy(() => import("@/components/leads/MirrorLeadCard").then(m => ({ default: m.MirrorLeadCard })));
+const FuzzyDuplicateAlert   = lazy(() => import("@/components/admissions/FuzzyDuplicateAlert").then(m => ({ default: m.FuzzyDuplicateAlert })));
+const ScorePopup            = lazy(() => import("@/components/admissions/ScorePopup").then(m => ({ default: m.ScorePopup })));
 
 // Lazy: dialogs — only loaded when the user opens them
 const InterviewScoringDialog       = lazy(() => import("@/components/admissions/InterviewScoringDialog").then(m => ({ default: m.InterviewScoringDialog })));
@@ -54,7 +55,6 @@ const SendEmailDialog              = lazy(() => import("@/components/leads/SendE
 const DirectDialGuardDialog        = lazy(() => import("@/components/admissions/DirectDialGuardDialog").then(m => ({ default: m.DirectDialGuardDialog })));
 import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
 import { useCallQueue } from "@/hooks/useCallQueue";
-import { ScorePopup } from "@/components/admissions/ScorePopup";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLeadDetail, useCampuses, useCourses, useMyProfileId } from "@/hooks/useAdmissionsData";
 
@@ -167,7 +167,7 @@ const LeadDetail = () => {
   // assigned to. lead_assignment_info is a SECURITY DEFINER RPC that returns
   // just the assignee's display name — no contact info, no stage.
   const [assignmentInfo, setAssignmentInfo] = useState<{ exists: boolean; lead_name: string | null; counsellor_name: string | null } | null>(null);
-  const { buckets, nextLead, refetch: refetchQueue } = useCallQueue(id);
+  const { buckets, nextLead, refetch: refetchQueue } = useCallQueue(id, lead?.counsellor_id);
 
   // useLeadDetail handles initial fetch + refetch on id change automatically.
   // Reset local state when navigating between leads so the old data doesn't
@@ -1269,8 +1269,14 @@ const LeadDetail = () => {
             userRole={role ?? null}
             onTokenPaidOverride={() => setShowTokenOverride(true)}
           />
-          <FuzzyDuplicateAlert leadId={lead.id} leadName={lead.name} leadPhone={lead.phone} leadEmail={lead.email} />
-          {lead.mirror_lead_id && <MirrorLeadCard mirrorLeadId={lead.mirror_lead_id} />}
+          <Suspense fallback={null}>
+            <FuzzyDuplicateAlert leadId={lead.id} leadName={lead.name} leadPhone={lead.phone} leadEmail={lead.email} />
+          </Suspense>
+          {lead.mirror_lead_id && (
+            <Suspense fallback={null}>
+              <MirrorLeadCard mirrorLeadId={lead.mirror_lead_id} />
+            </Suspense>
+          )}
           <Card className="border-border/60">
             <CardContent className="p-4 flex items-center justify-between gap-3">
               <div>
@@ -1568,12 +1574,14 @@ const LeadDetail = () => {
       )}
 
       {/* Score animation popup */}
-      <ScorePopup
-        points={scorePopup.points}
-        label={scorePopup.label}
-        visible={scorePopup.visible}
-        onDone={() => setScorePopup(p => ({ ...p, visible: false }))}
-      />
+      <Suspense fallback={null}>
+        <ScorePopup
+          points={scorePopup.points}
+          label={scorePopup.label}
+          visible={scorePopup.visible}
+          onDone={() => setScorePopup(p => ({ ...p, visible: false }))}
+        />
+      </Suspense>
 
       {/* Next Lead Prompt — after call disposition */}
       {showNextLeadPrompt && (

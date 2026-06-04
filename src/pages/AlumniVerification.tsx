@@ -8,7 +8,7 @@ import {
   ScrollText, Award, BookOpen,
 } from "lucide-react";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
-import alumniHero from "@/assets/alumni-hero.png";
+import alumniHero from "@/assets/alumni-hero.jpg";
 
 const COURSES = [
   "PGDM", "MBA", "BBA", "B.Tech", "M.Tech", "B.Sc Nursing", "GNM", "ANM",

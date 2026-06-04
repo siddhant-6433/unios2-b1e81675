@@ -3,11 +3,11 @@ import miraiMan from "@/assets/mirai-man.png";
 import nimtBeaconLogo from "@/assets/nimt-beacon-logo.png";
 import nimtEduInstLogo from "@/assets/nimt-edu-inst-logo.svg";
 import nimtEduInstLogoWhite from "@/assets/nimt-edu-inst-logo-white.svg";
-import loginBgNimt from "@/assets/login-bg-nimt.jpg";
+import loginBgNimt from "@/assets/login-bg-nimt-optimized.jpg";
 import loginBgBeacon from "@/assets/login-bg-beacon.jpg";
-import loginBgMirai from "@/assets/login-bg-mirai.png";
+import loginBgMirai from "@/assets/login-bg-mirai.jpg";
 import nirfLogo from "@/assets/nirf-logo.png";
-import greatPlaceToStudy from "@/assets/great-place-to-study.svg";
+import greatPlaceToStudy from "@/assets/great-place-to-study.png";
 
 export type PortalId = "nimt" | "beacon" | "mirai";
 
