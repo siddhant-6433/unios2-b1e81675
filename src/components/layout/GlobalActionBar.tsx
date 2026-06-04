@@ -43,218 +43,77 @@ export function GlobalActionBar() {
 
     const fetchCounts = async () => {
       try {
-        const today = new Date().toISOString().slice(0, 10);
-        const todayStart = `${today}T00:00:00+05:30`;
-        const todayEnd   = `${today}T23:59:59+05:30`;
-
-        // Determine scope — counsellor filter or counsellor role
         const effectiveProfileId = counsellorFilter !== "all"
           ? counsellorFilter
           : (isCounsellor ? profileId : null);
 
-        // Use allSettled — if one source breaks (RLS, missing view, schema
-        // mismatch), the rest of the bar still renders. Promise.all would
-        // wipe ALL pills on a single failure, which is the bug we hit when
-        // one of the eight sources silently 404'd.
-        const queries = [
-          (() => {
-            let q = (supabase.from("overdue_followups" as any) as any)
-              .select("id", { count: "exact", head: true });
-            if (effectiveProfileId) q = q.eq("counsellor_id", effectiveProfileId);
-            return q;
-          })(),
-          (() => {
-            let q = supabase.from("lead_followups")
-              .select(effectiveProfileId ? "id, leads!inner(counsellor_id)" : "id", { count: "exact", head: true })
-              .eq("status", "pending")
-              .gte("scheduled_at", todayStart)
-              .lte("scheduled_at", todayEnd);
-            if (effectiveProfileId) q = q.eq("leads.counsellor_id", effectiveProfileId);
-            return q;
-          })(),
-          (() => {
-            let q = supabase.from("leads").select("id", { count: "exact", head: true })
-              .eq("stage", "new_lead" as any).is("first_contact_at", null);
-            if (effectiveProfileId) q = q.eq("counsellor_id", effectiveProfileId);
-            return q;
-          })(),
-          (() => {
-            if (isCounsellor || counsellorFilter !== "all") return Promise.resolve({ count: 0 });
-            return supabase.from("leads").select("id", { count: "exact", head: true })
-              .eq("stage", "new_lead" as any).is("counsellor_id", null);
-          })(),
-          (() => {
-            let q = (supabase.from("visits_unclosed_today" as any) as any)
-              .select("visit_id", { count: "exact", head: true });
-            if (effectiveProfileId) q = q.eq("counsellor_id", effectiveProfileId);
-            return q;
-          })(),
-          (() => {
-            let q = (supabase.from("visits_needing_confirmation" as any) as any)
-              .select("visit_id", { count: "exact", head: true });
-            if (effectiveProfileId) q = q.eq("counsellor_id", effectiveProfileId);
-            return q;
-          })(),
-          (() => {
-            let q = (supabase.from("post_visit_pending_followups" as any) as any)
-              .select("visit_id", { count: "exact", head: true });
-            if (effectiveProfileId) q = q.eq("counsellor_id", effectiveProfileId);
-            return q;
-          })(),
-          (() => {
-            let q = (supabase.from("ai_call_records" as any) as any)
-              .select("id, leads!inner(counsellor_id)", { count: "exact", head: true })
-              .eq("needs_followup", true)
-              .is("followup_done_at", null);
-            if (effectiveProfileId) q = q.eq("leads.counsellor_id", effectiveProfileId);
-            return q;
-          })(),
-          // Missed Callbacks — inbound call_logs the candidate placed that no
-          // human picked up. Scoped to the counsellor's own leads when a
-          // counsellor scope is active; org-wide otherwise.
-          (() => {
-            let q = supabase.from("call_logs")
-              .select(effectiveProfileId ? "id, leads!inner(counsellor_id)" : "id", { count: "exact", head: true })
-              .eq("direction", "inbound")
-              .eq("disposition", "missed");
-            if (effectiveProfileId) q = q.eq("leads.counsellor_id", effectiveProfileId);
-            return q;
-          })(),
-          // Hot leads: AI-elevated priority_interested. Counsellor-scoped only —
-          // the team-wide count is too noisy for the action bar.
-          (() => {
-            if (!effectiveProfileId) return Promise.resolve({ count: 0 });
-            return supabase.from("leads").select("id", { count: "exact", head: true })
-              .eq("stage", "priority_interested" as any)
-              .eq("counsellor_id", effectiveProfileId);
-          })(),
-          // WhatsApp unread: direct indexed head-count on whatsapp_messages
-          // (partial index idx_wa_messages_unread) scoped to this counsellor's
-          // leads. The whatsapp_conversations view recomputes DISTINCT ON + 3
-          // LATERAL count scans over all 56K+ messages on every call (~3s mean)
-          // because filters can't be pushed into its set-returning function;
-          // this answers in milliseconds. Mirrors NotificationPanel.fetchUnreplied.
-          // Counsellor-scoped only; admins have a dedicated inbox.
-          (() => {
-            if (!effectiveProfileId) return Promise.resolve({ count: 0 });
-            return supabase.from("whatsapp_messages")
-              .select("id, leads!inner(counsellor_id)", { count: "exact", head: true })
-              .eq("direction", "inbound")
-              .eq("is_read", false)
-              .eq("leads.counsellor_id", effectiveProfileId);
-          })(),
-          // Reclaim soon: leads that the SLA cron will unassign in <=30 min if
-          // no contact is made. Counsellor-scoped; uses RPC for the per-source
-          // SLA window math (see fn_count_leads_reclaim_soon).
-          (() => {
-            if (!effectiveProfileId) return Promise.resolve({ data: 0 });
-            return (supabase as any).rpc("fn_count_leads_reclaim_soon", {
-              p_counsellor_id: effectiveProfileId,
-              p_within_min: 30,
-            });
-          })(),
-        ];
+        const { data, error } = await (supabase as any).rpc("action_badge_counts", {
+          p_scope_counsellor_id: effectiveProfileId,
+          p_include_unassigned: !isCounsellor && counsellorFilter === "all",
+        });
 
-        const settled = await Promise.allSettled(queries);
-        const labels = ["overdue","today","fresh","unassigned","unclosed","confirm","post_visit","ai_needs_followup","missed_callbacks","hot","wa_unread","reclaim_soon"];
-        const pick = (i: number) => {
-          const r = settled[i];
-          if (r.status === "fulfilled") {
-            const v = r.value as any;
-            if (v?.error) {
-              console.warn(`[GlobalActionBar] ${labels[i]} query error:`, v.error.message || v.error);
-              return { count: 0 };
-            }
-            return v;
-          }
-          console.warn(`[GlobalActionBar] ${labels[i]} query rejected:`, r.reason);
-          return { count: 0 };
-        };
-        const overdueRes   = pick(0);
-        const todayRes     = pick(1);
-        const freshRes     = pick(2);
-        const unassignedRes = pick(3);
-        const unclosedRes  = pick(4);
-        const confirmRes   = pick(5);
-        const postVisitRes = pick(6);
-        const aiNeedsFollowupRes = pick(7);
-        const missedCallbacksRes = pick(8);
-        const hotRes       = pick(9);
-        const waRes        = pick(10);
-        const reclaimRes   = pick(11);
+        if (error) throw error;
 
+        const c = (key: string) => Number(data?.[key] || 0);
         const result: ActionItem[] = [];
 
-        const c = (r: any) => r?.count || 0;
-        // WhatsApp is now a direct head-count on whatsapp_messages → use .count.
-        const waUnread = c(waRes);
-        // RPC returns the integer directly in .data, not .count.
-        const reclaimSoon = typeof reclaimRes?.data === "number" ? reclaimRes.data : 0;
-
-        if (c(missedCallbacksRes) > 0) result.push({
-          key: "missed_callbacks", label: "Missed Callbacks", count: c(missedCallbacksRes),
+        if (c("missed_callbacks") > 0) result.push({
+          key: "missed_callbacks", label: "Missed Callbacks", count: c("missed_callbacks"),
           icon: PhoneMissed, color: "text-white bg-red-600 border-red-700 animate-pulse",
           url: "/call-log",
         });
-        if (c(aiNeedsFollowupRes) > 0) result.push({
-          key: "ai_needs_followup", label: "AI Needs Follow-up", count: c(aiNeedsFollowupRes),
+        if (c("ai_needs_followup") > 0) result.push({
+          key: "ai_needs_followup", label: "AI Needs Follow-up", count: c("ai_needs_followup"),
           icon: PhoneMissed, color: "text-white bg-rose-600 border-rose-700 animate-pulse",
           url: "/missed-calls",
         });
-        // Reclaim Soon — highest urgency after missed callbacks. Pulses so the
-        // counsellor can't miss it. Clicks straight to the dialer where the
-        // leads at risk are already in the queue with their own per-row badge.
-        if (reclaimSoon > 0) result.push({
-          key: "reclaim_soon", label: "Reclaim in <30m", count: reclaimSoon,
+        if (c("reclaim_soon") > 0) result.push({
+          key: "reclaim_soon", label: "Reclaim in <30m", count: c("reclaim_soon"),
           icon: Timer, color: "text-white bg-red-600 border-red-700 animate-pulse",
           url: "/cloud-dialer",
         });
-        if (c(unassignedRes) > 0) result.push({
-          key: "unassigned", label: "Unassigned", count: c(unassignedRes),
+        if (c("unassigned") > 0) result.push({
+          key: "unassigned", label: "Unassigned", count: c("unassigned"),
           icon: Inbox, color: "text-white bg-orange-500 border-orange-600 animate-pulse",
           url: "/lead-buckets",
         });
-        // Hot Leads — AI-elevated priority_interested. Counsellor-scoped.
-        if (c(hotRes) > 0) result.push({
-          key: "hot", label: "Hot Leads", count: c(hotRes),
+        if (c("hot") > 0) result.push({
+          key: "hot", label: "Hot Leads", count: c("hot"),
           icon: Flame, color: "text-violet-700 bg-violet-50 border-violet-200",
           url: "/cloud-dialer",
         });
-        if (c(overdueRes) > 0) result.push({
-          key: "overdue", label: "Overdue Follow-ups", count: c(overdueRes),
+        if (c("overdue") > 0) result.push({
+          key: "overdue", label: "Overdue Follow-ups", count: c("overdue"),
           icon: AlertTriangle, color: "text-red-600 bg-red-50 border-red-200",
           url: "/pending-followups?tab=overdue",
         });
-        if (c(todayRes) > 0) result.push({
-          key: "today", label: "Today's Follow-ups", count: c(todayRes),
+        if (c("today") > 0) result.push({
+          key: "today", label: "Today's Follow-ups", count: c("today"),
           icon: Clock, color: "text-amber-600 bg-amber-50 border-amber-200",
           url: "/pending-followups?tab=today",
         });
-        if (c(freshRes) > 0) result.push({
-          key: "fresh", label: "Fresh Leads", count: c(freshRes),
+        if (c("fresh") > 0) result.push({
+          key: "fresh", label: "Fresh Leads", count: c("fresh"),
           icon: Sparkles, color: "text-orange-600 bg-orange-50 border-orange-200",
           url: "/fresh-leads",
         });
-        if (c(postVisitRes) > 0) result.push({
-          key: "post_visit", label: "Post-Visit", count: c(postVisitRes),
+        if (c("post_visit") > 0) result.push({
+          key: "post_visit", label: "Post-Visit", count: c("post_visit"),
           icon: Phone, color: "text-amber-600 bg-amber-50 border-amber-200",
           url: "/pending-followups?tab=post_visit",
         });
-        if (c(unclosedRes) > 0) result.push({
-          key: "unclosed", label: "Visits to Close", count: c(unclosedRes),
+        if (c("unclosed") > 0) result.push({
+          key: "unclosed", label: "Visits to Close", count: c("unclosed"),
           icon: MapPin, color: "text-red-600 bg-red-50 border-red-200",
           url: "/pending-followups?tab=unclosed_visits",
         });
-        if (c(confirmRes) > 0) result.push({
-          key: "confirm", label: "Visit Confirmations", count: c(confirmRes),
+        if (c("confirm") > 0) result.push({
+          key: "confirm", label: "Visit Confirmations", count: c("confirm"),
           icon: CalendarCheck, color: "text-purple-600 bg-purple-50 border-purple-200",
           url: "/pending-followups?tab=visit_confirm",
         });
-        // WhatsApp unread — last in the strip since it's a softer signal than
-        // the others (a message can wait a few hours; a missed call or
-        // reclaim-risk can't).
-        if (waUnread > 0) result.push({
-          key: "wa_unread", label: "WhatsApp Unread", count: waUnread,
+        if (c("wa_unread") > 0) result.push({
+          key: "wa_unread", label: "WhatsApp Unread", count: c("wa_unread"),
           icon: MessageCircle, color: "text-emerald-700 bg-emerald-50 border-emerald-200",
           url: "/whatsapp-inbox",
         });

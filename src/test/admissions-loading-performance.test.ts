@@ -2,14 +2,16 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const admissions = readFileSync("src/pages/Admissions.tsx", "utf8");
+const admissionsData = readFileSync("src/hooks/useAdmissionsData.ts", "utf8");
+const overviewMigration = readFileSync("supabase/migrations/20260618160000_admissions_overview_and_enrichment.sql", "utf8");
 
 describe("Admissions CRM loading performance guardrails", () => {
-  it("hydrates application progress in bounded batches instead of one large lead_id filter", () => {
-    expect(admissions).toContain("APPLICATION_HYDRATE_CHUNK_SIZE = 50");
-    expect(admissions).toContain("for (const leadIdBatch of chunkIds(leadIds))");
-    expect(admissions).toContain('.in("lead_id", leadIdBatch)');
+  it("hydrates application progress through the admissions overview payload instead of client lead_id fanout", () => {
+    expect(admissionsData).toContain('rpc("admissions_overview"');
+    expect(overviewMigration).toMatch(/\bSECURITY\s+INVOKER\b/i);
+    expect(overviewMigration).toContain("jsonb_build_object");
     expect(admissions).not.toContain('.in("lead_id", leadIds)');
-    expect(admissions).toContain("applyApplicationHydration(enriched)");
+    expect(admissions).not.toContain("APPLICATION_HYDRATE_CHUNK_SIZE");
     expect(admissions).not.toContain("await hydrateApplications(enriched)");
   });
 
@@ -22,8 +24,9 @@ describe("Admissions CRM loading performance guardrails", () => {
     expect(admissions).toContain("Retry");
   });
 
-  it("keeps the fix inside client-side RLS-protected queries", () => {
-    expect(admissions).not.toMatch(/\brpc\(["'].*applications/i);
+  it("keeps the fix RLS-preserving", () => {
+    expect(overviewMigration).toMatch(/\bSECURITY\s+INVOKER\b/i);
+    expect(overviewMigration).not.toMatch(/\bSECURITY\s+DEFINER\b/i);
     expect(admissions).not.toMatch(/\bSECURITY\s+DEFINER\b/i);
     expect(admissions).not.toMatch(/\bGRANT\b/i);
   });

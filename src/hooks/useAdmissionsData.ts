@@ -44,6 +44,31 @@ export interface AdmissionsStats {
   post_visit_pending_lead_ids: string[];
 }
 
+export interface AdmissionsOverviewPayload {
+  stage_counts: Record<string, number>;
+  interested_lead_ids: string[];
+  visit_action_counts: {
+    missedCallbacks: number;
+    overdueFollowups: number;
+    scheduled: number;
+    scheduledToday: number;
+    scheduledThisWeek: number;
+    checkinPending: number;
+    visitsCompleted: number;
+    visitsCompletedPendingFollowup: number;
+  };
+  visit_funnel_counts: {
+    scheduled: number;
+    confirmed: number;
+    completed: number;
+    visit_followup: number;
+    applied: number;
+    admitted: number;
+  };
+  visit_funnel_leakage: number;
+  visit_funnel_box_ids: Record<string, string[]>;
+}
+
 /**
  * Cached wrapper around the admissions_stats RPC. Survives Admissions →
  * LeadDetail → Admissions navigation without a DB round trip.
@@ -62,6 +87,52 @@ export function useAdmissionsStats(opts: {
       });
       if (error) throw error;
       return (data || {}) as AdmissionsStats;
+    },
+  });
+}
+
+/**
+ * Collapsed admissions dashboard payload. Replaces the old mix of stage-count,
+ * call-log, visit-count, and visit-funnel queries with a single RLS-safe RPC.
+ */
+export function useAdmissionsOverview(opts: {
+  counsellorId: string | null;
+  campusId: string | null;
+}) {
+  const { counsellorId, campusId } = opts;
+  return useQuery<AdmissionsOverviewPayload>({
+    queryKey: ["admissions-overview", counsellorId, campusId],
+    staleTime: 30_000,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("admissions_overview" as any, {
+        p_counsellor_id: counsellorId,
+        p_campus_id: campusId,
+      });
+      if (error) throw error;
+      return (data || {
+        stage_counts: {},
+        interested_lead_ids: [],
+        visit_action_counts: {
+          missedCallbacks: 0,
+          overdueFollowups: 0,
+          scheduled: 0,
+          scheduledToday: 0,
+          scheduledThisWeek: 0,
+          checkinPending: 0,
+          visitsCompleted: 0,
+          visitsCompletedPendingFollowup: 0,
+        },
+        visit_funnel_counts: {
+          scheduled: 0,
+          confirmed: 0,
+          completed: 0,
+          visit_followup: 0,
+          applied: 0,
+          admitted: 0,
+        },
+        visit_funnel_leakage: 0,
+        visit_funnel_box_ids: {},
+      }) as AdmissionsOverviewPayload;
     },
   });
 }
@@ -90,6 +161,23 @@ export interface CloudDialerBucket {
 export interface CloudDialerQueuePayload {
   queue: CloudDialerQueueLead[];
   buckets: CloudDialerBucket[];
+}
+
+export interface CloudDialerBootstrapPayload {
+  counsellor_identity: {
+    display_name: string;
+    phone: string | null;
+  };
+  most_used_templates: {
+    key: string;
+    label: string;
+  }[];
+  source_sla_hours: Record<string, number>;
+  course_options: {
+    id: string;
+    name: string;
+    campus: string;
+  }[];
 }
 
 /**
@@ -190,6 +278,50 @@ export function useCloudDialerQueue(opts: {
       });
       if (error) throw error;
       return (data || { queue: [], buckets: [] }) as CloudDialerQueuePayload;
+    },
+  });
+}
+
+export function useCloudDialerListQueue(opts: {
+  counsellorId: string | null;
+  mode: "fresh" | "all";
+  limit?: number;
+  enabled?: boolean;
+}) {
+  const { counsellorId, mode, limit = 100, enabled = true } = opts;
+  return useQuery<CloudDialerQueuePayload>({
+    queryKey: ["cloud-dialer-list-queue", counsellorId, mode, limit],
+    enabled,
+    staleTime: 15_000,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("cloud_dialer_list_queue" as any, {
+        p_counsellor_id: counsellorId,
+        p_mode: mode,
+        p_limit: limit,
+      });
+      if (error) throw error;
+      return (data || { queue: [], buckets: [] }) as CloudDialerQueuePayload;
+    },
+  });
+}
+
+export function useCloudDialerBootstrap(opts?: { enabled?: boolean }) {
+  const { user } = useAuth();
+  const enabled = opts?.enabled ?? true;
+  return useQuery<CloudDialerBootstrapPayload>({
+    queryKey: ["cloud-dialer-bootstrap", user?.id ?? null],
+    enabled: enabled && !!user?.id,
+    staleTime: 10 * 60_000,
+    gcTime: 30 * 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("cloud_dialer_bootstrap" as any);
+      if (error) throw error;
+      return (data || {
+        counsellor_identity: { display_name: "the admissions team", phone: null },
+        most_used_templates: [],
+        source_sla_hours: {},
+        course_options: [],
+      }) as CloudDialerBootstrapPayload;
     },
   });
 }

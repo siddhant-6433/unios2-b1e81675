@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useAdmissionsStats } from "@/hooks/useAdmissionsData";
+import { useAdmissionsOverview, useAdmissionsStats } from "@/hooks/useAdmissionsData";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -18,24 +18,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { AddLeadDialog } from "@/components/admissions/AddLeadDialog";
-import { LeadDraftsPanel } from "@/components/admissions/LeadDraftsPanel";
-import { BulkLeadImportDialog } from "@/components/admissions/BulkLeadImportDialog";
-import { TransferLeadDialog } from "@/components/admissions/TransferLeadDialog";
-import { BulkWhatsAppDialog } from "@/components/admissions/BulkWhatsAppDialog";
 import { LeadTemperatureBadge } from "@/components/admissions/LeadTemperatureBadge";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
-import { SeatMatrix } from "@/components/admissions/SeatMatrix";
-import { PaymentReconciliation } from "@/components/admissions/PaymentReconciliation";
-import { ActionCenterView } from "@/components/admissions/ActionCenterView";
 import { CounsellorScoreBadge } from "@/components/admissions/CounsellorScoreBadge";
-import { HotLeadsSidebar } from "@/components/admissions/HotLeadsSidebar";
-import { CounsellorOnboarding } from "@/components/onboarding/CounsellorOnboarding";
-import { CloudDialerNudge } from "@/components/admissions/CloudDialerNudge";
-import { LeadPipeline, leadStagesForBucket, type LeadFunnelStage } from "@/components/admissions/LeadPipeline";
-import { VisitActionCenter, type VisitAction } from "@/components/admissions/VisitActionCenter";
-import { VisitPipeline } from "@/components/admissions/VisitPipeline";
-import { type VisitFunnelStage, VISIT_FUNNEL_ORDER } from "@/lib/leadStages";
+import { type VisitAction } from "@/components/admissions/VisitActionCenter";
+import { type LeadFunnelStage, type VisitFunnelStage, VISIT_FUNNEL_ORDER, leadStagesForBucket } from "@/lib/leadStages";
 import { useTatDefaults } from "@/hooks/useTatDefaults";
 import { LEAD_SOURCES, SOURCE_LABELS, SOURCE_BADGE_COLORS } from "@/config/leadSources";
 import {
@@ -48,6 +35,35 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ChevronDown } from "lucide-react";
 import { groupCourses, type CourseLike } from "@/lib/courseSort";
+
+const AddLeadDialog = lazy(() =>
+  import("@/components/admissions/AddLeadDialog").then((m) => ({ default: m.AddLeadDialog })));
+const LeadDraftsPanel = lazy(() =>
+  import("@/components/admissions/LeadDraftsPanel").then((m) => ({ default: m.LeadDraftsPanel })));
+const BulkLeadImportDialog = lazy(() =>
+  import("@/components/admissions/BulkLeadImportDialog").then((m) => ({ default: m.BulkLeadImportDialog })));
+const TransferLeadDialog = lazy(() =>
+  import("@/components/admissions/TransferLeadDialog").then((m) => ({ default: m.TransferLeadDialog })));
+const BulkWhatsAppDialog = lazy(() =>
+  import("@/components/admissions/BulkWhatsAppDialog").then((m) => ({ default: m.BulkWhatsAppDialog })));
+const SeatMatrix = lazy(() =>
+  import("@/components/admissions/SeatMatrix").then((m) => ({ default: m.SeatMatrix })));
+const PaymentReconciliation = lazy(() =>
+  import("@/components/admissions/PaymentReconciliation").then((m) => ({ default: m.PaymentReconciliation })));
+const ActionCenterView = lazy(() =>
+  import("@/components/admissions/ActionCenterView").then((m) => ({ default: m.ActionCenterView })));
+const HotLeadsSidebar = lazy(() =>
+  import("@/components/admissions/HotLeadsSidebar").then((m) => ({ default: m.HotLeadsSidebar })));
+const CounsellorOnboarding = lazy(() =>
+  import("@/components/onboarding/CounsellorOnboarding").then((m) => ({ default: m.CounsellorOnboarding })));
+const CloudDialerNudge = lazy(() =>
+  import("@/components/admissions/CloudDialerNudge").then((m) => ({ default: m.CloudDialerNudge })));
+const LeadPipeline = lazy(() =>
+  import("@/components/admissions/LeadPipeline").then((m) => ({ default: m.LeadPipeline })));
+const VisitActionCenter = lazy(() =>
+  import("@/components/admissions/VisitActionCenter").then((m) => ({ default: m.VisitActionCenter })));
+const VisitPipeline = lazy(() =>
+  import("@/components/admissions/VisitPipeline").then((m) => ({ default: m.VisitPipeline })));
 
 const STAGES = [
   "new_lead", "priority_interested", "application_in_progress", "application_fee_paid", "application_submitted", "counsellor_call", "visit_scheduled",
@@ -135,29 +151,6 @@ interface Lead {
   app_fee_amount?: number | null;
 }
 
-// Application step counts for % calculation (matches apply portal)
-const STEPS_BY_CATEGORY: Record<string, string[]> = {
-  school: ["personal", "parents", "siblings", "questionnaire", "academic", "payment", "documents", "review"],
-  default: ["personal", "parents", "academic", "extracurricular", "payment", "documents", "review"],
-};
-
-function getCompletionPct(completed_sections: any, program_category: string | null): number {
-  if (!completed_sections) return 0;
-  const steps = STEPS_BY_CATEGORY[program_category || "default"] || STEPS_BY_CATEGORY.default;
-  const done = steps.filter(k => completed_sections[k] === true).length;
-  return Math.round((done / steps.length) * 100);
-}
-
-const APPLICATION_HYDRATE_CHUNK_SIZE = 50;
-
-function chunkIds(ids: string[], size = APPLICATION_HYDRATE_CHUNK_SIZE): string[][] {
-  const chunks: string[][] = [];
-  for (let i = 0; i < ids.length; i += size) {
-    chunks.push(ids.slice(i, i + size));
-  }
-  return chunks;
-}
-
 // Compact application progress badge
 function AppProgressBadge({ pct, paymentStatus }: { pct: number | null | undefined; paymentStatus?: string | null }) {
   if (pct === null || pct === undefined) return null;
@@ -175,6 +168,10 @@ function AppProgressBadge({ pct, paymentStatus }: { pct: number | null | undefin
       {label}
     </span>
   );
+}
+
+function DeferredBlock({ className = "h-24" }: { className?: string }) {
+  return <div className={`rounded-2xl border border-border/40 bg-muted/20 animate-pulse ${className}`} />;
 }
 
 const Admissions = () => {
@@ -225,31 +222,11 @@ const Admissions = () => {
   // per mount; per-stage HEAD count queries in parallel (Supabase REST caps
   // SELECT rows at 1000, so a single GROUP-BY-on-client wouldn't see the
   // tail of the data — admitted lead at row 8.5k would silently disappear).
-  const [stageCounts, setStageCounts] = useState<Record<string, number>>({});
-  // Leads in counsellor_call/ai_called with at least one call_log disposition='interested'.
-  // Promoted into Hot in the funnel — option (b) from the design call.
-  const [extraHotCount, setExtraHotCount] = useState(0);
-  const [interestedLeadIds, setInterestedLeadIds] = useState<Set<string>>(new Set());
   // AI-call summaries keyed by lead_id, shown inline under each lead's name
-  // in the leads list. Fetched in the same batch query for the visible page.
+  // in the leads list. Hydrated together with application progress via one RPC.
   const [aiSummaries, setAiSummaries] = useState<Record<string, string>>({});
   const [funnelStage, setFunnelStage] = useState<LeadFunnelStage | "leakage" | null>(null);
-  // Visit-action counts for the operational dashboard.
-  const [visitActionCounts, setVisitActionCounts] = useState({
-    missedCallbacks: 0, overdueFollowups: 0,
-    scheduled: 0, scheduledToday: 0, scheduledThisWeek: 0,
-    checkinPending: 0,
-    visitsCompleted: 0, visitsCompletedPendingFollowup: 0,
-  });
   const [visitAction, setVisitAction] = useState<VisitAction | null>(null);
-  // Visit funnel (second pipeline, sourced from visit_funnel_leads view).
-  // Counts per box + the lead_id set per box (for click-to-filter), so a
-  // single fetch drives both the chart and the filter.
-  const [visitFunnelCounts, setVisitFunnelCounts] = useState<Record<VisitFunnelStage, number>>({
-    scheduled: 0, confirmed: 0, completed: 0, visit_followup: 0, applied: 0, admitted: 0,
-  });
-  const [visitFunnelLeakage, setVisitFunnelLeakage] = useState(0);
-  const [visitFunnelBoxIds, setVisitFunnelBoxIds] = useState<Record<string, string[]>>({});
   const [visitFunnelBox, setVisitFunnelBox] = useState<VisitFunnelStage | "leakage" | null>(null);
   // Debounced search — keeps server roundtrips low while typing
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -402,45 +379,39 @@ const Admissions = () => {
 
   // Hydrate application completion % for whichever rows we just loaded.
   // Split out so both fetch paths can reuse it.
-  const hydrateApplications = async (rows: any[]) => {
-    if (!rows.length) return rows;
+  const hydrateLeadEnrichment = async (rows: any[]) => {
+    if (!rows.length) return { rows, summaries: {} as Record<string, string> };
     const leadIds = rows.map(r => r.id);
-    const apps: any[] = [];
-    for (const leadIdBatch of chunkIds(leadIds)) {
-      const { data, error } = await supabase
-        .from("applications")
-        .select("lead_id, completed_sections, program_category, payment_status, fee_amount, status")
-        .in("lead_id", leadIdBatch);
-      if (error) {
-        console.warn("[Admissions] application hydration skipped for a lead batch", error.message);
-        continue;
-      }
-      if (data?.length) apps.push(...data);
+    const { data, error } = await supabase.rpc("admissions_lead_enrichment" as any, {
+      p_lead_ids: leadIds,
+    });
+    if (error) {
+      console.warn("[Admissions] lead enrichment skipped for this page", error.message);
+      return { rows, summaries: {} as Record<string, string> };
     }
-    if (!apps?.length) return rows;
-    const byLead: Record<string, any> = {};
-    apps.forEach((a: any) => {
-      const existing = byLead[a.lead_id];
-      const pct = getCompletionPct(a.completed_sections, a.program_category);
-      if (!existing || pct > existing.pct) {
-        byLead[a.lead_id] = { pct, payment_status: a.payment_status, fee_amount: a.fee_amount, status: a.status };
-      }
-    });
+    const byLead = new Map<string, any>();
+    const summaries: Record<string, string> = {};
+    for (const row of (data || []) as any[]) {
+      if (!row?.lead_id) continue;
+      byLead.set(row.lead_id, row);
+      if (row.ai_summary) summaries[row.lead_id] = row.ai_summary;
+    }
     rows.forEach((l: any) => {
-      const m = byLead[l.id];
+      const m = byLead.get(l.id);
       if (m) {
-        l.app_completion_pct = m.pct;
-        l.app_payment_status = m.payment_status;
-        l.app_fee_amount = m.fee_amount ?? null;
+        l.app_completion_pct = m.app_completion_pct ?? null;
+        l.app_payment_status = m.app_payment_status ?? null;
+        l.app_fee_amount = m.app_fee_amount ?? null;
       }
     });
-    return rows;
+    return { rows, summaries };
   };
 
-  const applyApplicationHydration = (rows: Lead[]) => {
+  const applyLeadEnrichment = (rows: Lead[]) => {
     const rowsToHydrate = rows.map(row => ({ ...row }));
-    void hydrateApplications(rowsToHydrate).then((hydratedRows) => {
+    void hydrateLeadEnrichment(rowsToHydrate).then(({ rows: hydratedRows, summaries }) => {
       const byLead = new Map(hydratedRows.map((row: Lead) => [row.id, row]));
+      setAiSummaries(summaries);
       setLeads(current => current.map(lead => {
         const hydrated = byLead.get(lead.id);
         if (!hydrated) return lead;
@@ -492,7 +463,7 @@ const Admissions = () => {
         setTotalCount(enriched.length);
         setSelectedIds(new Set());
         setHasLoadedOnce(true);
-        applyApplicationHydration(enriched);
+        applyLeadEnrichment(enriched);
         return;
       }
 
@@ -580,7 +551,7 @@ const Admissions = () => {
       setLeads(enriched);
       setTotalCount(count ?? enriched.length);
       setHasLoadedOnce(true);
-      applyApplicationHydration(enriched);
+      applyLeadEnrichment(enriched);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to load admissions leads.";
       console.error("[Admissions] failed to load leads", error);
@@ -817,179 +788,6 @@ const Admissions = () => {
   // Reset page when filters change
   useEffect(() => { setPage(1); }, [stageFilter, sourceFilter, leadInstitutionType, effectiveCourseFilterIds, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, fromDate, toDate]);
 
-  // Fetch lead-pipeline counts (one GROUP-BY) + visit-action counts. Cheap
-  // queries; refresh on mount. Counsellor-scoped via stage filter when the
-  // signed-in user is a counsellor.
-  useEffect(() => {
-    let cancelled = false;
-    const fetchPipelineData = async () => {
-      // Per-stage HEAD count queries. Each is { count: 'exact', head: true }
-      // so we never pull rows — the Supabase REST 1000-row cap doesn't
-      // matter. is_mirror=false matches the admissions_stats RPC so
-      // school + main session leads aren't double-counted.
-      const allStages = [
-        "new_lead","ai_called","counsellor_call","priority_interested",
-        "visit_scheduled","interview",
-        "application_in_progress","application_submitted","application_fee_paid",
-        "application_approved","offer_sent","token_paid","pre_admitted","admitted",
-        "not_interested","dnc","rejected","ineligible","deferred",
-      ];
-      // Single GROUP BY scan instead of one HEAD count per stage. The
-      // get_lead_stage_counts RPC is SECURITY INVOKER, so the leads RLS policy
-      // applies exactly as it did to the per-stage queries — same scoping
-      // (is_mirror=false; counsellor → own leads; else selected campus).
-      const { data: stageRows } = await (supabase as any).rpc("get_lead_stage_counts", {
-        p_campus_id: (role !== "counsellor" && selectedCampusId && selectedCampusId !== "all")
-          ? selectedCampusId : null,
-        p_counsellor_id: (role === "counsellor" && profile?.id) ? profile.id : null,
-        p_exclude_mirror: true,
-      });
-      if (cancelled) return;
-      const tally: Record<string, number> = {};
-      for (const s of allStages) tally[s] = 0;
-      for (const r of (stageRows || []) as { stage: string; count: number }[]) {
-        if (r.stage in tally) tally[r.stage] = Number(r.count) || 0;
-      }
-      setStageCounts(tally);
-
-      // Pull lead_ids for `disposition='interested'` calls so we can both
-      // (a) promote them into Hot in the funnel and (b) include them when
-      // the Hot bucket is clicked. We fetch ids so we can dedupe AND
-      // intersect with stage filters client-side.
-      const { data: interestedRows } = await supabase
-        .from("call_logs")
-        .select("lead_id")
-        .eq("disposition", "interested")
-        .limit(2000);
-      const ids = new Set<string>((interestedRows || []).map((r: any) => r.lead_id).filter(Boolean));
-      if (!cancelled) {
-        setInterestedLeadIds(ids);
-        // Cap at the Contacted bucket size — anything beyond is already in
-        // a later stage and shouldn't be re-counted.
-        const contacted = (tally["counsellor_call"] || 0) + (tally["ai_called"] || 0);
-        setExtraHotCount(Math.min(ids.size, contacted));
-      }
-
-      // Visit action counts — parallel HEAD counts.
-      const now = new Date();
-      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-      const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
-      const sevenDays = new Date(now.getTime() + 7 * 86400000).toISOString();
-      const fourteenDaysAgo = new Date(now.getTime() - 14 * 86400000).toISOString();
-      const nowIso = now.toISOString();
-      const [
-        { count: missedCallbacks },
-        { count: overdueFollowupsView },
-        { count: aiNeedsFollowup },
-        { count: scheduled },
-        { count: scheduledToday },
-        { count: scheduledThisWeek },
-        { count: checkinPending },
-        { count: visitsCompleted },
-        { count: visitsCompletedPendingFollowup },
-      ] = await Promise.all([
-        // Missed Callbacks — inbound calls that weren't picked up by a
-        // human agent. The candidate dialed in; no one answered.
-        supabase.from("call_logs").select("id", { count: "exact", head: true })
-          .eq("direction", "inbound").eq("disposition", "missed"),
-        // Overdue Follow-ups (part 1) — scheduled lead_followups past due,
-        // already excludes closed leads via the view.
-        (supabase.from("overdue_followups" as any) as any)
-          .select("id", { count: "exact", head: true }),
-        // Overdue Follow-ups (part 2) — AI calls flagged needs_followup
-        // that the counsellor hasn't actioned. Folded into the same card
-        // since they're all "scheduled work that's overdue".
-        (supabase.from("ai_call_records" as any) as any)
-          .select("id", { count: "exact", head: true })
-          .eq("needs_followup", true).is("followup_done_at", null),
-        supabase.from("campus_visits").select("id", { count: "exact", head: true })
-          .in("status", ["scheduled", "confirmed"]).gte("visit_date", nowIso),
-        supabase.from("campus_visits").select("id", { count: "exact", head: true })
-          .in("status", ["scheduled", "confirmed"]).gte("visit_date", todayStart).lt("visit_date", tomorrowStart),
-        supabase.from("campus_visits").select("id", { count: "exact", head: true })
-          .in("status", ["scheduled", "confirmed"]).gte("visit_date", nowIso).lt("visit_date", sevenDays),
-        supabase.from("campus_visits").select("id", { count: "exact", head: true })
-          .in("status", ["scheduled", "confirmed"]).lt("visit_date", nowIso),
-        supabase.from("campus_visits").select("id", { count: "exact", head: true })
-          .eq("status", "completed").gte("visit_date", fourteenDaysAgo),
-        supabase.from("post_visit_pending_followups" as any).select("visit_id", { count: "exact", head: true }),
-      ]);
-      if (cancelled) return;
-      setVisitActionCounts({
-        missedCallbacks: missedCallbacks || 0,
-        overdueFollowups: (overdueFollowupsView || 0) + (aiNeedsFollowup || 0),
-        scheduled: scheduled || 0,
-        scheduledToday: scheduledToday || 0,
-        scheduledThisWeek: scheduledThisWeek || 0,
-        checkinPending: checkinPending || 0,
-        visitsCompleted: visitsCompleted || 0,
-        visitsCompletedPendingFollowup: visitsCompletedPendingFollowup || 0,
-      });
-
-      // Visit funnel — one fetch of the lead-centric view gives both the
-      // per-box counts AND the lead_id sets for click-to-filter. ~hundreds of
-      // rows max, so client-side tally is cheap. Counsellor-scoped via RLS +
-      // the explicit counsellor_id filter for parity with the spine funnel.
-      let vfQuery = supabase.from("visit_funnel_leads" as any).select("lead_id, funnel_box, counsellor_id");
-      if (role === "counsellor" && profile?.id) vfQuery = vfQuery.eq("counsellor_id", profile.id);
-      const { data: vfRows, error: vfError } = await vfQuery;
-      if (cancelled) return;
-      // Surface query failures instead of silently rendering an empty pipeline.
-      // A missing view / RLS denial here previously fell through to all-zero
-      // counts, which the funnel reads as a legitimate "no visits" empty state —
-      // indistinguishable from a broken backend (e.g. unapplied migration).
-      if (vfError) {
-        console.error("[VisitPipeline] visit_funnel_leads query failed:", vfError);
-        toast({
-          title: "Visit Pipeline unavailable",
-          description: "Couldn't load visit funnel data. This usually means a backend/migration issue, not that there are no visits.",
-          variant: "destructive",
-        });
-      }
-      const vfCounts: Record<VisitFunnelStage, number> = {
-        scheduled: 0, confirmed: 0, completed: 0, visit_followup: 0, applied: 0, admitted: 0,
-      };
-      const vfIds: Record<string, string[]> = {};
-      let vfLeakage = 0;
-      for (const r of (vfRows || []) as any[]) {
-        const box = r.funnel_box as string;
-        (vfIds[box] ||= []).push(r.lead_id);
-        if (box === "leakage") vfLeakage++;
-        else if (box in vfCounts) vfCounts[box as VisitFunnelStage]++;
-      }
-      setVisitFunnelCounts(vfCounts);
-      setVisitFunnelLeakage(vfLeakage);
-      setVisitFunnelBoxIds(vfIds);
-    };
-    fetchPipelineData();
-    return () => { cancelled = true; };
-  }, [role, profile?.id, selectedCampusId]);
-
-  // Batch-fetch AI call summaries for the currently-loaded leads. One row
-  // per lead = the most recent record with a non-null summary. Cheap join
-  // keyed by lead_id; runs once per page change.
-  useEffect(() => {
-    if (!leads.length) { setAiSummaries({}); return; }
-    let cancelled = false;
-    (async () => {
-      const ids = leads.map(l => l.id).filter(Boolean);
-      if (ids.length === 0) return;
-      const { data } = await supabase.from("ai_call_records")
-        .select("lead_id, summary, started_at")
-        .in("lead_id", ids)
-        .not("summary", "is", null)
-        .order("started_at", { ascending: false })
-        .limit(ids.length * 3); // overshoot — we'll keep the most recent per lead
-      if (cancelled) return;
-      const map: Record<string, string> = {};
-      for (const r of (data || []) as any[]) {
-        if (!map[r.lead_id] && r.summary) map[r.lead_id] = r.summary;
-      }
-      setAiSummaries(map);
-    })();
-    return () => { cancelled = true; };
-  }, [leads]);
-
   // Funnel click → translate bucket into a stageFilter (comma-separated raw
   // lead_stage values that the existing `matchesStage` filter already
   // understands via `.split(",").includes(l.stage)`).
@@ -1105,6 +903,43 @@ const Admissions = () => {
   const statsCounsellorId = role === "counsellor" && profile?.id ? profile.id : null;
   const statsCampusId = statsCounsellorId ? null : (selectedCampusId !== "all" ? selectedCampusId : null);
   const { data: statsData } = useAdmissionsStats({ counsellorId: statsCounsellorId, campusId: statsCampusId });
+  const { data: admissionsOverview } = useAdmissionsOverview({
+    counsellorId: statsCounsellorId,
+    campusId: statsCampusId,
+  });
+
+  const stageCounts = useMemo(
+    () => admissionsOverview?.stage_counts ?? {},
+    [admissionsOverview?.stage_counts],
+  );
+  const interestedLeadIds = useMemo(
+    () => new Set<string>(admissionsOverview?.interested_lead_ids ?? []),
+    [admissionsOverview?.interested_lead_ids],
+  );
+  const extraHotCount = useMemo(() => {
+    const contacted = (stageCounts["counsellor_call"] || 0) + (stageCounts["ai_called"] || 0);
+    return Math.min(interestedLeadIds.size, contacted);
+  }, [interestedLeadIds, stageCounts]);
+  const visitActionCounts = admissionsOverview?.visit_action_counts ?? {
+    missedCallbacks: 0,
+    overdueFollowups: 0,
+    scheduled: 0,
+    scheduledToday: 0,
+    scheduledThisWeek: 0,
+    checkinPending: 0,
+    visitsCompleted: 0,
+    visitsCompletedPendingFollowup: 0,
+  };
+  const visitFunnelCounts = admissionsOverview?.visit_funnel_counts ?? {
+    scheduled: 0,
+    confirmed: 0,
+    completed: 0,
+    visit_followup: 0,
+    applied: 0,
+    admitted: 0,
+  };
+  const visitFunnelLeakage = admissionsOverview?.visit_funnel_leakage ?? 0;
+  const visitFunnelBoxIds = admissionsOverview?.visit_funnel_box_ids ?? {};
 
   const newLeads        = statsData?.new_leads         ?? 0;
   const todayLeads      = statsData?.today_leads       ?? 0;
@@ -1173,9 +1008,17 @@ const Admissions = () => {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* First-time onboarding for counsellors */}
-      {role === "counsellor" && <CounsellorOnboarding />}
+      {role === "counsellor" && (
+        <Suspense fallback={null}>
+          <CounsellorOnboarding />
+        </Suspense>
+      )}
       {/* Productivity nudge — auto-hides if they're already using the cloud dialer */}
-      {role === "counsellor" && <CloudDialerNudge />}
+      {role === "counsellor" && (
+        <Suspense fallback={null}>
+          <CloudDialerNudge />
+        </Suspense>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Admissions CRM</h1>
@@ -1189,10 +1032,12 @@ const Admissions = () => {
       </div>
 
       {/* Resumable lead drafts (autosaved from AddLeadDialog) */}
-      <LeadDraftsPanel
-        refreshKey={draftsRefreshKey}
-        onResume={(id) => { setResumeDraftId(id); setShowAddLead(true); }}
-      />
+      <Suspense fallback={<DeferredBlock className="h-20" />}>
+        <LeadDraftsPanel
+          refreshKey={draftsRefreshKey}
+          onResume={(id) => { setResumeDraftId(id); setShowAddLead(true); }}
+        />
+      </Suspense>
 
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
@@ -1244,7 +1089,7 @@ const Admissions = () => {
           screen clean. The two funnels are grouped as "where things stand";
           the action center below is "what to do now". */}
       {view !== "action_center" && (
-        <>
+        <Suspense fallback={<DeferredBlock className="h-48" />}>
           <div className="space-y-2.5">
             <LeadPipeline
               stageCounts={stageCounts}
@@ -1264,7 +1109,7 @@ const Admissions = () => {
             active={visitAction}
             onClick={handleVisitActionClick}
           />
-        </>
+        </Suspense>
       )}
 
       {/* Stat cards & filter banners — hidden when Action Center is active */}
@@ -1456,11 +1301,13 @@ const Admissions = () => {
       {/* Hot Leads now lives in a floating right-edge sidebar so it doesn't
           consume vertical space and surfaces a notification badge for new
           arrivals. The FAB is always on the right edge. */}
-      <HotLeadsSidebar
-        profileId={profile?.id}
-        isSuperAdmin={isSuperAdmin}
-        isTeamLeader={isTeamLeader}
-      />
+      <Suspense fallback={null}>
+        <HotLeadsSidebar
+          profileId={profile?.id}
+          isSuperAdmin={isSuperAdmin}
+          isTeamLeader={isTeamLeader}
+        />
+      </Suspense>
 
       {/* TAT Defaults Banner — visible to counsellors with pending tasks */}
       {myDefaults && myDefaults.total_defaults > 0 && (
@@ -1790,57 +1637,63 @@ const Admissions = () => {
       )}
 
       {view === "action_center" ? (
-        <ActionCenterView
-          counsellorFilter={actionCounsellorFilter}
-          counsellorOptions={counsellorOptions}
-          canFilterByCounsellor={canFilterByCounsellor}
-          onCounsellorFilterChange={setActionCounsellorFilter}
-          onViewAll={(bucket, leadIds) => {
-            const labels: Record<string, string> = {
-              overdue: "Overdue Follow-ups",
-              new_leads: "New Leads to Contact",
-              today_followups: "Today's Follow-ups",
-              today_visits: "Today's Visits",
-              post_visit: "Post-Visit Pending",
-              stalled: "Stalled Applications",
-              upcoming: "Upcoming This Week",
-            };
-            // Fetch leads that might not be loaded yet, then switch to list
-            (async () => {
-              const missingIds = leadIds.filter(id => !leads.find(l => l.id === id));
-              if (missingIds.length > 0) {
-                const { data: extraLeads } = await supabase
-                  .from("leads")
-                  .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)")
-                  .in("id", missingIds);
-                if (extraLeads) {
-                  setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({
-                    ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—",
-                    counsellor_name: l.profiles?.display_name || "Unassigned",
-                    app_completion_pct: null, app_payment_status: null, app_fee_amount: null,
-                  }))]);
+        <Suspense fallback={<DeferredBlock className="h-64" />}>
+          <ActionCenterView
+            counsellorFilter={actionCounsellorFilter}
+            counsellorOptions={counsellorOptions}
+            canFilterByCounsellor={canFilterByCounsellor}
+            onCounsellorFilterChange={setActionCounsellorFilter}
+            onViewAll={(bucket, leadIds) => {
+              const labels: Record<string, string> = {
+                overdue: "Overdue Follow-ups",
+                new_leads: "New Leads to Contact",
+                today_followups: "Today's Follow-ups",
+                today_visits: "Today's Visits",
+                post_visit: "Post-Visit Pending",
+                stalled: "Stalled Applications",
+                upcoming: "Upcoming This Week",
+              };
+              // Fetch leads that might not be loaded yet, then switch to list
+              (async () => {
+                const missingIds = leadIds.filter(id => !leads.find(l => l.id === id));
+                if (missingIds.length > 0) {
+                  const { data: extraLeads } = await supabase
+                    .from("leads")
+                    .select("*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)")
+                    .in("id", missingIds);
+                  if (extraLeads) {
+                    setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({
+                      ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—",
+                      counsellor_name: l.profiles?.display_name || "Unassigned",
+                      app_completion_pct: null, app_payment_status: null, app_fee_amount: null,
+                    }))]);
+                  }
                 }
-              }
-              setActionLeadIds(new Set(leadIds));
-              setActionBucketLabel(labels[bucket] || bucket);
-              setFollowupLeadIds(null);
-              setVisitLeadIds(null);
-              setInactiveIds(null);
-              setNotCalledIds(null);
-              setStageFilter("all");
-              setSourceFilter("all");
-              setRoleFilter("all");
-              setTempFilter("all");
-              setSearch("");
-              setView("list");
-              setPage(1);
-            })();
-          }}
-        />
+                setActionLeadIds(new Set(leadIds));
+                setActionBucketLabel(labels[bucket] || bucket);
+                setFollowupLeadIds(null);
+                setVisitLeadIds(null);
+                setInactiveIds(null);
+                setNotCalledIds(null);
+                setStageFilter("all");
+                setSourceFilter("all");
+                setRoleFilter("all");
+                setTempFilter("all");
+                setSearch("");
+                setView("list");
+                setPage(1);
+              })();
+            }}
+          />
+        </Suspense>
       ) : view === "seats" ? (
-        <SeatMatrix />
+        <Suspense fallback={<DeferredBlock className="h-64" />}>
+          <SeatMatrix />
+        </Suspense>
       ) : view === "payments" ? (
-        <PaymentReconciliation />
+        <Suspense fallback={<DeferredBlock className="h-64" />}>
+          <PaymentReconciliation />
+        </Suspense>
       ) : view === "pipeline" ? (
         <div className="flex gap-4 overflow-x-auto pb-4 -mx-6 px-6">
           {STAGES.map((stage) => {
@@ -2080,31 +1933,47 @@ const Admissions = () => {
         </>
       )}
 
-      <AddLeadDialog
-        open={showAddLead}
-        onOpenChange={(o) => { setShowAddLead(o); if (!o) setResumeDraftId(undefined); }}
-        onSuccess={fetchLeads}
-        resumeDraftId={resumeDraftId}
-        onDraftChange={() => setDraftsRefreshKey(k => k + 1)}
-      />
-      <BulkLeadImportDialog open={showBulkImport} onOpenChange={setShowBulkImport} onSuccess={fetchLeads} />
+      {showAddLead && (
+        <Suspense fallback={null}>
+          <AddLeadDialog
+            open={showAddLead}
+            onOpenChange={(o) => { setShowAddLead(o); if (!o) setResumeDraftId(undefined); }}
+            onSuccess={fetchLeads}
+            resumeDraftId={resumeDraftId}
+            onDraftChange={() => setDraftsRefreshKey(k => k + 1)}
+          />
+        </Suspense>
+      )}
+      {showBulkImport && (
+        <Suspense fallback={null}>
+          <BulkLeadImportDialog open={showBulkImport} onOpenChange={setShowBulkImport} onSuccess={fetchLeads} />
+        </Suspense>
+      )}
 
       {/* Bulk WhatsApp */}
-      <BulkWhatsAppDialog
-        open={showBulkWhatsApp}
-        onOpenChange={setShowBulkWhatsApp}
-        leads={Array.from(selectedIds).map(id => leads.find(l => l.id === id)).filter(Boolean) as Lead[]}
-        onSuccess={() => { fetchLeads(); setSelectedIds(new Set()); }}
-      />
+      {showBulkWhatsApp && (
+        <Suspense fallback={null}>
+          <BulkWhatsAppDialog
+            open={showBulkWhatsApp}
+            onOpenChange={setShowBulkWhatsApp}
+            leads={Array.from(selectedIds).map(id => leads.find(l => l.id === id)).filter(Boolean) as Lead[]}
+            onSuccess={() => { fetchLeads(); setSelectedIds(new Set()); }}
+          />
+        </Suspense>
+      )}
 
       {/* Bulk Transfer Dialog */}
-      <TransferLeadDialog
-        open={showTransfer}
-        onOpenChange={setShowTransfer}
-        leadIds={Array.from(selectedIds)}
-        leadNames={selectedLeadNames}
-        onSuccess={fetchLeads}
-      />
+      {showTransfer && (
+        <Suspense fallback={null}>
+          <TransferLeadDialog
+            open={showTransfer}
+            onOpenChange={setShowTransfer}
+            leadIds={Array.from(selectedIds)}
+            leadNames={selectedLeadNames}
+            onSuccess={fetchLeads}
+          />
+        </Suspense>
+      )}
 
       {/* Request Deletion Dialog (non-admin) */}
       <Dialog open={showDeleteRequest} onOpenChange={setShowDeleteRequest}>

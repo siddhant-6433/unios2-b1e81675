@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import uniosLogo from "@/assets/unios-logo.png";
 import {
   LayoutDashboard, Users, GraduationCap, IndianRupee,
@@ -175,19 +175,28 @@ export function AppSidebar() {
   // Personal Document Tracker — visible to all super_admins
   const hasPersonalDocs = role === "super_admin";
 
-  const fetchNewLeadCount = () => {
-    let query = supabase
-      .from("leads")
-      .select("id", { count: "exact", head: true })
-      .eq("stage", "new_lead");
-    // Counsellors only see their assigned leads
-    if (role === "counsellor" && profile?.id) {
-      query = query.eq("counsellor_id", profile.id);
-    }
-    query.then(({ count }) => setNewLeadCount(count || 0));
-  };
+  const fetchAdmissionBadges = useCallback(async () => {
+    if (role === "counsellor" && !profile?.id) return;
 
-  const fetchPendingApprovals = async () => {
+    const { data, error } = await (supabase as any).rpc("action_badge_counts", {
+      p_scope_counsellor_id: role === "counsellor" ? profile?.id : null,
+      p_include_unassigned: true,
+    });
+
+    if (error) {
+      console.error("[AppSidebar] admission badge fetch failed:", error);
+      return;
+    }
+
+    setWaUnread(Number(data?.wa_unread || 0));
+    setNewLeadCount(Number(data?.new_leads_total || 0));
+    setTatDefaults(Number(data?.tat_defaults || 0));
+    setPendingFollowupCount(Number(data?.overdue || 0) + Number(data?.today || 0));
+    setMissedCallbackCount(Number(data?.ai_needs_followup || 0));
+    setPriorityInterestedCount(Number(data?.priority_interested_total || 0));
+  }, [role, profile?.id]);
+
+  const fetchPendingApprovals = useCallback(async () => {
     // Only approvers need this count
     if (!["super_admin", "principal", "campus_admin", "admission_head"].includes(role || "")) {
       setPendingApprovals(0);
@@ -195,126 +204,38 @@ export function AppSidebar() {
     }
     const { data } = await supabase.rpc("count_pending_approvals" as any);
     setPendingApprovals(Number(data) || 0);
-  };
+  }, [role]);
 
   useEffect(() => {
-    (async () => {
-      // Direct count via idx_wa_messages_unread instead of the
-      // whatsapp_conversations view — see WhatsAppPanel for context.
-      const { count } = await supabase
-        .from("whatsapp_messages")
-        .select("id", { count: "exact", head: true })
-        .eq("direction", "inbound")
-        .eq("is_read", false);
-      setWaUnread(count || 0);
-    })();
-    fetchNewLeadCount();
+    fetchAdmissionBadges();
     fetchPendingApprovals();
 
-    // Fetch TAT defaults for sidebar badge
-    (async () => {
-      const { data } = await supabase
-        .from("counsellor_tat_defaults" as any)
-        .select("total_defaults, user_id");
-      if (data) {
-        // For counsellors: show their own defaults. For admins: show team total.
-        if (role === "counsellor") {
-          const mine = (data as any[]).find(d => d.user_id === user?.id);
-          setTatDefaults(mine?.total_defaults || 0);
-        } else {
-          setTatDefaults((data as any[]).reduce((s: number, d: any) => s + (d.total_defaults || 0), 0));
-        }
-      }
-    })();
+    let badgeDebounce: ReturnType<typeof setTimeout> | null = null;
+    const scheduleBadgeRefresh = () => {
+      if (badgeDebounce) clearTimeout(badgeDebounce);
+      badgeDebounce = setTimeout(fetchAdmissionBadges, 1500);
+    };
 
-    // Fetch pending followup count (overdue + today)
-    (async () => {
-      const today = new Date().toISOString().slice(0, 10);
-      let q = supabase.from("lead_followups")
-        .select(role === "counsellor" && profile?.id ? "id, leads!inner(counsellor_id)" : "id", { count: "exact", head: true })
-        .eq("status", "pending").lte("scheduled_at", `${today}T23:59:59`);
-      if (role === "counsellor" && profile?.id) {
-        q = q.eq("leads.counsellor_id", profile.id);
-      }
-      const { count } = await q;
-      setPendingFollowupCount(count || 0);
-    })();
-
-    // Fetch missed callback count (AI inbound calls with needs_followup=true)
-    (async () => {
-      let q = (supabase.from("ai_call_records" as any) as any)
-        .select("id, leads!inner(counsellor_id)", { count: "exact", head: true })
-        .eq("needs_followup", true)
-        .is("followup_done_at", null);
-      if (role === "counsellor" && profile?.id) {
-        q = q.eq("leads.counsellor_id", profile.id);
-      }
-      const { count } = await q;
-      setMissedCallbackCount(count || 0);
-    })();
-
-    // Fetch priority interested count (leads auto-elevated by high-conversion AI calls)
-    (async () => {
-      let q = supabase.from("leads").select("id", { count: "exact", head: true }).eq("stage", "priority_interested" as any);
-      if (role === "counsellor" && profile?.id) {
-        q = q.eq("counsellor_id", profile.id);
-      }
-      const { count } = await q;
-      setPriorityInterestedCount(count || 0);
-    })();
-
-    // Realtime-driven refresh, debounced so a burst of messages doesn't
-    // hammer the DB. Uses direct count (see fetchUnreplied above) instead of
-    // the slow whatsapp_conversations view.
-    let waDebounce: ReturnType<typeof setTimeout> | null = null;
-    const waChannel = supabase
-      .channel("wa-unread-sidebar")
-      .on("postgres_changes" as any, {
-        event: "*",
-        schema: "public",
-        table: "whatsapp_messages",
-      }, () => {
-        if (waDebounce) clearTimeout(waDebounce);
-        waDebounce = setTimeout(() => {
-          supabase
-            .from("whatsapp_messages")
-            .select("id", { count: "exact", head: true })
-            .eq("direction", "inbound")
-            .eq("is_read", false)
-            .then(({ count }) => setWaUnread(count || 0));
-        }, 1500);
-      })
-      .subscribe();
-
-    const leadsChannel = supabase
-      .channel("leads-count-sidebar")
-      .on("postgres_changes" as any, {
-        event: "*",
-        schema: "public",
-        table: "leads",
-      }, () => { fetchNewLeadCount(); })
+    const badgeChannel = supabase
+      .channel("admission-badges-sidebar")
+      .on("postgres_changes" as any, { event: "*", schema: "public", table: "whatsapp_messages" }, scheduleBadgeRefresh)
+      .on("postgres_changes" as any, { event: "*", schema: "public", table: "leads" }, scheduleBadgeRefresh)
+      .on("postgres_changes" as any, { event: "*", schema: "public", table: "lead_followups" }, scheduleBadgeRefresh)
+      .on("postgres_changes" as any, { event: "*", schema: "public", table: "ai_call_records" }, scheduleBadgeRefresh)
       .subscribe();
 
     const approvalsChannel = supabase
       .channel("approvals-count-sidebar")
-      .on("postgres_changes" as any, {
-        event: "*",
-        schema: "public",
-        table: "concessions",
-      }, () => { fetchPendingApprovals(); })
-      .on("postgres_changes" as any, {
-        event: "*",
-        schema: "public",
-        table: "offer_letters",
-      }, () => { fetchPendingApprovals(); })
+      .on("postgres_changes" as any, { event: "*", schema: "public", table: "concessions" }, fetchPendingApprovals)
+      .on("postgres_changes" as any, { event: "*", schema: "public", table: "offer_letters" }, fetchPendingApprovals)
       .subscribe();
 
     return () => {
-      supabase.removeChannel(waChannel);
-      supabase.removeChannel(leadsChannel);
+      if (badgeDebounce) clearTimeout(badgeDebounce);
+      supabase.removeChannel(badgeChannel);
       supabase.removeChannel(approvalsChannel);
     };
-  }, [role, profile?.id, user?.id]);
+  }, [fetchAdmissionBadges, fetchPendingApprovals]);
 
   const inboxBadge = pendingApprovals + pendingFollowupCount + waUnread;
   const visibleMain = mainMenu.filter(canSee).map(item => {

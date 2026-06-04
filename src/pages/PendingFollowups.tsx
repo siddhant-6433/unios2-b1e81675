@@ -13,7 +13,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
-import { TERMINAL_LEAD_STAGES } from "@/lib/leadStages";
 
 type Tab = "overdue" | "today" | "upcoming" | "visit_confirm" | "unclosed_visits" | "post_visit";
 
@@ -92,218 +91,47 @@ const PendingFollowups = () => {
     })();
   }, [isCounsellor]);
 
-  const fetchCounts = useCallback(async () => {
+  const fetchPayload = useCallback(async () => {
     // Counsellor scoping leans on profile.id; if it hasn't loaded yet the
-    // .eq("counsellor_id", null) silently returns zero across every tab.
+    // RPC would correctly return no owned rows, but keeping the spinner short
+    // avoids a confusing empty state during auth hydration.
     if (isCounsellor && !profileId) return;
-    const today = new Date().toISOString().slice(0, 10);
-    const todayStart = `${today}T00:00:00+05:30`;
-    const todayEnd = `${today}T23:59:59+05:30`;
-    const weekEnd = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10) + "T23:59:59+05:30";
 
-    // Determine which counsellor to scope to
-    const scopeId = isCounsellor ? profileId : (counsellorFilter !== "all" && counsellorFilter !== "unassigned" ? counsellorFilter : null);
+    setLoading(true);
+
+    const scopeId = isCounsellor
+      ? profileId
+      : (counsellorFilter !== "all" && counsellorFilter !== "unassigned" ? counsellorFilter : null);
     const scopeUnassigned = !isCounsellor && counsellorFilter === "unassigned";
 
-    // Get lead IDs for the scoped counsellor or unassigned
-    let scopedLeadIds: string[] | null = null;
-    if (scopeId) {
-      const { data: scopedLeads } = await supabase.from("leads").select("id").eq("counsellor_id", scopeId);
-      scopedLeadIds = (scopedLeads || []).map((l: any) => l.id);
-    } else if (scopeUnassigned) {
-      const { data: scopedLeads } = await supabase.from("leads").select("id").is("counsellor_id", null);
-      scopedLeadIds = (scopedLeads || []).map((l: any) => l.id);
-    }
-    if (scopedLeadIds && scopedLeadIds.length === 0) {
-      setCounts({ overdue: 0, today: 0, upcoming: 0, visit_confirm: 0, unclosed_visits: 0, post_visit: 0 });
+    const { data, error } = await (supabase as any).rpc("pending_followups_payload", {
+      p_tab: tab,
+      p_scope_counsellor_id: scopeId,
+      p_scope_unassigned: scopeUnassigned,
+      p_page: page,
+      p_page_size: PAGE_SIZE,
+    });
+
+    if (error) {
+      console.error("Pending follow-ups fetch failed:", error);
+      setItems([]);
+      setLoading(false);
       return;
     }
 
-    // Overdue
-    let oq = supabase.from("lead_followups" as any).select("id", { count: "exact", head: true })
-      .eq("status", "pending").lt("scheduled_at", todayStart);
-    if (scopedLeadIds) oq = oq.in("lead_id", scopedLeadIds);
-
-    // Today
-    let tq = supabase.from("lead_followups" as any).select("id", { count: "exact", head: true })
-      .eq("status", "pending").gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd);
-    if (scopedLeadIds) tq = tq.in("lead_id", scopedLeadIds);
-
-    // Upcoming
-    let uq = supabase.from("lead_followups" as any).select("id", { count: "exact", head: true })
-      .eq("status", "pending").gt("scheduled_at", todayEnd).lte("scheduled_at", weekEnd);
-    if (scopedLeadIds) uq = uq.in("lead_id", scopedLeadIds);
-
-    // Visit confirmations
-    let vcq = supabase.from("visits_needing_confirmation" as any).select("visit_id", { count: "exact", head: true });
-    if (scopeId) vcq = vcq.eq("counsellor_id", scopeId);
-    else if (scopeUnassigned) vcq = vcq.is("counsellor_id", null);
-
-    // Unclosed visits
-    let uvq = supabase.from("visits_unclosed_today" as any).select("visit_id", { count: "exact", head: true });
-    if (scopeId) uvq = uvq.eq("counsellor_id", scopeId);
-    else if (scopeUnassigned) uvq = uvq.is("counsellor_id", null);
-
-    // Post-visit
-    let pvq = supabase.from("post_visit_pending_followups" as any).select("visit_id", { count: "exact", head: true });
-    if (scopeId) pvq = pvq.eq("counsellor_id", scopeId);
-    else if (scopeUnassigned) pvq = pvq.is("counsellor_id", null);
-
-    const [oRes, tRes, uRes, vcRes, uvRes, pvRes] = await Promise.all([oq, tq, uq, vcq, uvq, pvq]);
     setCounts({
-      overdue: oRes.count || 0,
-      today: tRes.count || 0,
-      upcoming: uRes.count || 0,
-      visit_confirm: vcRes.count || 0,
-      unclosed_visits: uvRes.count || 0,
-      post_visit: pvRes.count || 0,
+      overdue: data?.counts?.overdue || 0,
+      today: data?.counts?.today || 0,
+      upcoming: data?.counts?.upcoming || 0,
+      visit_confirm: data?.counts?.visit_confirm || 0,
+      unclosed_visits: data?.counts?.unclosed_visits || 0,
+      post_visit: data?.counts?.post_visit || 0,
     });
-  }, [isCounsellor, profileId, counsellorFilter]);
-
-  const fetchItems = useCallback(async () => {
-    if (isCounsellor && !profileId) return;
-    setLoading(true);
-    const today = new Date().toISOString().slice(0, 10);
-    const todayStart = `${today}T00:00:00+05:30`;
-    const todayEnd = `${today}T23:59:59+05:30`;
-    const weekEnd = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10) + "T23:59:59+05:30";
-
-    let result: FollowupItem[] = [];
-
-    const filterCounsellorId = isCounsellor ? profileId : (counsellorFilter !== "all" && counsellorFilter !== "unassigned" ? counsellorFilter : null);
-    const filterUnassigned = !isCounsellor && counsellorFilter === "unassigned";
-
-    if (tab === "overdue" || tab === "today" || tab === "upcoming") {
-      // Pre-fetch lead IDs for counsellor scoping (same approach as counts)
-      let scopedLeadIds: string[] | null = null;
-      if (filterCounsellorId) {
-        const { data: sLeads } = await supabase.from("leads").select("id").eq("counsellor_id", filterCounsellorId);
-        scopedLeadIds = (sLeads || []).map((l: any) => l.id);
-        if (!scopedLeadIds.length) { setItems([]); setLoading(false); return; }
-      } else if (filterUnassigned) {
-        const { data: sLeads } = await supabase.from("leads").select("id").is("counsellor_id", null);
-        scopedLeadIds = (sLeads || []).map((l: any) => l.id);
-        if (!scopedLeadIds.length) { setItems([]); setLoading(false); return; }
-      }
-
-      let q = supabase.from("lead_followups" as any)
-        .select(`id, lead_id, type, scheduled_at, notes, status, user_id,
-          leads:lead_id(name, phone, stage, counsellor_id,
-            counsellor_profile:counsellor_id(display_name),
-            courses:course_id(name), campuses:campus_id(name)
-          )`)
-        .eq("status", "pending")
-        .order("scheduled_at", { ascending: tab === "overdue" });
-
-      if (tab === "overdue") q = q.lt("scheduled_at", todayStart);
-      else if (tab === "today") q = q.gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd);
-      else q = q.gt("scheduled_at", todayEnd).lte("scheduled_at", weekEnd);
-
-      // Filter by pre-fetched lead IDs
-      if (scopedLeadIds) q = q.in("lead_id", scopedLeadIds);
-
-      q = q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-      const { data } = await q;
-
-      result = (data || [])
-        .filter((r: any) => !(TERMINAL_LEAD_STAGES as string[]).includes(r.leads?.stage))
-        .map((r: any) => {
-          const daysOverdue = Math.max(0, Math.floor((Date.now() - new Date(r.scheduled_at).getTime()) / 86400000));
-          return {
-            id: r.id,
-            lead_id: r.lead_id,
-            lead_name: r.leads?.name || "Unknown",
-            lead_phone: r.leads?.phone || "",
-            lead_stage: r.leads?.stage || "",
-            counsellor_name: r.leads?.counsellor_profile?.display_name || "Unassigned",
-            counsellor_id: r.leads?.counsellor_id || null,
-            type: r.type || "call",
-            scheduled_at: r.scheduled_at,
-            notes: r.notes,
-            days_overdue: daysOverdue,
-            campus_name: r.leads?.campuses?.name || "",
-          };
-        });
-    } else if (tab === "visit_confirm") {
-      let q = supabase.from("visits_needing_confirmation" as any)
-        .select("*")
-        .order("visit_date", { ascending: true });
-      if (filterCounsellorId) q = q.eq("counsellor_id", filterCounsellorId);
-      else if (filterUnassigned) q = q.is("counsellor_id", null);
-      q = q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-      const { data } = await q;
-
-      result = (data || []).map((r: any) => ({
-        id: r.visit_id,
-        lead_id: r.lead_id,
-        lead_name: r.lead_name || "Unknown",
-        lead_phone: r.lead_phone || "",
-        lead_stage: "",
-        counsellor_name: "",
-        counsellor_id: r.counsellor_id,
-        type: "visit_confirmation",
-        scheduled_at: r.visit_date,
-        notes: null,
-        urgency: r.urgency,
-        campus_name: r.campus_name || "",
-      }));
-    } else if (tab === "unclosed_visits") {
-      let q = supabase.from("visits_unclosed_today" as any)
-        .select("*")
-        .order("visit_date", { ascending: true });
-      if (filterCounsellorId) q = q.eq("counsellor_id", filterCounsellorId);
-      else if (filterUnassigned) q = q.is("counsellor_id", null);
-      q = q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-      const { data } = await q;
-
-      result = (data || []).map((r: any) => {
-        const daysPast = Math.floor((Date.now() - new Date(r.visit_date).getTime()) / 86400000);
-        return {
-          id: r.visit_id,
-          lead_id: r.lead_id,
-          lead_name: r.lead_name || "Unknown",
-          lead_phone: r.lead_phone || "",
-          lead_stage: "",
-          counsellor_name: r.counsellor_name || "Unassigned",
-          counsellor_id: r.counsellor_id,
-          type: "unclosed_visit",
-          scheduled_at: r.visit_date,
-          notes: null,
-          days_overdue: daysPast,
-          campus_name: r.campus_name || "",
-        };
-      });
-    } else if (tab === "post_visit") {
-      let q = supabase.from("post_visit_pending_followups" as any)
-        .select("*")
-        .order("visit_date", { ascending: true });
-      if (filterCounsellorId) q = q.eq("counsellor_id", filterCounsellorId);
-      else if (filterUnassigned) q = q.is("counsellor_id", null);
-      q = q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-      const { data } = await q;
-
-      result = (data || []).map((r: any) => ({
-        id: r.visit_id,
-        lead_id: r.lead_id,
-        lead_name: r.lead_name || "Unknown",
-        lead_phone: r.lead_phone || "",
-        lead_stage: r.lead_stage || "",
-        counsellor_name: "",
-        counsellor_id: r.counsellor_id,
-        type: "post_visit",
-        scheduled_at: r.visit_date,
-        notes: null,
-        days_since_visit: r.days_since_visit,
-        campus_name: r.campus_name || "",
-      }));
-    }
-
-    setItems(result);
+    setItems(data?.items || []);
     setLoading(false);
-  }, [tab, page, isCounsellor, profileId, counsellorFilter, user?.id]);
+  }, [tab, page, isCounsellor, profileId, counsellorFilter]);
 
-  useEffect(() => { fetchCounts(); }, [fetchCounts]);
-  useEffect(() => { fetchItems(); }, [fetchItems]);
+  useEffect(() => { fetchPayload(); }, [fetchPayload]);
   useEffect(() => { setPage(0); setSelected(new Set()); }, [tab, counsellorFilter]);
 
   const filtered = search
@@ -316,8 +144,7 @@ const PendingFollowups = () => {
   const handleMarkComplete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     await supabase.from("lead_followups" as any).update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", id);
-    fetchItems();
-    fetchCounts();
+    fetchPayload();
   };
 
   const openCompleteDialog = (visitId: string, leadId: string, leadName: string, e: React.MouseEvent) => {
@@ -351,7 +178,7 @@ const PendingFollowups = () => {
     toast({ title: "Visit completed", description: `Follow-up scheduled for ${new Date(followupDate).toLocaleDateString("en-IN")}` });
     setSaving(false);
     setCompleteDialog(null);
-    fetchItems(); fetchCounts();
+    fetchPayload();
   };
 
   const handleNoShowVisit = async () => {
@@ -392,7 +219,7 @@ const PendingFollowups = () => {
     }
     setSaving(false);
     setNoShowDialog(null);
-    fetchItems(); fetchCounts();
+    fetchPayload();
   };
 
   const openRescheduleVisitDialog = (visitId: string, leadId: string, leadName: string, e: React.MouseEvent) => {
@@ -419,7 +246,7 @@ const PendingFollowups = () => {
     toast({ title: "Visit rescheduled", description: `New date: ${new Date(newDateIso).toLocaleDateString("en-IN")}` });
     setSaving(false);
     setRescheduleVisitDialog(null);
-    fetchItems(); fetchCounts();
+    fetchPayload();
   };
 
   const handleCloudCall = async (leadId: string, e: React.MouseEvent) => {
@@ -486,8 +313,7 @@ const PendingFollowups = () => {
     setSelected(new Set());
     setReassignTo("");
     setReassigning(false);
-    fetchItems();
-    fetchCounts();
+    fetchPayload();
   };
 
   const totalAll = counts.overdue + counts.today + counts.upcoming + counts.visit_confirm + counts.post_visit;

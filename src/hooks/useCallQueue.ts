@@ -58,58 +58,20 @@ export function useCallQueue(currentLeadId?: string, counsellorId?: string) {
     if (!resolvedCounsellorId) return;
     setLoading(true);
 
-    const now = new Date();
-    const todayStart = now.toISOString().slice(0, 10);
-    const todayEnd = todayStart + "T23:59:59";
-
     try {
-      const [r1, r2, r3, r4] = await Promise.all([
-        supabase.from("post_visit_pending_followups" as any)
-          .select("lead_id, lead_name, lead_phone")
-          .eq("counsellor_id", resolvedCounsellorId)
-          .order("visit_date", { ascending: true })
-          .limit(10),
-        supabase.from("overdue_followups" as any)
-          .select("lead_id, lead_name, lead_phone")
-          .eq("counsellor_id", resolvedCounsellorId)
-          .order("scheduled_at", { ascending: true })
-          .limit(10),
-        supabase.from("lead_followups")
-          .select("lead_id, leads!inner(id, name, phone, counsellor_id)")
-          .eq("status", "pending")
-          .eq("leads.counsellor_id", resolvedCounsellorId)
-          .gte("scheduled_at", todayStart)
-          .lte("scheduled_at", todayEnd)
-          .order("scheduled_at", { ascending: true })
-          .limit(10),
-        supabase.from("leads")
-          .select("id, name, phone, source, created_at")
-          .eq("counsellor_id", resolvedCounsellorId)
-          .eq("stage", "new_lead")
-          .is("first_contact_at", null)
-          .order("created_at", { ascending: true })
-          .limit(30),
-      ]);
+      const { data, error } = await supabase.rpc("cloud_dialer_queue" as any, {
+        p_counsellor_id: resolvedCounsellorId,
+        p_max_per_bucket: 10,
+      });
+      if (error) throw error;
 
-      const postVisit = (r1.data || []).map((r: any) => ({ id: r.lead_id, name: r.lead_name, phone: r.lead_phone }));
-      const overdue = (r2.data || []).map((r: any) => ({ id: r.lead_id, name: r.lead_name, phone: r.lead_phone }));
-      const todayFu = (r3.data || []).map((r: any) => ({ id: r.lead_id, name: (r.leads as any)?.name || "", phone: (r.leads as any)?.phone || "" }));
-      // Source tier: 1 = paid (meta/google), 2 = website, 3 = other. Paid leads decay
-      // fastest so they should be dialed first within the New Lead bucket.
-      const sourceTier = (s: string | null | undefined): number => {
-        if (s === "meta_ads" || s === "google_ads") return 1;
-        if (s === "website" || s === "mirai_website") return 2;
-        return 3;
-      };
-      const newLeads = (r4.data || [])
-        .slice()
-        .sort((a: any, b: any) => {
-          const t = sourceTier(a.source) - sourceTier(b.source);
-          if (t !== 0) return t;
-          return (a.created_at || "").localeCompare(b.created_at || "");
-        })
-        .slice(0, 10)
-        .map((r: any) => ({ id: r.id, name: r.name, phone: r.phone }));
+      const rows = Array.isArray((data as any)?.queue) ? (data as any).queue : [];
+      const bucketDefs = [
+        { key: "post_visit", sourceLabel: "Post-Visit", label: "Post-Visit", color: "bg-amber-500" },
+        { key: "overdue", sourceLabel: "Overdue", label: "Overdue", color: "bg-red-500" },
+        { key: "today", sourceLabel: "Today", label: "Today", color: "bg-blue-500" },
+        { key: "new", sourceLabel: "New Lead", label: "New Leads", color: "bg-orange-500" },
+      ] as const;
 
       const seen = new Set<string>();
       const dedup = (arr: { id: string; name: string; phone: string }[]) => {
@@ -120,12 +82,24 @@ export function useCallQueue(currentLeadId?: string, counsellorId?: string) {
         });
       };
 
-      const b: QueueBucket[] = [
-        { key: "post_visit", label: "Post-Visit", color: "bg-amber-500", count: postVisit.length, leads: dedup(postVisit) },
-        { key: "overdue", label: "Overdue", color: "bg-red-500", count: overdue.length, leads: dedup(overdue) },
-        { key: "today", label: "Today", color: "bg-blue-500", count: todayFu.length, leads: dedup(todayFu) },
-        { key: "new", label: "New Leads", color: "bg-orange-500", count: newLeads.length, leads: dedup(newLeads) },
-      ].filter(b => b.count > 0);
+      const b: QueueBucket[] = bucketDefs.map((bucket) => {
+        const leads = dedup(
+          rows
+            .filter((row: any) => row.bucket === bucket.sourceLabel)
+            .map((row: any) => ({
+              id: row.id,
+              name: row.name || "",
+              phone: row.phone || "",
+            })),
+        );
+        return {
+          key: bucket.key,
+          label: bucket.label,
+          color: bucket.color,
+          count: leads.length,
+          leads,
+        };
+      }).filter((bucket) => bucket.count > 0);
 
       setBuckets(b);
 

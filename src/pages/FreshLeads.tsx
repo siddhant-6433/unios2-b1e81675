@@ -73,51 +73,22 @@ const FreshLeads = () => {
     if (isCounsellor && !profileId) return;
     setLoading(true);
 
-    // Base filters
-    const applyFilters = (q: any) => {
-      q = q.eq("stage", "new_lead" as any).is("first_contact_at", null);
-      if (isCounsellor && profileId) {
-        q = q.eq("counsellor_id", profileId);
-      } else {
-        if (counsellorFilter !== "all") q = q.eq("counsellor_id", counsellorFilter);
-        if (assignmentFilter === "assigned") q = q.not("counsellor_id", "is", null);
-        else if (assignmentFilter === "unassigned") q = q.is("counsellor_id", null);
-      }
-      return q;
-    };
+    const { data, error } = await (supabase as any).rpc("fresh_leads_payload", {
+      p_scope_counsellor_id: isCounsellor
+        ? profileId
+        : (assignmentFilter === "unassigned" || counsellorFilter === "all" ? null : counsellorFilter),
+      p_assignment_filter: assignmentFilter,
+      p_page: page,
+      p_page_size: PAGE_SIZE,
+    });
 
-    // Count query
-    const { count } = await applyFilters(
-      supabase.from("leads").select("id", { count: "exact", head: true })
-    );
-    setTotalCount(count || 0);
-
-    // Data query
-    let q = applyFilters(
-      supabase.from("leads").select(`id, name, phone, source, created_at, counsellor_id,
-        courses:course_id(name),
-        campuses:campus_id(name),
-        counsellor_profile:counsellor_id(display_name)
-      `)
-    ).order("created_at", { ascending: true })
-     .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-
-    const { data } = await q;
-
-    if (data) {
-      const now = Date.now();
-      setLeads((data as any[]).map((l: any) => ({
-        id: l.id,
-        name: l.name || "Unknown",
-        phone: l.phone || "",
-        source: l.source || "",
-        course_name: l.courses?.name || "—",
-        campus_name: l.campuses?.name || "—",
-        counsellor_name: l.counsellor_profile?.display_name || "Unassigned",
-        counsellor_id: l.counsellor_id,
-        created_at: l.created_at,
-        hours_since: Math.floor((now - new Date(l.created_at).getTime()) / 3600000),
-      })));
+    if (error) {
+      console.error("Fresh leads fetch failed:", error);
+      setLeads([]);
+      setTotalCount(0);
+    } else {
+      setTotalCount(data?.totalCount || 0);
+      setLeads(data?.leads || []);
     }
     setLoading(false);
   }, [counsellorFilter, assignmentFilter, page, isCounsellor, profileId]);

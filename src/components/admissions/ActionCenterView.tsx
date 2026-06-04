@@ -16,10 +16,8 @@ function LeaderboardWidget() {
   const [myScore, setMyScore] = useState<any>(null);
 
   useEffect(() => {
-    (async () => {
-      const { data } = await supabase
-        .from("counsellor_leaderboard" as any)
-        .select("*");
+    const fetchLeaderboard = async () => {
+      const { data } = await supabase.rpc("get_counsellor_leaderboard" as any);
       if (!data) return;
       const sorted = (data as any[]).sort((a, b) => b.weekly_score - a.weekly_score);
       setLeaders(sorted.slice(0, 5));
@@ -31,7 +29,9 @@ function LeaderboardWidget() {
           setMyScore(sorted[idx]);
         }
       }
-    })();
+    };
+
+    fetchLeaderboard();
 
     // Listen for score updates
     if (!profile?.id) return;
@@ -41,18 +41,7 @@ function LeaderboardWidget() {
         event: "INSERT",
         schema: "public",
         table: "counsellor_score_events",
-      }, () => {
-        // Refetch
-        supabase.from("counsellor_leaderboard" as any).select("*").then(({ data }) => {
-          if (!data) return;
-          const sorted = (data as any[]).sort((a, b) => b.weekly_score - a.weekly_score);
-          setLeaders(sorted.slice(0, 5));
-          if (profile?.id) {
-            const idx = sorted.findIndex((s: any) => s.counsellor_id === profile.id);
-            if (idx >= 0) { setMyRank(idx + 1); setMyScore(sorted[idx]); }
-          }
-        });
-      })
+      }, fetchLeaderboard)
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
@@ -149,13 +138,14 @@ export function ActionCenterView({
   const [callLead, setCallLead] = useState<ActionLead | null>(null);
   const [campuses, setCampuses] = useState<{ id: string; name: string }[]>([]);
 
-  // Fetch campuses for call disposition dialog
+  // Fetch campuses only when the legacy inline disposition dialog opens.
   useEffect(() => {
+    if (!callLead || campuses.length > 0) return;
     (async () => {
       const { data } = await supabase.from("campuses").select("id, name").order("name");
       setCampuses(data || []);
     })();
-  }, []);
+  }, [callLead, campuses.length]);
 
   // Navigate to the lead's detail page with ?action=call. LeadDetail's
   // useEffect picks that up and triggers a real Cloud Call (Plivo bridges

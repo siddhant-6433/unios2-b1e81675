@@ -552,118 +552,18 @@ const CounsellorDashboard = () => {
     setCallingDatePreset(preset);
     const { from, to } = getDateRange(preset);
 
-    // Get counsellor profiles
-    const { data: roleData } = await supabase
-      .from("user_roles" as any).select("user_id, role").in("role", ["counsellor", "admission_head"]);
-    const counsellorUserIds = (roleData || []).map((r: any) => r.user_id);
-    const { data: profiles } = await supabase
-      .from("profiles").select("id, user_id, display_name").in("user_id", counsellorUserIds);
+    const { data, error } = await (supabase as any).rpc("counsellor_calling_summary", {
+      p_from_date: from || null,
+      p_to_date: to || null,
+    });
 
-    if (!profiles?.length) { setCallingLoading(false); return; }
-
-    const profileIdToUserId = new Map((profiles as any[]).map(p => [p.id, p.user_id]));
-    const userIdToProfileId = new Map((profiles as any[]).map(p => [p.user_id, p.id]));
-
-    // Active leads per counsellor (not in terminal stages)
-    const { data: activeLeads } = await supabase
-      .from("leads")
-      .select("id, counsellor_id, stage, first_contact_at, assigned_at, created_at")
-      .not("counsellor_id", "is", null)
-      .not("stage", "in", "(admitted,rejected,not_interested)");
-
-    // Call logs in date range
-    let callQ = supabase
-      .from("call_logs" as any)
-      .select("id, lead_id, disposition, duration_seconds, user_id, called_at")
-      .order("called_at", { ascending: false });
-    if (from) callQ = callQ.gte("called_at", `${from}T00:00:00`);
-    if (to) callQ = callQ.lte("called_at", `${to}T23:59:59`);
-    const { data: callLogs } = await callQ;
-
-    // ALL call logs (to determine never-called leads)
-    const { data: allCallLogs } = await supabase
-      .from("call_logs" as any)
-      .select("lead_id")
-      .limit(5000);
-
-    // Overdue followups per counsellor
-    const { data: overdueData } = await supabase
-      .from("overdue_followups" as any)
-      .select("id, counsellor_id");
-
-    // Build set of ever-called lead IDs
-    const everCalledLeadIds = new Set<string>();
-    for (const cl of (allCallLogs || []) as any[]) everCalledLeadIds.add(cl.lead_id);
-
-    // Build per-counsellor aggregation
-    const agg = new Map<string, {
-      name: string; profileId: string; userId: string;
-      activeLeads: number; notCalled: number; callsInPeriod: number;
-      callDuration: number; overdueFollowups: number;
-      avgResponseHrs: number | null;
-      dispositions: Record<string, number>;
-    }>();
-
-    for (const p of profiles as any[]) {
-      agg.set(p.id, {
-        name: p.display_name || "Unknown",
-        profileId: p.id,
-        userId: p.user_id,
-        activeLeads: 0, notCalled: 0, callsInPeriod: 0,
-        callDuration: 0, overdueFollowups: 0,
-        avgResponseHrs: null,
-        dispositions: {},
-      });
+    if (error) {
+      console.error("fetchCalling RPC error:", error);
+      setCallingLoading(false);
+      return;
     }
 
-    // Count active leads and not-called
-    const responseTimes: Record<string, number[]> = {};
-    for (const l of (activeLeads || []) as any[]) {
-      const entry = agg.get(l.counsellor_id);
-      if (!entry) continue;
-      entry.activeLeads++;
-      if (!everCalledLeadIds.has(l.id)) entry.notCalled++;
-      if (l.assigned_at && l.first_contact_at) {
-        const hrs = (new Date(l.first_contact_at).getTime() - new Date(l.assigned_at).getTime()) / 3600000;
-        if (hrs >= 0 && hrs < 720) {
-          if (!responseTimes[l.counsellor_id]) responseTimes[l.counsellor_id] = [];
-          responseTimes[l.counsellor_id].push(hrs);
-        }
-      }
-    }
-
-    // Count calls in period and dispositions
-    for (const cl of (callLogs || []) as any[]) {
-      const profileId = userIdToProfileId.get(cl.user_id);
-      if (!profileId) continue;
-      const entry = agg.get(profileId);
-      if (!entry) continue;
-      entry.callsInPeriod++;
-      entry.callDuration += cl.duration_seconds || 0;
-      if (cl.disposition) {
-        entry.dispositions[cl.disposition] = (entry.dispositions[cl.disposition] || 0) + 1;
-      }
-    }
-
-    // Count overdue followups
-    for (const o of (overdueData || []) as any[]) {
-      const entry = agg.get(o.counsellor_id);
-      if (entry) entry.overdueFollowups++;
-    }
-
-    // Compute avg response time
-    for (const [pid, entry] of agg) {
-      const times = responseTimes[pid];
-      if (times?.length) {
-        entry.avgResponseHrs = Math.round((times.reduce((a, b) => a + b, 0) / times.length) * 10) / 10;
-      }
-    }
-
-    setCallingData(
-      Array.from(agg.values())
-        .filter(a => a.activeLeads > 0)
-        .sort((a, b) => b.notCalled - a.notCalled) // worst performers first
-    );
+    setCallingData((data || []) as any[]);
     setCallingLoading(false);
   }, []);
 
