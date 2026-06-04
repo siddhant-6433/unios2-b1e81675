@@ -99,6 +99,8 @@ const stageIcons: Record<string, typeof Users> = {
 
 // Lead sources imported from @/config/leadSources
 
+type LeadInstitutionType = "all" | "school" | "college";
+
 const PERSON_ROLE_COLORS: Record<string, string> = {
   lead: "bg-pastel-yellow text-foreground/80",
   applicant: "bg-pastel-blue text-foreground/80",
@@ -183,12 +185,13 @@ const Admissions = () => {
   const isTeamLeader = useIsTeamLeader();
   const { toast } = useToast();
   const [view, setView] = useState<"action_center" | "pipeline" | "list" | "seats" | "payments">(
-    "pipeline"
+    "list"
   );
   const [actionCounsellorFilter, setActionCounsellorFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const [leadInstitutionType, setLeadInstitutionType] = useState<LeadInstitutionType>("all");
   const [courseFilter, setCourseFilter] = useState<string[]>([]);
   const [debouncedCourseFilter, setDebouncedCourseFilter] = useState<string[]>([]);
   const [courseOptions, setCourseOptions] = useState<(CourseLike & { id: string; name: string })[]>([]);
@@ -368,6 +371,35 @@ const Admissions = () => {
     return () => clearTimeout(t);
   }, [courseFilter]);
 
+  const categoryCourseIds = useMemo(() => {
+    if (leadInstitutionType === "all") return [];
+    return courseOptions
+      .filter((c) => (c.institution_type || "").toLowerCase() === leadInstitutionType)
+      .map((c) => c.id);
+  }, [courseOptions, leadInstitutionType]);
+
+  const courseOptionsForFilter = useMemo(() => {
+    if (leadInstitutionType === "all") return courseOptions;
+    return courseOptions.filter((c) => (c.institution_type || "").toLowerCase() === leadInstitutionType);
+  }, [courseOptions, leadInstitutionType]);
+
+  const effectiveCourseFilterIds = useMemo(() => {
+    if (leadInstitutionType === "all") return debouncedCourseFilter;
+    const categorySet = new Set(categoryCourseIds);
+    if (debouncedCourseFilter.length === 0) return categoryCourseIds;
+    return debouncedCourseFilter.filter((id) => categorySet.has(id));
+  }, [categoryCourseIds, debouncedCourseFilter, leadInstitutionType]);
+
+  useEffect(() => {
+    if (leadInstitutionType === "all" || courseOptions.length === 0) return;
+    const allowed = new Set(categoryCourseIds);
+    setCourseFilter((prev) => {
+      const next = prev.filter((id) => allowed.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+    setCourseSearch("");
+  }, [categoryCourseIds, courseOptions.length, leadInstitutionType]);
+
   // Hydrate application completion % for whichever rows we just loaded.
   // Split out so both fetch paths can reuse it.
   const hydrateApplications = async (rows: any[]) => {
@@ -492,7 +524,11 @@ const Admissions = () => {
         else if (stages.length > 1) query = query.in("stage", stages);
       }
       if (sourceFilter !== "all") query = query.eq("source", sourceFilter);
-      if (debouncedCourseFilter.length > 0) query = query.in("course_id", debouncedCourseFilter);
+      if (leadInstitutionType !== "all" && effectiveCourseFilterIds.length === 0) {
+        setLeads([]); setTotalCount(0); setSelectedIds(new Set()); setHasLoadedOnce(true);
+        return;
+      }
+      if (effectiveCourseFilterIds.length > 0) query = query.in("course_id", effectiveCourseFilterIds);
       if (roleFilter !== "all") query = query.eq("person_role", roleFilter);
       if (tempFilter !== "all") query = query.eq("lead_temperature", tempFilter);
 
@@ -566,7 +602,7 @@ const Admissions = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     view, page, selectedCampusId, counsellorFilter, role, profile?.id,
-    stageFilter, sourceFilter, debouncedCourseFilter, roleFilter, tempFilter,
+    stageFilter, sourceFilter, leadInstitutionType, effectiveCourseFilterIds, roleFilter, tempFilter,
     fromDate, toDate, debouncedSearch,
     inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds,
   ]);
@@ -745,7 +781,7 @@ const Admissions = () => {
       (digits.length >= 3 && phoneDigits.includes(digits));
     const matchesStage = stageFilter === "all" || stageFilter.split(",").includes(l.stage);
     const matchesSource = sourceFilter === "all" || l.source === sourceFilter;
-    const matchesCourse = debouncedCourseFilter.length === 0 || (l.course_id != null && debouncedCourseFilter.includes(l.course_id));
+    const matchesCourse = effectiveCourseFilterIds.length === 0 || (l.course_id != null && effectiveCourseFilterIds.includes(l.course_id));
     const matchesRole = roleFilter === "all" || l.person_role === roleFilter;
     const matchesTemp = tempFilter === "all" || l.lead_temperature === tempFilter;
     const matchesInactive = !inactiveIds || inactiveIds.has(l.id);
@@ -779,7 +815,7 @@ const Admissions = () => {
   const paginatedLeads = view === "list" ? leads : filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // Reset page when filters change
-  useEffect(() => { setPage(1); }, [stageFilter, sourceFilter, debouncedCourseFilter, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, fromDate, toDate]);
+  useEffect(() => { setPage(1); }, [stageFilter, sourceFilter, leadInstitutionType, effectiveCourseFilterIds, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, fromDate, toDate]);
 
   // Fetch lead-pipeline counts (one GROUP-BY) + visit-action counts. Cheap
   // queries; refresh on mount. Counsellor-scoped via stage filter when the
@@ -1566,6 +1602,12 @@ const Admissions = () => {
             <option value="all">All Sources</option>
             {LEAD_SOURCES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
+          <select value={leadInstitutionType} onChange={(e) => setLeadInstitutionType(e.target.value as LeadInstitutionType)}
+            className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
+            <option value="all">School & College</option>
+            <option value="school">School Leads</option>
+            <option value="college">College Leads</option>
+          </select>
           <Popover open={coursePopoverOpen} onOpenChange={setCoursePopoverOpen}>
             <PopoverTrigger asChild>
               <button
@@ -1574,10 +1616,16 @@ const Admissions = () => {
               >
                 <span>
                   {courseFilter.length === 0
-                    ? "All Courses"
+                    ? leadInstitutionType === "school"
+                      ? "All Grades"
+                      : leadInstitutionType === "college"
+                        ? "All College Courses"
+                        : "All Courses"
                     : courseFilter.length === 1
                       ? (courseOptions.find(c => c.id === courseFilter[0])?.name || "1 course")
-                      : `${courseFilter.length} courses`}
+                      : leadInstitutionType === "school"
+                        ? `${courseFilter.length} grades`
+                        : `${courseFilter.length} courses`}
                 </span>
                 <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
               </button>
@@ -1606,8 +1654,14 @@ const Admissions = () => {
                 {(() => {
                   const q = courseSearch.toLowerCase();
                   const filtered = q
-                    ? courseOptions.filter(c => c.name.toLowerCase().includes(q))
-                    : courseOptions;
+                    ? courseOptionsForFilter.filter(c => [
+                        c.name,
+                        c.code,
+                        c.institution_name,
+                        c.campus_name,
+                        c.department_name,
+                      ].some(v => (v || "").toLowerCase().includes(q)))
+                    : courseOptionsForFilter;
                   const sections = groupCourses(filtered);
                   if (sections.length === 0) {
                     return <div className="px-3 py-4 text-center text-xs text-muted-foreground">No courses</div>;
@@ -1647,41 +1701,59 @@ const Admissions = () => {
                             {allSelected ? "Clear" : "Select all"}
                           </button>
                         </div>
-                        {Array.from(institutions.entries()).map(([instName, secs]) => (
-                          <div key={`${campus}-${instName}`} className="mb-1">
-                            {instName && (
-                              <div className="px-2 pt-1.5 pb-0.5 text-[11px] font-semibold text-foreground/90">
-                                {instName}
-                              </div>
-                            )}
-                            {secs.map(section => (
-                              <div key={`${campus}-${instName}-${section.sectionKey}`} className="mb-0.5">
-                                <div className="px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80">
-                                  {section.sectionLabel}
+                        {Array.from(institutions.entries()).map(([instName, secs]) => {
+                          const institutionIds = secs.flatMap(s => s.items.map(i => i.id));
+                          const institutionSelected = institutionIds.length > 0 && institutionIds.every(id => courseFilter.includes(id));
+                          const hasSchoolCourses = secs.some(s => s.items.some(i => (i.institution_type || "").toLowerCase() === "school"));
+                          return (
+                            <div key={`${campus}-${instName}`} className="mb-1">
+                              {instName && (
+                                <div className="flex items-center justify-between px-2 pt-1.5 pb-0.5">
+                                  <span className="text-[11px] font-semibold text-foreground/90">{instName}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setCourseFilter(prev =>
+                                        institutionSelected
+                                          ? prev.filter(id => !institutionIds.includes(id))
+                                          : Array.from(new Set([...prev, ...institutionIds]))
+                                      );
+                                    }}
+                                    className="text-[10px] text-primary hover:underline"
+                                  >
+                                    {institutionSelected ? "Clear" : hasSchoolCourses ? "Select grades" : "Select courses"}
+                                  </button>
                                 </div>
-                                {section.items.map(c => {
-                                  const checked = courseFilter.includes(c.id);
-                                  return (
-                                    <label
-                                      key={c.id}
-                                      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted/50 cursor-pointer"
-                                    >
-                                      <Checkbox
-                                        checked={checked}
-                                        onCheckedChange={(v) => {
-                                          setCourseFilter(prev =>
-                                            v ? [...prev, c.id] : prev.filter(id => id !== c.id)
-                                          );
-                                        }}
-                                      />
-                                      <span className="flex-1 truncate text-foreground">{c.name}</span>
-                                    </label>
-                                  );
-                                })}
-                              </div>
-                            ))}
-                          </div>
-                        ))}
+                              )}
+                              {secs.map(section => (
+                                <div key={`${campus}-${instName}-${section.sectionKey}`} className="mb-0.5">
+                                  <div className="px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80">
+                                    {section.sectionLabel}
+                                  </div>
+                                  {section.items.map(c => {
+                                    const checked = courseFilter.includes(c.id);
+                                    return (
+                                      <label
+                                        key={c.id}
+                                        className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted/50 cursor-pointer"
+                                      >
+                                        <Checkbox
+                                          checked={checked}
+                                          onCheckedChange={(v) => {
+                                            setCourseFilter(prev =>
+                                              v ? Array.from(new Set([...prev, c.id])) : prev.filter(id => id !== c.id)
+                                            );
+                                          }}
+                                        />
+                                        <span className="flex-1 truncate text-foreground">{c.name}</span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })}
                       </div>
                     );
                   });
