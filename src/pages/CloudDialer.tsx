@@ -865,6 +865,13 @@ export default function CloudDialer() {
     toast({ title: "Disposition saved", description: `Marked as "${disposition.replace("_", " ")}". Will finalize when call ends.` });
   };
 
+  const completePendingFollowupsForCurrentLead = async () => {
+    if (!currentLead) return;
+    await supabase.from("lead_followups")
+      .update({ status: "completed", completed_at: new Date().toISOString() } as any)
+      .eq("lead_id", currentLead.id).eq("status", "pending");
+  };
+
   // ── Finalize a pre-selected disposition after call ends ─────────────────
 
   const finalizeDisposition = async (disposition: string, duration: number) => {
@@ -902,9 +909,7 @@ export default function CloudDialer() {
     }
 
     // Mark pending followups as completed (clears overdue status)
-    await supabase.from("lead_followups")
-      .update({ status: "completed", completed_at: new Date().toISOString() } as any)
-      .eq("lead_id", currentLead.id).eq("status", "pending");
+    await completePendingFollowupsForCurrentLead();
 
     // Log activity
     const durStr = duration > 0 ? ` (${Math.floor(duration / 60)}m${duration % 60 ? ` ${duration % 60}s` : ""})` : "";
@@ -966,9 +971,7 @@ export default function CloudDialer() {
     }
 
     // Mark pending followups as completed (clears overdue status)
-    await supabase.from("lead_followups")
-      .update({ status: "completed", completed_at: new Date().toISOString() } as any)
-      .eq("lead_id", currentLead.id).eq("status", "pending");
+    await completePendingFollowupsForCurrentLead();
 
     // Log activity
     const durStr = callState.elapsed > 0 ? ` (${Math.floor(callState.elapsed / 60)}m${callState.elapsed % 60 ? ` ${callState.elapsed % 60}s` : ""})` : "";
@@ -1057,10 +1060,11 @@ export default function CloudDialer() {
     }
   };
 
-  const handleAutoDisposition = (disposition: string, skipLog = false) => {
+  const handleAutoDisposition = async (disposition: string, skipLog = false) => {
     const statsKey = disposition === "busy" ? "busy" : disposition === "voicemail" ? "voicemail" : "noAnswer";
     setStats(prev => ({ ...prev, [statsKey]: prev[statsKey] + 1 }));
     setCallState(prev => ({ ...prev, status: "auto-disposed", disposition, autoDisposition: true }));
+    await completePendingFollowupsForCurrentLead();
     // Write call log via dedupe RPC so this row merges with the auto path from
     // bridge-hangup (if it already wrote one). Without this, cancels + stuck-call
     // timeouts produce no call log at all.
