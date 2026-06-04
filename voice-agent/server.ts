@@ -3170,8 +3170,19 @@ Deno.serve({ port: PORT }, async (req) => {
       body: JSON.stringify({ first_contact_at: new Date().toISOString() }),
     }).catch(() => {});
 
-    // 5. Auto-followup for unanswered/busy/voicemail
-    if (isAuto && disposition !== "cancelled") {
+    // 5. Auto-followup for unanswered/busy/voicemail. Terminal dispositions
+    // such as not_interested / wrong_number / do_not_contact must never enter
+    // the retry sequence.
+    const AUTO_FOLLOWUP_DISPOSITIONS = new Set(["busy", "not_answered", "voicemail"]);
+    if (isAuto && disposition) {
+      await fetch(`${SUPABASE_URL}/rest/v1/lead_followups?lead_id=eq.${leadId}&status=eq.pending`, {
+        method: "PATCH",
+        headers: { ...dbH, Prefer: "return=minimal" },
+        body: JSON.stringify({ status: "completed", completed_at: new Date().toISOString() }),
+      }).catch(e => console.error(`[BRIDGE-HANGUP ${callId}] complete pending followups:`, e.message));
+    }
+
+    if (isAuto && disposition && AUTO_FOLLOWUP_DISPOSITIONS.has(disposition)) {
       // Exclude counsellor_no_answer attempts from the strike counter — those
       // never actually reached the lead, so they shouldn't push the lead toward
       // the 4-strike "mark inactive" rule.
@@ -3182,6 +3193,14 @@ Deno.serve({ port: PORT }, async (req) => {
         await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}`, { method: "PATCH", headers: { ...dbH, Prefer: "return=minimal" }, body: JSON.stringify({ stage: "not_interested" }) });
         await fetch(`${SUPABASE_URL}/rest/v1/lead_notes`, { method: "POST", headers: { ...dbH, Prefer: "return=minimal" }, body: JSON.stringify({ lead_id: leadId, content: `📞 Lead marked inactive — ${att} Cloud Call attempts, all ${disposition?.replace("_"," ")}` }) });
       } else {
+        const leadRes = await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}&select=stage&limit=1`, { headers: dbH });
+        const leadRows = await leadRes.json().catch(() => []);
+        const leadStage = Array.isArray(leadRows) && leadRows[0]?.stage ? leadRows[0].stage : null;
+        if (["not_interested", "dnc", "rejected", "ineligible", "admitted", "cold"].includes(leadStage)) {
+          console.log(`[BRIDGE-HANGUP ${callId}] Skip auto-followup; lead stage is ${leadStage}`);
+          activeCallContexts.delete(callId);
+          return new Response("OK");
+        }
         const gap = att === 1 ? 4 : att === 2 ? 24 : 72;
         const fut = new Date(Date.now() + gap * 3600000);
         const ist = new Date(fut.getTime() + 5.5 * 3600000);
