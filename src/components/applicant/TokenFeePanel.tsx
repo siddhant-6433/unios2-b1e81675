@@ -54,11 +54,13 @@ interface Offer {
   total_fee: number;
   scholarship_amount: number | null;
   net_fee: number;
+  token_fee_amount?: number | null;
   approval_status: string;
   status: string;
   acceptance_deadline: string | null; // date string e.g. "2026-06-30"
   created_at: string;
   letter_url: string | null;
+  loan_letter_url: string | null;
 }
 
 interface Props {
@@ -87,6 +89,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   }[]>([]);
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
+  const [generatingLoanLetter, setGeneratingLoanLetter] = useState(false);
   const [showInstalment, setShowInstalment] = useState(false);
   const [instalmentPreset, setInstalmentPreset] = useState<number | null>(null);
   const [customAmt, setCustomAmt] = useState("");
@@ -263,6 +266,38 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     }
   };
 
+  const generateLoanLetter = async () => {
+    if (!offer) return;
+    setGeneratingLoanLetter(true);
+    setError(null);
+    try {
+      const { data, error: invErr } = await supabase.functions.invoke("generate-loan-letter", {
+        body: { offer_letter_id: offer.id, application_id: applicationId },
+      });
+      if (invErr) {
+        let detail = invErr.message;
+        try {
+          const ctx = (invErr as { context?: { json?: () => Promise<unknown>; text?: () => Promise<string> } }).context;
+          const body = ctx?.json ? await ctx.json() : (ctx?.text ? await ctx.text() : null);
+          if (body && typeof body === "object" && "error" in body && typeof body.error === "string") detail = body.error;
+          else if (typeof body === "string" && body) detail = body;
+        } catch {
+          // Keep the generic function error if the response body cannot be parsed.
+        }
+        throw new Error(detail);
+      }
+      if (data?.error) throw new Error(data.error);
+      const url = data?.loan_letter_url;
+      if (!url) throw new Error("No loan letter URL returned");
+      setOffer(prev => prev ? { ...prev, loan_letter_url: url } : prev);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to generate loan letter");
+    } finally {
+      setGeneratingLoanLetter(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="mt-3 flex items-center gap-2 text-xs text-gray-500">
@@ -391,6 +426,55 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
             )}
           </div>
         )}
+      </div>
+
+      {/* ── Education loan letter ───────────────────────── */}
+      <div className={`rounded-2xl border p-4 shadow-sm ${
+        feeStatus.token_complete ? "border-indigo-100 bg-indigo-50" : "border-gray-100 bg-white"
+      }`}>
+        <div className="flex items-start gap-3">
+          <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${
+            feeStatus.token_complete ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-400"
+          }`}>
+            <FileText className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className={`text-sm font-bold ${feeStatus.token_complete ? "text-indigo-950" : "text-gray-700"}`}>
+              Education Loan Letter
+            </p>
+            <p className={`text-xs mt-0.5 leading-snug ${feeStatus.token_complete ? "text-indigo-700" : "text-gray-500"}`}>
+              {feeStatus.token_complete
+                ? "Your token fee is paid. Download the loan support letter for bank processing."
+                : `Unlocked after token fee payment of ₹${feeStatus.token_required.toLocaleString("en-IN")}.`}
+            </p>
+          </div>
+          {feeStatus.token_complete ? (
+            offer.loan_letter_url ? (
+              <a
+                href={offer.loan_letter_url}
+                target="_blank"
+                rel="noopener"
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-bold text-white hover:bg-indigo-700 transition-colors"
+              >
+                <FileText className="h-3.5 w-3.5" />
+                View
+              </a>
+            ) : (
+              <button
+                disabled={generatingLoanLetter}
+                onClick={generateLoanLetter}
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-bold text-white hover:bg-indigo-700 transition-colors disabled:opacity-50"
+              >
+                {generatingLoanLetter ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                Generate
+              </button>
+            )
+          ) : (
+            <span className="shrink-0 rounded-full bg-gray-100 px-2.5 py-1 text-[10px] font-semibold text-gray-500">
+              Locked
+            </span>
+          )}
+        </div>
       </div>
 
       {/* ── Journey Steps ──────────────────────────────── */}

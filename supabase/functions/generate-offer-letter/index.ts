@@ -537,6 +537,7 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
   const terms = [
     "Provisional offer subject to verification of original documents at physical admission.",
     "Token fee is adjustable against the first-year programme fee and is non-refundable once paid.",
+    "Education loan support letter can be downloaded from the applicant portal after the token fee is paid.",
     "Remaining first-year fee is due as per the schedule communicated post token-fee confirmation.",
     "The above fee does not include Uniform Fee, Examination Fee and other applicable fees levied by the University / Examination Body, if any.",
     "Offer lapses automatically if token fee is not received by the acceptance deadline.",
@@ -739,8 +740,8 @@ Deno.serve(async (req) => {
       amount: Number(w.amount || 0),
     }));
 
-    // Token fee on the PDF: this is the amount the candidate must pay to
-    // confirm the seat and get their Admission Number — i.e. 25% of the
+    // Token fee on the PDF: this is the amount the candidate must pay before
+    // downloading the education-loan support letter — i.e. 10% of the
     // post-scholarship + post-waiver Year-1 fee, floored at ₹5,000.
     //
     //   1. If the offer carries an explicit token_fee_amount (set when the
@@ -759,7 +760,7 @@ Deno.serve(async (req) => {
         .reduce((s, w) => s + Number(w.amount || 0), 0);
       const postY1 = Math.max(0, y1Total - scholarship - y1Waivers);
       tokenAmount = postY1 > 0
-        ? Math.max(Math.round(postY1 * 0.25), 5000)
+        ? Math.max(Math.round(postY1 * 0.10), 5000)
         : Number(lead?.token_amount || 0);
     }
 

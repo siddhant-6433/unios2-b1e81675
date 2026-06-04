@@ -33,6 +33,9 @@ interface OfferLetter {
   created_at: string;
   session_id?: string | null;
   letter_url?: string | null;
+  loan_letter_url?: string | null;
+  admission_mode?: "direct" | "entrance" | null;
+  entrance_exam_name?: string | null;
 }
 
 interface SessionOption { id: string; name: string; is_active: boolean }
@@ -64,6 +67,23 @@ interface OfferLetterEditRequest {
   created_at: string;
 }
 
+const ENTRANCE_OPTIONS = [
+  "CAT",
+  "MAT",
+  "XAT",
+  "CMAT",
+  "CUET",
+  "CLAT",
+  "LSAT",
+  "NEET",
+  "JEECUP",
+  "UP B.Ed Joint Entrance Exam (JEEB.Ed)",
+  "UP D.El.Ed Counselling",
+  "PTET Entrance Exam",
+  "NIMT Admission Test (NAT)",
+  "Other",
+];
+
 export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, courseId, campusId, onSuccess }: OfferLetterDialogProps) {
   const { user, role } = useAuth();
   const { toast } = useToast();
@@ -78,10 +98,17 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   // waivers after the offer is issued. Total fee is also no longer typed by
   // the user — it comes directly from the published fee_structure for the
   // selected course + session.
-  const [form, setForm] = useState({ acceptance_deadline: "", session_id: "", token_fee_amount: "" });
+  const [form, setForm] = useState({
+    acceptance_deadline: "",
+    session_id: "",
+    token_fee_amount: "",
+    admission_mode: "direct" as "direct" | "entrance",
+    entrance_exam_name: "",
+    entrance_exam_other: "",
+  });
   const [tokenFeeEdited, setTokenFeeEdited] = useState(false);
   const [sessions, setSessions] = useState<SessionOption[]>([]);
-  // First-year fee for the picked session — used to default + floor the token fee.
+  // First-year fee for the picked session — used to default the token fee.
   const [firstYearFee, setFirstYearFee] = useState<number>(0);
   // Term keys present in the active fee structure (e.g. ['year_1', 'year_2']) —
   // drives the year picker in the Add-Waiver inline form.
@@ -267,19 +294,15 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       .reduce((s, w) => s + Number(w.amount || 0), 0);
 
   // Net Year-1 fee = gross Year-1 fee minus any year_1 waivers already
-  // staged in the pre-issuance waiver list. Token fee defaults/floor are
-  // anchored to this net figure so the candidate isn't asked to pay 25%
-  // of the full fee when they've been given a concession on Year 1.
+  // staged in the pre-issuance waiver list. The loan-letter token fee
+  // defaults to 10% of this net figure.
   const netFirstYearFee = Math.max(0, firstYearFee - preWaiverTotalForTerm("year_1"));
 
-  // Floor = greater of (10% of net Year-1, ₹5K). Always at least ₹5,000
-  // regardless of waivers — excess over Year-1 balance rolls forward to Year-2,
-  // Year-3, etc. at payment time (handled in provision-student-fees).
-  const tokenFloor = netFirstYearFee > 0
-    ? Math.max(Math.round(netFirstYearFee * 0.10), 5000)
-    : 5000;
+  // Token fee defaults to 10% of net Year-1. Admissions can lower it while
+  // issuing the offer, but never below ₹5,000.
+  const tokenFloor = 5000;
   const tokenDefault = netFirstYearFee > 0
-    ? Math.max(Math.round(netFirstYearFee * 0.25), tokenFloor)
+    ? Math.max(Math.round(netFirstYearFee * 0.10), tokenFloor)
     : 0;
 
   // Whenever the net Year-1 fee changes (waiver added/removed), always
@@ -308,6 +331,13 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       toast({ title: "Acceptance deadline required", description: "Set the date by which the candidate must accept this offer.", variant: "destructive" });
       return;
     }
+    const entranceName = form.entrance_exam_name === "Other"
+      ? form.entrance_exam_other.trim()
+      : form.entrance_exam_name.trim();
+    if (form.admission_mode === "entrance" && !entranceName) {
+      toast({ title: "Entrance details required", description: "Select the entrance/counselling route or type it under Other.", variant: "destructive" });
+      return;
+    }
 
     // Validate token fee — fall back to the computed default when the user
     // hasn't typed anything explicitly.
@@ -319,7 +349,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     if (tokenFeeNum < tokenFloor) {
       toast({
         title: "Token fee below minimum",
-        description: `Token fee cannot be lower than ₹${tokenFloor.toLocaleString("en-IN")} (the greater of 10% of Year-1 fee and ₹5,000).`,
+        description: `Token fee cannot be lower than ₹${tokenFloor.toLocaleString("en-IN")}.`,
         variant: "destructive",
       });
       return;
@@ -344,6 +374,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       net_fee: totalFee,
       token_fee_amount: tokenFeeNum,
       token_fee_user_edited: tokenFeeEdited,
+      admission_mode: form.admission_mode,
+      entrance_exam_name: form.admission_mode === "entrance" ? entranceName : null,
       acceptance_deadline: form.acceptance_deadline || null,
       course_id: courseId,
       campus_id: campusId,
@@ -397,7 +429,14 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
         description: autoApproved ? "PDF will be ready in a few seconds." : "Principal will review and approve this offer.",
       });
       setShowForm(false);
-      setForm({ acceptance_deadline: "", session_id: "", token_fee_amount: "" });
+      setForm({
+        acceptance_deadline: "",
+        session_id: "",
+        token_fee_amount: "",
+        admission_mode: "direct",
+        entrance_exam_name: "",
+        entrance_exam_other: "",
+      });
       setTokenFeeEdited(false);
       setPreWaivers([]);
       setShowPreWaiverForm(false);
@@ -872,8 +911,58 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                   </div>
                 )}
 
-                {/* Token fee — defaults to 25% of Year-1, editable but floored at
-                    max(10% of Year-1, ₹5,000). The pencil icon flips edit mode;
+                <div>
+                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">
+                    Admission Route
+                  </label>
+                  <select
+                    value={form.admission_mode}
+                    onChange={e => setForm(p => ({
+                      ...p,
+                      admission_mode: e.target.value as "direct" | "entrance",
+                      entrance_exam_name: e.target.value === "direct" ? "" : p.entrance_exam_name,
+                      entrance_exam_other: e.target.value === "direct" ? "" : p.entrance_exam_other,
+                    }))}
+                    className={inputCls}
+                  >
+                    <option value="direct">Direct Admission</option>
+                    <option value="entrance">Admission via Entrance / Counselling</option>
+                  </select>
+                </div>
+
+                {form.admission_mode === "entrance" && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-medium text-muted-foreground mb-1">
+                        Entrance / Counselling <span className="text-destructive">*</span>
+                      </label>
+                      <select
+                        value={form.entrance_exam_name}
+                        onChange={e => setForm(p => ({ ...p, entrance_exam_name: e.target.value, entrance_exam_other: e.target.value === "Other" ? p.entrance_exam_other : "" }))}
+                        className={inputCls}
+                      >
+                        <option value="">Select entrance</option>
+                        {ENTRANCE_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                      </select>
+                    </div>
+                    {form.entrance_exam_name === "Other" && (
+                      <div>
+                        <label className="block text-[11px] font-medium text-muted-foreground mb-1">
+                          Other Entrance <span className="text-destructive">*</span>
+                        </label>
+                        <input
+                          value={form.entrance_exam_other}
+                          onChange={e => setForm(p => ({ ...p, entrance_exam_other: e.target.value }))}
+                          className={inputCls}
+                          placeholder="Type entrance/counselling name"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Token fee — defaults to 10% of Year-1, editable but floored at
+                    ₹5,000. The pencil icon flips edit mode;
                     the field is read-only otherwise to discourage casual changes. */}
                 <div>
                   <label className="flex items-center justify-between text-[11px] font-medium text-muted-foreground mb-1">
@@ -903,15 +992,14 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                     {netFirstYearFee > 0 ? (
                       tokenFeeEdited ? (
                         <>
-                          Minimum <span className="font-semibold text-foreground">₹{tokenFloor.toLocaleString("en-IN")}</span> —
-                          the greater of 10% of net Year-1 fee and ₹5,000. Any excess over Year-1 balance rolls to Year-2.
+                          Minimum <span className="font-semibold text-foreground">₹{tokenFloor.toLocaleString("en-IN")}</span>. This is the amount the applicant must pay before downloading the education loan letter.
                           {firstYearFee !== netFirstYearFee && (
                             <> Gross Year-1 is ₹{firstYearFee.toLocaleString("en-IN")}; Year-1 waiver of ₹{(firstYearFee - netFirstYearFee).toLocaleString("en-IN")} applied.</>
                           )}
                         </>
                       ) : (
                         <>
-                          Default = 25% of net Year-1 fee (₹{netFirstYearFee.toLocaleString("en-IN")}) = ₹{tokenDefault.toLocaleString("en-IN")}.
+                          Default = 10% of net Year-1 fee (₹{netFirstYearFee.toLocaleString("en-IN")}) = ₹{tokenDefault.toLocaleString("en-IN")}.
                           {firstYearFee !== netFirstYearFee && (
                             <> Gross ₹{firstYearFee.toLocaleString("en-IN")} minus ₹{(firstYearFee - netFirstYearFee).toLocaleString("en-IN")} Year-1 waiver.</>
                           )}
@@ -938,7 +1026,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                     ))}
                   </select>
                   <p className="mt-1 text-[10px] text-muted-foreground/70">
-                    Locks the fee structure for this offer. Token amount = 10% of first-year fee from this session's structure.
+                    Locks the fee structure for this offer. Token amount defaults to 10% of first-year fee from this session's structure.
                     {!isSuperAdmin && " Only super admin can pick a non-active session."}
                   </p>
                 </div>
@@ -960,7 +1048,20 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                     title={programmeTotal <= 0 ? "Publish a fee structure for this course + session first" : undefined}>
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Issue Offer
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setPreWaivers([]); setShowPreWaiverForm(false); setPreWaiverForm({ term: "year_1", amount: "", reason: "" }); }}>Cancel</Button>
+                  <Button variant="outline" size="sm" onClick={() => {
+                    setShowForm(false);
+                    setForm({
+                      acceptance_deadline: "",
+                      session_id: "",
+                      token_fee_amount: "",
+                      admission_mode: "direct",
+                      entrance_exam_name: "",
+                      entrance_exam_other: "",
+                    });
+                    setPreWaivers([]);
+                    setShowPreWaiverForm(false);
+                    setPreWaiverForm({ term: "year_1", amount: "", reason: "" });
+                  }}>Cancel</Button>
                 </div>
               </CardContent>
             </Card>
