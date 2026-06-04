@@ -428,55 +428,6 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         )}
       </div>
 
-      {/* ── Education loan letter ───────────────────────── */}
-      <div className={`rounded-2xl border p-4 shadow-sm ${
-        feeStatus.token_complete ? "border-indigo-100 bg-indigo-50" : "border-gray-100 bg-white"
-      }`}>
-        <div className="flex items-start gap-3">
-          <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${
-            feeStatus.token_complete ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-400"
-          }`}>
-            <FileText className="h-5 w-5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className={`text-sm font-bold ${feeStatus.token_complete ? "text-indigo-950" : "text-gray-700"}`}>
-              Education Loan Letter
-            </p>
-            <p className={`text-xs mt-0.5 leading-snug ${feeStatus.token_complete ? "text-indigo-700" : "text-gray-500"}`}>
-              {feeStatus.token_complete
-                ? "Your token fee is paid. Download the loan support letter for bank processing."
-                : `Unlocked after token fee payment of ₹${feeStatus.token_required.toLocaleString("en-IN")}.`}
-            </p>
-          </div>
-          {feeStatus.token_complete ? (
-            offer.loan_letter_url ? (
-              <a
-                href={offer.loan_letter_url}
-                target="_blank"
-                rel="noopener"
-                className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-bold text-white hover:bg-indigo-700 transition-colors"
-              >
-                <FileText className="h-3.5 w-3.5" />
-                View
-              </a>
-            ) : (
-              <button
-                disabled={generatingLoanLetter}
-                onClick={generateLoanLetter}
-                className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-bold text-white hover:bg-indigo-700 transition-colors disabled:opacity-50"
-              >
-                {generatingLoanLetter ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
-                Generate
-              </button>
-            )
-          ) : (
-            <span className="shrink-0 rounded-full bg-gray-100 px-2.5 py-1 text-[10px] font-semibold text-gray-500">
-              Locked
-            </span>
-          )}
-        </div>
-      </div>
-
       {/* ── Journey Steps ──────────────────────────────── */}
       <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
         <div className="px-4 pt-4 pb-3 border-b border-gray-50">
@@ -509,7 +460,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                         : <span className="text-[10px] font-semibold text-blue-700 bg-blue-100 border border-blue-200 px-2 py-0.5 rounded-full">Action Required</span>}
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5 leading-snug">
-                      Pay 10% of first-year fee to secure your seat and receive your Pre-Admission Number.
+                      Pay the token fee target from your offer to secure your seat and receive your Pre-Admission Number.
                       {tokenOutstanding > minInstalment && !done && ` You can pay in instalments of ₹${minInstalment.toLocaleString("en-IN")} or more.`}
                     </p>
                     <div className="mt-2.5 h-2 rounded-full bg-gray-200 overflow-hidden">
@@ -524,6 +475,43 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                     </div>
                     {isPreAdmitted && lead.pre_admission_no && (
                       <p className="mt-1.5 text-xs text-emerald-700 font-semibold">✓ Pre-Admission No: {lead.pre_admission_no}</p>
+                    )}
+                    {done && (
+                      <div className="mt-3 flex flex-col gap-3 rounded-xl border border-indigo-200 bg-indigo-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-start gap-2.5">
+                          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white">
+                            <FileText className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold uppercase tracking-wide text-indigo-900">
+                              Eligible for Education Loan
+                            </p>
+                            <p className="mt-0.5 text-xs leading-snug text-indigo-700">
+                              Your token fee target of ₹{feeStatus.token_required.toLocaleString("en-IN")} is complete. Download the loan support letter for bank processing.
+                            </p>
+                          </div>
+                        </div>
+                        {offer.loan_letter_url ? (
+                          <a
+                            href={offer.loan_letter_url}
+                            target="_blank"
+                            rel="noopener"
+                            className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-bold text-white transition-colors hover:bg-indigo-700"
+                          >
+                            <FileText className="h-3.5 w-3.5" />
+                            View Loan Letter
+                          </a>
+                        ) : (
+                          <button
+                            disabled={generatingLoanLetter}
+                            onClick={generateLoanLetter}
+                            className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-bold text-white transition-colors hover:bg-indigo-700 disabled:opacity-50"
+                          >
+                            {generatingLoanLetter ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                            Generate Loan Letter
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>

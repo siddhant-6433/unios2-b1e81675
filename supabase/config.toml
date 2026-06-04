@@ -51,6 +51,9 @@ verify_jwt = false
 [functions.generate-offer-letter]
 verify_jwt = false
 
+[functions.generate-loan-letter]
+verify_jwt = false
+
 [functions.generate-application-form]
 verify_jwt = false
 
