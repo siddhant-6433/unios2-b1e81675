@@ -146,6 +146,16 @@ function getCompletionPct(completed_sections: any, program_category: string | nu
   return Math.round((done / steps.length) * 100);
 }
 
+const APPLICATION_HYDRATE_CHUNK_SIZE = 50;
+
+function chunkIds(ids: string[], size = APPLICATION_HYDRATE_CHUNK_SIZE): string[][] {
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += size) {
+    chunks.push(ids.slice(i, i + size));
+  }
+  return chunks;
+}
+
 // Compact application progress badge
 function AppProgressBadge({ pct, paymentStatus }: { pct: number | null | undefined; paymentStatus?: string | null }) {
   if (pct === null || pct === undefined) return null;
@@ -191,6 +201,7 @@ const Admissions = () => {
   const [counsellorOptions, setCounsellorOptions] = useState<{ id: string; name: string }[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showAddLead, setShowAddLead] = useState(false);
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>();
   const [draftsRefreshKey, setDraftsRefreshKey] = useState(0);
@@ -362,10 +373,18 @@ const Admissions = () => {
   const hydrateApplications = async (rows: any[]) => {
     if (!rows.length) return rows;
     const leadIds = rows.map(r => r.id);
-    const { data: apps } = await supabase
-      .from("applications")
-      .select("lead_id, completed_sections, program_category, payment_status, fee_amount, status")
-      .in("lead_id", leadIds);
+    const apps: any[] = [];
+    for (const leadIdBatch of chunkIds(leadIds)) {
+      const { data, error } = await supabase
+        .from("applications")
+        .select("lead_id, completed_sections, program_category, payment_status, fee_amount, status")
+        .in("lead_id", leadIdBatch);
+      if (error) {
+        console.warn("[Admissions] application hydration skipped for a lead batch", error.message);
+        continue;
+      }
+      if (data?.length) apps.push(...data);
+    }
     if (!apps?.length) return rows;
     const byLead: Record<string, any> = {};
     apps.forEach((a: any) => {
@@ -386,28 +405,133 @@ const Admissions = () => {
     return rows;
   };
 
+  const applyApplicationHydration = (rows: Lead[]) => {
+    const rowsToHydrate = rows.map(row => ({ ...row }));
+    void hydrateApplications(rowsToHydrate).then((hydratedRows) => {
+      const byLead = new Map(hydratedRows.map((row: Lead) => [row.id, row]));
+      setLeads(current => current.map(lead => {
+        const hydrated = byLead.get(lead.id);
+        if (!hydrated) return lead;
+        return {
+          ...lead,
+          app_completion_pct: hydrated.app_completion_pct,
+          app_payment_status: hydrated.app_payment_status,
+          app_fee_amount: hydrated.app_fee_amount,
+        };
+      }));
+    });
+  };
+
   const fetchLeads = async () => {
     setLoading(true);
+    setLoadError(null);
 
-    // Pipeline / action_center / seats / payments need the in-memory pool to
-    // bucket by stage. Capped at 500 (same as before — those views are heavy).
-    // List view is the hot path most counsellors live in; it pages server-side.
-    if (view !== "list") {
-      let query = supabase
+    try {
+      // Pipeline / action_center / seats / payments need the in-memory pool to
+      // bucket by stage. Capped at 500 (same as before — those views are heavy).
+      // List view is the hot path most counsellors live in; it pages server-side.
+      if (view !== "list") {
+        let query = supabase
+          .from("leads")
+          .select(`*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`)
+          .order("created_at", { ascending: false })
+          .limit(500);
+        if (role === "counsellor" && profile?.id) {
+          query = query.eq("counsellor_id", profile.id);
+        } else if (counsellorFilter !== "all" && counsellorFilter !== "unassigned") {
+          query = query.eq("counsellor_id", counsellorFilter);
+        } else if (counsellorFilter === "unassigned") {
+          query = query.is("counsellor_id", null);
+        } else if (selectedCampusId !== "all") {
+          query = query.eq("campus_id", selectedCampusId);
+        }
+        const { data, error } = await query;
+        if (error) throw error;
+        const enriched = (data || []).map((l: any) => ({
+          ...l,
+          course_name: l.courses?.name || "—",
+          campus_name: l.campuses?.name || "—",
+          counsellor_name: l.profiles?.display_name || "Unassigned",
+          app_completion_pct: null as number | null,
+          app_payment_status: null as string | null,
+          app_fee_amount: null as number | null,
+        }));
+        setLeads(enriched);
+        setTotalCount(enriched.length);
+        setSelectedIds(new Set());
+        setHasLoadedOnce(true);
+        applyApplicationHydration(enriched);
+        return;
+      }
+
+      // ── List view: server-side filter + paginate ───────────────────────────
+      const offset = (page - 1) * PAGE_SIZE;
+      let query: any = supabase
         .from("leads")
-        .select(`*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`)
-        .order("created_at", { ascending: false })
-        .limit(500);
+        .select(
+          "*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)",
+          { count: "exact" }
+        )
+        .order("created_at", { ascending: false });
+
+      // Counsellor / campus scope
       if (role === "counsellor" && profile?.id) {
         query = query.eq("counsellor_id", profile.id);
-      } else if (counsellorFilter !== "all" && counsellorFilter !== "unassigned") {
-        query = query.eq("counsellor_id", counsellorFilter);
       } else if (counsellorFilter === "unassigned") {
         query = query.is("counsellor_id", null);
+      } else if (counsellorFilter !== "all") {
+        query = query.eq("counsellor_id", counsellorFilter);
       } else if (selectedCampusId !== "all") {
         query = query.eq("campus_id", selectedCampusId);
       }
-      const { data } = await query;
+
+      // Stage / source / role / temperature
+      if (stageFilter !== "all") {
+        const stages = stageFilter.split(",").map(s => s.trim()).filter(Boolean);
+        if (stages.length === 1) query = query.eq("stage", stages[0]);
+        else if (stages.length > 1) query = query.in("stage", stages);
+      }
+      if (sourceFilter !== "all") query = query.eq("source", sourceFilter);
+      if (debouncedCourseFilter.length > 0) query = query.in("course_id", debouncedCourseFilter);
+      if (roleFilter !== "all") query = query.eq("person_role", roleFilter);
+      if (tempFilter !== "all") query = query.eq("lead_temperature", tempFilter);
+
+      // Date range (applied to created_at)
+      if (fromDate) query = query.gte("created_at", `${fromDate}T00:00:00`);
+      if (toDate) query = query.lte("created_at", `${toDate}T23:59:59.999`);
+
+      // Multi-field search (server-side ilike OR). Triggered after ≥ 2 chars.
+      if (debouncedSearch.length >= 2) {
+        const q = debouncedSearch;
+        const digits = q.replace(/\D/g, "");
+        const phoneTerm = digits.length >= 3 ? digits : q;
+        // Escape any commas in the user-supplied search to avoid breaking the OR string
+        const safe = (s: string) => s.replace(/,/g, "");
+        query = query.or(
+          `name.ilike.%${safe(q)}%,phone.ilike.%${safe(phoneTerm)}%,email.ilike.%${safe(q)}%,application_id.ilike.%${safe(q)}%`
+        );
+      }
+
+      // ID-set filters: intersect any active sets and pass the result as .in("id", …)
+      const idSets: (Set<string> | null)[] = [inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds];
+      const activeSets = idSets.filter((s): s is Set<string> => s !== null);
+      if (activeSets.length > 0) {
+        let intersection = Array.from(activeSets[0]);
+        for (let i = 1; i < activeSets.length; i++) {
+          const other = activeSets[i];
+          intersection = intersection.filter(id => other.has(id));
+        }
+        if (intersection.length === 0) {
+          setLeads([]); setTotalCount(0); setSelectedIds(new Set()); setHasLoadedOnce(true);
+          return;
+        }
+        query = query.in("id", intersection);
+      }
+
+      query = query.range(offset, offset + PAGE_SIZE - 1);
+
+      const { data, count, error } = await query;
+      if (error) throw error;
       const enriched = (data || []).map((l: any) => ({
         ...l,
         course_name: l.courses?.name || "—",
@@ -417,96 +541,23 @@ const Admissions = () => {
         app_payment_status: null as string | null,
         app_fee_amount: null as number | null,
       }));
-      await hydrateApplications(enriched);
       setLeads(enriched);
-      setTotalCount(enriched.length);
-      setSelectedIds(new Set());
-      setLoading(false);
+      setTotalCount(count ?? enriched.length);
       setHasLoadedOnce(true);
-      return;
-    }
-
-    // ── List view: server-side filter + paginate ───────────────────────────
-    const offset = (page - 1) * PAGE_SIZE;
-    let query: any = supabase
-      .from("leads")
-      .select(
-        "*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)",
-        { count: "exact" }
-      )
-      .order("created_at", { ascending: false });
-
-    // Counsellor / campus scope
-    if (role === "counsellor" && profile?.id) {
-      query = query.eq("counsellor_id", profile.id);
-    } else if (counsellorFilter === "unassigned") {
-      query = query.is("counsellor_id", null);
-    } else if (counsellorFilter !== "all") {
-      query = query.eq("counsellor_id", counsellorFilter);
-    } else if (selectedCampusId !== "all") {
-      query = query.eq("campus_id", selectedCampusId);
-    }
-
-    // Stage / source / role / temperature
-    if (stageFilter !== "all") {
-      const stages = stageFilter.split(",").map(s => s.trim()).filter(Boolean);
-      if (stages.length === 1) query = query.eq("stage", stages[0]);
-      else if (stages.length > 1) query = query.in("stage", stages);
-    }
-    if (sourceFilter !== "all") query = query.eq("source", sourceFilter);
-    if (debouncedCourseFilter.length > 0) query = query.in("course_id", debouncedCourseFilter);
-    if (roleFilter !== "all") query = query.eq("person_role", roleFilter);
-    if (tempFilter !== "all") query = query.eq("lead_temperature", tempFilter);
-
-    // Date range (applied to created_at)
-    if (fromDate) query = query.gte("created_at", `${fromDate}T00:00:00`);
-    if (toDate) query = query.lte("created_at", `${toDate}T23:59:59.999`);
-
-    // Multi-field search (server-side ilike OR). Triggered after ≥ 2 chars.
-    if (debouncedSearch.length >= 2) {
-      const q = debouncedSearch;
-      const digits = q.replace(/\D/g, "");
-      const phoneTerm = digits.length >= 3 ? digits : q;
-      // Escape any commas in the user-supplied search to avoid breaking the OR string
-      const safe = (s: string) => s.replace(/,/g, "");
-      query = query.or(
-        `name.ilike.%${safe(q)}%,phone.ilike.%${safe(phoneTerm)}%,email.ilike.%${safe(q)}%,application_id.ilike.%${safe(q)}%`
-      );
-    }
-
-    // ID-set filters: intersect any active sets and pass the result as .in("id", …)
-    const idSets: (Set<string> | null)[] = [inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds];
-    const activeSets = idSets.filter((s): s is Set<string> => s !== null);
-    if (activeSets.length > 0) {
-      let intersection = Array.from(activeSets[0]);
-      for (let i = 1; i < activeSets.length; i++) {
-        const other = activeSets[i];
-        intersection = intersection.filter(id => other.has(id));
+      applyApplicationHydration(enriched);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to load admissions leads.";
+      console.error("[Admissions] failed to load leads", error);
+      setLoadError(message);
+      if (!hasLoadedOnce) {
+        setLeads([]);
+        setTotalCount(0);
+        setSelectedIds(new Set());
+        setHasLoadedOnce(true);
       }
-      if (intersection.length === 0) {
-        setLeads([]); setTotalCount(0); setSelectedIds(new Set()); setLoading(false); setHasLoadedOnce(true);
-        return;
-      }
-      query = query.in("id", intersection);
+    } finally {
+      setLoading(false);
     }
-
-    query = query.range(offset, offset + PAGE_SIZE - 1);
-
-    const { data, count } = await query;
-    const enriched = (data || []).map((l: any) => ({
-      ...l,
-      course_name: l.courses?.name || "—",
-      campus_name: l.campuses?.name || "—",
-      counsellor_name: l.profiles?.display_name || "Unassigned",
-      app_completion_pct: null as number | null,
-      app_payment_status: null as string | null,
-      app_fee_amount: null as number | null,
-    }));
-    await hydrateApplications(enriched);
-    setLeads(enriched);
-    setTotalCount(count ?? enriched.length);
-    setLoading(false);
-    setHasLoadedOnce(true);
   };
 
   // Refetch whenever any input that affects the query changes
@@ -1063,6 +1114,22 @@ const Admissions = () => {
   // result no longer unmounts the page just because `leads.length === 0`.
   if (!hasLoadedOnce) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  }
+
+  if (loadError && leads.length === 0) {
+    return (
+      <div className="flex min-h-[320px] items-center justify-center px-4">
+        <div className="w-full max-w-md rounded-lg border bg-card p-6 text-center shadow-sm">
+          <XCircle className="mx-auto mb-3 h-8 w-8 text-destructive" />
+          <h1 className="text-lg font-semibold text-foreground">Admissions CRM could not load</h1>
+          <p className="mt-2 text-sm text-muted-foreground">{loadError}</p>
+          <Button className="mt-5" onClick={() => fetchLeads()} disabled={loading}>
+            {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Retry
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   const selectedLeadNames = Array.from(selectedIds).map(id => leads.find(l => l.id === id)?.name || "").filter(Boolean);

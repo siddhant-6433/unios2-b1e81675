@@ -52,14 +52,6 @@ export function GlobalActionBar() {
           ? counsellorFilter
           : (isCounsellor ? profileId : null);
 
-        let myLeadIds: string[] | null = null;
-        if (effectiveProfileId) {
-          const { data: myLeads } = await supabase
-            .from("leads").select("id").eq("counsellor_id", effectiveProfileId);
-          myLeadIds = (myLeads || []).map((l: any) => l.id);
-          if (!myLeadIds.length) { setItems([]); return; }
-        }
-
         // Use allSettled — if one source breaks (RLS, missing view, schema
         // mismatch), the rest of the bar still renders. Promise.all would
         // wipe ALL pills on a single failure, which is the bug we hit when
@@ -73,11 +65,11 @@ export function GlobalActionBar() {
           })(),
           (() => {
             let q = supabase.from("lead_followups")
-              .select("id", { count: "exact", head: true })
+              .select(effectiveProfileId ? "id, leads!inner(counsellor_id)" : "id", { count: "exact", head: true })
               .eq("status", "pending")
               .gte("scheduled_at", todayStart)
               .lte("scheduled_at", todayEnd);
-            if (myLeadIds) q = q.in("lead_id", myLeadIds);
+            if (effectiveProfileId) q = q.eq("leads.counsellor_id", effectiveProfileId);
             return q;
           })(),
           (() => {
@@ -122,10 +114,10 @@ export function GlobalActionBar() {
           // counsellor scope is active; org-wide otherwise.
           (() => {
             let q = supabase.from("call_logs")
-              .select("id", { count: "exact", head: true })
+              .select(effectiveProfileId ? "id, leads!inner(counsellor_id)" : "id", { count: "exact", head: true })
               .eq("direction", "inbound")
               .eq("disposition", "missed");
-            if (myLeadIds) q = q.in("lead_id", myLeadIds);
+            if (effectiveProfileId) q = q.eq("leads.counsellor_id", effectiveProfileId);
             return q;
           })(),
           // Hot leads: AI-elevated priority_interested. Counsellor-scoped only —
@@ -144,12 +136,12 @@ export function GlobalActionBar() {
           // this answers in milliseconds. Mirrors NotificationPanel.fetchUnreplied.
           // Counsellor-scoped only; admins have a dedicated inbox.
           (() => {
-            if (!myLeadIds) return Promise.resolve({ count: 0 });
+            if (!effectiveProfileId) return Promise.resolve({ count: 0 });
             return supabase.from("whatsapp_messages")
-              .select("id", { count: "exact", head: true })
+              .select("id, leads!inner(counsellor_id)", { count: "exact", head: true })
               .eq("direction", "inbound")
               .eq("is_read", false)
-              .in("lead_id", myLeadIds);
+              .eq("leads.counsellor_id", effectiveProfileId);
           })(),
           // Reclaim soon: leads that the SLA cron will unassign in <=30 min if
           // no contact is made. Counsellor-scoped; uses RPC for the per-source
