@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2, CreditCard, FileText, IndianRupee, Clock, Check, GraduationCap, Sparkles, ChevronRight, CalendarDays } from "lucide-react";
+import { buildApplicantFeeBreakdownRows } from "./feeBreakdown";
 
 // Fallbacks if the get_applicant_deadlines RPC is unreachable.
 // The single source of truth is _app_config — these are last-resort
@@ -614,27 +615,17 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
 
       {/* ── Fee Breakdown ──────────────────────────────── */}
       {(() => {
-        // Build sorted per-year rows from yearFees
-        const yearKeys = Object.keys(yearFees).filter(k => k.startsWith("year_")).sort();
-        const scholarship = offer.scholarship_amount || 0;
-        // post_scholarship_year_1 bakes in both scholarship + approved year-1 waivers
-        const y1Net = feeStatus.post_scholarship_year_1 ?? (feeStatus.first_year_fee - scholarship);
-
-        const rows = yearKeys.map(term => {
-          const raw = yearFees[term];
-          const termWaivers = offerWaivers.filter(w => w.term === term).reduce((s, w) => s + w.amount, 0);
-          const sch = term === "year_1" ? scholarship : 0;
-          // For year_1, use the authoritative post-scholarship value from feeStatus
-          // (it already accounts for all approved waivers on that term).
-          const net = term === "year_1" ? y1Net : raw - termWaivers;
-          const totalDeduction = raw - net;
-          return { term, raw, sch, waivers: termWaivers, totalDeduction, net };
+        const rows = buildApplicantFeeBreakdownRows({
+          yearFeesNet: yearFees,
+          offerWaivers,
+          scholarshipAmount: offer.scholarship_amount || 0,
+          feeStatus,
         });
 
         const grandRaw = rows.reduce((s, r) => s + r.raw, 0);
         const grandNet = rows.reduce((s, r) => s + r.net, 0);
         const grandDeductions = grandRaw - grandNet;
-        const hasMultiYear = yearKeys.length > 1;
+        const hasMultiYear = rows.length > 1;
         const hasAnyDeduction = grandDeductions > 0;
 
         const fmt = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
