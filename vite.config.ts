@@ -5,7 +5,7 @@ import { componentTagger } from "lovable-tagger";
 
 const VENDOR_GROUPS: Array<{ chunk: string; matchers: string[] }> = [
   { chunk: "vendor-runtime", matchers: ["/tslib/", "/@babel/runtime/"] },
-  { chunk: "vendor-react", matchers: ["/react/", "/react-dom/", "/scheduler/"] },
+  { chunk: "vendor-react", matchers: ["/node_modules/react/", "/node_modules/react-dom/", "/node_modules/scheduler/"] },
   { chunk: "vendor-router", matchers: ["/react-router/", "/react-router-dom/", "/@remix-run/router/", "/history/"] },
   { chunk: "vendor-query-supabase", matchers: ["/@tanstack/react-query/", "/@tanstack/query-core/", "/@supabase/", "/iceberg-js/", "/@lovable.dev/cloud-auth-js/"] },
   {
@@ -82,12 +82,13 @@ const VENDOR_GROUPS: Array<{ chunk: string; matchers: string[] }> = [
 ];
 
 function manualChunks(id: string) {
-  if (id.includes("vite/preload-helper") || id.includes("commonjsHelpers")) return "vendor-runtime";
-  if (!id.includes("node_modules")) return;
+  const normalizedId = id.replace(/\\/g, "/");
+  if (normalizedId.includes("vite/preload-helper") || normalizedId.includes("commonjsHelpers")) return "vendor-runtime";
+  if (!normalizedId.includes("/node_modules/")) return;
 
   for (const group of VENDOR_GROUPS) {
     if (group.matchers.length === 0) continue;
-    if (group.matchers.some((matcher) => id.includes(matcher))) {
+    if (group.matchers.some((matcher) => normalizedId.includes(matcher))) {
       return group.chunk;
     }
   }
