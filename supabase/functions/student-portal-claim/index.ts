@@ -11,10 +11,7 @@
  *   3. Function verifies the token is unclaimed + unexpired, finds the
  *      student row, finds-or-creates an auth user keyed by phone, links
  *      students.user_id → that auth user, marks the token claimed.
- *   4. Returns { phone, name, magic_email } so the SPA can sign the user
- *      in via OTP (no password — phone provider is disabled on this
- *      project, so the SPA stores the student_id in localStorage and
- *      uses it for subsequent reads, similar to apply portal).
+ *   4. Returns a Supabase session so the SPA can enter /student immediately.
  *
  * Auth: anon key OR no auth (token itself IS the credential).
  */
@@ -32,6 +29,50 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+function normalizePhone(value: string | null | undefined): string | null {
+  const digits = (value || "").replace(/\D/g, "");
+  if (!digits) return null;
+  return digits.startsWith("91") ? digits : `91${digits}`;
+}
+
+function studentEmail(studentId: string, phone: string | null, email: string | null | undefined): string {
+  const trimmed = (email || "").trim().toLowerCase();
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return trimmed;
+  if (phone) return `${phone}@student.unios.local`;
+  return `student.${studentId}@student.unios.local`;
+}
+
+async function findUserByEmailOrPhone(db: any, email: string, phone: string | null) {
+  const { data } = await db.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  return (data?.users || []).find((u: any) =>
+    u.email?.toLowerCase() === email.toLowerCase() ||
+    (phone && u.phone?.replace(/\D/g, "") === phone)
+  ) || null;
+}
+
+async function createSession(db: any, userId: string) {
+  const { data: userData } = await db.auth.admin.getUserById(userId);
+  const email = userData?.user?.email;
+  if (!email) return null;
+
+  const { data: magicLink, error: magicError } = await db.auth.admin.generateLink({
+    type: "magiclink",
+    email,
+  });
+  if (magicError || !magicLink?.properties?.hashed_token) return null;
+
+  const { data: sessionData, error: verifyError } = await db.auth.verifyOtp({
+    token_hash: magicLink.properties.hashed_token,
+    type: "magiclink",
+  });
+  if (verifyError || !sessionData?.session) return null;
+
+  return {
+    access_token: sessionData.session.access_token,
+    refresh_token: sessionData.session.refresh_token,
+  };
 }
 
 Deno.serve(async (req) => {
@@ -67,26 +108,84 @@ Deno.serve(async (req) => {
 
   const { data: student, error: studentErr } = await db
     .from("students")
-    .select("id, name, phone, email, user_id, admission_no")
+    .select("id, name, phone, whatsapp_no, email, user_id, admission_no")
     .eq("id", row.student_id)
     .single();
   if (studentErr || !student) return json({ error: "Student record not found" }, 404);
 
-  // Mark token claimed even if no auth user gets linked. The SPA can use
-  // the returned student data immediately; auth linking is a soft-success.
-  await db
-    .from("student_magic_tokens")
-    .update({ claimed_at: new Date().toISOString() })
-    .eq("id", row.id);
+  const phone = normalizePhone(student.phone || student.whatsapp_no || row.phone);
+  const email = studentEmail(student.id, phone, student.email || row.email);
 
-  await db.from("lead_activities").insert({
-    lead_id: row.lead_id,
-    type: "system",
-    description: `Student claimed StudentPortal access (AN: ${student.admission_no || "—"})`,
-  });
+  let userId = student.user_id;
+  if (!userId) {
+    const existing = await findUserByEmailOrPhone(db, email, phone);
+    if (existing?.id) {
+      userId = existing.id;
+    } else {
+      const createPayload: Record<string, unknown> = {
+        email,
+        email_confirm: true,
+        user_metadata: {
+          provisioned_by: "student_portal_claim",
+          role: "student",
+          student_id: student.id,
+          phone,
+          full_name: student.name,
+          display_name: student.name,
+        },
+      };
+      if (phone) {
+        createPayload.phone = `+${phone}`;
+        createPayload.phone_confirm = true;
+      }
+
+      const { data: created, error: createErr } = await db.auth.admin.createUser(createPayload as any);
+      if (createErr || !created?.user?.id) {
+        const fallback = await findUserByEmailOrPhone(db, email, phone);
+        if (!fallback?.id) return json({ error: createErr?.message || "Could not create student account" }, 500);
+        userId = fallback.id;
+      } else {
+        userId = created.user.id;
+      }
+    }
+
+    const { error: linkErr } = await db
+      .from("students")
+      .update({ user_id: userId })
+      .eq("id", student.id);
+    if (linkErr) return json({ error: linkErr.message }, 500);
+  }
+
+  await db.from("user_roles").upsert(
+    { user_id: userId, role: "student" },
+    { onConflict: "user_id,role", ignoreDuplicates: true },
+  );
+
+  await db.from("profiles").upsert(
+    { user_id: userId, display_name: student.name, ...(phone ? { phone: `+${phone}` } : {}) },
+    { onConflict: "user_id" },
+  );
+
+  const session = await createSession(db, userId);
+  if (!session) return json({ error: "Could not create student session" }, 500);
+
+  const { error: claimErr } = await db
+    .from("student_magic_tokens")
+    .update({ claimed_at: new Date().toISOString(), claimed_user_id: userId })
+    .eq("id", row.id);
+  if (claimErr) return json({ error: claimErr.message }, 500);
+
+  if (row.lead_id) {
+    await db.from("lead_activities").insert({
+      lead_id: row.lead_id,
+      type: "system",
+      description: `Student claimed StudentPortal access (AN: ${student.admission_no || "—"})`,
+    });
+  }
 
   return json({
     ok: true,
+    session,
     student_id: student.id,
     name: student.name,
     phone: student.phone,
