@@ -48,67 +48,43 @@ export function WhatsAppPanel() {
   const [open, setOpen] = useState(false);
   const toastIdSet = useRef(new Set<string>());
 
-  // Fetch WhatsApp message notifications scoped to counsellor's leads if needed
+  // Notifications are already scoped at write time by user_id. Avoid fetching
+  // every counsellor lead ID here; this component is mounted on every CRM page.
   const fetchNotifications = useCallback(async () => {
     if (!user?.id) return;
     setLoading(true);
 
-    let leadIds: string[] | null = null;
-    if (isCounsellor && profile?.id) {
-      const { data: myLeads } = await supabase
-        .from("leads").select("id").eq("counsellor_id", profile.id);
-      leadIds = (myLeads || []).map((l: any) => l.id);
-    }
-
-    let q = supabase
-      .from("notifications" as any)
+    const q = supabase
+      .from("notifications" as never)
       .select("*")
       .eq("user_id", user.id)
       .eq("type", "whatsapp_message")
       .order("created_at", { ascending: false })
       .limit(50);
 
-    // For counsellors, further filter by notifications whose link contains their lead IDs
-    // Notifications use user_id already scoped at creation, but fetch all and filter by link/lead
     const { data } = await q;
-    let filtered = (data || []) as any[];
-
-    // If counsellor, only show notifications whose link matches their leads
-    if (isCounsellor && leadIds !== null) {
-      const idSet = new Set(leadIds);
-      filtered = filtered.filter((n: any) => {
-        if (!n.link) return false;
-        // links are typically "/admissions/<lead_id>" or "/whatsapp-inbox?lead=<lead_id>"
-        return leadIds!.some(id => n.link.includes(id));
-      });
-    }
+    const filtered = (data || []) as Notification[];
 
     setNotifications(filtered);
-    setUnreadNotifCount(filtered.filter((n: any) => !n.is_read).length);
+    setUnreadNotifCount(filtered.filter((n) => !n.is_read).length);
     setLoading(false);
-  }, [user?.id, isCounsellor, profile?.id]);
+  }, [user?.id]);
 
-  // Fetch unreplied count directly from whatsapp_messages instead of the
-  // whatsapp_conversations view. The view does DISTINCT ON + 2 LATERAL count
-  // subqueries across 16K+ messages and was hitting the 8s statement timeout
-  // when every tab + every realtime message refired it. The partial index
-  // idx_wa_messages_unread (direction='inbound' AND is_read=false) answers a
-  // direct head-count in milliseconds.
+  // Reuse the badge RPC instead of doing a PostgREST head-count from every
+  // mounted header. It scopes counsellors server-side and avoids materializing
+  // their lead IDs in the client.
   const fetchUnreplied = useCallback(async () => {
-    let q = supabase
-      .from("whatsapp_messages")
-      .select("id", { count: "exact", head: true })
-      .eq("direction", "inbound")
-      .eq("is_read", false);
-    if (isCounsellor && profile?.id) {
-      const { data: myLeads } = await supabase
-        .from("leads").select("id").eq("counsellor_id", profile.id);
-      if (!myLeads?.length) { setUnrepliedCount(0); return; }
-      q = q.in("lead_id", myLeads.map((l: any) => l.id));
+    if (!role || (isCounsellor && !profile?.id)) return;
+    const { data, error } = await supabase.rpc("action_badge_counts" as never, {
+      p_scope_counsellor_id: isCounsellor ? profile?.id : null,
+      p_include_unassigned: true,
+    } as never);
+    if (error) {
+      console.error("[WhatsAppPanel] unread count fetch failed:", error);
+      return;
     }
-    const { count } = await q;
-    setUnrepliedCount(count || 0);
-  }, [isCounsellor, profile?.id]);
+    setUnrepliedCount(Number(data?.wa_unread || 0));
+  }, [role, isCounsellor, profile?.id]);
 
   useEffect(() => {
     fetchNotifications();
@@ -120,15 +96,13 @@ export function WhatsAppPanel() {
     if (!user?.id) return;
     const notifChannel = supabase
       .channel("wa-notifications-realtime")
-      .on("postgres_changes" as any, {
+      .on("postgres_changes", {
         event: "INSERT", schema: "public", table: "notifications",
         filter: `user_id=eq.${user.id}`,
-      }, (payload: any) => {
+      }, (payload: { new: Notification }) => {
         const n = payload.new as Notification;
         if (n.type !== "whatsapp_message") return;
         if (toastIdSet.current.has(n.id)) return;
-        // For counsellors, only surface if the notification link relates to their leads
-        // Re-fetch to apply proper filtering rather than doing it inline
         fetchNotifications();
         fetchUnreplied();
       })
@@ -140,7 +114,7 @@ export function WhatsAppPanel() {
     let waDebounce: ReturnType<typeof setTimeout> | null = null;
     const waChannel = supabase
       .channel("wa-conversations-header")
-      .on("postgres_changes" as any, {
+      .on("postgres_changes", {
         event: "*", schema: "public", table: "whatsapp_messages",
       }, () => {
         if (waDebounce) clearTimeout(waDebounce);
@@ -152,11 +126,11 @@ export function WhatsAppPanel() {
       supabase.removeChannel(notifChannel);
       supabase.removeChannel(waChannel);
     };
-  }, [user?.id, fetchUnreplied]);
+  }, [user?.id, fetchNotifications, fetchUnreplied]);
 
   const handleClick = async (notif: Notification) => {
     if (!notif.is_read) {
-      await supabase.from("notifications" as any).update({ is_read: true }).eq("id", notif.id);
+      await supabase.from("notifications" as never).update({ is_read: true } as never).eq("id", notif.id);
       setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, is_read: true } : n));
       setUnreadNotifCount(prev => Math.max(0, prev - 1));
     }
@@ -180,7 +154,7 @@ export function WhatsAppPanel() {
     // 3. Look up phone via lead_id using whatsapp_messages (not the view, avoids RLS issues)
     if (notif.lead_id) {
       const { data: msg } = await supabase
-        .from("whatsapp_messages" as any)
+        .from("whatsapp_messages" as never)
         .select("phone")
         .eq("lead_id", notif.lead_id)
         .order("created_at", { ascending: false })
@@ -200,14 +174,14 @@ export function WhatsAppPanel() {
     if (!user?.id) return;
     const unreadIds = notifications.filter(n => !n.is_read).map(n => n.id);
     if (unreadIds.length === 0) return;
-    await supabase.from("notifications" as any).update({ is_read: true }).in("id", unreadIds);
+    await supabase.from("notifications" as never).update({ is_read: true } as never).in("id", unreadIds);
     setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
     setUnreadNotifCount(0);
   };
 
   const deleteNotif = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    await supabase.from("notifications" as any).delete().eq("id", id);
+    await supabase.from("notifications" as never).delete().eq("id", id);
     const removed = notifications.find(n => n.id === id);
     setNotifications(prev => prev.filter(n => n.id !== id));
     if (removed && !removed.is_read) setUnreadNotifCount(prev => Math.max(0, prev - 1));
