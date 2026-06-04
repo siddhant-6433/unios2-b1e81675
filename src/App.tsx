@@ -4,10 +4,11 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { CampusProvider } from "@/contexts/CampusContext";
 import { PermissionProvider } from "@/contexts/PermissionContext";
+import { getStudentClaimToken } from "@/lib/studentClaim";
 import {
   ProtectedRoute,
   StaffRoute,
@@ -147,6 +148,19 @@ function OfferLinkRedirect() {
   return <Navigate to={`/apply?token=${encodeURIComponent(token)}&view=offer`} replace />;
 }
 
+function StudentPortalEntry() {
+  const [searchParams] = useSearchParams();
+  const claimToken = getStudentClaimToken(searchParams);
+
+  if (claimToken) return <StudentPortalPage />;
+
+  return (
+    <StudentRoute>
+      <StudentPortalPage />
+    </StudentRoute>
+  );
+}
+
 const App = () => (
   <AppErrorBoundary>
   <QueryClientProvider client={queryClient}>
@@ -200,11 +214,7 @@ const App = () => (
             />
             <Route
               path="/student"
-              element={
-                <StudentRoute>
-                  <StudentPortalPage />
-                </StudentRoute>
-              }
+              element={<StudentPortalEntry />}
             />
             <Route path="/forbidden" element={<Forbidden />} />
             <Route

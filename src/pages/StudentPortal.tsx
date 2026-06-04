@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { PortalLayout } from "@/components/layout/PortalLayout";
+import { getStudentClaimToken } from "@/lib/studentClaim";
 import {
   IndianRupee, ClipboardCheck, Megaphone, Loader2,
   AlertCircle, CheckCircle, Clock, CreditCard,
@@ -44,15 +45,60 @@ interface AttendanceSummary {
 export default function StudentPortal() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const claimToken = getStudentClaimToken(searchParams);
   const [activeTab, setActiveTab] = useState("fees");
   const [student, setStudent] = useState<StudentInfo | null>(null);
   const [fees, setFees] = useState<FeeItem[]>([]);
   const [attendance, setAttendance] = useState<AttendanceSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [claimError, setClaimError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!claimToken) return;
+
+    let cancelled = false;
+    const redeemClaim = async () => {
+      setLoading(true);
+      setClaimError(null);
+
+      const { data, error } = await supabase.functions.invoke("student-portal-claim", {
+        body: { token: claimToken },
+      });
+
+      if (cancelled) return;
+
+      const session = data?.session;
+      if (error || data?.error || !session?.access_token || !session?.refresh_token) {
+        setClaimError(data?.error || error?.message || "Could not claim student portal access.");
+        setLoading(false);
+        return;
+      }
+
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+      });
+
+      if (cancelled) return;
+
+      if (sessionError) {
+        setClaimError(sessionError.message);
+        setLoading(false);
+        return;
+      }
+
+      navigate("/student", { replace: true });
+    };
+
+    redeemClaim();
+    return () => { cancelled = true; };
+  }, [claimToken, navigate]);
+
+  useEffect(() => {
+    if (claimToken) return;
     fetchStudentData();
-  }, [user?.id]);
+  }, [claimToken, user?.id]);
 
   const fetchStudentData = async () => {
     setLoading(true);
@@ -117,7 +163,28 @@ export default function StudentPortal() {
     return (
       <PortalLayout>
         <div className="flex items-center justify-center py-20">
-          <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+          <div className="flex flex-col items-center gap-3 text-center">
+            <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+            {claimToken && <p className="text-sm text-gray-500">Claiming your student portal access...</p>}
+          </div>
+        </div>
+      </PortalLayout>
+    );
+  }
+
+  if (claimError) {
+    return (
+      <PortalLayout>
+        <div className="rounded-2xl bg-white border border-gray-200 p-12 text-center">
+          <AlertCircle className="h-10 w-10 text-red-400 mx-auto mb-3" />
+          <h2 className="text-lg font-semibold text-gray-900 mb-1">Claim link could not be used</h2>
+          <p className="text-sm text-gray-500 mb-5">{claimError}</p>
+          <button
+            onClick={() => navigate("/login")}
+            className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary/90 transition-colors"
+          >
+            Go to Login
+          </button>
         </div>
       </PortalLayout>
     );
