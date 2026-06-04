@@ -230,12 +230,11 @@ export function AppSidebar() {
     // Fetch pending followup count (overdue + today)
     (async () => {
       const today = new Date().toISOString().slice(0, 10);
-      let q = supabase.from("lead_followups").select("id", { count: "exact", head: true })
+      let q = supabase.from("lead_followups")
+        .select(role === "counsellor" && profile?.id ? "id, leads!inner(counsellor_id)" : "id", { count: "exact", head: true })
         .eq("status", "pending").lte("scheduled_at", `${today}T23:59:59`);
       if (role === "counsellor" && profile?.id) {
-        const { data: myLeads } = await supabase.from("leads").select("id").eq("counsellor_id", profile.id);
-        if (myLeads?.length) q = q.in("lead_id", myLeads.map((l: any) => l.id));
-        else { setPendingFollowupCount(0); return; }
+        q = q.eq("leads.counsellor_id", profile.id);
       }
       const { count } = await q;
       setPendingFollowupCount(count || 0);
@@ -315,7 +314,7 @@ export function AppSidebar() {
       supabase.removeChannel(leadsChannel);
       supabase.removeChannel(approvalsChannel);
     };
-  }, [role]);
+  }, [role, profile?.id, user?.id]);
 
   const inboxBadge = pendingApprovals + pendingFollowupCount + waUnread;
   const visibleMain = mainMenu.filter(canSee).map(item => {

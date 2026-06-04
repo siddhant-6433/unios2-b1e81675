@@ -47,7 +47,8 @@ const SendWhatsAppDialog           = lazy(() => import("@/components/leads/SendW
 const AddSecondaryCounsellorDialog = lazy(() => import("@/components/leads/AddSecondaryCounsellorDialog").then(m => ({ default: m.AddSecondaryCounsellorDialog })));
 const ScheduleVisitDialog          = lazy(() => import("@/components/admissions/ScheduleVisitDialog").then(m => ({ default: m.ScheduleVisitDialog })));
 const ScheduleFollowupDialog       = lazy(() => import("@/components/admissions/ScheduleFollowupDialog").then(m => ({ default: m.ScheduleFollowupDialog })));
-const CallDispositionDialog        = lazy(() => import("@/components/admissions/CallDispositionDialog").then(m => ({ default: m.CallDispositionDialog })));
+const loadCallDispositionDialog = () => import("@/components/admissions/CallDispositionDialog");
+const CallDispositionDialog        = lazy(() => loadCallDispositionDialog().then(m => ({ default: m.CallDispositionDialog })));
 const RecordPaymentDialog          = lazy(() => import("@/components/admissions/RecordPaymentDialog").then(m => ({ default: m.RecordPaymentDialog })));
 const SendEmailDialog              = lazy(() => import("@/components/leads/SendEmailDialog").then(m => ({ default: m.SendEmailDialog })));
 const DirectDialGuardDialog        = lazy(() => import("@/components/admissions/DirectDialGuardDialog").then(m => ({ default: m.DirectDialGuardDialog })));
@@ -267,6 +268,13 @@ const LeadDetail = () => {
     }
   }, [showCallDisposition]);
 
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      void loadCallDispositionDialog();
+    }, 0);
+    return () => window.clearTimeout(id);
+  }, []);
+
   // When opened from /missed-calls via "Cloud Call", the URL carries the
   // ai_call_records.id of the missed-call entry to resolve. We stash it in
   // a ref before clearing the URL so logCallDisposition can mark it done
@@ -278,7 +286,7 @@ const LeadDetail = () => {
   // Previously this opened the disposition dialog directly, which let
   // staff log "not answered" entries without ever placing a real call.
   // Now it kicks off a real Plivo call — disposition dialog opens
-  // automatically 3s after the call is placed (see triggerManualCall).
+  // immediately in calling mode while the Plivo bridge starts.
   useEffect(() => {
     if (searchParams.get("action") === "call" && !loading && lead && !manualCalling) {
       const mid = searchParams.get("missed_call_id");
@@ -785,11 +793,15 @@ const LeadDetail = () => {
   // guard modal can call it after the counsellor confirms an override.
   const placeManualCall = async () => {
     if (!id) return;
+    void loadCallDispositionDialog();
     setManualCalling(true);
+    setActiveCallUuid(null);
+    setDispositionCallEnded(false);
+    setDispositionCallStatus("calling");
+    setShowCallDisposition(true);
     try {
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
       const { data, error } = await supabase.functions.invoke("manual-call", {
-        body: { lead_id: id, caller_user_id: currentUser?.id },
+        body: { lead_id: id, caller_user_id: user?.id },
       });
       if (error) {
         let detail = error.message;
@@ -798,20 +810,28 @@ const LeadDetail = () => {
           if (ctx) { const raw = await ctx.text().catch(() => ""); try { detail = JSON.parse(raw)?.error || raw; } catch { detail = raw || error.message; } }
         } catch {}
         toast({ title: "Call Failed", description: detail, variant: "destructive" });
+        setShowCallDisposition(false);
+        setActiveCallUuid(null);
+        setDispositionCallStatus(undefined);
+        setDispositionCallEnded(false);
       } else if (data?.error) {
         toast({ title: "Call Failed", description: data.error, variant: "destructive" });
+        setShowCallDisposition(false);
+        setActiveCallUuid(null);
+        setDispositionCallStatus(undefined);
+        setDispositionCallEnded(false);
       } else {
         toast({ title: "Calling You", description: data?.message || "Pick up your phone to connect to the student." });
-        // Open the disposition dialog immediately in "calling" mode. The poll
-        // below flips it to connected / no_answer / busy / failed once Plivo
-        // reports back via ai_call_records.
+        // The panel is already visible; the UUID arms polling + cancellation.
         setActiveCallUuid(data?.call_id || null);
-        setDispositionCallStatus("calling");
-        setShowCallDisposition(true);
         fetchAll(true);
       }
     } catch (e: any) {
       toast({ title: "Call Failed", description: e.message, variant: "destructive" });
+      setShowCallDisposition(false);
+      setActiveCallUuid(null);
+      setDispositionCallStatus(undefined);
+      setDispositionCallEnded(false);
     }
     setManualCalling(false);
   };
@@ -1156,54 +1176,62 @@ const LeadDetail = () => {
           Renders null until a Cloud Call is placed (showCallDisposition).
           onCallNow side-effect (WhatsApp template to the counsellor's own
           phone) was removed on user request; "Call Now" still opens tel:. */}
-      <CallDispositionDialog
-        inline
-        open={showCallDisposition}
-        onOpenChange={setShowCallDisposition}
-        leadName={lead.name}
-        leadPhone={lead.phone}
-        campuses={campuses}
-        defaultCampusId={lead.campus_id || undefined}
-        onSubmit={logCallDisposition}
-        callStatus={dispositionCallStatus}
-        callEnded={dispositionCallEnded}
-        onManualConnect={() => setDispositionCallStatus("connected")}
-        onRetryCall={async () => {
-          // Counsellor missed A-leg → reset dialog state and place a fresh call.
-          // The poll effect will re-arm on the new activeCallUuid.
-          setShowCallDisposition(false);
-          setDispositionCallStatus(undefined);
-          setDispositionCallEnded(false);
-          setActiveCallUuid(null);
-          await placeManualCall();
-        }}
-        onCancelCall={activeCallUuid ? async () => {
-          // Cancel the in-flight Cloud Call: hangs up both Plivo legs and
-          // records the call as cancelled_by_counsellor in call_logs +
-          // ai_call_records. Failures surface as a toast — the panel still
-          // closes so the counsellor isn't stuck on a broken state.
-          try {
-            const { error } = await supabase.functions.invoke("manual-call-cancel", {
-              body: { call_id: activeCallUuid, caller_user_id: user?.id },
-            });
-            if (error) {
-              toast({ title: "Cancel failed", description: error.message, variant: "destructive" });
-            } else {
-              toast({ title: "Call cancelled", description: "Both legs dropped." });
-              fetchAll(true);
+      <Suspense fallback={showCallDisposition ? (
+        <div className="rounded-xl border border-cyan-200 bg-cyan-50/70 dark:border-cyan-900/50 dark:bg-cyan-950/20 px-4 py-3 flex items-center gap-2 text-sm text-cyan-900 dark:text-cyan-100">
+          <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+          Opening call disposition...
+        </div>
+      ) : null}>
+        <CallDispositionDialog
+          inline
+          open={showCallDisposition}
+          onOpenChange={setShowCallDisposition}
+          leadName={lead.name}
+          leadPhone={lead.phone}
+          campuses={campuses}
+          defaultCampusId={lead.campus_id || undefined}
+          onSubmit={logCallDisposition}
+          callStatus={dispositionCallStatus}
+          callEnded={dispositionCallEnded}
+          callStarting={manualCalling && !activeCallUuid && dispositionCallStatus === "calling"}
+          onManualConnect={activeCallUuid ? () => setDispositionCallStatus("connected") : undefined}
+          onRetryCall={async () => {
+            // Counsellor missed A-leg → reset dialog state and place a fresh call.
+            // The poll effect will re-arm on the new activeCallUuid.
+            setShowCallDisposition(false);
+            setDispositionCallStatus(undefined);
+            setDispositionCallEnded(false);
+            setActiveCallUuid(null);
+            await placeManualCall();
+          }}
+          onCancelCall={activeCallUuid ? async () => {
+            // Cancel the in-flight Cloud Call: hangs up both Plivo legs and
+            // records the call as cancelled_by_counsellor in call_logs +
+            // ai_call_records. Failures surface as a toast — the panel still
+            // closes so the counsellor isn't stuck on a broken state.
+            try {
+              const { error } = await supabase.functions.invoke("manual-call-cancel", {
+                body: { call_id: activeCallUuid, caller_user_id: user?.id },
+              });
+              if (error) {
+                toast({ title: "Cancel failed", description: error.message, variant: "destructive" });
+              } else {
+                toast({ title: "Call cancelled", description: "Both legs dropped." });
+                fetchAll(true);
+              }
+            } catch (e: any) {
+              toast({ title: "Cancel failed", description: e?.message || "Try again", variant: "destructive" });
             }
-          } catch (e: any) {
-            toast({ title: "Cancel failed", description: e?.message || "Try again", variant: "destructive" });
-          }
-        } : undefined}
-        courseName={courseName}
-        leadStage={lead.stage as any}
-        personRole={(lead as any).person_role || null}
-        latestNote={notes[0]?.content || null}
-        aiCallSummary={(lead as any).ai_notes || null}
-        leadSource={lead.source || null}
-        jdKeyword={(lead as any).jd_category || null}
-      />
+          } : undefined}
+          courseName={courseName}
+          leadStage={lead.stage as any}
+          personRole={(lead as any).person_role || null}
+          latestNote={notes[0]?.content || null}
+          aiCallSummary={(lead as any).ai_notes || null}
+          leadSource={lead.source || null}
+          jdKeyword={(lead as any).jd_category || null}
+        />
+      </Suspense>
 
       {/* Application Progress — top of page, full width, for applicants */}
       {(lead.person_role === "applicant" || lead.application_id) && (

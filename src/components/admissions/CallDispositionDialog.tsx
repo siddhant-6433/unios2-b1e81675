@@ -75,6 +75,10 @@ interface CallDispositionDialogProps {
   /** True once Plivo has reported the bridge as ended (CallStatus=completed).
    *  Keeps the dialog in "connected" UI state but freezes the elapsed timer. */
   callEnded?: boolean;
+  /** True while the caller has requested a Cloud Call but the backend has not
+   *  returned the call UUID yet. The calling panel is visible, but live-call
+   *  controls stay locked until cancellation/polling can target a real call. */
+  callStarting?: boolean;
   /** Called when counsellor clicks "Call connected" — flips parent state */
   onManualConnect?: () => void;
   /** Called when counsellor clicks "Cancel" during the calling phase. Should
@@ -185,7 +189,7 @@ const formatDisplayDate = (dateStr: string) => {
 export function CallDispositionDialog({
   open, onOpenChange, leadName, leadPhone, campuses, defaultCampusId,
   onSubmit, onCallNow, callStatus, callEnded, onManualConnect, onCancelCall,
-  onRetryCall,
+  callStarting = false, onRetryCall,
   courseName, leadStage, personRole, latestNote, aiCallSummary,
   leadSource, jdKeyword, inline = false,
 }: CallDispositionDialogProps) {
@@ -460,10 +464,14 @@ export function CallDispositionDialog({
             {/* Waiting spinner */}
             <div className="flex flex-col items-center justify-center gap-2 py-4 text-center">
               <Loader2 className="h-6 w-6 text-primary animate-spin" />
-              <p className="text-sm font-medium text-foreground">Waiting for {leadName} to pick up…</p>
+              <p className="text-sm font-medium text-foreground">
+                {callStarting ? "Starting Cloud Call..." : `Waiting for ${leadName} to pick up...`}
+              </p>
               <p className="text-[11px] text-muted-foreground max-w-xs">
-                Tap <span className="font-semibold">Call connected</span> the moment they answer,
-                or wait — the screen will auto-fill if their phone is busy / switched off / unanswered.
+                {callStarting
+                  ? "We are connecting to Plivo. Controls will unlock as soon as the call is ready."
+                  : <>Tap <span className="font-semibold">Call connected</span> the moment they answer,
+                    or wait - the screen will auto-fill if their phone is busy / switched off / unanswered.</>}
               </p>
             </div>
 
@@ -472,7 +480,7 @@ export function CallDispositionDialog({
                 size="sm"
                 className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-xs"
                 onClick={() => onManualConnect?.()}
-                disabled={cancelling}
+                disabled={callStarting || cancelling || !onManualConnect}
               >
                 <CheckCircle className="h-3.5 w-3.5 mr-1.5" />
                 Call connected — Mark Outcome
@@ -496,7 +504,7 @@ export function CallDispositionDialog({
                     handleClose(false);
                   }
                 }}
-                disabled={cancelling}
+                disabled={callStarting || cancelling}
                 className="text-xs"
               >
                 {cancelling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Cancel"}

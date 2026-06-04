@@ -30,36 +30,28 @@ function fmt(ms: number | null): string {
 async function fetchManualMedian(threeDaysAgo: string, counsellorId: string | null): Promise<number | null> {
   let callQuery = supabase
     .from("lead_activities")
-    .select("lead_id, created_at")
+    .select("lead_id, created_at, leads!inner(created_at, counsellor_id)")
     .eq("type", "call")
     .gte("created_at", threeDaysAgo)
     .order("created_at", { ascending: true });
 
   if (counsellorId) {
-    const { data: myLeads } = await supabase.from("leads").select("id").eq("counsellor_id", counsellorId).limit(500);
-    const ids = (myLeads ?? []).map((l: any) => l.id);
-    if (ids.length === 0) return null;
-    callQuery = callQuery.in("lead_id", ids.slice(0, 200)); // limit to avoid URL overflow
+    callQuery = callQuery.eq("leads.counsellor_id", counsellorId);
   }
 
   const { data: callActs } = await callQuery;
   if (!callActs || callActs.length === 0) return null;
 
   const firstCallMap: Record<string, number> = {};
+  const createdMap: Record<string, number> = {};
   callActs.forEach((a: any) => {
-    if (!firstCallMap[a.lead_id]) firstCallMap[a.lead_id] = new Date(a.created_at).getTime();
+    if (!firstCallMap[a.lead_id]) {
+      firstCallMap[a.lead_id] = new Date(a.created_at).getTime();
+      createdMap[a.lead_id] = new Date(a.leads?.created_at || a.created_at).getTime();
+    }
   });
 
   const leadIds = Object.keys(firstCallMap);
-
-  // Batch fetch to avoid URL-too-long errors (Supabase GET has ~8KB URL limit)
-  const createdMap: Record<string, number> = {};
-  for (let i = 0; i < leadIds.length; i += 50) {
-    const batch = leadIds.slice(i, i + 50);
-    const { data: leadDates } = await supabase.from("leads").select("id, created_at").in("id", batch);
-    (leadDates ?? []).forEach((l: any) => { createdMap[l.id] = new Date(l.created_at).getTime(); });
-  }
-
   const delays = leadIds
     .map(id => firstCallMap[id] - (createdMap[id] ?? firstCallMap[id]))
     .filter(ms => ms >= 0);
