@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildApplicantFeeBreakdownRows } from "@/components/applicant/feeBreakdown";
+import {
+  buildApplicantFeeBreakdownRows,
+  buildApplicantOneTimePaymentOptions,
+} from "@/components/applicant/feeBreakdown";
 
 describe("applicant fee breakdown", () => {
   it("reconstructs gross fees from net year fees and does not subtract offer waivers twice", () => {
@@ -56,6 +59,45 @@ describe("applicant fee breakdown", () => {
       waivers: 0,
       totalDeduction: 20_000,
       net: 110_000,
+    });
+  });
+
+  it("calculates one-time payment options on post-waiver net fees", () => {
+    const rows = buildApplicantFeeBreakdownRows({
+      yearFeesNet: {
+        year_1: 75_000,
+        year_2: 75_000,
+        year_3: 75_000,
+        year_4: 75_000,
+      },
+      offerWaivers: [
+        { term: "year_1", amount: 17_000 },
+        { term: "year_2", amount: 19_760 },
+        { term: "year_3", amount: 22_603 },
+        { term: "year_4", amount: 25_531 },
+      ],
+      scholarshipAmount: 0,
+      feeStatus: {
+        first_year_fee: 92_000,
+        post_scholarship_year_1: 75_000,
+      },
+    });
+
+    const options = buildApplicantOneTimePaymentOptions({
+      rows,
+      paidTowardCourse: 37_500,
+      lumpSumPct: 5,
+      multiYearPct: 2.5,
+      includeMultiYearWaiver: true,
+    });
+
+    expect(options).toMatchObject({
+      year1NetFee: 75_000,
+      totalNetFee: 300_000,
+      year1Discount: 3_750,
+      fullCourseDiscount: 20_625,
+      year1AmountDue: 33_750,
+      fullCourseAmountDue: 241_875,
     });
   });
 });

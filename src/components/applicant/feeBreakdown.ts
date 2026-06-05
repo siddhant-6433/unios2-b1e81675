@@ -14,7 +14,20 @@ export type FeeBreakdownRow = {
   net: number;
 };
 
+export type OneTimePaymentOptions = {
+  year1NetFee: number;
+  totalNetFee: number;
+  additionalYearsNetFee: number;
+  paidTowardCourse: number;
+  year1Discount: number;
+  fullCourseDiscount: number;
+  fullCourseAdditionalDiscount: number;
+  year1AmountDue: number;
+  fullCourseAmountDue: number;
+};
+
 const clampMoney = (value: number) => Math.max(0, Number(value) || 0);
+const roundMoney = (value: number) => Math.round(clampMoney(value));
 
 export function buildApplicantFeeBreakdownRows({
   yearFeesNet,
@@ -56,4 +69,42 @@ export function buildApplicantFeeBreakdownRows({
         net,
       };
     });
+}
+
+export function buildApplicantOneTimePaymentOptions({
+  rows,
+  paidTowardCourse,
+  lumpSumPct,
+  multiYearPct,
+  includeMultiYearWaiver,
+}: {
+  rows: FeeBreakdownRow[];
+  paidTowardCourse: number;
+  lumpSumPct: number;
+  multiYearPct: number;
+  includeMultiYearWaiver: boolean;
+}): OneTimePaymentOptions {
+  const year1NetFee = clampMoney(rows.find((row) => row.term === "year_1")?.net || 0);
+  const additionalYearsNetFee = rows
+    .filter((row) => row.term !== "year_1")
+    .reduce((sum, row) => sum + clampMoney(row.net), 0);
+  const totalNetFee = year1NetFee + additionalYearsNetFee;
+  const paid = clampMoney(paidTowardCourse);
+  const lumpPct = clampMoney(lumpSumPct) / 100;
+  const additionalPct = (clampMoney(lumpSumPct) + (includeMultiYearWaiver ? clampMoney(multiYearPct) : 0)) / 100;
+  const year1Discount = roundMoney(year1NetFee * lumpPct);
+  const fullCourseAdditionalDiscount = roundMoney(additionalYearsNetFee * additionalPct);
+  const fullCourseDiscount = year1Discount + fullCourseAdditionalDiscount;
+
+  return {
+    year1NetFee,
+    totalNetFee,
+    additionalYearsNetFee,
+    paidTowardCourse: paid,
+    year1Discount,
+    fullCourseDiscount,
+    fullCourseAdditionalDiscount,
+    year1AmountDue: Math.max(0, roundMoney(year1NetFee - paid - year1Discount)),
+    fullCourseAmountDue: Math.max(0, roundMoney(totalNetFee - paid - fullCourseDiscount)),
+  };
 }

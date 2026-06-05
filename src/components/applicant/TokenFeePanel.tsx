@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2, CreditCard, FileText, IndianRupee, Clock, Check, GraduationCap, Sparkles, ChevronRight, CalendarDays } from "lucide-react";
-import { buildApplicantFeeBreakdownRows } from "./feeBreakdown";
+import { buildApplicantFeeBreakdownRows, buildApplicantOneTimePaymentOptions } from "./feeBreakdown";
 
 // Fallbacks if the get_applicant_deadlines RPC is unreachable.
 // The single source of truth is _app_config — these are last-resort
@@ -356,9 +356,6 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   // deadline, NOT the per-lead countdown the policy used to enforce.
   // Show the additional-years discount whenever today ≤ scholarship
   // deadline AND the offer has additional years.
-  const showFullCourse = (feeStatus.lump_sum_pct || 0) > 0
-    && (feeStatus.additional_years_fee || 0) > 0
-    && (feeStatus.full_course_amount_due || 0) > 0;
   const inMultiYearWindow = scholarshipWindowOpen;
 
   // Milestone dates
@@ -1026,26 +1023,44 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
            full-course pitch lands first.
       */}
       {(feeStatus.lump_sum_pct || 0) > 0 && (() => {
-        const y1Fee     = feeStatus.first_year_fee || 0;
-        const totalFee  = feeStatus.total_course_fee || 0;
+        const rows = buildApplicantFeeBreakdownRows({
+          yearFeesNet: yearFees,
+          offerWaivers,
+          scholarshipAmount: offer.scholarship_amount || 0,
+          feeStatus,
+        });
         // Use paid_toward_course (token_fee + 'other'), NOT total_paid —
         // application_fee and registration_fee are separate charges and
         // shouldn't reduce the course-fee due. Falls back to total_paid
         // for older RPC responses missing the new field.
         const paid      = feeStatus.paid_toward_course ?? feeStatus.total_paid ?? 0;
-        const y1Disc    = feeStatus.full_first_year_discount || 0;
-        const fcDisc    = feeStatus.full_course_discount || 0;
-        const y1Due     = feeStatus.full_first_year_amount_due || 0;
-        const fcDue     = feeStatus.full_course_amount_due || 0;
-        const multiDisc = Math.max(0, fcDisc - y1Disc);
+        const paymentOptions = buildApplicantOneTimePaymentOptions({
+          rows,
+          paidTowardCourse: paid,
+          lumpSumPct: feeStatus.lump_sum_pct || 0,
+          multiYearPct: feeStatus.multi_year_pct || 0,
+          includeMultiYearWaiver: inMultiYearWindow,
+        });
+        const y1Fee     = paymentOptions.year1NetFee;
+        const totalFee  = paymentOptions.totalNetFee;
+        const y1Disc    = paymentOptions.year1Discount;
+        const fcDisc    = paymentOptions.fullCourseDiscount;
+        const y1Due     = paymentOptions.year1AmountDue;
+        const fcDue     = paymentOptions.fullCourseAmountDue;
+        const multiDisc = paymentOptions.fullCourseAdditionalDiscount;
         const y1Covered = y1Due === 0 && y1Fee > 0;
         const fcCovered = fcDue === 0 && totalFee > 0;
         const surplusPaidVsY1 = Math.max(0, paid - y1Fee + y1Disc);
         const fmtRupee = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
-        const hasFullCourse = (feeStatus.additional_years_fee || 0) > 0;
+        const hasFullCourse = paymentOptions.additionalYearsNetFee > 0;
 
         return (
           <div className="space-y-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-gray-500">One-time payment waivers</p>
+              <p className="text-[11px] text-gray-500 mt-0.5">Calculated on fee after approved waiver.</p>
+            </div>
+
             {/* ── HERO: Full course (Best Value) ──────────────────────────
                 Gated on full_course_payment_deadline — after that date the
                 lump-sum CTA disappears (only year-1 lump-sum remains
@@ -1054,19 +1069,10 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
             {hasFullCourse && (fullCourseWindowOpen || fcCovered) && (
               <div className={`rounded-2xl border-2 p-5 shadow-lg relative ${
                 fcCovered ? "border-gray-200 bg-gray-50" :
-                "border-emerald-300 bg-gradient-to-br from-emerald-50 via-green-50 to-emerald-100"
+                "border-emerald-300 bg-emerald-50"
               }`}>
-                {/* Decorative shimmer — wrapped in an overflow-hidden inner
-                    div so it clips to the card without cropping the
-                    BEST VALUE badge that sits just above the top edge. */}
                 {!fcCovered && (
-                  <div className="absolute inset-0 overflow-hidden rounded-2xl pointer-events-none">
-                    <div className="absolute top-0 right-0 w-32 h-32 -mr-16 -mt-16 rounded-full bg-emerald-200/40 blur-2xl" />
-                  </div>
-                )}
-
-                {!fcCovered && (
-                  <div className="absolute -top-3 left-4 z-10 inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-emerald-600 to-green-600 px-3 py-1 text-[10px] font-bold text-white shadow-md">
+                  <div className="absolute -top-3 left-4 z-10 inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-[10px] font-bold text-white shadow-md">
                     <Sparkles className="h-3 w-3" /> BEST VALUE
                   </div>
                 )}
@@ -1083,10 +1089,13 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                     ) : (
                       <>
                         <p className="text-lg font-bold text-emerald-900 leading-tight">
-                          Save {fmtRupee(fcDisc)} on Full Course
+                          Pay full course now
                         </p>
                         <p className="text-xs text-emerald-700 mt-1">
-                          {feeStatus.lump_sum_pct}% off year-1
+                          One-time waiver: save {fmtRupee(fcDisc)} on the post-waiver course fee.
+                        </p>
+                        <p className="text-[11px] text-emerald-700 mt-0.5">
+                          {feeStatus.lump_sum_pct}% off year 1
                           {inMultiYearWindow
                             ? ` + extra ${feeStatus.multi_year_pct}% off all other years.`
                             : ` + ${feeStatus.lump_sum_pct}% off other years.`}
@@ -1132,7 +1141,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                           concessionBreakdown: Object.keys(breakdown).length ? breakdown : undefined,
                         });
                       }}
-                      className="shrink-0 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 px-5 py-3.5 text-sm font-bold text-white hover:from-emerald-700 hover:to-green-700 active:scale-95 transition-all disabled:opacity-50 shadow-lg shadow-emerald-300/40"
+                      className="shrink-0 inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-3.5 text-sm font-bold text-white hover:bg-emerald-700 active:scale-95 transition-all disabled:opacity-50 shadow-lg shadow-emerald-300/40"
                     >
                       {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
                       Pay {fmtRupee(fcDue)}
@@ -1150,18 +1159,18 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                     </summary>
                     <div className="mt-2 space-y-1 text-[12px] font-mono bg-white/60 rounded-lg p-3 border border-emerald-200/60">
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Total course fee</span>
+                        <span className="text-gray-600">Course fee after waiver</span>
                         <span className="text-gray-900">{fmtRupee(totalFee)}</span>
                       </div>
                       {paid > 0 && (
                         <div className="flex justify-between text-blue-700">
                           <span>Already paid</span>
-                          <span>− {fmtRupee(paid)}</span>
+                          <span>− {fmtRupee(Math.min(paid, totalFee))}</span>
                         </div>
                       )}
                       {y1Disc > 0 && (
                         <div className="flex justify-between text-emerald-700">
-                          <span>{feeStatus.lump_sum_pct}% off year-1</span>
+                          <span>{feeStatus.lump_sum_pct}% one-time off year 1</span>
                           <span>− {fmtRupee(y1Disc)}</span>
                         </div>
                       )}
@@ -1206,9 +1215,14 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                         )}
                       </p>
                     ) : (
-                      <p className="text-sm font-semibold text-amber-900">
-                        Save {fmtRupee(y1Disc)} ·  Pay {fmtRupee(y1Due)}
-                      </p>
+                      <>
+                        <p className="text-sm font-semibold text-amber-900">
+                          Pay year 1 now
+                        </p>
+                        <p className="text-[11px] text-amber-700 mt-0.5">
+                          One-time waiver: save {fmtRupee(y1Disc)} · pay {fmtRupee(y1Due)}
+                        </p>
+                      </>
                     )}
                   </div>
 
@@ -1243,18 +1257,18 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                     </summary>
                     <div className="mt-1.5 space-y-0.5 text-[11px] font-mono bg-white/70 rounded-md p-2 border border-amber-200/50">
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Year 1 fee</span>
+                        <span className="text-gray-600">Year 1 fee after waiver</span>
                         <span className="text-gray-900">{fmtRupee(y1Fee)}</span>
                       </div>
                       {paid > 0 && (
                         <div className="flex justify-between text-blue-700">
                           <span>Already paid</span>
-                          <span>− {fmtRupee(Math.min(paid, y1Fee + y1Disc))}</span>
+                          <span>− {fmtRupee(Math.min(paid, y1Fee))}</span>
                         </div>
                       )}
                       {y1Disc > 0 && (
                         <div className="flex justify-between text-emerald-700">
-                          <span>{feeStatus.lump_sum_pct}% lump-sum off</span>
+                          <span>{feeStatus.lump_sum_pct}% one-time off</span>
                           <span>− {fmtRupee(y1Disc)}</span>
                         </div>
                       )}

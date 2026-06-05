@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const migration = readFileSync(
-  "supabase/migrations/20260618150000_fix_cloud_dialer_terminal_followups.sql",
+  "supabase/migrations/20260618151000_fix_cloud_dialer_terminal_followups.sql",
   "utf8",
 );
 
