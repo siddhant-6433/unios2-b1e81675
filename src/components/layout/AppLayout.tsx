@@ -13,6 +13,7 @@ import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { CounsellorFilterProvider } from "@/contexts/CounsellorFilterContext";
 import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
+import { useEffect, useState } from "react";
 
 const pageTitles: Record<string, string> = {
   "/": "Dashboard",
@@ -69,7 +70,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const title = pageTitles[location.pathname] || "NIMT UniOs";
   const { profile, role } = useAuth();
   const isCounsellor = role === "counsellor";
+  const [deferredShellReady, setDeferredShellReady] = useState(false);
   usePresenceHeartbeat();
+
+  useEffect(() => {
+    setDeferredShellReady(false);
+    const timeoutId = window.setTimeout(() => setDeferredShellReady(true), 600);
+    return () => window.clearTimeout(timeoutId);
+  }, [location.pathname]);
 
   return (
     <CounsellorFilterProvider>
@@ -92,16 +100,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               </div>
               <div className="flex items-center gap-1.5">
                 <HeaderSearch />
-                <HeaderFeedbackWidget />
-                <WhatsAppPanel />
-                <NotificationPanel />
+                {deferredShellReady && <HeaderFeedbackWidget />}
+                {deferredShellReady && <WhatsAppPanel />}
+                {deferredShellReady && <NotificationPanel />}
                 <div className="w-px h-6 bg-border/60 mx-0.5" />
                 <HeaderProfile />
               </div>
             </header>
-            <CahetSprintTicker />
-            <GlobalActionBar />
-            <LiveCallBar />
+            {deferredShellReady && <CahetSprintTicker />}
+            {deferredShellReady && <GlobalActionBar />}
+            {deferredShellReady && <LiveCallBar />}
             <main className="flex-1 overflow-auto p-6">
               {children}
             </main>
