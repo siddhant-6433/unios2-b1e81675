@@ -62,7 +62,7 @@ const Finance = () => {
       // below stays unchanged.
       supabase.from("v_all_payments" as any).select("*").order("paid_at", { ascending: false }).limit(500),
       supabase.from("fee_structures").select("*, courses:course_id(name), admission_sessions:session_id(name), fee_structure_items(*, fee_codes:fee_code_id(code, name, category))").order("created_at", { ascending: false }).limit(200),
-      supabase.from("offer_waivers").select("id", { count: "exact", head: true }).eq("status", "pending"),
+      supabase.from("offer_waivers").select("id", { count: "planned", head: true }).eq("status", "pending"),
     ]);
     if (ledgerRes.data) setLedger(ledgerRes.data);
     if (paymentsRes.data) {

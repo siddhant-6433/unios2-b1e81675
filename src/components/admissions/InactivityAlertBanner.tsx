@@ -32,7 +32,7 @@ export function InactivityAlertBanner({ onViewInactive, onViewOverdue, campusId 
       setInactiveIds(ids);
 
       // Fetch overdue follow-ups — scope similarly
-      let overdueQuery = supabase.from("overdue_followups" as any).select("id", { count: "exact", head: true });
+      let overdueQuery = supabase.from("overdue_followups" as any).select("id", { count: "planned", head: true });
       if (isCounsellorOnly && profile?.id) {
         overdueQuery = overdueQuery.eq("counsellor_id", profile.id);
       }

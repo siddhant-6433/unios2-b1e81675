@@ -75,6 +75,11 @@ interface BucketLead {
   last_ai_conversion_pct: number | null;
 }
 
+interface LeadBucketCursor {
+  created_at: string;
+  id: string;
+}
+
 interface Counsellor {
   id: string;
   display_name: string;
@@ -146,6 +151,7 @@ export default function LeadBuckets() {
   const [hasMore, setHasMore] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
   const pageRef = useRef(0);
+  const cursorRef = useRef<LeadBucketCursor | null>(null);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [courseFilter, setCourseFilter] = useState<string>("all");
@@ -263,31 +269,43 @@ export default function LeadBuckets() {
   const fetchPage = async (reset: boolean) => {
     const targetPage = reset ? 0 : pageRef.current + 1;
     if (reset) setLoading(true); else setLoadingMore(true);
+    const cursor = reset ? null : cursorRef.current;
+    if (reset) cursorRef.current = null;
 
-    const from = targetPage * PAGE_SIZE;
-    const to = from + PAGE_SIZE - 1;
-    // count: "exact" only on the first page — re-counting on every scroll is
+    // planned count only on the first page — re-counting on every scroll is
     // wasteful; subsequent pages infer hasMore from a full page returning.
     let query = supabase
       .from("unassigned_leads_bucket" as any)
-      .select("*", reset ? { count: "exact" } : undefined)
+      .select(
+        `id, name, phone, stage, source, course_name, campus_name, created_at,
+         lead_score, lead_temperature, bucket, jd_category, last_ai_summary,
+         last_ai_disposition, last_ai_conversion_pct`,
+        reset ? { count: "planned" } : undefined
+      )
       .order("created_at", { ascending: true }) // oldest (most urgent) first
-      .range(from, to);
+      .order("id", { ascending: true })
+      .limit(PAGE_SIZE + 1);
+    if (cursor) {
+      query = query.or(`created_at.gt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.gt.${cursor.id})`);
+    }
     query = applyScope(query);
 
     const { data, error, count } = await query;
     if (error) console.error("Lead buckets fetch error:", error);
-    const rows = ((data || []) as any) as BucketLead[];
+    const fetched = ((data || []) as any) as BucketLead[];
+    const rows = fetched.slice(0, PAGE_SIZE);
+    const nextCursor = rows[rows.length - 1];
 
     if (reset) {
       setLeads(rows);
       setSelectedIds(new Set());
       setTotalCount(count ?? rows.length);
-      setHasMore(from + rows.length < (count ?? 0));
+      setHasMore(fetched.length > PAGE_SIZE);
     } else {
       setLeads((prev) => [...prev, ...rows]);
-      setHasMore(rows.length === PAGE_SIZE);
+      setHasMore(fetched.length > PAGE_SIZE);
     }
+    cursorRef.current = nextCursor ? { created_at: nextCursor.created_at, id: nextCursor.id } : null;
     pageRef.current = targetPage;
     setLoading(false);
     setLoadingMore(false);
@@ -374,18 +392,26 @@ export default function LeadBuckets() {
   const fetchAllScopedIds = async (): Promise<string[]> => {
     const ids: string[] = [];
     const STEP = 1000;
-    for (let from = 0; ; from += STEP) {
+    let cursor: LeadBucketCursor | null = null;
+    while (true) {
       let q = supabase
         .from("unassigned_leads_bucket" as any)
-        .select("id")
+        .select("id, created_at")
         .order("created_at", { ascending: true })
-        .range(from, from + STEP - 1);
+        .order("id", { ascending: true })
+        .limit(STEP + 1);
+      if (cursor) {
+        q = q.or(`created_at.gt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.gt.${cursor.id})`);
+      }
       q = applyScope(q);
       const { data, error } = await q;
       if (error) { console.error("Scoped id fetch error:", error); break; }
-      const rows = (data || []) as any[];
+      const fetched = (data || []) as any[];
+      const rows = fetched.slice(0, STEP);
       ids.push(...rows.map((r) => r.id));
-      if (rows.length < STEP) break;
+      const last = rows[rows.length - 1];
+      if (!last || fetched.length <= STEP) break;
+      cursor = { created_at: last.created_at, id: last.id };
     }
     return ids;
   };

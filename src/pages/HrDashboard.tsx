@@ -37,17 +37,17 @@ const HrDashboard = () => {
     const today = new Date().toISOString().slice(0, 10);
 
     const [employeesRes, punchRes, leaveRes, pendingLeaveRes, faceRes, jobAppRes] = await Promise.all([
-      supabase.from("profiles").select("user_id, display_name, role", { count: "exact" })
+      supabase.from("profiles").select("user_id, display_name, role", { count: "planned" })
         .not("role", "in", "(student,parent)"),
       supabase.from("employee_attendance").select("user_id, punch_in, punch_out, selfie_url")
         .eq("date", today).order("punch_in", { ascending: false }).limit(50),
-      supabase.from("employee_leave_requests").select("user_id", { count: "exact" })
+      supabase.from("employee_leave_requests").select("user_id", { count: "planned" })
         .eq("status", "approved").lte("start_date", today).gte("end_date", today),
-      supabase.from("employee_leave_requests").select("id", { count: "exact" })
+      supabase.from("employee_leave_requests").select("id", { count: "planned" })
         .eq("status", "pending"),
-      supabase.from("employee_face_registrations").select("id", { count: "exact" })
+      supabase.from("employee_face_registrations").select("id", { count: "planned" })
         .eq("status", "pending"),
-      supabase.from("job_applicants" as any).select("id", { count: "exact", head: true })
+      supabase.from("job_applicants" as any).select("id", { count: "planned", head: true })
         .eq("status", "new"),
     ]);
 

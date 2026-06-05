@@ -42,6 +42,7 @@ function dateRangeFor(preset: DatePreset, customStart?: string, customEnd?: stri
 }
 
 interface LeadRow {
+  id: string;
   source: string | null;
   stage: string;
   created_at: string;
@@ -160,17 +161,25 @@ export default function PublisherAnalytics() {
       setLoading(true);
       const PAGE = 1000;
       let all: LeadRow[] = [];
-      let page = 0;
+      let cursor: { created_at: string; id: string } | null = null;
       while (true) {
-        const { data, error } = await supabase
+        let query = supabase
           .from("leads")
-          .select("source, stage, created_at")
+          .select("id, source, stage, created_at")
           .order("created_at", { ascending: false })
-          .range(page * PAGE, (page + 1) * PAGE - 1);
+          .order("id", { ascending: false })
+          .limit(PAGE + 1);
+        if (cursor) {
+          query = query.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
+        }
+        const { data, error } = await query;
         if (error) break;
-        all = all.concat((data || []) as LeadRow[]);
-        if ((data || []).length < PAGE) break;
-        page++;
+        const fetched = (data || []) as LeadRow[];
+        const rows = fetched.slice(0, PAGE);
+        all = all.concat(rows);
+        const last = rows[rows.length - 1];
+        if (!last || fetched.length <= PAGE) break;
+        cursor = { created_at: last.created_at, id: last.id };
       }
       setLeads(all);
       setLoading(false);

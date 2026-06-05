@@ -122,12 +122,12 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
     const byCampus = selectedCampusId !== "all";
 
     const baseLeads = () => {
-      let q = supabase.from("leads").select("id", { count: "exact", head: true });
+      let q = supabase.from("leads").select("id", { count: "planned", head: true });
       if (byCampus) q = q.eq("campus_id", selectedCampusId);
       return q;
     };
     const baseStudents = () => {
-      let q = supabase.from("students").select("id", { count: "exact", head: true });
+      let q = supabase.from("students").select("id", { count: "planned", head: true });
       if (byCampus) q = q.eq("campus_id", selectedCampusId);
       return q;
     };
@@ -146,13 +146,13 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
         return q;
       })(),
       (() => {
-        let q = supabase.from("leads").select("id", { count: "exact", head: true })
+        let q = supabase.from("leads").select("id", { count: "planned", head: true })
           .in("stage", ["application_in_progress", "application_fee_paid", "application_submitted", "offer_sent", "token_paid", "pre_admitted"] as any);
         if (byCampus) q = q.eq("campus_id", selectedCampusId);
         return q;
       })(),
       (() => {
-        let q = supabase.from("leads").select("id", { count: "exact", head: true })
+        let q = supabase.from("leads").select("id", { count: "planned", head: true })
           .in("stage", ["application_submitted", "offer_sent", "token_paid", "pre_admitted"] as any);
         if (byCampus) q = q.eq("campus_id", selectedCampusId);
         return q;

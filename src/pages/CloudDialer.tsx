@@ -1184,7 +1184,7 @@ export default function CloudDialer() {
     let cancelled = false;
     const fetchMissedCount = async () => {
       let q = (supabase.from("ai_call_records" as any) as any)
-        .select("id, lead_id, leads!inner(counsellor_id)", { count: "exact", head: true })
+        .select("id, lead_id, leads!inner(counsellor_id)", { count: "planned", head: true })
         .eq("needs_followup", true)
         .is("followup_done_at", null);
       if (role === "counsellor" && profile?.id) {
