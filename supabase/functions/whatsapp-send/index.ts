@@ -24,6 +24,7 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   // with a fallback: /courses listing when untagged course, /contact page when
   // untagged campus, and the correct uni.nimt.ac.in apply domain.
   course_info_video_v2: { name: "course_info_video_v2", params: ["student_name", "course_label", "course_url", "campus_url", "apply_url"] },
+  bpt_bmrit_cahet_deadline: { name: "bpt_bmrit_cahet_deadline", params: [] },
   // Counsellor utility — tap-to-call link sent to counsellor's own phone
   counsellor_call_lead: { name: "lead_queue_item", params: ["counsellor_name", "lead_name", "lead_phone", "course"] },
   // Call disposition auto-replies to leads
@@ -574,6 +575,7 @@ Deno.serve(async (req) => {
       fee_reminder: "Hi {{1}}, this is a reminder that a fee payment of Rs.{{2}} is due by {{3}}. Please complete the payment to avoid any delays.",
       course_info_video: "Hi {{1}}, here are the details for {{2}} at NIMT Educational Institutions:\n\nDuration: {{3}}\nEligibility: {{4}}\nCampus: {{5}}",
       course_info_video_v2: "Hi {{1}}, here are the details you requested for {{2}} at NIMT Educational Institutions:\n\n📚 Course information: {{3}}\n📍 Campus locations: {{4}}\n📝 Application portal: {{5}}\n\nReply to this message if you have any questions — our admissions team will be glad to assist you.",
+      bpt_bmrit_cahet_deadline: "Dear Applicant,\n\nThis is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *TODAY (5th June 2026)*\n\nFor admission Candidates *MUST*\n\n1. Complete College Application Online at https://apply.nimt.ac.in\n2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nPlease note both form submissions are mandatory by 5th June 2026 to be included in the admission process for session 2026-27.\n\nFor any details please call 9555192192\n9667691872\n7428499849",
       counsellor_lead_assigned: "Hi {{1}}, a new lead has been assigned to you: {{2}} (Phone: ****{{3}}). Please make first contact within {{4}} hours.",
       counsellor_sla_warning: "Reminder: Lead {{1}} has not been contacted yet. You have {{2}} hour(s) remaining.",
       counsellor_lead_reclaimed: "Lead {{1}} ({{2}}) has been returned to the unassigned bucket due to SLA breach.",

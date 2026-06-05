@@ -68,6 +68,15 @@ const TEMPLATES = [
     preview: "Hi {{1}}, here are the details you requested for {{2}}:\n📚 Course information: <course page or /courses>\n📍 Campus locations: <campus map or /contact>\n📝 Application portal: uni.nimt.ac.in/apply/nimt\n\n🎥 Campus video will be sent as follow-up",
   },
   {
+    key: "bpt_bmrit_cahet_deadline",
+    label: "BPT/BMRIT CAHET Deadline",
+    description: "5 June 2026 application + CAHET registration deadline",
+    badge: "Deadline",
+    followUpMsg: null,
+    buildParams: () => [],
+    preview: "Dear Applicant,\n\nThis is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *TODAY (5th June 2026)*\n\nFor admission Candidates *MUST*\n\n1. Complete College Application Online at https://apply.nimt.ac.in\n2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nPlease note both form submissions are mandatory by 5th June 2026 to be included in the admission process for session 2026-27.\n\nFor any details please call 9555192192\n9667691872\n7428499849",
+  },
+  {
     key: "course_details",
     label: "Course Details",
     description: "Send course information",
