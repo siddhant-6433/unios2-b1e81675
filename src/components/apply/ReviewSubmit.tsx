@@ -264,6 +264,10 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
               {entranceExams.map((ex: any, i: number) => (
                 <div key={i}>
                   <Row label={ex.exam_name} value={
+                    ex.status === 'registered' ? `Registered${ex.registration_no ? `: ${ex.registration_no}` : ''}${ex.registered_name ? ` (${ex.registered_name})` : ''}`
+                    : ex.exam_name?.toLowerCase?.().includes('cahet') && ex.registration_no ? `Registration No: ${ex.registration_no}${ex.registered_name ? ` (${ex.registered_name})` : ''}`
+                    : ex.exam_name?.toLowerCase?.().includes('cahet') ? 'Not registered yet'
+                    :
                     ex.status === 'declared' ? `Score: ${ex.score || 'N/A'}`
                     : ex.status === 'not_declared' ? `Result pending${ex.expected_date ? ` (Expected: ${ex.expected_date})` : ''}`
                     : 'Yet to appear'

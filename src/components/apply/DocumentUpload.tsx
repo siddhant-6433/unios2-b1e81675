@@ -100,7 +100,7 @@ function getRequiredDocs(
   // Entrance exam scorecards
   const exams: any[] = academicDetails?.entrance_exams || [];
   exams.forEach((ex: any) => {
-    if (ex && ex.status === 'declared' && ex.exam_name) {
+    if (ex && ex.status === 'declared' && ex.exam_name && !/cahet/i.test(ex.exam_name)) {
       base.push({
         key: `entrance_${ex.exam_name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}_scorecard`,
         label: `${ex.exam_name} Scorecard`,
