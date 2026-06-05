@@ -102,6 +102,13 @@ const INBOX_TEMPLATES = [
     params: ["student_name", "amount", "due_date"],
     preview: "Hi {{student_name}}, this is a reminder that your fee of ₹{{amount}} is due by {{due_date}}. Please complete the payment to secure your seat.",
   },
+  {
+    key: "bpt_bmrit_cahet_deadline",
+    label: "BPT/BMRIT CAHET Deadline",
+    description: "5 June 2026 application + CAHET registration deadline",
+    params: [],
+    preview: "Dear Applicant,\n\nThis is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *TODAY (5th June 2026)*\n\nFor admission Candidates *MUST*\n\n1. Complete College Application Online at https://apply.nimt.ac.in\n2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nPlease note both form submissions are mandatory by 5th June 2026 to be included in the admission process for session 2026-27.\n\nFor any details please call 9555192192\n9667691872\n7428499849",
+  },
   // ── Knowledge Base Quick Replies ─────────────────────────────────────────
   {
     key: "kb_apply_link",
