@@ -106,7 +106,7 @@ interface CallLogCursor {
 
 const CallLog = () => {
   const navigate = useNavigate();
-  const { role, roleLoaded, user } = useAuth();
+  const { role, roleLoaded, user, profile } = useAuth();
   const isCounsellor = role === "counsellor";
   const [records, setRecords] = useState<EnrichedCallLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -139,7 +139,7 @@ const CallLog = () => {
 
       if (isCounsellor) {
         setCounsellorFilter(user.id);
-        setCounsellorOptions([]);
+        setCounsellorOptions([{ id: user.id, name: profile?.display_name || "You" }]);
         setCounsellorStats([]);
         return;
       }
@@ -151,7 +151,7 @@ const CallLog = () => {
         setCounsellorOptions(profs.map(p => ({ id: p.user_id, name: p.display_name || "Unnamed" })).sort((a, b) => a.name.localeCompare(b.name)));
       }
     })();
-  }, [isCounsellor, roleLoaded, setCounsellorFilter, user?.id]);
+  }, [isCounsellor, profile?.display_name, roleLoaded, setCounsellorFilter, user?.id]);
 
   const fetchRecords = useCallback(async () => {
     if (!roleLoaded || !user?.id) {
@@ -293,14 +293,22 @@ const CallLog = () => {
         else if (["call_back", "callback"].includes(r.disposition)) s.call_back++;
       });
       setStats(s);
+      if (isCounsellor && page === 1) {
+        setCounsellorStats([{
+          id: user.id,
+          name: profile?.display_name || callerMap[user.id] || "You",
+          count: s.total,
+        }]);
+      }
     }
 
     // Per-counsellor call counts for the same date range (admins only).
-    // Runs in parallel with head:true counts — one lightweight query per counsellor.
+    // Use exact counts here: planned counts are planner estimates and can show
+    // "1" for every selective user_id/date query even when the real count is 0.
     if (!isCounsellor && counsellorOptions.length > 0 && page === 1) {
       const results = await Promise.all(
         counsellorOptions.map(async (c) => {
-          let q = supabase.from("call_logs").select("id", { count: "planned", head: true }).eq("user_id", c.id);
+          let q = supabase.from("call_logs").select("id", { count: "exact", head: true }).eq("user_id", c.id);
           if (from) q = q.gte("created_at", `${from}T00:00:00`);
           if (to) q = q.lte("created_at", `${to}T23:59:59`);
           const { count } = await q;
@@ -311,7 +319,7 @@ const CallLog = () => {
     }
 
     setLoading(false);
-  }, [datePreset, customFrom, customTo, page, scopedCounsellorId, counsellorOptions, isCounsellor, roleLoaded, user?.id]);
+  }, [datePreset, customFrom, customTo, page, scopedCounsellorId, counsellorOptions, isCounsellor, profile?.display_name, roleLoaded, user?.id]);
 
   useEffect(() => { fetchRecords(); }, [fetchRecords]);
   useEffect(() => {
@@ -374,13 +382,13 @@ const CallLog = () => {
         ))}
       </div>
 
-      {/* Counsellor-wise calls (admin only) */}
-      {!isCounsellor && counsellorStats.length > 0 && (
+      {/* Counsellor-wise calls. Counsellors see only their own scoped row. */}
+      {counsellorStats.length > 0 && (
         <Card className="border-border/60 shadow-none">
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-3">
               <div>
-                <p className="text-sm font-semibold text-foreground">Calls by Counsellor</p>
+                <p className="text-sm font-semibold text-foreground">{isCounsellor ? "My Calls" : "Calls by Counsellor"}</p>
                 <p className="text-[11px] text-muted-foreground">
                   {datePreset === "all" ? "All time" : PRESETS.find(p => p.key === datePreset)?.label || "Custom range"}
                 </p>
@@ -398,8 +406,11 @@ const CallLog = () => {
                   return (
                     <button
                       key={c.id}
-                      onClick={() => setCounsellorFilter(isActive ? "all" : c.id)}
-                      className={`w-full text-left group ${isActive ? "" : "hover:opacity-90"}`}
+                      onClick={() => {
+                        if (!isCounsellor) setCounsellorFilter(isActive ? "all" : c.id);
+                      }}
+                      disabled={isCounsellor}
+                      className={`w-full text-left group ${isCounsellor ? "cursor-default" : isActive ? "" : "hover:opacity-90"}`}
                     >
                       <div className="flex items-center justify-between mb-1">
                         <span className={`text-xs font-medium ${isActive ? "text-primary" : "text-foreground"} truncate`}>{c.name}</span>
