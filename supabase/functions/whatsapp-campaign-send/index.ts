@@ -232,6 +232,7 @@ Deno.serve(async (req) => {
             status: "sent",
             is_read: true,
             business_phone_number_id: phoneNumberId,
+            sender_user_id: user.id,
           });
 
           // Log lead activity
