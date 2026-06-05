@@ -457,10 +457,16 @@ function AcademicBlock({
 /* ── Entrance Exam Section ─────────────────────────── */
 interface EntranceExam {
   exam_name: string;
-  status: 'yet_to_appear' | 'not_declared' | 'declared';
+  status: 'yet_to_appear' | 'not_declared' | 'declared' | 'registered';
   score?: string;
   expected_date?: string;
+  registration_no?: string;
+  registered_name?: string;
   is_custom?: boolean;
+}
+
+function isCahetExamName(name: string): boolean {
+  return /cahet/i.test(name);
 }
 
 function EntranceExamSection({
@@ -488,7 +494,10 @@ function EntranceExamSection({
     const existingAutoNames = new Set(keptAuto.map(e => e.exam_name));
     const newAuto = courseExamNames
       .filter(n => !existingAutoNames.has(n))
-      .map(name => ({ exam_name: name, status: 'yet_to_appear' as const }));
+      .map(name => ({
+        exam_name: name,
+        status: 'yet_to_appear' as const,
+      }));
     const reconciled = [...keptAuto, ...newAuto, ...customExams];
     // Avoid useless re-renders if nothing changed
     if (JSON.stringify(reconciled) !== JSON.stringify(exams)) {
@@ -564,6 +573,13 @@ function EntranceExamSection({
                   placeholder="Exam name"
                   className={`${inputCls} max-w-xs`}
                 />
+              ) : isCahetExamName(ex.exam_name) ? (
+                <div>
+                  <h4 className="text-sm font-semibold text-foreground">CAHET Registration Details</h4>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Required for BPT/BMRIT admission through ABVMU Lucknow counselling.
+                  </p>
+                </div>
               ) : (
                 <h4 className="text-sm font-medium text-foreground">{ex.exam_name}</h4>
               )}
@@ -573,7 +589,40 @@ function EntranceExamSection({
                 </Button>
               )}
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {isCahetExamName(ex.exam_name) ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">CAHET Registration Status</label>
+                  <select
+                    value={ex.status === 'registered' ? 'registered' : 'yet_to_appear'}
+                    onChange={e => updateExam(idx, 'status', e.target.value)}
+                    className={inputCls}
+                  >
+                    <option value="registered">Registered on ABVMU CAHET 2026</option>
+                    <option value="yet_to_appear">Not registered yet</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">CAHET Registration No.</label>
+                  <input
+                    value={ex.registration_no || ''}
+                    onChange={e => updateExam(idx, 'registration_no', e.target.value)}
+                    placeholder="e.g. CAHET-2026-12345"
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Name on CAHET Form</label>
+                  <input
+                    value={ex.registered_name || ''}
+                    onChange={e => updateExam(idx, 'registered_name', e.target.value)}
+                    placeholder="As entered on ABVMU CAHET"
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Status</label>
                 <select
@@ -608,7 +657,8 @@ function EntranceExamSection({
                   />
                 </div>
               )}
-            </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       ))}
