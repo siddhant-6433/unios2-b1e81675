@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X, KeyRound, Trash2, UserCheck, Lock, LockOpen, ArrowRightLeft
+  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X, KeyRound, Trash2, UserCheck, Lock, LockOpen, ArrowRightLeft, AlertTriangle
 } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -28,6 +28,7 @@ import { BrandingPanel } from "@/components/admin/BrandingPanel";
 import CampusGeofencePanel from "@/components/admin/CampusGeofencePanel";
 import FaceApprovalPanel from "@/components/admin/FaceApprovalPanel";
 import { TransferAccountDialog } from "@/components/admin/TransferAccountDialog";
+import { Switch } from "@/components/ui/switch";
 import type { Database } from "@/integrations/supabase/types";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
@@ -392,7 +393,12 @@ const AdminPanel = () => {
         </div>
       </div>
 
-      {isSuperAdmin && <VoiceProviderCard />}
+      {isSuperAdmin && (
+        <div className="space-y-3">
+          <OverdueFollowupEnforcementCard />
+          <VoiceProviderCard />
+        </div>
+      )}
 
       <Tabs defaultValue={searchParams.get("tab") || "users"} className="w-full">
         <TabsList className="bg-transparent border-b border-border rounded-none p-0 h-auto gap-0 w-full justify-start">
@@ -1344,5 +1350,69 @@ const SummaryCard = ({ label, value, bg }: { label: string; value: number; bg: s
     </div>
   </div>
 );
+
+function OverdueFollowupEnforcementCard() {
+  const { toast } = useToast();
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    (supabase.rpc("get_overdue_followup_enforcement_enabled" as any) as any).then(({ data, error }: any) => {
+      if (error) {
+        toast({ title: "Couldn't load overdue follow-up setting", description: error.message, variant: "destructive" });
+        setEnabled(true);
+        return;
+      }
+      setEnabled(data !== false);
+    });
+  }, [toast]);
+
+  const updateEnabled = async (next: boolean) => {
+    const previous = enabled;
+    setEnabled(next);
+    setSaving(true);
+
+    const { error } = await supabase.rpc("set_overdue_followup_enforcement_enabled" as any, { _enabled: next });
+    setSaving(false);
+
+    if (error) {
+      setEnabled(previous);
+      toast({ title: "Couldn't save overdue follow-up setting", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    toast({
+      title: next ? "Overdue follow-ups enabled" : "Overdue follow-ups paused",
+      description: next
+        ? "Counsellor overdue queues and direct-dial priority checks are active."
+        : "Overdue queues and direct-dial overdue blocking are temporarily suppressed.",
+    });
+  };
+
+  if (enabled === null) return null;
+
+  return (
+    <div className="rounded-2xl border border-border bg-card p-4">
+      <div className="flex flex-wrap items-center gap-4">
+        <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${enabled ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600"}`}>
+          <AlertTriangle className="h-4 w-4" />
+        </div>
+        <div className="flex-1 min-w-[240px]">
+          <p className="text-sm font-semibold text-foreground">Overdue follow-up enforcement</p>
+          <p className="text-[12px] text-muted-foreground mt-0.5">
+            {enabled
+              ? "Overdue follow-ups appear in counsellor queues and can block non-priority direct calls."
+              : "Overdue follow-up queues are hidden and direct calls are not blocked by overdue follow-ups."}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {saving && <span className="text-[11px] text-muted-foreground">Saving...</span>}
+          <span className="text-xs font-medium text-muted-foreground">{enabled ? "Enabled" : "Paused"}</span>
+          <Switch checked={enabled} disabled={saving} onCheckedChange={updateEnabled} aria-label="Toggle overdue follow-up enforcement" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default AdminPanel;
