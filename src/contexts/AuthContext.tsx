@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, useCallback, ReactNode } from "react";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
@@ -78,8 +78,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return stored ? JSON.parse(stored) : null;
     } catch { return null; }
   });
+  const fetchedUserDataForRef = useRef<string | null>(null);
 
   const fetchUserData = async (userId: string, authUser?: User) => {
+    if (fetchedUserDataForRef.current === userId) return;
+    fetchedUserDataForRef.current = userId;
     try {
       const [profileRes, roleRes] = await Promise.all([
         supabase.from("profiles").select("id, display_name, phone, avatar_url, campus, department, institution").eq("user_id", userId).single(),
@@ -115,6 +118,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         .then((res: any) => { if (Array.isArray(res?.data)) setPermissions(res.data); })
         .catch(() => {});
     } catch (err) {
+      fetchedUserDataForRef.current = null;
       console.error("fetchUserData failed:", err);
     } finally {
       setRoleLoaded(true);
@@ -123,12 +127,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+      async (event, session) => {
+        if (event === "INITIAL_SESSION") return;
         setSession(session);
         if (session?.user) {
           // Use setTimeout to avoid Supabase client deadlock
           setTimeout(() => fetchUserData(session.user.id, session.user), 0);
         } else {
+          fetchedUserDataForRef.current = null;
           setProfile(null);
           setRole(null);
           setRoleLoaded(true); // no user = no role to load
@@ -142,6 +148,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (session?.user) {
         fetchUserData(session.user.id, session.user);
       } else {
+        fetchedUserDataForRef.current = null;
         setRoleLoaded(true); // no user = no role to load
       }
       setLoading(false);
@@ -177,6 +184,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const signOut = async () => {
     stopImpersonating();
     await supabase.auth.signOut();
+    fetchedUserDataForRef.current = null;
     setSession(null);
     setProfile(null);
     setRole(null);
