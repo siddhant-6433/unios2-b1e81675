@@ -5,6 +5,7 @@ const migration = readFileSync(
   "supabase/migrations/20260618161000_tighten_call_logs_counsellor_rls.sql",
   "utf8",
 );
+const callLogPage = readFileSync("src/pages/CallLog.tsx", "utf8");
 
 describe("call_logs counsellor data scope", () => {
   it("does not grant counsellors broad call_logs select access", () => {
@@ -18,5 +19,18 @@ describe("call_logs counsellor data scope", () => {
     expect(selectPolicy).not.toMatch(
       /OR\s+has_role\(\(SELECT auth\.uid\(\)\), 'counsellor'::app_role\)\s*(?:\)|OR)/,
     );
+  });
+
+  it("renders a self-only calls chart for counsellor sessions", () => {
+    expect(callLogPage).toContain("if (isCounsellor && page === 1)");
+    expect(callLogPage).toContain("count: s.total");
+    expect(callLogPage).toContain('isCounsellor ? "My Calls" : "Calls by Counsellor"');
+    expect(callLogPage).toContain("disabled={isCounsellor}");
+    expect(callLogPage).not.toContain("!isCounsellor && counsellorStats.length > 0");
+  });
+
+  it("uses exact counts for the per-counsellor chart", () => {
+    expect(callLogPage).toContain('count: "exact", head: true');
+    expect(callLogPage).not.toContain('count: "planned", head: true }).eq("user_id"');
   });
 });
