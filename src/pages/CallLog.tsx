@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -99,6 +99,11 @@ interface AiCallRecording {
   recording_url: string | null;
 }
 
+interface CallLogCursor {
+  created_at: string;
+  id: string;
+}
+
 const CallLog = () => {
   const navigate = useNavigate();
   const { role, roleLoaded, user } = useAuth();
@@ -107,6 +112,8 @@ const CallLog = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const callPageCursorsRef = useRef<Record<number, CallLogCursor>>({});
+  const [hasNextCallPage, setHasNextCallPage] = useState(false);
 
   // Filters
   const [datePreset, setDatePreset] = useState<DatePreset>("today");
@@ -159,17 +166,28 @@ const CallLog = () => {
     setLoading(true);
 
     const { from, to } = datePreset === "custom" ? { from: customFrom, to: customTo } : getDateRange(datePreset);
+    const pageCursor = page > 1 ? callPageCursorsRef.current[page] : null;
+    if (page > 1 && !pageCursor) {
+      setPage(1);
+      setLoading(false);
+      return;
+    }
 
     let query = supabase
       .from("call_logs")
       .select(`
         id, lead_id, disposition, duration_seconds, notes, recording_url, created_at, called_at, user_id, cloud_call_uuid, source,
         leads:lead_id(name, phone, stage, source)
-      `, { count: "exact" })
-      .order("created_at", { ascending: false });
+      `, page === 1 ? { count: "planned" } : undefined)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(PAGE_SIZE + 1);
 
     if (from) query = query.gte("created_at", `${from}T00:00:00`);
     if (to) query = query.lte("created_at", `${to}T23:59:59`);
+    if (pageCursor) {
+      query = query.or(`created_at.lt.${pageCursor.created_at},and(created_at.eq.${pageCursor.created_at},id.lt.${pageCursor.id})`);
+    }
 
     // Server-side counsellor filter by user_id (who made the call).
     // For counsellors, bind directly to the authenticated user once role is
@@ -178,10 +196,11 @@ const CallLog = () => {
       query = query.eq("user_id", scopedCounsellorId);
     }
 
-    const { data, count } = await query.range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
+    const { data, count } = await query;
 
     if (data) {
-      const rows = data as unknown as CallLogRow[];
+      const rows = (data as unknown as CallLogRow[]).slice(0, PAGE_SIZE);
+      const hasNext = (data as unknown as CallLogRow[]).length > PAGE_SIZE;
       // Batch-fetch caller profiles
       const callerIds = [...new Set(rows.map((r) => r.user_id).filter((id): id is string => Boolean(id)))];
       const callerMap: Record<string, string> = {};
@@ -250,10 +269,22 @@ const CallLog = () => {
       });
 
       setRecords(enriched);
-      setTotalCount(count || enriched.length);
+      if (page === 1) setTotalCount(count || enriched.length);
+      setHasNextCallPage(hasNext);
+      if (hasNext && enriched.length > 0) {
+        const last = enriched[enriched.length - 1];
+        callPageCursorsRef.current[page + 1] = { created_at: last.created_at, id: last.id };
+      } else {
+        delete callPageCursorsRef.current[page + 1];
+      }
 
       // Compute stats from this page (ideally from full dataset, but good enough for filtered view)
-      const s = { ...EMPTY_STATS, total: count || enriched.length };
+      const s = {
+        ...EMPTY_STATS,
+        total: page === 1
+          ? (count || enriched.length)
+          : (page - 1) * PAGE_SIZE + enriched.length + (hasNext ? 1 : 0),
+      };
       enriched.forEach(r => {
         if (r.disposition === "interested") s.interested++;
         else if (r.disposition === "not_interested") s.not_interested++;
@@ -266,10 +297,10 @@ const CallLog = () => {
 
     // Per-counsellor call counts for the same date range (admins only).
     // Runs in parallel with head:true counts — one lightweight query per counsellor.
-    if (!isCounsellor && counsellorOptions.length > 0) {
+    if (!isCounsellor && counsellorOptions.length > 0 && page === 1) {
       const results = await Promise.all(
         counsellorOptions.map(async (c) => {
-          let q = supabase.from("call_logs").select("id", { count: "exact", head: true }).eq("user_id", c.id);
+          let q = supabase.from("call_logs").select("id", { count: "planned", head: true }).eq("user_id", c.id);
           if (from) q = q.gte("created_at", `${from}T00:00:00`);
           if (to) q = q.lte("created_at", `${to}T23:59:59`);
           const { count } = await q;
@@ -283,7 +314,11 @@ const CallLog = () => {
   }, [datePreset, customFrom, customTo, page, scopedCounsellorId, counsellorOptions, isCounsellor, roleLoaded, user?.id]);
 
   useEffect(() => { fetchRecords(); }, [fetchRecords]);
-  useEffect(() => { setPage(1); }, [datePreset, counsellorFilter, dispositionFilter]);
+  useEffect(() => {
+    setPage(1);
+    callPageCursorsRef.current = {};
+    setHasNextCallPage(false);
+  }, [datePreset, counsellorFilter, dispositionFilter]);
 
   // Client-side filters (disposition + search — counsellor is now server-side)
   const filtered = records.filter(r => {
@@ -299,7 +334,7 @@ const CallLog = () => {
     return true;
   });
 
-  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   const formatDuration = (s: number | null) => {
     if (!s) return "—";
@@ -445,17 +480,15 @@ const CallLog = () => {
           Showing <span className="font-semibold text-foreground">{filtered.length}</span> of <span className="font-semibold text-foreground">{totalCount}</span> calls
           {datePreset !== "all" && <span> ({PRESETS.find(p => p.key === datePreset)?.label || "Custom"})</span>}
         </p>
-        {totalPages > 1 && (
+        {(totalPages > 1 || hasNextCallPage) && (
           <div className="flex items-center gap-1.5">
             <button onClick={() => setPage(1)} disabled={page <= 1}
               className="rounded-lg border border-input bg-card px-2 py-1 text-xs disabled:opacity-40 hover:bg-muted">First</button>
             <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}
               className="rounded-lg border border-input bg-card px-2.5 py-1 text-xs font-medium disabled:opacity-40 hover:bg-muted">Prev</button>
             <span className="text-xs text-muted-foreground px-2">{page} / {totalPages}</span>
-            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}
+            <button onClick={() => setPage(p => p + 1)} disabled={!hasNextCallPage}
               className="rounded-lg border border-input bg-card px-2.5 py-1 text-xs font-medium disabled:opacity-40 hover:bg-muted">Next</button>
-            <button onClick={() => setPage(totalPages)} disabled={page >= totalPages}
-              className="rounded-lg border border-input bg-card px-2 py-1 text-xs disabled:opacity-40 hover:bg-muted">Last</button>
           </div>
         )}
       </div>
@@ -556,7 +589,7 @@ const CallLog = () => {
       )}
 
       {/* Bottom pagination */}
-      {totalPages > 1 && (
+      {(totalPages > 1 || hasNextCallPage) && (
         <div className="flex items-center justify-between">
           <p className="text-xs text-muted-foreground">
             Page {page} of {totalPages} · {totalCount} total calls
@@ -564,7 +597,7 @@ const CallLog = () => {
           <div className="flex items-center gap-1.5">
             <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}
               className="rounded-lg border border-input bg-card px-2.5 py-1 text-xs font-medium disabled:opacity-40 hover:bg-muted">Prev</button>
-            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}
+            <button onClick={() => setPage(p => p + 1)} disabled={!hasNextCallPage}
               className="rounded-lg border border-input bg-card px-2.5 py-1 text-xs font-medium disabled:opacity-40 hover:bg-muted">Next</button>
           </div>
         </div>

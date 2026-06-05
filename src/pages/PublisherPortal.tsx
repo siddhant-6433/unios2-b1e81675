@@ -235,10 +235,10 @@ export default function PublisherPortal() {
       // Paginate to bypass Supabase server-side max-rows cap (default 1000)
       const PAGE = 1000;
       let allLeads: any[] = [];
-      let page = 0;
+      let cursor: { created_at: string; id: string } | null = null;
       let fetchErr = null;
       while (true) {
-        const { data: batch, error } = await (supabase as any)
+        let query = (supabase as any)
           .from("leads")
           .select(`
             id, name, phone, email, stage, city, state, created_at,
@@ -248,11 +248,19 @@ export default function PublisherPortal() {
           `)
           .eq("source", pub.source)
           .order("created_at", { ascending: false })
-          .range(page * PAGE, (page + 1) * PAGE - 1);
+          .order("id", { ascending: false })
+          .limit(PAGE + 1);
+        if (cursor) {
+          query = query.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
+        }
+        const { data: batch, error } = await query;
         if (error) { fetchErr = error; break; }
-        allLeads = allLeads.concat(batch ?? []);
-        if ((batch ?? []).length < PAGE) break; // last page
-        page++;
+        const fetched = batch ?? [];
+        const rows = fetched.slice(0, PAGE);
+        allLeads = allLeads.concat(rows);
+        const last = rows[rows.length - 1];
+        if (!last || fetched.length <= PAGE) break; // last page
+        cursor = { created_at: last.created_at, id: last.id };
       }
 
       if (fetchErr) {

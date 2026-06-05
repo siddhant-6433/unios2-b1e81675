@@ -48,7 +48,7 @@ export function CloudDialerNudge() {
       // manual_log calls logged from the lead page.
       const { count } = await supabase
         .from("call_logs")
-        .select("id", { count: "exact", head: true })
+        .select("id", { count: "planned", head: true })
         .eq("user_id", user.id)
         .eq("source", "cloud_dialer")
         .gte("called_at", sevenDaysAgo);

@@ -249,7 +249,7 @@ export default function Inbox() {
       isSuperAdmin
         ? supabase
             .from("offer_waivers")
-            .select("id", { count: "exact", head: true })
+            .select("id", { count: "planned", head: true })
             .eq("status", "pending")
         : Promise.resolve({ count: 0 }),
 
@@ -257,7 +257,7 @@ export default function Inbox() {
       isApprover
         ? supabase
             .from("offer_letters")
-            .select("id", { count: "exact", head: true })
+            .select("id", { count: "planned", head: true })
             .eq("approval_status", "pending_principal")
         : Promise.resolve({ count: 0 }),
 
@@ -265,7 +265,7 @@ export default function Inbox() {
       isAdmissions
         ? supabase
             .from("applications" as any)
-            .select("id", { count: "exact", head: true })
+            .select("id", { count: "planned", head: true })
             .eq("status", "submitted")
         : Promise.resolve({ count: 0 }),
 
@@ -274,7 +274,7 @@ export default function Inbox() {
         ? (() => {
             let q = supabase
               .from("lead_followups")
-              .select("id", { count: "exact", head: true })
+              .select("id", { count: "planned", head: true })
               .eq("status", "pending")
               .lte("scheduled_at", `${today}T23:59:59`);
             return q;
@@ -285,7 +285,7 @@ export default function Inbox() {
       isAdmissions
         ? supabase
             .from("whatsapp_messages")
-            .select("id", { count: "exact", head: true })
+            .select("id", { count: "planned", head: true })
             .eq("direction", "inbound")
             .eq("is_read", false)
         : Promise.resolve({ count: 0 }),
@@ -294,7 +294,7 @@ export default function Inbox() {
       isSuperAdmin
         ? supabase
             .from("videos" as any)
-            .select("id", { count: "exact", head: true })
+            .select("id", { count: "planned", head: true })
             .eq("status", "pending_approval")
         : Promise.resolve({ count: 0 }),
 
@@ -302,7 +302,7 @@ export default function Inbox() {
       isApprover
         ? supabase
             .from("consultant_voice_messages" as any)
-            .select("id", { count: "exact", head: true })
+            .select("id", { count: "planned", head: true })
             .eq("status", "unread")
         : Promise.resolve({ count: 0 }),
     ]);
@@ -492,7 +492,7 @@ export default function Inbox() {
         // Use whatsapp_conversations view if available, else aggregate
         const { data, error } = await supabase
           .from("whatsapp_conversations" as any)
-          .select("*")
+          .select("phone, lead_id, lead_name, last_message, last_message_at, unread_count")
           .gt("unread_count", 0)
           .order("last_message_at", { ascending: false })
           .limit(100);

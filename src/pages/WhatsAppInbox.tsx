@@ -350,16 +350,27 @@ const WhatsAppInbox = () => {
     // list to the wrong viewer.
     if (role === "counsellor" && !profile?.id) return;
     (async () => {
-      // Fetch ALL conversations in batches (Supabase caps at 1000 per query)
+      // Fetch conversations in keyset batches. The UI still needs a full
+      // working set for tabs/search/staff synthesis, but offset scans get
+      // expensive as the WhatsApp view grows.
       let allConvData: any[] = [];
-      let offset = 0;
+      let cursor: { last_message_at: string; phone: string } | null = null;
       const BATCH = 1000;
       while (true) {
         let q = supabase
           .from("whatsapp_conversations" as any)
-          .select("*")
+          .select(`
+            phone, lead_id, lead_name, lead_stage, lead_person_role, course_name,
+            last_message, last_direction, last_message_at, unread_count,
+            counsellor_id, counsellor_name, has_inbound,
+            business_phone_number_id, business_phone_number, lead_counsellor_ids
+          `)
           .order("last_message_at", { ascending: false })
-          .range(offset, offset + BATCH - 1);
+          .order("phone", { ascending: false })
+          .limit(BATCH);
+        if (cursor) {
+          q = q.or(`last_message_at.lt.${cursor.last_message_at},and(last_message_at.eq.${cursor.last_message_at},phone.lt.${cursor.phone})`);
+        }
 
         if (role === "counsellor" && profile?.id) {
           // Filter via the aggregated lead_counsellor_ids array — covers the
@@ -380,7 +391,8 @@ const WhatsAppInbox = () => {
         if (!data || (data as any[]).length === 0) break;
         allConvData = [...allConvData, ...(data as any[])];
         if ((data as any[]).length < BATCH) break; // last page
-        offset += BATCH;
+        const last = (data as any[])[(data as any[]).length - 1];
+        cursor = { last_message_at: last.last_message_at, phone: last.phone };
       }
 
       setConversations(allConvData);
@@ -414,12 +426,18 @@ const WhatsAppInbox = () => {
             lead_id: null,
             lead_name: null,
             lead_stage: null,
+            lead_person_role: null,
+            course_name: null,
             last_message: null,
             last_direction: "outbound",
             last_message_at: "1970-01-01T00:00:00Z", // no messages yet — sort to bottom
             unread_count: 0,
             counsellor_id: null,
             counsellor_name: null,
+            has_inbound: false,
+            business_phone_number_id: null,
+            business_phone_number: null,
+            lead_counsellor_ids: null,
           });
         }
       }

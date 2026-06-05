@@ -177,7 +177,7 @@ function DeferredBlock({ className = "h-24" }: { className?: string }) {
 const Admissions = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { role, profile } = useAuth();
+  const { role, profile, user } = useAuth();
   const { selectedCampusId } = useCampus();
   const isTeamLeader = useIsTeamLeader();
   const { toast } = useToast();
@@ -213,6 +213,8 @@ const Admissions = () => {
   const [actionBucketLabel, setActionBucketLabel] = useState<string>("");
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
+  const [leadPageCursors, setLeadPageCursors] = useState<Record<number, { created_at: string; id: string }>>({});
+  const [hasNextLeadPage, setHasNextLeadPage] = useState(false);
 
   // Server-side total count (only used in list view — pipeline view fetches all)
   const [totalCount, setTotalCount] = useState(0);
@@ -468,14 +470,23 @@ const Admissions = () => {
       }
 
       // ── List view: server-side filter + paginate ───────────────────────────
-      const offset = (page - 1) * PAGE_SIZE;
+      const pageCursor = page > 1 ? leadPageCursors[page] : null;
+      if (page > 1 && !pageCursor) {
+        setPage(1);
+        return;
+      }
       let query: any = supabase
         .from("leads")
         .select(
-          "*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)",
-          { count: "exact" }
+          `id, name, phone, email, stage, source, person_role, created_at,
+           application_id, pre_admission_no, admission_no, course_id, campus_id,
+           counsellor_id, lead_score, lead_temperature, ai_called,
+           courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`,
+          page === 1 ? { count: "planned" } : undefined
         )
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(PAGE_SIZE + 1);
 
       // Counsellor / campus scope
       if (role === "counsellor" && profile?.id) {
@@ -497,6 +508,7 @@ const Admissions = () => {
       if (sourceFilter !== "all") query = query.eq("source", sourceFilter);
       if (leadInstitutionType !== "all" && effectiveCourseFilterIds.length === 0) {
         setLeads([]); setTotalCount(0); setSelectedIds(new Set()); setHasLoadedOnce(true);
+        setHasNextLeadPage(false); setLeadPageCursors({});
         return;
       }
       if (effectiveCourseFilterIds.length > 0) query = query.in("course_id", effectiveCourseFilterIds);
@@ -519,6 +531,10 @@ const Admissions = () => {
         );
       }
 
+      if (pageCursor) {
+        query = query.or(`created_at.lt.${pageCursor.created_at},and(created_at.eq.${pageCursor.created_at},id.lt.${pageCursor.id})`);
+      }
+
       // ID-set filters: intersect any active sets and pass the result as .in("id", …)
       const idSets: (Set<string> | null)[] = [inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds];
       const activeSets = idSets.filter((s): s is Set<string> => s !== null);
@@ -530,16 +546,17 @@ const Admissions = () => {
         }
         if (intersection.length === 0) {
           setLeads([]); setTotalCount(0); setSelectedIds(new Set()); setHasLoadedOnce(true);
+          setHasNextLeadPage(false); setLeadPageCursors({});
           return;
         }
         query = query.in("id", intersection);
       }
 
-      query = query.range(offset, offset + PAGE_SIZE - 1);
-
       const { data, count, error } = await query;
       if (error) throw error;
-      const enriched = (data || []).map((l: any) => ({
+      const rows = ((data || []) as any[]).slice(0, PAGE_SIZE);
+      const hasNext = ((data || []) as any[]).length > PAGE_SIZE;
+      const enriched = rows.map((l: any) => ({
         ...l,
         course_name: l.courses?.name || "—",
         campus_name: l.campuses?.name || "—",
@@ -549,7 +566,20 @@ const Admissions = () => {
         app_fee_amount: null as number | null,
       }));
       setLeads(enriched);
-      setTotalCount(count ?? enriched.length);
+      if (page === 1) {
+        setTotalCount(count ?? enriched.length);
+      }
+      setHasNextLeadPage(hasNext);
+      setLeadPageCursors((prev) => {
+        const next = { ...prev };
+        if (hasNext && enriched.length > 0) {
+          const last = enriched[enriched.length - 1];
+          next[page + 1] = { created_at: last.created_at, id: last.id };
+        } else {
+          delete next[page + 1];
+        }
+        return next;
+      });
       setHasLoadedOnce(true);
       applyLeadEnrichment(enriched);
     } catch (error) {
@@ -782,11 +812,15 @@ const Admissions = () => {
   // and `totalCount` is the unpaginated total. Pipeline / action_center
   // still need the client-side `filtered` array for stage bucketing.
   const filteredCount = view === "list" ? totalCount : filtered.length;
-  const totalPages = Math.ceil(filteredCount / PAGE_SIZE);
+  const totalPages = view === "list" ? Math.max(1, Math.ceil(filteredCount / PAGE_SIZE)) : Math.ceil(filteredCount / PAGE_SIZE);
   const paginatedLeads = view === "list" ? leads : filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // Reset page when filters change
-  useEffect(() => { setPage(1); }, [stageFilter, sourceFilter, leadInstitutionType, effectiveCourseFilterIds, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, fromDate, toDate]);
+  useEffect(() => {
+    setPage(1);
+    setLeadPageCursors({});
+    setHasNextLeadPage(false);
+  }, [stageFilter, sourceFilter, leadInstitutionType, effectiveCourseFilterIds, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, fromDate, toDate]);
 
   // Funnel click → translate bucket into a stageFilter (comma-separated raw
   // lead_stage values that the existing `matchesStage` filter already
@@ -1784,7 +1818,7 @@ const Admissions = () => {
                 Prev
               </button>
               <span className="text-xs text-muted-foreground px-2">Page {page} of {totalPages}</span>
-              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}
+              <button onClick={() => setPage(p => p + 1)} disabled={!hasNextLeadPage}
                 className="rounded-lg border border-input bg-card px-2.5 py-1 text-xs font-medium text-foreground disabled:opacity-40 hover:bg-muted">
                 Next
               </button>
@@ -1923,10 +1957,8 @@ const Admissions = () => {
               <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}
                 className="rounded-lg border border-input bg-card px-2.5 py-1 text-xs font-medium disabled:opacity-40 hover:bg-muted">Prev</button>
               <span className="text-xs text-muted-foreground px-2">{page} / {totalPages}</span>
-              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}
+              <button onClick={() => setPage(p => p + 1)} disabled={!hasNextLeadPage}
                 className="rounded-lg border border-input bg-card px-2.5 py-1 text-xs font-medium disabled:opacity-40 hover:bg-muted">Next</button>
-              <button onClick={() => setPage(totalPages)} disabled={page >= totalPages}
-                className="rounded-lg border border-input bg-card px-2 py-1 text-xs disabled:opacity-40 hover:bg-muted">Last</button>
             </div>
           </div>
         )}

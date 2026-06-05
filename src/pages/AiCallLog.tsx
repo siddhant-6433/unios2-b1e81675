@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
@@ -31,6 +31,11 @@ interface AiCallRecord {
   followup_status?: string;
   followup_date?: string;
   followup_counsellor?: string;
+}
+
+interface AiCallCursor {
+  created_at: string;
+  id: string;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -84,6 +89,8 @@ const AiCallLog = () => {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [page, setPage] = useState(0);
+  const pageCursorsRef = useRef<Record<number, AiCallCursor>>({});
+  const [hasNextPage, setHasNextPage] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
   const [stats, setStats] = useState({ total: 0, completed: 0, withRecording: 0, highConv: 0, inbound: 0 });
   const [activeStatFilter, setActiveStatFilter] = useState<"total" | "completed" | "withRecording" | "highConv" | "inbound" | null>(null);
@@ -92,30 +99,32 @@ const AiCallLog = () => {
   const fetchRecords = useCallback(async () => {
     setLoading(true);
     const { from: dateFrom, to: dateTo } = getDateRange(dateFilter, customFrom, customTo);
-
-    // Build query for count + stats. Exclude counsellor_no_answer — those
-    // attempts never reached the lead and shouldn't show up in call stats.
-    let countQuery = supabase
-      .from("ai_call_records" as any)
-      .select("id, status, recording_url, conversion_probability, call_type", { count: "exact", head: false })
-      .neq("status", "counsellor_no_answer");
-
-    if (dateFrom) countQuery = countQuery.gte("created_at", dateFrom);
-    if (dateTo) countQuery = countQuery.lte("created_at", dateTo);
-    if (search) {
-      // For search, we need to join with leads — skip count optimization, filter client-side
+    const pageCursor = page > 0 ? pageCursorsRef.current[page] : null;
+    if (page > 0 && !pageCursor) {
+      setPage(0);
+      setLoading(false);
+      return;
     }
 
-    const { data: countData, count } = await countQuery;
-    const allForStats = countData || [];
-    setTotalCount(count || allForStats.length);
-    setStats({
-      total: count || allForStats.length,
-      completed: allForStats.filter((r: any) => r.status === "completed").length,
-      withRecording: allForStats.filter((r: any) => r.recording_url).length,
-      highConv: allForStats.filter((r: any) => (r.conversion_probability || 0) >= 60).length,
-      inbound: allForStats.filter((r: any) => r.call_type === "inbound").length,
-    });
+    if (page === 0) {
+      const { data: statsData, error: statsError } = await supabase.rpc("ai_call_log_stats" as any, {
+        p_date_from: dateFrom,
+        p_date_to: dateTo,
+      });
+      if (!statsError && statsData) {
+        const nextStats = {
+          total: Number((statsData as any).total ?? 0),
+          completed: Number((statsData as any).completed ?? 0),
+          withRecording: Number((statsData as any).withRecording ?? 0),
+          highConv: Number((statsData as any).highConv ?? 0),
+          inbound: Number((statsData as any).inbound ?? 0),
+        };
+        setTotalCount(nextStats.total);
+        setStats(nextStats);
+      } else if (statsError) {
+        console.warn("[AiCallLog] stats skipped", statsError.message);
+      }
+    }
 
     // Fetch page data with joins. Same exclusion as countQuery so the list
     // matches the stats above.
@@ -131,10 +140,14 @@ const AiCallLog = () => {
       `)
       .neq("status", "counsellor_no_answer")
       .order("created_at", { ascending: false })
-      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+      .order("id", { ascending: false })
+      .limit(PAGE_SIZE + 1);
 
     if (dateFrom) query = query.gte("created_at", dateFrom);
     if (dateTo) query = query.lte("created_at", dateTo);
+    if (pageCursor) {
+      query = query.or(`created_at.lt.${pageCursor.created_at},and(created_at.eq.${pageCursor.created_at},id.lt.${pageCursor.id})`);
+    }
 
     // Call type filter
     if (callTypeFilter === "ai") query = (query as any).or("call_type.eq.ai,call_type.is.null");
@@ -150,12 +163,22 @@ const AiCallLog = () => {
     const { data } = await query;
 
     if (data) {
+      const fetchedRows = data as any[];
+      const pageRows = fetchedRows.slice(0, PAGE_SIZE);
+      const hasNext = fetchedRows.length > PAGE_SIZE;
+      setHasNextPage(hasNext);
+      const last = pageRows[pageRows.length - 1];
+      if (last) {
+        pageCursorsRef.current[page + 1] = { created_at: last.created_at, id: last.id };
+      } else {
+        delete pageCursorsRef.current[page + 1];
+      }
       // Batch-fetch retry counts and followup info for all lead_ids in this page
-      const leadIds = [...new Set((data as any[]).map((r: any) => r.lead_id).filter(Boolean))];
+      const leadIds = [...new Set(pageRows.map((r: any) => r.lead_id).filter(Boolean))];
       const [retryRes, followupRes] = await Promise.all([
         // Count total AI calls per lead
         supabase.from("ai_call_records" as any)
-          .select("lead_id", { count: "exact", head: false })
+          .select("lead_id")
           .in("lead_id", leadIds),
         // Latest followup per lead
         supabase.from("lead_followups" as any)
@@ -176,7 +199,7 @@ const AiCallLog = () => {
         if (!followupMap[f.lead_id]) followupMap[f.lead_id] = f;
       });
 
-      let mapped = (data as any[]).map((r: any) => {
+      let mapped = pageRows.map((r: any) => {
         const fu = followupMap[r.lead_id];
         return {
           ...r,
@@ -213,9 +236,11 @@ const AiCallLog = () => {
   // Reset page when filters change
   useEffect(() => {
     setPage(0);
+    pageCursorsRef.current = {};
+    setHasNextPage(false);
   }, [dateFilter, customFrom, customTo, search, activeStatFilter, callTypeFilter]);
 
-  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   const fmtDuration = (s: number | null) => {
     if (!s) return "—";
@@ -468,7 +493,7 @@ const AiCallLog = () => {
       </Card>
 
       {/* Pagination */}
-      {totalPages > 1 && (
+      {(totalPages > 1 || hasNextPage) && (
         <div className="flex items-center justify-between">
           <p className="text-xs text-muted-foreground">
             Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, totalCount)} of {totalCount.toLocaleString()} calls
@@ -478,29 +503,10 @@ const AiCallLog = () => {
               className="rounded-lg border border-input bg-card p-1.5 text-muted-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
               <ChevronLeft className="h-4 w-4" />
             </button>
-            {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
-              let pageNum: number;
-              if (totalPages <= 7) {
-                pageNum = i;
-              } else if (page < 4) {
-                pageNum = i;
-              } else if (page > totalPages - 5) {
-                pageNum = totalPages - 7 + i;
-              } else {
-                pageNum = page - 3 + i;
-              }
-              return (
-                <button key={pageNum} onClick={() => setPage(pageNum)}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                    page === pageNum
-                      ? "bg-primary text-primary-foreground"
-                      : "border border-input bg-card text-muted-foreground hover:bg-muted"
-                  }`}>
-                  {pageNum + 1}
-                </button>
-              );
-            })}
-            <button onClick={() => setPage(Math.min(totalPages - 1, page + 1))} disabled={page >= totalPages - 1}
+            <span className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-medium text-foreground">
+              Page {page + 1} of {totalPages}
+            </span>
+            <button onClick={() => setPage(page + 1)} disabled={!hasNextPage}
               className="rounded-lg border border-input bg-card p-1.5 text-muted-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
               <ChevronRight className="h-4 w-4" />
             </button>
