@@ -11,6 +11,7 @@ interface BulkLeadImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
+  defaultListMode?: "off" | "new" | "existing";
 }
 
 // Fields the importer can write to. The keys are the column names on the
@@ -110,7 +111,7 @@ interface ExistingList {
   member_count: number;
 }
 
-export function BulkLeadImportDialog({ open, onOpenChange, onSuccess }: BulkLeadImportDialogProps) {
+export function BulkLeadImportDialog({ open, onOpenChange, onSuccess, defaultListMode = "off" }: BulkLeadImportDialogProps) {
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -132,6 +133,7 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess }: BulkLead
   // overriding whatever was in the CSV (or filling it in when missing).
   // Empty string = "use CSV value, fall back to 'other'".
   const [sourceOverride, setSourceOverride] = useState<string>("");
+  const [otherSourceName, setOtherSourceName] = useState<string>("");
 
   // Notes can be assembled from multiple CSV columns (e.g. campaign_name +
   // ad_set + remarks) concatenated with a separator. When this list is
@@ -145,7 +147,7 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess }: BulkLead
   //   off       — don't create / append any list
   //   new       — create a new list with `listName`
   //   existing  — append to the list with id `existingListId`
-  const [listMode, setListMode] = useState<"off" | "new" | "existing">("off");
+  const [listMode, setListMode] = useState<"off" | "new" | "existing">(defaultListMode);
   const [listName, setListName] = useState("");
   const [existingListId, setExistingListId] = useState<string>("");
   const [existingLists, setExistingLists] = useState<ExistingList[]>([]);
@@ -156,11 +158,11 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess }: BulkLead
       setStep("upload"); setFileName(""); setHeaders([]); setRawRows([]);
       setMapping({ name: NONE, phone: NONE, email: NONE, source: NONE, guardian_name: NONE, guardian_phone: NONE, notes: NONE });
       setResult(null); setTriggerAiCalls(false);
-      setListMode("off"); setListName(""); setExistingListId("");
-      setSourceOverride("");
+      setListMode(defaultListMode); setListName(""); setExistingListId("");
+      setSourceOverride(""); setOtherSourceName("");
       setNotesColumns([]); setNotesSeparator(", "); setNotesIncludeLabels(true);
     }
-  }, [open]);
+  }, [open, defaultListMode]);
 
   // Lazy-load existing lists once the user lands on the preview step and
   // toggles to "append" mode. Most imports are one-shot so this avoids the
@@ -276,6 +278,22 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess }: BulkLead
   const validCount = parsed.filter(l => l.valid).length;
   const invalidCount = parsed.filter(l => !l.valid).length;
   const requiredMapped = mapping.name !== NONE && mapping.phone !== NONE;
+  const trimmedOtherSourceName = otherSourceName.trim();
+  const sourceOverrideLabel =
+    sourceOverride === "other" && trimmedOtherSourceName
+      ? `${LEAD_SOURCES.find(s => s.value === "other")?.label || "Other"} (${trimmedOtherSourceName})`
+      : sourceOverride
+        ? LEAD_SOURCES.find(s => s.value === sourceOverride)?.label || sourceOverride
+        : "";
+  const defaultListName =
+    sourceOverride === "other" && trimmedOtherSourceName
+      ? trimmedOtherSourceName
+      : `Imported leads — ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`;
+
+  const previewSourceLabel = (lead: ParsedRow) => {
+    if (sourceOverride) return sourceOverrideLabel;
+    return lead.source || "—";
+  };
 
   // ── Import action ───────────────────────────────────────────────────────
   const handleImport = async () => {
@@ -335,7 +353,10 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess }: BulkLead
         source: (sourceOverride || l.source || "other") as any,
         guardian_name: l.guardian_name || null,
         guardian_phone: l.guardian_phone || null,
-        notes: l.notes || null,
+        notes: [
+          sourceOverride === "other" && trimmedOtherSourceName ? `Other source: ${trimmedOtherSourceName}` : "",
+          l.notes || "",
+        ].filter(Boolean).join("\n") || null,
         skip_ai_call: true,
       } as any));
 
@@ -380,7 +401,7 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess }: BulkLead
     let savedListName: string | undefined;
     if (memberIds.length > 0 && listMode !== "off") {
       if (listMode === "new") {
-        const name = listName.trim() || `Imported leads — ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`;
+        const name = listName.trim() || defaultListName;
         const { data: list, error: listErr } = await supabase
           .from("lead_lists" as any)
           .insert({ name, source: "import", description: `Imported ${memberIds.length} leads from ${fileName || "CSV"}` })
@@ -658,7 +679,7 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess }: BulkLead
                       <td className="px-3 py-2 text-foreground">{l.name}</td>
                       <td className="px-3 py-2 text-muted-foreground font-mono text-xs">{l.phone}</td>
                       <td className="px-3 py-2 text-muted-foreground text-xs">{l.email || "—"}</td>
-                      <td className="px-3 py-2 text-muted-foreground text-xs">{l.source || "—"}</td>
+                      <td className="px-3 py-2 text-muted-foreground text-xs">{previewSourceLabel(l)}</td>
                       <td className="px-3 py-2 text-xs text-destructive">{l.error || ""}</td>
                     </tr>
                   ))}
@@ -676,7 +697,7 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess }: BulkLead
                   <p className="text-xs font-semibold text-amber-900">Lead source</p>
                   <p className="text-[11px] text-amber-800/90 mt-0.5">
                     {sourceOverride
-                      ? <>All <strong>{validCount}</strong> leads will be tagged as <strong>{LEAD_SOURCES.find(s => s.value === sourceOverride)?.label || sourceOverride}</strong>, overriding the CSV.</>
+                      ? <>All <strong>{validCount}</strong> leads will be tagged as <strong>{sourceOverrideLabel}</strong>, overriding the CSV.</>
                       : mapping.source !== NONE
                         ? <>Using the <strong>{mapping.source}</strong> column from the CSV. Pick an override below to apply one source to all rows.</>
                         : <>No source column mapped — pick one below or all rows default to <strong>Other</strong>.</>}
@@ -693,6 +714,24 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess }: BulkLead
                   <option key={s.value} value={s.value}>{s.label}</option>
                 ))}
               </select>
+              {sourceOverride === "other" && (
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-amber-900" htmlFor="bulk-import-other-source-name">
+                    Other source name
+                  </label>
+                  <input
+                    id="bulk-import-other-source-name"
+                    type="text"
+                    value={otherSourceName}
+                    onChange={e => setOtherSourceName(e.target.value)}
+                    placeholder="NEET 2026 Entrance Center Data"
+                    className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-amber-300"
+                  />
+                  <p className="text-[10px] text-amber-800/80">
+                    Leads still use source Other, and this name is saved into each lead note.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Save as List — three modes */}
@@ -727,7 +766,7 @@ export function BulkLeadImportDialog({ open, onOpenChange, onSuccess }: BulkLead
                   type="text"
                   value={listName}
                   onChange={e => setListName(e.target.value)}
-                  placeholder={`Imported leads — ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`}
+                  placeholder={defaultListName}
                   className="w-full rounded-lg border border-violet-200 bg-white px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-violet-300"
                 />
               )}

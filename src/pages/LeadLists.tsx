@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
@@ -8,9 +8,12 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  ListPlus, Loader2, Send, Mail, Trash2, Users, MessageSquare, AlertTriangle,
+  ListPlus, Loader2, Send, Mail, Trash2, Users, MessageSquare, AlertTriangle, Upload,
 } from "lucide-react";
 import { WA_BULK_TEMPLATES } from "@/config/waBulkTemplates";
+
+const BulkLeadImportDialog = lazy(() =>
+  import("@/components/admissions/BulkLeadImportDialog").then((m) => ({ default: m.BulkLeadImportDialog })));
 
 interface LeadList {
   id: string;
@@ -32,6 +35,7 @@ export default function LeadLists() {
   const { toast } = useToast();
   const [lists, setLists] = useState<LeadList[]>([]);
   const [loading, setLoading] = useState(true);
+  const [importOpen, setImportOpen] = useState(false);
 
   // Send-WhatsApp dialog
   const [waOpen, setWaOpen] = useState(false);
@@ -308,13 +312,17 @@ export default function LeadLists() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Lead Lists</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Reusable lead lists for bulk WhatsApp and email campaigns. Build a list from CSV import or from a filtered view in Lead Buckets.
           </p>
         </div>
+        <Button onClick={() => setImportOpen(true)} className="gap-2 shrink-0 self-start">
+          <Upload className="h-4 w-4" />
+          Import CSV
+        </Button>
       </div>
 
       {loading ? (
@@ -327,9 +335,12 @@ export default function LeadLists() {
             <ListPlus className="h-10 w-10 text-muted-foreground mx-auto" />
             <p className="text-sm font-medium text-foreground">No lists yet</p>
             <p className="text-xs text-muted-foreground max-w-md mx-auto">
-              Create your first list by importing a CSV from the Admissions page (tick "Save as list"),
-              or by saving a filter snapshot from Lead Buckets.
+              Create your first list by importing a CSV here, or by saving a filter snapshot from Lead Buckets.
             </p>
+            <Button onClick={() => setImportOpen(true)} className="gap-2">
+              <Upload className="h-4 w-4" />
+              Import CSV
+            </Button>
           </CardContent>
         </Card>
       ) : (
@@ -389,6 +400,17 @@ export default function LeadLists() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {importOpen && (
+        <Suspense fallback={null}>
+          <BulkLeadImportDialog
+            open={importOpen}
+            onOpenChange={setImportOpen}
+            onSuccess={fetchLists}
+            defaultListMode="new"
+          />
+        </Suspense>
       )}
 
       {/* WhatsApp send dialog */}
