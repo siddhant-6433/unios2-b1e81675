@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { sendPlivoWhatsAppText } from "../_shared/plivo.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,6 +8,21 @@ const corsHeaders = {
 };
 
 type WhatsAppRoute = "default" | "otp" | "call" | "visit" | "bulk" | "reply";
+const PLIVO_WHATSAPP_NUMBER = "919555192192";
+
+function digitsOnly(value: string | null | undefined) {
+  return (value || "").replace(/[^0-9]/g, "");
+}
+
+function normalizeBusinessPhoneNumber(value: string | null | undefined) {
+  const digits = digitsOnly(value);
+  if (digits.length === 10) return `91${digits}`;
+  return digits;
+}
+
+function isPlivoWhatsAppChannel(value: string | null | undefined) {
+  return normalizeBusinessPhoneNumber(value) === PLIVO_WHATSAPP_NUMBER;
+}
 
 function routeConfig(route: WhatsAppRoute) {
   const token =
@@ -80,13 +96,14 @@ Deno.serve(async (req) => {
     }
 
     const requestedPhoneNumberId = typeof business_phone_number_id === "string" ? business_phone_number_id : null;
+    const usePlivo = isPlivoWhatsAppChannel(requestedPhoneNumberId);
     const matchingConfig = requestedPhoneNumberId
       ? allowedPhoneConfigs().find((config) => config.phoneNumberId === requestedPhoneNumberId)
       : null;
     const defaultConfig = routeConfig("reply");
     const { token: whatsappToken, phoneNumberId } = matchingConfig || defaultConfig;
 
-    if (!whatsappToken || !phoneNumberId) {
+    if (!usePlivo && (!whatsappToken || !phoneNumberId)) {
       return new Response(
         JSON.stringify({ error: "WhatsApp reply route is not configured" }),
         { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -108,46 +125,63 @@ Deno.serve(async (req) => {
     }
 
     const waPhone = phone.replace(/[^0-9]/g, "");
+    let sentMessageId: string | null = null;
+    let loggedPhoneNumberId = phoneNumberId;
 
-    // Send free-form text message (only works within 24hr conversation window)
-    const waResponse = await fetch(
-      `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${whatsappToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          to: waPhone,
-          type: "text",
-          text: { body: message },
-        }),
+    if (usePlivo) {
+      loggedPhoneNumberId = normalizeBusinessPhoneNumber(requestedPhoneNumberId);
+      const plivoResult = await sendPlivoWhatsAppText(loggedPhoneNumberId, waPhone, message);
+      if (!plivoResult.ok) {
+        return new Response(
+          JSON.stringify({ error: "Plivo WhatsApp send failed", detail: plivoResult.raw }),
+          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
-    );
-
-    const waResult = await waResponse.json();
-
-    if (!waResponse.ok) {
-      return new Response(
-        JSON.stringify({ error: waResult?.error?.message || "Failed to send" }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      sentMessageId = plivoResult.messageUuid;
+    } else {
+      // Send free-form text message (only works within 24hr conversation window)
+      const waResponse = await fetch(
+        `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${whatsappToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            messaging_product: "whatsapp",
+            to: waPhone,
+            type: "text",
+            text: { body: message },
+          }),
+        }
       );
+
+      const waResult = await waResponse.json();
+
+      if (!waResponse.ok) {
+        return new Response(
+          JSON.stringify({ error: waResult?.error?.message || "Failed to send" }),
+          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      sentMessageId = waResult?.messages?.[0]?.id || null;
     }
 
     // Log to whatsapp_messages
     await admin.from("whatsapp_messages").insert({
       lead_id: lead_id || null,
-      wa_message_id: waResult?.messages?.[0]?.id || null,
+      wa_message_id: sentMessageId,
       direction: "outbound",
       phone: waPhone,
       message_type: "text",
       content: message,
       status: "sent",
       is_read: true,
-      business_phone_number_id: phoneNumberId,
+      provider: usePlivo ? "plivo" : "meta",
+      business_phone_number_id: loggedPhoneNumberId,
       template_key: "manual_reply",
+      sender_user_id: user.id,
     });
 
     // Log activity
@@ -161,7 +195,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ success: true, message_id: waResult?.messages?.[0]?.id, business_phone_number_id: phoneNumberId }),
+      JSON.stringify({ success: true, message_id: sentMessageId, business_phone_number_id: loggedPhoneNumberId, provider: usePlivo ? "plivo" : "meta" }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err: any) {
