@@ -12,7 +12,7 @@ import {
   Phone, MessageSquare, ChevronRight, Plus, Search, Filter, Upload,
   Eye, Calendar, MoreHorizontal, Users, TrendingUp, ArrowUpRight,
   Bot, UserCheck, MapPin, FileText, CheckCircle, XCircle, Clock, Loader2,
-  Trash2, ArrowRightLeft, Send, Flag, Inbox, Gift, Shield, CreditCard
+  Trash2, ArrowRightLeft, Send, Flag, Inbox, Gift, Shield, CreditCard, ListPlus
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -151,6 +151,12 @@ interface Lead {
   app_fee_amount?: number | null;
 }
 
+interface ExistingList {
+  id: string;
+  name: string;
+  member_count: number;
+}
+
 // Compact application progress badge
 function AppProgressBadge({ pct, paymentStatus }: { pct: number | null | undefined; paymentStatus?: string | null }) {
   if (pct === null || pct === undefined) return null;
@@ -240,6 +246,12 @@ const Admissions = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
   const [showBulkWhatsApp, setShowBulkWhatsApp] = useState(false);
+  const [showAddToList, setShowAddToList] = useState(false);
+  const [listMode, setListMode] = useState<"new" | "existing">("new");
+  const [newListName, setNewListName] = useState("");
+  const [existingListId, setExistingListId] = useState("");
+  const [existingLists, setExistingLists] = useState<ExistingList[]>([]);
+  const [savingList, setSavingList] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showDeleteRequest, setShowDeleteRequest] = useState(false);
   const [deleteReason, setDeleteReason] = useState<string>("duplicate");
@@ -733,6 +745,102 @@ const Admissions = () => {
     }
   };
 
+  const openAddToListDialog = async () => {
+    setShowAddToList(true);
+    const { data, error } = await supabase
+      .from("lead_lists" as any)
+      .select("id, name, member_count")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      toast({ title: "Lists could not load", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    setExistingLists(((data || []) as any[]).map((list) => ({
+      id: list.id,
+      name: list.name,
+      member_count: list.member_count || 0,
+    })));
+  };
+
+  const handleAddSelectedToList = async () => {
+    const leadIds = Array.from(selectedIds);
+    if (!leadIds.length) return;
+
+    let listId = existingListId;
+    let listName = existingLists.find((list) => list.id === existingListId)?.name || "";
+
+    setSavingList(true);
+
+    if (listMode === "new") {
+      const name = newListName.trim();
+      if (!name) {
+        toast({ title: "Name required", description: "Give the list a name first.", variant: "destructive" });
+        setSavingList(false);
+        return;
+      }
+
+      const { data: list, error: listErr } = await supabase
+        .from("lead_lists" as any)
+        .insert({
+          name,
+          source: "manual",
+          description: `Saved from Admissions — ${leadIds.length} selected leads`,
+          created_by: profile?.id || null,
+        })
+        .select("id, name")
+        .single();
+
+      if (listErr || !list) {
+        toast({ title: "Could not create list", description: listErr?.message || "Unknown error", variant: "destructive" });
+        setSavingList(false);
+        return;
+      }
+
+      listId = (list as any).id;
+      listName = (list as any).name;
+    } else if (!listId) {
+      toast({ title: "Choose a list", description: "Select an existing list first.", variant: "destructive" });
+      setSavingList(false);
+      return;
+    }
+
+    const members = leadIds.map((lead_id) => ({ list_id: listId, lead_id }));
+    let memberErrors = 0;
+    for (let i = 0; i < members.length; i += 500) {
+      const chunk = members.slice(i, i + 500);
+      const { error: memberErr } = await supabase
+        .from("lead_list_members" as any)
+        .upsert(chunk, { onConflict: "list_id,lead_id", ignoreDuplicates: true } as any);
+      if (memberErr) {
+        memberErrors++;
+        console.error("List member insert failed:", memberErr);
+      }
+    }
+
+    setSavingList(false);
+
+    if (memberErrors > 0) {
+      toast({
+        title: "List partially updated",
+        description: `"${listName}" was created, but some leads could not be added. Check console.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    toast({
+      title: listMode === "new" ? "List created" : "List updated",
+      description: `"${listName}" — ${leadIds.length} selected lead${leadIds.length === 1 ? "" : "s"} added.`,
+    });
+    setShowAddToList(false);
+    setNewListName("");
+    setExistingListId("");
+    setListMode("new");
+    setSelectedIds(new Set());
+  };
+
   const handleBulkDelete = async () => {
     setDeleting(true);
     const ids = Array.from(selectedIds);
@@ -1078,6 +1186,9 @@ const Admissions = () => {
         <div className="flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
           <span className="text-sm font-medium text-foreground">{selectedIds.size} lead{selectedIds.size > 1 ? "s" : ""} selected</span>
           <div className="ml-auto flex gap-2">
+            <Button variant="outline" size="sm" className="gap-2" onClick={openAddToListDialog}>
+              <ListPlus className="h-4 w-4" /> Add to List
+            </Button>
             <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowBulkWhatsApp(true)}>
               <Send className="h-4 w-4" /> WhatsApp
             </Button>
@@ -1981,6 +2092,85 @@ const Admissions = () => {
           <BulkLeadImportDialog open={showBulkImport} onOpenChange={setShowBulkImport} onSuccess={fetchLeads} />
         </Suspense>
       )}
+
+      {/* Add selected leads to a reusable list */}
+      <Dialog open={showAddToList} onOpenChange={(open) => {
+        if (savingList) return;
+        setShowAddToList(open);
+        if (!open) {
+          setNewListName("");
+          setExistingListId("");
+          setListMode("new");
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add to List</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              {selectedIds.size} selected lead{selectedIds.size === 1 ? "" : "s"} will be saved to a static list for bulk WhatsApp or email campaigns.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant={listMode === "new" ? "default" : "outline"}
+                onClick={() => setListMode("new")}
+              >
+                New list
+              </Button>
+              <Button
+                type="button"
+                variant={listMode === "existing" ? "default" : "outline"}
+                onClick={() => setListMode("existing")}
+              >
+                Existing list
+              </Button>
+            </div>
+            {listMode === "new" ? (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">List name</label>
+                <input
+                  type="text"
+                  value={newListName}
+                  onChange={(e) => setNewListName(e.target.value)}
+                  placeholder={`Admissions leads — ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`}
+                  className="mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                  autoFocus
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Choose list</label>
+                <select
+                  value={existingListId}
+                  onChange={(e) => setExistingListId(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                >
+                  <option value="">Select a list...</option>
+                  {existingLists.map((list) => (
+                    <option key={list.id} value={list.id}>{list.name} ({list.member_count})</option>
+                  ))}
+                </select>
+                {existingLists.length === 0 && (
+                  <p className="mt-2 text-xs text-muted-foreground">No existing lists yet. Create a new list instead.</p>
+                )}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddToList(false)} disabled={savingList}>Cancel</Button>
+            <Button
+              onClick={handleAddSelectedToList}
+              disabled={savingList || (listMode === "new" ? !newListName.trim() : !existingListId)}
+              className="gap-2"
+            >
+              {savingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
+              {listMode === "new" ? "Create List" : "Add to List"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Bulk WhatsApp */}
       {showBulkWhatsApp && (
