@@ -27,4 +27,15 @@ describe("LiveCallBar lifecycle guards", () => {
     expect(voiceAgentSource).toContain("is_live_transfer=eq.true");
     expect(voiceAgentSource).toContain("Live transfer marker closed when AI stream ended");
   });
+
+  it("does not mark the student connected from the counsellor parent leg", () => {
+    const parentStatusHandler = voiceAgentSource.slice(
+      voiceAgentSource.indexOf('if (path.startsWith("/bridge-call-status/"))'),
+      voiceAgentSource.indexOf('// POST /bridge-status/{callId}'),
+    );
+
+    expect(voiceAgentSource).toContain("student connection is owned by /bridge-b-status");
+    expect(parentStatusHandler).not.toContain("student_connected_at");
+    expect(parentStatusHandler).not.toContain('status: "in_progress"');
+  });
 });

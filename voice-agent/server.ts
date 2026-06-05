@@ -2861,9 +2861,8 @@ Deno.serve({ port: PORT }, async (req) => {
 
   // POST /bridge-call-status/{callId} — Plivo per-state callback on the
   // PARENT call (set via callback_url on Call.create). Fires every time the
-  // CallStatus changes (initiated → ringing → in-progress → completed). We
-  // use the in-progress event to write ai_call_records.student_connected_at
-  // so the lead-page polling can auto-flip the dialog.
+  // CallStatus changes (initiated → ringing → in-progress → completed). This
+  // is the counsellor leg only; student connection is owned by /bridge-b-status.
   //
   // The <Number statusCallbackUrl="…" /bridge-b-status> path is unreliable
   // because Plivo's per-leg callback defaults to "completed"-only and the
@@ -2894,18 +2893,6 @@ Deno.serve({ port: PORT }, async (req) => {
       }).catch(e => console.error(`[BRIDGE-CALL-STATUS ${callId}] plivo_call_uuid persist failed:`, e.message));
     }
 
-    const isAnswered = callStatus === "in-progress" || event === "answered";
-    if (isAnswered && SUPABASE_URL) {
-      await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
-        method: "PATCH",
-        headers: { ...dbH, Prefer: "return=minimal" },
-        body: JSON.stringify({
-          student_connected_at: new Date().toISOString(),
-          status: "in_progress",
-        }),
-      }).catch(e => console.error(`[BRIDGE-CALL-STATUS ${callId}] DB update failed:`, e.message));
-      console.log(`[BRIDGE-CALL-STATUS ${callId}] Wrote student_connected_at + status=in_progress`);
-    }
     return new Response("OK");
   }
 

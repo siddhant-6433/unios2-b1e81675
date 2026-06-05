@@ -92,8 +92,26 @@ Deno.serve(async (req) => {
 
     const callId = crypto.randomUUID();
 
+    // Create the live-call row before touching Plivo. Plivo can emit status /
+    // hangup callbacks before Call.create returns; if the row does not exist
+    // yet, those callbacks patch zero rows and the later insert leaves a
+    // permanent status='initiated' call in the LiveCallBar.
+    const { error: callRecordErr } = await db.from("ai_call_records").insert({
+      lead_id,
+      call_uuid: callId,
+      status: "initiated",
+      call_type: "manual",
+      caller_user_id: userId,
+      summary: `Cloud Call: dialing counsellor ${profile.display_name}`,
+    });
+
+    if (callRecordErr) {
+      console.error("Failed to create manual call record:", callRecordErr);
+      return json({ error: "Could not start call tracking. Try again." }, 500);
+    }
+
     // Set bridge context on voice agent server
-    await fetch(`${VOICE_AGENT_URL}/bridge-context/${callId}`, {
+    const ctxRes = await fetch(`${VOICE_AGENT_URL}/bridge-context/${callId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -107,6 +125,22 @@ Deno.serve(async (req) => {
         counsellorUserId: userId,
       }),
     });
+
+    if (!ctxRes.ok) {
+      const ctxText = await ctxRes.text().catch(() => "");
+      console.error("Bridge context setup failed:", ctxRes.status, ctxText);
+      await db
+        .from("ai_call_records")
+        .update({
+          status: "failed",
+          disposition: "call_setup_failed",
+          duration_seconds: 0,
+          completed_at: new Date().toISOString(),
+          summary: "Cloud Call failed before provider dial: bridge context setup failed",
+        } as any)
+        .eq("call_uuid", callId);
+      return json({ error: "Call setup failed before dialing your phone. Try again." }, 502);
+    }
 
     // Plivo: call the counsellor first
     const answerUrl = `${VOICE_AGENT_URL}/bridge-answer/${callId}?student=${studentPhone}`;
@@ -123,11 +157,9 @@ Deno.serve(async (req) => {
       hangup_url: hangupUrl,
       hangup_method: "POST",
       // Per-state callback. Plivo POSTs this URL on every CallStatus change
-      // (initiated / ringing / in-progress / completed) for the parent call.
-      // We use it to write ai_call_records.student_connected_at when the
-      // bridged leg enters in-progress, so the lead-page dialog auto-flips
-      // from "waiting for pickup" → disposition picker without the
-      // counsellor having to tap "Call connected".
+      // (initiated / ringing / in-progress / completed) for the parent
+      // counsellor leg. Student connection is detected by the bridged B-leg
+      // callback in voice-agent.
       callback_url: stateCallbackUrl,
       callback_method: "POST",
       ring_timeout: 30,
@@ -152,20 +184,29 @@ Deno.serve(async (req) => {
 
     if (!plivoRes.ok) {
       console.error("Plivo call failed:", plivoRes.status, plivoText);
+      await db
+        .from("ai_call_records")
+        .update({
+          status: "failed",
+          disposition: "call_setup_failed",
+          duration_seconds: 0,
+          completed_at: new Date().toISOString(),
+          summary: `Cloud Call failed before ringing counsellor: ${plivoData?.error || plivoData?.message || plivoText || "Plivo error"}`,
+        } as any)
+        .eq("call_uuid", callId);
       return json({ error: `Call failed: ${plivoData?.error || plivoData?.message || plivoText || "Unknown error"}` }, 500);
     }
 
-    // Create ai_call_records immediately for progressive state tracking
-    // Client polls this record to detect: ringing → student connected → call ended
-    await db.from("ai_call_records").insert({
-      lead_id,
-      call_uuid: callId,
-      plivo_call_uuid: plivoData.request_uuid || null,
-      status: "initiated",
-      call_type: "manual",
-      caller_user_id: userId,
-      summary: `Cloud Call: connecting by ${profile.display_name}`,
-    });
+    // Patch any provider identifier Call.create returned. Some Plivo accounts
+    // return only "async api spawned"; bridge-call-status will persist the real
+    // CallUUID on the first callback in that case.
+    await db
+      .from("ai_call_records")
+      .update({
+        plivo_call_uuid: plivoData.request_uuid || null,
+        summary: `Cloud Call: connecting by ${profile.display_name}`,
+      } as any)
+      .eq("call_uuid", callId);
 
     // Log activity
     await db.from("lead_activities").insert({
