@@ -23,6 +23,7 @@
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { normalizePlivoVoiceNumber } from "../_shared/phone.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -118,11 +119,7 @@ Deno.serve(async (req) => {
           .select("phone")
           .eq("user_id", record.caller_user_id)
           .single();
-        if (prof?.phone) {
-          counsellorPhone = String(prof.phone).replace(/[^0-9+]/g, "");
-          if (counsellorPhone.startsWith("+")) counsellorPhone = counsellorPhone.substring(1);
-          if (counsellorPhone.length === 10) counsellorPhone = `91${counsellorPhone}`;
-        }
+        if (prof?.phone) counsellorPhone = normalizePlivoVoiceNumber(prof.phone) || "";
       }
 
       // Plivo Live Calls endpoint: GET .../Call/?status=live[&to_number=...]
