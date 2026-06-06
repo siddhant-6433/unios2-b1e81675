@@ -43,6 +43,8 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
 
     expect(enqueueIndex).toBeGreaterThan(-1);
     expect(aiReplyIndex).toBeGreaterThan(-1);
+    expect(orchestrator).toContain('const businessNumber = provider === "plivo"');
+    expect(orchestrator).toContain("body.business_phone_number_id || body.business_number || body.business_phone_number");
     expect(orchestrator).toContain("dispatchClassifier(supabaseUrl, serviceRoleKey, queueId)");
     expect(orchestrator).toContain('decision: "classifier_deferred"');
     expect(orchestrator).toContain("auto_categorize_lead_from_message");
@@ -98,6 +100,9 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(manualReply).toContain("provider === \"plivo\"");
     expect(manualReply).toContain("sendWhatsAppText(admin, channelHint");
     expect(manualReply).toContain("provider: sendResult.provider");
+    expect(channelAdapter).toContain("routeForMetaPhoneNumberId");
+    expect(channelAdapter).toContain("envMetaChannel(route, requestedMetaPhoneNumberId)");
+    expect(channelAdapter).toContain("!candidates.some((item) => item.score >= 5)");
   });
 
   it("passes provider and business number from the inbox to manual replies", () => {
@@ -132,6 +137,10 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(stateMigration).toContain("'needs_counsellor'");
     expect(stateMigration).toContain("conversation_mode text");
     expect(stateMigration).toContain("conversation_state text");
+    expect(providerMigration).toContain("conversation_mode text");
+    expect(providerMigration).toContain("conversation_state text");
+    expect(providerMigration).toContain("LEFT JOIN public.whatsapp_conversation_state wcs");
+    expect(providerMigration).toContain("wcs.last_bot_action");
     expect(conversationStateHelper).toContain("upsertConversationState");
     expect(conversationStateHelper).toContain("conversationBusinessKey");
   });
@@ -142,6 +151,7 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(aiReply).toContain('state: confidence < 0.6 ? "knowledge_gap" : "answered_by_ai"');
     expect(manualReply).toContain('state: "human_active"');
     expect(inbox).toContain("conversation_mode, conversation_state");
+    expect(inbox).toContain("lastError = null");
     expect(inbox).toContain('from("whatsapp_conversation_state")');
     expect(inbox).toContain("stateLabel(selectedConv.conversation_state)");
   });
@@ -149,6 +159,21 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
   it("allows internal service-role calls to AI reply and classifier functions", () => {
     expect(supabaseConfig).toMatch(/\[functions\.whatsapp-ai-reply\]\s+verify_jwt = false/);
     expect(supabaseConfig).toMatch(/\[functions\.wa-classify-message\]\s+verify_jwt = false/);
+    expect(aiReply).toContain('authHeader !== `Bearer ${serviceRoleKey}`');
+    expect(classifier).toContain('authHeader !== `Bearer ${serviceRoleKey}`');
+    expect(orchestrator).toContain("Authorization: `Bearer ${serviceRoleKey}`");
+  });
+
+  it("keeps job and vendor handoff acknowledgements on manual-reply-capable channels", () => {
+    const handoffStart = aiReply.indexOf("don't pitch admissions to job applicants / vendors");
+    const handoffEnd = aiReply.indexOf("Auto-create lead if doesn't exist", handoffStart);
+    const handoffBlock = aiReply.slice(handoffStart, handoffEnd);
+
+    expect(handoffStart).toBeGreaterThan(-1);
+    expect(handoffBlock).toContain("requireManualReply: true");
+    expect(handoffBlock).not.toContain("requireAi: true");
+    expect(channelsMigration).toContain("('HR Meta sender', 'meta', 'hr'");
+    expect(channelsMigration).toContain("false, true, false");
   });
 
   it("adds an automation audit trail and shared conversation orchestrator", () => {
@@ -159,6 +184,8 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(automationEventsHelper).toContain("whatsapp_automation_events");
     expect(orchestrator).toContain('eventType: "inbound_received"');
     expect(orchestrator).toContain('eventType: "handoff_created"');
+    expect(orchestrator).toContain('template_key: "dnc_ack"');
+    expect(orchestrator).toContain('title: `DNC: ${leadForNotification.name || phone} opted out`');
     expect(orchestrator).toContain("/functions/v1/whatsapp-ai-reply");
     expect(orchestrator).toContain("isLikelyFeedbackReply");
     expect(orchestrator).toContain("DNC_PATTERNS");
@@ -168,9 +195,11 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(metaWebhook).toContain("invokeConversationOrchestrator");
     expect(metaWebhook).toContain('source: "meta_webhook"');
     expect(metaWebhook).toContain('provider: "meta"');
+    expect(metaWebhook).toContain("EdgeRuntime?.waitUntil?.(dispatch)");
     expect(plivoWebhook).toContain("invokeConversationOrchestrator");
     expect(plivoWebhook).toContain('source: "plivo_webhook"');
     expect(plivoWebhook).toContain('provider: "plivo"');
+    expect(plivoWebhook).toContain("EdgeRuntime?.waitUntil?.(dispatch)");
     expect(metaWebhook).toContain("dispatch_reply: true");
     expect(plivoWebhook).toContain("dispatch_reply: true");
   });

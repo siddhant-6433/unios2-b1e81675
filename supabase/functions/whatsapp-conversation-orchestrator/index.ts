@@ -1,5 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { digits, type WhatsAppProvider } from "../_shared/whatsapp-channel.ts";
+import { digits, sendWhatsAppText, type WhatsAppProvider } from "../_shared/whatsapp-channel.ts";
 import { logWhatsAppAutomationEvent } from "../_shared/whatsapp-automation-events.ts";
 import {
   upsertConversationState,
@@ -91,9 +91,9 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const provider: WhatsAppProvider = body.provider === "plivo" ? "plivo" : "meta";
     const phone = digits(body.phone);
-    const businessNumber =
-      digits(body.business_number || body.business_phone_number || body.business_phone_number_id) ||
-      String(body.business_phone_number_id || "");
+    const businessNumber = provider === "plivo"
+      ? digits(body.business_number || body.business_phone_number || body.business_phone_number_id)
+      : String(body.business_phone_number_id || body.business_number || body.business_phone_number || "");
     const messageId: string | null = body.message_id || null;
     let leadId: string | null = body.lead_id || null;
     const content = typeof body.content === "string" ? body.content : "";
@@ -229,6 +229,10 @@ Deno.serve(async (req) => {
     }
 
     if (messageType === "text" && content.trim() && DNC_PATTERNS.test(content.trim())) {
+      const { data: leadForNotification } = leadId
+        ? await admin.from("leads").select("name,counsellor_id").eq("id", leadId).maybeSingle()
+        : { data: null };
+
       if (leadId) {
         await admin.from("leads").update({ stage: "dnc" }).eq("id", leadId);
         await admin.from("lead_activities").insert({
@@ -236,7 +240,49 @@ Deno.serve(async (req) => {
           type: "whatsapp",
           description: `Lead marked DNC by conversation engine: "${content.substring(0, 100)}"`,
         });
+        if (leadForNotification?.counsellor_id) {
+          await admin.from("notifications").insert({
+            user_id: leadForNotification.counsellor_id,
+            type: "general",
+            title: `DNC: ${leadForNotification.name || phone} opted out`,
+            body: `Lead replied "${content.substring(0, 60)}" on WhatsApp and has been marked Do Not Contact.`,
+            link: `/admissions/${leadId}`,
+            lead_id: leadId,
+          });
+        }
       }
+
+      const dncMsg = "You have been unsubscribed and added to our Do Not Contact list. We will not reach out to you again. If this was a mistake, please reply \"START\" to re-subscribe.";
+      try {
+        const sendResult = await sendWhatsAppText(admin, {
+          provider,
+          route: provider === "plivo" ? "plivo_admissions" : "reply",
+          businessPhoneNumberId: provider === "meta" ? businessNumber : null,
+          businessNumber,
+          requireManualReply: true,
+        }, phone, dncMsg);
+        if (sendResult.ok) {
+          await admin.from("whatsapp_messages").insert({
+            lead_id: leadId,
+            wa_message_id: sendResult.messageId,
+            direction: "outbound",
+            phone,
+            message_type: "text",
+            content: dncMsg,
+            status: "sent",
+            is_read: true,
+            template_key: "dnc_ack",
+            provider: sendResult.provider,
+            business_phone_number_id: sendResult.businessPhoneNumberId,
+            business_phone_number: sendResult.businessNumber,
+          });
+        } else {
+          console.error("DNC ack send failed:", sendResult.raw || sendResult.error);
+        }
+      } catch (e) {
+        console.error("DNC ack error:", e);
+      }
+
       await logWhatsAppAutomationEvent(admin, {
         phone,
         businessNumber,

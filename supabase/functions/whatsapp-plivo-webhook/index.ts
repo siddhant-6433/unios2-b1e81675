@@ -26,7 +26,7 @@ function invokeConversationOrchestrator(payload: Record<string, unknown>): void 
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!supabaseUrl || !serviceRoleKey) return;
 
-  fetch(`${supabaseUrl}/functions/v1/whatsapp-conversation-orchestrator`, {
+  const dispatch = fetch(`${supabaseUrl}/functions/v1/whatsapp-conversation-orchestrator`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -34,6 +34,7 @@ function invokeConversationOrchestrator(payload: Record<string, unknown>): void 
     },
     body: JSON.stringify(payload),
   }).catch((err) => console.error("conversation orchestrator dispatch error:", err));
+  (globalThis as any).EdgeRuntime?.waitUntil?.(dispatch);
 }
 
 // Strip everything but digits. Plivo sends E.164 (+919555192192); the existing

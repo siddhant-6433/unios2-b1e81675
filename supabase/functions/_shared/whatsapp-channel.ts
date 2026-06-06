@@ -87,7 +87,14 @@ function routeEnv(route: WhatsAppChannelRoute) {
   return META_ROUTE_ENV[route] || META_ROUTE_ENV.admissions;
 }
 
-function envMetaChannel(route: WhatsAppChannelRoute): WhatsAppChannel {
+function routeForMetaPhoneNumberId(phoneNumberId: string, fallbackRoute: WhatsAppChannelRoute): WhatsAppChannelRoute {
+  for (const [route, env] of Object.entries(META_ROUTE_ENV) as [WhatsAppChannelRoute, typeof META_ROUTE_ENV[WhatsAppChannelRoute]][]) {
+    if (Deno.env.get(env.phoneNumberId) === phoneNumberId) return route;
+  }
+  return fallbackRoute;
+}
+
+function envMetaChannel(route: WhatsAppChannelRoute, requestedPhoneNumberId?: string | null): WhatsAppChannel {
   const env = routeEnv(route);
   return {
     id: null,
@@ -95,7 +102,7 @@ function envMetaChannel(route: WhatsAppChannelRoute): WhatsAppChannel {
     provider: "meta",
     route,
     business_number: null,
-    meta_phone_number_id: Deno.env.get(env.phoneNumberId) || Deno.env.get("WHATSAPP_PHONE_NUMBER_ID") || null,
+    meta_phone_number_id: requestedPhoneNumberId || Deno.env.get(env.phoneNumberId) || Deno.env.get("WHATSAPP_PHONE_NUMBER_ID") || null,
     secret_token_name: Deno.env.get(env.token) ? env.token : "WHATSAPP_API_TOKEN",
     allow_ai: true,
     allow_manual_reply: true,
@@ -158,6 +165,9 @@ export async function resolveWhatsAppChannel(
   admin: SupabaseLike,
   hint: WhatsAppChannelHint,
 ): Promise<WhatsAppChannel> {
+  const requestedMetaPhoneNumberId = hint.provider !== "plivo" && hint.businessPhoneNumberId
+    ? hint.businessPhoneNumberId
+    : null;
   const { data, error } = await admin
     .from("whatsapp_channels")
     .select("id,label,provider,route,business_number,meta_phone_number_id,secret_token_name,allow_ai,allow_manual_reply,allow_bulk")
@@ -171,6 +181,11 @@ export async function resolveWhatsAppChannel(
       .filter((item) => item.score >= 0)
       .sort((a, b) => b.score - a.score);
 
+    if (requestedMetaPhoneNumberId && !candidates.some((item) => item.score >= 5)) {
+      const route = routeForMetaPhoneNumberId(requestedMetaPhoneNumberId, hint.route || "reply");
+      return envMetaChannel(route, requestedMetaPhoneNumberId);
+    }
+
     if (candidates[0]) return candidates[0].channel;
   }
 
@@ -178,7 +193,7 @@ export async function resolveWhatsAppChannel(
     return envPlivoChannel(digits(hint.businessNumber));
   }
 
-  return envMetaChannel(hint.route || "reply");
+  return envMetaChannel(hint.route || "reply", requestedMetaPhoneNumberId);
 }
 
 function metaConfig(channel: WhatsAppChannel, fallbackRoute: WhatsAppChannelRoute) {

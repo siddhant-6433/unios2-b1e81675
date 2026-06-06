@@ -792,6 +792,7 @@ const WhatsAppInbox = () => {
 
         const { data, error } = await q;
         if (!error) {
+          lastError = null;
           rows = ((data || []) as any[]).map(withConversationDefaults);
           break;
         }
