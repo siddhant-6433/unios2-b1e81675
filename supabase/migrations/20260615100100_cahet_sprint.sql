@@ -1,5 +1,5 @@
 -- CAHET Sprint: registrations table, storage bucket, queue/stats/leaderboard RPCs.
--- Deadline: 2026-06-05. Pool: BPT + BMRIT leads (by course interest OR application course).
+-- Deadline: 2026-06-10 23:59 IST. Pool: BPT + BMRIT leads (by course interest OR application course).
 
 -- ========== STORAGE ==========
 
@@ -298,7 +298,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
     (SELECT COUNT(*)::int FROM pool) AS pool_total,
     (SELECT COUNT(*)::int FROM pool po
        WHERE NOT EXISTS (SELECT 1 FROM regs r WHERE r.lead_id = po.lead_id)) AS pool_remaining,
-    '2026-06-05 23:59:59+05:30'::timestamptz AS deadline_at;
+    '2026-06-10 23:59:59+05:30'::timestamptz AS deadline_at;
 $$;
 
 GRANT EXECUTE ON FUNCTION public.cahet_sprint_stats(uuid) TO authenticated;

@@ -15,7 +15,7 @@ interface SprintStats {
 }
 
 const TARGET_PER_COUNSELLOR = 15;
-const DEADLINE_FALLBACK = "2026-06-05T23:59:59+05:30";
+const DEADLINE_FALLBACK = "2026-06-10T23:59:59+05:30";
 const DISMISS_KEY = "cahet_ticker_dismissed_session";
 
 // Only ticker for users who can act on this — counsellors and admission staff.
@@ -30,6 +30,17 @@ function daysRemaining(deadlineIso: string): number {
   const ms = new Date(deadlineIso).getTime() - Date.now();
   if (ms <= 0) return 0;
   return Math.ceil(ms / 86_400_000);
+}
+
+function formatDeadline(deadlineIso: string): string {
+  return new Date(deadlineIso).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: "Asia/Kolkata",
+  });
 }
 
 export function CahetSprintTicker() {
@@ -67,6 +78,7 @@ export function CahetSprintTicker() {
 
   const days = daysRemaining(stats.deadline_at || DEADLINE_FALLBACK);
   if (days === 0) return null;
+  const deadlineLabel = formatDeadline(stats.deadline_at || DEADLINE_FALLBACK);
 
   const ownProgress = Math.min(100, Math.round((stats.own_count / TARGET_PER_COUNSELLOR) * 100));
   const urgent = days <= 3;
@@ -78,54 +90,55 @@ export function CahetSprintTicker() {
 
   return (
     <div
-      className={`flex items-center gap-3 px-4 py-1.5 text-xs border-b ${
+      className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 text-xs border-b sm:px-4 ${
         urgent
           ? "bg-rose-600 text-white border-rose-700"
           : "bg-rose-50 text-rose-900 border-rose-200"
       }`}
     >
       <Flame className={`h-3.5 w-3.5 flex-shrink-0 ${urgent ? "animate-pulse" : ""}`} />
-      <span className="font-semibold whitespace-nowrap">
-        CAHET ends in {days} {days === 1 ? "day" : "days"}
+      <span className="font-semibold">
+        CAHET deadline: {deadlineLabel}
       </span>
+      <span className="opacity-80">({days} {days === 1 ? "day" : "days"} left)</span>
       {isCounsellor ? (
         <>
           <span className="opacity-80">·</span>
-          <span className="whitespace-nowrap">
+          <span>
             You: <strong className="tabular-nums">{stats.own_count}/{TARGET_PER_COUNSELLOR}</strong>
             {stats.own_today > 0 && (
               <span className={urgent ? "ml-1 opacity-80" : "ml-1 text-rose-600"}>(+{stats.own_today} today)</span>
             )}
           </span>
-          <div className={`h-1.5 w-24 rounded overflow-hidden ${urgent ? "bg-rose-800/40" : "bg-rose-200"}`}>
+          <div className={`hidden h-1.5 w-24 rounded overflow-hidden sm:block ${urgent ? "bg-rose-800/40" : "bg-rose-200"}`}>
             <div
               className={urgent ? "h-full bg-white" : "h-full bg-rose-600"}
               style={{ width: `${ownProgress}%` }}
             />
           </div>
           <span className="opacity-80">·</span>
-          <span className="whitespace-nowrap">
+          <span>
             Team <strong className="tabular-nums">{stats.team_count}</strong>
           </span>
         </>
       ) : (
         <>
           <span className="opacity-80">·</span>
-          <span className="whitespace-nowrap">
+          <span>
             Team <strong className="tabular-nums">{stats.team_count}</strong>
             {stats.team_today > 0 && (
               <span className={urgent ? "ml-1 opacity-80" : "ml-1 text-rose-600"}>(+{stats.team_today} today)</span>
             )}
           </span>
           <span className="opacity-80">·</span>
-          <span className="whitespace-nowrap">
+          <span>
             Pool left <strong className="tabular-nums">{stats.pool_remaining}</strong>
           </span>
         </>
       )}
       <Link
         to="/cahet-sprint"
-        className={`ml-auto inline-flex items-center gap-1 font-medium hover:underline ${urgent ? "" : "text-rose-700"}`}
+        className={`ml-auto inline-flex items-center gap-1 whitespace-nowrap font-medium hover:underline ${urgent ? "" : "text-rose-700"}`}
       >
         Open Sprint <ArrowRight className="h-3 w-3" />
       </Link>

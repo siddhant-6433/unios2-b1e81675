@@ -27,6 +27,7 @@ import { PortalProvider, usePortal } from "@/components/apply/PortalContext";
 import { TokenFeePanel } from "@/components/applicant/TokenFeePanel";
 import { ApplicationPreview, type PreviewDoc } from "@/components/applicant/ApplicationPreview";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
+import { ApplicantDeadlineTicker } from "@/components/layout/ApplicantDeadlineTicker";
 import { captureAttribution, trackPixelLead } from "@/lib/analytics";
 
 // ─── OTP Login Screen ───
@@ -2176,6 +2177,7 @@ function Header({ appId, completedCount, totalSteps, onLogout }: { appId: string
 function ApplyPortalWrapper() {
   return (
     <PortalProvider>
+      <ApplicantDeadlineTicker audience="public" />
       <ApplyPortal />
     </PortalProvider>
   );

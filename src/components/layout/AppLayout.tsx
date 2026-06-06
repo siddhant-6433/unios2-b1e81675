@@ -4,6 +4,7 @@ import { ImpersonationBanner } from "@/components/layout/ImpersonationBanner";
 import { GlobalActionBar } from "@/components/layout/GlobalActionBar";
 import { LiveCallBar } from "@/components/layout/LiveCallBar";
 import { CahetSprintTicker } from "@/components/layout/CahetSprintTicker";
+import { ApplicantDeadlineTicker } from "@/components/layout/ApplicantDeadlineTicker";
 import { NotificationPanel } from "@/components/layout/NotificationPanel";
 import { WhatsAppPanel } from "@/components/layout/WhatsAppPanel";
 import { HeaderSearch } from "@/components/layout/HeaderSearch";
@@ -87,18 +88,18 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="flex-1 flex w-full">
           <AppSidebar />
           <div className="flex-1 flex flex-col min-w-0">
-            <header className="sticky top-0 z-30 flex h-12 items-center justify-between border-b border-border bg-card px-5">
-              <div className="flex items-center gap-3">
+            <header className="sticky top-0 z-30 flex min-h-12 items-center justify-between gap-2 border-b border-border bg-card px-3 py-2 sm:px-5">
+              <div className="flex min-w-0 flex-1 items-center gap-3">
                 <SidebarTrigger className="text-muted-foreground hover:text-foreground transition-colors" />
-                <div className="flex items-center gap-1.5 text-sm">
-                  <span className="font-semibold text-foreground">
+                <div className="flex min-w-0 items-center gap-1.5 text-sm">
+                  <span className="truncate font-semibold text-foreground">
                     {isCounsellor ? counsellorGreeting(profile?.display_name) : "NIMT"}
                   </span>
-                  <span className="text-muted-foreground/50">›</span>
-                  <span className="font-medium text-muted-foreground">{title}</span>
+                  <span className="flex-shrink-0 text-muted-foreground/50">›</span>
+                  <span className="truncate font-medium text-muted-foreground">{title}</span>
                 </div>
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-shrink-0 items-center gap-1 sm:gap-1.5">
                 <HeaderSearch />
                 {deferredShellReady && <HeaderFeedbackWidget />}
                 {deferredShellReady && <WhatsAppPanel />}
@@ -108,6 +109,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               </div>
             </header>
             {deferredShellReady && <CahetSprintTicker />}
+            {deferredShellReady && <ApplicantDeadlineTicker />}
             {deferredShellReady && <GlobalActionBar />}
             {deferredShellReady && <LiveCallBar />}
             <main className="flex-1 overflow-auto p-6">

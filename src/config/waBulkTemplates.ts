@@ -70,7 +70,7 @@ export const WA_BULK_TEMPLATES: WaBulkTemplate[] = [
   {
     key: "bpt_bmrit_cahet_deadline",
     label: "BPT/BMRIT CAHET Deadline",
-    description: "Tells BPT/BMRIT applicants to submit both NIMT and CAHET forms by 5 June 2026.",
+    description: "Tells BPT/BMRIT applicants to submit both NIMT and CAHET forms by 10 June 2026.",
     params: [],
   },
   {
