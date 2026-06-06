@@ -29,8 +29,8 @@ describe("call_logs counsellor data scope", () => {
     expect(callLogPage).not.toContain("!isCounsellor && counsellorStats.length > 0");
   });
 
-  it("uses exact counts for the per-counsellor chart", () => {
-    expect(callLogPage).toContain('count: "exact", head: true');
-    expect(callLogPage).not.toContain('count: "planned", head: true }).eq("user_id"');
+  it("keeps the per-counsellor chart off exact counts", () => {
+    expect(callLogPage).toContain('count: "planned", head: true');
+    expect(callLogPage).not.toContain('count: "exact", head: true');
   });
 });

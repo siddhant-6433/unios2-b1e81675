@@ -134,6 +134,10 @@ export function parseMandatorySubjects(prerequisites: string[]): string[] {
   return mandatory;
 }
 
+function stripMandatoryAnnotation(prereq: string): string {
+  return prereq.replace(/\s*\([^)]+\s+[Mm]andatory\)\s*/g, '').trim();
+}
+
 /** Parse marks string to percentage. Values ≤ 10 are treated as CGPA (×9.5). */
 export function parseMarksToPercentage(marks: string | undefined): number | null {
   if (!marks) return null;
@@ -248,12 +252,17 @@ export function validateAcademicEligibility(
       .map((s: string) => s.trim())
       .filter(Boolean);
 
-    const anyStream = class12Prereqs.some(
+    const mandatorySubjects = parseMandatorySubjects(class12Prereqs);
+    const groupPrereqs = class12Prereqs
+      .map(stripMandatoryAnnotation)
+      .filter(Boolean)
+      .filter(p => !mandatorySubjects.some(m => m.toLowerCase() === p.toLowerCase()));
+
+    const anyStream = groupPrereqs.some(
       p => p.toLowerCase().includes('any stream') || p.toLowerCase() === 'any'
     );
 
     // Check mandatory subjects extracted from parenthetical (e.g., English Mandatory)
-    const mandatorySubjects = parseMandatorySubjects(class12Prereqs);
     if (mandatorySubjects.length > 0 && c12) {
       if (studentSubjects.length === 0) {
         results.push({
@@ -275,13 +284,13 @@ export function validateAcademicEligibility(
       }
     }
 
-    if (!anyStream && mandatorySubjects.length === 0) {
+    if (!anyStream && groupPrereqs.length > 0) {
       if (c12 && studentSubjects.length > 0) {
-        const hasMatch = class12Prereqs.some(prereq =>
+        const hasMatch = groupPrereqs.some(prereq =>
           isSubjectGroupSatisfied(prereq, studentSubjects)
         );
         if (!hasMatch) {
-          const groupLabels = class12Prereqs.map(p => {
+          const groupLabels = groupPrereqs.map(p => {
             const expanded = SUBJECT_GROUP_MAP[p.toUpperCase()];
             return expanded ? `${p} (${expanded.join(', ')})` : p;
           });
@@ -294,7 +303,7 @@ export function validateAcademicEligibility(
       } else if (!c12 || studentSubjects.length === 0) {
         results.push({
           field: 'class_12',
-          message: `Please select your Class 12 subjects. Required: ${class12Prereqs.join(' / ')}.`,
+          message: `Please select your Class 12 subjects. Required: ${groupPrereqs.join(' / ')}.`,
           type: 'error',
         });
       }

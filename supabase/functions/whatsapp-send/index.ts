@@ -543,7 +543,7 @@ Deno.serve(async (req) => {
       fee_reminder: "Hi {{1}}, this is a reminder that a fee payment of Rs.{{2}} is due by {{3}}. Please complete the payment to avoid any delays.",
       course_info_video: "Hi {{1}}, here are the details for {{2}} at NIMT Educational Institutions:\n\nDuration: {{3}}\nEligibility: {{4}}\nCampus: {{5}}",
       course_info_video_v2: "Hi {{1}}, here are the details you requested for {{2}} at NIMT Educational Institutions:\n\n📚 Course information: {{3}}\n📍 Campus locations: {{4}}\n📝 Application portal: {{5}}\n\nReply to this message if you have any questions — our admissions team will be glad to assist you.",
-      bpt_bmrit_cahet_deadline: "Dear Applicant,\n\nThis is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *TODAY (5th June 2026)*\n\nFor admission Candidates *MUST*\n\n1. Complete College Application Online at https://apply.nimt.ac.in\n2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nPlease note both form submissions are mandatory by 5th June 2026 to be included in the admission process for session 2026-27.\n\nFor any details please call 9555192192\n9667691872\n7428499849",
+      bpt_bmrit_cahet_deadline: "Dear Applicant,\n\nThis is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *10th June 2026, 11:59 PM*\n\nFor admission Candidates *MUST*\n\n1. Complete College Application Online at https://apply.nimt.ac.in\n2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nPlease note both form submissions are mandatory by 10th June 2026, 11:59 PM to be included in the admission process for session 2026-27.\n\nFor any details please call 9555192192\n9667691872\n7428499849",
       counsellor_lead_assigned: "Hi {{1}}, a new lead has been assigned to you: {{2}} (Phone: ****{{3}}). Please make first contact within {{4}} hours.",
       counsellor_sla_warning: "Reminder: Lead {{1}} has not been contacted yet. You have {{2}} hour(s) remaining.",
       counsellor_lead_reclaimed: "Lead {{1}} ({{2}}) has been returned to the unassigned bucket due to SLA breach.",
@@ -569,6 +569,7 @@ Deno.serve(async (req) => {
       ai_missed_call_followup: "Hi {{1}}, this is Navya from NIMT Educational Institutions. I tried calling you regarding your enquiry about {{2}}.\n\nPlease feel free to call back at {{3}} during 9 AM-8 PM IST.\n\n📄 Course information: {{4}}\n🎥 Watch course video: {{5}}\n\nLooking forward to assisting you with your admission journey.",
       apply_portal_login: "Hi {{1}}, your secure login link for the NIMT application portal is ready. Tap the button below to complete your application or pay your token fee directly — no OTP needed. The link is valid until {{2}}, so please use it before it expires.",
       course_info_v1: "Hi {{1}}, here are the details for {{2}} at NIMT:\n• Duration: {{3}}\n• Eligibility: {{4}}\n• Accreditation: {{5}}\n\nWatch a short course video or view the full fees and syllabus on the course page. Reply STOP to opt out.",
+      course_info_v4: "Hi {{1}}, here are the details for {{2}} at NIMT Educational Institutions:\n\nDuration: {{3}}\nEligibility: {{4}}\nApproval: {{5}}\nCourse video: {{6}}\n\nOpen the course page below for fees and application steps. Reply STOP to opt out.",
       course_info_generic: "Hi {{1}}, thanks for your interest in NIMT Educational Institutions. We offer programmes in nursing, paramedical, pharma, management, education, law, and engineering across our Greater Noida, Ghaziabad, and Kotputli campuses. Browse the full list, fees, and eligibility on our website. Reply STOP to opt out.",
       visit_reminder_v2: "Hi {{1}}, your campus visit for {{2}} is on {{3}} at {{4}}. Your counsellor {{5}} will meet you there. Tap below for directions to the campus.",
       offer_letter_acceptance: "Congratulations {{1}}! NIMT has issued your offer letter for {{2}}. Net fee: Rs.{{3}}. Please accept by {{4}}. Tap below to view your offer, accept it, and pay the token fee in one secure step.",
@@ -610,6 +611,7 @@ Deno.serve(async (req) => {
       business_phone_number_id: phoneNumberId,
       business_phone_number: sendResult.businessNumber,
       status_error: statusErrorPayload,
+      sender_user_id: user.id,
     }).select("id").maybeSingle();
 
     await recordWhatsAppOutboundContext(adminClient, {

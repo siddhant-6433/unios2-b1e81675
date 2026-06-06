@@ -121,7 +121,7 @@ const BUCKET_FILTERS: { key: "all" | Bucket; label: string }[] = [
 ];
 
 const TARGET_PER_COUNSELLOR = 15;
-const DEADLINE_LABEL = "5 Jun 2026";
+const DEADLINE_LABEL = "10 Jun 2026, 11:59 PM";
 
 function timeAgo(iso: string | null): string {
   if (!iso) return "—";

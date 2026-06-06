@@ -143,6 +143,7 @@ Deno.serve(async (req) => {
       business_phone_number_id: sendResult.businessPhoneNumberId,
       business_phone_number: sendResult.businessNumber,
       template_key: "manual_reply",
+      sender_user_id: user.id,
     }).select("id").maybeSingle();
 
     await recordWhatsAppOutboundContext(admin, {

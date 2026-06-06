@@ -42,6 +42,25 @@ describe("hot list database load guardrails", () => {
     }
   });
 
+  it("keeps the overview dashboard on the single aggregate payload", () => {
+    const dashboard = read("src/pages/Dashboard.tsx");
+    const dashboardOverview = read("supabase/migrations/20260618211200_dashboard_overview_rpc.sql");
+
+    expect(dashboard).toContain('rpc("dashboard_overview"');
+    expect(read("src/components/dashboard/DashboardAnalytics.tsx")).toContain('rpc("dashboard_analytics"');
+    expect(dashboard).not.toContain('rpc("get_lead_stage_counts"');
+    expect(dashboard).not.toContain('from("fee_ledger")');
+    expect(dashboard).not.toContain('from("students").select("status');
+    expect(dashboard).not.toContain('from("leads").select("source")');
+    expect(dashboard).not.toContain('from("leads").select("created_at")');
+    expect(dashboard).not.toContain('from "recharts"');
+    expect(read("src/components/dashboard/DashboardAnalytics.tsx")).toContain('from "recharts"');
+    expect(dashboardOverview).toMatch(/\bSECURITY\s+INVOKER\b/i);
+    expect(dashboardOverview).toContain("jsonb_build_object");
+    expect(dashboardOverview).toContain("GRANT EXECUTE ON FUNCTION public.dashboard_overview(uuid) TO authenticated");
+    expect(dashboardOverview).toContain("GRANT EXECUTE ON FUNCTION public.dashboard_analytics(uuid) TO authenticated");
+  });
+
   it("ships the indexes and stats RPC that support cursor-based reads", () => {
     expect(keysetMigration).toContain("idx_leads_created_id_desc");
     expect(keysetMigration).toContain("idx_call_logs_created_id_desc");

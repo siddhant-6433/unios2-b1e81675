@@ -17,6 +17,19 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 
+const CONVERSATION_PAGE_SIZE = 120;
+
+const TEMPLATE_MESSAGE_TEXTS: Record<string, string> = {
+  bpt_bmrit_cahet_deadline:
+    "Dear Applicant,\n\nThis is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *10th June 2026, 11:59 PM*\n\nFor admission Candidates *MUST*\n\n1. Complete College Application Online at https://apply.nimt.ac.in\n2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nPlease note both form submissions are mandatory by 10th June 2026, 11:59 PM to be included in the admission process for session 2026-27.\n\nFor any details please call 9555192192\n9667691872\n7428499849",
+  course_info_generic:
+    "Hi {{student_name}}, thanks for your interest in NIMT Educational Institutions. We offer programmes in nursing, paramedical, pharma, management, education, law, and engineering across our Greater Noida, Ghaziabad, and Kotputli campuses. Browse the full list, fees, and eligibility on our website. Reply STOP to opt out.",
+  course_info_v4:
+    "Hi {{student_name}}, here are the details for {{course_name}} at NIMT Educational Institutions:\n\nDuration: {{duration}}\nEligibility: {{eligibility}}\nApproval: {{approval}}\nCourse video: {{video_url}}\n\nOpen the course page below for fees and application steps. Reply STOP to opt out.",
+};
+
+const TEMPLATE_PLACEHOLDER_RE = /^\s*(?:\[Campaign:[^\]]+\]\s*)?\[Template:\s*([^\]]+)\]\s*$/i;
+
 interface Conversation {
   phone: string;
   lead_id: string | null;
@@ -49,6 +62,7 @@ interface Conversation {
 
 interface Message {
   id: string;
+  wa_message_id?: string | null;
   direction: string;
   content: string | null;
   message_type: string;
@@ -56,6 +70,19 @@ interface Message {
   template_key: string | null;
   media_url: string | null;
   created_at: string;
+  sender_user_id?: string | null;
+}
+
+interface MessageConversationSeed {
+  phone: string | null;
+  lead_id: string | null;
+  direction: string | null;
+  content: string | null;
+  created_at: string | null;
+  provider: "meta" | "plivo" | null;
+  business_phone_number_id: string | null;
+  business_phone_number: string | null;
+  is_read: boolean | null;
 }
 
 const STAGE_LABELS: Record<string, string> = {
@@ -116,9 +143,9 @@ const INBOX_TEMPLATES = [
   {
     key: "bpt_bmrit_cahet_deadline",
     label: "BPT/BMRIT CAHET Deadline",
-    description: "5 June 2026 application + CAHET registration deadline",
+    description: "10 June 2026 application + CAHET registration deadline",
     params: [],
-    preview: "Dear Applicant,\n\nThis is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *TODAY (5th June 2026)*\n\nFor admission Candidates *MUST*\n\n1. Complete College Application Online at https://apply.nimt.ac.in\n2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nPlease note both form submissions are mandatory by 5th June 2026 to be included in the admission process for session 2026-27.\n\nFor any details please call 9555192192\n9667691872\n7428499849",
+    preview: "Dear Applicant,\n\nThis is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *10th June 2026, 11:59 PM*\n\nFor admission Candidates *MUST*\n\n1. Complete College Application Online at https://apply.nimt.ac.in\n2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nPlease note both form submissions are mandatory by 10th June 2026, 11:59 PM to be included in the admission process for session 2026-27.\n\nFor any details please call 9555192192\n9667691872\n7428499849",
   },
   // ── Knowledge Base Quick Replies ─────────────────────────────────────────
   {
@@ -168,7 +195,7 @@ const INBOX_TEMPLATES = [
     label: "📋 Eligibility — General",
     description: "Quick eligibility overview for popular courses",
     params: [],
-    preview: "📋 *Eligibility Overview — Popular Courses*\n\n🏥 *B.Sc Nursing:* 10+2 PCB, min 45%, age 17+\n🏥 *GNM:* 10+2 any stream, min 40%, age 17-35 (Science NOT required!)\n🦾 *BPT (Physiotherapy):* 10+2 PCB, min 45%\n⚖️ *BA LLB (5yr):* 12th pass, min 45%\n⚖️ *LLB (3yr):* Graduation any stream, min 45%\n🎓 *MBA:* Bachelor's degree, min 50%, valid entrance score (CAT/MAT/XAT/CMAT)\n🎓 *PGDM:* Bachelor's degree, min 50%, CAT/MAT/XAT/CMAT\n🖥️ *BCA:* 12th with Maths, min 45%\n📊 *BBA:* 12th any stream, min 45%\n💊 *D Pharma:* 10+2 PCB/PCM, min 50%\n\nFor course-specific eligibility, please share which course you're interested in!",
+    preview: "📋 *Eligibility Overview — Popular Courses*\n\n🏥 *B.Sc Nursing:* 10+2 PCB, min 45%, age 17+\n🏥 *GNM:* 10+2 any stream, min 40%, age 17-35 (Science NOT required!)\n🦾 *BPT (Physiotherapy):* 10+2 PCB + English, min 50% (40% reserved/PwD); UP 2026 via CAHET counselling\n🩻 *BMRIT:* 10+2 PCB + English, min 50% (40% reserved/PwD); UP 2026 via CAHET counselling\n⚖️ *BA LLB (5yr):* 12th pass, min 45%\n⚖️ *LLB (3yr):* Graduation any stream, min 45%\n🎓 *MBA:* Bachelor's degree, min 50%, valid entrance score (CAT/MAT/XAT/CMAT)\n🎓 *PGDM:* Bachelor's degree, min 50%, CAT/MAT/XAT/CMAT\n🖥️ *BCA:* 12th with Maths, min 45%\n📊 *BBA:* 12th any stream, min 45%\n💊 *D Pharma:* 10+2 PCB/PCM, min 50%\n\nFor course-specific eligibility, please share which course you're interested in!",
   },
   {
     key: "kb_fee_structure",
@@ -195,11 +222,69 @@ const ALLOWED_ROLES = new Set(["super_admin", "campus_admin", "principal", "admi
 // any conversation that's been categorised as a job_applicant on the
 // admissions number. The default (admissions) inbox excludes those.
 const HR_BUSINESS_PNID = "970526789470416";
-const PLIVO_ADMISSIONS_BUSINESS_NUMBER = "919555192192";
-const FIXED_INBOXES = [
-  { id: PLIVO_ADMISSIONS_BUSINESS_NUMBER, label: "9555192192" },
-  { id: HR_BUSINESS_PNID, label: "HR 9599675267" },
+const HR_BUSINESS_NUMBER = "9599675267";
+const PLIVO_WHATSAPP_NUMBER = "919555192192";
+const PRIMARY_META_WHATSAPP_NUMBER = "919667691872";
+const KNOWN_ADMISSIONS_PHONE_CHANNELS = [
+  { id: PLIVO_WHATSAPP_NUMBER, label: "9555192192 Inbox", provider: "plivo" },
+  { id: PRIMARY_META_WHATSAPP_NUMBER, label: "9667691872 Inbox", provider: "meta" },
+  { id: "917428499849", label: "7428499849 Inbox", provider: "meta" },
 ];
+
+const digitsOnly = (value: string | null | undefined) => (value || "").replace(/\D/g, "");
+
+const isBusinessPhoneNumberChannel = (value: string | null | undefined) => {
+  const digits = digitsOnly(value);
+  return digits.length === 10 || (digits.length === 12 && digits.startsWith("91"));
+};
+
+const normalizeBusinessChannel = (value: string | null | undefined) => {
+  const digits = digitsOnly(value);
+  if (digits.length === 10) return `91${digits}`;
+  return digits;
+};
+
+const businessChannelVariants = (value: string | null | undefined) => {
+  const normalized = normalizeBusinessChannel(value);
+  if (!normalized) return [];
+  if (normalized.length === 12 && normalized.startsWith("91")) return [normalized, normalized.slice(2)];
+  return [normalized];
+};
+
+const getConversationBusinessChannel = (c: Conversation) =>
+  normalizeBusinessChannel(c.business_phone_number_id || c.business_phone_number);
+
+const findKnownAdmissionsChannel = (id: string | null | undefined, label?: string | null) => {
+  const variants = new Set([...businessChannelVariants(id), ...businessChannelVariants(label)]);
+  return KNOWN_ADMISSIONS_PHONE_CHANNELS.find(channel =>
+    businessChannelVariants(channel.id).some(v => variants.has(v))
+  );
+};
+
+const isHrBusinessChannel = (id: string | null | undefined, label?: string | null) =>
+  id === HR_BUSINESS_PNID || digitsOnly(id) === HR_BUSINESS_NUMBER || digitsOnly(label) === HR_BUSINESS_NUMBER;
+
+const isHrBusinessConversation = (c: Conversation) =>
+  isHrBusinessChannel(c.business_phone_number_id, c.business_phone_number);
+
+const isPhoneNumberBusinessConversation = (c: Conversation) =>
+  isBusinessPhoneNumberChannel(c.business_phone_number_id) || isBusinessPhoneNumberChannel(c.business_phone_number);
+
+const isKnownAdmissionsPhoneConversation = (c: Conversation) =>
+  Boolean(findKnownAdmissionsChannel(c.business_phone_number_id, c.business_phone_number));
+
+const conversationMatchesBusinessChannel = (c: Conversation, channel: string) => {
+  const variants = new Set(businessChannelVariants(channel));
+  return businessChannelVariants(c.business_phone_number_id).some(v => variants.has(v))
+      || businessChannelVariants(c.business_phone_number).some(v => variants.has(v));
+};
+
+const formatInboxLabel = (id: string, label?: string | null) => {
+  const digits = normalizeBusinessChannel(label || id);
+  if (digits.length === 12 && digits.startsWith("91")) return `${digits.slice(2)} Inbox`;
+  if (digits.length === 10) return `${digits} Inbox`;
+  return label || id;
+};
 
 const STATE_LABELS: Record<string, string> = {
   new_unqualified: "New",
@@ -217,7 +302,9 @@ const STATE_LABELS: Record<string, string> = {
   knowledge_gap: "Knowledge gap",
 };
 
-const stateLabel = (state?: string | null) => state ? (STATE_LABELS[state] || state.replace(/_/g, " ")) : "New";
+const stateLabel = (state?: string | null) =>
+  state ? (STATE_LABELS[state] || state.replace(/_/g, " ")) : "New";
+
 const conversationBusinessKey = (conv?: Conversation | null) =>
   conv?.provider === "plivo"
     ? (conv.business_phone_number || conv.business_phone_number_id || null)
@@ -273,8 +360,15 @@ const WhatsAppInbox = () => {
   const isHrScope = scope === "hr";
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversationCursor, setConversationCursor] = useState<{ last_message_at: string; phone: string } | null>(null);
+  const [hasMoreConversations, setHasMoreConversations] = useState(true);
+  const [loadingMoreConversations, setLoadingMoreConversations] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedPhone, setSelectedPhone] = useState<string | null>(null);
+  const [selectedCourseInfo, setSelectedCourseInfo] = useState<Record<string, string> | null>(null);
+  const [senderNames, setSenderNames] = useState<Record<string, string>>({});
+  const [localSenderNamesByWaId, setLocalSenderNamesByWaId] = useState<Record<string, string>>({});
+  const [localSenderNamesBySignature, setLocalSenderNamesBySignature] = useState<Record<string, string>>({});
   const [search, setSearch] = useState("");
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
@@ -288,9 +382,11 @@ const WhatsAppInbox = () => {
   // "primary" = the most-used phone_number_id + legacy NULL rows; any other
   // distinct phone_number_id is shown as its own inbox.
   const [businessNumber, setBusinessNumber] = useState<string>("primary");
+  const [detectedInboxChannels, setDetectedInboxChannels] = useState<{ id: string; label: string; n: number }[]>([]);
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
   const [staffConvs, setStaffConvs] = useState<Conversation[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const loadingConversationsRef = useRef(false);
 
   // Admin-only state
   const [counsellorList, setCounsellorList] = useState<{ id: string; name: string }[]>([]);
@@ -322,8 +418,20 @@ const WhatsAppInbox = () => {
   const [aiMode, setAiMode] = useState<"ai" | "human" | null>(null);
   const [aiModeSaving, setAiModeSaving] = useState(false);
 
+  const matchesActiveBusinessNumber = (c: Conversation) => {
+    if (isHrScope) {
+      return isHrBusinessConversation(c)
+          || c.lead_person_role === "job_applicant";
+    }
+    if (isHrBusinessConversation(c)) return false;
+    if (businessNumber !== "primary") return conversationMatchesBusinessChannel(c, businessNumber);
+    return !c.business_phone_number_id
+        || (primaryPnid ? c.business_phone_number_id === primaryPnid : !isKnownAdmissionsPhoneConversation(c));
+  };
+
   useEffect(() => {
-    const conv = conversations.find(c => c.phone === selectedPhone);
+    const conv = conversations.find(c => c.phone === selectedPhone && matchesActiveBusinessNumber(c))
+      || conversations.find(c => c.phone === selectedPhone);
     const channel = conversationBusinessKey(conv);
     if (!selectedPhone || !channel) { setAiMode(null); return; }
     let cancelled = false;
@@ -348,10 +456,11 @@ const WhatsAppInbox = () => {
       if (!cancelled) setAiMode(((data?.mode as "ai" | "human") ?? conv?.conversation_mode ?? "ai") === "human" ? "human" : "ai");
     })();
     return () => { cancelled = true; };
-  }, [selectedPhone, conversations]);
+  }, [selectedPhone, conversations, businessNumber, isHrScope]);
 
   const toggleAiMode = async () => {
-    const conv = conversations.find(c => c.phone === selectedPhone);
+    const conv = conversations.find(c => c.phone === selectedPhone && matchesActiveBusinessNumber(c))
+      || conversations.find(c => c.phone === selectedPhone);
     const channel = conversationBusinessKey(conv);
     if (!selectedPhone || !channel) return;
     const next = aiMode === "human" ? "ai" : "human";
@@ -389,32 +498,53 @@ const WhatsAppInbox = () => {
     toast({ title: next === "human" ? "AI paused for this chat" : "AI re-enabled for this chat" });
   };
 
-  // Multi-inbox: rank pnids by message count → most-used is "primary".
-  const { primaryPnid, otherInboxes } = (() => {
+  // Multi-inbox: keep phone-number channels (Plivo/coexistence DIDs) out of
+  // the primary heuristic so they never get folded into the default admissions inbox.
+  const { primaryPnid, primaryInboxLabel, otherInboxes } = (() => {
     const counts = new Map<string, { label: string; n: number }>();
-    for (const c of conversations) {
-      if (!c.business_phone_number_id) continue;
-      const key = c.business_phone_number_id;
-      const cur = counts.get(key) || { label: c.business_phone_number || key, n: 0 };
-      cur.n += 1;
-      counts.set(key, cur);
+    if (!isHrScope) {
+      for (const channel of KNOWN_ADMISSIONS_PHONE_CHANNELS) {
+        counts.set(channel.id, { label: channel.label, n: 0 });
+      }
     }
-    const sorted = [...counts.entries()].sort((a, b) => b[1].n - a[1].n);
+    for (const c of [...detectedInboxChannels, ...conversations]) {
+      if ("id" in c) {
+        if (!isHrScope && isHrBusinessChannel(c.id, c.label)) continue;
+        counts.set(c.id, { label: c.label, n: c.n });
+        continue;
+      }
+      if (!c.business_phone_number_id) continue;
+      if (!isHrScope && isHrBusinessConversation(c)) continue;
+      const key = getConversationBusinessChannel(c);
+      if (!key) continue;
+      const known = findKnownAdmissionsChannel(key, c.business_phone_number);
+      const countKey = known && known.provider === "meta" && !isBusinessPhoneNumberChannel(key) ? key : (known?.id || key);
+      const countLabel = known?.label || formatInboxLabel(key, c.business_phone_number);
+      if (known && countKey !== known.id && counts.has(known.id)) counts.delete(known.id);
+      const cur = counts.get(countKey) || { label: countLabel, n: 0 };
+      cur.n += 1;
+      counts.set(countKey, cur);
+    }
+    const sorted = [...counts.entries()]
+      .map(([id, v]) => ({ id, label: formatInboxLabel(id, v.label), n: v.n }))
+      .sort((a, b) => b.n - a.n);
+    const primaryItem = sorted.find(item => !isBusinessPhoneNumberChannel(item.id)) || null;
+    const primary = primaryItem?.id || null;
+    const primaryMetaFallback = !isHrScope
+      ? KNOWN_ADMISSIONS_PHONE_CHANNELS.find(channel => channel.id === PRIMARY_META_WHATSAPP_NUMBER)
+      : null;
+    const primaryUsesMetaFallbackLabel = Boolean(primaryMetaFallback);
+    const secondaryInboxes = sorted
+      .filter(item => item.id !== primary)
+      .filter(item => !primaryUsesMetaFallbackLabel || item.id !== primaryMetaFallback?.id)
+      .map(item => ({ id: item.id, label: item.label }));
     return {
-      primaryPnid: sorted[0]?.[0] || null as string | null,
-      otherInboxes: sorted.slice(1).map(([id, v]) => ({ id, label: v.label })),
+      primaryPnid: primary as string | null,
+      primaryInboxLabel: primaryMetaFallback?.label || primaryItem?.label || "Primary Inbox",
+      otherInboxes: secondaryInboxes,
     };
   })();
-  const inboxOptions = (() => {
-    const seen = new Set<string>();
-    const options: { id: string; label: string }[] = [];
-    for (const inbox of [...FIXED_INBOXES, ...otherInboxes]) {
-      if (!inbox.id || seen.has(inbox.id)) continue;
-      seen.add(inbox.id);
-      options.push(inbox);
-    }
-    return options;
-  })();
+  const hasOtherInbox = otherInboxes.length > 0;
 
   // Pre-fill backfill form when dialog opens, using detected pnids if any
   const openBackfill = () => {
@@ -457,96 +587,320 @@ const WhatsAppInbox = () => {
     // conversation regardless of which number it landed on. The
     // business-number switcher doesn't apply here — the scope is fixed.
     if (isHrScope) {
-      return c.business_phone_number_id === HR_BUSINESS_PNID
+      return isHrBusinessConversation(c)
           || c.lead_person_role === "job_applicant";
-    }
-    if (businessNumber !== "primary") {
-      return c.business_phone_number_id === businessNumber
-          || c.business_phone_number === businessNumber;
     }
     // Admissions scope: exclude job_applicant conversations entirely;
     // those live in the dedicated HR inbox.
     if (c.lead_person_role === "job_applicant") return false;
-    return !c.business_phone_number_id
-      || c.business_phone_number_id === primaryPnid
-      || (primaryPnid === null
-        && c.business_phone_number_id !== HR_BUSINESS_PNID
-        && c.business_phone_number_id !== PLIVO_ADMISSIONS_BUSINESS_NUMBER);
+    if (isHrBusinessConversation(c)) return false;
+    if (businessNumber !== "primary") return conversationMatchesBusinessChannel(c, businessNumber);
+    if (isKnownAdmissionsPhoneConversation(c)) return false;
+    if (businessNumber === "primary") {
+      return !c.business_phone_number_id
+          || (primaryPnid ? c.business_phone_number_id === primaryPnid : !isKnownAdmissionsPhoneConversation(c));
+    }
+    return c.business_phone_number_id === businessNumber;
   };
 
-  // Fetch conversations + build staff list
-  useEffect(() => {
-    // For counsellors, wait until profile.id is available — otherwise the
-    // .contains filter falls through and we'd briefly expose the unfiltered
-    // list to the wrong viewer.
-    if (role === "counsellor" && !profile?.id) return;
-    (async () => {
-      // Fetch conversations in keyset batches. The UI still needs a full
-      // working set for tabs/search/staff synthesis, but offset scans get
-      // expensive as the WhatsApp view grows.
-      let allConvData: any[] = [];
-      let cursor: { last_message_at: string; phone: string } | null = null;
-      const BATCH = 1000;
-      let selectCandidates = [CONVERSATION_SELECT_RICH, CONVERSATION_SELECT_PROVIDER, CONVERSATION_SELECT_LEGACY];
-      while (true) {
-        let data: any[] | null = null;
-        let lastError: any = null;
+  const fetchMessageBackedConversationRows = async (selectedBusinessNumber = businessNumber): Promise<Conversation[]> => {
+    const variants = businessChannelVariants(selectedBusinessNumber);
+    if (variants.length === 0) return [];
 
-        for (let i = 0; i < selectCandidates.length; i++) {
-          let q = supabase
-            .from("whatsapp_conversations" as any)
-            .select(selectCandidates[i])
-            .order("last_message_at", { ascending: false })
-            .order("phone", { ascending: false })
-            .limit(BATCH);
-          if (cursor) {
-            q = q.or(`last_message_at.lt.${cursor.last_message_at},and(last_message_at.eq.${cursor.last_message_at},phone.lt.${cursor.phone})`);
-          }
+    let messageQuery = supabase
+      .from("whatsapp_messages" as any)
+      .select("phone, lead_id, direction, content, created_at, provider, business_phone_number_id, business_phone_number, is_read")
+      .order("created_at", { ascending: false })
+      .limit(CONVERSATION_PAGE_SIZE * 5);
 
-          if (role === "counsellor" && profile?.id) {
-            // Filter via the aggregated lead_counsellor_ids array — covers the
-            // case where the latest message on a phone is a campaign blast
-            // (lead_id NULL) or a template tied to another counsellor's lead,
-            // which would otherwise collapse the view's displayed counsellor_id
-            // and hide a conversation this counsellor actually owns inbound on.
-            q = q.contains("lead_counsellor_ids", [profile.id]);
-          } else if (isAdminRole(role)) {
-            if (counsellorFilter === "unassigned") {
-              q = (q as any).is("counsellor_id", null);
-            } else if (counsellorFilter !== "all") {
-              q = q.eq("counsellor_id", counsellorFilter);
-            }
-          }
+    messageQuery = messageQuery.or(
+      variants
+        .flatMap(v => [`business_phone_number_id.eq.${v}`, `business_phone_number.eq.${v}`])
+        .join(","),
+    );
 
-          const result = await q;
-          if (!result.error) {
-            data = (result.data || []) as any[];
-            if (i > 0) selectCandidates = selectCandidates.slice(i);
-            break;
-          }
-          lastError = result.error;
-        }
+    const { data, error } = await messageQuery;
+    if (error) throw error;
 
-        if (!data) {
-          console.error("whatsapp_conversations fetch failed:", lastError);
-          toast({
-            title: "Couldn't load WhatsApp conversations",
-            description: lastError?.message || "The inbox view returned an error.",
-            variant: "destructive",
-          });
-          break;
-        }
+    const seedRows = ((data || []) as any[] as MessageConversationSeed[])
+      .filter(row => row.phone && row.created_at);
+    if (seedRows.length === 0) return [];
 
-        if (data.length === 0) break;
-        allConvData = [...allConvData, ...data.map(withConversationDefaults)];
-        if (data.length < BATCH) break; // last page
-        const last = data[data.length - 1];
-        cursor = { last_message_at: last.last_message_at, phone: last.phone };
+    const leadIds = Array.from(new Set(seedRows.map(row => row.lead_id).filter((id): id is string => Boolean(id))));
+    const leadById = new Map<string, any>();
+    const courseById = new Map<string, string>();
+    const counsellorById = new Map<string, string>();
+
+    if (leadIds.length > 0) {
+      const { data: leadsData, error: leadsError } = await supabase
+        .from("leads" as any)
+        .select("id, name, stage, person_role, counsellor_id, course_id")
+        .in("id", leadIds);
+      if (leadsError) throw leadsError;
+
+      for (const lead of ((leadsData || []) as any[])) {
+        leadById.set(lead.id, lead);
       }
 
-      setConversations(allConvData);
+      const courseIds = Array.from(new Set(
+        ((leadsData || []) as any[])
+          .map(lead => lead.course_id)
+          .filter((id): id is string => Boolean(id)),
+      ));
+      const counsellorIds = Array.from(new Set(
+        ((leadsData || []) as any[])
+          .map(lead => lead.counsellor_id)
+          .filter((id): id is string => Boolean(id)),
+      ));
 
-      // Fetch ALL staff/counsellor profiles with phone numbers
+      if (courseIds.length > 0) {
+        const { data: coursesData } = await supabase
+          .from("courses" as any)
+          .select("id, name")
+          .in("id", courseIds);
+        for (const course of ((coursesData || []) as any[])) {
+          if (course.id && course.name) courseById.set(course.id, course.name);
+        }
+      }
+
+      if (counsellorIds.length > 0) {
+        const { data: profilesData } = await supabase
+          .from("profiles" as any)
+          .select("id, display_name")
+          .in("id", counsellorIds);
+        for (const counsellor of ((profilesData || []) as any[])) {
+          if (counsellor.id && counsellor.display_name) counsellorById.set(counsellor.id, counsellor.display_name);
+        }
+      }
+    }
+
+    const selectedChannel = normalizeBusinessChannel(selectedBusinessNumber);
+    const grouped = new Map<string, {
+      latest: MessageConversationSeed;
+      leadId: string | null;
+      unreadCount: number;
+      hasInbound: boolean;
+    }>();
+
+    for (const row of seedRows) {
+      const lead = row.lead_id ? leadById.get(row.lead_id) : null;
+      if (role === "counsellor" && profile?.id && (!lead || lead.counsellor_id !== profile.id)) {
+        continue;
+      }
+      if (isAdminRole(role)) {
+        if (counsellorFilter === "unassigned" && lead?.counsellor_id) continue;
+        if (counsellorFilter !== "all" && counsellorFilter !== "unassigned" && (!lead || lead.counsellor_id !== counsellorFilter)) continue;
+      }
+
+      const rowChannel = normalizeBusinessChannel(row.business_phone_number_id || row.business_phone_number) || selectedChannel;
+      const key = `${row.phone}:${rowChannel}`;
+      const existing = grouped.get(key);
+      if (!existing) {
+        grouped.set(key, {
+          latest: row,
+          leadId: row.lead_id || null,
+          unreadCount: row.direction === "inbound" && row.is_read === false ? 1 : 0,
+          hasInbound: row.direction === "inbound",
+        });
+        continue;
+      }
+
+      if (!existing.leadId && row.lead_id) existing.leadId = row.lead_id;
+      if (row.direction === "inbound") existing.hasInbound = true;
+      if (row.direction === "inbound" && row.is_read === false) existing.unreadCount += 1;
+    }
+
+    return Array.from(grouped.values())
+      .map(group => {
+        const latest = group.latest;
+        const lead = group.leadId ? leadById.get(group.leadId) : null;
+        return withConversationDefaults({
+          phone: latest.phone || "",
+          lead_id: group.leadId,
+          lead_name: lead?.name || null,
+          lead_stage: lead?.stage || null,
+          lead_person_role: lead?.person_role || null,
+          course_name: lead?.course_id ? courseById.get(lead.course_id) || null : null,
+          last_message: latest.content,
+          last_direction: latest.direction || "inbound",
+          last_message_at: latest.created_at || new Date(0).toISOString(),
+          unread_count: group.unreadCount,
+          counsellor_id: lead?.counsellor_id || null,
+          counsellor_name: lead?.counsellor_id ? counsellorById.get(lead.counsellor_id) || null : null,
+          has_inbound: group.hasInbound,
+          provider: latest.provider || null,
+          business_phone_number_id: latest.business_phone_number_id || selectedChannel || null,
+          business_phone_number: latest.business_phone_number || selectedChannel || null,
+          lead_counsellor_ids: lead?.counsellor_id ? [lead.counsellor_id] : null,
+        });
+      })
+      .filter(row => matchesInbox(row))
+      .sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime())
+      .slice(0, CONVERSATION_PAGE_SIZE);
+  };
+
+  const fetchConversationPage = async (
+    reset = false,
+    explicitCursor: { last_message_at: string; phone: string } | null = conversationCursor,
+  ) => {
+    if (role === "counsellor" && !profile?.id) return;
+    if (loadingConversationsRef.current) return;
+    if (!reset && !hasMoreConversations) return;
+
+    loadingConversationsRef.current = true;
+    if (reset) setLoading(true);
+    else setLoadingMoreConversations(true);
+
+    try {
+      let rows: Conversation[] = [];
+      let lastError: any = null;
+      for (const selectFields of [CONVERSATION_SELECT_RICH, CONVERSATION_SELECT_PROVIDER, CONVERSATION_SELECT_LEGACY]) {
+        let q = supabase
+          .from("whatsapp_conversations" as any)
+          .select(selectFields)
+          .order("last_message_at", { ascending: false })
+          .order("phone", { ascending: false })
+          .limit(CONVERSATION_PAGE_SIZE);
+
+        if (explicitCursor) {
+          q = q.or(`last_message_at.lt.${explicitCursor.last_message_at},and(last_message_at.eq.${explicitCursor.last_message_at},phone.lt.${explicitCursor.phone})`);
+        }
+
+        if (!isHrScope && businessNumber !== "primary") {
+          const variants = businessChannelVariants(businessNumber);
+          if (variants.length > 0) {
+            q = q.or(
+              variants
+                .flatMap(v => [`business_phone_number_id.eq.${v}`, `business_phone_number.eq.${v}`])
+                .join(","),
+            );
+          }
+        }
+
+        if (role === "counsellor" && profile?.id) {
+          // Filter via the aggregated lead_counsellor_ids array — covers the
+          // case where the latest message on a phone is a campaign blast
+          // (lead_id NULL) or a template tied to another counsellor's lead.
+          q = q.contains("lead_counsellor_ids", [profile.id]);
+        } else if (isAdminRole(role)) {
+          if (counsellorFilter === "unassigned") {
+            q = (q as any).is("counsellor_id", null);
+          } else if (counsellorFilter !== "all") {
+            q = q.eq("counsellor_id", counsellorFilter);
+          }
+        }
+
+        const { data, error } = await q;
+        if (!error) {
+          rows = ((data || []) as any[]).map(withConversationDefaults);
+          break;
+        }
+        lastError = error;
+      }
+
+      if (lastError && rows.length === 0) throw lastError;
+      if (reset && rows.length === 0 && businessNumber !== "primary" && isBusinessPhoneNumberChannel(businessNumber)) {
+        rows = await fetchMessageBackedConversationRows(businessNumber);
+      }
+
+      setConversations(prev => {
+        if (reset) return rows;
+        const seen = new Set(prev.map(c => `${c.phone}:${conversationBusinessKey(c) || ""}`));
+        const nextRows = rows.filter(c => !seen.has(`${c.phone}:${conversationBusinessKey(c) || ""}`));
+        return [...prev, ...nextRows];
+      });
+
+      if (rows.length < CONVERSATION_PAGE_SIZE) {
+        setHasMoreConversations(false);
+        setConversationCursor(null);
+      } else {
+        const last = rows[rows.length - 1];
+        setHasMoreConversations(true);
+        setConversationCursor({ last_message_at: last.last_message_at, phone: last.phone });
+      }
+    } catch (error: any) {
+      toast({ title: "WhatsApp inbox could not load", description: error?.message || "Try again.", variant: "destructive" });
+      if (reset) {
+        setConversations([]);
+        setHasMoreConversations(false);
+      }
+    } finally {
+      setLoading(false);
+      setLoadingMoreConversations(false);
+      loadingConversationsRef.current = false;
+    }
+  };
+
+  // Fetch the first conversation page only. Additional pages load on scroll so
+  // the inbox can paint quickly even when thousands of outbound rows exist.
+  useEffect(() => {
+    if (role === "counsellor" && !profile?.id) return;
+    setConversations([]);
+    setConversationCursor(null);
+    setHasMoreConversations(true);
+    void fetchConversationPage(true, null);
+  }, [role, profile?.id, counsellorFilter, businessNumber]);
+
+  // Discover all business-number channels in the background. The main inbox
+  // only loads the first page for speed, so the selector cannot depend on
+  // whichever numbers happen to appear in that first page.
+  useEffect(() => {
+    if (role === "counsellor" && !profile?.id) return;
+    let cancelled = false;
+    (async () => {
+      let conversationChannelQuery = supabase
+        .from("whatsapp_conversations" as any)
+        .select("business_phone_number_id, business_phone_number, counsellor_id, lead_counsellor_ids")
+        .not("business_phone_number_id", "is", null)
+        .order("last_message_at", { ascending: false })
+        .limit(5000);
+
+      if (role === "counsellor" && profile?.id) {
+        conversationChannelQuery = conversationChannelQuery.contains("lead_counsellor_ids", [profile.id]);
+      } else if (isAdminRole(role)) {
+        if (counsellorFilter === "unassigned") {
+          conversationChannelQuery = (conversationChannelQuery as any).is("counsellor_id", null);
+        } else if (counsellorFilter !== "all") {
+          conversationChannelQuery = conversationChannelQuery.eq("counsellor_id", counsellorFilter);
+        }
+      }
+
+      const messageChannelQuery = supabase
+        .from("whatsapp_messages" as any)
+        .select("business_phone_number_id, business_phone_number")
+        .not("business_phone_number_id", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(5000);
+
+      const [conversationChannels, messageChannels] = await Promise.all([
+        conversationChannelQuery,
+        messageChannelQuery,
+      ]);
+      if (cancelled) return;
+
+      const counts = new Map<string, { label: string; n: number }>();
+      for (const row of ([...(conversationChannels.data || []), ...(messageChannels.data || [])] as any[])) {
+        const id = normalizeBusinessChannel(row.business_phone_number_id || row.business_phone_number);
+        if (!id) continue;
+        if (!isHrScope && isHrBusinessChannel(id, row.business_phone_number)) continue;
+        const cur = counts.get(id) || { label: formatInboxLabel(id, row.business_phone_number), n: 0 };
+        cur.n += 1;
+        counts.set(id, cur);
+      }
+
+      setDetectedInboxChannels(
+        [...counts.entries()]
+          .map(([id, v]) => ({ id, label: formatInboxLabel(id, v.label), n: v.n }))
+          .sort((a, b) => b.n - a.n),
+      );
+    })();
+    return () => { cancelled = true; };
+  }, [role, profile?.id, counsellorFilter, isHrScope]);
+
+  // Fetch staff/counsellor metadata off the critical path for the first paint.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
       const { data: staffProfiles } = await supabase
         .from("profiles")
         .select("phone, display_name, user_id")
@@ -557,81 +911,82 @@ const WhatsAppInbox = () => {
         .select("user_id, role")
         .in("role", ["super_admin", "campus_admin", "principal", "admission_head", "counsellor", "accountant", "faculty", "teacher", "data_entry", "office_admin", "office_assistant", "hostel_warden"]);
 
+      if (cancelled) return;
       const staffUserIds = new Set((staffRoles || []).map((r: any) => r.user_id));
       const nameMap: Record<string, string> = {};
       const syntheticConvs: Conversation[] = [];
-      const existingPhones = new Set(allConvData.map((c: any) => c.phone));
 
       for (const p of (staffProfiles || [])) {
         if (!p.phone || !staffUserIds.has(p.user_id)) continue;
         const digits = p.phone.replace(/\D/g, "");
         if (p.display_name) nameMap[digits] = p.display_name;
-
-        // Only create synthetic entries for staff with NO existing conversation
-        // (staff who already have a conversation in the DB are shown from allConvData)
-        if (!existingPhones.has(digits)) {
-          syntheticConvs.push({
-            phone: digits,
-            lead_id: null,
-            lead_name: null,
-            lead_stage: null,
-            lead_person_role: null,
-            course_name: null,
-            last_message: null,
-            last_direction: "outbound",
-            last_message_at: "1970-01-01T00:00:00Z", // no messages yet — sort to bottom
-            unread_count: 0,
-            counsellor_id: null,
-            counsellor_name: null,
-            has_inbound: false,
-            provider: null,
-            business_phone_number_id: null,
-            business_phone_number: null,
-            conversation_mode: null,
-            conversation_state: null,
-            owner_user_id: null,
-            escalation_role: null,
-            handoff_reason: null,
-            priority: null,
-            sla_due_at: null,
-            last_intent: null,
-            last_confidence: null,
-            last_bot_action: null,
-            lead_counsellor_ids: null,
-          });
-        }
+        syntheticConvs.push({
+          phone: digits,
+          lead_id: null,
+          lead_name: null,
+          lead_stage: null,
+          lead_person_role: null,
+          course_name: null,
+          last_message: null,
+          last_direction: "outbound",
+          last_message_at: "1970-01-01T00:00:00Z",
+          unread_count: 0,
+          counsellor_id: null,
+          counsellor_name: null,
+          has_inbound: false,
+          provider: null,
+          business_phone_number_id: null,
+          business_phone_number: null,
+          conversation_mode: null,
+          conversation_state: null,
+          owner_user_id: null,
+          escalation_role: null,
+          handoff_reason: null,
+          priority: null,
+          sla_due_at: null,
+          last_intent: null,
+          last_confidence: null,
+          last_bot_action: null,
+          lead_counsellor_ids: null,
+        });
       }
 
       setStaffNames(nameMap);
       setStaffConvs(syntheticConvs);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
-      // Fetch counsellor list for admins
-      if (isAdminRole(role)) {
-        const { data: ccRoles } = await supabase
-          .from("user_roles")
-          .select("user_id")
-          .eq("role", "counsellor");
+  useEffect(() => {
+    if (!isAdminRole(role)) { setCounsellorList([]); return; }
+    let cancelled = false;
+    (async () => {
+      const { data: ccRoles } = await supabase
+        .from("user_roles")
+        .select("user_id")
+        .eq("role", "counsellor");
 
-        if (ccRoles && ccRoles.length > 0) {
-          const ccUserIds = ccRoles.map((r: any) => r.user_id);
-          const { data: ccProfiles } = await supabase
-            .from("profiles")
-            .select("id, display_name")
-            .in("user_id", ccUserIds);
-
-          if (ccProfiles) {
-            setCounsellorList(
-              ccProfiles
-                .filter((p: any) => p.display_name)
-                .map((p: any) => ({ id: p.id, name: p.display_name }))
-            );
-          }
-        }
+      if (!ccRoles || ccRoles.length === 0) {
+        if (!cancelled) setCounsellorList([]);
+        return;
       }
 
-      setLoading(false);
+      const ccUserIds = ccRoles.map((r: any) => r.user_id);
+      const { data: ccProfiles } = await supabase
+        .from("profiles")
+        .select("id, display_name")
+        .in("user_id", ccUserIds);
+
+      if (!cancelled && ccProfiles) {
+        setCounsellorList(
+          ccProfiles
+            .filter((p: any) => p.display_name)
+            .map((p: any) => ({ id: p.id, name: p.display_name }))
+        );
+      }
     })();
-  }, [role, profile?.id, counsellorFilter]);
+    return () => { cancelled = true; };
+  }, [role]);
 
   // Fetch unreplied breakdown for admins — separate unlimited query
   useEffect(() => {
@@ -668,6 +1023,7 @@ const WhatsAppInbox = () => {
   const [deepLinkNotFound, setDeepLinkNotFound] = useState(false);
   useEffect(() => {
     if (!phoneFromUrl || conversations.length === 0) return;
+    let cancelled = false;
     setDeepLinkNotFound(false);
     const normalized = phoneFromUrl.replace(/\D/g, "");
     const allSearchable = [...conversations, ...staffConvs];
@@ -680,8 +1036,40 @@ const WhatsAppInbox = () => {
       setSelectedPhone(match.phone);
       setInboxTab("all");
     } else {
-      setDeepLinkNotFound(true);
+      (async () => {
+        let row: Conversation | undefined;
+        for (const selectFields of [CONVERSATION_SELECT_RICH, CONVERSATION_SELECT_PROVIDER, CONVERSATION_SELECT_LEGACY]) {
+          const { data, error } = await supabase
+            .from("whatsapp_conversations" as any)
+            .select(selectFields)
+            .eq("phone", normalized)
+            .order("last_message_at", { ascending: false })
+            .limit(1);
+          if (!error) {
+            row = ((data || []) as any[]).map(withConversationDefaults)[0];
+            break;
+          }
+        }
+
+        if (cancelled) return;
+        if (!row) {
+          setDeepLinkNotFound(true);
+          return;
+        }
+
+        setConversations(prev => {
+          const exists = prev.some(c => c.phone === row.phone && (c.business_phone_number_id || "") === (row.business_phone_number_id || ""));
+          return exists ? prev : [row, ...prev];
+        });
+        if (row.has_inbound === false && !isOutboundMode) {
+          navigate(`/whatsapp-inbox?mode=outbound&phone=${normalized}`, { replace: true });
+          return;
+        }
+        setSelectedPhone(row.phone);
+        setInboxTab("all");
+      })();
     }
+    return () => { cancelled = true; };
   }, [searchParams, conversations.length, staffConvs.length]);
 
   // Fetch messages for selected conversation
@@ -691,26 +1079,53 @@ const WhatsAppInbox = () => {
       // Pick the active business pnid for filtering. "primary" matches the
       // most-used pnid + legacy NULL rows; otherwise exact match.
       const activePnid = businessNumber === "primary" ? primaryPnid : businessNumber;
+      const applyBusinessNumberFilter = (query: any) => {
+        if (isHrScope) {
+          // HR view shows the candidate's full thread: messages on the HR
+          // number AND any messages on the admissions number that were
+          // categorised as job-applicant — same conversation, different DID.
+          // We don't pnid-filter here; the conversation list is already
+          // scoped via matchesInbox.
+          return query;
+        }
+        if (businessNumber !== "primary" && isBusinessPhoneNumberChannel(businessNumber)) {
+          const variants = businessChannelVariants(businessNumber);
+          return query.or(
+            variants
+              .flatMap(v => [`business_phone_number_id.eq.${v}`, `business_phone_number.eq.${v}`])
+              .join(","),
+          );
+        }
+        if (businessNumber === "primary") {
+          if (activePnid) return query.or(`business_phone_number_id.is.null,business_phone_number_id.eq.${activePnid}`);
+          return query.is("business_phone_number_id", null);
+        }
+        return query.eq("business_phone_number_id", businessNumber);
+      };
 
-      let q = supabase
-        .from("whatsapp_messages" as any)
-        .select("id, direction, content, message_type, status, template_key, media_url, created_at, business_phone_number_id")
-        .eq("phone", selectedPhone)
-        .order("created_at", { ascending: true })
-        .limit(200);
-      if (isHrScope) {
-        // HR view shows the candidate's full thread: messages on the HR
-        // number AND any messages on the admissions number that were
-        // categorised as job-applicant — same conversation, different DID.
-        // We don't pnid-filter here; the conversation list is already
-        // scoped via matchesInbox.
-      } else if (businessNumber === "primary") {
-        if (activePnid) q = (q as any).or(`business_phone_number_id.is.null,business_phone_number_id.eq.${activePnid}`);
-      } else {
-        q = q.eq("business_phone_number_id", businessNumber);
+      const buildMessageQuery = (selectColumns: string) => {
+        let query = supabase
+          .from("whatsapp_messages" as any)
+          .select(selectColumns)
+          .eq("phone", selectedPhone)
+          .order("created_at", { ascending: true })
+          .limit(200);
+        return applyBusinessNumberFilter(query);
+      };
+
+      const messageColumns = "id, wa_message_id, direction, content, message_type, status, template_key, media_url, created_at, business_phone_number_id";
+      let q = buildMessageQuery(`${messageColumns}, sender_user_id`);
+      let { data, error } = await q;
+      if (error && /sender_user_id/i.test(error.message || "")) {
+        const fallback = await buildMessageQuery(messageColumns);
+        data = fallback.data;
+        error = fallback.error;
       }
-      const { data } = await q;
-      if (data) setMessages(data as any);
+      if (error) {
+        toast({ title: "Couldn't load WhatsApp messages", description: error.message, variant: "destructive" });
+      } else if (data) {
+        setMessages(data as any);
+      }
 
       // Mark as read (scoped to the active inbox so the other inbox keeps its unread count)
       let upd = supabase
@@ -719,21 +1134,39 @@ const WhatsAppInbox = () => {
         .eq("phone", selectedPhone)
         .eq("direction", "inbound")
         .eq("is_read", false);
-      if (isHrScope) {
-        // No pnid filter — mark all inbound for this candidate as read.
-      } else if (businessNumber === "primary") {
-        if (activePnid) upd = (upd as any).or(`business_phone_number_id.is.null,business_phone_number_id.eq.${activePnid}`);
-      } else {
-        upd = upd.eq("business_phone_number_id", businessNumber);
-      }
-      await upd;
+      await applyBusinessNumberFilter(upd);
 
       // Update local unread count
       setConversations(prev =>
-        prev.map(c => c.phone === selectedPhone ? { ...c, unread_count: 0 } : c)
+        prev.map(c => c.phone === selectedPhone && matchesInbox(c) ? { ...c, unread_count: 0 } : c)
       );
     })();
   }, [selectedPhone, businessNumber, primaryPnid]);
+
+  useEffect(() => {
+    const userIds = Array.from(new Set(
+      messages
+        .map(m => m.sender_user_id)
+        .filter((id): id is string => Boolean(id) && !senderNames[id])
+    ));
+    if (userIds.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("user_id, display_name")
+        .in("user_id", userIds);
+      if (cancelled) return;
+      setSenderNames(prev => {
+        const next = { ...prev };
+        for (const p of data || []) {
+          if ((p as any).user_id) next[(p as any).user_id] = (p as any).display_name || "Unknown user";
+        }
+        return next;
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [messages, senderNames]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -783,12 +1216,16 @@ const WhatsAppInbox = () => {
     if (!reply.trim() || !selectedPhone) return;
     setSending(true);
 
-    const conv = conversations.find(c => c.phone === selectedPhone);
+    const conv = conversations.find(c => c.phone === selectedPhone && matchesInbox(c))
+      || conversations.find(c => c.phone === selectedPhone);
 
-    const { error } = await invokeEdge("whatsapp-reply", {
+    const currentSenderName = profile?.display_name || user?.email || "You";
+    const messageText = reply.trim();
+    const localSenderSignature = `${selectedPhone}:${messageText}`;
+    const { data, error } = await invokeEdge<{ message_id?: string }>("whatsapp-reply", {
       body: {
         phone: selectedPhone,
-        message: reply.trim(),
+        message: messageText,
         lead_id: conv?.lead_id || null,
         provider: conv?.provider || null,
         business_phone_number_id: conv?.business_phone_number_id || null,
@@ -803,6 +1240,10 @@ const WhatsAppInbox = () => {
         toast({ title: "Failed to send", description: error.message, variant: "destructive" });
       }
     } else {
+      setLocalSenderNamesBySignature(prev => ({ ...prev, [localSenderSignature]: currentSenderName }));
+      if (data?.message_id) {
+        setLocalSenderNamesByWaId(prev => ({ ...prev, [data.message_id!]: currentSenderName }));
+      }
       setReply("");
     }
     setSending(false);
@@ -817,7 +1258,8 @@ const WhatsAppInbox = () => {
     if (!selectedTemplate || !selectedPhone) return;
     setSendingTemplate(true);
 
-    const conv = conversations.find(c => c.phone === selectedPhone);
+    const conv = conversations.find(c => c.phone === selectedPhone && matchesInbox(c))
+      || conversations.find(c => c.phone === selectedPhone);
     const leadName = conv?.lead_name || "Student";
     const previewText = getTemplatePreview(selectedTemplate);
 
@@ -907,7 +1349,8 @@ const WhatsAppInbox = () => {
   const getTemplatePreview = (templateKey: string): string => {
     const tmpl = INBOX_TEMPLATES.find(t => t.key === templateKey);
     if (!tmpl) return "";
-    const conv = conversations.find(c => c.phone === selectedPhone);
+    const conv = conversations.find(c => c.phone === selectedPhone && matchesInbox(c))
+      || conversations.find(c => c.phone === selectedPhone);
     const leadName = conv?.lead_name || "Student";
 
     const values: Record<string, string> = {
@@ -923,7 +1366,74 @@ const WhatsAppInbox = () => {
     return tmpl.preview.replace(/\{\{(\w+)\}\}/g, (_, key) => values[key] || `{{${key}}}`);
   };
 
-  const selectedConv = conversations.find(c => c.phone === selectedPhone);
+  const selectedConv = conversations.find(c => c.phone === selectedPhone && matchesInbox(c))
+    || conversations.find(c => c.phone === selectedPhone);
+
+  useEffect(() => {
+    if (!selectedConv?.lead_id) { setSelectedCourseInfo(null); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await (supabase.rpc as any)("fn_resolve_course_info_params", {
+        p_lead_id: selectedConv.lead_id,
+      });
+      if (!cancelled) setSelectedCourseInfo(data && typeof data === "object" ? data as Record<string, string> : null);
+    })();
+    return () => { cancelled = true; };
+  }, [selectedConv?.lead_id]);
+
+  const renderStoredTemplate = (templateKey: string) => {
+    const text = TEMPLATE_MESSAGE_TEXTS[templateKey];
+    if (!text) return null;
+    const values: Record<string, string> = {
+      student_name: selectedCourseInfo?.student_name || selectedConv?.lead_name || "Student",
+      course_name: selectedCourseInfo?.course_name || selectedConv?.course_name || "your selected course",
+      duration: selectedCourseInfo?.duration || "course duration",
+      eligibility: selectedCourseInfo?.eligibility || "eligibility criteria",
+      approval: selectedCourseInfo?.approval || "NIMT Educational Institutions",
+      video_url: selectedCourseInfo?.video_url || "course video link",
+    };
+    return text.replace(/\{\{(\w+)\}\}/g, (_, key) => values[key] || `{{${key}}}`);
+  };
+
+  const getMessageText = (m: Message) => {
+    const fallback = m.content || `[${m.message_type}]`;
+    if (!m.template_key) return fallback;
+    const match = fallback.match(TEMPLATE_PLACEHOLDER_RE);
+    if (!match) return fallback;
+    const key = match[1].trim().replace(/\s+/g, "_");
+    return renderStoredTemplate(m.template_key) || renderStoredTemplate(key) || fallback;
+  };
+
+  const getConversationPreview = (c: Conversation) => {
+    const fallback = c.last_message || "[media]";
+    const match = fallback.match(TEMPLATE_PLACEHOLDER_RE);
+    if (!match) return fallback;
+    const key = match[1].trim().replace(/\s+/g, "_");
+    const text = TEMPLATE_MESSAGE_TEXTS[key];
+    if (!text) return fallback;
+    return text.replace(/\{\{(\w+)\}\}/g, (_, param) => {
+      if (param === "student_name") return c.lead_name || "Student";
+      if (param === "course_name") return c.course_name || "your selected course";
+      if (param === "approval") return "NIMT Educational Institutions";
+      if (param === "duration") return "course duration";
+      if (param === "eligibility") return "eligibility criteria";
+      if (param === "video_url") return "course video link";
+      return `{{${param}}}`;
+    });
+  };
+
+  const getOutboundSenderLabel = (m: Message) => {
+    if (m.wa_message_id && localSenderNamesByWaId[m.wa_message_id]) return localSenderNamesByWaId[m.wa_message_id];
+    if (m.sender_user_id && senderNames[m.sender_user_id]) return senderNames[m.sender_user_id];
+    if (m.sender_user_id && m.sender_user_id === user?.id && profile?.display_name) return profile.display_name;
+    const localSenderSignature = selectedPhone && m.content ? `${selectedPhone}:${m.content.trim()}` : null;
+    if (m.template_key === "manual_reply" && localSenderSignature && localSenderNamesBySignature[localSenderSignature]) {
+      return localSenderNamesBySignature[localSenderSignature];
+    }
+    if (m.template_key === "ai_auto_reply") return "Bot";
+    if (m.template_key && m.template_key !== "manual_reply") return "Auto";
+    return "Counsellor";
+  };
 
   const STAGE_WA_MESSAGES: Record<string, string> = {
     not_interested:
@@ -947,13 +1457,13 @@ const WhatsAppInbox = () => {
     const { error: replyErr } = await invokeEdge("whatsapp-reply", {
       body: {
         phone: selectedPhone,
-        message,
-        lead_id: leadId,
-        provider: selectedConv?.provider || null,
-        business_phone_number_id: selectedConv?.business_phone_number_id || null,
-        business_number: selectedConv?.business_phone_number || null,
-      },
-    });
+          message,
+          lead_id: leadId,
+          provider: selectedConv?.provider || null,
+          business_phone_number_id: selectedConv?.business_phone_number_id || null,
+          business_number: selectedConv?.business_phone_number || null,
+        },
+      });
 
     if (replyErr) {
       toast({
@@ -990,12 +1500,24 @@ const WhatsAppInbox = () => {
 
   // Combine real conversations + synthetic staff entries
   const allStaffPhones = new Set(Object.keys(staffNames));
+  const loadedConversationPhones = new Set(conversations.map(c => c.phone));
+  const syntheticStaffConvs = staffConvs.filter(c => !loadedConversationPhones.has(c.phone));
   const allConvs = (inboxTab === "staff"
-    ? [...conversations.filter(c => !c.lead_id && allStaffPhones.has(c.phone)), ...staffConvs]
+    ? [...conversations.filter(c => !c.lead_id && allStaffPhones.has(c.phone)), ...syntheticStaffConvs]
     : conversations).filter(matchesInbox);
 
   const NON_ADMISSION_ROLES = new Set(["job_applicant", "vendor", "other"]);
   const isOtherCategory = (c: Conversation) => c.lead_person_role && NON_ADMISSION_ROLES.has(c.lead_person_role);
+  const isHandoffConversation = (c: Conversation) =>
+    c.conversation_state === "needs_counsellor"
+    || c.conversation_mode === "human"
+    || Boolean(c.handoff_reason);
+  const isSlaBreached = (c: Conversation) =>
+    Boolean(c.sla_due_at && new Date(c.sla_due_at).getTime() < Date.now());
+  const isKnowledgeGap = (c: Conversation) =>
+    c.conversation_state === "knowledge_gap" || c.last_bot_action === "knowledge_gap";
+  const isUnassignedOps = (c: Conversation) =>
+    !c.owner_user_id && !c.counsellor_id && c.has_inbound;
 
   // Apply mode filter (inbox vs outbound) to get the working set
   const modeFiltered = allConvs.filter(c => {
@@ -1005,25 +1527,11 @@ const WhatsAppInbox = () => {
     return c.has_inbound === true;
   });
 
-  const isSlaBreached = (c: Conversation) =>
-    !!c.sla_due_at && new Date(c.sla_due_at).getTime() < Date.now() && c.conversation_mode !== "closed";
-  const isHandoffConversation = (c: Conversation) =>
-    c.conversation_mode === "human" ||
-    !!c.handoff_reason ||
-    c.conversation_state === "needs_counsellor" ||
-    c.conversation_state === "job_handoff" ||
-    c.conversation_state === "vendor_handoff";
-  const opsFiltered = modeFiltered.filter(c => {
-    if (opsFilter === "all") return true;
-    if (opsFilter === "handoff") return isHandoffConversation(c);
-    if (opsFilter === "sla") return isSlaBreached(c);
-    if (opsFilter === "knowledge") return c.conversation_state === "knowledge_gap";
-    if (opsFilter === "unassigned") return !c.counsellor_id && !c.owner_user_id;
-    return true;
-  });
-
   const filtered = modeFiltered.filter(c => {
-    if (!opsFiltered.includes(c)) return false;
+    if (opsFilter === "handoff" && !isHandoffConversation(c)) return false;
+    if (opsFilter === "sla" && !isSlaBreached(c)) return false;
+    if (opsFilter === "knowledge" && !isKnowledgeGap(c)) return false;
+    if (opsFilter === "unassigned" && !isUnassignedOps(c)) return false;
     // Tab filter
     if (inboxTab === "all") { /* show everything */ }
     else if (inboxTab === "leads" && (!c.lead_id || isOtherCategory(c))) return false;
@@ -1046,22 +1554,22 @@ const WhatsAppInbox = () => {
 
   const totalUnreadMsgs = modeFiltered.reduce((s, c) => s + c.unread_count, 0);
   const totalUnrepliedConvs = modeFiltered.filter(c => c.unread_count > 0).length;
-  const opsCounts = {
-    all: modeFiltered.length,
-    handoff: modeFiltered.filter(isHandoffConversation).length,
-    sla: modeFiltered.filter(isSlaBreached).length,
-    knowledge: modeFiltered.filter(c => c.conversation_state === "knowledge_gap").length,
-    unassigned: modeFiltered.filter(c => !c.counsellor_id && !c.owner_user_id).length,
-  };
 
   const leadConvs = modeFiltered.filter(c => c.lead_id && !isOtherCategory(c));
   const leadUnreplied = leadConvs.filter(c => c.unread_count > 0).length;
-  const staffConvs2 = [...modeFiltered.filter(c => !c.lead_id && allStaffPhones.has(c.phone)), ...staffConvs];
+  const staffConvs2 = [...modeFiltered.filter(c => !c.lead_id && allStaffPhones.has(c.phone)), ...syntheticStaffConvs];
   const staffUnreplied = staffConvs2.filter(c => c.unread_count > 0).length;
   const jobConvs = modeFiltered.filter(c => c.lead_person_role === "job_applicant");
   const jobUnreplied = jobConvs.filter(c => c.unread_count > 0).length;
   const otherConvs = modeFiltered.filter(c => c.lead_person_role === "vendor" || c.lead_person_role === "other");
   const otherUnreplied = otherConvs.filter(c => c.unread_count > 0).length;
+  const opsFilters = [
+    { key: "all" as const, label: "All ops", count: modeFiltered.length },
+    { key: "handoff" as const, label: "Handoff", count: modeFiltered.filter(isHandoffConversation).length },
+    { key: "sla" as const, label: "SLA", count: modeFiltered.filter(isSlaBreached).length },
+    { key: "knowledge" as const, label: "Knowledge", count: modeFiltered.filter(isKnowledgeGap).length },
+    { key: "unassigned" as const, label: "Unassigned", count: modeFiltered.filter(isUnassignedOps).length },
+  ];
 
   const formatTime = (iso: string) => {
     const d = new Date(iso);
@@ -1135,16 +1643,16 @@ const WhatsAppInbox = () => {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {!isHrScope && (
+          {hasOtherInbox && !isHrScope && (
             <select
               value={businessNumber}
               onChange={e => { setBusinessNumber(e.target.value); setSelectedPhone(null); }}
               className="rounded-lg border border-input bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/50"
               title="Select inbox"
             >
-              <option value="primary">Primary Inbox</option>
-              {inboxOptions.map(o => (
-                <option key={o.id} value={o.id}>+{o.label}</option>
+              <option value="primary">{primaryInboxLabel}</option>
+              {otherInboxes.map(o => (
+                <option key={o.id} value={o.id}>{o.label}</option>
               ))}
             </select>
           )}
@@ -1205,6 +1713,24 @@ const WhatsAppInbox = () => {
               ))}
             </div>
 
+            {isAdminRole(role) && (
+              <div className="flex flex-wrap gap-1 px-3 py-2 border-b border-border/70 bg-muted/20">
+                {opsFilters.map((f) => (
+                  <button
+                    key={f.key}
+                    onClick={() => setOpsFilter(f.key)}
+                    className={`rounded-full px-2.5 py-0.5 text-[10px] font-medium border transition-colors ${
+                      opsFilter === f.key
+                        ? "border-slate-400 bg-slate-100 text-slate-800"
+                        : "border-transparent bg-background/70 text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {f.label} {f.count}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* Admin: counsellor filter row */}
             {isAdminRole(role) && (
               <div className="px-3 py-2 border-b border-border bg-muted/20">
@@ -1219,30 +1745,6 @@ const WhatsAppInbox = () => {
                     <option key={cc.id} value={cc.id}>{cc.name}</option>
                   ))}
                 </select>
-              </div>
-            )}
-
-            {isAdminRole(role) && (
-              <div className="flex flex-wrap gap-1 px-3 py-2 border-b border-border bg-muted/10">
-                {([
-                  { key: "all" as const, label: "Ops", count: opsCounts.all },
-                  { key: "handoff" as const, label: "Handoff", count: opsCounts.handoff },
-                  { key: "sla" as const, label: "SLA", count: opsCounts.sla },
-                  { key: "knowledge" as const, label: "Knowledge", count: opsCounts.knowledge },
-                  { key: "unassigned" as const, label: "Unassigned", count: opsCounts.unassigned },
-                ]).map((item) => (
-                  <button
-                    key={item.key}
-                    onClick={() => setOpsFilter(item.key)}
-                    className={`rounded-full px-2.5 py-0.5 text-[10px] font-medium border transition-colors ${
-                      opsFilter === item.key
-                        ? "bg-slate-900 text-white border-slate-900"
-                        : "bg-background text-muted-foreground border-border hover:bg-muted"
-                    }`}
-                  >
-                    {item.label} {item.count}
-                  </button>
-                ))}
               </div>
             )}
 
@@ -1300,68 +1802,92 @@ const WhatsAppInbox = () => {
               </div>
             )}
 
-            <div className="flex-1 overflow-y-auto">
+            <div
+              className="flex-1 overflow-y-auto"
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                if (el.scrollHeight - el.scrollTop - el.clientHeight < 360) {
+                  void fetchConversationPage(false);
+                }
+              }}
+            >
               {filtered.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-8">No conversations yet</p>
               ) : (
-                groupedConvs.map((group) => (
-                  <div key={group.label}>
-                    {/* Date section header */}
-                    <div className="sticky top-0 z-10 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide border-b border-border/30 bg-muted/60 backdrop-blur-sm text-muted-foreground">
-                      {group.label}
-                    </div>
-                    {group.items.map((c) => (
-                      <button
-                        key={c.phone}
-                        onClick={() => setSelectedPhone(c.phone)}
-                        className={`w-full text-left px-4 py-3 border-b border-border/40 hover:bg-muted/30 transition-colors ${selectedPhone === c.phone ? "bg-muted/50" : ""}`}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-1.5">
-                              <span className={`text-sm truncate ${c.unread_count > 0 ? "font-semibold text-foreground" : "font-medium text-foreground"}`}>
-                                {getDisplayName(c)}
-                              </span>
-                              {isStaffConv(c) && (
-                                <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-violet-300 text-violet-600 dark:text-violet-400">Staff</Badge>
-                              )}
-                              {c.lead_id && (!c.lead_person_role || c.lead_person_role === "lead" || c.lead_person_role === "applicant") && !isStaffConv(c) && (
-                                <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-blue-300 text-blue-600">Admission</Badge>
-                              )}
-                              {c.lead_person_role === "job_applicant" && (
-                                <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-purple-300 text-purple-600">Job</Badge>
-                              )}
-                              {c.lead_person_role === "vendor" && (
-                                <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-amber-300 text-amber-600">Vendor</Badge>
-                              )}
-                              {c.lead_person_role === "other" && (
-                                <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-gray-300 text-gray-500">Other</Badge>
-                              )}
-                              {c.unread_count > 0 && (
-                                <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-green-500 px-1 text-[9px] font-bold text-white">
-                                  {c.unread_count}
+                <>
+                  {groupedConvs.map((group) => (
+                    <div key={group.label}>
+                      {/* Date section header */}
+                      <div className="sticky top-0 z-10 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide border-b border-border/30 bg-muted/60 backdrop-blur-sm text-muted-foreground">
+                        {group.label}
+                      </div>
+                      {group.items.map((c) => (
+                        <button
+                          key={`${c.phone}:${c.business_phone_number_id || ""}`}
+                          onClick={() => setSelectedPhone(c.phone)}
+                          className={`w-full text-left px-4 py-3 border-b border-border/40 hover:bg-muted/30 transition-colors ${selectedPhone === c.phone ? "bg-muted/50" : ""}`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className={`text-sm truncate ${c.unread_count > 0 ? "font-semibold text-foreground" : "font-medium text-foreground"}`}>
+                                  {getDisplayName(c)}
                                 </span>
-                              )}
+                                {isStaffConv(c) && (
+                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-violet-300 text-violet-600 dark:text-violet-400">Staff</Badge>
+                                )}
+                                {c.lead_id && (!c.lead_person_role || c.lead_person_role === "lead" || c.lead_person_role === "applicant") && !isStaffConv(c) && (
+                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-blue-300 text-blue-600">Admission</Badge>
+                                )}
+                                {c.lead_person_role === "job_applicant" && (
+                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-purple-300 text-purple-600">Job</Badge>
+                                )}
+                                {c.lead_person_role === "vendor" && (
+                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-amber-300 text-amber-600">Vendor</Badge>
+                                )}
+                                {c.lead_person_role === "other" && (
+                                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-gray-300 text-gray-500">Other</Badge>
+                                )}
+                                {c.unread_count > 0 && (
+                                  <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-green-500 px-1 text-[9px] font-bold text-white">
+                                    {c.unread_count}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                {formatPhone(c.phone)}
+                                {c.course_name && <span className="px-1 rounded bg-blue-50 text-blue-600 text-[8px] font-medium">{courseAcronym(c.course_name)}</span>}
+                                {c.counsellor_name && !isStaffConv(c) && (
+                                  <span className="text-[9px] text-muted-foreground/70">· {c.counsellor_name.split(" ")[0]}</span>
+                                )}
+                              </p>
+                              <p className={`text-xs truncate mt-0.5 ${c.unread_count > 0 ? "font-medium text-foreground/80" : "text-muted-foreground"}`}>
+                                {c.last_direction === "outbound" ? <span className="text-muted-foreground">You: </span> : ""}{getConversationPreview(c).replace(/\\n/g, " ")}
+                              </p>
                             </div>
-                            <p className="text-[10px] text-muted-foreground flex items-center gap-1">
-                              {formatPhone(c.phone)}
-                              {c.course_name && <span className="px-1 rounded bg-blue-50 text-blue-600 text-[8px] font-medium">{courseAcronym(c.course_name)}</span>}
-                              {c.counsellor_name && !isStaffConv(c) && (
-                                <span className="text-[9px] text-muted-foreground/70">· {c.counsellor_name.split(" ")[0]}</span>
-                              )}
-                            </p>
-                            <p className={`text-xs truncate mt-0.5 ${c.unread_count > 0 ? "font-medium text-foreground/80" : "text-muted-foreground"}`}>
-                              {c.last_direction === "outbound" ? <span className="text-muted-foreground">You: </span> : ""}{(c.last_message || "[media]").replace(/\\n/g, " ")}
-                            </p>
+                            <span className={`text-[10px] whitespace-nowrap ${c.unread_count > 0 ? "text-green-600 font-semibold" : "text-muted-foreground"}`}>
+                              {formatTime(c.last_message_at)}
+                            </span>
                           </div>
-                          <span className={`text-[10px] whitespace-nowrap ${c.unread_count > 0 ? "text-green-600 font-semibold" : "text-muted-foreground"}`}>
-                            {formatTime(c.last_message_at)}
-                          </span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                ))
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+                  {(loadingMoreConversations || hasMoreConversations) && (
+                    <div className="flex items-center justify-center px-4 py-3">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 gap-1.5 text-[10px] text-muted-foreground"
+                        disabled={loadingMoreConversations}
+                        onClick={() => void fetchConversationPage(false)}
+                      >
+                        {loadingMoreConversations && <Loader2 className="h-3 w-3 animate-spin" />}
+                        {loadingMoreConversations ? "Loading more..." : "Load more"}
+                      </Button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -1395,10 +1921,15 @@ const WhatsAppInbox = () => {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <p className="text-sm font-semibold text-foreground truncate">{selectedConv?.lead_name || (selectedPhone ? formatPhone(selectedPhone) : "")}</p>
-                      {selectedConv?.counsellor_name && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 dark:bg-violet-900/30 border border-violet-200 dark:border-violet-700 px-2 py-0.5 text-[10px] font-medium text-violet-700 dark:text-violet-300 whitespace-nowrap">
-                          <User className="h-2.5 w-2.5" />
-                          {selectedConv.counsellor_name}
+	                      {selectedConv?.counsellor_name && (
+	                        <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 dark:bg-violet-900/30 border border-violet-200 dark:border-violet-700 px-2 py-0.5 text-[10px] font-medium text-violet-700 dark:text-violet-300 whitespace-nowrap">
+	                          <User className="h-2.5 w-2.5" />
+	                          {selectedConv.counsellor_name}
+	                        </span>
+	                      )}
+                      {selectedConv?.conversation_state && (
+                        <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-700 whitespace-nowrap">
+                          {stateLabel(selectedConv.conversation_state)}
                         </span>
                       )}
                     </div>
@@ -1411,25 +1942,9 @@ const WhatsAppInbox = () => {
                           onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(selectedConv.course_name!); toast({ title: "Copied", description: selectedConv.course_name }); }}
                         >{courseAcronym(selectedConv.course_name)}</span>
                       )}
-                      {selectedConv?.conversation_state && (
-                        <span
-                          className={`px-1.5 py-0 rounded text-[9px] font-semibold ${
-                            selectedConv.priority === "high" || selectedConv.priority === "urgent" || selectedConv.conversation_state === "knowledge_gap" || selectedConv.conversation_state === "needs_counsellor"
-                              ? "bg-amber-100 text-amber-700"
-                              : "bg-slate-100 text-slate-600"
-                          }`}
-                          title={[
-                            stateLabel(selectedConv.conversation_state),
-                            selectedConv.handoff_reason ? `Reason: ${selectedConv.handoff_reason.replace(/_/g, " ")}` : null,
-                            selectedConv.escalation_role ? `Escalation: ${selectedConv.escalation_role}` : null,
-                          ].filter(Boolean).join(" · ")}
-                        >
-                          {stateLabel(selectedConv.conversation_state)}
-                        </span>
-                      )}
                     </p>
                   </div>
-                  {selectedConv?.business_phone_number_id && aiMode && (
+                  {conversationBusinessKey(selectedConv) && aiMode && (
                     <button
                       onClick={toggleAiMode}
                       disabled={aiModeSaving}
@@ -1614,9 +2129,6 @@ const WhatsAppInbox = () => {
                           ? "bg-primary text-primary-foreground rounded-br-md"
                           : "bg-muted text-foreground rounded-bl-md"
                       }`}>
-                        {m.template_key && (
-                          <p className="text-[9px] opacity-70 mb-0.5">Template: {m.template_key}</p>
-                        )}
                         {/* Media rendering */}
                         {m.media_url && m.message_type === "image" ? (
                           /^\d/.test(m.media_url) ? (
@@ -1647,19 +2159,18 @@ const WhatsAppInbox = () => {
                         ) : null}
                         {/* Text content / caption */}
                         {(m.content || (!m.media_url && m.message_type !== "text")) && (
-                          <p className="text-sm whitespace-pre-wrap">{(m.content || `[${m.message_type}]`).replace(/\\n/g, "\n")}</p>
+                          <p className="text-sm whitespace-pre-wrap">{getMessageText(m).replace(/\\n/g, "\n")}</p>
                         )}
                         <div className="flex items-center justify-end gap-1 mt-0.5">
                           {m.direction === "outbound" && (() => {
-                            if (m.template_key === "ai_auto_reply") return (
-                              <span className="inline-flex items-center gap-0.5 text-[8px] opacity-50"><Bot className="h-2.5 w-2.5" /> Bot</span>
-                            );
-                            if (m.template_key) return (
-                              <span className="inline-flex items-center gap-0.5 text-[8px] opacity-50"><Cpu className="h-2.5 w-2.5" /> Auto</span>
-                            );
-                            return (
-                              <span className="text-[8px] opacity-40">Counsellor</span>
-                            );
+                            const label = getOutboundSenderLabel(m);
+                            if (label === "Bot") {
+                              return <span className="inline-flex items-center gap-0.5 text-[8px] opacity-50"><Bot className="h-2.5 w-2.5" /> Bot</span>;
+                            }
+                            if (label === "Auto") {
+                              return <span className="inline-flex items-center gap-0.5 text-[8px] opacity-50"><Cpu className="h-2.5 w-2.5" /> Auto</span>;
+                            }
+                            return <span className="text-[8px] opacity-50">{label}</span>;
                           })()}
                           <span className="text-[9px] opacity-60">
                             {new Date(m.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}

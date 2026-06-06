@@ -162,11 +162,17 @@ function computeMismatches(app: any, rules: any[]): Mismatch[] {
     }
     if (r.entrance_exam_required) {
       const examName = (r.entrance_exam_name || "").trim().toLowerCase();
-      const declared = exams.some((e: any) =>
-        (e.exam_name || "").toLowerCase().includes(examName) && e.status === "declared"
-      );
+      const isCahet = examName.includes("cahet");
+      const declared = exams.some((e: any) => {
+        const candidateExam = (e.exam_name || "").toLowerCase();
+        if (!candidateExam.includes(examName)) return false;
+        if (isCahet) return e.status === "registered" && !!String(e.registration_no || "").trim();
+        return e.status === "declared";
+      });
       if (!declared && examName) {
-        entranceWarnings.push(`Entrance exam required: ${r.entrance_exam_name} (status not declared).`);
+        entranceWarnings.push(isCahet
+          ? `CAHET registration required: ${r.entrance_exam_name} (registration no. not provided).`
+          : `Entrance exam required: ${r.entrance_exam_name} (status not declared).`);
       } else if (!declared && !examName) {
         entranceWarnings.push("Entrance exam required (no scorecard declared yet).");
       }
@@ -1035,11 +1041,12 @@ async function buildApplicationPdfInline(
     ];
     drawHeaderRow(ctx, cols, 14);
     exams.forEach(e => {
+      const isCahet = /cahet/i.test(e.exam_name || "");
       drawValueRow(ctx, [
         { value: norm(e.exam_name), w: cols[0].w },
-        { value: norm(e.status),    w: cols[1].w },
-        { value: norm(e.score),     w: cols[2].w },
-        { value: fmtDate(e.expected_date), w: cols[3].w },
+        { value: isCahet && e.status === "registered" ? "registered" : norm(e.status), w: cols[1].w },
+        { value: isCahet ? norm(e.registration_no) : norm(e.score), w: cols[2].w },
+        { value: isCahet ? norm(e.registered_name) : fmtDate(e.expected_date), w: cols[3].w },
       ], 22);
     });
     renderMismatch(ctx, "entrance");

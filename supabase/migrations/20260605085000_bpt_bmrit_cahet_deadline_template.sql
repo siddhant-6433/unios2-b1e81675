@@ -8,7 +8,7 @@ VALUES
   (
     'bpt_bmrit_cahet_deadline',
     'BPT/BMRIT CAHET Deadline',
-    '5 June 2026 application + CAHET registration deadline',
+    '10 June 2026 application + CAHET registration deadline',
     'application',
     true
   )

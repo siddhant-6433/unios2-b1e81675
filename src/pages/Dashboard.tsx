@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { lazy, Suspense, useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCampus } from "@/contexts/CampusContext";
@@ -11,15 +11,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Link, Navigate } from "react-router-dom";
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend, CartesianGrid,
-} from "recharts";
 import { JdCategoryMappingPanel } from "@/components/admissions/JdCategoryMappingPanel";
 import { MetaCourseMappingPanel } from "@/components/admissions/MetaCourseMappingPanel";
 import { PendingApprovalsPanel } from "@/components/dashboard/PendingApprovalsPanel";
 import { ConsultantVoiceMessagesPanel } from "@/components/dashboard/ConsultantVoiceMessagesPanel";
-import { AiCallLogsPanel } from "@/components/dashboard/AiCallLogsPanel";
+
+const DashboardAnalytics = lazy(() => import("@/components/dashboard/DashboardAnalytics"));
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -46,49 +43,41 @@ const stageBadgeClass: Record<string, string> = {
   offer_sent: "bg-pastel-green text-foreground/70",
 };
 
-const PIE_COLORS = ["#6366f1", "#22c55e", "#f59e0b", "#3b82f6", "#8b5cf6", "#14b8a6", "#ec4899", "#f97316"];
+type DashboardOverviewPayload = {
+  counts?: {
+    total_leads?: number;
+    today_leads?: number;
+    admitted?: number;
+    students?: number;
+    app_in_progress?: number;
+    app_submitted?: number;
+  };
+  funnel?: { stage: string; count: number }[];
+  recent_leads?: {
+    id: string;
+    name: string | null;
+    phone: string | null;
+    stage: string;
+    source: string | null;
+    created_at: string;
+    course_name: string | null;
+    campus_name: string | null;
+  }[];
+};
 
-function fmtAmt(val: number): string {
-  if (val >= 1_00_00_000) return `${(val / 1_00_00_000).toFixed(2)} Cr`;
-  if (val >= 1_00_000)    return `${(val / 1_00_000).toFixed(2)} L`;
-  if (val >= 1_000)       return `${(val / 1_000).toFixed(1)} K`;
-  return `₹${val}`;
-}
-
-function fmtSrc(src: string): string {
-  return src.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-}
-
-// ── Reusable chart tooltips ─────────────────────────────────────────────────
-
-function CountTooltip({ active, payload, label }: any) {
-  if (!active || !payload?.length) return null;
+function AnalyticsFallback() {
   return (
-    <div className="rounded-xl border border-border bg-card shadow-md px-3 py-2 text-xs space-y-1">
-      <p className="font-semibold text-foreground mb-1">{label}</p>
-      {payload.map((p: any) => (
-        <div key={p.name} className="flex items-center gap-2">
-          <span className="inline-block h-2 w-2 rounded-full" style={{ background: p.fill }} />
-          <span className="text-muted-foreground">{p.name}:</span>
-          <span className="font-medium text-foreground">{p.value}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function FeeTooltip({ active, payload, label }: any) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="rounded-xl border border-border bg-card shadow-md px-3 py-2 text-xs space-y-1">
-      <p className="font-semibold text-foreground mb-1">{label}</p>
-      {payload.map((p: any) => (
-        <div key={p.name} className="flex items-center gap-2">
-          <span className="inline-block h-2 w-2 rounded-full" style={{ background: p.fill }} />
-          <span className="text-muted-foreground">{p.name}:</span>
-          <span className="font-medium text-foreground">{fmtAmt(p.value)}</span>
-        </div>
-      ))}
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest whitespace-nowrap">Analytics</p>
+        <div className="flex-1 border-t border-border/50" />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+        <div className="lg:col-span-3 h-64 rounded-lg border border-border/60 bg-muted/20" />
+        <div className="lg:col-span-2 h-64 rounded-lg border border-border/60 bg-muted/20" />
+      </div>
+      <div className="h-72 rounded-lg border border-border/60 bg-muted/20" />
+      <div className="h-48 rounded-lg border border-border/60 bg-muted/20" />
     </div>
   );
 }
@@ -109,176 +98,44 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
   const [appInProgress,setAppInProgress]= useState(0);
   const [appSubmitted, setAppSubmitted] = useState(0);
 
-  // Chart data
-  const [campusStudents, setCampusStudents] = useState<{ name: string; total: number; active: number }[]>([]);
-  const [feeByCampus,    setFeeByCampus]    = useState<{ name: string; assigned: number; paid: number; due: number }[]>([]);
-  const [leadBySrc,      setLeadBySrc]      = useState<{ name: string; count: number }[]>([]);
-  const [weeklyLeads,    setWeeklyLeads]    = useState<{ day: string; leads: number }[]>([]);
-  const [feeTotal,       setFeeTotal]       = useState({ assigned: 0, paid: 0, due: 0 });
-
   const fetchDashboard = async () => {
     setLoading(true);
-    const today    = new Date().toISOString().slice(0, 10);
     const byCampus = selectedCampusId !== "all";
+    const { data, error } = await (supabase as any).rpc("dashboard_overview", {
+      p_campus_id: byCampus ? selectedCampusId : null,
+    });
 
-    const baseLeads = () => {
-      let q = supabase.from("leads").select("id", { count: "planned", head: true });
-      if (byCampus) q = q.eq("campus_id", selectedCampusId);
-      return q;
-    };
-    const baseStudents = () => {
-      let q = supabase.from("students").select("id", { count: "planned", head: true });
-      if (byCampus) q = q.eq("campus_id", selectedCampusId);
-      return q;
-    };
-
-    // ── Core counts ──
-    const [leadsRes, todayRes, admittedRes, studentsRes, recentRes, appInProgRes, appSubmRes] = await Promise.all([
-      baseLeads(),
-      baseLeads().gte("created_at", today),
-      baseLeads().eq("stage", "admitted"),
-      baseStudents(),
-      (() => {
-        let q = supabase.from("leads")
-          .select("id, name, phone, stage, source, created_at, courses:course_id(name), campuses:campus_id(name)")
-          .order("created_at", { ascending: false }).limit(5);
-        if (byCampus) q = q.eq("campus_id", selectedCampusId);
-        return q;
-      })(),
-      (() => {
-        let q = supabase.from("leads").select("id", { count: "planned", head: true })
-          .in("stage", ["application_in_progress", "application_fee_paid", "application_submitted", "offer_sent", "token_paid", "pre_admitted"] as any);
-        if (byCampus) q = q.eq("campus_id", selectedCampusId);
-        return q;
-      })(),
-      (() => {
-        let q = supabase.from("leads").select("id", { count: "planned", head: true })
-          .in("stage", ["application_submitted", "offer_sent", "token_paid", "pre_admitted"] as any);
-        if (byCampus) q = q.eq("campus_id", selectedCampusId);
-        return q;
-      })(),
-    ]);
-
-    setLeadCount(leadsRes.count || 0);
-    setTodayLeads(todayRes.count || 0);
-    setAdmittedCount(admittedRes.count || 0);
-    setStudentCount(studentsRes.count || 0);
-    setAppInProgress(appInProgRes.count || 0);
-    setAppSubmitted(appSubmRes.count || 0);
-
-    if (recentRes.data) {
-      setRecentLeads(recentRes.data.map((l: any) => ({
-        ...l,
-        course_name: l.courses?.name || "—",
-        campus_name: l.campuses?.name || "—",
-        initials: (l.name || "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase(),
-      })));
+    if (error) {
+      console.error("Failed to load dashboard overview", error);
+      setLoading(false);
+      return;
     }
 
-    // ── Funnel ──
-    // One GROUP BY scan via RPC instead of one HEAD count per stage. The
-    // RPC is SECURITY INVOKER so leads RLS still scopes counts per role
-    // exactly as the per-stage queries did. p_exclude_mirror:false preserves
-    // the funnel's existing behaviour (mirror leads were not filtered here).
-    const stages = Object.keys(STAGE_LABELS);
-    const { data: stageRows } = await (supabase as any).rpc("get_lead_stage_counts", {
-      p_campus_id: byCampus ? selectedCampusId : null,
-      p_counsellor_id: null,
-      p_exclude_mirror: false,
-    });
+    const payload = (data || {}) as DashboardOverviewPayload;
+    const counts = payload.counts || {};
+    setLeadCount(Number(counts.total_leads) || 0);
+    setTodayLeads(Number(counts.today_leads) || 0);
+    setAdmittedCount(Number(counts.admitted) || 0);
+    setStudentCount(Number(counts.students) || 0);
+    setAppInProgress(Number(counts.app_in_progress) || 0);
+    setAppSubmitted(Number(counts.app_submitted) || 0);
+
     const stageMap: Record<string, number> = {};
-    for (const r of (stageRows || []) as { stage: string; count: number }[]) {
+    for (const r of payload.funnel || []) {
       stageMap[r.stage] = Number(r.count) || 0;
     }
-    const funnelCounts = stages.map((stage) => ({
+    setFunnel(Object.keys(STAGE_LABELS).map((stage) => ({
       stage: STAGE_LABELS[stage],
       count: stageMap[stage] || 0,
-    }));
-    setFunnel(funnelCounts);
+    })));
 
-    // ── Chart data (parallel) ──
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-
-    let campusStuQ = supabase.from("students").select("status, campuses:campus_id(name)").limit(1000);
-    if (byCampus) campusStuQ = campusStuQ.eq("campus_id", selectedCampusId);
-
-    let feeQ = supabase.from("fee_ledger")
-      .select("total_amount, paid_amount, balance, students:student_id(campus_id, campuses:campus_id(name))")
-      .limit(1000);
-
-    let srcQ = supabase.from("leads").select("source").limit(1000);
-    if (byCampus) srcQ = srcQ.eq("campus_id", selectedCampusId);
-
-    let weekQ = supabase.from("leads").select("created_at").gte("created_at", sevenDaysAgo);
-    if (byCampus) weekQ = weekQ.eq("campus_id", selectedCampusId);
-
-    const [campStuRes, feeRes, srcRes, weekRes] = await Promise.all([campusStuQ, feeQ, srcQ, weekQ]);
-
-    // Aggregate: students by campus
-    if (campStuRes.data) {
-      const map: Record<string, { name: string; total: number; active: number }> = {};
-      (campStuRes.data as any[]).forEach(s => {
-        const name = (s.campuses as any)?.name || "Unknown";
-        if (!map[name]) map[name] = { name, total: 0, active: 0 };
-        map[name].total++;
-        if (s.status === "active") map[name].active++;
-      });
-      setCampusStudents(Object.values(map).sort((a, b) => b.total - a.total));
-    }
-
-    // Aggregate: fee by campus
-    if (feeRes.data) {
-      const map: Record<string, { name: string; assigned: number; paid: number; due: number }> = {};
-      let totAssigned = 0, totPaid = 0, totDue = 0;
-      (feeRes.data as any[]).forEach((f: any) => {
-        const name = (f.students as any)?.campuses?.name || "Unknown";
-        if (!map[name]) map[name] = { name, assigned: 0, paid: 0, due: 0 };
-        map[name].assigned += f.total_amount || 0;
-        map[name].paid     += f.paid_amount  || 0;
-        map[name].due      += f.balance      || 0;
-        totAssigned += f.total_amount || 0;
-        totPaid     += f.paid_amount  || 0;
-        totDue      += f.balance      || 0;
-      });
-      setFeeByCampus(Object.values(map).filter(c => c.assigned > 0).sort((a, b) => b.assigned - a.assigned));
-      setFeeTotal({ assigned: totAssigned, paid: totPaid, due: totDue });
-    }
-
-    // Aggregate: lead sources
-    if (srcRes.data) {
-      const map: Record<string, number> = {};
-      (srcRes.data as any[]).forEach(l => {
-        const s = l.source || "unknown";
-        map[s] = (map[s] || 0) + 1;
-      });
-      setLeadBySrc(
-        Object.entries(map)
-          .map(([name, count]) => ({ name, count }))
-          .sort((a, b) => b.count - a.count)
-          .slice(0, 8)
-      );
-    }
-
-    // Aggregate: weekly leads
-    if (weekRes.data) {
-      const days: Record<string, number> = {};
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        days[d.toISOString().slice(0, 10)] = 0;
-      }
-      (weekRes.data as any[]).forEach(l => {
-        const day = l.created_at.slice(0, 10);
-        if (day in days) days[day]++;
-      });
-      setWeeklyLeads(
-        Object.entries(days).map(([date, leads]) => ({
-          day: new Date(date).toLocaleDateString("en-IN", { weekday: "short", day: "numeric" }),
-          leads,
-        }))
-      );
-    }
-
+    setRecentLeads((payload.recent_leads || []).map((l) => ({
+      ...l,
+      name: l.name || "Unknown",
+      course_name: l.course_name || "—",
+      campus_name: l.campus_name || "—",
+      initials: (l.name || "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase(),
+    })));
     setLoading(false);
   };
 
@@ -299,8 +156,6 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
     { label: "Applications Submitted",  value: String(appSubmitted), sub: "Ready for review",          subColor: "text-chart-3",   icon: ClipboardCheck,iconBg: "bg-pastel-green" },
     { label: "Admitted",               value: String(admittedCount),sub: `${conversionRate}% conversion`,subColor: "text-primary",icon: GraduationCap, iconBg: "bg-pastel-purple" },
   ];
-
-  const AXIS_STYLE = { fontSize: 11, fill: "hsl(var(--muted-foreground))" };
 
   return (
     <>
@@ -392,137 +247,12 @@ const SuperAdminDashboard = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
         </Card>
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════════════ */}
-      {/* ── Analytics Section ── */}
-      {/* ═══════════════════════════════════════════════════════════════════ */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest whitespace-nowrap">Analytics</p>
-          <div className="flex-1 border-t border-border/50" />
-        </div>
-
-        {/* Row 1: Student Count + Lead Sources */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-          {/* Students by Campus */}
-          <Card className="lg:col-span-3 border-border/60 shadow-none">
-            <CardHeader className="pb-1 pt-4 px-5">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-semibold">Student Count</CardTitle>
-                <span className="text-xs text-muted-foreground font-mono">{studentCount} total</span>
-              </div>
-            </CardHeader>
-            <CardContent className="px-2 pb-4 pt-1">
-              {campusStudents.length === 0 ? (
-                <div className="h-52 flex items-center justify-center text-sm text-muted-foreground">No student data</div>
-              ) : (
-                <ResponsiveContainer width="100%" height={210}>
-                  <BarChart data={campusStudents} margin={{ top: 8, right: 12, left: 0, bottom: 0 }} barGap={2}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                    <XAxis dataKey="name" tick={AXIS_STYLE} tickLine={false} axisLine={false}
-                      tickFormatter={v => v.length > 13 ? v.slice(0, 13) + "…" : v} />
-                    <YAxis tick={AXIS_STYLE} tickLine={false} axisLine={false} allowDecimals={false} />
-                    <Tooltip content={<CountTooltip />} cursor={{ fill: "hsl(var(--muted))" }} />
-                    <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
-                    <Bar dataKey="total"  name="Total"  fill="#6366f1" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                    <Bar dataKey="active" name="Active" fill="#22c55e" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Lead Sources */}
-          <Card className="lg:col-span-2 border-border/60 shadow-none">
-            <CardHeader className="pb-1 pt-4 px-5">
-              <CardTitle className="text-sm font-semibold">Lead Sources</CardTitle>
-            </CardHeader>
-            <CardContent className="px-2 pb-4 pt-1">
-              {leadBySrc.length === 0 ? (
-                <div className="h-52 flex items-center justify-center text-sm text-muted-foreground">No lead data</div>
-              ) : (
-                <ResponsiveContainer width="100%" height={210}>
-                  <PieChart>
-                    <Pie
-                      data={leadBySrc.map(d => ({ name: fmtSrc(d.name), value: d.count }))}
-                      cx="50%" cy="45%"
-                      innerRadius={52} outerRadius={78}
-                      paddingAngle={2} dataKey="value">
-                      {leadBySrc.map((_, i) => (
-                        <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(v: any, n: any) => [v, n]} />
-                    <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: 10, paddingTop: 4 }} />
-                  </PieChart>
-                </ResponsiveContainer>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Row 2: Fee Summary */}
-        <Card className="border-border/60 shadow-none">
-          <CardHeader className="pb-1 pt-4 px-5">
-            <div className="flex items-start justify-between flex-wrap gap-3">
-              <CardTitle className="text-sm font-semibold">Fee Summary</CardTitle>
-              {feeTotal.assigned > 0 && (
-                <div className="flex gap-5 text-xs">
-                  <span>
-                    <span className="text-muted-foreground">Net Assigned: </span>
-                    <span className="font-semibold text-foreground">{fmtAmt(feeTotal.assigned)}</span>
-                  </span>
-                  <span>
-                    <span className="text-muted-foreground">Paid: </span>
-                    <span className="font-semibold text-green-600">{fmtAmt(feeTotal.paid)}</span>
-                  </span>
-                  <span>
-                    <span className="text-muted-foreground">Due: </span>
-                    <span className="font-semibold text-amber-600">{fmtAmt(feeTotal.due)}</span>
-                  </span>
-                </div>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="px-2 pb-4 pt-1">
-            {feeByCampus.length === 0 ? (
-              <div className="h-52 flex items-center justify-center text-sm text-muted-foreground">No fee data</div>
-            ) : (
-              <ResponsiveContainer width="100%" height={230}>
-                <BarChart data={feeByCampus} margin={{ top: 8, right: 12, left: 8, bottom: 0 }} barGap={2}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                  <XAxis dataKey="name" tick={AXIS_STYLE} tickLine={false} axisLine={false}
-                    tickFormatter={v => v.length > 14 ? v.slice(0, 14) + "…" : v} />
-                  <YAxis tick={AXIS_STYLE} tickLine={false} axisLine={false}
-                    tickFormatter={fmtAmt} width={58} />
-                  <Tooltip content={<FeeTooltip />} cursor={{ fill: "hsl(var(--muted))" }} />
-                  <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
-                  <Bar dataKey="assigned" name="Net Assigned" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={36} />
-                  <Bar dataKey="paid"     name="Paid"         fill="#22c55e" radius={[4, 4, 0, 0]} maxBarSize={36} />
-                  <Bar dataKey="due"      name="Due"          fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={36} />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Row 3: Weekly Lead Trend */}
-        <Card className="border-border/60 shadow-none">
-          <CardHeader className="pb-1 pt-4 px-5">
-            <CardTitle className="text-sm font-semibold">Lead Trend — Last 7 Days</CardTitle>
-          </CardHeader>
-          <CardContent className="px-2 pb-4 pt-1">
-            <ResponsiveContainer width="100%" height={160}>
-              <BarChart data={weeklyLeads} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                <XAxis dataKey="day" tick={AXIS_STYLE} tickLine={false} axisLine={false} />
-                <YAxis tick={AXIS_STYLE} tickLine={false} axisLine={false} allowDecimals={false} />
-                <Tooltip content={<CountTooltip />} cursor={{ fill: "hsl(var(--muted))" }} />
-                <Bar dataKey="leads" name="Leads" fill="#8b5cf6" radius={[4, 4, 0, 0]} maxBarSize={48} />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      </div>
+      <Suspense fallback={<AnalyticsFallback />}>
+        <DashboardAnalytics
+          selectedCampusId={selectedCampusId}
+          studentCount={studentCount}
+        />
+      </Suspense>
     </>
   );
 };

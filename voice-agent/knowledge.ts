@@ -71,17 +71,19 @@ export const COURSE_KNOWLEDGE: Record<string, {
   },
   "BPT": {
     highlights: [
-      "4.5-year degree including 6-month compulsory internship",
+      "5-year annual degree: 4 academic years + 1-year compulsory internship",
+      "NCAHP Physiotherapy Professional category, ISCO Code 2264",
+      "UP 2026-27 admission via CAHET counselling by ABVMU Lucknow; NEET UG exempt this year",
       "Clinical training at NIMT parent hospital and affiliated facilities",
       "Internship rotations: Orthopaedics, Neurology, General Surgery, General Medicine, and Physiotherapy",
       "Specialisation areas: Musculoskeletal, Neurological, Cardiorespiratory, Sports, Paediatric, Geriatric",
     ],
-    practicalExposure: "Clinical training at NIMT's own parent hospital. Internship equally divided across Orthopaedics, Neurology, General Surgery, General Medicine, and Physiotherapy departments.",
+    practicalExposure: "Clinical training at NIMT's own parent hospital. The programme includes 1 year compulsory internship with rotations across Orthopaedics, Neurology, General Surgery, General Medicine, and Physiotherapy departments.",
     careers: "Physiotherapist in private clinics, government/private hospitals, nursing homes, CHCs, NGOs, sports teams, gyms, fitness clinics, rehabilitation centres. Can pursue MPT.",
     whyNimt: "Own hospital on campus, comprehensive clinical rotation, growing demand for physiotherapists in India.",
-    eligibility: "10+2 with PCB. Minimum 45% (General), 40% (OBC/SC/ST). English passed individually. Minimum age 17.",
-    entrance: "CPET (Common Paramedical Entrance Test) / UPCPAT",
-    duration: "4.5 Years (8 Semesters + 6-month Internship)",
+    eligibility: "10+2 or equivalent with Physics, Chemistry, Biology (or Botany & Zoology) and English pass. Minimum 50% PCB aggregate; 40% for SC/ST/OBC-NCL/PwD. Minimum age 17.",
+    entrance: "UP 2026-27: CAHET counselling by ABVMU Lucknow; NEET UG exempt this year",
+    duration: "5 Years (4 academic years + 1-year compulsory internship)",
     campus: "Greater Noida",
     fee: "Rs 92,000 per year (first year fee)",
   },
@@ -193,17 +195,35 @@ export const COURSE_KNOWLEDGE: Record<string, {
   "BMRIT": {
     highlights: [
       "4-year B.Sc in Medical Radiology & Imaging Technology",
+      "ISCO Code 3211",
+      "UP 2026-27 admission via CAHET counselling by ABVMU Lucknow; NEET UG exempt this year",
       "Training in X-ray, CT scan, MRI, Ultrasound, Nuclear Medicine",
       "Clinical training at NIMT hospital and affiliated facilities",
     ],
     practicalExposure: "General X-ray, orthopaedics imaging, paediatric imaging, emergency imaging, mobile imaging, surgical suite imaging at affiliate hospitals.",
     careers: "Radiographer, X-Ray/CT/MRI/Ultrasound Technician at hospitals, diagnostic centres, multi-specialty hospitals (Apollo, Max, Fortis), Armed Forces medical corps. Can pursue M.Sc MMRIT.",
     whyNimt: "Hospital-based training, growing diagnostic imaging field, affordable.",
-    eligibility: "10+2 with Biology. Minimum 45% aggregate.",
-    entrance: "Merit-based (no entrance exam required)",
+    eligibility: "10+2 with Physics, Chemistry, Biology and English pass. Minimum 50% PCB aggregate; 40% for SC/ST/OBC-NCL/PwD. ISCO Code 3211.",
+    entrance: "UP 2026-27: CAHET counselling by ABVMU Lucknow; NEET UG exempt this year",
     duration: "4 Years (including internship)",
     campus: "Greater Noida",
     fee: "Rs 92,000 per year (first year fee)",
+  },
+  "OTT": {
+    highlights: [
+      "2-year diploma in Anaesthesia and Operation Theatre Technology",
+      "ISCO Code 3259",
+      "Training for operation theatre and anaesthesia support roles",
+      "Clinical training at NIMT hospital and affiliated facilities",
+    ],
+    practicalExposure: "Operation theatre and anaesthesia support training at NIMT's parent hospital and affiliated facilities.",
+    careers: "Operation Theatre Technician, anaesthesia support technician, surgical assistant, CSSD/OT support roles in hospitals and surgical centres.",
+    whyNimt: "Hospital-based practical exposure, affordable diploma pathway, and training aligned to operation theatre support roles.",
+    eligibility: "10+2 with Operation Theatre relevant subjects. ISCO Code 3259.",
+    entrance: "Merit-based / as per current admission rules",
+    duration: "2 Years",
+    campus: "Greater Noida",
+    fee: "Rs 62,000 per year (first year fee)",
   },
   "D Pharma": {
     highlights: [
@@ -285,7 +305,7 @@ BBA: Rs 75,000/year (Greater Noida & Ghaziabad)
 BMRIT: Rs 92,000/year (Greater Noida)
 D.Pharma: Rs 95,000/year (Greater Noida)
 DPT (Diploma Physiotherapy): Rs 62,000/year (Greater Noida)
-OTT (Operation Theater Technician): Rs 62,000/year (Greater Noida)
+OTT / D-OTT (Operation Theater Technician): Rs 62,000/year (Greater Noida), ISCO Code 3259
 D.El.Ed: Rs 45,000/year (Ghaziabad)
 MPT: Rs 89,000/year (Greater Noida)
 MMRIT: Rs 89,000/year (Greater Noida)

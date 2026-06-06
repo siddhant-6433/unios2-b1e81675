@@ -61,11 +61,12 @@ GNM (General Nursing & Midwifery):
 - Entrance: UPCNET / merit-based
 
 BPT (Bachelor of Physiotherapy):
-- Duration: 4.5 Years (8 Semesters + 6-month Internship)
+- Duration: 5 Years (4 academic years + 1-year compulsory internship)
 - Campus: Greater Noida
-- Eligibility: 10+2 with PCB. Min 45% (General), 40% (OBC/SC/ST). Age 17+.
-- Entrance: CPET / UPCPAT
-- Clinical training at NIMT hospital. Rotations: Orthopaedics, Neurology, Surgery, Medicine, Physiotherapy.
+- Eligibility: 10+2 PCB/Botany & Zoology with English pass. Min 50% PCB aggregate (40% SC/ST/OBC-NCL/PwD). Age 17+.
+- Admission: UP 2026-27 through CAHET counselling by ABVMU Lucknow; NEET UG exempt this year.
+- NCAHP category: Physiotherapy Professional, ISCO Code 2264.
+- Clinical training at NIMT hospital. 1-year internship rotations: Orthopaedics, Neurology, Surgery, Medicine, Physiotherapy.
 
 MBA:
 - Duration: 2 Years (4 Semesters) | AKTU affiliated | AICTE approved
@@ -109,7 +110,9 @@ BBA:
 
 BMRIT (B.Sc Medical Radiology & Imaging Technology):
 - Duration: 4 Years (including internship) | Campus: Greater Noida
-- Eligibility: 10+2 with Biology, min 45%. No entrance exam required.
+- Eligibility: 10+2 PCB with English pass, min 50% PCB aggregate (40% SC/ST/OBC-NCL/PwD).
+- Admission: UP 2026-27 through CAHET counselling by ABVMU Lucknow; NEET UG exempt this year.
+- ISCO Code: 3211.
 - Training in X-ray, CT scan, MRI, Ultrasound, Nuclear Medicine at NIMT hospital.
 
 D Pharma:
@@ -145,7 +148,7 @@ FEE STRUCTURE (First Year / Annual Fee):
 - D.Pharma: ₹95,000/year | Greater Noida campus
 - DPT (Diploma Physiotherapy): ₹62,000/year | Greater Noida campus
 - D.El.Ed: ₹45,000/year | Ghaziabad campus
-- OTT (Operation Theater Technician): ₹62,000/year | Greater Noida campus
+- OTT / D-OTT (Operation Theater Technician): ₹62,000/year | Greater Noida campus | ISCO Code 3259
 - MPT (Masters Physiotherapy): ₹89,000/year | Greater Noida campus
 - MMRIT (M.Sc Radiology): ₹89,000/year | Greater Noida campus
 Note: These are first-year fees. Subsequent years may vary. Scholarships available for merit/SC/ST/OBC. Contact admissions for complete fee breakup.

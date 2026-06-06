@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const globalActionBar = readFileSync("src/components/layout/GlobalActionBar.tsx", "utf8");
 const appSidebar = readFileSync("src/components/layout/AppSidebar.tsx", "utf8");
+const appLayout = readFileSync("src/components/layout/AppLayout.tsx", "utf8");
 const whatsAppPanel = readFileSync("src/components/layout/WhatsAppPanel.tsx", "utf8");
 const headerResponseTime = readFileSync("src/components/layout/HeaderResponseTime.tsx", "utf8");
 const useTatDefaults = readFileSync("src/hooks/useTatDefaults.ts", "utf8");
@@ -24,6 +25,7 @@ describe("CRM layout performance guardrails", () => {
   it("uses one invoker payload for repeated layout counts so RLS still gates scoped counts", () => {
     expect(globalActionBar).toContain('rpc("action_badge_counts"');
     expect(appSidebar).toContain('rpc("action_badge_counts"');
+    expect(appLayout).toContain("deferredShellReady");
     expect(actionBadgeCounts).toMatch(/\bSECURITY\s+INVOKER\b/i);
     expect(actionBadgeCounts).toContain("public.get_user_role(auth.uid())");
     expect(actionBadgeCounts).toContain("role_name = 'counsellor'");
