@@ -8,17 +8,33 @@
 //   • Fields: From (sender E.164), To (our Plivo number), Text (body),
 //     Type ("whatsapp"), MessageUUID (unique id), Media0..N (media URLs).
 //
-// PR1 scope: log the inbound message, create/lookup the lead (so every new
-// message generates a lead — the core ask), and ensure a whatsapp_ai_mode row
-// exists for the conversation. Outbound AI/template sending via Plivo is a
-// follow-up PR; this function deliberately does NOT reply yet.
-
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { sendPlivoWhatsAppText } from "../_shared/plivo.ts";
+import { upsertConversationState } from "../_shared/whatsapp-conversation-state.ts";
+import {
+  markWhatsAppInboundEvent,
+  recordWhatsAppInboundEvent,
+} from "../_shared/whatsapp-inbound-events.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+function invokeConversationOrchestrator(payload: Record<string, unknown>): void {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseUrl || !serviceRoleKey) return;
+
+  fetch(`${supabaseUrl}/functions/v1/whatsapp-conversation-orchestrator`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${serviceRoleKey}`,
+    },
+    body: JSON.stringify(payload),
+  }).catch((err) => console.error("conversation orchestrator dispatch error:", err));
+}
 
 // Strip everything but digits. Plivo sends E.164 (+919555192192); the existing
 // Meta path stores `phone` as bare digits (919555192192), so we match that.
@@ -62,6 +78,25 @@ function pick(body: Record<string, string>, ...keys: string[]): string {
   return "";
 }
 
+function payloadSummary(body: Record<string, string>): Record<string, string> {
+  const summary: Record<string, string> = {};
+  for (const [key, value] of Object.entries(body).slice(0, 30)) {
+    summary[key] = value.length > 120 ? `${value.slice(0, 120)}...` : value;
+  }
+  return summary;
+}
+
+const AUTO_REPLIES: { patterns: RegExp; reply: string }[] = [
+  {
+    patterns: /^(hi|hello|hey|hii+|hlo|good\s*(morning|evening|afternoon)|namaste|namaskar|helo|hy)[\s!.]*$/i,
+    reply: "Hi! 👋 Welcome to NIMT Admissions.\n\nPlease share your name and course interest. You can reply like: *Priya, 3*\n\n1. B.Sc Nursing\n2. GNM\n3. BPT\n4. BMRIT\n5. MBA\n6. PGDM\n7. BBA\n8. BCA\n9. BA LLB / LLB\n10. B.Ed\n11. D Pharma\n12. School admission",
+  },
+  {
+    patterns: /\b(thank|thanks|thanku|thnx|thnks|dhanyawad|shukriya|ty)\b/i,
+    reply: "You're welcome! 😊 Feel free to reach out anytime if you have more questions. We're here to help!",
+  },
+];
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -85,25 +120,80 @@ Deno.serve(async (req) => {
   try {
     const body = await parsePlivoBody(req);
 
-    // Only handle WhatsApp inbound. If Plivo ever points SMS at this URL, ack
-    // and ignore rather than misfiling it as a WhatsApp lead.
-    const channelType = pick(body, "Type", "type").toLowerCase();
-    if (channelType && channelType !== "whatsapp") {
-      return new Response(JSON.stringify({ skipped: true, reason: `type=${channelType}` }), {
-        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const fromDigits = toDigits(pick(body, "From", "from", "src"));
-    const toDigitsVal = toDigits(pick(body, "To", "to", "dst"));
-    const text = pick(body, "Text", "text", "Body", "body") || null;
-    const waMessageId = pick(body, "MessageUUID", "message_uuid", "MessageUUID0") || null;
-    const media0 = pick(body, "Media0", "media0", "MediaUrl0") || null;
+    const channelType = pick(body, "Type", "type", "Channel", "channel").toLowerCase();
+    const fromDigits = toDigits(pick(
+      body,
+      "From",
+      "from",
+      "src",
+      "Src",
+      "Source",
+      "source",
+      "Sender",
+      "sender",
+      "ContactNumber",
+      "contact_number",
+      "WaId",
+      "wa_id",
+    ));
+    const toDigitsVal = toDigits(pick(
+      body,
+      "To",
+      "to",
+      "dst",
+      "Dst",
+      "Destination",
+      "destination",
+      "Recipient",
+      "recipient",
+    )) || "919555192192";
+    const text = pick(body, "Text", "text", "Body", "body", "Message", "message", "Content", "content") || null;
+    const waMessageId = pick(body, "MessageUUID", "MessageUuid", "message_uuid", "MessageUUID0", "Uuid", "uuid") || null;
+    const media0 = pick(body, "Media0", "media0", "MediaUrl0", "media_url", "MediaURL") || null;
+    const declaredMessageType = pick(body, "MessageType", "message_type", "Type", "type").toLowerCase();
+    const msgType = media0 ? "image" : declaredMessageType && declaredMessageType !== "whatsapp" ? declaredMessageType : "text";
+    const leadPhone = toLeadPhone(fromDigits);
+    const inboundEventId = await recordWhatsAppInboundEvent(admin, {
+      provider: "plivo",
+      providerEventId: waMessageId || undefined,
+      phone: fromDigits,
+      businessNumber: toDigitsVal,
+      messageType: msgType,
+      content: text,
+      mediaCount: media0 ? 1 : 0,
+      rawPayload: body,
+      normalized: {
+        channel_type: channelType || null,
+        from: fromDigits,
+        to: toDigitsVal,
+        message_uuid: waMessageId,
+        media0,
+      },
+    });
 
     if (!fromDigits) {
       // Status callbacks (delivery receipts) and other non-message events have
       // no From — ack so Plivo doesn't retry.
-      return new Response(JSON.stringify({ skipped: true, reason: "no_from" }), {
+      await markWhatsAppInboundEvent(admin, inboundEventId, {
+        processingStatus: "skipped",
+        skipReason: "no_from",
+      });
+      console.error("Plivo webhook skipped: no sender in payload", payloadSummary(body));
+      return new Response(JSON.stringify({ skipped: true, reason: "no_from", keys: Object.keys(body).slice(0, 30) }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Only skip known non-WhatsApp traffic after we know there is no real
+    // WhatsApp sender problem. Some Plivo payloads use Type for the message
+    // kind ("text") rather than the channel ("whatsapp"), so From/Text wins.
+    if (channelType && !["whatsapp", "text", "message", "inbound"].includes(channelType) && !text && !media0) {
+      await markWhatsAppInboundEvent(admin, inboundEventId, {
+        processingStatus: "skipped",
+        skipReason: `unsupported_type:${channelType}`,
+      });
+      console.error("Plivo webhook skipped: unsupported type", channelType, payloadSummary(body));
+      return new Response(JSON.stringify({ skipped: true, reason: `type=${channelType}` }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -117,19 +207,21 @@ Deno.serve(async (req) => {
         .eq("wa_message_id", waMessageId)
         .limit(1);
       if (dupe && dupe.length > 0) {
+        await markWhatsAppInboundEvent(admin, inboundEventId, {
+          processingStatus: "skipped",
+          skipReason: "duplicate_provider_message",
+          messageId: dupe[0]?.id || null,
+        });
         return new Response(JSON.stringify({ skipped: true, reason: "duplicate" }), {
           status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
     }
 
-    const msgType = media0 ? "image" : "text";
-    const leadPhone = toLeadPhone(fromDigits);
-
     // ── Find or create the lead (mirrors whatsapp-ai-reply) ──────────────────
     const { data: existingLeads } = await admin
       .from("leads")
-      .select("id, counsellor_id, name, stage")
+      .select("id, counsellor_id, name, stage, person_role")
       .or(`phone.eq.${fromDigits},phone.eq.${leadPhone},phone.eq.+${fromDigits}`)
       .eq("is_mirror", false)
       .limit(1);
@@ -145,14 +237,14 @@ Deno.serve(async (req) => {
           stage: "new_lead",
           name: leadPhone,
         })
-        .select("id, counsellor_id, name, stage")
+        .select("id, counsellor_id, name, stage, person_role")
         .single();
       if (leadErr) console.error("plivo lead insert failed:", leadErr);
       lead = newLead || null;
     }
 
     // ── Log the inbound message ──────────────────────────────────────────────
-    await admin.from("whatsapp_messages").insert({
+    const { data: insertedMsg } = await admin.from("whatsapp_messages").insert({
       lead_id: lead?.id || null,
       wa_message_id: waMessageId,
       direction: "inbound",
@@ -166,6 +258,43 @@ Deno.serve(async (req) => {
       provider: "plivo",
       business_phone_number_id: toDigitsVal || null,
       business_phone_number: toDigitsVal || null,
+    }).select("id").single();
+    const inboundMessageId: string | null = insertedMsg?.id || null;
+    await markWhatsAppInboundEvent(admin, inboundEventId, {
+      leadId: lead?.id || null,
+      messageId: inboundMessageId,
+      processingStatus: inboundMessageId ? "linked" : "error",
+      skipReason: inboundMessageId ? null : "whatsapp_message_insert_missing_id",
+    });
+
+    if (toDigitsVal) {
+      await upsertConversationState(admin, {
+        phone: fromDigits,
+        businessNumber: toDigitsVal,
+        provider: "plivo",
+        leadId: lead?.id || null,
+        mode: "ai",
+        state: msgType === "text" ? "new_unqualified" : "needs_counsellor",
+        ownerUserId: lead?.counsellor_id || null,
+        escalationRole: msgType === "text" ? null : "counsellor",
+        handoffReason: msgType === "text" ? null : "inbound_media",
+        priority: msgType === "text" ? "normal" : "high",
+      });
+    }
+
+    invokeConversationOrchestrator({
+      source: "plivo_webhook",
+      provider: "plivo",
+      phone: fromDigits,
+      business_number: toDigitsVal,
+      message_id: inboundMessageId,
+      lead_id: lead?.id || null,
+      lead_stage: lead?.stage || null,
+      person_role: lead?.person_role || null,
+      owner_user_id: lead?.counsellor_id || null,
+      message_type: msgType,
+      content: text || "",
+      dispatch_reply: true,
     });
 
     // ── Activity + engagement signal (only when we have a lead) ──────────────
@@ -196,10 +325,87 @@ Deno.serve(async (req) => {
         );
     }
 
+    let shouldDeferAiReply = false;
+    const orchestratorOwnsReplyDecision = true;
+    const isClassifiedAwayFromAdmissions =
+      lead?.person_role === "job_applicant" || lead?.person_role === "vendor";
+
+    if (!orchestratorOwnsReplyDecision && lead?.id && msgType === "text" && text && !isClassifiedAwayFromAdmissions && lead.stage !== "dnc") {
+      try {
+        const { data: catResult } = await admin.rpc("auto_categorize_lead_from_message", {
+          _lead_id: lead.id,
+          _message_text: text,
+        });
+
+        if (catResult === "lead" && text.trim().length >= 6) {
+          const { data: ambig } = await admin.rpc("wa_message_might_be_non_admission", {
+            _text: text,
+          });
+          if (ambig === true) {
+            const { data: queueId } = await admin.rpc("enqueue_wa_classification", {
+              _lead_id: lead.id,
+              _message_id: inboundMessageId,
+              _phone: fromDigits,
+              _content: text,
+              _dispatch_reply: true,
+            });
+            if (queueId) {
+              shouldDeferAiReply = true;
+              const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+              const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+              const classifyRes = await fetch(`${supabaseUrl}/functions/v1/wa-classify-message`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${serviceRoleKey}`,
+                },
+                body: JSON.stringify({ queue_id: queueId, dispatch_reply: true }),
+              });
+              if (!classifyRes.ok) {
+                console.error("Plivo classify dispatch failed:", classifyRes.status, await classifyRes.text());
+              }
+            }
+          }
+        }
+      } catch (classifyErr) {
+        console.error("Plivo classification enqueue error:", classifyErr);
+      }
+    }
+
+    let keywordMatched = false;
+    if (!orchestratorOwnsReplyDecision && !shouldDeferAiReply && !isClassifiedAwayFromAdmissions && lead?.stage !== "dnc" && msgType === "text" && text && toDigitsVal) {
+      const matched = AUTO_REPLIES.find((rule) => rule.patterns.test(text.trim()));
+      if (matched) {
+        keywordMatched = true;
+        try {
+          const sendRes = await sendPlivoWhatsAppText(toDigitsVal, fromDigits, matched.reply);
+          if (sendRes.ok) {
+            await admin.from("whatsapp_messages").insert({
+              lead_id: lead?.id || null,
+              wa_message_id: sendRes.messageUuid,
+              direction: "outbound",
+              phone: fromDigits,
+              message_type: "text",
+              content: matched.reply,
+              status: "sent",
+              is_read: true,
+              provider: "plivo",
+              business_phone_number_id: toDigitsVal,
+              template_key: "auto_reply",
+            });
+          } else {
+            console.error("Plivo keyword auto-reply failed:", sendRes.raw);
+          }
+        } catch (replyErr) {
+          console.error("Plivo keyword auto-reply error:", replyErr);
+        }
+      }
+    }
+
     // ── Dispatch the AI reply (provider = plivo) ─────────────────────────────
     // Only for text. whatsapp-ai-reply gates on human-mode + recent-counsellor
     // backoff, so dispatching here is safe even if the chat is human-handled.
-    if (msgType === "text" && text && toDigitsVal) {
+    if (!orchestratorOwnsReplyDecision && !keywordMatched && !shouldDeferAiReply && msgType === "text" && text && toDigitsVal) {
       try {
         const { data: recentMsgs } = await admin
           .from("whatsapp_messages")
@@ -209,7 +415,7 @@ Deno.serve(async (req) => {
           .limit(6);
 
         const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-        await fetch(`${supabaseUrl}/functions/v1/whatsapp-ai-reply`, {
+        const aiRes = await fetch(`${supabaseUrl}/functions/v1/whatsapp-ai-reply`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -226,6 +432,9 @@ Deno.serve(async (req) => {
             business_number: toDigitsVal,
           }),
         });
+        if (!aiRes.ok) {
+          console.error("Plivo AI reply failed:", aiRes.status, await aiRes.text());
+        }
       } catch (aiErr) {
         console.error("Plivo AI reply dispatch error:", aiErr);
       }

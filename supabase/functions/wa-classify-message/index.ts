@@ -289,6 +289,18 @@ Deno.serve(async (req) => {
           leadName = leadRow?.name || null;
           leadStage = leadRow?.stage || null;
         }
+        const { data: sourceMessage } = messageId
+          ? await admin
+            .from("whatsapp_messages")
+            .select("provider, business_phone_number_id, business_phone_number")
+            .eq("id", messageId)
+            .maybeSingle()
+          : { data: null };
+
+        const provider = sourceMessage?.provider === "plivo" ? "plivo" : "meta";
+        const businessNumber = sourceMessage?.business_phone_number || sourceMessage?.business_phone_number_id || null;
+        const businessPhoneNumberId = provider === "meta" ? sourceMessage?.business_phone_number_id || null : null;
+
         const { data: recent } = await admin
           .from("whatsapp_messages")
           .select("direction, content")
@@ -309,6 +321,9 @@ Deno.serve(async (req) => {
             lead_stage: leadStage,
             course_interest: null,
             recent_messages: (recent || []).reverse(),
+            provider,
+            business_number: provider === "plivo" ? businessNumber : undefined,
+            business_phone_number_id: businessPhoneNumberId,
           }),
         });
       } catch (replyErr) {

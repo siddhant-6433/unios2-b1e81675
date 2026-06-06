@@ -72,6 +72,18 @@ verify_jwt = false
 [functions.whatsapp-plivo-webhook]
 verify_jwt = false
 
+[functions.whatsapp-ai-reply]
+verify_jwt = false
+
+[functions.wa-classify-message]
+verify_jwt = false
+
+[functions.whatsapp-conversation-orchestrator]
+verify_jwt = false
+
+[functions.whatsapp-route-health]
+verify_jwt = false
+
 [functions.whatsapp-campaign-send]
 verify_jwt = false
 

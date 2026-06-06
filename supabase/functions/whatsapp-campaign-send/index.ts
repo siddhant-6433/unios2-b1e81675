@@ -1,4 +1,9 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { sendWhatsAppTemplate } from "../_shared/whatsapp-channel.ts";
+import {
+  expectedReplyTypeForTemplate,
+  recordWhatsAppOutboundContext,
+} from "../_shared/whatsapp-outbound-context.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -41,16 +46,6 @@ Deno.serve(async (req) => {
           error: "Bulk WhatsApp campaigns are paused by an administrator. Contact ops to re-enable (unset WHATSAPP_BULK_PAUSED).",
           paused: true,
         }),
-        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const whatsappToken = Deno.env.get("WHATSAPP_BULK_API_TOKEN") || Deno.env.get("WHATSAPP_API_TOKEN");
-    const phoneNumberId = Deno.env.get("WHATSAPP_BULK_PHONE_NUMBER_ID") || Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
-
-    if (!whatsappToken || !phoneNumberId) {
-      return new Response(
-        JSON.stringify({ error: "WhatsApp API not configured. Contact administrator." }),
         { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -178,36 +173,20 @@ Deno.serve(async (req) => {
       };
       const bodyParams = templateDef.params.map(p => ({ type: "text", text: resolveParam(p) }));
 
-      const waPayload: any = {
-        messaging_product: "whatsapp",
-        to: waPhone,
-        type: "template",
-        template: {
-          name: templateDef.name,
-          language: { code: "en" },
-          ...(bodyParams.length > 0
-            ? { components: [{ type: "body", parameters: bodyParams }] }
-            : {}),
-        },
-      };
-
       try {
-        const waResponse = await fetch(
-          `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${whatsappToken}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(waPayload),
-          }
-        );
+        const sendResult = await sendWhatsAppTemplate(adminClient, {
+          route: "bulk",
+          requireBulk: true,
+        }, waPhone, {
+          name: templateDef.name,
+          language: "en",
+          components: bodyParams.length > 0
+            ? [{ type: "body", parameters: bodyParams }]
+            : [],
+        });
 
-        const waResult = await waResponse.json();
-
-        if (waResponse.ok) {
-          const messageId = waResult?.messages?.[0]?.id || null;
+        if (sendResult.ok) {
+          const messageId = sendResult.messageId;
 
           // Mark recipient as sent
           await adminClient
@@ -220,7 +199,7 @@ Deno.serve(async (req) => {
             .eq("id", recipient.id);
 
           // Log to whatsapp_messages for inbox visibility
-          await adminClient.from("whatsapp_messages").insert({
+          const { data: insertedMessage } = await adminClient.from("whatsapp_messages").insert({
             lead_id: recipient.lead_id || null,
             wa_message_id: messageId,
             direction: "outbound",
@@ -230,7 +209,30 @@ Deno.serve(async (req) => {
             template_key: campaign.template_key,
             status: "sent",
             is_read: true,
-            business_phone_number_id: phoneNumberId,
+            provider: sendResult.provider,
+            business_phone_number_id: sendResult.businessPhoneNumberId,
+            business_phone_number: sendResult.businessNumber,
+          }).select("id").maybeSingle();
+
+          await recordWhatsAppOutboundContext(adminClient, {
+            messageId: insertedMessage?.id || null,
+            providerMessageId: messageId,
+            phone: waPhone,
+            businessNumber: sendResult.businessNumber || sendResult.businessPhoneNumberId,
+            provider: sendResult.provider,
+            leadId: recipient.lead_id || null,
+            campaignId: campaign_id,
+            campaignRecipientId: recipient.id,
+            templateKey: campaign.template_key,
+            outboundKind: "bulk_campaign",
+            expectedReplyType: expectedReplyTypeForTemplate(campaign.template_key),
+            responsePolicy: "engine",
+            metadata: {
+              campaign_name: campaign.name,
+              static_params: staticParams,
+              sent_by_user_id: user.id,
+            },
+            expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
           });
 
           // Log lead activity
@@ -245,7 +247,7 @@ Deno.serve(async (req) => {
 
           sentCount++;
         } else {
-          const errorMsg = waResult?.error?.message || "Unknown Meta API error";
+          const errorMsg = sendResult.error || "Unknown WhatsApp channel error";
           console.error(`Failed to send to ${waPhone}:`, errorMsg);
 
           await adminClient

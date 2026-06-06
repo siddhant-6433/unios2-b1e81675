@@ -1,9 +1,29 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { upsertConversationState } from "../_shared/whatsapp-conversation-state.ts";
+import {
+  markWhatsAppInboundEvent,
+  recordWhatsAppInboundEvent,
+} from "../_shared/whatsapp-inbound-events.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+function invokeConversationOrchestrator(payload: Record<string, unknown>): void {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseUrl || !serviceRoleKey) return;
+
+  fetch(`${supabaseUrl}/functions/v1/whatsapp-conversation-orchestrator`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${serviceRoleKey}`,
+    },
+    body: JSON.stringify(payload),
+  }).catch((err) => console.error("conversation orchestrator dispatch error:", err));
+}
 
 type WhatsAppRoute = "default" | "otp" | "call" | "visit" | "bulk" | "reply";
 
@@ -46,7 +66,7 @@ function getWhatsAppConfigForPhone(requestedPhoneNumberId: string | null) {
 const AUTO_REPLIES: { patterns: RegExp; reply: string }[] = [
   {
     patterns: /^(hi|hello|hey|hii+|hlo|good\s*(morning|evening|afternoon)|namaste|namaskar|helo|hy)[\s!.]*$/i,
-    reply: "Hi! 👋 Welcome to NIMT Educational Institutions. How can I help you today?\n\n1️⃣ Admission enquiry\n2️⃣ Course information\n3️⃣ Fee structure\n4️⃣ Campus visit\n5️⃣ Talk to a counsellor",
+    reply: "Hi! 👋 Welcome to NIMT Admissions.\n\nPlease share your name and course interest. You can reply like: *Priya, 3*\n\n1. B.Sc Nursing\n2. GNM\n3. BPT\n4. BMRIT\n5. MBA\n6. PGDM\n7. BBA\n8. BCA\n9. BA LLB / LLB\n10. B.Ed\n11. D Pharma\n12. School admission",
   },
   // Menu number responses are intentionally NOT here — they go to AI with context
   // so Gemini can give a rich, knowledge-base-driven answer
@@ -123,6 +143,24 @@ Deno.serve(async (req) => {
             `[${msgType}]`;
           const mediaId = msg.image?.id || msg.document?.id || msg.audio?.id || msg.video?.id || null;
           let mediaUrl: string | null = mediaId;
+          const inboundEventId = await recordWhatsAppInboundEvent(admin, {
+            provider: "meta",
+            providerEventId: waMessageId,
+            phone,
+            businessNumber: businessPnId || businessNumber,
+            messageType: msgType,
+            content,
+            mediaCount: mediaId ? 1 : 0,
+            rawPayload: msg,
+            normalized: {
+              entry_id: entry?.id || null,
+              change_field: change?.field || null,
+              business_phone_number_id: businessPnId,
+              business_phone_number: businessNumber,
+              media_id: mediaId,
+              button_reply: buttonReply,
+            },
+          });
 
           // ── WhatsApp sign-in intent ──────────────────────────────────────
           // The browser creates a short-lived intent, then opens WhatsApp with
@@ -154,6 +192,15 @@ Deno.serve(async (req) => {
                 .eq("status", "pending");
             }
 
+            await markWhatsAppInboundEvent(admin, inboundEventId, {
+              processingStatus: "skipped",
+              skipReason: "whatsapp_login_intent",
+              normalized: {
+                login_code: loginCode,
+                business_phone_number_id: businessPnId,
+                business_phone_number: businessNumber,
+              },
+            });
             continue;
           }
 
@@ -325,6 +372,15 @@ Deno.serve(async (req) => {
               console.error("[#mydoc] error:", e?.message || e);
               await sendWaText(phone, `Couldn't save that document: ${e?.message || "unknown error"}`);
             }
+            await markWhatsAppInboundEvent(admin, inboundEventId, {
+              processingStatus: "skipped",
+              skipReason: "personal_document_flow",
+              normalized: {
+                business_phone_number_id: businessPnId,
+                business_phone_number: businessNumber,
+                media_id: mediaId,
+              },
+            });
             continue; // skip lead pipeline entirely
           }
 
@@ -392,12 +448,30 @@ Deno.serve(async (req) => {
             .or(`phone.eq.${phone},phone.eq.${normalizedPhone},phone.eq.+${phone}`)
             .eq("is_mirror", false)
             .limit(1);
-          const lead = leadRows?.[0] || null;
+          let lead = leadRows?.[0] || null;
+
+          if (!lead) {
+            const phoneForLead = phone.length === 10 ? `+91${phone}` : `+${phone}`;
+            const { data: newLead, error: leadInsertErr } = await admin
+              .from("leads")
+              .insert({
+                phone: phoneForLead,
+                source: "whatsapp",
+                stage: "new_lead",
+                name: phoneForLead,
+              })
+              .select("id, counsellor_id, name, stage, person_role")
+              .single();
+            if (leadInsertErr) {
+              console.error("Webhook auto-create lead failed:", leadInsertErr.message);
+            }
+            lead = newLead || null;
+          }
 
           // Skip all processing for DNC leads (except logging the message)
           if (lead?.stage === "dnc") {
             // Still log the message but skip replies
-            await admin.from("whatsapp_messages").insert({
+            const { data: dncMsg } = await admin.from("whatsapp_messages").insert({
               lead_id: lead.id,
               wa_message_id: waMessageId,
               direction: "inbound",
@@ -406,6 +480,12 @@ Deno.serve(async (req) => {
               assigned_to: lead.counsellor_id || null,
               business_phone_number_id: businessPnId,
               business_phone_number: businessNumber,
+            }).select("id").single();
+            await markWhatsAppInboundEvent(admin, inboundEventId, {
+              leadId: lead.id,
+              messageId: dncMsg?.id || null,
+              processingStatus: dncMsg?.id ? "linked" : "error",
+              skipReason: dncMsg?.id ? "dnc" : "dnc_message_insert_missing_id",
             });
             continue;
           }
@@ -443,8 +523,46 @@ Deno.serve(async (req) => {
             business_phone_number: businessNumber,
           }).select("id").single();
           const inboundMessageId: string | null = insertedMsg?.id || null;
+          await markWhatsAppInboundEvent(admin, inboundEventId, {
+            leadId: lead?.id || null,
+            messageId: inboundMessageId,
+            processingStatus: inboundMessageId ? "linked" : "error",
+            skipReason: inboundMessageId ? null : "whatsapp_message_insert_missing_id",
+          });
+
+          if (businessPnId) {
+            await upsertConversationState(admin, {
+              phone,
+              businessNumber: businessPnId,
+              provider: "meta",
+              leadId: lead?.id || null,
+              mode: "ai",
+              state: msgType === "text" ? "new_unqualified" : "needs_counsellor",
+              ownerUserId: lead?.counsellor_id || null,
+              escalationRole: msgType === "text" ? null : "counsellor",
+              handoffReason: msgType === "text" ? null : "inbound_media",
+              priority: msgType === "text" ? "normal" : "high",
+            });
+          }
+
+          invokeConversationOrchestrator({
+            source: "meta_webhook",
+            provider: "meta",
+            phone,
+            business_phone_number_id: businessPnId,
+            business_phone_number: businessNumber,
+            message_id: inboundMessageId,
+            lead_id: lead?.id || null,
+            lead_stage: lead?.stage || null,
+            person_role: (lead as any)?.person_role || null,
+            owner_user_id: lead?.counsellor_id || null,
+            message_type: msgType,
+            content,
+            dispatch_reply: true,
+          });
 
           // Log activity if lead found
+          const orchestratorOwnsReplyDecision = true;
           if (lead?.id) {
             await admin.from("lead_activities").insert({
               lead_id: lead.id,
@@ -466,7 +584,7 @@ Deno.serve(async (req) => {
             // Otherwise reply immediately as today (fast path for normal admission queries).
             // Skipped on the HR channel: the classifier dispatches AI replies, which
             // we never want for HR/job-applicant traffic.
-            if (content && msgType === "text" && !isHrChannel) {
+            if (!orchestratorOwnsReplyDecision && content && msgType === "text" && !isHrChannel) {
               try {
                 const { data: catResult } = await admin.rpc("auto_categorize_lead_from_message", {
                   _lead_id: lead.id,
@@ -481,7 +599,7 @@ Deno.serve(async (req) => {
                     const { data: queueId } = await admin.rpc("enqueue_wa_classification", {
                       _lead_id: lead.id,
                       _message_id: inboundMessageId,
-                      _phone: normalizedPhone,
+                      _phone: phone,
                       _content: content,
                       _dispatch_reply: true,
                     });
@@ -724,7 +842,7 @@ Deno.serve(async (req) => {
 
           // ── DNC detection: "stop", "not interested", etc. ──────────────────
           const DNC_PATTERNS = /\b(stop|unsubscribe|opt.?out|do not contact|dont contact|don'?t contact|not interested|nahi chahiye|mujhe nahi chahiye|remove me|block me|dnc|irritating|irritate|stop calling|stop messaging|stop whatsapp|band karo|chhodiye|chhodo|mat karo|pareshan|hata do|hatao)\b/i;
-          if (!feedbackHandled && msgType === "text" && content && DNC_PATTERNS.test(content.trim())) {
+          if (!orchestratorOwnsReplyDecision && !feedbackHandled && msgType === "text" && content && DNC_PATTERNS.test(content.trim())) {
             // Mark lead as DNC if known
             if (lead?.id) {
               await admin.from("leads").update({ stage: "dnc" }).eq("id", lead.id);
@@ -782,7 +900,7 @@ Deno.serve(async (req) => {
           // Skipped on the HR channel and for job_applicant leads — those
           // conversations are admissions-irrelevant.
           let keywordMatched = false;
-          if (!feedbackHandled && !isHrChannel && msgType === "text" && content) {
+          if (!orchestratorOwnsReplyDecision && !feedbackHandled && !isHrChannel && msgType === "text" && content) {
             const matched = AUTO_REPLIES.find(r => r.patterns.test(content.trim()));
             if (matched) {
               keywordMatched = true;
@@ -843,16 +961,23 @@ Deno.serve(async (req) => {
           // ── AI Knowledge Base reply (handles everything not matched above) ──
           // Suppressed on the HR channel and for job_applicant leads — the
           // admissions knowledge base shouldn't reply on careers traffic.
-          if (!feedbackHandled && !keywordMatched && !shouldDeferAiReply && !isHrChannel && msgType === "text" && content) {
-            try {
-              // Map menu number selections to explicit intent so AI gives a rich answer
-              const MENU_CONTEXT: Record<string, string> = {
-                "1": "The user selected option 1 — they want information about admissions and how to apply.",
-                "2": "The user selected option 2 — they want to know about courses offered at NIMT.",
-                "3": "The user selected option 3 — they want fee structure information.",
-                "4": "The user selected option 4 — they want to schedule a campus visit.",
-                "5": "The user selected option 5 — they want to talk to a counsellor.",
-              };
+	          if (!orchestratorOwnsReplyDecision && !feedbackHandled && !keywordMatched && !shouldDeferAiReply && !isHrChannel && msgType === "text" && content) {
+	            try {
+	              // Map menu number selections to explicit intent so AI gives a rich answer
+	              const MENU_CONTEXT: Record<string, string> = {
+	                "1": "The user selected course option 1 — B.Sc Nursing.",
+	                "2": "The user selected course option 2 — GNM.",
+	                "3": "The user selected course option 3 — BPT.",
+	                "4": "The user selected course option 4 — BMRIT.",
+	                "5": "The user selected course option 5 — MBA.",
+	                "6": "The user selected course option 6 — PGDM.",
+	                "7": "The user selected course option 7 — BBA.",
+	                "8": "The user selected course option 8 — BCA.",
+	                "9": "The user selected course option 9 — BA LLB / LLB.",
+	                "10": "The user selected course option 10 — B.Ed.",
+	                "11": "The user selected course option 11 — D Pharma.",
+	                "12": "The user selected course option 12 — School admission.",
+	              };
               const menuCtx = MENU_CONTEXT[content.trim()];
               const messageForAI = menuCtx
                 ? `[System note: ${menuCtx}]\n\nUser message: ${content}`
