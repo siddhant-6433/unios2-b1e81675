@@ -49,6 +49,8 @@ describe("ApplicantDeadlineTicker", () => {
     );
 
     expect(screen.getByText("Application deadline")).toBeInTheDocument();
+    expect(screen.getByText(/10 Jun 2026/)).toBeInTheDocument();
+    expect(screen.getByText(/5 days left/)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Edit" })).not.toBeInTheDocument();
   });
 });
