@@ -177,7 +177,7 @@ FEE STRUCTURE (First Year / Annual Fee):
 - D.Pharma: ₹95,000/year | Greater Noida campus
 - DPT (Diploma Physiotherapy): ₹62,000/year | Greater Noida campus
 - D.El.Ed: ₹45,000/year | Ghaziabad campus
-- OTT (Operation Theater Technician): ₹62,000/year | Greater Noida campus
+- OTT / D-OTT (Operation Theater Technician): ₹62,000/year | Greater Noida campus | ISCO Code 3259
 - MPT (Masters Physiotherapy): ₹89,000/year | Greater Noida campus
 - MMRIT (M.Sc Radiology): ₹89,000/year | Greater Noida campus
 Note: These are first-year fees. Subsequent years may vary. Scholarships available for merit/SC/ST/OBC. Contact admissions for complete fee breakup.
