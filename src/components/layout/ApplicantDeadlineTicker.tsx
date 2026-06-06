@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
 const DEFAULT_FEE_SUBMISSION_DEADLINE = "2026-06-15";
+const PUBLIC_APPLICATION_DEADLINE = "2026-06-10";
 
 const STAFF_ROLES = new Set([
   "super_admin",
@@ -42,12 +43,14 @@ interface ApplicantDeadlineTickerProps {
 
 export function ApplicantDeadlineTicker({ audience = "staff" }: ApplicantDeadlineTickerProps) {
   const { role } = useAuth();
-  const [deadline, setDeadline] = useState(DEFAULT_FEE_SUBMISSION_DEADLINE);
+  const [deadline, setDeadline] = useState(
+    audience === "public" ? PUBLIC_APPLICATION_DEADLINE : DEFAULT_FEE_SUBMISSION_DEADLINE,
+  );
 
   const eligible = audience === "public" || Boolean(role && STAFF_ROLES.has(role as string));
 
   useEffect(() => {
-    if (!eligible) return;
+    if (!eligible || audience === "public") return;
     let cancelled = false;
 
     async function load() {
@@ -59,7 +62,7 @@ export function ApplicantDeadlineTicker({ audience = "staff" }: ApplicantDeadlin
 
     load();
     return () => { cancelled = true; };
-  }, [eligible]);
+  }, [audience, eligible]);
 
   if (!eligible) return null;
 
