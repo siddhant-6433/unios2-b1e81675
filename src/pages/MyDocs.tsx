@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeEdge } from "@/integrations/supabase/edge";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +29,7 @@ import {
   Wind, Smartphone, BookOpen, BadgeCheck, CreditCard, AlertTriangle,
   ChevronRight, MoreVertical, Pencil,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 type DocType =
   | "health_insurance" | "life_insurance" | "vehicle_insurance" | "vehicle_pollution"
@@ -51,7 +53,7 @@ interface PersonalDoc {
   created_at: string;
 }
 
-const TYPE_META: Record<DocType, { label: string; icon: any; iconBg: string; iconColor: string; tab: string }> = {
+const TYPE_META: Record<DocType, { label: string; icon: LucideIcon; iconBg: string; iconColor: string; tab: string }> = {
   health_insurance:  { label: "Health Insurance",  icon: Heart,       iconBg: "bg-rose-100",    iconColor: "text-rose-500",   tab: "health" },
   life_insurance:    { label: "Life Insurance",    icon: ShieldCheck, iconBg: "bg-blue-100",    iconColor: "text-blue-500",   tab: "health" },
   vehicle_insurance: { label: "Car Insurance",     icon: Car,         iconBg: "bg-amber-100",   iconColor: "text-amber-600",  tab: "vehicle" },
@@ -343,7 +345,7 @@ interface ExtractResult {
   insured_name: string | null;
   issued_on: string | null;
   expires_on: string | null;
-  raw: any;
+  raw: unknown;
 }
 
 const UploadDialog = ({
@@ -382,6 +384,7 @@ const UploadDialog = ({
   const upload = async () => {
     if (!file) return;
     setUploading(true);
+    let uploadedPath: string | null = null;
     try {
       const ext = file.name.split(".").pop()?.toLowerCase() || (file.type === "application/pdf" ? "pdf" : "jpg");
       const id = crypto.randomUUID();
@@ -390,16 +393,27 @@ const UploadDialog = ({
         .from("personal-documents")
         .upload(path, file, { contentType: file.type, upsert: false });
       if (upErr) throw upErr;
-      setFilePath(path);
+      uploadedPath = path;
 
       setExtracting(true);
-      const { data, error } = await supabase.functions.invoke("extract-personal-doc", {
+      const { data, error } = await invokeEdge<ExtractResult>("extract-personal-doc", {
         body: { file_path: path, doc_type_hint: typeHint === "auto" ? undefined : typeHint },
       });
-      if (error) throw error;
-      setForm(data as ExtractResult);
-    } catch (e: any) {
-      toast({ title: "Upload failed", description: e.message || String(e), variant: "destructive" });
+      if (error) throw new Error(error.message);
+      if (!data) throw new Error("No extraction result returned.");
+
+      setFilePath(path);
+      setForm(data);
+    } catch (e: unknown) {
+      if (uploadedPath) {
+        await supabase.storage.from("personal-documents").remove([uploadedPath]).catch(() => {});
+      }
+      const message = e instanceof Error ? e.message : String(e);
+      toast({
+        title: uploadedPath ? "Extraction failed" : "Upload failed",
+        description: message,
+        variant: "destructive",
+      });
     } finally {
       setUploading(false);
       setExtracting(false);
@@ -456,7 +470,7 @@ const UploadDialog = ({
 
             <div className="space-y-1.5">
               <Label>Type hint (optional)</Label>
-              <Select value={typeHint} onValueChange={v => setTypeHint(v as any)}>
+              <Select value={typeHint} onValueChange={v => setTypeHint(v as DocType | "auto")}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="auto">Auto-detect</SelectItem>
