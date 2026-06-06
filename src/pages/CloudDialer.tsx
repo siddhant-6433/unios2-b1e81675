@@ -759,6 +759,7 @@ export default function CloudDialer() {
       if (error || data?.error) {
         const msg = data?.error || error?.message || "Call failed";
         toast({ title: "Call Failed", description: msg, variant: "destructive" });
+        setDialerActive(false);
         setCallState(prev => ({ ...prev, status: "ended", disposition: "failed" }));
         return;
       }
@@ -772,6 +773,7 @@ export default function CloudDialer() {
       }
     } catch (e: any) {
       toast({ title: "Call Failed", description: e.message, variant: "destructive" });
+      setDialerActive(false);
       setCallState(prev => ({ ...prev, status: "ended", disposition: "failed" }));
     }
   };
