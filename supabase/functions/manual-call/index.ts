@@ -15,6 +15,7 @@
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { maskPhoneForLog, normalizePlivoVoiceNumber } from "../_shared/phone.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -44,6 +45,12 @@ Deno.serve(async (req) => {
 
     if (!PLIVO_AUTH_ID || !PLIVO_AUTH_TOKEN || !PLIVO_DIALER_PHONE_NUMBER || !VOICE_AGENT_URL) {
       return json({ error: "Calling not configured. Contact admin." }, 503);
+    }
+
+    const dialerFrom = normalizePlivoVoiceNumber(PLIVO_DIALER_PHONE_NUMBER);
+    if (!dialerFrom) {
+      console.error("Invalid PLIVO_DIALER_PHONE_NUMBER for voice calls:", maskPhoneForLog(PLIVO_DIALER_PHONE_NUMBER));
+      return json({ error: "Calling number is not configured correctly. Contact admin." }, 503);
     }
 
     // Auth: accept anon key (manual button) or service role (internal).
@@ -81,14 +88,15 @@ Deno.serve(async (req) => {
       return json({ error: "Your phone number is not set in your profile. Go to Settings → Profile to add it." }, 400);
     }
 
-    // Normalize phones
-    let studentPhone = lead.phone.replace(/[^0-9+]/g, "");
-    if (studentPhone.startsWith("+")) studentPhone = studentPhone.substring(1);
-    if (studentPhone.length === 10) studentPhone = `91${studentPhone}`;
+    const studentPhone = normalizePlivoVoiceNumber(lead.phone);
+    if (!studentPhone) {
+      return json({ error: "Lead phone number is not valid for calling. Update the lead phone and try again." }, 400);
+    }
 
-    let counsellorPhone = profile.phone.replace(/[^0-9+]/g, "");
-    if (counsellorPhone.startsWith("+")) counsellorPhone = counsellorPhone.substring(1);
-    if (counsellorPhone.length === 10) counsellorPhone = `91${counsellorPhone}`;
+    const counsellorPhone = normalizePlivoVoiceNumber(profile.phone);
+    if (!counsellorPhone) {
+      return json({ error: "Your profile phone number is not valid for calling. Use a 10-digit Indian mobile number with country code +91." }, 400);
+    }
 
     const callId = crypto.randomUUID();
 
@@ -150,7 +158,7 @@ Deno.serve(async (req) => {
     const stateCallbackUrl = `${VOICE_AGENT_URL}/bridge-call-status/${callId}`;
 
     const plivoPayload = {
-      from: PLIVO_DIALER_PHONE_NUMBER,
+      from: dialerFrom,
       to: counsellorPhone,
       answer_url: answerUrl,
       answer_method: "GET",
@@ -180,7 +188,11 @@ Deno.serve(async (req) => {
     try { plivoData = JSON.parse(plivoText); } catch { plivoData = { raw: plivoText }; }
 
     console.log("Plivo response:", plivoRes.status, plivoText);
-    console.log("Plivo payload sent:", JSON.stringify(plivoPayload));
+    console.log("Plivo payload sent:", JSON.stringify({
+      ...plivoPayload,
+      from: maskPhoneForLog(dialerFrom),
+      to: maskPhoneForLog(counsellorPhone),
+    }));
 
     if (!plivoRes.ok) {
       console.error("Plivo call failed:", plivoRes.status, plivoText);
