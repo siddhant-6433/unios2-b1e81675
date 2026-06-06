@@ -209,6 +209,22 @@ export const COURSE_KNOWLEDGE: Record<string, {
     campus: "Greater Noida",
     fee: "Rs 92,000 per year (first year fee)",
   },
+  "OTT": {
+    highlights: [
+      "2-year diploma in Anaesthesia and Operation Theatre Technology",
+      "ISCO Code 3259",
+      "Training for operation theatre and anaesthesia support roles",
+      "Clinical training at NIMT hospital and affiliated facilities",
+    ],
+    practicalExposure: "Operation theatre and anaesthesia support training at NIMT's parent hospital and affiliated facilities.",
+    careers: "Operation Theatre Technician, anaesthesia support technician, surgical assistant, CSSD/OT support roles in hospitals and surgical centres.",
+    whyNimt: "Hospital-based practical exposure, affordable diploma pathway, and training aligned to operation theatre support roles.",
+    eligibility: "10+2 with Operation Theatre relevant subjects. ISCO Code 3259.",
+    entrance: "Merit-based / as per current admission rules",
+    duration: "2 Years",
+    campus: "Greater Noida",
+    fee: "Rs 62,000 per year (first year fee)",
+  },
   "D Pharma": {
     highlights: [
       "2-year Diploma in Pharmacy + 3-month practical training",
@@ -289,7 +305,7 @@ BBA: Rs 75,000/year (Greater Noida & Ghaziabad)
 BMRIT: Rs 92,000/year (Greater Noida)
 D.Pharma: Rs 95,000/year (Greater Noida)
 DPT (Diploma Physiotherapy): Rs 62,000/year (Greater Noida)
-OTT (Operation Theater Technician): Rs 62,000/year (Greater Noida)
+OTT / D-OTT (Operation Theater Technician): Rs 62,000/year (Greater Noida), ISCO Code 3259
 D.El.Ed: Rs 45,000/year (Ghaziabad)
 MPT: Rs 89,000/year (Greater Noida)
 MMRIT: Rs 89,000/year (Greater Noida)
