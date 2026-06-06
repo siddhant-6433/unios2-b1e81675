@@ -303,12 +303,12 @@ const CallLog = () => {
     }
 
     // Per-counsellor call counts for the same date range (admins only).
-    // Use exact counts here: planned counts are planner estimates and can show
-    // "1" for every selective user_id/date query even when the real count is 0.
+    // Avoid exact counts on this hot path; the breakdown is advisory and should
+    // not force expensive count scans while the main call log is loading.
     if (!isCounsellor && counsellorOptions.length > 0 && page === 1) {
       const results = await Promise.all(
         counsellorOptions.map(async (c) => {
-          let q = supabase.from("call_logs").select("id", { count: "exact", head: true }).eq("user_id", c.id);
+          let q = supabase.from("call_logs").select("id", { count: "planned", head: true }).eq("user_id", c.id);
           if (from) q = q.gte("created_at", `${from}T00:00:00`);
           if (to) q = q.lte("created_at", `${to}T23:59:59`);
           const { count } = await q;

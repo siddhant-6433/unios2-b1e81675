@@ -1,4 +1,10 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { sendWhatsAppTemplate, type WhatsAppChannelRoute } from "../_shared/whatsapp-channel.ts";
+import {
+  expectedReplyTypeForTemplate,
+  recordWhatsAppOutboundContext,
+  responsePolicyForTemplate,
+} from "../_shared/whatsapp-outbound-context.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -204,20 +210,6 @@ function getRouteForTemplate(templateKey: string): WhatsAppRoute {
   if (CALL_TEMPLATE_KEYS.has(templateKey)) return "call";
   if (VISIT_TEMPLATE_KEYS.has(templateKey)) return "visit";
   return "default";
-}
-
-function getWhatsAppConfig(route: WhatsAppRoute) {
-  const token =
-    (route === "call" ? Deno.env.get("WHATSAPP_CALL_API_TOKEN") : null) ||
-    (route === "visit" ? Deno.env.get("WHATSAPP_VISIT_API_TOKEN") : null) ||
-    Deno.env.get("WHATSAPP_API_TOKEN");
-
-  const phoneNumberId =
-    (route === "call" ? Deno.env.get("WHATSAPP_CALL_PHONE_NUMBER_ID") : null) ||
-    (route === "visit" ? Deno.env.get("WHATSAPP_VISIT_PHONE_NUMBER_ID") : null) ||
-    Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
-
-  return { token, phoneNumberId };
 }
 
 Deno.serve(async (req) => {
@@ -489,14 +481,7 @@ Deno.serve(async (req) => {
     }
 
     const phoneRoute = getRouteForTemplate(template_key);
-    const { token: whatsappToken, phoneNumberId } = getWhatsAppConfig(phoneRoute);
-
-    if (!whatsappToken || !phoneNumberId) {
-      return new Response(
-        JSON.stringify({ error: `WhatsApp ${phoneRoute} route is not configured. Contact administrator.` }),
-        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    const channelRoute: WhatsAppChannelRoute = phoneRoute === "default" ? "admissions" : phoneRoute;
 
     // Build template components
     const waPhone = phone.replace(/[^0-9]/g, "");
@@ -529,38 +514,21 @@ Deno.serve(async (req) => {
       });
     }
 
-    const waPayload: any = {
-      messaging_product: "whatsapp",
-      to: waPhone,
-      type: "template",
-      template: {
-        name: templateDef.name,
-        language: { code: "en" },
-        ...(components.length > 0 ? { components } : {}),
-      },
-    };
-
-    const waResponse = await fetch(
-      `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${whatsappToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(waPayload),
-      }
-    );
-
-    // Parse body as text first so we can keep the raw response for the failed
-    // path even when Meta returns non-JSON (e.g. plain-text 5xx from the edge).
-    const waResultText = await waResponse.text().catch(() => "");
-    let waResult: any = null;
-    try { waResult = waResultText ? JSON.parse(waResultText) : null; } catch { waResult = null; }
+    const sendResult = await sendWhatsAppTemplate(admin, {
+      route: channelRoute,
+      requireBulk: channelRoute === "bulk",
+    }, waPhone, {
+      name: templateDef.name,
+      language: "en",
+      components,
+    });
+    const waResult = sendResult.raw as { error?: { message?: string }; messages?: { id?: string }[] } | null;
+    const phoneNumberId = sendResult.businessPhoneNumberId;
+    const waResultText = "";
 
     // Log to whatsapp_messages + lead_activities (even if Meta rejected it)
-    const adminClient = createClient(supabaseUrl, serviceRoleKey);
-    const metaFailed = !waResponse.ok;
+    const adminClient = admin;
+    const metaFailed = !sendResult.ok;
 
     if (metaFailed) {
       console.error("WhatsApp send error:", JSON.stringify(waResult));
@@ -622,16 +590,16 @@ Deno.serve(async (req) => {
     // dashboard and the per-message inbox can show what Meta complained about.
     const statusErrorPayload = metaFailed
       ? {
-          http_status: waResponse.status,
+          http_status: sendResult.status,
           ...(waResult?.error ? { error: waResult.error } : {}),
           ...(waResult && !waResult.error ? { body: waResult } : {}),
           ...(!waResult && waResultText ? { raw: waResultText.slice(0, 1000) } : {}),
         }
       : null;
 
-    await adminClient.from("whatsapp_messages").insert({
+    const { data: insertedMessage } = await adminClient.from("whatsapp_messages").insert({
       lead_id: lead_id || null,
-      wa_message_id: waResult?.messages?.[0]?.id || null,
+      wa_message_id: sendResult.messageId,
       direction: "outbound",
       phone: waPhone,
       message_type: "template",
@@ -639,9 +607,32 @@ Deno.serve(async (req) => {
       template_key,
       status: metaFailed ? "failed" : "sent",
       is_read: true,
+      provider: sendResult.provider,
       business_phone_number_id: phoneNumberId,
+      business_phone_number: sendResult.businessNumber,
       status_error: statusErrorPayload,
       sender_user_id: user.id,
+    }).select("id").maybeSingle();
+
+    await recordWhatsAppOutboundContext(adminClient, {
+      messageId: insertedMessage?.id || null,
+      providerMessageId: sendResult.messageId,
+      phone: waPhone,
+      businessNumber: sendResult.businessNumber || phoneNumberId,
+      provider: sendResult.provider,
+      leadId: lead_id || null,
+      templateKey: template_key,
+      outboundKind: "template",
+      expectedReplyType: expectedReplyTypeForTemplate(template_key),
+      responsePolicy: responsePolicyForTemplate(template_key),
+      metadata: {
+        route: phoneRoute,
+        params,
+        button_urls,
+        status: metaFailed ? "failed" : "sent",
+        invoked_by_user_id: user.id,
+      },
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
     });
 
     if (lead_id) {
@@ -661,15 +652,22 @@ Deno.serve(async (req) => {
     if (metaFailed) {
       return new Response(
         JSON.stringify({
-          error: waResult?.error?.message || "Failed to send WhatsApp message",
+          error: waResult?.error?.message || sendResult.error || "Failed to send WhatsApp message",
           meta_error: waResult?.error?.message,
         }),
-        { status: waResponse.status >= 400 && waResponse.status < 500 ? waResponse.status : 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: sendResult.status >= 400 && sendResult.status < 500 ? sendResult.status : 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     return new Response(
-      JSON.stringify({ success: true, message_id: waResult?.messages?.[0]?.id, phone_route: phoneRoute, business_phone_number_id: phoneNumberId }),
+      JSON.stringify({
+        success: true,
+        message_id: sendResult.messageId,
+        phone_route: phoneRoute,
+        provider: sendResult.provider,
+        business_phone_number_id: phoneNumberId,
+        business_phone_number: sendResult.businessNumber,
+      }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err: any) {

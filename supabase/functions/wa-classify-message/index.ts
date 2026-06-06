@@ -99,6 +99,13 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const authHeader = req.headers.get("Authorization") || req.headers.get("authorization") || "";
+  if (authHeader !== `Bearer ${serviceRoleKey}`) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   const geminiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY");
   if (!geminiKey) {
     return new Response(JSON.stringify({ error: "GEMINI_API_KEY not configured" }), {
@@ -289,6 +296,18 @@ Deno.serve(async (req) => {
           leadName = leadRow?.name || null;
           leadStage = leadRow?.stage || null;
         }
+        const { data: sourceMessage } = messageId
+          ? await admin
+            .from("whatsapp_messages")
+            .select("provider, business_phone_number_id, business_phone_number")
+            .eq("id", messageId)
+            .maybeSingle()
+          : { data: null };
+
+        const provider = sourceMessage?.provider === "plivo" ? "plivo" : "meta";
+        const businessNumber = sourceMessage?.business_phone_number || sourceMessage?.business_phone_number_id || null;
+        const businessPhoneNumberId = provider === "meta" ? sourceMessage?.business_phone_number_id || null : null;
+
         const { data: recent } = await admin
           .from("whatsapp_messages")
           .select("direction, content")
@@ -309,6 +328,9 @@ Deno.serve(async (req) => {
             lead_stage: leadStage,
             course_interest: null,
             recent_messages: (recent || []).reverse(),
+            provider,
+            business_number: provider === "plivo" ? businessNumber : undefined,
+            business_phone_number_id: businessPhoneNumberId,
           }),
         });
       } catch (replyErr) {

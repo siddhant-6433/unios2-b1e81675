@@ -43,11 +43,11 @@ describe("WhatsApp inbox template rendering and speed guardrails", () => {
     expect(inbox).toContain("businessChannelVariants");
     expect(inbox).toContain("isKnownAdmissionsPhoneConversation");
     expect(inbox).toContain("matchesActiveBusinessNumber");
-    expect(whatsappReply).toContain('PLIVO_WHATSAPP_NUMBER = "919555192192"');
-    expect(whatsappReply).toContain("isPlivoWhatsAppChannel");
-    expect(whatsappReply).toContain("normalizeBusinessPhoneNumber");
-    expect(whatsappReply).toContain("sendPlivoWhatsAppText");
-    expect(whatsappReply).toContain('provider: usePlivo ? "plivo" : "meta"');
+    expect(whatsappReply).toContain("sendWhatsAppText");
+    expect(whatsappReply).toContain('provider: requestedProvider');
+    expect(whatsappReply).toContain('route: requestedProvider === "plivo" ? "plivo_admissions" : "reply"');
+    expect(whatsappReply).toContain("businessNumber: requestedBusinessNumber || requestedPhoneNumberId");
+    expect(whatsappReply).toContain("sender_user_id: user.id");
   });
 
   it("does not block first paint by draining every WhatsApp conversation page", () => {
@@ -61,7 +61,7 @@ describe("WhatsApp inbox template rendering and speed guardrails", () => {
   it("falls back to raw messages when a selected phone-number inbox has no conversation rows", () => {
     expect(inbox).toContain("fetchMessageBackedConversationRows");
     expect(inbox).toContain('from("whatsapp_messages" as any)');
-    expect(inbox).toContain('select("phone, lead_id, direction, content, created_at, business_phone_number_id, business_phone_number, is_read")');
+    expect(inbox).toContain('select("phone, lead_id, direction, content, created_at, provider, business_phone_number_id, business_phone_number, is_read")');
     expect(inbox).toContain('businessNumber !== "primary" && isBusinessPhoneNumberChannel(businessNumber)');
     expect(inbox).toContain("rows = await fetchMessageBackedConversationRows(businessNumber)");
   });

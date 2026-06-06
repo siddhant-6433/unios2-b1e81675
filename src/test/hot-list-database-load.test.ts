@@ -44,7 +44,7 @@ describe("hot list database load guardrails", () => {
 
   it("keeps the overview dashboard on the single aggregate payload", () => {
     const dashboard = read("src/pages/Dashboard.tsx");
-    const dashboardOverview = read("supabase/migrations/20260618205000_dashboard_overview_rpc.sql");
+    const dashboardOverview = read("supabase/migrations/20260618211200_dashboard_overview_rpc.sql");
 
     expect(dashboard).toContain('rpc("dashboard_overview"');
     expect(read("src/components/dashboard/DashboardAnalytics.tsx")).toContain('rpc("dashboard_analytics"');

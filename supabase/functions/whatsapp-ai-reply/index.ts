@@ -1,44 +1,15 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { sendPlivoWhatsAppText } from "../_shared/plivo.ts";
+import { digits, sendWhatsAppText } from "../_shared/whatsapp-channel.ts";
+import { logWhatsAppAutomationEvent } from "../_shared/whatsapp-automation-events.ts";
+import {
+  conversationBusinessKey,
+  upsertConversationState,
+} from "../_shared/whatsapp-conversation-state.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-
-type WhatsAppRoute = "default" | "otp" | "call" | "visit" | "bulk" | "reply";
-
-function routeConfig(route: WhatsAppRoute) {
-  const token =
-    (route === "otp" ? Deno.env.get("WHATSAPP_OTP_API_TOKEN") : null) ||
-    (route === "call" ? Deno.env.get("WHATSAPP_CALL_API_TOKEN") : null) ||
-    (route === "visit" ? Deno.env.get("WHATSAPP_VISIT_API_TOKEN") : null) ||
-    (route === "bulk" ? Deno.env.get("WHATSAPP_BULK_API_TOKEN") : null) ||
-    (route === "reply" ? Deno.env.get("WHATSAPP_REPLY_API_TOKEN") : null) ||
-    Deno.env.get("WHATSAPP_API_TOKEN");
-
-  const phoneNumberId =
-    (route === "otp" ? Deno.env.get("WHATSAPP_OTP_PHONE_NUMBER_ID") : null) ||
-    (route === "call" ? Deno.env.get("WHATSAPP_CALL_PHONE_NUMBER_ID") : null) ||
-    (route === "visit" ? Deno.env.get("WHATSAPP_VISIT_PHONE_NUMBER_ID") : null) ||
-    (route === "bulk" ? Deno.env.get("WHATSAPP_BULK_PHONE_NUMBER_ID") : null) ||
-    (route === "reply" ? Deno.env.get("WHATSAPP_REPLY_PHONE_NUMBER_ID") : null) ||
-    Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
-
-  return { route, token, phoneNumberId };
-}
-
-function getWhatsAppConfigForPhone(requestedPhoneNumberId: string | null) {
-  const configs = [
-    routeConfig("default"),
-    routeConfig("otp"),
-    routeConfig("call"),
-    routeConfig("visit"),
-    routeConfig("bulk"),
-    routeConfig("reply"),
-  ];
-  return configs.find((config) => requestedPhoneNumberId && config.phoneNumberId === requestedPhoneNumberId) || routeConfig("reply");
-}
 
 // ─── NIMT Knowledge Base ────────────────────────────────────────────────────
 
@@ -204,13 +175,166 @@ FACILITIES:
 - Hostels: 600+ capacity, AC and non-AC options, separate for boys and girls
 - Cafeteria, gym, sports grounds
 - Wi-Fi campus, transport facility
-`;
+	`;
 
-function buildSystemPrompt(hasName: boolean, hasCourse: boolean): string {
+type SupabaseAdminClient = ReturnType<typeof createClient>;
+
+interface AdmissionCourseOption {
+  number: string;
+  label: string;
+  aliases: string[];
+  codePrefixes: string[];
+}
+
+const ADMISSION_COURSE_OPTIONS: AdmissionCourseOption[] = [
+  { number: "1", label: "B.Sc Nursing", aliases: ["bsc nursing", "b.sc nursing", "b sc nursing", "nursing"], codePrefixes: ["BSCN"] },
+  { number: "2", label: "GNM", aliases: ["gnm", "general nursing"], codePrefixes: ["GNM"] },
+  { number: "3", label: "BPT", aliases: ["bpt", "physiotherapy", "bachelor of physiotherapy"], codePrefixes: ["BPT"] },
+  { number: "4", label: "BMRIT", aliases: ["bmrit", "radiology", "medical radiology", "imaging technology"], codePrefixes: ["BMRIT"] },
+  { number: "5", label: "MBA", aliases: ["mba", "master of business administration"], codePrefixes: ["MBA"] },
+  { number: "6", label: "PGDM", aliases: ["pgdm"], codePrefixes: ["PGDM"] },
+  { number: "7", label: "BBA", aliases: ["bba", "bachelor of business administration"], codePrefixes: ["BBA"] },
+  { number: "8", label: "BCA", aliases: ["bca", "bachelor of computer applications"], codePrefixes: ["BCA"] },
+  { number: "9", label: "BA LLB / LLB", aliases: ["ba llb", "ballb", "llb", "law"], codePrefixes: ["BALLB", "LLB"] },
+  { number: "10", label: "B.Ed", aliases: ["b.ed", "bed", "b ed", "bachelor of education"], codePrefixes: ["BED"] },
+  { number: "11", label: "D Pharma", aliases: ["d pharma", "d.pharma", "d pharm", "dpharma", "diploma pharmacy"], codePrefixes: ["DPHARMA"] },
+  { number: "12", label: "School admission", aliases: ["school", "beacon", "nursery", "kg", "class"], codePrefixes: ["BSA", "BSAV"] },
+];
+
+function normalizeText(value: string): string {
+  return (value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function isPlaceholderLeadName(name: string | null | undefined, phone: string): boolean {
+  const normalizedName = (name || "").replace(/[^0-9]/g, "");
+  const normalizedPhone = (phone || "").replace(/[^0-9]/g, "");
+  return !name || name.trim().length <= 1 || (!!normalizedName && normalizedPhone.endsWith(normalizedName));
+}
+
+function detectCourseOption(message: string): AdmissionCourseOption | null {
+  const trimmed = (message || "").trim();
+  const exactNumber = trimmed.match(/^(?:course\s*)?(\d{1,2})$/i)?.[1];
+  const courseOptionNumber = trimmed.match(/\bcourse option\s+(\d{1,2})\b/i)?.[1];
+  const commaNumber = trimmed.match(/,\s*(\d{1,2})\s*$/)?.[1];
+  const selectedNumber = exactNumber || courseOptionNumber || commaNumber;
+  if (selectedNumber) {
+    const byNumber = ADMISSION_COURSE_OPTIONS.find((option) => option.number === selectedNumber);
+    if (byNumber) return byNumber;
+  }
+
+  const normalized = normalizeText(message);
+  return ADMISSION_COURSE_OPTIONS.find((option) =>
+    option.aliases.some((alias) => normalized.includes(normalizeText(alias)))
+  ) || null;
+}
+
+function extractNameCandidate(message: string): string | null {
+  const trimmed = (message || "").trim();
+  const explicit = trimmed.match(/\b(?:my name is|i am|i'm|myself|name is)\s+([a-z][a-z\s.'-]{1,60})/i)?.[1];
+  const candidate = explicit || trimmed.match(/^([a-z][a-z\s.'-]{1,60})\s*,\s*\d{1,2}\b/i)?.[1] || null;
+  if (!candidate) return null;
+  const cleaned = candidate.replace(/\b(?:and|course|interested|admission|fees?|for)\b.*$/i, "").trim();
+  const normalized = normalizeText(cleaned);
+  if (!normalized || ADMISSION_COURSE_OPTIONS.some((option) => option.aliases.some((alias) => normalized.includes(normalizeText(alias))))) {
+    return null;
+  }
+  return cleaned.slice(0, 100);
+}
+
+async function resolveCourseId(admin: SupabaseAdminClient, option: AdmissionCourseOption): Promise<string | null> {
+  const { data: courses } = await admin
+    .from("courses")
+    .select("id, name, code")
+    .order("code", { ascending: true });
+
+  const rows = (courses || []) as { id: string; name: string; code: string }[];
+  const byCode = rows.find((course) =>
+    option.codePrefixes.some((prefix) => (course.code || "").toUpperCase().startsWith(prefix))
+  );
+  if (byCode?.id) return byCode.id;
+
+  const byName = rows.find((course) => {
+    const name = normalizeText(course.name);
+    return option.aliases.some((alias) => name.includes(normalizeText(alias)));
+  });
+  return byName?.id || null;
+}
+
+interface CourseAdmissionBrief {
+  short_name: string;
+  positioning: string | null;
+  strongest_usp: string | null;
+  best_fit_lead: string | null;
+  bot_first_reply: string | null;
+  proof_points: string[] | null;
+  qualification_questions: string[] | null;
+  careers: string[] | null;
+  fee_summary: string | null;
+  source_url: string | null;
+  last_verified_at: string | null;
+}
+
+function formatList(label: string, values: string[] | null | undefined): string {
+  const filtered = (values || []).map((value) => value.trim()).filter(Boolean);
+  return filtered.length ? `${label}: ${filtered.join("; ")}` : "";
+}
+
+function formatCourseAdmissionBrief(brief: CourseAdmissionBrief | null): string {
+  if (!brief) return "";
+  return [
+    `Verified course brief: ${brief.short_name}`,
+    brief.positioning ? `Positioning: ${brief.positioning}` : "",
+    brief.strongest_usp ? `Strongest USP: ${brief.strongest_usp}` : "",
+    brief.best_fit_lead ? `Best-fit lead: ${brief.best_fit_lead}` : "",
+    brief.bot_first_reply ? `Bot first reply angle: ${brief.bot_first_reply}` : "",
+    formatList("Proof points", brief.proof_points),
+    formatList("Qualification questions", brief.qualification_questions),
+    formatList("Careers", brief.careers),
+    brief.fee_summary ? `Fee summary: ${brief.fee_summary}` : "",
+    brief.source_url ? `Source: ${brief.source_url}` : "",
+    brief.last_verified_at ? `Last verified: ${brief.last_verified_at}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+async function loadCourseAdmissionBrief(
+  admin: SupabaseAdminClient,
+  courseId: string | null,
+  courseName: string | null,
+): Promise<string> {
+  let brief: CourseAdmissionBrief | null = null;
+
+  if (courseId) {
+    const { data } = await admin
+      .from("course_admission_briefs")
+      .select("short_name,positioning,strongest_usp,best_fit_lead,bot_first_reply,proof_points,qualification_questions,careers,fee_summary,source_url,last_verified_at")
+      .eq("course_id", courseId)
+      .maybeSingle();
+    brief = data as CourseAdmissionBrief | null;
+  }
+
+  if (!brief && courseName) {
+    const { data } = await admin
+      .from("course_admission_briefs")
+      .select("short_name,positioning,strongest_usp,best_fit_lead,bot_first_reply,proof_points,qualification_questions,careers,fee_summary,source_url,last_verified_at")
+      .ilike("short_name", `%${courseName}%`)
+      .limit(1)
+      .maybeSingle();
+    brief = data as CourseAdmissionBrief | null;
+  }
+
+  return formatCourseAdmissionBrief(brief);
+}
+
+const COURSE_MENU = ADMISSION_COURSE_OPTIONS
+  .map((option) => `${option.number}. ${option.label}`)
+  .join("\n");
+
+function buildSystemPrompt(hasName: boolean, hasCourse: boolean, courseBriefContext: string): string {
   const introInstructions = `\n\nLEAD ENRICHMENT:
 ${!hasName ? "The student's name is not yet known. If they mention their name, extract it." : ""}
-${!hasCourse ? "The student's course interest is not yet known." : ""}
+${!hasCourse ? `The student's course interest is not yet known. Ask them to choose from this numbered list and tell them they can reply like "Priya, 3":\n${COURSE_MENU}` : ""}
 CRITICAL RULE: If the user's message mentions or asks about a specific course (like "BPT", "MBA", "nursing", "BCA", etc.), IMMEDIATELY answer their question about that course using the knowledge base. Do NOT ask them which course they are interested in — they just told you. Extract the course name and provide the information.
+If the user replies with a course option number, treat it as that course selection from the numbered list.
 Only ask for missing info (name or course) if the user's message does NOT contain any course reference or name. Never ask for something the user already provided in their message.
 When you detect name or course in the user's message, include at the END of your response:
 {"extracted_name": "...", "extracted_course": "..."}
@@ -262,6 +386,7 @@ Always end with a helpful call to action (e.g., visit portal, call helpline, or 
 If you don't know something specific, say you'll have a counsellor share the details and provide the helpline number (+91 9555192192).
 
 Do NOT make up information not present in the knowledge base.${introInstructions}${classificationInstructions}
+${courseBriefContext ? `\n\nCOURSE-SPECIFIC VERIFIED BRIEF:\n${courseBriefContext}` : ""}
 
 KNOWLEDGE BASE:
 ${KNOWLEDGE_BASE}`;
@@ -278,10 +403,11 @@ Deno.serve(async (req) => {
     const sendProvider: "meta" | "plivo" = provider === "plivo" ? "plivo" : "meta";
     // Channel key for the per-conversation AI/human guard: the Plivo number's
     // digits for the plivo path, else the Meta phone_number_id.
-    const channelKey: string | null =
-      (typeof business_number === "string" && business_number) ||
-      (typeof business_phone_number_id === "string" && business_phone_number_id) ||
-      null;
+    const channelKey = conversationBusinessKey(
+      sendProvider,
+      typeof business_phone_number_id === "string" ? business_phone_number_id : null,
+      typeof business_number === "string" ? business_number : null,
+    );
 
     if (!phone || !message) {
       return new Response(JSON.stringify({ error: "phone and message required" }), {
@@ -291,8 +417,16 @@ Deno.serve(async (req) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const authHeader = req.headers.get("Authorization") || req.headers.get("authorization") || "";
+    if (authHeader !== `Bearer ${serviceRoleKey}`) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const admin = createClient(supabaseUrl, serviceRoleKey);
     const googleApiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY")!;
+    const normalizedPhone = digits(phone);
 
     // Check if a counsellor manually replied in the last 30 minutes — skip AI if so
     // Auto-replies are tagged template_key="auto_reply"; AI replies tagged "ai_auto_reply"
@@ -318,13 +452,41 @@ Deno.serve(async (req) => {
     // bot stays silent and humans handle it. Missing row → defaults to 'ai', so
     // the existing Meta number is unaffected unless a row is explicitly created.
     if (channelKey) {
+      const { data: stateRow } = await admin
+        .from("whatsapp_conversation_state")
+        .select("mode,state")
+        .eq("phone", normalizedPhone)
+        .eq("business_number", channelKey)
+        .maybeSingle();
+      if (stateRow?.mode === "human" || stateRow?.mode === "paused" || stateRow?.mode === "closed") {
+        await logWhatsAppAutomationEvent(admin, {
+          phone,
+          businessNumber: channelKey,
+          provider: sendProvider,
+          eventType: "human_mode_skip",
+          decision: "skip_ai_reply",
+          reason: `conversation_${stateRow.mode}`,
+        });
+        return new Response(JSON.stringify({ skipped: true, reason: `conversation_${stateRow.mode}` }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
       const { data: modeRow } = await admin
         .from("whatsapp_ai_mode")
         .select("mode")
-        .eq("phone", phone.replace(/[^0-9]/g, ""))
+        .eq("phone", normalizedPhone)
         .eq("business_number", channelKey)
         .maybeSingle();
       if (modeRow?.mode === "human") {
+        await logWhatsAppAutomationEvent(admin, {
+          phone,
+          businessNumber: channelKey,
+          provider: sendProvider,
+          eventType: "human_mode_skip",
+          decision: "skip_ai_reply",
+          reason: "human_mode",
+        });
         return new Response(JSON.stringify({ skipped: true, reason: "human_mode" }), {
           status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -332,18 +494,20 @@ Deno.serve(async (req) => {
     }
 
     // ── Find or create lead ──────────────────────────────────────────────────
-    const normalizedPhone = phone.replace(/[^0-9]/g, "");
     const { data: existingLeads } = await admin
       .from("leads")
-      .select("id, name, course_id, person_role")
+      .select("id, name, course_id, person_role, counsellor_id")
       .or(`phone.eq.${normalizedPhone},phone.eq.${normalizedPhone.replace(/^91/, "+91")},phone.eq.+${normalizedPhone}`)
       .eq("is_mirror", false)
       .limit(1);
 
     const existingLead = existingLeads?.[0] || null;
     let leadId = existingLead?.id || null;
-    const hasName = !!(existingLead?.name && existingLead.name.trim().length > 1);
-    const hasCourse = !!(existingLead?.course_id || course_interest);
+    let existingCourseId = existingLead?.course_id || null;
+    let hasName = !isPlaceholderLeadName(existingLead?.name, normalizedPhone);
+    let hasCourse = !!(existingCourseId || course_interest);
+    let leadNameForPrompt = lead_name || (hasName ? existingLead?.name || null : null);
+    let courseInterestForPrompt = course_interest || null;
 
     // ── Short-circuit: don't pitch admissions to job applicants / vendors ────
     // Send a single templated reply instead and let HR / procurement take over.
@@ -353,21 +517,18 @@ Deno.serve(async (req) => {
         ? "Thanks for writing to NIMT. You've been forwarded to our HR team — they will get in touch about openings shortly. For urgent queries email careers@nimt.ac.in."
         : "Thanks for your message. You've been forwarded to our procurement team. For business enquiries please email procurement@nimt.ac.in with your company profile.";
       try {
-        const { token: waToken, phoneNumberId: pnId } = getWhatsAppConfigForPhone(typeof business_phone_number_id === "string" ? business_phone_number_id : null);
-        if (!waToken || !pnId) throw new Error("WhatsApp reply route is not configured");
-        const waPhone = phone.replace(/[^0-9]/g, "");
-        const sendRes = await fetch(`https://graph.facebook.com/v21.0/${pnId}/messages`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${waToken}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messaging_product: "whatsapp", to: waPhone, type: "text", text: { body: reply },
-          }),
-        });
-        if (sendRes.ok) {
-          const sendResult = await sendRes.json();
+        const sendResult = await sendWhatsAppText(admin, {
+          provider: sendProvider,
+          route: sendProvider === "plivo" ? "plivo_admissions" : "reply",
+          businessPhoneNumberId: typeof business_phone_number_id === "string" ? business_phone_number_id : null,
+          businessNumber: channelKey,
+          requireManualReply: true,
+        }, phone, reply);
+
+        if (sendResult.ok) {
           await admin.from("whatsapp_messages").insert({
             lead_id: leadId,
-            wa_message_id: sendResult?.messages?.[0]?.id || null,
+            wa_message_id: sendResult.messageId,
             direction: "outbound",
             phone,
             message_type: "text",
@@ -375,8 +536,25 @@ Deno.serve(async (req) => {
             status: "sent",
             is_read: true,
             template_key: role === "job_applicant" ? "hr_handoff" : "procurement_handoff",
-            business_phone_number_id: pnId,
+            provider: sendResult.provider,
+            business_phone_number_id: sendResult.businessPhoneNumberId,
+            business_phone_number: sendResult.businessNumber,
           });
+          await upsertConversationState(admin, {
+            phone,
+            businessNumber: channelKey,
+            provider: sendResult.provider,
+            leadId,
+            mode: "human",
+            state: role === "job_applicant" ? "job_handoff" : "vendor_handoff",
+            ownerUserId: existingLead?.counsellor_id || null,
+            escalationRole: role === "job_applicant" ? "hr" : "procurement",
+            handoffReason: `classified_${role}`,
+            priority: "normal",
+            lastIntent: role,
+          });
+        } else {
+          console.error("Job/vendor handoff send failed:", sendResult.raw || sendResult.error);
         }
       } catch (e) {
         console.error("Job/vendor handoff reply error:", e);
@@ -409,6 +587,31 @@ Deno.serve(async (req) => {
       console.log("Auto-created lead from WhatsApp:", leadId);
     }
 
+    const deterministicName = !hasName ? extractNameCandidate(message) : null;
+    if (leadId && deterministicName) {
+      await admin.from("leads").update({ name: deterministicName }).eq("id", leadId);
+      hasName = true;
+      leadNameForPrompt = deterministicName;
+    }
+
+    const selectedCourseOption = !hasCourse ? detectCourseOption(message) : null;
+    if (leadId && selectedCourseOption) {
+      const courseId = await resolveCourseId(admin, selectedCourseOption);
+      courseInterestForPrompt = selectedCourseOption.label;
+      hasCourse = true;
+
+      if (courseId) {
+        await admin.from("leads").update({ course_id: courseId }).eq("id", leadId);
+        existingCourseId = courseId;
+      }
+
+      await admin.from("lead_notes").insert({
+        lead_id: leadId,
+        content: `Course interest (from WhatsApp): ${selectedCourseOption.label}`,
+        user_id: null,
+      });
+    }
+
     // Build conversation context
     const contextParts: { role: string; parts: { text: string }[] }[] = [];
     if (recent_messages && recent_messages.length > 0) {
@@ -419,13 +622,15 @@ Deno.serve(async (req) => {
         });
       }
     }
-    const leadContext = lead_name
-      ? `[Lead info: Name=${lead_name}, Stage=${lead_stage || "unknown"}, Course interest=${course_interest || "not specified"}]\n\n`
+    const leadContext = leadNameForPrompt || courseInterestForPrompt || existingCourseId
+      ? `[Lead info: Name=${leadNameForPrompt || "not specified"}, Stage=${lead_stage || "unknown"}, Course interest=${courseInterestForPrompt || (existingCourseId ? "already selected in CRM" : "not specified")}]\n\n`
       : "";
     contextParts.push({ role: "user", parts: [{ text: leadContext + message }] });
 
+    const courseBriefContext = await loadCourseAdmissionBrief(admin, existingCourseId, courseInterestForPrompt);
+
     // Call Gemini with dynamic system prompt
-    const systemPrompt = buildSystemPrompt(hasName, hasCourse);
+    const systemPrompt = buildSystemPrompt(hasName, hasCourse, courseBriefContext);
     const geminiRes = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${googleApiKey}`,
       {
@@ -484,6 +689,13 @@ Deno.serve(async (req) => {
         console.log("Enriched lead name:", leadId, extractedName);
       }
       if (extractedCourse) {
+        const extractedCourseOption = detectCourseOption(extractedCourse);
+        if (extractedCourseOption) {
+          const courseId = await resolveCourseId(admin, extractedCourseOption);
+          if (courseId) {
+            await admin.from("leads").update({ course_id: courseId }).eq("id", leadId);
+          }
+        }
         await admin.from("lead_notes").insert({
           lead_id: leadId,
           content: `Course interest (from WhatsApp): ${extractedCourse}`,
@@ -529,67 +741,74 @@ Deno.serve(async (req) => {
     }
 
     // ── Send via WhatsApp API ───────────────────────────────────────────────
-    const waPhone = phone.replace(/[^0-9]/g, "");
-    let sentMessageId: string | null = null;
-    let loggedChannel: string | null = channelKey;
+    const sendResult = await sendWhatsAppText(admin, {
+      provider: sendProvider,
+      route: sendProvider === "plivo" ? "plivo_admissions" : "reply",
+      businessPhoneNumberId: typeof business_phone_number_id === "string" ? business_phone_number_id : null,
+      businessNumber: channelKey,
+      requireAi: true,
+    }, phone, aiReply);
 
-    if (sendProvider === "plivo") {
-      // Plivo BSP path (coexistence number). src = our Plivo number, dst = lead.
-      if (!channelKey) {
-        return new Response(JSON.stringify({ error: "Plivo send requires business_number" }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      const plivoRes = await sendPlivoWhatsAppText(channelKey, waPhone, aiReply);
-      if (!plivoRes.ok) {
-        console.error("Plivo WhatsApp send failed:", plivoRes.raw);
-        return new Response(JSON.stringify({ error: "Plivo send failed", detail: plivoRes.raw }), {
-          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      sentMessageId = plivoRes.messageUuid;
-    } else {
-      const { token: waToken, phoneNumberId: pnId } = getWhatsAppConfigForPhone(typeof business_phone_number_id === "string" ? business_phone_number_id : null);
-      if (!waToken || !pnId) {
-        return new Response(JSON.stringify({ error: "WhatsApp reply route is not configured" }), {
-          status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      loggedChannel = pnId;
-      const waRes = await fetch(`https://graph.facebook.com/v21.0/${pnId}/messages`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${waToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          to: waPhone,
-          type: "text",
-          text: { body: aiReply },
-        }),
+    if (!sendResult.ok) {
+      console.error("WhatsApp AI send failed:", sendResult.raw || sendResult.error);
+      await logWhatsAppAutomationEvent(admin, {
+        phone,
+        businessNumber: sendResult.businessNumber || sendResult.businessPhoneNumberId || channelKey,
+        provider: sendResult.provider,
+        leadId,
+        eventType: "send_failed",
+        decision: "ai_reply_failed",
+        reason: sendResult.error,
+        metadata: { status: sendResult.status, raw: sendResult.raw },
       });
-
-      const waResult = await waRes.json();
-      if (!waRes.ok) {
-        console.error("WhatsApp send failed:", waResult);
-        return new Response(JSON.stringify({ error: "WhatsApp send failed", detail: waResult }), {
-          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      sentMessageId = waResult?.messages?.[0]?.id || null;
+      return new Response(JSON.stringify({ error: sendResult.error || "WhatsApp send failed", detail: sendResult.raw }), {
+        status: sendResult.status >= 400 ? sendResult.status : 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // Log outbound AI reply
     await admin.from("whatsapp_messages").insert({
       lead_id: leadId,
-      wa_message_id: sentMessageId,
+      wa_message_id: sendResult.messageId,
       direction: "outbound",
-      phone,
+      phone: digits(phone),
       message_type: "text",
       content: aiReply,
       status: "sent",
       is_read: true,
       template_key: "ai_auto_reply",
-      provider: sendProvider,
-      business_phone_number_id: loggedChannel,
+      provider: sendResult.provider,
+      business_phone_number_id: sendResult.businessPhoneNumberId,
+      business_phone_number: sendResult.businessNumber,
+    });
+
+    await logWhatsAppAutomationEvent(admin, {
+      phone,
+      businessNumber: sendResult.businessNumber || sendResult.businessPhoneNumberId || channelKey,
+      provider: sendResult.provider,
+      leadId,
+      eventType: "ai_reply_sent",
+      decision: botAction,
+      reason: queryType,
+      confidence,
+      metadata: { message_id: sendResult.messageId },
+    });
+
+    await upsertConversationState(admin, {
+      phone,
+      businessNumber: sendResult.businessNumber || sendResult.businessPhoneNumberId || channelKey,
+      provider: sendResult.provider,
+      leadId,
+      mode: "ai",
+      state: confidence < 0.6 ? "knowledge_gap" : "answered_by_ai",
+      ownerUserId: existingLead?.counsellor_id || null,
+      escalationRole: confidence < 0.6 ? "admission_head" : null,
+      handoffReason: confidence < 0.6 ? "low_confidence" : null,
+      priority: confidence < 0.6 ? "high" : "normal",
+      lastIntent: queryType,
+      lastConfidence: confidence,
+      lastBotAction: botAction,
     });
 
     return new Response(JSON.stringify({ success: true, reply: aiReply, query_type: queryType, action: botAction }), {

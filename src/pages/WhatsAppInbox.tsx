@@ -44,8 +44,19 @@ interface Conversation {
   counsellor_id: string | null;
   counsellor_name: string | null;
   has_inbound: boolean;
+  provider: "meta" | "plivo" | null;
   business_phone_number_id: string | null;
   business_phone_number: string | null;
+  conversation_mode: "ai" | "human" | "paused" | "closed" | null;
+  conversation_state: string | null;
+  owner_user_id: string | null;
+  escalation_role: string | null;
+  handoff_reason: string | null;
+  priority: "low" | "normal" | "high" | "urgent" | null;
+  sla_due_at: string | null;
+  last_intent: string | null;
+  last_confidence: number | null;
+  last_bot_action: string | null;
   lead_counsellor_ids: string[] | null;
 }
 
@@ -68,6 +79,7 @@ interface MessageConversationSeed {
   direction: string | null;
   content: string | null;
   created_at: string | null;
+  provider: "meta" | "plivo" | null;
   business_phone_number_id: string | null;
   business_phone_number: string | null;
   is_read: boolean | null;
@@ -274,6 +286,69 @@ const formatInboxLabel = (id: string, label?: string | null) => {
   return label || id;
 };
 
+const STATE_LABELS: Record<string, string> = {
+  new_unqualified: "New",
+  awaiting_name: "Needs name",
+  awaiting_course: "Needs course",
+  qualified: "Qualified",
+  answered_by_ai: "AI answered",
+  needs_counsellor: "Needs counsellor",
+  human_active: "Human active",
+  followup_scheduled: "Follow-up",
+  not_interested: "Not interested",
+  dnc: "DNC",
+  job_handoff: "HR handoff",
+  vendor_handoff: "Vendor handoff",
+  knowledge_gap: "Knowledge gap",
+};
+
+const stateLabel = (state?: string | null) =>
+  state ? (STATE_LABELS[state] || state.replace(/_/g, " ")) : "New";
+
+const conversationBusinessKey = (conv?: Conversation | null) =>
+  conv?.provider === "plivo"
+    ? (conv.business_phone_number || conv.business_phone_number_id || null)
+    : (conv?.business_phone_number_id || conv?.business_phone_number || null);
+
+const CONVERSATION_SELECT_RICH = `
+  phone, lead_id, lead_name, lead_stage, lead_person_role, course_name,
+  last_message, last_direction, last_message_at, unread_count,
+  counsellor_id, counsellor_name, has_inbound,
+  provider, business_phone_number_id, business_phone_number,
+  conversation_mode, conversation_state, owner_user_id, escalation_role,
+  handoff_reason, priority, sla_due_at, last_intent, last_confidence, last_bot_action,
+  lead_counsellor_ids
+`;
+
+const CONVERSATION_SELECT_PROVIDER = `
+  phone, lead_id, lead_name, lead_stage, lead_person_role, course_name,
+  last_message, last_direction, last_message_at, unread_count,
+  counsellor_id, counsellor_name, has_inbound,
+  provider, business_phone_number_id, business_phone_number, lead_counsellor_ids
+`;
+
+const CONVERSATION_SELECT_LEGACY = `
+  phone, lead_id, lead_name, lead_stage, lead_person_role, course_name,
+  last_message, last_direction, last_message_at, unread_count,
+  counsellor_id, counsellor_name, has_inbound,
+  business_phone_number_id, business_phone_number, lead_counsellor_ids
+`;
+
+const withConversationDefaults = (row: any): Conversation => ({
+  ...row,
+  provider: row.provider || null,
+  conversation_mode: row.conversation_mode || null,
+  conversation_state: row.conversation_state || null,
+  owner_user_id: row.owner_user_id || null,
+  escalation_role: row.escalation_role || null,
+  handoff_reason: row.handoff_reason || null,
+  priority: row.priority || null,
+  sla_due_at: row.sla_due_at || null,
+  last_intent: row.last_intent || null,
+  last_confidence: row.last_confidence ?? null,
+  last_bot_action: row.last_bot_action || null,
+});
+
 const WhatsAppInbox = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -319,6 +394,7 @@ const WhatsAppInbox = () => {
   const [unrepliedOnly, setUnrepliedOnly] = useState(false);
   const [unrepliedByCC, setUnrepliedByCC] = useState<{ id: string; name: string; count: number }[]>([]);
   const [unrepliedPanelOpen, setUnrepliedPanelOpen] = useState(true);
+  const [opsFilter, setOpsFilter] = useState<"all" | "handoff" | "sla" | "knowledge" | "unassigned">("all");
 
   // Quick-action followup dialog
   const [followupOpen, setFollowupOpen] = useState(false);
@@ -356,17 +432,28 @@ const WhatsAppInbox = () => {
   useEffect(() => {
     const conv = conversations.find(c => c.phone === selectedPhone && matchesActiveBusinessNumber(c))
       || conversations.find(c => c.phone === selectedPhone);
-    const channel = conv?.business_phone_number_id;
+    const channel = conversationBusinessKey(conv);
     if (!selectedPhone || !channel) { setAiMode(null); return; }
     let cancelled = false;
     (async () => {
+      const { data: stateData } = await (supabase as any)
+        .from("whatsapp_conversation_state")
+        .select("mode")
+        .eq("phone", selectedPhone.replace(/[^0-9]/g, ""))
+        .eq("business_number", channel)
+        .maybeSingle();
+      if (stateData?.mode) {
+        if (!cancelled) setAiMode(stateData.mode === "human" ? "human" : "ai");
+        return;
+      }
+
       const { data } = await (supabase as any)
         .from("whatsapp_ai_mode")
         .select("mode")
         .eq("phone", selectedPhone.replace(/[^0-9]/g, ""))
         .eq("business_number", channel)
         .maybeSingle();
-      if (!cancelled) setAiMode(((data?.mode as "ai" | "human") ?? "ai"));
+      if (!cancelled) setAiMode(((data?.mode as "ai" | "human") ?? conv?.conversation_mode ?? "ai") === "human" ? "human" : "ai");
     })();
     return () => { cancelled = true; };
   }, [selectedPhone, conversations, businessNumber, isHrScope]);
@@ -374,7 +461,7 @@ const WhatsAppInbox = () => {
   const toggleAiMode = async () => {
     const conv = conversations.find(c => c.phone === selectedPhone && matchesActiveBusinessNumber(c))
       || conversations.find(c => c.phone === selectedPhone);
-    const channel = conv?.business_phone_number_id;
+    const channel = conversationBusinessKey(conv);
     if (!selectedPhone || !channel) return;
     const next = aiMode === "human" ? "ai" : "human";
     setAiModeSaving(true);
@@ -384,9 +471,30 @@ const WhatsAppInbox = () => {
         { phone: selectedPhone.replace(/[^0-9]/g, ""), business_number: channel, mode: next, updated_at: new Date().toISOString() },
         { onConflict: "phone,business_number" },
       );
+    const { error: stateError } = await (supabase as any)
+      .from("whatsapp_conversation_state")
+      .upsert(
+        {
+          phone: selectedPhone.replace(/[^0-9]/g, ""),
+          business_number: channel,
+          provider: conv?.provider || "meta",
+          lead_id: conv?.lead_id || null,
+          mode: next,
+          state: next === "human" ? "human_active" : "new_unqualified",
+          owner_user_id: next === "human" ? (profile?.id || null) : (conv?.owner_user_id || conv?.counsellor_id || null),
+          handoff_reason: next === "human" ? "manual_toggle" : null,
+          updated_by: profile?.id || null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "phone,business_number" },
+      );
     setAiModeSaving(false);
-    if (error) { toast({ title: "Couldn't update mode", description: error.message, variant: "destructive" }); return; }
+    if (error || stateError) { toast({ title: "Couldn't update mode", description: error?.message || stateError?.message, variant: "destructive" }); return; }
     setAiMode(next);
+    setConversations(prev => prev.map(c => c.phone === selectedPhone && conversationBusinessKey(c) === channel
+      ? { ...c, conversation_mode: next, conversation_state: next === "human" ? "human_active" : "new_unqualified", handoff_reason: next === "human" ? "manual_toggle" : null }
+      : c
+    ));
     toast({ title: next === "human" ? "AI paused for this chat" : "AI re-enabled for this chat" });
   };
 
@@ -501,7 +609,7 @@ const WhatsAppInbox = () => {
 
     let messageQuery = supabase
       .from("whatsapp_messages" as any)
-      .select("phone, lead_id, direction, content, created_at, business_phone_number_id, business_phone_number, is_read")
+      .select("phone, lead_id, direction, content, created_at, provider, business_phone_number_id, business_phone_number, is_read")
       .order("created_at", { ascending: false })
       .limit(CONVERSATION_PAGE_SIZE * 5);
 
@@ -606,7 +714,7 @@ const WhatsAppInbox = () => {
       .map(group => {
         const latest = group.latest;
         const lead = group.leadId ? leadById.get(group.leadId) : null;
-        return {
+        return withConversationDefaults({
           phone: latest.phone || "",
           lead_id: group.leadId,
           lead_name: lead?.name || null,
@@ -620,10 +728,11 @@ const WhatsAppInbox = () => {
           counsellor_id: lead?.counsellor_id || null,
           counsellor_name: lead?.counsellor_id ? counsellorById.get(lead.counsellor_id) || null : null,
           has_inbound: group.hasInbound,
+          provider: latest.provider || null,
           business_phone_number_id: latest.business_phone_number_id || selectedChannel || null,
           business_phone_number: latest.business_phone_number || selectedChannel || null,
           lead_counsellor_ids: lead?.counsellor_id ? [lead.counsellor_id] : null,
-        } satisfies Conversation;
+        });
       })
       .filter(row => matchesInbox(row))
       .sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime())
@@ -643,58 +752,62 @@ const WhatsAppInbox = () => {
     else setLoadingMoreConversations(true);
 
     try {
-      let q = supabase
-        .from("whatsapp_conversations" as any)
-        .select(`
-          phone, lead_id, lead_name, lead_stage, lead_person_role, course_name,
-          last_message, last_direction, last_message_at, unread_count,
-          counsellor_id, counsellor_name, has_inbound,
-          business_phone_number_id, business_phone_number, lead_counsellor_ids
-        `)
-        .order("last_message_at", { ascending: false })
-        .order("phone", { ascending: false })
-        .limit(CONVERSATION_PAGE_SIZE);
+      let rows: Conversation[] = [];
+      let lastError: any = null;
+      for (const selectFields of [CONVERSATION_SELECT_RICH, CONVERSATION_SELECT_PROVIDER, CONVERSATION_SELECT_LEGACY]) {
+        let q = supabase
+          .from("whatsapp_conversations" as any)
+          .select(selectFields)
+          .order("last_message_at", { ascending: false })
+          .order("phone", { ascending: false })
+          .limit(CONVERSATION_PAGE_SIZE);
 
-      if (explicitCursor) {
-        q = q.or(`last_message_at.lt.${explicitCursor.last_message_at},and(last_message_at.eq.${explicitCursor.last_message_at},phone.lt.${explicitCursor.phone})`);
-      }
-
-      if (!isHrScope && businessNumber !== "primary") {
-        const variants = businessChannelVariants(businessNumber);
-        if (variants.length > 0) {
-          q = q.or(
-            variants
-              .flatMap(v => [`business_phone_number_id.eq.${v}`, `business_phone_number.eq.${v}`])
-              .join(","),
-          );
+        if (explicitCursor) {
+          q = q.or(`last_message_at.lt.${explicitCursor.last_message_at},and(last_message_at.eq.${explicitCursor.last_message_at},phone.lt.${explicitCursor.phone})`);
         }
-      }
 
-      if (role === "counsellor" && profile?.id) {
-        // Filter via the aggregated lead_counsellor_ids array — covers the
-        // case where the latest message on a phone is a campaign blast
-        // (lead_id NULL) or a template tied to another counsellor's lead.
-        q = q.contains("lead_counsellor_ids", [profile.id]);
-      } else if (isAdminRole(role)) {
-        if (counsellorFilter === "unassigned") {
-          q = (q as any).is("counsellor_id", null);
-        } else if (counsellorFilter !== "all") {
-          q = q.eq("counsellor_id", counsellorFilter);
+        if (!isHrScope && businessNumber !== "primary") {
+          const variants = businessChannelVariants(businessNumber);
+          if (variants.length > 0) {
+            q = q.or(
+              variants
+                .flatMap(v => [`business_phone_number_id.eq.${v}`, `business_phone_number.eq.${v}`])
+                .join(","),
+            );
+          }
         }
+
+        if (role === "counsellor" && profile?.id) {
+          // Filter via the aggregated lead_counsellor_ids array — covers the
+          // case where the latest message on a phone is a campaign blast
+          // (lead_id NULL) or a template tied to another counsellor's lead.
+          q = q.contains("lead_counsellor_ids", [profile.id]);
+        } else if (isAdminRole(role)) {
+          if (counsellorFilter === "unassigned") {
+            q = (q as any).is("counsellor_id", null);
+          } else if (counsellorFilter !== "all") {
+            q = q.eq("counsellor_id", counsellorFilter);
+          }
+        }
+
+        const { data, error } = await q;
+        if (!error) {
+          lastError = null;
+          rows = ((data || []) as any[]).map(withConversationDefaults);
+          break;
+        }
+        lastError = error;
       }
 
-      const { data, error } = await q;
-      if (error) throw error;
-
-      let rows = ((data || []) as any[]) as Conversation[];
+      if (lastError && rows.length === 0) throw lastError;
       if (reset && rows.length === 0 && businessNumber !== "primary" && isBusinessPhoneNumberChannel(businessNumber)) {
         rows = await fetchMessageBackedConversationRows(businessNumber);
       }
 
       setConversations(prev => {
         if (reset) return rows;
-        const seen = new Set(prev.map(c => `${c.phone}:${c.business_phone_number_id || ""}`));
-        const nextRows = rows.filter(c => !seen.has(`${c.phone}:${c.business_phone_number_id || ""}`));
+        const seen = new Set(prev.map(c => `${c.phone}:${conversationBusinessKey(c) || ""}`));
+        const nextRows = rows.filter(c => !seen.has(`${c.phone}:${conversationBusinessKey(c) || ""}`));
         return [...prev, ...nextRows];
       });
 
@@ -822,8 +935,19 @@ const WhatsAppInbox = () => {
           counsellor_id: null,
           counsellor_name: null,
           has_inbound: false,
+          provider: null,
           business_phone_number_id: null,
           business_phone_number: null,
+          conversation_mode: null,
+          conversation_state: null,
+          owner_user_id: null,
+          escalation_role: null,
+          handoff_reason: null,
+          priority: null,
+          sla_due_at: null,
+          last_intent: null,
+          last_confidence: null,
+          last_bot_action: null,
           lead_counsellor_ids: null,
         });
       }
@@ -914,20 +1038,21 @@ const WhatsAppInbox = () => {
       setInboxTab("all");
     } else {
       (async () => {
-        const { data } = await supabase
-          .from("whatsapp_conversations" as any)
-          .select(`
-            phone, lead_id, lead_name, lead_stage, lead_person_role, course_name,
-            last_message, last_direction, last_message_at, unread_count,
-            counsellor_id, counsellor_name, has_inbound,
-            business_phone_number_id, business_phone_number, lead_counsellor_ids
-          `)
-          .eq("phone", normalized)
-          .order("last_message_at", { ascending: false })
-          .limit(1);
+        let row: Conversation | undefined;
+        for (const selectFields of [CONVERSATION_SELECT_RICH, CONVERSATION_SELECT_PROVIDER, CONVERSATION_SELECT_LEGACY]) {
+          const { data, error } = await supabase
+            .from("whatsapp_conversations" as any)
+            .select(selectFields)
+            .eq("phone", normalized)
+            .order("last_message_at", { ascending: false })
+            .limit(1);
+          if (!error) {
+            row = ((data || []) as any[]).map(withConversationDefaults)[0];
+            break;
+          }
+        }
 
         if (cancelled) return;
-        const row = ((data || []) as any[])[0] as Conversation | undefined;
         if (!row) {
           setDeepLinkNotFound(true);
           return;
@@ -1103,7 +1228,9 @@ const WhatsAppInbox = () => {
         phone: selectedPhone,
         message: messageText,
         lead_id: conv?.lead_id || null,
+        provider: conv?.provider || null,
         business_phone_number_id: conv?.business_phone_number_id || null,
+        business_number: conv?.business_phone_number || null,
       },
     });
 
@@ -1145,7 +1272,9 @@ const WhatsAppInbox = () => {
           phone: selectedPhone,
           message: previewText,
           lead_id: conv?.lead_id || null,
+          provider: conv?.provider || null,
           business_phone_number_id: conv?.business_phone_number_id || null,
+          business_number: conv?.business_phone_number || null,
         },
       });
       if (error) {
@@ -1329,11 +1458,13 @@ const WhatsAppInbox = () => {
     const { error: replyErr } = await invokeEdge("whatsapp-reply", {
       body: {
         phone: selectedPhone,
-        message,
-        lead_id: leadId,
-        business_phone_number_id: selectedConv?.business_phone_number_id || null,
-      },
-    });
+          message,
+          lead_id: leadId,
+          provider: selectedConv?.provider || null,
+          business_phone_number_id: selectedConv?.business_phone_number_id || null,
+          business_number: selectedConv?.business_phone_number || null,
+        },
+      });
 
     if (replyErr) {
       toast({
@@ -1378,6 +1509,16 @@ const WhatsAppInbox = () => {
 
   const NON_ADMISSION_ROLES = new Set(["job_applicant", "vendor", "other"]);
   const isOtherCategory = (c: Conversation) => c.lead_person_role && NON_ADMISSION_ROLES.has(c.lead_person_role);
+  const isHandoffConversation = (c: Conversation) =>
+    c.conversation_state === "needs_counsellor"
+    || c.conversation_mode === "human"
+    || Boolean(c.handoff_reason);
+  const isSlaBreached = (c: Conversation) =>
+    Boolean(c.sla_due_at && new Date(c.sla_due_at).getTime() < Date.now());
+  const isKnowledgeGap = (c: Conversation) =>
+    c.conversation_state === "knowledge_gap" || c.last_bot_action === "knowledge_gap";
+  const isUnassignedOps = (c: Conversation) =>
+    !c.owner_user_id && !c.counsellor_id && c.has_inbound;
 
   // Apply mode filter (inbox vs outbound) to get the working set
   const modeFiltered = allConvs.filter(c => {
@@ -1388,6 +1529,10 @@ const WhatsAppInbox = () => {
   });
 
   const filtered = modeFiltered.filter(c => {
+    if (opsFilter === "handoff" && !isHandoffConversation(c)) return false;
+    if (opsFilter === "sla" && !isSlaBreached(c)) return false;
+    if (opsFilter === "knowledge" && !isKnowledgeGap(c)) return false;
+    if (opsFilter === "unassigned" && !isUnassignedOps(c)) return false;
     // Tab filter
     if (inboxTab === "all") { /* show everything */ }
     else if (inboxTab === "leads" && (!c.lead_id || isOtherCategory(c))) return false;
@@ -1419,6 +1564,13 @@ const WhatsAppInbox = () => {
   const jobUnreplied = jobConvs.filter(c => c.unread_count > 0).length;
   const otherConvs = modeFiltered.filter(c => c.lead_person_role === "vendor" || c.lead_person_role === "other");
   const otherUnreplied = otherConvs.filter(c => c.unread_count > 0).length;
+  const opsFilters = [
+    { key: "all" as const, label: "All ops", count: modeFiltered.length },
+    { key: "handoff" as const, label: "Handoff", count: modeFiltered.filter(isHandoffConversation).length },
+    { key: "sla" as const, label: "SLA", count: modeFiltered.filter(isSlaBreached).length },
+    { key: "knowledge" as const, label: "Knowledge", count: modeFiltered.filter(isKnowledgeGap).length },
+    { key: "unassigned" as const, label: "Unassigned", count: modeFiltered.filter(isUnassignedOps).length },
+  ];
 
   const formatTime = (iso: string) => {
     const d = new Date(iso);
@@ -1561,6 +1713,24 @@ const WhatsAppInbox = () => {
                 </button>
               ))}
             </div>
+
+            {isAdminRole(role) && (
+              <div className="flex flex-wrap gap-1 px-3 py-2 border-b border-border/70 bg-muted/20">
+                {opsFilters.map((f) => (
+                  <button
+                    key={f.key}
+                    onClick={() => setOpsFilter(f.key)}
+                    className={`rounded-full px-2.5 py-0.5 text-[10px] font-medium border transition-colors ${
+                      opsFilter === f.key
+                        ? "border-slate-400 bg-slate-100 text-slate-800"
+                        : "border-transparent bg-background/70 text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {f.label} {f.count}
+                  </button>
+                ))}
+              </div>
+            )}
 
             {/* Admin: counsellor filter row */}
             {isAdminRole(role) && (
@@ -1752,10 +1922,15 @@ const WhatsAppInbox = () => {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <p className="text-sm font-semibold text-foreground truncate">{selectedConv?.lead_name || (selectedPhone ? formatPhone(selectedPhone) : "")}</p>
-                      {selectedConv?.counsellor_name && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 dark:bg-violet-900/30 border border-violet-200 dark:border-violet-700 px-2 py-0.5 text-[10px] font-medium text-violet-700 dark:text-violet-300 whitespace-nowrap">
-                          <User className="h-2.5 w-2.5" />
-                          {selectedConv.counsellor_name}
+	                      {selectedConv?.counsellor_name && (
+	                        <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 dark:bg-violet-900/30 border border-violet-200 dark:border-violet-700 px-2 py-0.5 text-[10px] font-medium text-violet-700 dark:text-violet-300 whitespace-nowrap">
+	                          <User className="h-2.5 w-2.5" />
+	                          {selectedConv.counsellor_name}
+	                        </span>
+	                      )}
+                      {selectedConv?.conversation_state && (
+                        <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-700 whitespace-nowrap">
+                          {stateLabel(selectedConv.conversation_state)}
                         </span>
                       )}
                     </div>
@@ -1770,7 +1945,7 @@ const WhatsAppInbox = () => {
                       )}
                     </p>
                   </div>
-                  {selectedConv?.business_phone_number_id && aiMode && (
+                  {conversationBusinessKey(selectedConv) && aiMode && (
                     <button
                       onClick={toggleAiMode}
                       disabled={aiModeSaving}
@@ -1808,7 +1983,9 @@ const WhatsAppInbox = () => {
                             message: "You have been added to our Do Not Contact list. We will not reach out to you via call or WhatsApp going forward. If this was a mistake, please reply START or call us at +91 9555192192.",
                             lead_id: dncLeadId,
                             bypass_dnc: true,
+                            provider: selectedConv?.provider || null,
                             business_phone_number_id: selectedConv?.business_phone_number_id || null,
+                            business_number: selectedConv?.business_phone_number || null,
                           },
                         });
                         // Reflect new DNC status locally so composer disables immediately

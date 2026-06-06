@@ -1,5 +1,14 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { sendPlivoWhatsAppText } from "../_shared/plivo.ts";
+import {
+  digits,
+  errorMessage,
+  sendWhatsAppText,
+  type WhatsAppChannelHint,
+  type WhatsAppProvider,
+} from "../_shared/whatsapp-channel.ts";
+import { logWhatsAppAutomationEvent } from "../_shared/whatsapp-automation-events.ts";
+import { recordWhatsAppOutboundContext } from "../_shared/whatsapp-outbound-context.ts";
+import { upsertConversationState } from "../_shared/whatsapp-conversation-state.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,57 +16,36 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-type WhatsAppRoute = "default" | "otp" | "call" | "visit" | "bulk" | "reply";
-const PLIVO_WHATSAPP_NUMBER = "919555192192";
+async function inferRouteFromLatestMessage(
+  admin: ReturnType<typeof createClient>,
+  phone: string,
+  requestedPhoneNumberId: string | null,
+): Promise<WhatsAppChannelHint> {
+  let query = admin
+    .from("whatsapp_messages")
+    .select("provider, business_phone_number_id, business_phone_number")
+    .eq("phone", digits(phone))
+    .order("created_at", { ascending: false })
+    .limit(1);
 
-function digitsOnly(value: string | null | undefined) {
-  return (value || "").replace(/[^0-9]/g, "");
-}
+  if (requestedPhoneNumberId) {
+    query = query.eq("business_phone_number_id", requestedPhoneNumberId);
+  }
 
-function normalizeBusinessPhoneNumber(value: string | null | undefined) {
-  const digits = digitsOnly(value);
-  if (digits.length === 10) return `91${digits}`;
-  return digits;
-}
+  const { data } = await query;
+  const latest = data?.[0] as {
+    provider?: string | null;
+    business_phone_number_id?: string | null;
+    business_phone_number?: string | null;
+  } | undefined;
 
-function isPlivoWhatsAppChannel(value: string | null | undefined) {
-  return normalizeBusinessPhoneNumber(value) === PLIVO_WHATSAPP_NUMBER;
-}
-
-function routeConfig(route: WhatsAppRoute) {
-  const token =
-    (route === "otp" ? Deno.env.get("WHATSAPP_OTP_API_TOKEN") : null) ||
-    (route === "call" ? Deno.env.get("WHATSAPP_CALL_API_TOKEN") : null) ||
-    (route === "visit" ? Deno.env.get("WHATSAPP_VISIT_API_TOKEN") : null) ||
-    (route === "bulk" ? Deno.env.get("WHATSAPP_BULK_API_TOKEN") : null) ||
-    (route === "reply" ? Deno.env.get("WHATSAPP_REPLY_API_TOKEN") : null) ||
-    Deno.env.get("WHATSAPP_API_TOKEN");
-
-  const phoneNumberId =
-    (route === "otp" ? Deno.env.get("WHATSAPP_OTP_PHONE_NUMBER_ID") : null) ||
-    (route === "call" ? Deno.env.get("WHATSAPP_CALL_PHONE_NUMBER_ID") : null) ||
-    (route === "visit" ? Deno.env.get("WHATSAPP_VISIT_PHONE_NUMBER_ID") : null) ||
-    (route === "bulk" ? Deno.env.get("WHATSAPP_BULK_PHONE_NUMBER_ID") : null) ||
-    (route === "reply" ? Deno.env.get("WHATSAPP_REPLY_PHONE_NUMBER_ID") : null) ||
-    Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
-
-  return { route, token, phoneNumberId };
-}
-
-function allowedPhoneConfigs() {
-  const configs = [
-    routeConfig("default"),
-    routeConfig("otp"),
-    routeConfig("call"),
-    routeConfig("visit"),
-    routeConfig("bulk"),
-    routeConfig("reply"),
-  ];
-
-  return configs.filter((config, index, all) =>
-    config.phoneNumberId &&
-    all.findIndex((item) => item.phoneNumberId === config.phoneNumberId) === index
-  );
+  return {
+    provider: latest?.provider === "plivo" ? "plivo" : "meta",
+    route: "reply",
+    businessPhoneNumberId: latest?.business_phone_number_id || requestedPhoneNumberId,
+    businessNumber: latest?.business_phone_number || latest?.business_phone_number_id || null,
+    requireManualReply: true,
+  };
 }
 
 Deno.serve(async (req) => {
@@ -88,29 +76,26 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { phone, message, lead_id, bypass_dnc, business_phone_number_id } = await req.json();
+    const { phone, message, lead_id, bypass_dnc, business_phone_number_id, provider, business_number } = await req.json();
     if (!phone || !message) {
       return new Response(JSON.stringify({ error: "phone and message are required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const requestedPhoneNumberId = typeof business_phone_number_id === "string" ? business_phone_number_id : null;
-    const usePlivo = isPlivoWhatsAppChannel(requestedPhoneNumberId);
-    const matchingConfig = requestedPhoneNumberId
-      ? allowedPhoneConfigs().find((config) => config.phoneNumberId === requestedPhoneNumberId)
-      : null;
-    const defaultConfig = routeConfig("reply");
-    const { token: whatsappToken, phoneNumberId } = matchingConfig || defaultConfig;
-
-    if (!usePlivo && (!whatsappToken || !phoneNumberId)) {
-      return new Response(
-        JSON.stringify({ error: "WhatsApp reply route is not configured" }),
-        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
     const admin = createClient(supabaseUrl, serviceRoleKey);
+    const requestedProvider: WhatsAppProvider | null = provider === "plivo" || provider === "meta" ? provider : null;
+    const requestedPhoneNumberId = typeof business_phone_number_id === "string" ? business_phone_number_id : null;
+    const requestedBusinessNumber = typeof business_number === "string" ? digits(business_number) : null;
+    const channelHint: WhatsAppChannelHint = requestedProvider
+      ? {
+        provider: requestedProvider,
+        route: requestedProvider === "plivo" ? "plivo_admissions" : "reply",
+        businessPhoneNumberId: requestedPhoneNumberId,
+        businessNumber: requestedBusinessNumber || requestedPhoneNumberId,
+        requireManualReply: true,
+      }
+      : await inferRouteFromLatestMessage(admin, phone, requestedPhoneNumberId);
 
     // Block sends to DNC leads — except when the caller is explicitly the
     // DNC farewell flow (Mark DNC button), which marks the lead DNC first
@@ -124,64 +109,67 @@ Deno.serve(async (req) => {
       }
     }
 
-    const waPhone = phone.replace(/[^0-9]/g, "");
-    let sentMessageId: string | null = null;
-    let loggedPhoneNumberId = phoneNumberId;
+    const waPhone = digits(phone);
+    const sendResult = await sendWhatsAppText(admin, channelHint, waPhone, message);
 
-    if (usePlivo) {
-      loggedPhoneNumberId = normalizeBusinessPhoneNumber(requestedPhoneNumberId);
-      const plivoResult = await sendPlivoWhatsAppText(loggedPhoneNumberId, waPhone, message);
-      if (!plivoResult.ok) {
-        return new Response(
-          JSON.stringify({ error: "Plivo WhatsApp send failed", detail: plivoResult.raw }),
-          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      sentMessageId = plivoResult.messageUuid;
-    } else {
-      // Send free-form text message (only works within 24hr conversation window)
-      const waResponse = await fetch(
-        `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${whatsappToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            messaging_product: "whatsapp",
-            to: waPhone,
-            type: "text",
-            text: { body: message },
-          }),
-        }
+    if (!sendResult.ok) {
+      await logWhatsAppAutomationEvent(admin, {
+        phone: waPhone,
+        businessNumber: sendResult.businessNumber || sendResult.businessPhoneNumberId || channelHint.businessNumber,
+        provider: sendResult.provider,
+        leadId: lead_id || null,
+        eventType: "send_failed",
+        decision: "manual_reply_failed",
+        reason: sendResult.error,
+        metadata: { status: sendResult.status, raw: sendResult.raw },
+      });
+      return new Response(
+        JSON.stringify({ error: sendResult.error || "Failed to send", detail: sendResult.raw }),
+        { status: sendResult.status >= 400 ? sendResult.status : 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
-
-      const waResult = await waResponse.json();
-
-      if (!waResponse.ok) {
-        return new Response(
-          JSON.stringify({ error: waResult?.error?.message || "Failed to send" }),
-          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      sentMessageId = waResult?.messages?.[0]?.id || null;
     }
 
     // Log to whatsapp_messages
-    await admin.from("whatsapp_messages").insert({
+    const { data: insertedMessage } = await admin.from("whatsapp_messages").insert({
       lead_id: lead_id || null,
-      wa_message_id: sentMessageId,
+      wa_message_id: sendResult.messageId,
       direction: "outbound",
       phone: waPhone,
       message_type: "text",
       content: message,
       status: "sent",
       is_read: true,
-      provider: usePlivo ? "plivo" : "meta",
-      business_phone_number_id: loggedPhoneNumberId,
+      provider: sendResult.provider,
+      business_phone_number_id: sendResult.businessPhoneNumberId,
+      business_phone_number: sendResult.businessNumber,
       template_key: "manual_reply",
       sender_user_id: user.id,
+    }).select("id").maybeSingle();
+
+    await recordWhatsAppOutboundContext(admin, {
+      messageId: insertedMessage?.id || null,
+      providerMessageId: sendResult.messageId,
+      phone: waPhone,
+      businessNumber: sendResult.businessNumber || sendResult.businessPhoneNumberId || channelHint.businessNumber,
+      provider: sendResult.provider,
+      leadId: lead_id || null,
+      templateKey: "manual_reply",
+      outboundKind: "manual_reply",
+      expectedReplyType: "general",
+      responsePolicy: "human",
+      metadata: { user_id: user.id },
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    });
+
+    await logWhatsAppAutomationEvent(admin, {
+      phone: waPhone,
+      businessNumber: sendResult.businessNumber || sendResult.businessPhoneNumberId || channelHint.businessNumber,
+      provider: sendResult.provider,
+      leadId: lead_id || null,
+      eventType: "handoff_created",
+      decision: "manual_reply_sent",
+      reason: "counsellor_reply",
+      metadata: { message_id: sendResult.messageId, user_id: user.id },
     });
 
     // Log activity
@@ -194,13 +182,47 @@ Deno.serve(async (req) => {
       });
     }
 
+    const stateBusinessNumber = sendResult.businessNumber || sendResult.businessPhoneNumberId;
+    if (stateBusinessNumber) {
+      await admin
+        .from("whatsapp_ai_mode")
+        .upsert(
+          {
+            phone: waPhone,
+            business_number: stateBusinessNumber,
+            mode: "human",
+            updated_at: new Date().toISOString(),
+            updated_by: user.id,
+          },
+          { onConflict: "phone,business_number" },
+        );
+
+      await upsertConversationState(admin, {
+        phone: waPhone,
+        businessNumber: stateBusinessNumber,
+        provider: sendResult.provider,
+        leadId: lead_id || null,
+        mode: "human",
+        state: "human_active",
+        ownerUserId: user.id,
+        handoffReason: "manual_reply",
+        updatedBy: user.id,
+      });
+    }
+
     return new Response(
-      JSON.stringify({ success: true, message_id: sentMessageId, business_phone_number_id: loggedPhoneNumberId, provider: usePlivo ? "plivo" : "meta" }),
+      JSON.stringify({
+        success: true,
+        message_id: sendResult.messageId,
+        provider: sendResult.provider,
+        business_phone_number_id: sendResult.businessPhoneNumberId,
+        business_phone_number: sendResult.businessNumber,
+      }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("WhatsApp reply error:", err);
-    return new Response(JSON.stringify({ error: err.message }), {
+    return new Response(JSON.stringify({ error: errorMessage(err, "WhatsApp reply failed") }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }

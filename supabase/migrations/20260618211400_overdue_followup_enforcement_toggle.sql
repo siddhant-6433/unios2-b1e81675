@@ -68,8 +68,15 @@ ORDER BY lf.scheduled_at ASC;
 ALTER VIEW public.overdue_followups SET (security_invoker = true);
 GRANT SELECT ON public.overdue_followups TO authenticated;
 
-ALTER FUNCTION IF EXISTS public.action_badge_counts(uuid, boolean)
-RENAME TO action_badge_counts_base;
+DO $$
+BEGIN
+  IF to_regprocedure('public.action_badge_counts_base(uuid, boolean)') IS NULL
+     AND to_regprocedure('public.action_badge_counts(uuid, boolean)') IS NOT NULL THEN
+    ALTER FUNCTION public.action_badge_counts(uuid, boolean)
+    RENAME TO action_badge_counts_base;
+  END IF;
+END
+$$;
 
 CREATE OR REPLACE FUNCTION public.action_badge_counts(
   p_scope_counsellor_id uuid DEFAULT NULL,
@@ -106,8 +113,15 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.action_badge_counts(uuid, boolean) TO authenticated;
 
-ALTER FUNCTION IF EXISTS public.pending_followups_payload(text, uuid, boolean, integer, integer)
-RENAME TO pending_followups_payload_base;
+DO $$
+BEGIN
+  IF to_regprocedure('public.pending_followups_payload_base(text, uuid, boolean, integer, integer)') IS NULL
+     AND to_regprocedure('public.pending_followups_payload(text, uuid, boolean, integer, integer)') IS NOT NULL THEN
+    ALTER FUNCTION public.pending_followups_payload(text, uuid, boolean, integer, integer)
+    RENAME TO pending_followups_payload_base;
+  END IF;
+END
+$$;
 
 CREATE OR REPLACE FUNCTION public.pending_followups_payload(
   p_tab text,
