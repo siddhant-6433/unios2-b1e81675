@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Static lint for the three access regressions that have actually bitten us:
+ * Static lint for production regressions that have actually bitten us:
  *
  *   A. Edge function called from the anonymous apply portal but missing from
  *      supabase/config.toml — defaults to verify_jwt=true, applicants 401.
@@ -16,6 +16,12 @@
  *      Lifecycle events must fire from DB triggers via fn_notify_event.
  *      (Bit us: app_submitted notification on 2026-05-18.)
  *
+ *   D. Fresh migrations creating policies / constraints without rerun guards.
+ *      Supabase can leave partial DDL behind when a migration fails before its
+ *      version is recorded, so the next db push reruns the file and crashes on
+ *      duplicate policy / constraint names.
+ *      (Bit us: whatsapp_inbound_events on 2026-06-07.)
+ *
  * Each rule supports an inline `lint-allow: <reason>` override:
  *   - SQL:  `-- lint-allow: <reason>` on the same line or the line above
  *   - TS:   `// lint-allow: <reason>` on the same line or the line above
@@ -29,12 +35,13 @@
  */
 
 import { readFile, readdir, stat, writeFile } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const BASELINE_PATH = join(REPO_ROOT, "scripts", "lint-access-guardrails.baseline.json");
 const UPDATE_BASELINE = process.argv.includes("--update-baseline");
+const IDEMPOTENT_MIGRATION_MIN_VERSION = "20260618212000";
 
 // ---------- helpers ---------------------------------------------------------
 
@@ -233,6 +240,81 @@ async function ruleC(violations) {
   }
 }
 
+// ---------- rule D: new migrations must survive partial DDL reruns ----------
+
+function escapeRegex(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function migrationVersion(path) {
+  const match = basename(path).match(/^(\d{14})_/);
+  return match?.[1] || null;
+}
+
+function shouldCheckIdempotency(path) {
+  const version = migrationVersion(path);
+  return version !== null && version >= IDEMPOTENT_MIGRATION_MIN_VERSION;
+}
+
+async function ruleD(violations) {
+  const migrationsDir = join(REPO_ROOT, "supabase", "migrations");
+  const files = await walk(migrationsDir, (p) => p.endsWith(".sql"));
+
+  for (const f of files) {
+    if (!shouldCheckIdempotency(f)) continue;
+
+    const { text, lines } = await readLines(f);
+    const rel = relative(REPO_ROOT, f);
+
+    for (const m of text.matchAll(/create\s+policy\s+(?:"([^"]+)"|([a-zA-Z_][\w$]*))/gim)) {
+      const policyName = m[1] || m[2];
+      const idx = text.slice(0, m.index).split("\n").length - 1;
+      if (isAllowed(lines, idx)) continue;
+
+      const prefix = text.slice(0, m.index);
+      const hasDrop = new RegExp(
+        `drop\\s+policy\\s+if\\s+exists\\s+(?:"${escapeRegex(policyName)}"|${escapeRegex(policyName)})`,
+        "i"
+      ).test(prefix);
+      if (hasDrop) continue;
+
+      violations.push({
+        file: rel,
+        line: idx + 1,
+        rule: "D:migration-policy-not-idempotent",
+        message:
+          `Policy '${policyName}' is created without a preceding DROP POLICY IF EXISTS. ` +
+          `If this migration partially applies in production before schema_migrations records it, ` +
+          `the next db push will fail with SQLSTATE 42710. Add DROP POLICY IF EXISTS first, ` +
+          `or add 'lint-allow: <reason>' if the statement is intentionally one-shot.`,
+      });
+    }
+
+    for (const m of text.matchAll(/add\s+constraint\s+([a-zA-Z_][\w$]*)/gim)) {
+      const constraintName = m[1];
+      const idx = text.slice(0, m.index).split("\n").length - 1;
+      if (isAllowed(lines, idx)) continue;
+
+      const prefixWindow = text.slice(Math.max(0, m.index - 1600), m.index);
+      const hasGuard =
+        /\bpg_constraint\b/i.test(prefixWindow) &&
+        new RegExp(`\\b${escapeRegex(constraintName)}\\b`, "i").test(prefixWindow);
+      if (hasGuard) continue;
+
+      violations.push({
+        file: rel,
+        line: idx + 1,
+        rule: "D:migration-constraint-not-idempotent",
+        message:
+          `Constraint '${constraintName}' is added without checking pg_constraint first. ` +
+          `If this migration partially applies in production before schema_migrations records it, ` +
+          `the next db push will fail with SQLSTATE 42P07. Guard it in a DO block, ` +
+          `or add 'lint-allow: <reason>' if the statement is intentionally one-shot.`,
+      });
+    }
+  }
+}
+
 // ---------- main ------------------------------------------------------------
 
 async function loadBaseline() {
@@ -254,6 +336,7 @@ function violationKey(v) {
   await ruleA(violations);
   await ruleB(violations);
   await ruleC(violations);
+  await ruleD(violations);
 
   // Stable sort: file then line.
   violations.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
