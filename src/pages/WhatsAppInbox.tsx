@@ -607,23 +607,42 @@ const WhatsAppInbox = () => {
     const variants = businessChannelVariants(selectedBusinessNumber);
     if (variants.length === 0) return [];
 
-    let messageQuery = supabase
-      .from("whatsapp_messages" as any)
-      .select("phone, lead_id, direction, content, created_at, provider, business_phone_number_id, business_phone_number, is_read")
-      .order("created_at", { ascending: false })
-      .limit(CONVERSATION_PAGE_SIZE * 5);
+    let seedRows: MessageConversationSeed[] = [];
+    let lastMessageError: any = null;
+    for (const includeBusinessNumber of [true, false]) {
+      let messageQuery = supabase
+        .from("whatsapp_messages" as any)
+        .select([
+          "phone",
+          "lead_id",
+          "direction",
+          "content",
+          "created_at",
+          "provider",
+          "business_phone_number_id",
+          includeBusinessNumber ? "business_phone_number" : null,
+          "is_read",
+        ].filter(Boolean).join(", "))
+        .order("created_at", { ascending: false })
+        .limit(CONVERSATION_PAGE_SIZE * 5);
 
-    messageQuery = messageQuery.or(
-      variants
-        .flatMap(v => [`business_phone_number_id.eq.${v}`, `business_phone_number.eq.${v}`])
-        .join(","),
-    );
+      const filterParts = includeBusinessNumber
+        ? variants.flatMap(v => [`business_phone_number_id.eq.${v}`, `business_phone_number.eq.${v}`])
+        : variants.map(v => `business_phone_number_id.eq.${v}`);
+      messageQuery = messageQuery.or(filterParts.join(","));
 
-    const { data, error } = await messageQuery;
-    if (error) throw error;
+      const { data, error } = await messageQuery;
+      if (!error) {
+        lastMessageError = null;
+        seedRows = ((data || []) as any[] as MessageConversationSeed[])
+          .filter(row => row.phone && row.created_at);
+        break;
+      }
+      lastMessageError = error;
+      if (!/business_phone_number/i.test(error.message || "")) break;
+    }
 
-    const seedRows = ((data || []) as any[] as MessageConversationSeed[])
-      .filter(row => row.phone && row.created_at);
+    if (lastMessageError) throw lastMessageError;
     if (seedRows.length === 0) return [];
 
     const leadIds = Array.from(new Set(seedRows.map(row => row.lead_id).filter((id): id is string => Boolean(id))));
@@ -799,10 +818,23 @@ const WhatsAppInbox = () => {
         lastError = error;
       }
 
-      if (lastError && rows.length === 0) throw lastError;
-      if (reset && rows.length === 0 && businessNumber !== "primary" && isBusinessPhoneNumberChannel(businessNumber)) {
-        rows = await fetchMessageBackedConversationRows(businessNumber);
+      if (reset && businessNumber !== "primary" && isBusinessPhoneNumberChannel(businessNumber)) {
+        const messageRows = await fetchMessageBackedConversationRows(businessNumber).catch(error => {
+          if (!lastError) throw error;
+          return [] as Conversation[];
+        });
+        if (messageRows.length > 0) {
+          const merged = new Map<string, Conversation>();
+          for (const row of [...rows, ...messageRows]) {
+            merged.set(`${row.phone}:${conversationBusinessKey(row) || ""}`, row);
+          }
+          rows = [...merged.values()]
+            .sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime())
+            .slice(0, CONVERSATION_PAGE_SIZE);
+          lastError = null;
+        }
       }
+      if (lastError && rows.length === 0) throw lastError;
 
       setConversations(prev => {
         if (reset) return rows;
@@ -1080,7 +1112,7 @@ const WhatsAppInbox = () => {
       // Pick the active business pnid for filtering. "primary" matches the
       // most-used pnid + legacy NULL rows; otherwise exact match.
       const activePnid = businessNumber === "primary" ? primaryPnid : businessNumber;
-      const applyBusinessNumberFilter = (query: any) => {
+      const applyBusinessNumberFilter = (query: any, includeBusinessNumber = true) => {
         if (isHrScope) {
           // HR view shows the candidate's full thread: messages on the HR
           // number AND any messages on the admissions number that were
@@ -1092,8 +1124,9 @@ const WhatsAppInbox = () => {
         if (businessNumber !== "primary" && isBusinessPhoneNumberChannel(businessNumber)) {
           const variants = businessChannelVariants(businessNumber);
           return query.or(
-            variants
-              .flatMap(v => [`business_phone_number_id.eq.${v}`, `business_phone_number.eq.${v}`])
+            (includeBusinessNumber
+              ? variants.flatMap(v => [`business_phone_number_id.eq.${v}`, `business_phone_number.eq.${v}`])
+              : variants.map(v => `business_phone_number_id.eq.${v}`))
               .join(","),
           );
         }
@@ -1104,21 +1137,26 @@ const WhatsAppInbox = () => {
         return query.eq("business_phone_number_id", businessNumber);
       };
 
-      const buildMessageQuery = (selectColumns: string) => {
-        let query = supabase
+      const buildMessageQuery = (selectColumns: string, includeBusinessNumber = true) => {
+        const query = supabase
           .from("whatsapp_messages" as any)
           .select(selectColumns)
           .eq("phone", selectedPhone)
           .order("created_at", { ascending: true })
           .limit(200);
-        return applyBusinessNumberFilter(query);
+        return applyBusinessNumberFilter(query, includeBusinessNumber);
       };
 
       const messageColumns = "id, wa_message_id, direction, content, message_type, status, template_key, media_url, created_at, business_phone_number_id";
-      let q = buildMessageQuery(`${messageColumns}, sender_user_id`);
+      const q = buildMessageQuery(`${messageColumns}, sender_user_id`);
       let { data, error } = await q;
       if (error && /sender_user_id/i.test(error.message || "")) {
         const fallback = await buildMessageQuery(messageColumns);
+        data = fallback.data;
+        error = fallback.error;
+      }
+      if (error && /business_phone_number/i.test(error.message || "")) {
+        const fallback = await buildMessageQuery(messageColumns, false);
         data = fallback.data;
         error = fallback.error;
       }
@@ -1129,13 +1167,22 @@ const WhatsAppInbox = () => {
       }
 
       // Mark as read (scoped to the active inbox so the other inbox keeps its unread count)
-      let upd = supabase
+      const upd = supabase
         .from("whatsapp_messages" as any)
         .update({ is_read: true, read_at: new Date().toISOString() } as any)
         .eq("phone", selectedPhone)
         .eq("direction", "inbound")
         .eq("is_read", false);
-      await applyBusinessNumberFilter(upd);
+      const readResult = await applyBusinessNumberFilter(upd);
+      if (readResult.error && /business_phone_number/i.test(readResult.error.message || "")) {
+        const legacyUpd = supabase
+          .from("whatsapp_messages" as any)
+          .update({ is_read: true, read_at: new Date().toISOString() } as any)
+          .eq("phone", selectedPhone)
+          .eq("direction", "inbound")
+          .eq("is_read", false);
+        await applyBusinessNumberFilter(legacyUpd, false);
+      }
 
       // Update local unread count
       setConversations(prev =>
