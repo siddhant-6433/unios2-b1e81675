@@ -4,7 +4,7 @@ import { ArrowRight, CalendarDays } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
-const DEFAULT_FEE_SUBMISSION_DEADLINE = "2026-06-15";
+const DEFAULT_FEE_SUBMISSION_DEADLINE = "2026-06-10";
 const PUBLIC_APPLICATION_DEADLINE = "2026-06-10";
 
 const STAFF_ROLES = new Set([

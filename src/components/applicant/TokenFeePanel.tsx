@@ -6,7 +6,7 @@ import { buildApplicantFeeBreakdownRows, buildApplicantOneTimePaymentOptions } f
 // Fallbacks if the get_applicant_deadlines RPC is unreachable.
 // The single source of truth is _app_config — these are last-resort
 // defaults so the UI still renders during a brief outage.
-const DEFAULT_FEE_SUBMISSION_DEADLINE      = "2026-06-15";
+const DEFAULT_FEE_SUBMISSION_DEADLINE      = "2026-06-10";
 const DEFAULT_FULL_COURSE_PAYMENT_DEADLINE = "2026-09-15";
 
 type FeeStatus = {
