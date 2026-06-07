@@ -163,8 +163,15 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.pending_followups_payload(text, uuid, boolean, integer, integer) TO authenticated;
 
-ALTER FUNCTION IF EXISTS public.action_center_payload(uuid)
-RENAME TO action_center_payload_base;
+DO $$
+BEGIN
+  IF to_regprocedure('public.action_center_payload_base(uuid)') IS NULL
+     AND to_regprocedure('public.action_center_payload(uuid)') IS NOT NULL THEN
+    ALTER FUNCTION public.action_center_payload(uuid)
+    RENAME TO action_center_payload_base;
+  END IF;
+END
+$$;
 
 CREATE OR REPLACE FUNCTION public.action_center_payload(
   p_counsellor_id uuid DEFAULT NULL
@@ -190,8 +197,15 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.action_center_payload(uuid) TO authenticated;
 
-ALTER FUNCTION IF EXISTS public.my_tat_defaults(uuid)
-RENAME TO my_tat_defaults_base;
+DO $$
+BEGIN
+  IF to_regprocedure('public.my_tat_defaults_base(uuid)') IS NULL
+     AND to_regprocedure('public.my_tat_defaults(uuid)') IS NOT NULL THEN
+    ALTER FUNCTION public.my_tat_defaults(uuid)
+    RENAME TO my_tat_defaults_base;
+  END IF;
+END
+$$;
 
 CREATE OR REPLACE FUNCTION public.my_tat_defaults(
   p_scope_counsellor_id uuid DEFAULT NULL
@@ -227,8 +241,15 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.my_tat_defaults(uuid) TO authenticated;
 
-ALTER FUNCTION IF EXISTS public.counsellor_calling_summary(date, date)
-RENAME TO counsellor_calling_summary_base;
+DO $$
+BEGIN
+  IF to_regprocedure('public.counsellor_calling_summary_base(date, date)') IS NULL
+     AND to_regprocedure('public.counsellor_calling_summary(date, date)') IS NOT NULL THEN
+    ALTER FUNCTION public.counsellor_calling_summary(date, date)
+    RENAME TO counsellor_calling_summary_base;
+  END IF;
+END
+$$;
 
 CREATE OR REPLACE FUNCTION public.counsellor_calling_summary(
   p_from_date date DEFAULT NULL,
