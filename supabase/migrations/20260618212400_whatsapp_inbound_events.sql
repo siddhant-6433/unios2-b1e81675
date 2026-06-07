@@ -23,9 +23,20 @@ create table if not exists public.whatsapp_inbound_events (
   processed_at timestamptz
 );
 
-alter table public.whatsapp_inbound_events
-  add constraint whatsapp_inbound_events_provider_event_unique
-  unique (provider, provider_event_id);
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'whatsapp_inbound_events_provider_event_unique'
+      and conrelid = 'public.whatsapp_inbound_events'::regclass
+  ) then
+    alter table public.whatsapp_inbound_events
+      add constraint whatsapp_inbound_events_provider_event_unique
+      unique (provider, provider_event_id);
+  end if;
+end
+$$;
 
 create index if not exists idx_whatsapp_inbound_events_phone_business_received
   on public.whatsapp_inbound_events (phone, coalesce(business_number, ''), received_at desc);
