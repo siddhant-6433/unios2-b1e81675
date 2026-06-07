@@ -58,7 +58,7 @@ export function NudgePaymentDialog({ open, onClose, candidate }: Props) {
     if (!open) return;
     setLoadingDate(true);
     (supabase as any).rpc("get_applicant_deadlines").then(({ data }: any) => {
-      const v = (data?.fee_submission_deadline as string) || "2026-06-15";
+      const v = (data?.fee_submission_deadline as string) || "2026-06-10";
       setDueDate(v);
       setLoadingDate(false);
     });

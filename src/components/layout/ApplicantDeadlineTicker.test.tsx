@@ -10,7 +10,7 @@ vi.mock("@/contexts/AuthContext", () => ({
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
     rpc: vi.fn().mockResolvedValue({
-      data: { fee_submission_deadline: "2026-06-15" },
+      data: { fee_submission_deadline: "2026-06-10" },
       error: null,
     }),
   },
@@ -32,8 +32,8 @@ describe("ApplicantDeadlineTicker", () => {
     );
 
     expect(screen.getByText("All-course deadline")).toBeInTheDocument();
-    expect(screen.getByText(/15 Jun 2026/)).toBeInTheDocument();
-    expect(screen.getByText(/10 days left/)).toBeInTheDocument();
+    expect(screen.getByText(/10 Jun 2026/)).toBeInTheDocument();
+    expect(screen.getByText(/5 days left/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Edit" })).toHaveAttribute("href", "/settings");
 
   });

@@ -15,7 +15,7 @@
 -- set_applicant_deadline() admin RPC.
 
 INSERT INTO public._app_config (key, value) VALUES
-  ('fee_submission_deadline',      '2026-06-15'),
+  ('fee_submission_deadline',      '2026-06-10'),
   ('full_course_payment_deadline', '2026-09-15')
 ON CONFLICT (key) DO NOTHING;
 
