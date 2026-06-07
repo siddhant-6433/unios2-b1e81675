@@ -66,6 +66,28 @@ export type EdgeError = {
   sessionExpired?: boolean;
 };
 
+export async function edgeErrorFromFunctionError(error: unknown): Promise<EdgeError> {
+  const baseMessage = error instanceof Error ? error.message : String(error);
+  let message = baseMessage;
+  let status: number | undefined;
+
+  // Pull the useful message out of the function's JSON body.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ctx = (error as any)?.context;
+  if (ctx && typeof ctx.json === "function") {
+    status = typeof ctx.status === "number" ? ctx.status : undefined;
+    try {
+      const cloned = typeof ctx.clone === "function" ? ctx.clone() : ctx;
+      const errBody = await cloned.json();
+      if (errBody?.error) message = errBody.error;
+    } catch {
+      // Body wasn't JSON — keep the original message.
+    }
+  }
+
+  return { message, status, sessionExpired: status === 401 };
+}
+
 /**
  * Drop-in wrapper around `supabase.functions.invoke` for authenticated calls.
  *
@@ -101,21 +123,5 @@ export async function invokeEdge<T = unknown>(
   const { data, error } = await supabase.functions.invoke(name, { body, headers });
   if (!error) return { data: data as T, error: null };
 
-  // Pull the useful message out of the function's JSON body.
-  let message = error.message;
-  let status: number | undefined;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ctx = (error as any)?.context;
-  if (ctx && typeof ctx.json === "function") {
-    status = typeof ctx.status === "number" ? ctx.status : undefined;
-    try {
-      const cloned = typeof ctx.clone === "function" ? ctx.clone() : ctx;
-      const errBody = await cloned.json();
-      if (errBody?.error) message = errBody.error;
-    } catch {
-      // Body wasn't JSON — keep the original message.
-    }
-  }
-
-  return { data: null, error: { message, status, sessionExpired: status === 401 } };
+  return { data: null, error: await edgeErrorFromFunctionError(error) };
 }
