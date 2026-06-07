@@ -21,7 +21,7 @@ describe("ApplicantDeadlineTicker", () => {
     vi.useRealTimers();
   });
 
-  it("renders the all-course applicant deadline in the navbar strip", async () => {
+  it("renders the staff application deadline with the public announcement header", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-06T00:00:00+05:30"));
 
@@ -31,11 +31,13 @@ describe("ApplicantDeadlineTicker", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText("All-course deadline")).toBeInTheDocument();
-    expect(screen.getByText(/10 Jun 2026/)).toBeInTheDocument();
-    expect(screen.getByText(/5 days left/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Edit" })).toHaveAttribute("href", "/settings");
-
+    expect(screen.getByText("Admissions 2026-27")).toBeInTheDocument();
+    expect(screen.getByText("Round 1 deadline: apply by 10th June 2026")).toBeInTheDocument();
+    expect(screen.getByText("BPT & BMRIT")).toBeInTheDocument();
+    expect(screen.getByText(/CAHET registration on ABVMU due/)).toBeInTheDocument();
+    expect(screen.getByText("4d 23h 59m 59s")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Apply Now/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Edit" })).not.toBeInTheDocument();
   });
 
   it("renders the public application deadline like the NIMT website announcement header", () => {
