@@ -50,12 +50,14 @@ create index if not exists idx_whatsapp_inbound_events_status_received
 
 alter table public.whatsapp_inbound_events enable row level security;
 
+drop policy if exists "Staff can read whatsapp_inbound_events" on public.whatsapp_inbound_events;
 create policy "Staff can read whatsapp_inbound_events"
   on public.whatsapp_inbound_events
   for select
   to authenticated
   using (true);
 
+drop policy if exists "Service role can manage whatsapp_inbound_events" on public.whatsapp_inbound_events;
 create policy "Service role can manage whatsapp_inbound_events"
   on public.whatsapp_inbound_events
   for all
