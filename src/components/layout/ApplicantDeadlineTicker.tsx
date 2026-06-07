@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, CalendarDays } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -53,15 +53,6 @@ function ordinal(value: number): string {
   }
 }
 
-function formatDate(dateString: string): string {
-  return endOfIstDay(dateString).toLocaleDateString("en-IN", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "Asia/Kolkata",
-  });
-}
-
 function formatLongDate(dateString: string): string {
   const date = endOfIstDay(dateString);
   const day = Number(
@@ -85,10 +76,10 @@ interface ApplicantDeadlineTickerProps {
   audience?: "staff" | "public";
 }
 
-function PublicApplicationDeadlineHeader() {
+function PublicApplicationDeadlineHeader({ deadline, showCta }: { deadline: string; showCta: boolean }) {
   const [now, setNow] = useState(Date.now());
-  const deadlineLabel = formatLongDate(PUBLIC_APPLICATION_DEADLINE);
-  const countdown = countdownRemaining(PUBLIC_APPLICATION_DEADLINE, now);
+  const deadlineLabel = formatLongDate(deadline);
+  const countdown = countdownRemaining(deadline, now);
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 1_000);
@@ -120,13 +111,15 @@ function PublicApplicationDeadlineHeader() {
           </strong>
         </div>
 
-        <Link
-          to="/apply/nimt"
-          className="inline-flex flex-shrink-0 items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-black uppercase tracking-wider text-[#0b1f4d] shadow-sm transition hover:bg-blue-100"
-        >
-          Apply Now
-          <ArrowRight className="h-3.5 w-3.5" />
-        </Link>
+        {showCta && (
+          <Link
+            to="/apply/nimt"
+            className="inline-flex flex-shrink-0 items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-black uppercase tracking-wider text-[#0b1f4d] shadow-sm transition hover:bg-blue-100"
+          >
+            Apply Now
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        )}
       </div>
     </div>
   );
@@ -160,24 +153,5 @@ export function ApplicantDeadlineTicker({ audience = "staff" }: ApplicantDeadlin
   const days = daysRemaining(deadline);
   if (days === 0) return null;
 
-  if (audience === "public") {
-    return <PublicApplicationDeadlineHeader />;
-  }
-
-  return (
-    <div className="border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-950 sm:px-5">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <CalendarDays className="h-3.5 w-3.5 flex-shrink-0 text-amber-700" />
-        <span className="font-semibold">{audience === "public" ? "Application deadline" : "All-course deadline"}</span>
-        <span className="text-amber-800">
-          {formatDate(deadline)} · {days} {days === 1 ? "day" : "days"} left
-        </span>
-        {audience === "staff" && role === "super_admin" && (
-          <Link to="/settings" className="ml-auto font-medium text-amber-900 underline-offset-2 hover:underline">
-            Edit
-          </Link>
-        )}
-      </div>
-    </div>
-  );
+  return <PublicApplicationDeadlineHeader deadline={deadline} showCta={audience === "public"} />;
 }
