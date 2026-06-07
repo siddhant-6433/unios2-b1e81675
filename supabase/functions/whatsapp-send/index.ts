@@ -258,7 +258,17 @@ Deno.serve(async (req) => {
       user = data.user;
     }
 
-    let { template_key, phone, params, lead_id, header_video_url, button_urls } = await req.json();
+    let {
+      template_key,
+      phone,
+      params,
+      lead_id,
+      header_video_url,
+      button_urls,
+      provider,
+      business_number,
+      business_phone_number_id,
+    } = await req.json();
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
 
@@ -514,10 +524,21 @@ Deno.serve(async (req) => {
       });
     }
 
-    const sendResult = await sendWhatsAppTemplate(admin, {
-      route: channelRoute,
-      requireBulk: channelRoute === "bulk",
-    }, waPhone, {
+    const requestedProvider = provider === "plivo" || provider === "meta" ? provider : null;
+    const requestedBusinessNumber = typeof business_number === "string" ? business_number.replace(/[^0-9]/g, "") : null;
+    const requestedPhoneNumberId = typeof business_phone_number_id === "string" ? business_phone_number_id : null;
+    const sendResult = await sendWhatsAppTemplate(admin, requestedProvider
+      ? {
+        provider: requestedProvider,
+        route: requestedProvider === "plivo" ? "plivo_admissions" : channelRoute,
+        businessNumber: requestedBusinessNumber || requestedPhoneNumberId,
+        businessPhoneNumberId: requestedPhoneNumberId,
+        requireBulk: requestedProvider === "plivo" ? false : channelRoute === "bulk",
+      }
+      : {
+        route: channelRoute,
+        requireBulk: channelRoute === "bulk",
+      }, waPhone, {
       name: templateDef.name,
       language: "en",
       components,
