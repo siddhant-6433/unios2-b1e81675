@@ -9,9 +9,10 @@ import {
   Loader2, Phone, MessageSquare, CalendarCheck, MapPin, UserCheck,
   Trophy, AlertTriangle, Clock, TrendingUp, ChevronDown, ChevronUp,
   Users, PhoneOff, PhoneCall, BarChart3, ArrowUpDown, ArrowUp, ArrowDown,
-  ExternalLink, CalendarDays,
+  ExternalLink, CalendarDays, History,
 } from "lucide-react";
 import { CahetSprintLeaderboard } from "@/components/dashboard/CahetSprintLeaderboard";
+import { LeadAssignmentHistory } from "@/components/dashboard/LeadAssignmentHistory";
 
 interface CounsellorStats {
   counsellor_id: string;
@@ -326,7 +327,7 @@ const CounsellorDashboard = () => {
   const [stats, setStats] = useState<CounsellorStats[]>([]);
   const [overdue, setOverdue] = useState<OverdueFollowup[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"leaderboard" | "overdue" | "tat-defaults" | "breakdown" | "activity" | "calling" | "funnel">("leaderboard");
+  const [tab, setTab] = useState<"leaderboard" | "overdue" | "tat-defaults" | "breakdown" | "activity" | "calling" | "assignments" | "funnel">("leaderboard");
   const [activityData, setActivityData] = useState<any[]>([]);
   const [activityLoading, setActivityLoading] = useState(false);
   const [callingData, setCallingData] = useState<any[]>([]);
@@ -921,6 +922,13 @@ const CounsellorDashboard = () => {
             className={`rounded-lg px-4 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${tab === "calling" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
           >
             Lead Calling
+          </button>
+          <button
+            onClick={() => setTab("assignments")}
+            className={`rounded-lg px-4 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap ${tab === "assignments" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            <History className="h-3.5 w-3.5" />
+            Assignments
           </button>
           <button
             onClick={() => setTab("funnel")}
@@ -1892,6 +1900,8 @@ const CounsellorDashboard = () => {
             </CardContent>
           </Card>
         </div>
+      ) : tab === "assignments" ? (
+        <LeadAssignmentHistory limit={200} />
       ) : tab === "funnel" ? (
         <FunnelTab
           rows={funnelRows}
