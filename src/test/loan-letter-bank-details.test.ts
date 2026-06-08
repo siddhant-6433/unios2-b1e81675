@@ -9,24 +9,23 @@ describe("education loan letter template", () => {
     expect(loanLetterFunction).toContain("Letter Date:");
     expect(loanLetterFunction).toContain("Reference No.:");
     expect(loanLetterFunction).toContain("NIMT/EL/");
-    expect(loanLetterFunction).toContain("Letter Reference");
+    expect(loanLetterFunction).toContain("Loan Reference Letter No.");
 
-    expect(loanLetterFunction).toContain("BANK REMITTANCE DETAILS");
-    expect(loanLetterFunction).toContain("const bankTable =");
-    expect(loanLetterFunction).toContain('drawBankRow("Detail", "Value", true)');
+    expect(loanLetterFunction).toContain("INSTITUTION BANK ACCOUNT DETAILS");
+    expect(loanLetterFunction).toContain("bankDetails");
     expect(loanLetterFunction).toContain("NIMT B. SCHOOL'S FOUNDATION");
     expect(loanLetterFunction).toContain("IDFC BANK");
     expect(loanLetterFunction).toContain("10118454426");
     expect(loanLetterFunction).toContain("IDFB0020154");
+    expect(loanLetterFunction).toContain("Alpha 1, Greater Noida");
     expect(loanLetterFunction).toContain("on behalf of");
     expect(loanLetterFunction).not.toContain("Offer Reference");
   });
 
   it("guards the added remittance section with page breaks", () => {
-    expect(loanLetterFunction).toContain("const ensureSpace =");
-    expect(loanLetterFunction).toContain("ensureSpace(205)");
-    expect(loanLetterFunction).toContain("page = pdf.addPage([595, 842])");
-    expect(loanLetterFunction).toContain("const fullRow =");
+    expect(loanLetterFunction).toContain("function ensureSpace");
+    expect(loanLetterFunction).toContain("function newPage");
+    expect(loanLetterFunction).toContain("const footerNoteY");
     expect(loanLetterFunction).toContain("Date.now()");
   });
 
