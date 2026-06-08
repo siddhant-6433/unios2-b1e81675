@@ -447,26 +447,14 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
             </p>
           </div>
           {feeStatus.token_complete ? (
-            offer.loan_letter_url ? (
-              <a
-                href={offer.loan_letter_url}
-                target="_blank"
-                rel="noopener"
-                className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-bold text-white hover:bg-indigo-700 transition-colors"
-              >
-                <FileText className="h-3.5 w-3.5" />
-                View
-              </a>
-            ) : (
-              <button
-                disabled={generatingLoanLetter}
-                onClick={generateLoanLetter}
-                className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-bold text-white hover:bg-indigo-700 transition-colors disabled:opacity-50"
-              >
-                {generatingLoanLetter ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
-                Generate
-              </button>
-            )
+            <button
+              disabled={generatingLoanLetter}
+              onClick={generateLoanLetter}
+              className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-bold text-white hover:bg-indigo-700 transition-colors disabled:opacity-50"
+            >
+              {generatingLoanLetter ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+              {offer.loan_letter_url ? "View Latest" : "Generate"}
+            </button>
           ) : (
             <span className="shrink-0 rounded-full bg-gray-100 px-2.5 py-1 text-[10px] font-semibold text-gray-500">
               Locked
