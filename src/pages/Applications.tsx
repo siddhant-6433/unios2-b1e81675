@@ -21,6 +21,10 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  applicationFunnelStageOf,
+  type ApplicationFunnelStage,
+} from "@/lib/applicationFunnel";
 
 interface AppRow {
   id: string;
@@ -70,9 +74,7 @@ interface AppRow {
 // cumulative "reached" counts (apps at this stage OR beyond) with conversion
 // % on the arrows, while clicking a box filters the table to apps currently
 // STUCK at that stage — the leakage cohort to act on.
-type FunnelStage =
-  | "in_progress" | "paid" | "submitted" | "approved"
-  | "offer_sent" | "token_paid" | "pre_admitted" | "admitted";
+type FunnelStage = ApplicationFunnelStage;
 
 // In NIMT's workflow the candidate ALWAYS pays the application fee before
 // submitting — docs + declaration come after the payment screen. So the
@@ -83,25 +85,7 @@ const FUNNEL_ORDER: FunnelStage[] = [
   "offer_sent", "token_paid", "pre_admitted", "admitted",
 ];
 
-function funnelStageOf(a: AppRow): FunnelStage {
-  // Each later stage presupposes the earlier ones. Notable guards:
-  //   • "Approved" requires payment_status='paid' so the arithmetic
-  //     Paid + Approved = Paid·No-Offer chip stays consistent.
-  //   • "Submitted" requires paid + post-draft status — matches the real
-  //     flow where you can't submit declaration until the fee is in.
-  if (a.lead_stage === "admitted") return "admitted";
-  if (a.lead_stage === "pre_admitted") return "pre_admitted";
-  if (a.has_token_fee_paid) return "token_paid";
-  if (a.has_offer || a.lead_stage === "offer_sent") return "offer_sent";
-  if (a.lead_stage === "application_approved" && a.payment_status === "paid") return "approved";
-  if (a.payment_status === "paid" && a.status && a.status !== "draft") return "submitted";
-  if (a.payment_status === "paid") return "paid";
-  // Unpaid but somehow past draft — shouldn't happen in NIMT's flow.
-  // Bucket as Submitted so the anomaly surfaces instead of silently
-  // dropping into In Progress.
-  if (a.status && a.status !== "draft") return "submitted";
-  return "in_progress";
-}
+const funnelStageOf = applicationFunnelStageOf;
 
 const FUNNEL_META: Record<FunnelStage, {
   label: string; icon: any;
