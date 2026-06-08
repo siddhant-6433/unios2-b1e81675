@@ -54,6 +54,7 @@ const admissionSubMenu: MenuItem[] = [
   { title: "WhatsApp", url: "/whatsapp-inbox", icon: MessageSquare, permission: "whatsapp:view" },
   { title: "WA Outbound", url: "/whatsapp-inbox?mode=outbound", icon: Send, permission: "whatsapp:view" },
   { title: "Performance", url: "/counsellor-dashboard", icon: BarChart3, permission: "performance:view" },
+  { title: "Lead Assignments", url: "/lead-assignments", icon: UserCheck, permission: "leads:view" },
   { title: "Lead Buckets", url: "/lead-buckets", icon: Inbox, permission: "lead_buckets:view" },
   { title: "Lists & Campaigns", url: "/lists", icon: ListPlus, permission: "leads:view" },
   { title: "Lead Allocation", url: "/lead-allocation", icon: Shuffle, permission: "lead_allocation:view" },

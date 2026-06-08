@@ -15,6 +15,7 @@ import { JdCategoryMappingPanel } from "@/components/admissions/JdCategoryMappin
 import { MetaCourseMappingPanel } from "@/components/admissions/MetaCourseMappingPanel";
 import { PendingApprovalsPanel } from "@/components/dashboard/PendingApprovalsPanel";
 import { ConsultantVoiceMessagesPanel } from "@/components/dashboard/ConsultantVoiceMessagesPanel";
+import { LeadAssignmentHistory } from "@/components/dashboard/LeadAssignmentHistory";
 
 const DashboardAnalytics = lazy(() => import("@/components/dashboard/DashboardAnalytics"));
 
@@ -441,6 +442,7 @@ const Dashboard = () => {
       {isAdmin && <PendingApprovalsPanel />}
       {isAdmin && <ConsultantVoiceMessagesPanel />}
       {isAdmin   && <SuperAdminDashboard isSuperAdmin={role === "super_admin"} />}
+      {isAdmin && <LeadAssignmentHistory limit={25} compact />}
       {isCounsellor && <SuperAdminDashboard isSuperAdmin={false} />}
       {isFaculty && <FacultyDashboard />}
       {isStudent && <StudentDashboard />}

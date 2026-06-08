@@ -33,11 +33,19 @@ LEFT JOIN public.courses c ON c.id = l.course_id
 LEFT JOIN public.departments d ON d.id = c.department_id
 LEFT JOIN public.institutions i ON i.id = d.institution_id
 LEFT JOIN public.campuses cam ON cam.id = l.campus_id
-LEFT JOIN public.institutions cam_inst
-  ON cam_inst.campus_id = l.campus_id
-  AND cam_inst.type = 'school'
-LEFT JOIN public.jd_category_mappings jdm
-  ON lower(jdm.category) = lower(l.jd_category)
+LEFT JOIN LATERAL (
+  SELECT ci.type
+  FROM public.institutions ci
+  WHERE ci.campus_id = l.campus_id
+    AND ci.type = 'school'
+  LIMIT 1
+) cam_inst ON true
+LEFT JOIN LATERAL (
+  SELECT jm.is_school
+  FROM public.jd_category_mappings jm
+  WHERE lower(jm.category) = lower(l.jd_category)
+  LIMIT 1
+) jdm ON true
 LEFT JOIN LATERAL (
   SELECT
     CASE
