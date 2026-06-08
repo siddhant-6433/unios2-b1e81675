@@ -26,6 +26,12 @@ const fmtDate = (d?: string | null) => {
   return dt.toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
 };
 
+const letterRefNo = (offerId?: string | null, applicationId?: string | null) => {
+  const year = new Date().getFullYear();
+  const suffix = (applicationId || offerId || "NA").replace(/[^A-Za-z0-9]/g, "").slice(-8).toUpperCase() || "NA";
+  return `NIMT/EL/${year}/${suffix}`;
+};
+
 async function fetchImage(pdf: PDFDocument, url: string | null): Promise<PDFImage | null> {
   if (!url) return null;
   try {
@@ -319,10 +325,15 @@ async function buildLoanLetterPdf(opts: LoanLetterOpts): Promise<Uint8Array> {
   };
   newPage(ctx);
   ctx.y -= 14;
-  const loanReferenceNo = `NIMT/ELSL/${opts.applicationId || opts.offer?.id?.slice?.(0, 8) || "NA"}`;
+  const loanReferenceNo = letterRefNo(opts.offer?.id, opts.applicationId);
 
-  ctx.page.drawText(`Date: ${fmtDate(new Date().toISOString())}`, {
+  ctx.page.drawText(`Letter Date: ${fmtDate(new Date().toISOString())}`, {
     x: ctx.margin, y: ctx.y - 8, size: 8, font: ctx.font, color: COLORS.muted,
+  });
+  const refText = `Reference No.: ${loanReferenceNo}`;
+  const refTextW = ctx.font.widthOfTextAtSize(refText, 8);
+  ctx.page.drawText(refText, {
+    x: ctx.width - ctx.margin - refTextW, y: ctx.y - 8, size: 8, font: ctx.font, color: COLORS.muted,
   });
   ctx.y -= 14;
 
@@ -365,6 +376,13 @@ async function buildLoanLetterPdf(opts: LoanLetterOpts): Promise<Uint8Array> {
   ], 3);
 
   ctx.y -= 3;
+  drawParagraph(ctx,
+    `Banks may remit the sanctioned education-loan amount directly to the above college account on behalf of ${opts.lead?.name || "the applicant"}.`,
+    7,
+    2,
+  );
+
+  ctx.y -= 1;
   drawSection(ctx, "FEE DETAILS");
   drawFeeTable(ctx, opts.yearItems);
   ctx.y -= 3;
@@ -622,7 +640,8 @@ Deno.serve(async (req) => {
       yearItems,
     });
 
-    const path = `loan-letters/${offer.lead_id}/${offer.id}-${Date.now()}.pdf`;
+    const refSlug = letterRefNo(offer.id, appRow.application_id).replace(/[^A-Za-z0-9]+/g, "-");
+    const path = `loan-letters/${offer.lead_id}/${refSlug}-${Date.now()}.pdf`;
     const { error: uploadErr } = await admin.storage
       .from("application-documents")
       .upload(path, pdfBytes, { contentType: "application/pdf", upsert: true, cacheControl: "no-cache, max-age=0" });

@@ -114,6 +114,12 @@ const shouldUseLocalLoanLetterPreview = () => {
   return ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
 };
 
+const buildLoanReferenceNo = (offerId?: string | null, appId?: string | null) => {
+  const year = new Date().getFullYear();
+  const suffix = (appId || offerId || "NA").replace(/[^A-Za-z0-9]/g, "").slice(-8).toUpperCase() || "NA";
+  return `NIMT/EL/${year}/${suffix}`;
+};
+
 const loadImageForPdf = async (url: string) => {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Could not load letterhead (${res.status})`);
@@ -497,7 +503,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     const paidTowardCourse = feeStatus.paid_toward_course ?? Math.max(0, (feeStatus.total_paid || 0) - (feeStatus.application_paid || 0));
     const firstYearNet = feeRows.find(r => r.term === "year_1")?.net || feeStatus.post_scholarship_year_1 || 0;
     const firstYearAmountDue = Math.max(0, firstYearNet - paidTowardCourse);
-    const loanReferenceNo = `NIMT/ELSL/${applicationId || offer.id.slice(0, 8)}`;
+    const loanReferenceNo = buildLoanReferenceNo(offer.id, applicationId);
     const admissionMode = offer.admission_mode === "entrance"
       ? `Entrance / Counselling${offer.entrance_exam_name ? ` - ${offer.entrance_exam_name}` : ""}`
       : "Direct Admission";
@@ -530,7 +536,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
     doc.setTextColor(105, 105, 115);
-    doc.text(`Date: ${generatedAt.toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}`, margin, y);
+    doc.text(`Letter Date: ${generatedAt.toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}`, margin, y);
+    doc.text(`Reference No.: ${loanReferenceNo}`, pageWidth - margin, y, { align: "right" });
     y += 18;
 
     doc.setFont("helvetica", "bold");
@@ -565,6 +572,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     ], 3);
 
     y += 3;
+    write(`Banks may remit the sanctioned education-loan amount directly to the above college account on behalf of ${lead.name || applicantName || "the applicant"}.`, 7, 2);
+    y += 1;
     heading("FEE DETAILS");
     feeTable([
       ...feeRows.map(r => ({
@@ -824,24 +833,13 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
               </p>
             </div>
             <div className="shrink-0 flex items-center gap-2">
-              {offer.loan_letter_url && !useLocalLoanLetterPreview && (
-                <a
-                  href={offer.loan_letter_url}
-                  target="_blank"
-                  rel="noopener"
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-white px-3 py-2.5 text-xs font-bold text-indigo-700 hover:bg-indigo-50 transition-colors"
-                >
-                  <FileText className="h-3.5 w-3.5" />
-                  View
-                </a>
-              )}
               <button
                 disabled={generatingLoanLetter}
                 onClick={generateLoanLetter}
                 className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-bold text-white hover:bg-indigo-700 transition-colors disabled:opacity-50"
               >
                 {generatingLoanLetter ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
-                {useLocalLoanLetterPreview ? "Preview latest local" : offer.loan_letter_url ? "Regenerate" : "Generate"}
+                {useLocalLoanLetterPreview ? "Preview latest local" : offer.loan_letter_url ? "View Latest" : "Generate"}
               </button>
             </div>
           </div>
