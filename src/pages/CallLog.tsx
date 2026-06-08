@@ -104,6 +104,16 @@ interface CallLogCursor {
   id: string;
 }
 
+interface CallLogMetrics {
+  total?: number;
+  interested?: number;
+  not_interested?: number;
+  no_answer?: number;
+  busy?: number;
+  call_back?: number;
+  counsellors?: { id: string | null; name: string | null; count: number | null }[];
+}
+
 const CallLog = () => {
   const navigate = useNavigate();
   const { role, roleLoaded, user, profile } = useAuth();
@@ -178,7 +188,7 @@ const CallLog = () => {
       .select(`
         id, lead_id, disposition, duration_seconds, notes, recording_url, created_at, called_at, user_id, cloud_call_uuid, source,
         leads:lead_id(name, phone, stage, source)
-      `, page === 1 ? { count: "planned" } : undefined)
+      `)
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
       .limit(PAGE_SIZE + 1);
@@ -196,7 +206,7 @@ const CallLog = () => {
       query = query.eq("user_id", scopedCounsellorId);
     }
 
-    const { data, count } = await query;
+    const { data } = await query;
 
     if (data) {
       const rows = (data as unknown as CallLogRow[]).slice(0, PAGE_SIZE);
@@ -269,7 +279,6 @@ const CallLog = () => {
       });
 
       setRecords(enriched);
-      if (page === 1) setTotalCount(count || enriched.length);
       setHasNextCallPage(hasNext);
       if (hasNext && enriched.length > 0) {
         const last = enriched[enriched.length - 1];
@@ -278,48 +287,51 @@ const CallLog = () => {
         delete callPageCursorsRef.current[page + 1];
       }
 
-      // Compute stats from this page (ideally from full dataset, but good enough for filtered view)
-      const s = {
-        ...EMPTY_STATS,
-        total: page === 1
-          ? (count || enriched.length)
-          : (page - 1) * PAGE_SIZE + enriched.length + (hasNext ? 1 : 0),
-      };
-      enriched.forEach(r => {
-        if (r.disposition === "interested") s.interested++;
-        else if (r.disposition === "not_interested") s.not_interested++;
-        else if (["not_answered", "no_answer", "voicemail"].includes(r.disposition)) s.no_answer++;
-        else if (r.disposition === "busy") s.busy++;
-        else if (["call_back", "callback"].includes(r.disposition)) s.call_back++;
-      });
-      setStats(s);
-      if (isCounsellor && page === 1) {
-        setCounsellorStats([{
-          id: user.id,
-          name: profile?.display_name || callerMap[user.id] || "You",
-          count: s.total,
-        }]);
+      if (page === 1) {
+        const { data: metricsData, error: metricsError } = await supabase.rpc("call_log_metrics", {
+          p_from_date: from || null,
+          p_to_date: to || null,
+          p_counsellor_id: scopedCounsellorId,
+        });
+
+        if (metricsError) {
+          console.error("Failed to fetch call log metrics", metricsError);
+          const fallbackStats = { ...EMPTY_STATS, total: enriched.length };
+          enriched.forEach(r => {
+            if (r.disposition === "interested") fallbackStats.interested++;
+            else if (r.disposition === "not_interested") fallbackStats.not_interested++;
+            else if (["not_answered", "no_answer", "voicemail"].includes(r.disposition || "")) fallbackStats.no_answer++;
+            else if (r.disposition === "busy") fallbackStats.busy++;
+            else if (["call_back", "callback"].includes(r.disposition || "")) fallbackStats.call_back++;
+          });
+          setTotalCount(fallbackStats.total);
+          setStats(fallbackStats);
+          setCounsellorStats([]);
+        } else {
+          const metrics = (metricsData || EMPTY_STATS) as CallLogMetrics;
+          const nextStats = {
+            total: metrics.total || 0,
+            interested: metrics.interested || 0,
+            not_interested: metrics.not_interested || 0,
+            no_answer: metrics.no_answer || 0,
+            busy: metrics.busy || 0,
+            call_back: metrics.call_back || 0,
+          };
+          setTotalCount(nextStats.total);
+          setStats(nextStats);
+          setCounsellorStats((metrics.counsellors || [])
+            .filter((c): c is { id: string; name: string | null; count: number | null } => Boolean(c.id))
+            .map(c => ({
+              id: c.id,
+              name: c.name || "Unknown",
+              count: c.count || 0,
+            })));
+        }
       }
     }
 
-    // Per-counsellor call counts for the same date range (admins only).
-    // Avoid exact counts on this hot path; the breakdown is advisory and should
-    // not force expensive count scans while the main call log is loading.
-    if (!isCounsellor && counsellorOptions.length > 0 && page === 1) {
-      const results = await Promise.all(
-        counsellorOptions.map(async (c) => {
-          let q = supabase.from("call_logs").select("id", { count: "planned", head: true }).eq("user_id", c.id);
-          if (from) q = q.gte("created_at", `${from}T00:00:00`);
-          if (to) q = q.lte("created_at", `${to}T23:59:59`);
-          const { count } = await q;
-          return { id: c.id, name: c.name, count: count || 0 };
-        })
-      );
-      setCounsellorStats(results.sort((a, b) => b.count - a.count));
-    }
-
     setLoading(false);
-  }, [datePreset, customFrom, customTo, page, scopedCounsellorId, counsellorOptions, isCounsellor, profile?.display_name, roleLoaded, user?.id]);
+  }, [datePreset, customFrom, customTo, page, scopedCounsellorId, roleLoaded, user?.id]);
 
   useEffect(() => { fetchRecords(); }, [fetchRecords]);
   useEffect(() => {

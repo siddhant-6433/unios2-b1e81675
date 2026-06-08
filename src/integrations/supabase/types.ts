@@ -10038,6 +10038,14 @@ export type Database = {
         Returns: number
       }
       count_pending_approvals: { Args: never; Returns: number }
+      call_log_metrics: {
+        Args: {
+          p_counsellor_id?: string | null
+          p_from_date?: string | null
+          p_to_date?: string | null
+        }
+        Returns: Json
+      }
       find_lead_duplicates: {
         Args: {
           p_email?: string
