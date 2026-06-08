@@ -14,7 +14,7 @@ const filterMigration = readFileSync(
   "utf8",
 );
 const dedupeMigration = readFileSync(
-  "supabase/migrations/20260619094000_dedupe_lead_assignment_history_backfill.sql",
+  "supabase/migrations/20260619095000_dedupe_lead_assignment_history_backfill.sql",
   "utf8",
 );
 
