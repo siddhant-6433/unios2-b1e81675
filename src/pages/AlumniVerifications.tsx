@@ -9,7 +9,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Loader2, Shield, FileText, ExternalLink, CheckCircle, XCircle, Clock, Eye, Plus, Upload, AlertTriangle, X, Mail,
+  Loader2, Shield, FileText, ExternalLink, CheckCircle, XCircle, Clock, Eye, Plus, Upload, AlertTriangle, X, Mail, Trash2,
 } from "lucide-react";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
@@ -64,25 +64,42 @@ export default function AlumniVerifications() {
   const [emailBody, setEmailBody] = useState("");
   const [emailSending, setEmailSending] = useState(false);
 
-  const handleDelete = async () => {
-    if (!selectedReq || !isSuperAdmin) return;
-    if (!confirm(`Delete request ${selectedReq.request_number}? This cannot be undone.`)) return;
+  const handleDelete = async (requestToDelete = selectedReq) => {
+    if (!requestToDelete || !isSuperAdmin) return;
+    if (!window.confirm(`Delete request ${requestToDelete.request_number}? This cannot be undone.`)) return;
     setDeleting(true);
-    // Delete storage files
-    const paths = [
-      selectedReq.diploma_certificate_url,
-      selectedReq.employee_review_doc_url,
-      ...(selectedReq.marksheet_urls || []),
-      ...(selectedReq.additional_doc_urls || []),
-    ].filter(Boolean);
-    if (paths.length > 0) {
-      await supabase.storage.from("alumni-verification-docs").remove(paths);
+
+    try {
+      // Delete storage files
+      const paths = [
+        requestToDelete.diploma_certificate_url,
+        requestToDelete.employee_review_doc_url,
+        ...(requestToDelete.marksheet_urls || []),
+        ...(requestToDelete.additional_doc_urls || []),
+      ].filter(Boolean);
+      if (paths.length > 0) {
+        await supabase.storage.from("alumni-verification-docs").remove(paths);
+      }
+
+      const { error } = await supabase
+        .from("alumni_verification_requests" as any)
+        .delete()
+        .eq("id", requestToDelete.id);
+
+      if (error) throw error;
+
+      toast({ title: "Request deleted" });
+      if (selectedReq?.id === requestToDelete.id) setSelectedReq(null);
+      fetchRequests();
+    } catch (error) {
+      toast({
+        title: "Failed to delete request",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setDeleting(false);
     }
-    await supabase.from("alumni_verification_requests" as any).delete().eq("id", selectedReq.id);
-    toast({ title: "Request deleted" });
-    setDeleting(false);
-    setSelectedReq(null);
-    fetchRequests();
   };
 
   const fetchRequests = async () => {
@@ -505,7 +522,28 @@ registrar@nimt.ac.in`,
                           ) : "—"}
                         </td>
                         <td className="px-3 py-3 text-center">
-                          <Button variant="ghost" size="sm" className="gap-1 text-xs"><Eye className="h-3 w-3" /> View</Button>
+                          <div className="flex items-center justify-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="gap-1 text-xs"
+                              onClick={(e) => { e.stopPropagation(); openDetail(req); }}
+                            >
+                              <Eye className="h-3 w-3" /> View
+                            </Button>
+                            {isSuperAdmin && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="gap-1 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                                onClick={(e) => { e.stopPropagation(); handleDelete(req); }}
+                                disabled={deleting}
+                              >
+                                {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                                Delete
+                              </Button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -746,7 +784,7 @@ registrar@nimt.ac.in`,
               {isSuperAdmin && (
                 <div className="pt-3 border-t border-border">
                   <Button variant="ghost" size="sm" className="gap-1.5 text-xs text-destructive hover:text-destructive hover:bg-destructive/10 w-full"
-                    onClick={handleDelete} disabled={deleting}>
+                    onClick={() => handleDelete()} disabled={deleting}>
                     {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5" />}
                     Delete Request
                   </Button>
