@@ -82,7 +82,7 @@ const CONNECTED_DISPOSITIONS = [
 ];
 
 const FOLLOWUP_GAPS = [4, 8, 48]; // hours: 4h, 8h, 2 days
-const MAX_AUTO_ATTEMPTS = 4; // after 4 unanswered attempts → mark inactive
+const MAX_AUTO_ATTEMPTS = 4; // after 4 unanswered attempts → mark cold
 
 const FOLLOWUP_TIME_SLOTS = ["09:00", "10:00", "11:00", "12:00", "14:00", "15:00", "16:00", "17:00"];
 
@@ -93,6 +93,32 @@ const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", counsellor_call: "Follow Up", application_in_progress: "App In Progress",
   visit_scheduled: "Visit Scheduled", application_fee_paid: "Fee Paid",
 };
+
+const TERMINAL_DIALER_STAGES = new Set([
+  "not_interested",
+  "dnc",
+  "rejected",
+  "ineligible",
+  "admitted",
+  "cold",
+]);
+
+const TERMINAL_DIALER_DISPOSITIONS = new Set([
+  "not_interested",
+  "ineligible",
+  "do_not_contact",
+  "dnc",
+  "wrong_number",
+]);
+
+const isTerminalDialerStage = (stage?: string | null) =>
+  !!stage && TERMINAL_DIALER_STAGES.has(stage);
+
+const isTerminalDialerDisposition = (disposition?: string | null) =>
+  !!disposition && TERMINAL_DIALER_DISPOSITIONS.has(disposition);
+
+const shouldRemoveFromDialer = (lead: QueueLead | null, disposition?: string | null) =>
+  !!lead && (isTerminalDialerStage(lead.stage) || isTerminalDialerDisposition(disposition));
 
 const formatFollowupDate = (dateStr: string) => {
   if (!dateStr) return "";
@@ -344,13 +370,18 @@ export default function CloudDialer() {
       first_contact_at: r.first_contact_at ?? null,
       followup_id: r.followup_id ?? undefined,
       followup_type: (r.followup_type as QueueLead["followup_type"]) ?? undefined,
-    })).filter(l => l.phone);
+    })).filter((lead) => lead.phone && !isTerminalDialerStage(lead.stage));
 
+    const bucketCounts = mapped.reduce<Record<string, number>>((acc, lead) => {
+      acc[lead.bucket] = (acc[lead.bucket] || 0) + 1;
+      return acc;
+    }, {});
     const buckets: {key:string; label:string; color:string; count:number}[] = [];
     (smartPayload.buckets || []).forEach((b: any) => {
       const meta = BUCKET_META[b.label];
-      if (meta && b.count > 0) {
-        buckets.push({ key: meta.key, label: meta.uiLabel, color: meta.color, count: b.count });
+      const count = bucketCounts[b.label] || 0;
+      if (meta && count > 0) {
+        buckets.push({ key: meta.key, label: meta.uiLabel, color: meta.color, count });
       }
     });
 
@@ -380,14 +411,14 @@ export default function CloudDialer() {
       course_fee: r.course_fee_per_year
         ? `₹${Number(r.course_fee_per_year).toLocaleString("en-IN")}/year`
         : undefined,
-    })).filter((lead) => lead.phone);
-    const buckets = (listPayload.buckets || [])
-      .filter((bucket: any) => bucket.count > 0)
-      .map((bucket: any) => ({
+    })).filter((lead) => lead.phone && !isTerminalDialerStage(lead.stage));
+    const buckets = mapped.length === 0
+      ? []
+      : (listPayload.buckets || []).map((bucket: any) => ({
         key: queueSource === "fresh" ? "new" : "all",
         label: bucket.label,
         color: queueSource === "fresh" ? "bg-orange-500" : "bg-gray-500",
-        count: bucket.count,
+        count: mapped.length,
       }));
     setQueue(mapped);
     setQueueBuckets(buckets);
@@ -626,6 +657,14 @@ export default function CloudDialer() {
       return;
     }
     if (data) {
+      if (isTerminalDialerStage(data.stage)) {
+        toast({
+          title: "Lead is closed",
+          description: `${data.name || "This lead"} is ${String(data.stage).replace("_", " ")} and was not added to the dialer.`,
+          variant: "destructive",
+        });
+        return;
+      }
       setDialLeadMatch({
         id: data.id, name: data.name || "Lead", phone: data.phone,
         stage: data.stage, source: data.source, course_id: data.course_id ?? null,
@@ -674,6 +713,15 @@ export default function CloudDialer() {
   // is given the lead explicitly so it doesn't depend on the currentLead
   // render closure settling first.
   const injectAndStart = (row: any) => {
+    if (isTerminalDialerStage(row?.stage)) {
+      toast({
+        title: "Lead is closed",
+        description: `${row?.name || "This lead"} is ${String(row?.stage || "closed").replace("_", " ")} and was not called.`,
+        variant: "destructive",
+      });
+      setDialPlacing(false);
+      return;
+    }
     const ql: QueueLead = {
       id: row.id,
       name: row.name || "Lead",
@@ -748,6 +796,17 @@ export default function CloudDialer() {
   const placeCall = async (leadOverride?: QueueLead) => {
     const lead = leadOverride && (leadOverride as any).id ? leadOverride : currentLead;
     if (!lead || !user?.id) return;
+    if (isTerminalDialerStage(lead.stage)) {
+      toast({
+        title: "Lead is closed",
+        description: `${lead.name} is ${lead.stage.replace("_", " ")} and was removed from the dialer.`,
+        variant: "destructive",
+      });
+      setQueue(prev => prev.filter(l => l.id !== lead.id));
+      setCurrentIdx(0);
+      setDialerActive(false);
+      return;
+    }
     cancellingRef.current = false;
     setCallState({ status: "calling", startTime: Date.now(), elapsed: 0, disposition: null, autoDisposition: false });
 
@@ -847,6 +906,8 @@ export default function CloudDialer() {
       await supabase.from("leads").update({ stage: "counsellor_call" as any }).eq("id", currentLead.id);
     } else if (disposition === "not_interested") {
       await supabase.from("leads").update({ stage: "not_interested" as any, person_role: notIntCategory } as any).eq("id", currentLead.id);
+    } else if (disposition === "ineligible") {
+      await supabase.from("leads").update({ stage: "ineligible" as any }).eq("id", currentLead.id);
     }
 
     setStats(prev => ({
@@ -910,6 +971,8 @@ export default function CloudDialer() {
       await supabase.from("leads").update({ stage: "counsellor_call" as any }).eq("id", currentLead.id);
     } else if (disposition === "not_interested") {
       await supabase.from("leads").update({ stage: "not_interested" as any, person_role: notIntCategory } as any).eq("id", currentLead.id);
+    } else if (disposition === "ineligible") {
+      await supabase.from("leads").update({ stage: "ineligible" as any }).eq("id", currentLead.id);
     }
 
     setStats(prev => ({
@@ -1015,14 +1078,22 @@ export default function CloudDialer() {
     if (!currentLead) return;
     const attempt = currentLead.attempt_count + 1;
     const isAutoDisp = ["busy", "not_answered", "voicemail", "cancelled"].includes(disposition);
+    const isTerminalDisposition = isTerminalDialerDisposition(disposition);
+    const exhaustedAutoAttempts = isAutoDisp && attempt >= MAX_AUTO_ATTEMPTS;
 
-    // After MAX_AUTO_ATTEMPTS unanswered attempts → mark inactive, no followup
-    if (isAutoDisp && attempt >= MAX_AUTO_ATTEMPTS) {
-      supabase.from("leads").update({ stage: "inactive" as any }).eq("id", currentLead.id);
+    // After MAX_AUTO_ATTEMPTS unanswered attempts → mark cold, no followup
+    if (isTerminalDisposition || exhaustedAutoAttempts) {
+      if (exhaustedAutoAttempts) {
+        supabase.from("leads").update({ stage: "cold" as any }).eq("id", currentLead.id);
+      }
       setFollowupDate("");
       setFollowupTime("");
       setAutoNextTimer(10);
-      toast({ title: "Marked Inactive", description: `${currentLead.name} — ${attempt} unanswered attempts. Removed from followups.` });
+      if (isTerminalDisposition) {
+        toast({ title: "Closed lead", description: `${currentLead.name} will not be queued again.` });
+      } else {
+        toast({ title: "Marked Cold", description: `${currentLead.name} — ${attempt} unanswered attempts. Removed from followups.` });
+      }
       return;
     }
 
@@ -1086,8 +1157,14 @@ export default function CloudDialer() {
   // ── Confirm followup and move to next ─────────────────────────────────────
 
   const moveToNext = async () => {
-    // Save followup if there's a date (skip for not_interested and inactive)
-    if (currentLead && followupDate && callState.disposition !== "not_interested") {
+    const exhaustedAutoAttempts = !!currentLead
+      && !!callState.disposition
+      && ["busy", "not_answered", "voicemail", "cancelled"].includes(callState.disposition)
+      && currentLead.attempt_count + 1 >= MAX_AUTO_ATTEMPTS;
+    const removeCurrent = shouldRemoveFromDialer(currentLead, callState.disposition) || exhaustedAutoAttempts;
+
+    // Save followup if there's a date and the lead is still dialable.
+    if (currentLead && followupDate && !removeCurrent) {
       const scheduledAt = new Date(`${followupDate}T${followupTime || "10:00"}:00`);
       await supabase.from("lead_followups").insert({
         lead_id: currentLead.id,
@@ -1123,11 +1200,19 @@ export default function CloudDialer() {
     preDispositionRef.current = null;
     setCallState({ status: "idle", startTime: null, elapsed: 0, disposition: null, autoDisposition: false });
 
-    if (currentIdx < queue.length - 1) {
-      setCurrentIdx(prev => prev + 1);
+    const nextQueue = removeCurrent && currentLead
+      ? queue.filter(lead => lead.id !== currentLead.id)
+      : queue;
+    const nextIdx = removeCurrent ? currentIdx : currentIdx + 1;
+    const nextLead = nextQueue[nextIdx] || null;
+
+    setQueue(nextQueue);
+
+    if (nextLead) {
+      setCurrentIdx(nextIdx);
       // Auto-place next call if dialer is active and not paused
       if (dialerActive && !paused) {
-        setTimeout(() => placeCall(), 1000);
+        setTimeout(() => placeCall(nextLead), 1000);
       }
     } else {
       setDialerActive(false);
@@ -1932,7 +2017,7 @@ export default function CloudDialer() {
                         )}
                       </div>
 
-                      {/* Followup scheduling (not for not_interested or inactive) */}
+                      {/* Followup scheduling (not for closed lifecycle stages) */}
                       {callState.disposition !== "not_interested" && followupDate && (
                         <div className="space-y-1.5">
                           <div className="flex items-center gap-2">
