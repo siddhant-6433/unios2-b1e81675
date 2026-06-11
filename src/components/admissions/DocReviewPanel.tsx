@@ -52,9 +52,10 @@ interface Props {
   /** When true, hides Verify/Reject actions — useful once the application
    *  has been decided so operators aren't prompted to re-review docs. */
   readOnly?: boolean;
+  readOnlyReason?: string;
 }
 
-export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnly }: Props) {
+export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnly, readOnlyReason }: Props) {
   const [activeIdx, setActiveIdx] = useState(0);
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
@@ -234,7 +235,7 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
                 {activeStatus === "rejected" ? "Rejected" : "Pending"}
               </p>
               <p className="text-[11px] text-muted-foreground mt-0.5">
-                The application has been decided — no further doc review needed.
+                {readOnlyReason || "The application has been decided — no further doc review needed."}
               </p>
             </div>
           ) : (

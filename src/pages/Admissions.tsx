@@ -1472,7 +1472,12 @@ const Admissions = () => {
               ].filter(Boolean).join(" · ")}
             </p>
           </div>
-          <Button size="sm" variant="outline" className="border-red-300 text-red-700 hover:bg-red-100 shrink-0" onClick={() => navigate("/counsellor-dashboard?tab=tat-defaults")}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-red-300 text-red-700 hover:bg-red-100 shrink-0"
+            onClick={() => setView("action_center")}
+          >
             View Details
           </Button>
         </div>

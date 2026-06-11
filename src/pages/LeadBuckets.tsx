@@ -141,7 +141,7 @@ export default function LeadBuckets() {
   const { selectedCampusId } = useCampus();
   const { toast } = useToast();
 
-  const PAGE_SIZE = 100;
+  const PAGE_SIZE = 50;
 
   const [activeBucket, setActiveBucket] = useState<"school" | "college">("college");
   const [schoolFilter, setSchoolFilter] = useState<"all" | "mirai" | "nimt">("all");
@@ -149,7 +149,6 @@ export default function LeadBuckets() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
-  const [totalCount, setTotalCount] = useState(0);
   const pageRef = useRef(0);
   const cursorRef = useRef<LeadBucketCursor | null>(null);
   const [search, setSearch] = useState("");
@@ -157,6 +156,7 @@ export default function LeadBuckets() {
   const [courseFilter, setCourseFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectingAllFiltered, setSelectingAllFiltered] = useState(false);
 
   // Server-side facet counts (true totals, independent of the loaded page).
   const [courseFacets, setCourseFacets] = useState<{ name: string; count: number }[]>([]);
@@ -272,15 +272,12 @@ export default function LeadBuckets() {
     const cursor = reset ? null : cursorRef.current;
     if (reset) cursorRef.current = null;
 
-    // planned count only on the first page — re-counting on every scroll is
-    // wasteful; subsequent pages infer hasMore from a full page returning.
     let query = supabase
       .from("unassigned_leads_bucket" as any)
       .select(
         `id, name, phone, stage, source, course_name, campus_name, created_at,
          lead_score, lead_temperature, bucket, jd_category, last_ai_summary,
-         last_ai_disposition, last_ai_conversion_pct`,
-        reset ? { count: "planned" } : undefined
+         last_ai_disposition, last_ai_conversion_pct`
       )
       .order("created_at", { ascending: true }) // oldest (most urgent) first
       .order("id", { ascending: true })
@@ -290,7 +287,7 @@ export default function LeadBuckets() {
     }
     query = applyScope(query);
 
-    const { data, error, count } = await query;
+    const { data, error } = await query;
     if (error) console.error("Lead buckets fetch error:", error);
     const fetched = ((data || []) as any) as BucketLead[];
     const rows = fetched.slice(0, PAGE_SIZE);
@@ -299,7 +296,6 @@ export default function LeadBuckets() {
     if (reset) {
       setLeads(rows);
       setSelectedIds(new Set());
-      setTotalCount(count ?? rows.length);
       setHasMore(fetched.length > PAGE_SIZE);
     } else {
       setLeads((prev) => [...prev, ...rows]);
@@ -460,6 +456,25 @@ export default function LeadBuckets() {
   // `filtered` aliases it for the selection / quick-pick helpers, which
   // operate on the rows currently loaded into the table.
   const filtered = leads;
+  const loadedFilteredCount = filtered.length;
+  const exactCountOrUnknown = (count: number | null | undefined) => {
+    if (typeof count !== "number") return null;
+    return count >= loadedFilteredCount ? count : null;
+  };
+  const exactFilteredCount = (() => {
+    if (!hasMore) return loadedFilteredCount;
+    if (debouncedSearch) return null;
+    if (courseFilter !== "all") {
+      return exactCountOrUnknown(courseFacets.find((c) => c.name === courseFilter)?.count);
+    }
+    if (sourceFilter !== "all") {
+      return exactCountOrUnknown(sourceFacets.find((s) => s.source === sourceFilter)?.count);
+    }
+    return exactCountOrUnknown(courseAllCount);
+  })();
+  const filteredCountLabel = exactFilteredCount === null ? `${loadedFilteredCount}+` : String(exactFilteredCount);
+  const hasMoreThanLoaded = exactFilteredCount === null ? hasMore : exactFilteredCount > loadedFilteredCount;
+  const allLoadedSelected = filtered.length > 0 && filtered.every((lead) => selectedIds.has(lead.id));
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -470,10 +485,25 @@ export default function LeadBuckets() {
   };
 
   const toggleSelectAll = () => {
-    if (selectedIds.size === filtered.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(filtered.map((l) => l.id)));
+    setSelectedIds((prev) => {
+      if (allLoadedSelected) {
+        const next = new Set(prev);
+        filtered.forEach((lead) => next.delete(lead.id));
+        return next;
+      }
+      const next = new Set(prev);
+      filtered.forEach((lead) => next.add(lead.id));
+      return next;
+    });
+  };
+
+  const handleSelectAllFiltered = async () => {
+    setSelectingAllFiltered(true);
+    const ids = await fetchAllScopedIds();
+    setSelectingAllFiltered(false);
+    setSelectedIds(new Set(ids));
+    if (!ids.length) {
+      toast({ title: "No leads found", description: "No leads match the current filters.", variant: "destructive" });
     }
   };
 
@@ -679,6 +709,23 @@ export default function LeadBuckets() {
               Clear
             </Button>
           )}
+          {hasMoreThanLoaded && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-3 text-xs"
+              onClick={handleSelectAllFiltered}
+              disabled={selectingAllFiltered}
+            >
+              {selectingAllFiltered ? (
+                <span className="inline-flex items-center gap-1">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Selecting…
+                </span>
+              ) : (
+                `Select all ${filteredCountLabel} matching filter`
+              )}
+            </Button>
+          )}
         </div>
       )}
 
@@ -757,12 +804,12 @@ export default function LeadBuckets() {
           variant="outline"
           size="sm"
           className="h-9 px-3 text-xs gap-1.5 ml-auto"
-          disabled={totalCount === 0}
+          disabled={loadedFilteredCount === 0}
           onClick={() => { setListScope("filtered"); setShowSaveList(true); }}
           title="Save the current filtered view as a reusable list for bulk WhatsApp/email"
         >
           <ListPlus className="h-3.5 w-3.5" />
-          Save filter as list ({totalCount})
+          Save filter as list ({filteredCountLabel})
         </Button>
       </div>
 
@@ -784,7 +831,7 @@ export default function LeadBuckets() {
               <tr className="border-b border-border bg-muted/40">
                 <th className="px-4 py-3 text-left w-10">
                   <Checkbox
-                    checked={selectedIds.size === filtered.length && filtered.length > 0}
+                    checked={allLoadedSelected}
                     onCheckedChange={toggleSelectAll}
                   />
                 </th>
@@ -895,7 +942,9 @@ export default function LeadBuckets() {
             </Button>
           ) : null}
           <span>
-            Showing {leads.length} of {totalCount} lead{totalCount === 1 ? "" : "s"}
+            {exactFilteredCount === null
+              ? `Showing ${loadedFilteredCount} loaded lead${loadedFilteredCount === 1 ? "" : "s"}`
+              : `Showing ${loadedFilteredCount} of ${exactFilteredCount} lead${exactFilteredCount === 1 ? "" : "s"}`}
           </span>
         </div>
         </>
@@ -946,7 +995,7 @@ export default function LeadBuckets() {
             <p className="text-sm text-muted-foreground">
               {listScope === "selected"
                 ? `${selectedIds.size} selected lead${selectedIds.size === 1 ? "" : "s"} will be saved.`
-                : `${totalCount} lead${totalCount === 1 ? "" : "s"} matching the current filters will be saved.`}
+                : `All leads matching the current filters will be fetched and saved.`}
               {" "}List is static — the snapshot won't change as new leads come in.
             </p>
             <div>
