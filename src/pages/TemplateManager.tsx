@@ -12,6 +12,10 @@ import {
   Loader2, Plus, Edit, Trash2, Mail, MessageSquare, Eye, RefreshCw, Send, CheckCircle, Clock, XCircle, AlertTriangle,
   GraduationCap, Save, Filter,
 } from "lucide-react";
+import {
+  cahetDeadlineDescription,
+  cahetDeadlineMessage,
+} from "@/lib/deadlineRollover";
 
 // ── WhatsApp Template (from Meta API) ──
 interface MetaTemplate {
@@ -160,7 +164,13 @@ Buttons:
       .select("template_key, display_name, description, category, show_in_lead_picker")
       .order("category", { ascending: true })
       .order("display_name", { ascending: true });
-    if (!error && data) setWaSettings(data as WaSetting[]);
+    if (!error && data) {
+      setWaSettings((data as WaSetting[]).map((setting) => (
+        setting.template_key === "bpt_bmrit_cahet_deadline"
+          ? { ...setting, description: cahetDeadlineDescription() }
+          : setting
+      )));
+    }
     setWaSettingsLoading(false);
   };
 
@@ -214,8 +224,8 @@ Buttons:
     {
       name: "bpt_bmrit_cahet_deadline",
       category: "UTILITY",
-      body: "Dear Applicant,\n\nThis is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *10th June 2026, 11:59 PM*\n\nFor admission Candidates *MUST*\n\n1. Complete College Application Online at https://apply.nimt.ac.in\n2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nPlease note both form submissions are mandatory by 10th June 2026, 11:59 PM to be included in the admission process for session 2026-27.\n\nFor any details please call 9555192192\n9667691872\n7428499849",
-      description: "Sent to BPT/BMRIT applicants for the 10 June 2026 application and CAHET registration deadline",
+      body: cahetDeadlineMessage(),
+      description: `Sent to BPT/BMRIT applicants for the ${cahetDeadlineDescription()}`,
     },
   ];
 

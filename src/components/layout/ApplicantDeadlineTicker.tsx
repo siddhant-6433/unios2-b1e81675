@@ -3,9 +3,14 @@ import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import {
+  effectiveApplicationDeadline,
+  EXTENDED_APPLICATION_DEADLINE,
+  INITIAL_APPLICATION_DEADLINE,
+} from "@/lib/deadlineRollover";
 
-const DEFAULT_FEE_SUBMISSION_DEADLINE = "2026-06-10";
-const PUBLIC_APPLICATION_DEADLINE = "2026-06-10";
+const DEFAULT_FEE_SUBMISSION_DEADLINE = INITIAL_APPLICATION_DEADLINE;
+const PUBLIC_APPLICATION_DEADLINE = INITIAL_APPLICATION_DEADLINE;
 
 const STAFF_ROLES = new Set([
   "super_admin",
@@ -78,8 +83,12 @@ interface ApplicantDeadlineTickerProps {
 
 function PublicApplicationDeadlineHeader({ deadline, showCta }: { deadline: string; showCta: boolean }) {
   const [now, setNow] = useState(Date.now());
-  const deadlineLabel = formatLongDate(deadline);
-  const countdown = countdownRemaining(deadline, now);
+  const effectiveDeadline = effectiveApplicationDeadline(deadline, now);
+  const deadlineLabel = formatLongDate(effectiveDeadline);
+  const countdown = countdownRemaining(effectiveDeadline, now);
+  const headline = effectiveDeadline === EXTENDED_APPLICATION_DEADLINE
+    ? "Round 1 Final Extension: apply by"
+    : "Round 1 deadline: apply by";
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 1_000);
@@ -95,7 +104,7 @@ function PublicApplicationDeadlineHeader({ deadline, showCta }: { deadline: stri
             Admissions 2026-27
           </span>
           <span className="text-sm font-bold text-white sm:text-base">
-            Round 1 deadline: apply by {deadlineLabel}
+            {headline} {deadlineLabel}
           </span>
         </div>
 
@@ -150,7 +159,7 @@ export function ApplicantDeadlineTicker({ audience = "staff" }: ApplicantDeadlin
 
   if (!eligible) return null;
 
-  const days = daysRemaining(deadline);
+  const days = daysRemaining(effectiveApplicationDeadline(deadline));
   if (days === 0) return null;
 
   return <PublicApplicationDeadlineHeader deadline={deadline} showCta={audience === "public"} />;

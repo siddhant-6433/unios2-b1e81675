@@ -16,12 +16,15 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  cahetDeadlineDescription,
+  cahetDeadlineMessage,
+} from "@/lib/deadlineRollover";
 
 const CONVERSATION_PAGE_SIZE = 120;
 
 const TEMPLATE_MESSAGE_TEXTS: Record<string, string> = {
-  bpt_bmrit_cahet_deadline:
-    "Dear Applicant,\n\nThis is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *10th June 2026, 11:59 PM*\n\nFor admission Candidates *MUST*\n\n1. Complete College Application Online at https://apply.nimt.ac.in\n2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nPlease note both form submissions are mandatory by 10th June 2026, 11:59 PM to be included in the admission process for session 2026-27.\n\nFor any details please call 9555192192\n9667691872\n7428499849",
+  bpt_bmrit_cahet_deadline: cahetDeadlineMessage(),
   course_info_generic:
     "Hi {{student_name}}, thanks for your interest in NIMT Educational Institutions. We offer programmes in nursing, paramedical, pharma, management, education, law, and engineering across our Greater Noida, Ghaziabad, and Kotputli campuses. Browse the full list, fees, and eligibility on our website. Reply STOP to opt out.",
   course_info_v4:
@@ -143,9 +146,9 @@ const INBOX_TEMPLATES = [
   {
     key: "bpt_bmrit_cahet_deadline",
     label: "BPT/BMRIT CAHET Deadline",
-    description: "10 June 2026 application + CAHET registration deadline",
+    description: cahetDeadlineDescription(),
     params: [],
-    preview: "Dear Applicant,\n\nThis is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *10th June 2026, 11:59 PM*\n\nFor admission Candidates *MUST*\n\n1. Complete College Application Online at https://apply.nimt.ac.in\n2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nPlease note both form submissions are mandatory by 10th June 2026, 11:59 PM to be included in the admission process for session 2026-27.\n\nFor any details please call 9555192192\n9667691872\n7428499849",
+    preview: cahetDeadlineMessage(),
   },
   // ── Knowledge Base Quick Replies ─────────────────────────────────────────
   {

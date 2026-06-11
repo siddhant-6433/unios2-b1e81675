@@ -3,6 +3,10 @@ import { Link, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { ArrowRight, Flame, X } from "lucide-react";
+import {
+  effectiveCahetDeadline,
+  INITIAL_CAHET_DEADLINE_ISO,
+} from "@/lib/deadlineRollover";
 
 interface SprintStats {
   own_count: number;
@@ -15,7 +19,7 @@ interface SprintStats {
 }
 
 const TARGET_PER_COUNSELLOR = 15;
-const DEADLINE_FALLBACK = "2026-06-10T23:59:59+05:30";
+const DEADLINE_FALLBACK = INITIAL_CAHET_DEADLINE_ISO;
 const DISMISS_KEY = "cahet_ticker_dismissed_session";
 
 // Only ticker for users who can act on this — counsellors and admission staff.
@@ -76,9 +80,10 @@ export function CahetSprintTicker() {
   if (!eligible || dismissed || onSprintPage) return null;
   if (!stats) return null;
 
-  const days = daysRemaining(stats.deadline_at || DEADLINE_FALLBACK);
+  const deadlineIso = effectiveCahetDeadline(stats.deadline_at || DEADLINE_FALLBACK);
+  const days = daysRemaining(deadlineIso);
   if (days === 0) return null;
-  const deadlineLabel = formatDeadline(stats.deadline_at || DEADLINE_FALLBACK);
+  const deadlineLabel = formatDeadline(deadlineIso);
 
   const ownProgress = Math.min(100, Math.round((stats.own_count / TARGET_PER_COUNSELLOR) * 100));
   const urgent = days <= 3;

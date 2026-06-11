@@ -2,11 +2,15 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2, CreditCard, FileText, IndianRupee, Clock, Check, GraduationCap, Sparkles, ChevronRight, CalendarDays } from "lucide-react";
 import { buildApplicantFeeBreakdownRows, buildApplicantOneTimePaymentOptions } from "./feeBreakdown";
+import {
+  effectiveApplicationDeadline,
+  INITIAL_APPLICATION_DEADLINE,
+} from "@/lib/deadlineRollover";
 
 // Fallbacks if the get_applicant_deadlines RPC is unreachable.
 // The single source of truth is _app_config — these are last-resort
 // defaults so the UI still renders during a brief outage.
-const DEFAULT_FEE_SUBMISSION_DEADLINE      = "2026-06-10";
+const DEFAULT_FEE_SUBMISSION_DEADLINE      = INITIAL_APPLICATION_DEADLINE;
 const DEFAULT_FULL_COURSE_PAYMENT_DEADLINE = "2026-09-15";
 
 type BankDetails = {
@@ -200,8 +204,9 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     // Deadlines are non-critical — log but don't block render if missing.
     if (!dlRes.error && dlRes.data) {
       const d = dlRes.data as Record<string, string>;
+      const feeSubmissionDeadline = d.fee_submission_deadline || DEFAULT_FEE_SUBMISSION_DEADLINE;
       setDeadlines({
-        fee_submission_deadline:      d.fee_submission_deadline      || DEFAULT_FEE_SUBMISSION_DEADLINE,
+        fee_submission_deadline:      effectiveApplicationDeadline(feeSubmissionDeadline),
         full_course_payment_deadline: d.full_course_payment_deadline || DEFAULT_FULL_COURSE_PAYMENT_DEADLINE,
       });
       setBankDetails({

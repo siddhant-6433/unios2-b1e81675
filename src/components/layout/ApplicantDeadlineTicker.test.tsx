@@ -58,4 +58,19 @@ describe("ApplicantDeadlineTicker", () => {
     expect(screen.getByRole("link", { name: /Apply Now/i })).toHaveAttribute("href", "/apply/nimt");
     expect(screen.queryByRole("link", { name: "Edit" })).not.toBeInTheDocument();
   });
+
+  it("rolls the public deadline to the Round 1 Final Extension after 10 June is over", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-11T00:00:00+05:30"));
+
+    render(
+      <MemoryRouter>
+        <ApplicantDeadlineTicker audience="public" />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Round 1 Final Extension: apply by 14th June 2026")).toBeInTheDocument();
+    expect(screen.getByText(/CAHET registration on ABVMU due/)).toHaveTextContent("14th June 2026, 11:59 PM");
+    expect(screen.getByText("3d 23h 59m 59s")).toBeInTheDocument();
+  });
 });
