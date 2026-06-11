@@ -772,7 +772,9 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                           type="button"
                           onClick={() => {
                             setShowPreWaiverForm(true);
-                            setPreWaiverForm({ term: availableTerms[0] || "year_1", amount: "", reason: "" });
+                            const usedTerms = new Set(preWaivers.map(w => w.term));
+                            const nextTerm = availableTerms.find(t => !usedTerms.has(t)) ?? availableTerms[0] ?? "year_1";
+                            setPreWaiverForm({ term: nextTerm, amount: "", reason: "" });
                           }}
                           className="text-[11px] text-primary hover:underline"
                         >
@@ -895,9 +897,12 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                 });
                                 return;
                               }
-                              setPreWaivers(prev => [...prev, { term: preWaiverForm.term, amount: amt, reason: preWaiverForm.reason }]);
+                              const newPreWaivers = [...preWaivers, { term: preWaiverForm.term, amount: amt, reason: preWaiverForm.reason }];
+                              setPreWaivers(newPreWaivers);
                               setShowPreWaiverForm(false);
-                              setPreWaiverForm({ term: availableTerms[0] || "year_1", amount: "", reason: "" });
+                              const usedTerms = new Set(newPreWaivers.map(w => w.term));
+                              const nextTerm = availableTerms.find(t => !usedTerms.has(t)) ?? availableTerms[0] ?? "year_1";
+                              setPreWaiverForm({ term: nextTerm, amount: "", reason: "" });
                             }}
                           >
                             Add
@@ -1145,7 +1150,9 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                 <button
                                   onClick={() => {
                                     setAddingWaiverFor(offer.id);
-                                    setWaiverForm({ term: availableTerms[0] || "year_1", amount: "", reason: "" });
+                                    const existingTerms = new Set((waiversByOffer[offer.id] || []).map(w => w.term));
+                                    const nextTerm = availableTerms.find(t => !existingTerms.has(t)) ?? availableTerms[0] ?? "year_1";
+                                    setWaiverForm({ term: nextTerm, amount: "", reason: "" });
                                   }}
                                   className="text-[11px] text-primary hover:underline"
                                 >

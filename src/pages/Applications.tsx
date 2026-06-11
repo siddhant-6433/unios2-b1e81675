@@ -25,6 +25,8 @@ import {
   applicationFunnelStageOf,
   type ApplicationFunnelStage,
 } from "@/lib/applicationFunnel";
+import { deleteApplication as deleteApplicationRequest } from "@/lib/deleteApplication";
+import { useToast } from "@/hooks/use-toast";
 
 interface AppRow {
   id: string;
@@ -143,6 +145,7 @@ const LEAD_STAGE_BADGE: Record<string, string> = {
 
 export default function Applications() {
   const { role, profile } = useAuth();
+  const { toast } = useToast();
   const isCounsellor = role === "counsellor";
   const isSuperAdmin = role === "super_admin";
   const [apps, setApps] = useState<AppRow[]>([]);
@@ -516,15 +519,24 @@ export default function Applications() {
   const handleDelete = async () => {
     if (!deleteTarget || deleteTarget.payment_status === "paid") return;
     setDeleting(true);
-    const { error } = await supabase.from("applications").delete().eq("id", deleteTarget.id);
+    const { data, error } = await deleteApplicationRequest({
+      id: deleteTarget.id,
+      applicationId: deleteTarget.application_id,
+      paymentStatus: deleteTarget.payment_status,
+    });
     setDeleting(false);
     if (error) {
-      // toast is not imported here — use alert as lightweight fallback
-      alert(`Delete failed: ${error.message}`);
+      toast({ title: "Delete failed", description: error.message, variant: "destructive" });
       return;
     }
     setApps(prev => prev.filter(a => a.id !== deleteTarget.id));
     setDeleteTarget(null);
+    toast({
+      title: "Application deleted",
+      description: data
+        ? `${data.application_id} deleted with ${data.deleted_storage_files} storage files cleaned up.`
+        : undefined,
+    });
   };
 
   if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;

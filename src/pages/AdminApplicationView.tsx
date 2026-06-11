@@ -11,6 +11,7 @@ import { AdmissionLifecycleStepper } from "@/components/admissions/AdmissionLife
 import { DocReviewPanel } from "@/components/admissions/DocReviewPanel";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { deleteApplication as deleteApplicationRequest } from "@/lib/deleteApplication";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -231,13 +232,22 @@ export default function AdminApplicationView() {
   const deleteApplication = async () => {
     if (!app || app.payment_status === "paid") return;
     setDeleting(true);
-    const { error } = await supabase.from("applications").delete().eq("id", app.id);
+    const { data, error } = await deleteApplicationRequest({
+      id: app.id,
+      applicationId: app.application_id,
+      paymentStatus: app.payment_status,
+    });
     setDeleting(false);
     if (error) {
       toast({ title: "Delete failed", description: error.message, variant: "destructive" });
       return;
     }
-    toast({ title: "Application deleted" });
+    toast({
+      title: "Application deleted",
+      description: data
+        ? `${data.application_id} deleted with ${data.deleted_storage_files} storage files cleaned up.`
+        : undefined,
+    });
     navigate("/applications");
   };
 
