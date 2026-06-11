@@ -144,6 +144,13 @@ const INBOX_TEMPLATES = [
     preview: "Hi {{student_name}}, this is a reminder that your fee of ₹{{amount}} is due by {{due_date}}. Please complete the payment to secure your seat.",
   },
   {
+    key: "nimt_followup_v2",
+    label: "Follow-up",
+    description: "Approved follow-up template for expired WhatsApp windows",
+    params: ["student_name", "followup_date"],
+    preview: "Hi {{student_name}}, this is a follow-up from NIMT Educational Institutions. Our counsellor will connect with you {{followup_date}}. Please reply here if you would like to continue the conversation.",
+  },
+  {
     key: "bpt_bmrit_cahet_deadline",
     label: "BPT/BMRIT CAHET Deadline",
     description: cahetDeadlineDescription(),
@@ -1325,10 +1332,18 @@ const WhatsAppInbox = () => {
       case "application_received": params = [leadName, "N/A"]; break;
       case "fee_reminder": params = [leadName, "the pending amount", "the due date"]; break;
       case "course_details": params = [leadName, courseName]; break;
+      case "nimt_followup_v2": params = [leadName, "soon"]; break;
     }
 
     const { data, error } = await supabase.functions.invoke("whatsapp-send", {
-      body: { template_key: selectedTemplate, phone: selectedPhone, params, lead_id: conv?.lead_id || null, ...(buttonUrls ? { button_urls: buttonUrls } : {}) },
+      body: {
+        template_key: selectedTemplate,
+        phone: selectedPhone,
+        params,
+        lead_id: conv?.lead_id || null,
+        clear_unread_after_send: true,
+        ...(buttonUrls ? { button_urls: buttonUrls } : {}),
+      },
     });
 
     if (error) {
@@ -1365,6 +1380,7 @@ const WhatsAppInbox = () => {
       application_id: "N/A",
       amount: "the pending amount",
       due_date: "the due date",
+      followup_date: "soon",
     };
 
     return tmpl.preview.replace(/\{\{(\w+)\}\}/g, (_, key) => values[key] || `{{${key}}}`);
