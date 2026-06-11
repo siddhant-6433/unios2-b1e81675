@@ -280,7 +280,9 @@ Deno.serve(async (req) => {
       user = data.user;
     }
 
-    let { template_key, phone, params, lead_id, header_video_url, button_urls } = await req.json();
+    const requestBody = await req.json();
+    let { template_key, params, button_urls } = requestBody;
+    const { phone, lead_id, header_video_url, clear_unread_after_send } = requestBody;
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
 
@@ -679,6 +681,17 @@ Deno.serve(async (req) => {
         }),
         { status: sendResult.status >= 400 && sendResult.status < 500 ? sendResult.status : 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    if (clear_unread_after_send === true) {
+      await adminClient.rpc("mark_whatsapp_conversation_read", {
+        p_phone: waPhone,
+        p_provider: sendResult.provider,
+        p_business_phone_number_id: phoneNumberId,
+        p_business_phone_number: sendResult.businessNumber,
+      }).then(({ error }) => {
+        if (error) console.error("mark_whatsapp_conversation_read failed:", error.message);
+      });
     }
 
     return new Response(

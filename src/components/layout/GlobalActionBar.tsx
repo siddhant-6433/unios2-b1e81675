@@ -113,7 +113,7 @@ export function GlobalActionBar() {
           url: "/pending-followups?tab=visit_confirm",
         });
         if (c("wa_unread") > 0) result.push({
-          key: "wa_unread", label: "WhatsApp Unread", count: c("wa_unread"),
+          key: "wa_unread", label: "WhatsApp Unreplied", count: c("wa_unread"),
           icon: MessageCircle, color: "text-emerald-700 bg-emerald-50 border-emerald-200",
           url: "/whatsapp-inbox",
         });
