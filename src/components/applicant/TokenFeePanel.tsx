@@ -272,6 +272,24 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
 
   useEffect(() => { load(); }, [applicationId]);
 
+  useEffect(() => {
+    if (!feeStatus) return;
+
+    const nextOutstanding = Math.max(0, feeStatus.token_required - feeStatus.token_paid);
+
+    setInstalmentPreset((current) => {
+      if (current === null || current <= nextOutstanding) return current;
+      return nextOutstanding > 0 ? nextOutstanding : null;
+    });
+
+    setCustomAmt((current) => {
+      if (!current) return current;
+      const parsed = parseFloat(current);
+      if (!Number.isFinite(parsed) || parsed <= nextOutstanding) return current;
+      return nextOutstanding > 0 ? String(nextOutstanding) : "";
+    });
+  }, [feeStatus]);
+
   // Listen for the popup's success/failure ping.
   useEffect(() => {
     const handler = (e: MessageEvent) => {
@@ -1231,8 +1249,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         // Installment presets for the token fee alternative
         const presets: number[] = [];
         let p = minInstalment;
-        while (p < tokenOutstanding && presets.length < 4) { presets.push(p); p += minInstalment; }
-        if (!presets.includes(tokenOutstanding) && tokenOutstanding > 0) presets.push(tokenOutstanding);
+        while (p < feeStatus.token_required && presets.length < 4) { presets.push(p); p += minInstalment; }
+        if (!presets.includes(feeStatus.token_required) && feeStatus.token_required > 0) presets.push(feeStatus.token_required);
 
         const selectedAmt = instalmentPreset !== null
           ? instalmentPreset
@@ -1313,19 +1331,22 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
 
                     {/* Pay in parts toggle */}
                     <button
-                      onClick={() => setInstalmentPreset(v => v === null ? minInstalment : null)}
+                      onClick={() => {
+                        setInstalmentPreset(v => v === tokenOutstanding ? minInstalment : tokenOutstanding);
+                        setCustomAmt("");
+                      }}
                       className="text-xs text-blue-600 hover:text-blue-700 font-medium underline underline-offset-2"
                     >
-                      {instalmentPreset === null && customAmt === "" && instalmentPreset !== tokenOutstanding
+                      {instalmentPreset !== tokenOutstanding
                         ? "Hide instalment options"
                         : "Pay in parts instead (min ₹" + minInstalment.toLocaleString("en-IN") + ")"}
                     </button>
 
                     {/* Instalment chips — revealed on toggle */}
-                    {instalmentPreset !== null && instalmentPreset !== tokenOutstanding && (
+                    {instalmentPreset !== tokenOutstanding && (
                       <div className="space-y-3 pt-1">
                         <div className="flex flex-wrap gap-2">
-                          {presets.filter(p => p < tokenOutstanding).map(amt => (
+                          {presets.filter(p => p <= tokenOutstanding).map(amt => (
                             <button
                               key={amt}
                               onClick={() => { setInstalmentPreset(amt); setCustomAmt(""); }}
