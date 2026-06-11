@@ -12,7 +12,7 @@ import {
   Phone, MessageSquare, ChevronRight, Plus, Search, Filter, Upload,
   Eye, Calendar, MoreHorizontal, Users, TrendingUp, ArrowUpRight,
   Bot, UserCheck, MapPin, FileText, CheckCircle, XCircle, Clock, Loader2,
-  Trash2, ArrowRightLeft, Send, Flag, Inbox, Gift, Shield, CreditCard, ListPlus
+  Trash2, ArrowRightLeft, Send, Flag, Inbox, Gift, Shield, CreditCard, ListPlus, Bell,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -1173,6 +1173,61 @@ const Admissions = () => {
         </div>
       </div>
 
+      {/* Today's followup alert - counsellors must not miss their due calls */}
+      {role === "counsellor" && (todayFollowups > 0 || overdueFollowups > 0) && view !== "action_center" && (
+        <div className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 ${
+          overdueFollowups > 0
+            ? "border-red-400/50 bg-red-50 dark:bg-red-950/30"
+            : "border-amber-400/50 bg-amber-50 dark:bg-amber-950/30"
+        }`}>
+          <div className={`flex h-10 w-10 items-center justify-center rounded-xl shrink-0 ${
+            overdueFollowups > 0 ? "bg-red-500/20" : "bg-amber-500/20"
+          }`}>
+            <Bell className={`h-5 w-5 ${overdueFollowups > 0 ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"}`} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-foreground">
+              {overdueFollowups > 0 && todayFollowups > 0 ? (
+                <>
+                  <span className="text-red-600 dark:text-red-400">{overdueFollowups} overdue</span>
+                  <span className="mx-1.5 text-muted-foreground">/</span>
+                  <span className="text-amber-700 dark:text-amber-300">{todayFollowups} due today</span>
+                </>
+              ) : overdueFollowups > 0 ? (
+                <span className="text-red-600 dark:text-red-400">{overdueFollowups} overdue follow-up{overdueFollowups !== 1 ? "s" : ""} - act now</span>
+              ) : (
+                <span className="text-amber-800 dark:text-amber-200">{todayFollowups} follow-up{todayFollowups !== 1 ? "s" : ""} due today</span>
+              )}
+            </p>
+            <p className={`text-xs mt-0.5 ${overdueFollowups > 0 ? "text-red-600/80 dark:text-red-400/80" : "text-amber-700/80 dark:text-amber-300/80"}`}>
+              Don't let these leads wait - call them before end of day
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {todayFollowups > 0 && (
+              <Button
+                size="sm"
+                className="bg-amber-600 hover:bg-amber-700 text-white shadow-none gap-1.5"
+                onClick={() => navigate("/pending-followups?tab=today")}
+              >
+                <Phone className="h-3.5 w-3.5" />
+                {todayFollowups} Today
+              </Button>
+            )}
+            {overdueFollowups > 0 && (
+              <Button
+                size="sm"
+                className="bg-red-600 hover:bg-red-700 text-white shadow-none gap-1.5"
+                onClick={() => navigate("/pending-followups?tab=overdue")}
+              >
+                <Clock className="h-3.5 w-3.5" />
+                {overdueFollowups} Overdue
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Resumable lead drafts (autosaved from AddLeadDialog) */}
       <Suspense fallback={<DeferredBlock className="h-20" />}>
         <LeadDraftsPanel
@@ -1472,7 +1527,12 @@ const Admissions = () => {
               ].filter(Boolean).join(" · ")}
             </p>
           </div>
-          <Button size="sm" variant="outline" className="border-red-300 text-red-700 hover:bg-red-100 shrink-0" onClick={() => navigate("/counsellor-dashboard?tab=tat-defaults")}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-red-300 text-red-700 hover:bg-red-100 shrink-0"
+            onClick={() => setView("action_center")}
+          >
             View Details
           </Button>
         </div>

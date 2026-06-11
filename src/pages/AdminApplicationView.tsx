@@ -12,6 +12,7 @@ import { DocReviewPanel } from "@/components/admissions/DocReviewPanel";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { deleteApplication as deleteApplicationRequest } from "@/lib/deleteApplication";
+import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -32,6 +33,8 @@ export default function AdminApplicationView() {
   const { toast } = useToast();
 
   const { role } = useAuth();
+  const isTeamLeader = useIsTeamLeader();
+  const canApproveApplication = role === "super_admin" || role === "principal" || isTeamLeader;
   const [loading, setLoading] = useState(true);
   const [app, setApp] = useState<any | null>(null);
   const [lead, setLead] = useState<{
@@ -112,6 +115,14 @@ export default function AdminApplicationView() {
   // (application_id, file_path) so each click is idempotent.
   const setDocStatus = async (doc: PreviewDoc, next: DocStatus, notes?: string) => {
     if (!applicationId) return;
+    if (!canApproveApplication) {
+      toast({
+        title: "Approval restricted",
+        description: "Only team leaders, principals, and super admins can approve or reject documents.",
+        variant: "destructive",
+      });
+      return;
+    }
     const { data: { user } } = await supabase.auth.getUser();
     const { data: profile } = user
       ? await supabase.from("profiles").select("id").eq("user_id", user.id).maybeSingle()
@@ -139,6 +150,14 @@ export default function AdminApplicationView() {
   // (only on rejected docs) — these flags exist as a workflow signal.
   const decideApplication = async (decision: "approved" | "rejected") => {
     if (!applicationId || !app) return;
+    if (!canApproveApplication) {
+      toast({
+        title: "Approval restricted",
+        description: "Only team leaders, principals, and super admins can approve or reject applications.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (decision === "rejected" && !rejectionReason.trim()) {
       setShowRejectionInput(true);
       return;
@@ -382,7 +401,7 @@ export default function AdminApplicationView() {
               )}
               <span className="text-muted-foreground">of {counts.total}</span>
             </div>
-            {!decided && (
+            {!decided && canApproveApplication && (
               <div className="flex items-center gap-2">
                 <Button
                   variant="pill-outline"
@@ -403,6 +422,11 @@ export default function AdminApplicationView() {
                   <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />Approve
                 </Button>
               </div>
+            )}
+            {!decided && !canApproveApplication && (
+              <p className="text-[11px] text-muted-foreground">
+                You can view submitted documents. Team leaders, principals, and super admins approve or reject them.
+              </p>
             )}
             {decided && app.status === "approved" && (() => {
               const canIssueOffer = !!lead?.id && (
@@ -475,7 +499,10 @@ export default function AdminApplicationView() {
         docs={docs}
         reviews={reviews}
         onSetStatus={setDocStatus}
-        readOnly={decided}
+        readOnly={decided || !canApproveApplication}
+        readOnlyReason={!canApproveApplication
+          ? "You can view this document, but only team leaders, principals, and super admins can approve or reject it."
+          : undefined}
         courseInfo={lead?.course ? {
           name: lead.course.name,
           code: lead.course.code,
