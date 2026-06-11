@@ -28,6 +28,7 @@ CREATE INDEX IF NOT EXISTS idx_lead_assignment_history_lead_created
 
 ALTER TABLE public.lead_assignment_history ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Admins can view lead assignment history" ON public.lead_assignment_history;
 CREATE POLICY "Admins can view lead assignment history"
   ON public.lead_assignment_history
   FOR SELECT TO authenticated
@@ -38,6 +39,7 @@ CREATE POLICY "Admins can view lead assignment history"
     OR public.has_role(auth.uid(), 'principal')
   );
 
+DROP POLICY IF EXISTS "Counsellors can view own lead assignment history" ON public.lead_assignment_history;
 CREATE POLICY "Counsellors can view own lead assignment history"
   ON public.lead_assignment_history
   FOR SELECT TO authenticated
@@ -45,6 +47,7 @@ CREATE POLICY "Counsellors can view own lead assignment history"
     assigned_to = (SELECT id FROM public.profiles WHERE user_id = auth.uid() LIMIT 1)
   );
 
+DROP POLICY IF EXISTS "Team leaders can view team lead assignment history" ON public.lead_assignment_history;
 CREATE POLICY "Team leaders can view team lead assignment history"
   ON public.lead_assignment_history
   FOR SELECT TO authenticated
