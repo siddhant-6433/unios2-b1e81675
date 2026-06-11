@@ -18,6 +18,28 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const INITIAL_CAHET_DEADLINE_MS = new Date("2026-06-10T23:59:59+05:30").getTime();
+
+function cahetDeadlineMessage(now = Date.now()): string {
+  const extended = now > INITIAL_CAHET_DEADLINE_MS;
+  const bodyDate = extended ? "14th June 2026" : "10th June 2026";
+  const prefix = extended ? "Round 1 Final Extension - " : "";
+  return `Dear Applicant,
+
+This is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - ${prefix}Last date for Application Submission is *${bodyDate}, 11:59 PM*
+
+For admission Candidates *MUST*
+
+1. Complete College Application Online at https://apply.nimt.ac.in
+2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4
+
+Please note both form submissions are mandatory by ${bodyDate}, 11:59 PM to be included in the admission process for session 2026-27.
+
+For any details please call 9555192192
+9667691872
+7428499849`;
+}
+
 // Each template has BODY (parameterised) + optionally BUTTONS.
 // Button URLs follow Meta's rules: full URL prefix + {{1}} suffix.
 // For PDF receipts (no fixed prefix possible) we use a static button to
@@ -370,7 +392,7 @@ const TEMPLATES = [
     components: [
       {
         type: "BODY",
-        text: "Dear Applicant,\n\nThis is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *10th June 2026, 11:59 PM*\n\nFor admission Candidates *MUST*\n\n1. Complete College Application Online at https://apply.nimt.ac.in\n2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nPlease note both form submissions are mandatory by 10th June 2026, 11:59 PM to be included in the admission process for session 2026-27.\n\nFor any details please call 9555192192\n9667691872\n7428499849",
+        text: cahetDeadlineMessage(),
       },
     ],
   },
@@ -541,9 +563,21 @@ Deno.serve(async (req) => {
     // If omitted, every template in the array is (re-)submitted; Meta returns
     // 400 with code 2388023 for any that already exist, which is fine.
     const filterNames: string[] | null = Array.isArray(body?.names) ? body.names : null;
-    const queue = filterNames
+    const queueBase = filterNames
       ? TEMPLATES.filter(t => filterNames.includes(t.name))
       : TEMPLATES;
+    const queue = queueBase.map((tpl) => (
+      tpl.name === "bpt_bmrit_cahet_deadline"
+        ? {
+            ...tpl,
+            components: tpl.components.map((component: any) => (
+              component.type === "BODY"
+                ? { ...component, text: cahetDeadlineMessage() }
+                : component
+            )),
+          }
+        : tpl
+    ));
 
     for (const tpl of queue) {
       try {

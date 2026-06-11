@@ -18,6 +18,10 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import {
+  effectiveApplicationDeadline,
+  INITIAL_APPLICATION_DEADLINE,
+} from "@/lib/deadlineRollover";
+import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -58,8 +62,8 @@ export function NudgePaymentDialog({ open, onClose, candidate }: Props) {
     if (!open) return;
     setLoadingDate(true);
     (supabase as any).rpc("get_applicant_deadlines").then(({ data }: any) => {
-      const v = (data?.fee_submission_deadline as string) || "2026-06-10";
-      setDueDate(v);
+      const v = (data?.fee_submission_deadline as string) || INITIAL_APPLICATION_DEADLINE;
+      setDueDate(effectiveApplicationDeadline(v));
       setLoadingDate(false);
     });
   }, [open]);
