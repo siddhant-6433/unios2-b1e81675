@@ -24,6 +24,12 @@ describe("Admissions CRM loading performance guardrails", () => {
     expect(admissions).toContain("Retry");
   });
 
+  it("keeps the counsellor pending-actions CTA inside the accessible admissions workflow", () => {
+    expect(admissions).toContain("TAT Defaults Banner");
+    expect(admissions).toContain('onClick={() => setView("action_center")}');
+    expect(admissions).not.toContain('navigate("/counsellor-dashboard?tab=tat-defaults")');
+  });
+
   it("keeps the fix RLS-preserving", () => {
     expect(overviewMigration).toMatch(/\bSECURITY\s+INVOKER\b/i);
     expect(overviewMigration).not.toMatch(/\bSECURITY\s+DEFINER\b/i);
