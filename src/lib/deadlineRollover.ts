@@ -1,40 +1,59 @@
-export const INITIAL_APPLICATION_DEADLINE = "2026-06-10";
-export const EXTENDED_APPLICATION_DEADLINE = "2026-06-14";
-export const INITIAL_CAHET_DEADLINE_ISO = "2026-06-10T23:59:59+05:30";
-export const EXTENDED_CAHET_DEADLINE_ISO = "2026-06-14T23:59:59+05:30";
+export const INITIAL_APPLICATION_DEADLINE = "2026-06-14";
+export const INITIAL_CAHET_DEADLINE_ISO = "2026-06-14T23:59:59+05:30";
 
-const INITIAL_DEADLINE_END_MS = new Date(INITIAL_CAHET_DEADLINE_ISO).getTime();
+const IST_DAY_MS = 86_400_000;
+const GENERAL_ADMISSION_ROUND_START = 2;
+const GENERAL_ADMISSION_EXTENSION_DAYS = 5;
+const GENERAL_ADMISSION_WINDOWS_PER_ROUND = 3;
+const INITIAL_APPLICATION_DEADLINE_END_MS = new Date(`${INITIAL_APPLICATION_DEADLINE}T23:59:59+05:30`).getTime();
+const INITIAL_CAHET_DEADLINE_END_MS = new Date(INITIAL_CAHET_DEADLINE_ISO).getTime();
 
 export function isAfterInitialDeadline(now = Date.now()): boolean {
-  return now > INITIAL_DEADLINE_END_MS;
+  return now > INITIAL_APPLICATION_DEADLINE_END_MS;
 }
 
-export function effectiveApplicationDeadline(deadline: string, now = Date.now()): string {
-  if (deadline <= INITIAL_APPLICATION_DEADLINE && isAfterInitialDeadline(now)) {
-    return EXTENDED_APPLICATION_DEADLINE;
-  }
-  return deadline;
+function formatIsoDate(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
 }
 
-export function effectiveCahetDeadline(deadlineIso: string, now = Date.now()): string {
-  if (new Date(deadlineIso).getTime() <= INITIAL_DEADLINE_END_MS && isAfterInitialDeadline(now)) {
-    return EXTENDED_CAHET_DEADLINE_ISO;
+function applicationWindowIndex(now = Date.now()): number {
+  if (!isAfterInitialDeadline(now)) return 0;
+  return Math.floor((now - INITIAL_APPLICATION_DEADLINE_END_MS - 1) / (GENERAL_ADMISSION_EXTENSION_DAYS * IST_DAY_MS)) + 1;
+}
+
+export function effectiveApplicationDeadline(_deadline: string, now = Date.now()): string {
+  const windowIndex = applicationWindowIndex(now);
+  const rollingDeadline = formatIsoDate(INITIAL_APPLICATION_DEADLINE_END_MS + windowIndex * GENERAL_ADMISSION_EXTENSION_DAYS * IST_DAY_MS);
+  return _deadline > rollingDeadline ? _deadline : rollingDeadline;
+}
+
+export function effectiveApplicationRound(now = Date.now()): number {
+  return GENERAL_ADMISSION_ROUND_START + Math.floor(applicationWindowIndex(now) / GENERAL_ADMISSION_WINDOWS_PER_ROUND);
+}
+
+export function applicationDeadlineHeadline(portalId: "nimt" | "beacon" | "mirai", now = Date.now()): string {
+  const round = effectiveApplicationRound(now);
+  if (portalId === "nimt") return `Round ${round} Application Deadline`;
+  return `Round ${round} Application Deadline for Admission`;
+}
+
+export function effectiveCahetDeadline(deadlineIso: string, _now = Date.now()): string {
+  if (new Date(deadlineIso).getTime() <= INITIAL_CAHET_DEADLINE_END_MS) {
+    return INITIAL_CAHET_DEADLINE_ISO;
   }
   return deadlineIso;
 }
 
-export function effectiveCahetDeadlineLabel(now = Date.now()): string {
-  return isAfterInitialDeadline(now) ? "14 Jun 2026, 11:59 PM" : "10 Jun 2026, 11:59 PM";
+export function effectiveCahetDeadlineLabel(_now = Date.now()): string {
+  return "14 Jun 2026, 11:59 PM";
 }
 
-export function effectiveCahetWhatsAppDeadlineText(now = Date.now()): {
+export function effectiveCahetWhatsAppDeadlineText(_now = Date.now()): {
   descriptionDate: string;
   bodyDate: string;
   prefix: string;
 } {
-  return isAfterInitialDeadline(now)
-    ? { descriptionDate: "14 June 2026", bodyDate: "14th June 2026", prefix: "Round 1 Final Extension - " }
-    : { descriptionDate: "10 June 2026", bodyDate: "10th June 2026", prefix: "" };
+  return { descriptionDate: "14 June 2026", bodyDate: "14th June 2026", prefix: "" };
 }
 
 export function cahetDeadlineDescription(now = Date.now()): string {

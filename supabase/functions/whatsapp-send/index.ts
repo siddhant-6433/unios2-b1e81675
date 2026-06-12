@@ -12,12 +12,9 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const INITIAL_CAHET_DEADLINE_MS = new Date("2026-06-10T23:59:59+05:30").getTime();
-
-function cahetDeadlineMessage(now = Date.now()): string {
-  const extended = now > INITIAL_CAHET_DEADLINE_MS;
-  const bodyDate = extended ? "14th June 2026" : "10th June 2026";
-  const prefix = extended ? "Round 1 Final Extension - " : "";
+function cahetDeadlineMessage(): string {
+  const bodyDate = "14th June 2026";
+  const prefix = "";
   return `Dear Applicant,
 
 This is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - ${prefix}Last date for Application Submission is *${bodyDate}, 11:59 PM*

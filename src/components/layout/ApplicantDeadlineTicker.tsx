@@ -3,11 +3,15 @@ import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePortal } from "@/components/apply/PortalContext";
 import {
+  applicationDeadlineHeadline,
   effectiveApplicationDeadline,
-  EXTENDED_APPLICATION_DEADLINE,
+  effectiveCahetDeadline,
   INITIAL_APPLICATION_DEADLINE,
+  INITIAL_CAHET_DEADLINE_ISO,
 } from "@/lib/deadlineRollover";
+import type { PortalId } from "@/components/apply/portalConfig";
 
 const DEFAULT_FEE_SUBMISSION_DEADLINE = INITIAL_APPLICATION_DEADLINE;
 const PUBLIC_APPLICATION_DEADLINE = INITIAL_APPLICATION_DEADLINE;
@@ -81,14 +85,35 @@ interface ApplicantDeadlineTickerProps {
   audience?: "staff" | "public";
 }
 
-function PublicApplicationDeadlineHeader({ deadline, showCta }: { deadline: string; showCta: boolean }) {
+function PublicApplicationDeadlineHeader({
+  audience,
+  deadline,
+  portalId,
+  portalName,
+  portalPath,
+  portalPrimaryColor,
+  showCta,
+}: {
+  audience: "staff" | "public";
+  deadline: string;
+  portalId: PortalId;
+  portalName: string;
+  portalPath: string;
+  portalPrimaryColor: string;
+  showCta: boolean;
+}) {
   const [now, setNow] = useState(Date.now());
   const effectiveDeadline = effectiveApplicationDeadline(deadline, now);
+  const cahetDeadline = effectiveCahetDeadline(INITIAL_CAHET_DEADLINE_ISO, now).slice(0, 10);
   const deadlineLabel = formatLongDate(effectiveDeadline);
-  const countdown = countdownRemaining(effectiveDeadline, now);
-  const headline = effectiveDeadline === EXTENDED_APPLICATION_DEADLINE
-    ? "Round 1 Final Extension: apply by"
-    : "Round 1 deadline: apply by";
+  const cahetDeadlineLabel = formatLongDate(cahetDeadline);
+  const usesCahetUrgency = audience === "staff" || portalId === "nimt";
+  const countdown = countdownRemaining(usesCahetUrgency ? cahetDeadline : effectiveDeadline, now);
+  const headline = applicationDeadlineHeadline(portalId, now);
+  const scopeLabel = usesCahetUrgency ? "BPT & BMRIT" : portalName;
+  const capsuleText = usesCahetUrgency ? "CAHET registration on ABVMU due" : "Application deadline";
+  const capsuleDeadlineLabel = usesCahetUrgency ? cahetDeadlineLabel : deadlineLabel;
+  const backgroundColor = audience === "staff" ? "#0b1f4d" : portalPrimaryColor;
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 1_000);
@@ -96,7 +121,7 @@ function PublicApplicationDeadlineHeader({ deadline, showCta }: { deadline: stri
   }, []);
 
   return (
-    <div className="border-b border-white/10 bg-[#0b1f4d] px-4 py-2 text-white shadow-sm">
+    <div className="border-b border-white/10 px-4 py-2 text-white shadow-sm" style={{ backgroundColor }}>
       <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-center gap-2 text-center text-xs font-semibold sm:justify-between md:flex-nowrap md:text-left">
         <div className="flex min-w-0 flex-wrap items-center justify-center gap-2 md:flex-nowrap md:justify-start">
           <span className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.14em] text-sky-300 sm:text-xs">
@@ -104,16 +129,16 @@ function PublicApplicationDeadlineHeader({ deadline, showCta }: { deadline: stri
             Admissions 2026-27
           </span>
           <span className="text-sm font-bold text-white sm:text-base">
-            {headline} {deadlineLabel}
+            {headline}: apply by {deadlineLabel}
           </span>
         </div>
 
         <div className="inline-flex min-w-0 flex-wrap items-center justify-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-white/90 md:flex-nowrap">
           <span className="text-[10px] font-black uppercase tracking-[0.14em] text-[#fffc4d] sm:text-xs">
-            BPT &amp; BMRIT
+            {scopeLabel}
           </span>
           <span className="hidden sm:inline">
-            CAHET registration on ABVMU due <strong className="text-white">{deadlineLabel}, 11:59 PM</strong>
+            {capsuleText} <strong className="text-white">{capsuleDeadlineLabel}, 11:59 PM</strong>
           </span>
           <strong className="rounded-full bg-[#fffc4d] px-2 py-0.5 font-mono text-xs font-black text-black">
             {countdown}
@@ -122,7 +147,8 @@ function PublicApplicationDeadlineHeader({ deadline, showCta }: { deadline: stri
 
         {showCta && (
           <Link
-            to="/apply/nimt"
+            to={portalPath}
+            style={{ color: portalPrimaryColor }}
             className="inline-flex flex-shrink-0 items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-black uppercase tracking-wider text-[#0b1f4d] shadow-sm transition hover:bg-blue-100"
           >
             Apply Now
@@ -136,6 +162,7 @@ function PublicApplicationDeadlineHeader({ deadline, showCta }: { deadline: stri
 
 export function ApplicantDeadlineTicker({ audience = "staff" }: ApplicantDeadlineTickerProps) {
   const { role } = useAuth();
+  const portal = usePortal();
   const [deadline, setDeadline] = useState(
     audience === "public" ? PUBLIC_APPLICATION_DEADLINE : DEFAULT_FEE_SUBMISSION_DEADLINE,
   );
@@ -162,5 +189,15 @@ export function ApplicantDeadlineTicker({ audience = "staff" }: ApplicantDeadlin
   const days = daysRemaining(effectiveApplicationDeadline(deadline));
   if (days === 0) return null;
 
-  return <PublicApplicationDeadlineHeader deadline={deadline} showCta={audience === "public"} />;
+  return (
+    <PublicApplicationDeadlineHeader
+      audience={audience}
+      deadline={deadline}
+      portalId={portal.id}
+      portalName={portal.name}
+      portalPath={`/apply/${portal.id}`}
+      portalPrimaryColor={portal.primaryColor}
+      showCta={audience === "public"}
+    />
+  );
 }

@@ -12,7 +12,7 @@ import { effectiveCahetWhatsAppDeadlineText } from "@/lib/deadlineRollover";
 
 const cahetDeadlineText = effectiveCahetWhatsAppDeadlineText();
 const cahetBulkDescription = cahetDeadlineText.prefix
-  ? `Tells BPT/BMRIT applicants about the Round 1 Final Extension to submit both NIMT and CAHET forms by ${cahetDeadlineText.descriptionDate}.`
+  ? `Tells BPT/BMRIT applicants about the updated deadline to submit both NIMT and CAHET forms by ${cahetDeadlineText.descriptionDate}.`
   : `Tells BPT/BMRIT applicants to submit both NIMT and CAHET forms by ${cahetDeadlineText.descriptionDate}.`;
 
 export type WaParamSource = "auto" | "static";
