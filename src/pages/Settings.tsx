@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import {
-  MapPin, Save, Loader2, Building2, Navigation, Radius, CalendarDays, Info,
+  MapPin, Save, Loader2, Building2, Navigation, Radius, CalendarDays, Info, KeyRound, ShieldCheck, Trash2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,13 @@ interface CampusGeofence {
   maps_cid: string | null;
 }
 
+interface PasskeySummary {
+  id: string;
+  friendly_name?: string | null;
+  created_at: string;
+  last_used_at?: string | null;
+}
+
 type DeadlineKey = "fee_submission_deadline" | "full_course_payment_deadline";
 
 const DEADLINE_LABELS: Record<DeadlineKey, { title: string; help: string }> = {
@@ -35,9 +42,9 @@ const DEADLINE_LABELS: Record<DeadlineKey, { title: string; help: string }> = {
 };
 
 const Settings = () => {
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const { toast } = useToast();
-  const [tab, setTab] = useState<"geofence" | "deadlines">("geofence");
+  const [tab, setTab] = useState<"account" | "geofence" | "deadlines">("account");
 
   // ── Deadlines state ────────────────────────────────────────────
   const [deadlines, setDeadlines] = useState<Record<DeadlineKey, string>>({
@@ -51,13 +58,68 @@ const Settings = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, Partial<CampusGeofence>>>({});
+  const [passkeys, setPasskeys] = useState<PasskeySummary[]>([]);
+  const [passkeysLoading, setPasskeysLoading] = useState(true);
+  const [passkeySaving, setPasskeySaving] = useState(false);
+  const [deletingPasskeyId, setDeletingPasskeyId] = useState<string | null>(null);
 
   const isSuperAdmin = role === "super_admin";
 
   useEffect(() => {
     fetchCampuses();
     fetchDeadlines();
+    fetchPasskeys();
   }, []);
+
+  const fetchPasskeys = async () => {
+    if (!user) {
+      setPasskeys([]);
+      setPasskeysLoading(false);
+      return;
+    }
+
+    setPasskeysLoading(true);
+    const { data, error } = await supabase.auth.passkey.list();
+    if (error) {
+      toast({ title: "Could not load passkeys", description: error.message, variant: "destructive" });
+    } else {
+      setPasskeys(data || []);
+    }
+    setPasskeysLoading(false);
+  };
+
+  const registerPasskey = async () => {
+    if (!("PublicKeyCredential" in window)) {
+      toast({
+        title: "Passkeys unavailable",
+        description: "This browser or device does not support passkeys.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setPasskeySaving(true);
+    const { error } = await supabase.auth.registerPasskey();
+    if (error) {
+      toast({ title: "Could not add passkey", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Passkey added", description: "You can now use this passkey from the UniOs login page." });
+      await fetchPasskeys();
+    }
+    setPasskeySaving(false);
+  };
+
+  const deletePasskey = async (passkeyId: string) => {
+    setDeletingPasskeyId(passkeyId);
+    const { error } = await supabase.auth.passkey.delete({ passkeyId });
+    if (error) {
+      toast({ title: "Could not remove passkey", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Passkey removed" });
+      setPasskeys((prev) => prev.filter((passkey) => passkey.id !== passkeyId));
+    }
+    setDeletingPasskeyId(null);
+  };
 
   const fetchDeadlines = async () => {
     setDeadlinesLoading(true);
@@ -92,7 +154,7 @@ const Settings = () => {
 
   const fetchCampuses = async () => {
     setLoading(true);
-    const { data } = await supabase
+    const { data } = await (supabase as any)
       .from("campuses")
       .select("id, name, code, address, city, latitude, longitude, geofence_radius_meters, maps_cid")
       .order("name");
@@ -120,7 +182,7 @@ const Settings = () => {
     if (!changes) return;
 
     setSaving(campus.id);
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from("campuses")
       .update({
         latitude: changes.latitude ?? campus.latitude,
@@ -151,11 +213,19 @@ const Settings = () => {
     <div className="space-y-6 animate-fade-in">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Settings</h1>
-        <p className="text-sm text-muted-foreground mt-1">System configuration and campus settings</p>
+        <p className="text-sm text-muted-foreground mt-1">Account security, system configuration, and campus settings</p>
       </div>
 
       {/* Tabs */}
       <div className="flex items-center gap-1 rounded-xl border border-input bg-card p-1 w-fit">
+        <button
+          onClick={() => setTab("account")}
+          className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+            tab === "account" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <KeyRound className="h-4 w-4" /> Account
+        </button>
         <button
           onClick={() => setTab("geofence")}
           className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
@@ -173,6 +243,77 @@ const Settings = () => {
           <CalendarDays className="h-4 w-4" /> Applicant Deadlines
         </button>
       </div>
+
+      {tab === "account" && (
+        <Card className="border-border/60 shadow-none">
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
+                <ShieldCheck className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <CardTitle className="text-base font-semibold">Passkeys</CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Use Face ID, fingerprint, device PIN, or a security key to sign in.
+                </p>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-xl border border-border/60 bg-muted/20 p-4">
+              <div>
+                <p className="text-sm font-medium text-foreground">Add this device as a passkey</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  After adding a passkey, choose "Sign in with passkey" on the login page.
+                </p>
+              </div>
+              <Button onClick={registerPasskey} disabled={passkeySaving} className="gap-2 shrink-0">
+                {passkeySaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                Add passkey
+              </Button>
+            </div>
+
+            {passkeysLoading ? (
+              <div className="flex h-24 items-center justify-center">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : passkeys.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border p-6 text-center">
+                <p className="text-sm font-medium text-foreground">No passkeys added yet</p>
+                <p className="text-xs text-muted-foreground mt-1">Add one above to enable passkey login for your account.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {passkeys.map((passkey) => (
+                  <div key={passkey.id} className="flex items-center justify-between gap-3 rounded-xl border border-border/60 p-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-foreground">
+                        {passkey.friendly_name || "Passkey"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Added {new Date(passkey.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                        {passkey.last_used_at
+                          ? ` · Last used ${new Date(passkey.last_used_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`
+                          : ""}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => deletePasskey(passkey.id)}
+                      disabled={deletingPasskeyId === passkey.id}
+                      className="gap-2 shrink-0 text-destructive hover:text-destructive"
+                    >
+                      {deletingPasskeyId === passkey.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                      Remove
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {tab === "deadlines" && (
         <>
