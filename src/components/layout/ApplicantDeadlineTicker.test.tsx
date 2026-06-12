@@ -95,7 +95,7 @@ describe("ApplicantDeadlineTicker", () => {
 
     expect(screen.getByText("NIMT Beacon School")).toBeInTheDocument();
     expect(screen.getByText("Round 2 Application Deadline for Admission: apply by 19th June 2026")).toBeInTheDocument();
-    expect(screen.getByText(/Application deadline/)).toHaveTextContent("19th June 2026, 11:59 PM");
+    expect(screen.queryByText(/^Application deadline/)).not.toBeInTheDocument();
     expect(screen.queryByText("BPT & BMRIT")).not.toBeInTheDocument();
     expect(screen.queryByText(/CAHET/)).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Apply Now/i })).toHaveAttribute("href", "/apply/beacon");
@@ -116,7 +116,7 @@ describe("ApplicantDeadlineTicker", () => {
 
     expect(screen.getByText("Mirai School")).toBeInTheDocument();
     expect(screen.getByText("Round 3 Application Deadline for Admission: apply by 29th June 2026")).toBeInTheDocument();
-    expect(screen.getByText(/Application deadline/)).toHaveTextContent("29th June 2026, 11:59 PM");
+    expect(screen.queryByText(/^Application deadline/)).not.toBeInTheDocument();
     expect(screen.queryByText(/CAHET/)).not.toBeInTheDocument();
     expect(screen.getByText("4d 23h 59m 59s")).toBeInTheDocument();
   });

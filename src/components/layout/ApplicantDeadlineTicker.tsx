@@ -114,6 +114,7 @@ function PublicApplicationDeadlineHeader({
   const capsuleText = usesCahetUrgency ? "CAHET registration on ABVMU due" : "Application deadline";
   const capsuleDeadlineLabel = usesCahetUrgency ? cahetDeadlineLabel : deadlineLabel;
   const backgroundColor = audience === "staff" ? "#0b1f4d" : portalPrimaryColor;
+  const headlineText = `${headline}: apply by ${deadlineLabel}`;
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 1_000);
@@ -122,25 +123,27 @@ function PublicApplicationDeadlineHeader({
 
   return (
     <div className="border-b border-white/10 px-4 py-2 text-white shadow-sm" style={{ backgroundColor }}>
-      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-center gap-2 text-center text-xs font-semibold sm:justify-between md:flex-nowrap md:text-left">
-        <div className="flex min-w-0 flex-wrap items-center justify-center gap-2 md:flex-nowrap md:justify-start">
-          <span className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.14em] text-sky-300 sm:text-xs">
+      <div className="mx-auto flex w-full max-w-[112rem] flex-wrap items-center justify-center gap-2 text-center text-xs font-semibold xl:flex-nowrap xl:justify-between xl:text-left">
+        <div className="flex min-w-0 flex-wrap items-center justify-center gap-2 xl:flex-nowrap xl:justify-start">
+          <span className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-[10px] font-black uppercase tracking-[0.14em] text-sky-300 sm:text-xs">
             <span className="h-2 w-2 rounded-full bg-emerald-400" aria-hidden="true" />
             Admissions 2026-27
           </span>
-          <span className="text-sm font-bold text-white sm:text-base">
-            {headline}: apply by {deadlineLabel}
+          <span className="min-w-0 text-sm font-bold text-white sm:text-base xl:truncate">
+            {headlineText}
           </span>
         </div>
 
-        <div className="inline-flex min-w-0 flex-wrap items-center justify-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-white/90 md:flex-nowrap">
-          <span className="text-[10px] font-black uppercase tracking-[0.14em] text-[#fffc4d] sm:text-xs">
+        <div className="inline-flex min-w-0 flex-wrap items-center justify-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-white/90 xl:flex-nowrap">
+          <span className="shrink-0 whitespace-nowrap text-[10px] font-black uppercase tracking-[0.14em] text-[#fffc4d] sm:text-xs">
             {scopeLabel}
           </span>
-          <span className="hidden sm:inline">
-            {capsuleText} <strong className="text-white">{capsuleDeadlineLabel}, 11:59 PM</strong>
-          </span>
-          <strong className="rounded-full bg-[#fffc4d] px-2 py-0.5 font-mono text-xs font-black text-black">
+          {usesCahetUrgency && (
+            <span className="hidden whitespace-nowrap sm:inline">
+              {capsuleText} <strong className="text-white">{capsuleDeadlineLabel}, 11:59 PM</strong>
+            </span>
+          )}
+          <strong className="shrink-0 whitespace-nowrap rounded-full bg-[#fffc4d] px-2 py-0.5 font-mono text-xs font-black text-black">
             {countdown}
           </strong>
         </div>
@@ -149,7 +152,7 @@ function PublicApplicationDeadlineHeader({
           <Link
             to={portalPath}
             style={{ color: portalPrimaryColor }}
-            className="inline-flex flex-shrink-0 items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-black uppercase tracking-wider text-[#0b1f4d] shadow-sm transition hover:bg-blue-100"
+            className="inline-flex flex-shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-white px-4 py-2 text-xs font-black uppercase tracking-wider text-[#0b1f4d] shadow-sm transition hover:bg-blue-100"
           >
             Apply Now
             <ArrowRight className="h-3.5 w-3.5" />
