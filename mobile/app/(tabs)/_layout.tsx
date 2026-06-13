@@ -6,6 +6,7 @@ import { colors } from '../../constants/Colors';
 import {
   Home, Fingerprint, User, BookOpen, Bell,
   IndianRupee, Inbox, Users, Briefcase,
+  Camera,
 } from 'lucide-react-native';
 
 type TabConfig = {
@@ -19,6 +20,7 @@ const roleTabs: Record<string, TabConfig[]> = {
   admin: [
     { name: 'index', title: 'Home', icon: Home },
     { name: 'inbox', title: 'Inbox', icon: Inbox },
+    { name: 'student-photos', title: 'Photos', icon: Camera },
     { name: 'hr', title: 'HR', icon: Briefcase },
     { name: 'team', title: 'Team', icon: Users },
     { name: 'profile', title: 'Profile', icon: User },
@@ -27,6 +29,13 @@ const roleTabs: Record<string, TabConfig[]> = {
   employee: [
     { name: 'index', title: 'Home', icon: Home },
     { name: 'punch', title: 'Punch', icon: Fingerprint },
+    { name: 'hr', title: 'HR', icon: Briefcase },
+    { name: 'profile', title: 'Profile', icon: User },
+  ],
+  office: [
+    { name: 'index', title: 'Home', icon: Home },
+    { name: 'punch', title: 'Punch', icon: Fingerprint },
+    { name: 'student-photos', title: 'Photos', icon: Camera },
     { name: 'hr', title: 'HR', icon: Briefcase },
     { name: 'profile', title: 'Profile', icon: User },
   ],
@@ -57,14 +66,15 @@ function getTabSet(role: AppRole | null): TabConfig[] {
   if (!role) return roleTabs.student;
   if (['super_admin', 'campus_admin', 'principal', 'admission_head'].includes(role)) return roleTabs.admin;
   if (['faculty', 'teacher', 'ib_coordinator'].includes(role)) return roleTabs.faculty;
-  if (['counsellor', 'accountant', 'data_entry', 'office_admin', 'office_assistant', 'hostel_warden'].includes(role)) return roleTabs.employee;
+  if (['office_admin', 'office_assistant'].includes(role)) return roleTabs.office;
+  if (['counsellor', 'accountant', 'data_entry', 'hostel_warden'].includes(role)) return roleTabs.employee;
   if (role === 'parent') return roleTabs.parent;
   if (role === 'student') return roleTabs.student;
   return roleTabs.employee;
 }
 
 // All possible tab screen file names
-const allScreens = ['index', 'punch', 'inbox', 'hr', 'team', 'classes', 'fees', 'notices', 'leave', 'profile'];
+const allScreens = ['index', 'punch', 'student-photos', 'inbox', 'hr', 'team', 'classes', 'fees', 'notices', 'leave', 'profile'];
 
 export default function TabLayout() {
   const { user, role, loading } = useAuth();
