@@ -578,25 +578,42 @@ Deno.serve(async (req) => {
 
       // If payment is confirmed as success, update the DB directly
       // (covers cases where surl callback was missed — popup closed early, etc.)
+      let applicationUpdated = false;
+      let applicationUpdateError: string | null = null;
       if (txn?.status?.toLowerCase() === "success") {
         const appId = application_id || txn?.udf1 || "";
         const paymentRef = txn?.easepayid || txnid;
         if (appId) {
           const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
-          const { error: dbErr } = await admin
+          const { data: updated, error: dbErr } = await admin
             .from("applications")
             .update({ payment_status: "paid", payment_ref: paymentRef })
-            .eq("application_id", appId);
+            .eq("application_id", appId)
+            .select("application_id, payment_status");
           if (dbErr) {
+            applicationUpdateError = dbErr.message;
             console.error("[easebuzz] verify-payment DB update error:", dbErr.message);
+          } else if (!updated?.length) {
+            applicationUpdateError = "application_not_found";
+            console.error("[easebuzz] verify-payment DB update matched 0 rows for", appId);
           } else {
+            applicationUpdated = true;
             console.log("[easebuzz] verify-payment: updated application", appId, "to paid");
           }
+        } else {
+          applicationUpdateError = "missing_application_id";
         }
       }
 
       return new Response(
-        JSON.stringify({ txnid: txn?.txnid, status: txn?.status, amount: txn?.amount, easepayid: txn?.easepayid }),
+        JSON.stringify({
+          txnid: txn?.txnid,
+          status: txn?.status,
+          amount: txn?.amount,
+          easepayid: txn?.easepayid,
+          application_updated: applicationUpdated,
+          application_update_error: applicationUpdateError,
+        }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }

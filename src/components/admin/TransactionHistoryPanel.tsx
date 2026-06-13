@@ -286,6 +286,7 @@ export default function TransactionHistoryPanel() {
     setReconcileResult(null);
     let updated = 0;
     let skipped = 0;
+    let gatewayOnly = 0;
     // Reconcile only applies to applications-table rows. lead_payment rows
     // shown in this view come from the offer flow and have their own
     // confirm path; we mustn't call verify-payment with their synthetic ID.
@@ -295,12 +296,42 @@ export default function TransactionHistoryPanel() {
         const { data } = await supabase.functions.invoke("easebuzz-payment", {
           body: { action: "verify-payment", application_id: txn.application_id },
         });
-        if (data?.status?.toLowerCase() === "success") updated++;
+        if (data?.application_updated === true) updated++;
+        else if (data?.status?.toLowerCase() === "success") gatewayOnly++;
         else if (data?.error) skipped++;
       } catch (_) { skipped++; }
     }
-    setReconcileResult(`Reconciled ${updated} of ${pending.length} pending payments${skipped ? ` (${skipped} unverifiable — try Mark Paid by UTR)` : ""}`);
-    if (updated > 0) fetchAppTxns();
+
+    let udf1Updated = 0;
+    let udf1Scanned = 0;
+    let udf1Error = "";
+    if (pending.length > updated) {
+      try {
+        const { data, error } = await supabase.functions.invoke("easebuzz-payment", {
+          body: { action: "reconcile-by-udf1", days_back: 30 },
+        });
+        if (error) throw new Error(error.message);
+        if (data?.error) throw new Error(data.error);
+        udf1Updated = data?.reconciled?.length || 0;
+        udf1Scanned = data?.pending_scanned || 0;
+      } catch (e: any) {
+        udf1Error = e?.message || "UDF1 sweep failed";
+      }
+    }
+
+    const totalUpdated = updated + udf1Updated;
+    const suffix = [
+      gatewayOnly ? `${gatewayOnly} gateway-success rows still failed DB update` : "",
+      skipped ? `${skipped} unverifiable` : "",
+      udf1Updated ? `${udf1Updated} recovered by UDF1 sweep` : "",
+      udf1Error ? `UDF1 sweep failed: ${udf1Error}` : "",
+    ].filter(Boolean).join(" · ");
+    setReconcileResult(
+      `Reconciled ${totalUpdated} of ${pending.length} pending payments` +
+      (udf1Scanned ? ` · UDF1 scanned ${udf1Scanned}` : "") +
+      (suffix ? ` (${suffix})` : "")
+    );
+    if (totalUpdated > 0) fetchAppTxns();
     setReconciling(false);
   };
 
