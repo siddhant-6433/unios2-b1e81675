@@ -24,7 +24,7 @@ interface AddStudentDialogProps {
   onDraftChange?: () => void;
 }
 
-type FeeVersion = "new_admission" | "existing_parent" | "standard";
+type FeeVersion = "new_admission" | "existing_parent" | "standard" | "stetho_batch";
 
 // School grade suffix → readable label
 const GRADE_LABELS: Record<string, string> = {
@@ -44,6 +44,10 @@ function isSchoolInstitution(inst: Institution | null) {
 function courseLabel(c: Course) {
   const suffix = c.code.split("-").pop() || "";
   return GRADE_LABELS[suffix] ? `${GRADE_LABELS[suffix]} (${c.code})` : c.name;
+}
+
+function isDaottCourse(course: Course | null) {
+  return course ? ["DAOTT-GN", "OTT-GN"].includes(course.code) : false;
 }
 
 const STEPS = ["Student Details", "Parent / Guardian", "Programme & Session"];
@@ -197,7 +201,14 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
   }, [form.school_admission_no]);
 
   const selectedInstitution = institutions.find(i => i.id === form.institution_id) || null;
+  const selectedCourse = courses.find(c => c.id === form.course_id) || null;
   const isSchool = isSchoolInstitution(selectedInstitution);
+
+  useEffect(() => {
+    if (isDaottCourse(selectedCourse)) {
+      setForm(f => ({ ...f, fee_version: "stetho_batch" }));
+    }
+  }, [selectedCourse?.id]);
 
   const step0Valid = !!form.name && !!form.dob && !!form.gender && !!form.campus_id && !!form.institution_id && !!form.course_id;
   const canSubmit  = step0Valid && !!form.session_id;
@@ -465,7 +476,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
               </div>
             </div>
 
-            {/* Fee structure — school gets 2-option toggle, others get standard */}
+            {/* Fee structure — school gets 2-option toggle, DAOTT gets Stetho Batch */}
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-2">
                 Fee Structure
@@ -486,6 +497,14 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
                     <p className="text-[10px] text-muted-foreground mt-0.5">CPI-revised rates for continuing families</p>
                   </button>
                 </div>
+              ) : isDaottCourse(selectedCourse) ? (
+                <div className="grid grid-cols-1 gap-2">
+                  <button onClick={() => set("fee_version", "stetho_batch")}
+                    className={`p-3 rounded-xl border text-left transition-colors ${form.fee_version === "stetho_batch" ? "border-primary bg-primary/5" : "border-border"}`}>
+                    <p className="text-xs font-semibold text-foreground">Stetho Batch</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">₹1,85,000 across 5 semesters</p>
+                  </button>
+                </div>
               ) : (
                 <div className="p-3 rounded-xl border border-border bg-muted/30">
                   <p className="text-xs text-muted-foreground">Standard fee structure will be applied based on programme.</p>
@@ -504,7 +523,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
               <p className="text-muted-foreground">
                 {allCampuses.find(c => c.id === form.campus_id)?.name || "—"}
                 {" › "}{selectedInstitution?.name || "—"}
-                {" › "}{courses.find(c => c.id === form.course_id) ? courseLabel(courses.find(c => c.id === form.course_id)!) : "—"}
+                {" › "}{selectedCourse ? courseLabel(selectedCourse) : "—"}
               </p>
               {form.school_admission_no && <p className="text-muted-foreground font-mono">Admission No: {form.school_admission_no}</p>}
             </div>

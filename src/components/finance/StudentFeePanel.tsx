@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Loader2, Wand2, Plus, HandCoins, Check, Clock, AlertTriangle, Trash2,
-  Receipt, FileText,
+  Receipt, FileText, RefreshCw,
 } from "lucide-react";
 import { ConcessionDialog } from "./ConcessionDialog";
 
@@ -36,12 +36,16 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [provisioning, setProvisioning] = useState(false);
+  const [migratingStetho, setMigratingStetho] = useState(false);
   const [concessionOpen, setConcessionOpen] = useState(false);
   const [selectedFeeItems, setSelectedFeeItems] = useState<string[]>([]);
 
   const isFinanceRole = ["super_admin", "campus_admin", "principal", "accountant"].includes(role || "");
   const canProvision = isFinanceRole;
   const canRequestConcession = ["counsellor", "super_admin", "campus_admin", "accountant"].includes(role || "");
+  const courseCode = student?.courses?.code || student?.course_code || "";
+  const isDaott = ["DAOTT-GN", "OTT-GN"].includes(courseCode);
+  const isStethoBatch = student?.fee_structure_version === "stetho_batch";
 
   useEffect(() => {
     if (student?.id) {
@@ -107,6 +111,31 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
     setProvisioning(false);
   };
 
+  const handleMigrateToStetho = async () => {
+    const confirmed = window.confirm(
+      "Migrate this DAOTT/DOTT admission to the Stetho Batch fee structure? The current ledger will be snapshotted before the live ledger is rebuilt.",
+    );
+    if (!confirmed) return;
+
+    setMigratingStetho(true);
+    const { data, error } = await (supabase as any).rpc("migrate_daott_student_to_stetho_batch", {
+      _student_id: student.id,
+    });
+    setMigratingStetho(false);
+
+    if (error) {
+      toast({ title: "Migration failed", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    toast({
+      title: "Migrated to Stetho Batch",
+      description: `Snapshot preserved. ${data?.ledger_rows_created || 0} fee rows created.`,
+    });
+    await fetchFees();
+    onRefresh?.();
+  };
+
   const handleRemoveUnpaid = async (feeId: string) => {
     const { error } = await supabase
       .from("fee_ledger")
@@ -147,8 +176,8 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
           </Badge>
         )}
         {student.fee_structure_version && (
-          <Badge className={student.fee_structure_version === "existing_parent" ? "bg-amber-100 text-amber-700 border-amber-200" : "bg-blue-100 text-blue-700 border-blue-200"}>
-            {student.fee_structure_version === "existing_parent" ? "Existing Parent" : "New Admission"}
+          <Badge className={student.fee_structure_version === "existing_parent" ? "bg-amber-100 text-amber-700 border-amber-200" : isStethoBatch ? "bg-violet-100 text-violet-700 border-violet-200" : "bg-blue-100 text-blue-700 border-blue-200"}>
+            {student.fee_structure_version === "existing_parent" ? "Existing Parent" : isStethoBatch ? "Stetho Batch" : "New Admission"}
           </Badge>
         )}
       </div>
@@ -171,6 +200,12 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
         {canRequestConcession && fees.length > 0 && (
           <Button size="sm" variant="outline" onClick={() => setConcessionOpen(true)} className="gap-1.5">
             <HandCoins className="h-3.5 w-3.5" /> Request Concession
+          </Button>
+        )}
+        {isFinanceRole && isDaott && !isStethoBatch && (
+          <Button size="sm" variant="outline" onClick={handleMigrateToStetho} disabled={migratingStetho} className="gap-1.5">
+            {migratingStetho ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            Migrate to Stetho Batch
           </Button>
         )}
       </div>
@@ -212,7 +247,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                   <span className="font-medium text-foreground">{f.fee_codes?.code || "—"}</span>
                   <span className="block text-[10px] text-muted-foreground">{f.fee_codes?.name}</span>
                 </td>
-                <td className="px-4 py-3 text-muted-foreground">{f.term}</td>
+                <td className="px-4 py-3 text-muted-foreground">{isStethoBatch && /^year_\d+$/.test(f.term) ? `Sem ${f.term.replace("year_", "")}` : f.term}</td>
                 <td className="px-4 py-3 text-right text-foreground">₹{Number(f.total_amount).toLocaleString("en-IN")}</td>
                 <td className="px-4 py-3 text-right text-muted-foreground">
                   {Number(f.concession) > 0 ? `₹${Number(f.concession).toLocaleString("en-IN")}` : "—"}

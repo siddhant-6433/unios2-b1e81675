@@ -24,13 +24,13 @@ const StudentProfile = () => {
   const fetchStudent = async () => {
     setLoading(true);
     let { data } = await supabase.from("students")
-      .select("*, courses:course_id(name), campuses:campus_id(name), batches:batch_id(name), admission_sessions:session_id(name)")
+      .select("*, courses:course_id(name, code), campuses:campus_id(name), batches:batch_id(name), admission_sessions:session_id(name)")
       .eq("admission_no", admissionNo)
       .maybeSingle();
 
     if (!data) {
       const res = await supabase.from("students")
-        .select("*, courses:course_id(name), campuses:campus_id(name), batches:batch_id(name), admission_sessions:session_id(name)")
+        .select("*, courses:course_id(name, code), campuses:campus_id(name), batches:batch_id(name), admission_sessions:session_id(name)")
         .eq("pre_admission_no", admissionNo)
         .maybeSingle();
       data = res.data;

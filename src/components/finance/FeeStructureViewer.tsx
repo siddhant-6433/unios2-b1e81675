@@ -250,10 +250,11 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
   const fmt = (n: number) => `₹${n.toLocaleString("en-IN")}`;
 
   // Collect year-wise data from metadata (year_1, year_2, ... keys or years/year_wise array)
-  const getYearData = (meta: any): { year: number; fee: number; discount: number; discountCondition: string; installmentCount: number; paymentNote: string }[] => {
+  type PeriodData = { year: number; label: string; fee: number; discount: number; discountCondition: string; installmentCount: number; paymentNote: string };
+
+  const getYearData = (meta: any): PeriodData[] => {
     if (!meta) return [];
-    const result: typeof retType = [];
-    type retType = { year: number; fee: number; discount: number; discountCondition: string; installmentCount: number; paymentNote: string }[];
+    const result: PeriodData[] = [];
 
     // Check year_1, year_2, ... keys
     for (let i = 1; i <= 8; i++) {
@@ -261,6 +262,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
       if (y && typeof y === "object") {
         result.push({
           year: i,
+          label: y.label || `${meta.period_label || "Year"} ${i}`,
           fee: Number(y.fee || y.amount || 0),
           discount: Number(y.discount || 0),
           discountCondition: y.discount_condition || "",
@@ -278,6 +280,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
           if (y.fee || y.amount) {
             result.push({
               year: i + 1,
+              label: y.label || `${meta.period_label || "Year"} ${i + 1}`,
               fee: Number(y.fee || y.amount || 0),
               discount: Number(y.discount || 0),
               discountCondition: y.discount_condition || "",
@@ -342,12 +345,12 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
 
           return (
             <div className="px-3 py-2 bg-muted/20">
-              <p className="text-[9px] font-semibold text-muted-foreground uppercase mb-1.5">Year-wise Breakdown</p>
+              <p className="text-[9px] font-semibold text-muted-foreground uppercase mb-1.5">{meta.period_label_plural || "Year-wise Breakdown"}</p>
               <table className="w-full text-[11px]">
                 <thead>
                   <tr className="text-muted-foreground">
-                    <th className="text-left font-medium pb-1">Year</th>
-                    <th className="text-right font-medium pb-1">{feeColLabel}</th>
+                    <th className="text-left font-medium pb-1">{meta.period_label || "Year"}</th>
+                    <th className="text-right font-medium pb-1">{meta.period_fee_label || feeColLabel}</th>
                     {hasAnyDiscount && (
                       <>
                         <th className="text-right font-medium pb-1">Waiver</th>
@@ -383,7 +386,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
 
                     return (
                       <tr key={y.year} className="border-t border-border/30">
-                        <td className="py-1.5 font-medium text-foreground">Year {y.year}</td>
+                        <td className="py-1.5 font-medium text-foreground">{y.label || `Year ${y.year}`}</td>
                         <td className="py-1.5 text-right text-foreground">{fmt(y.fee)}</td>
                         {hasAnyDiscount && (
                           <>
@@ -441,6 +444,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
   const versionLabel = (v: string) => {
     if (v?.includes("existing_parent")) return "Existing Parent";
     if (v?.includes("new_admission")) return "New Admission";
+    if (v?.includes("stetho_batch")) return "Stetho Batch";
     return v || "Standard";
   };
 
