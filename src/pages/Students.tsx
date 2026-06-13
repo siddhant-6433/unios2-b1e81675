@@ -8,6 +8,7 @@ import { AddStudentDialog } from "@/components/admissions/AddStudentDialog";
 import { StudentDraftsPanel } from "@/components/admissions/StudentDraftsPanel";
 import { BulkStudentImportDialog } from "@/components/admissions/BulkStudentImportDialog";
 import { usePermissions } from "@/contexts/PermissionContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { classifyCourse } from "@/lib/courseSort";
 
 interface StudentRow {
@@ -17,6 +18,7 @@ interface StudentRow {
   pre_admission_no: string | null;
   status: string;
   phone: string | null;
+  created_by: string | null;
   section: string | null;
   course_name?: string;
   course_code?: string | null;
@@ -44,6 +46,7 @@ interface StudentQueryRow {
   pre_admission_no: string | null;
   status: string;
   phone: string | null;
+  created_by: string | null;
   section: string | null;
   courses?: {
     id: string;
@@ -62,6 +65,9 @@ interface StudentQueryRow {
   } | null;
   campuses?: {
     name: string | null;
+  } | null;
+  leads?: {
+    counsellor_id: string | null;
   } | null;
 }
 
@@ -152,6 +158,7 @@ const Students = () => {
   const [draftRefreshKey, setDraftRefreshKey] = useState(0);
   const { selectedCampusId } = useCampus();
   const { can } = usePermissions();
+  const { role, user, profile } = useAuth();
   const canCreateStudents = can("students", "create");
 
   const fetchStudents = useCallback(async () => {
@@ -165,6 +172,7 @@ const Students = () => {
         pre_admission_no,
         status,
         phone,
+        created_by,
         section,
         courses:course_id(
           id,
@@ -175,14 +183,19 @@ const Students = () => {
           )
         ),
         batches:batch_id(name, section),
-        campuses:campus_id(name)
+        campuses:campus_id(name),
+        leads:lead_id(counsellor_id)
       `)
       .order("name", { ascending: true })
       .limit(1000);
     if (selectedCampusId !== "all") query = query.eq("campus_id", selectedCampusId);
     const { data } = await query;
     if (data) {
-      setStudents((data as StudentQueryRow[]).map((s) => {
+      const scopedRows = role === "counsellor"
+        ? (data as StudentQueryRow[]).filter((s) => s.created_by === user?.id || s.leads?.counsellor_id === profile?.id)
+        : data as StudentQueryRow[];
+
+      setStudents(scopedRows.map((s) => {
         const course = s.courses;
         const institution = course?.departments?.institutions;
         const classification = classifyCourse({
@@ -205,7 +218,7 @@ const Students = () => {
       }));
     }
     setLoading(false);
-  }, [selectedCampusId]);
+  }, [profile?.id, role, selectedCampusId, user?.id]);
 
   useEffect(() => { fetchStudents(); }, [fetchStudents]);
 
