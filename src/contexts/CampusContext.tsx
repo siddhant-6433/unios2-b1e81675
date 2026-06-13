@@ -39,15 +39,27 @@ export const CampusProvider = ({ children }: { children: ReactNode }) => {
       .order("name")
       .then(({ data }) => {
         if (!data) { setLoading(false); return; }
-        setCampuses(data as Campus[]);
+        let visibleCampuses = data as Campus[];
 
-        // Non-super-admins: pre-select their campus if profile.campus matches a campus name
+        // Office assistants are branch-scoped. The database enforces the same
+        // profile.campus -> campuses.name/code match via RLS helper functions.
         if (role && role !== "super_admin" && profile?.campus) {
           const match = data.find(
-            (c) => c.name.toLowerCase() === profile.campus!.toLowerCase()
+            (c) =>
+              c.name.toLowerCase() === profile.campus!.toLowerCase() ||
+              c.code.toLowerCase() === profile.campus!.toLowerCase()
           );
-          if (match) setSelectedCampusId(match.id);
+          if (role === "office_assistant") {
+            visibleCampuses = match ? [match] : [];
+          }
+          if (match) {
+            setSelectedCampusId(match.id);
+          } else if (role === "office_assistant") {
+            setSelectedCampusId("all");
+          }
         }
+
+        setCampuses(visibleCampuses);
         setLoading(false);
       });
   }, [role, profile?.campus]);

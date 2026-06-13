@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { AddStudentDialog } from "@/components/admissions/AddStudentDialog";
 import { StudentDraftsPanel } from "@/components/admissions/StudentDraftsPanel";
 import { BulkStudentImportDialog } from "@/components/admissions/BulkStudentImportDialog";
+import { usePermissions } from "@/contexts/PermissionContext";
 
 interface StudentRow {
   id: string;
@@ -28,6 +29,8 @@ const Students = () => {
   const [resumeDraftId, setResumeDraftId] = useState<string | null>(null);
   const [draftRefreshKey, setDraftRefreshKey] = useState(0);
   const { selectedCampusId } = useCampus();
+  const { can } = usePermissions();
+  const canCreateStudents = can("students", "create");
 
   const fetchStudents = useCallback(async () => {
     setLoading(true);
@@ -78,20 +81,24 @@ const Students = () => {
           <h1 className="text-2xl font-bold text-foreground">Students</h1>
           <p className="text-sm text-muted-foreground mt-1">View and manage student records.</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setBulkOpen(true)} className="gap-1.5 text-sm">
-            <Upload className="h-4 w-4" /> Bulk Import
-          </Button>
-          <Button onClick={() => setAddOpen(true)} className="gap-1.5 text-sm">
-            <UserPlus className="h-4 w-4" /> Add Student
-          </Button>
-        </div>
+        {canCreateStudents && (
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setBulkOpen(true)} className="gap-1.5 text-sm">
+              <Upload className="h-4 w-4" /> Bulk Import
+            </Button>
+            <Button onClick={() => setAddOpen(true)} className="gap-1.5 text-sm">
+              <UserPlus className="h-4 w-4" /> Add Student
+            </Button>
+          </div>
+        )}
       </div>
 
-      <StudentDraftsPanel
-        refreshKey={draftRefreshKey}
-        onResume={(id) => { setResumeDraftId(id); setAddOpen(true); }}
-      />
+      {canCreateStudents && (
+        <StudentDraftsPanel
+          refreshKey={draftRefreshKey}
+          onResume={(id) => { setResumeDraftId(id); setAddOpen(true); }}
+        />
+      )}
 
       <div className="relative max-w-sm">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -132,14 +139,18 @@ const Students = () => {
         )}
       </div>
 
-      <AddStudentDialog
-        open={addOpen}
-        onOpenChange={(o) => { setAddOpen(o); if (!o) setResumeDraftId(null); }}
-        onSuccess={() => { fetchStudents(); setDraftRefreshKey(k => k + 1); }}
-        resumeDraftId={resumeDraftId}
-        onDraftChange={() => setDraftRefreshKey(k => k + 1)}
-      />
-      <BulkStudentImportDialog open={bulkOpen} onOpenChange={setBulkOpen} onSuccess={fetchStudents} />
+      {canCreateStudents && (
+        <>
+          <AddStudentDialog
+            open={addOpen}
+            onOpenChange={(o) => { setAddOpen(o); if (!o) setResumeDraftId(null); }}
+            onSuccess={() => { fetchStudents(); setDraftRefreshKey(k => k + 1); }}
+            resumeDraftId={resumeDraftId}
+            onDraftChange={() => setDraftRefreshKey(k => k + 1)}
+          />
+          <BulkStudentImportDialog open={bulkOpen} onOpenChange={setBulkOpen} onSuccess={fetchStudents} />
+        </>
+      )}
     </div>
   );
 };

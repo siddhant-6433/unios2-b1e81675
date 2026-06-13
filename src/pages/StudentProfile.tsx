@@ -1,10 +1,23 @@
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowLeft, User, Phone, Mail, MapPin, Calendar, Heart, GraduationCap, Check, X, Clock, BookOpen, Loader2, TrendingUp, BarChart3, Activity, Filter, Users, RefreshCw, FileText, Download, ExternalLink, ShieldCheck, AlertCircle, Clock3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StudentFeePanel } from "@/components/finance/StudentFeePanel";
+
+const CONTACT_FIELDS = [
+  { value: "phone", label: "Student Phone" },
+  { value: "whatsapp_no", label: "Student WhatsApp" },
+  { value: "father_phone", label: "Father Phone" },
+  { value: "father_whatsapp", label: "Father WhatsApp" },
+  { value: "mother_phone", label: "Mother Phone" },
+  { value: "mother_whatsapp", label: "Mother WhatsApp" },
+  { value: "guardian_phone", label: "Guardian Phone" },
+] as const;
 
 const StudentProfile = () => {
   const { admissionNo } = useParams<{ admissionNo: string }>();
@@ -18,6 +31,13 @@ const StudentProfile = () => {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [contactDialogOpen, setContactDialogOpen] = useState(false);
+  const [contactField, setContactField] = useState<(typeof CONTACT_FIELDS)[number]["value"]>("phone");
+  const [contactValue, setContactValue] = useState("");
+  const [contactReason, setContactReason] = useState("");
+  const [contactSaving, setContactSaving] = useState(false);
+  const { role } = useAuth();
+  const { toast } = useToast();
 
   useEffect(() => { if (admissionNo) fetchStudent(); }, [admissionNo]);
 
@@ -148,6 +168,46 @@ const StudentProfile = () => {
       await fetchStudent();
     }
     setSyncing(false);
+  };
+
+  const canRequestContactChange = ["office_assistant", "office_admin", "principal", "super_admin"].includes(role || "");
+  const selectedContactLabel = CONTACT_FIELDS.find((f) => f.value === contactField)?.label || "Contact number";
+  const selectedContactOldValue = student?.[contactField] || "";
+
+  const openContactDialog = (field: (typeof CONTACT_FIELDS)[number]["value"]) => {
+    setContactField(field);
+    setContactValue(student?.[field] || "");
+    setContactReason("");
+    setContactDialogOpen(true);
+  };
+
+  const submitContactChange = async () => {
+    const trimmedValue = contactValue.trim();
+    const trimmedReason = contactReason.trim();
+    if (!trimmedValue || !trimmedReason) {
+      toast({ title: "Missing details", description: "Enter the new number and reason.", variant: "destructive" });
+      return;
+    }
+
+    setContactSaving(true);
+    const { error } = await (supabase as any).rpc("request_student_contact_change", {
+      _student_id: student.id,
+      _field_name: contactField,
+      _new_value: trimmedValue,
+      _reason: trimmedReason,
+    });
+    setContactSaving(false);
+
+    if (error) {
+      toast({ title: "Request failed", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    toast({
+      title: "Change requested",
+      description: "Principal or super admin approval is required before the number is updated.",
+    });
+    setContactDialogOpen(false);
   };
 
   return (
@@ -305,6 +365,16 @@ const StudentProfile = () => {
                 <Detail label="School Admission No" value={student.school_admission_no || "—"} />
                 <Detail label="Class Roll No" value={student.class_roll_no || "—"} />
               </div>
+              {canRequestContactChange && (
+                <div className="flex flex-wrap gap-2 border-t border-border pt-4">
+                  <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => openContactDialog("phone")}>
+                    <Phone className="h-3.5 w-3.5" /> Request Student Phone Edit
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => openContactDialog("whatsapp_no")}>
+                    <Phone className="h-3.5 w-3.5" /> Request Student WhatsApp Edit
+                  </Button>
+                </div>
+              )}
             </div>
 
             {/* Father's Information */}
@@ -322,6 +392,16 @@ const StudentProfile = () => {
                 <Detail label="Income" value={student.father_income || "—"} />
                 <Detail label="Father Aadhar" value={student.father_aadhar || "—"} />
               </div>
+              {canRequestContactChange && (
+                <div className="flex flex-wrap gap-2 border-t border-border pt-4">
+                  <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => openContactDialog("father_phone")}>
+                    <Phone className="h-3.5 w-3.5" /> Request Father Phone Edit
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => openContactDialog("father_whatsapp")}>
+                    <Phone className="h-3.5 w-3.5" /> Request Father WhatsApp Edit
+                  </Button>
+                </div>
+              )}
             </div>
 
             {/* Mother's Information */}
@@ -336,6 +416,16 @@ const StudentProfile = () => {
                 <Detail label="Organization" value={student.mother_organization || "—"} />
                 <Detail label="Mother Aadhar" value={student.mother_aadhar || "—"} />
               </div>
+              {canRequestContactChange && (
+                <div className="flex flex-wrap gap-2 border-t border-border pt-4">
+                  <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => openContactDialog("mother_phone")}>
+                    <Phone className="h-3.5 w-3.5" /> Request Mother Phone Edit
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => openContactDialog("mother_whatsapp")}>
+                    <Phone className="h-3.5 w-3.5" /> Request Mother WhatsApp Edit
+                  </Button>
+                </div>
+              )}
             </div>
 
             {/* Guardian Information */}
@@ -345,6 +435,13 @@ const StudentProfile = () => {
                 <Detail label="Guardian Name" value={student.guardian_name || "—"} />
                 <Detail label="Guardian Phone" value={student.guardian_phone || "—"} />
               </div>
+              {canRequestContactChange && (
+                <div className="flex flex-wrap gap-2 border-t border-border pt-4">
+                  <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => openContactDialog("guardian_phone")}>
+                    <Phone className="h-3.5 w-3.5" /> Request Guardian Phone Edit
+                  </Button>
+                </div>
+              )}
             </div>
 
             {/* Siblings */}
@@ -621,6 +718,71 @@ const StudentProfile = () => {
           </div>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={contactDialogOpen} onOpenChange={setContactDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Request Contact Number Edit</DialogTitle>
+            <DialogDescription>
+              Approval from principal or super admin is required before this change is applied.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="grid gap-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Field</label>
+              <select
+                value={contactField}
+                onChange={(e) => {
+                  const next = e.target.value as (typeof CONTACT_FIELDS)[number]["value"];
+                  setContactField(next);
+                  setContactValue(student?.[next] || "");
+                }}
+                className="rounded-lg border border-input bg-background px-3 py-2 text-sm"
+              >
+                {CONTACT_FIELDS.map((field) => (
+                  <option key={field.value} value={field.value}>{field.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid gap-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Current {selectedContactLabel}</label>
+                <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                  {selectedContactOldValue || "—"}
+                </div>
+              </div>
+              <div className="grid gap-1.5">
+                <label className="text-xs font-medium text-muted-foreground">New {selectedContactLabel}</label>
+                <input
+                  value={contactValue}
+                  onChange={(e) => setContactValue(e.target.value)}
+                  className="rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                  placeholder="Enter mobile number"
+                />
+              </div>
+            </div>
+            <div className="grid gap-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Reason</label>
+              <textarea
+                value={contactReason}
+                onChange={(e) => setContactReason(e.target.value)}
+                rows={3}
+                className="rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                placeholder="Why should this number be changed?"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setContactDialogOpen(false)}>Cancel</Button>
+            <Button type="button" onClick={submitContactChange} disabled={contactSaving}>
+              {contactSaving && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+              Submit Request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
