@@ -8,6 +8,9 @@ const whatsappReply = readFileSync("supabase/functions/whatsapp-reply/index.ts",
 describe("WhatsApp inbox template rendering and speed guardrails", () => {
   it("renders course_info_v4 as readable message text instead of a template-key placeholder", () => {
     expect(inbox).toContain("course_info_v4:");
+    expect(inbox).toContain("course_info_video_v2:");
+    expect(inbox).toContain('key: "course_info_v4"');
+    expect(inbox).toContain('key: "course_info_video_v2"');
     expect(inbox).toContain("bpt_bmrit_cahet_deadline:");
     expect(inbox).toContain("TEMPLATE_PLACEHOLDER_RE");
     expect(inbox).toContain("getMessageText(m)");
@@ -48,6 +51,7 @@ describe("WhatsApp inbox template rendering and speed guardrails", () => {
     expect(whatsappReply).toContain('route: requestedProvider === "plivo" ? "plivo_admissions" : "reply"');
     expect(whatsappReply).toContain("businessNumber: requestedBusinessNumber || requestedPhoneNumberId");
     expect(whatsappReply).toContain("sender_user_id: user.id");
+    expect(inbox).toContain('invokeEdge<any>("whatsapp-send"');
   });
 
   it("does not block first paint by draining every WhatsApp conversation page", () => {
@@ -61,8 +65,9 @@ describe("WhatsApp inbox template rendering and speed guardrails", () => {
   it("falls back to raw messages when a selected phone-number inbox has no conversation rows", () => {
     expect(inbox).toContain("fetchMessageBackedConversationRows");
     expect(inbox).toContain('from("whatsapp_messages" as any)');
-    expect(inbox).toContain('select("phone, lead_id, direction, content, created_at, provider, business_phone_number_id, business_phone_number, is_read")');
+    expect(inbox).toContain("messageColumns = \"id, phone, lead_id, direction, content, created_at, provider, business_phone_number_id, business_phone_number, is_read\"");
+    expect(inbox).toContain('eq("direction", "inbound")');
     expect(inbox).toContain('businessNumber !== "primary" && isBusinessPhoneNumberChannel(businessNumber)');
-    expect(inbox).toContain("rows = await fetchMessageBackedConversationRows(businessNumber)");
+    expect(inbox).toContain("mergeConversationRows(rows, messageBackedRows)");
   });
 });
