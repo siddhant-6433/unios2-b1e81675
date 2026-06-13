@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { validateAcademicEligibility, type EligibilityRule } from "@/components/apply/eligibilityRules";
+import {
+  validateAcademicEligibility,
+  validateDobEligibility,
+  type EligibilityRule,
+} from "@/components/apply/eligibilityRules";
 
 const cahetPcbEnglishRule: EligibilityRule = {
   minAge: 17,
@@ -10,6 +14,47 @@ const cahetPcbEnglishRule: EligibilityRule = {
 };
 
 describe("apply eligibility rules", () => {
+  it("checks UG and PG age rules as of December 31 of the admission year", () => {
+    expect(
+      validateDobEligibility(
+        "professional",
+        "2009-09-22",
+        2026,
+        { minAge: 17 },
+      ),
+    ).toBeNull();
+
+    expect(
+      validateDobEligibility(
+        "professional",
+        "2009-09-22",
+        2026,
+        { minAge: 18 },
+      ),
+    ).toEqual({
+      field: "dob",
+      message: "Minimum age 18 years required (as of December 31, 2026). Applicant is 17.3 years old.",
+      type: "error",
+    });
+  });
+
+  it("keeps K-12 school age rules on their school-specific cutoff", () => {
+    expect(
+      validateDobEligibility(
+        "school",
+        "2021-08-01",
+        2026,
+        { minAge: 6 },
+        "Grade I",
+        "NIMT Beacon",
+      ),
+    ).toEqual({
+      field: "dob",
+      message: "Minimum age 6 years required (as of July 31, 2026). Applicant is 5 years old.",
+      type: "error",
+    });
+  });
+
   it("requires both PCB group subjects and English for CAHET health programmes", () => {
     const withoutBiologyOrEnglish = validateAcademicEligibility(
       "professional",
