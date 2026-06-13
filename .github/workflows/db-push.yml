@@ -112,6 +112,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Refuse branch manual production push
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error title=Manual db push must run from main::This workflow applies migrations to production. Re-run it from the main branch so branch-only migration files cannot be recorded in production before they exist on main."
+          exit 1
+
       - name: Verify secrets
         # For the push path we WANT to fail loudly: a missing secret means
         # nothing got applied, which is silent data drift waiting to happen.
