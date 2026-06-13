@@ -154,6 +154,17 @@ Deno.serve(async (req) => {
       sender_user_id: user.id,
     }).select("id").maybeSingle();
 
+    // A successful manual reply means older inbound messages in this same
+    // conversation no longer need to drive "unreplied" badges.
+    await admin.rpc("mark_whatsapp_conversation_read", {
+      p_phone: waPhone,
+      p_provider: sendResult.provider,
+      p_business_phone_number_id: sendResult.businessPhoneNumberId,
+      p_business_phone_number: sendResult.businessNumber,
+    }).then(({ error }) => {
+      if (error) console.error("mark_whatsapp_conversation_read failed:", error.message);
+    });
+
     await recordWhatsAppOutboundContext(admin, {
       messageId: insertedMessage?.id || null,
       providerMessageId: sendResult.messageId,

@@ -1214,6 +1214,10 @@ function ApplicationDashboardView({
                     applicantName={a.full_name || ""}
                     applicantPhone={a.phone}
                     applicantEmail={a.email}
+                    courseName={(a.course_selections || [])
+                      ?.map((c: any) => c.course_name)
+                      .filter(Boolean)
+                      .join(", ") || null}
                   />
                 )}
               </div>

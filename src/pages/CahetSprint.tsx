@@ -17,6 +17,10 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { CahetRegisterDialog, type CahetRegisterTarget } from "@/components/leads/CahetRegisterDialog";
+import {
+  effectiveCahetDeadline,
+  effectiveCahetDeadlineLabel,
+} from "@/lib/deadlineRollover";
 
 // Mirrors CloudDialer.CONNECTED_DISPOSITIONS — kept in sync deliberately so
 // counsellors see the same options. If you add/rename a disposition there,
@@ -121,7 +125,6 @@ const BUCKET_FILTERS: { key: "all" | Bucket; label: string }[] = [
 ];
 
 const TARGET_PER_COUNSELLOR = 15;
-const DEADLINE_LABEL = "10 Jun 2026, 11:59 PM";
 
 function timeAgo(iso: string | null): string {
   if (!iso) return "—";
@@ -584,7 +587,9 @@ const CahetSprint = () => {
   }, [selectedRow, moveSelection, placeCall, skipRow, registerFor, activeCall, cancelCall, markDisposition]);
 
   // ── Render ──────────────────────────────────────────────────────────────
-  const days = stats ? daysRemaining(stats.deadline_at) : 0;
+  const deadlineIso = stats ? effectiveCahetDeadline(stats.deadline_at) : null;
+  const deadlineLabel = effectiveCahetDeadlineLabel();
+  const days = deadlineIso ? daysRemaining(deadlineIso) : 0;
   const ownProgress = stats ? Math.min(100, Math.round((stats.own_count / TARGET_PER_COUNSELLOR) * 100)) : 0;
 
   return (
@@ -599,7 +604,7 @@ const CahetSprint = () => {
                 CAHET Counselling Registration Sprint
               </div>
               <div className="text-sm text-rose-700/80 mt-0.5">
-                Last date <strong>{DEADLINE_LABEL}</strong> ({days} {days === 1 ? "day" : "days"} left). Target: {TARGET_PER_COUNSELLOR}/counsellor.
+                Last date <strong>{deadlineLabel}</strong> ({days} {days === 1 ? "day" : "days"} left). Target: {TARGET_PER_COUNSELLOR}/counsellor.
               </div>
             </div>
             <div className="flex gap-6 items-center">

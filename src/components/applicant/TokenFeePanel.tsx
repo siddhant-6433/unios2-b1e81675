@@ -2,12 +2,34 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2, CreditCard, FileText, IndianRupee, Clock, Check, GraduationCap, Sparkles, ChevronRight, CalendarDays } from "lucide-react";
 import { buildApplicantFeeBreakdownRows, buildApplicantOneTimePaymentOptions } from "./feeBreakdown";
+import {
+  effectiveApplicationDeadline,
+  INITIAL_APPLICATION_DEADLINE,
+} from "@/lib/deadlineRollover";
 
 // Fallbacks if the get_applicant_deadlines RPC is unreachable.
 // The single source of truth is _app_config — these are last-resort
 // defaults so the UI still renders during a brief outage.
-const DEFAULT_FEE_SUBMISSION_DEADLINE      = "2026-06-10";
+const DEFAULT_FEE_SUBMISSION_DEADLINE      = INITIAL_APPLICATION_DEADLINE;
 const DEFAULT_FULL_COURSE_PAYMENT_DEADLINE = "2026-09-15";
+
+type BankDetails = {
+  beneficiary_name: string;
+  bank_name: string;
+  account_no: string;
+  ifsc: string;
+  branch: string;
+  upi_id: string;
+};
+
+const DEFAULT_BANK_DETAILS: BankDetails = {
+  beneficiary_name: "NIMT B. SCHOOL'S FOUNDATION",
+  bank_name: "IDFC BANK",
+  account_no: "10118454426",
+  ifsc: "IDFB0020154",
+  branch: "Alpha 1, Greater Noida",
+  upi_id: "-",
+};
 
 type FeeStatus = {
   first_year_fee: number;
@@ -62,6 +84,8 @@ interface Offer {
   created_at: string;
   letter_url: string | null;
   loan_letter_url: string | null;
+  admission_mode?: string | null;
+  entrance_exam_name?: string | null;
 }
 
 interface Props {
@@ -76,6 +100,48 @@ interface Props {
 
 const isMbaCourse = (name: string | null | undefined) =>
   !!name && /\bMBA\b/i.test(name);
+
+const LOAN_LETTER_UNLOCK_TOKEN_FEE = 5000;
+const DEFAULT_NIMT_LETTERHEAD_URL = "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/application-documents/branding/nimt_he/letterhead.png";
+const DEFAULT_NIMT_FOOTER_URL = "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/application-documents/branding/nimt_he/footer.png";
+
+const openPdfUrl = (url: string, previewWindow: Window | null) => {
+  if (previewWindow && !previewWindow.closed) {
+    previewWindow.location.href = url;
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+};
+
+const shouldUseLocalLoanLetterPreview = () => {
+  if (!import.meta.env.DEV) return false;
+  return ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+};
+
+const buildLoanReferenceNo = (offerId?: string | null, appId?: string | null) => {
+  const year = new Date().getFullYear();
+  const suffix = (appId || offerId || "NA").replace(/[^A-Za-z0-9]/g, "").slice(-8).toUpperCase() || "NA";
+  return `NIMT/EL/${year}/${suffix}`;
+};
+
+const loadImageForPdf = async (url: string) => {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Could not load letterhead (${res.status})`);
+  const blob = await res.blob();
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = dataUrl;
+  });
+  return { dataUrl, width: img.naturalWidth || img.width, height: img.naturalHeight || img.height };
+};
 
 export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName, applicantPhone, applicantEmail, courseName, onPayment }: Props) {
   const [lead, setLead] = useState<Lead | null>(null);
@@ -99,6 +165,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     fee_submission_deadline:      DEFAULT_FEE_SUBMISSION_DEADLINE,
     full_course_payment_deadline: DEFAULT_FULL_COURSE_PAYMENT_DEADLINE,
   });
+  const [bankDetails, setBankDetails] = useState<BankDetails>(DEFAULT_BANK_DETAILS);
 
   const load = async () => {
     setLoading(true);
@@ -137,9 +204,18 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     // Deadlines are non-critical — log but don't block render if missing.
     if (!dlRes.error && dlRes.data) {
       const d = dlRes.data as Record<string, string>;
+      const feeSubmissionDeadline = d.fee_submission_deadline || DEFAULT_FEE_SUBMISSION_DEADLINE;
       setDeadlines({
-        fee_submission_deadline:      d.fee_submission_deadline      || DEFAULT_FEE_SUBMISSION_DEADLINE,
+        fee_submission_deadline:      effectiveApplicationDeadline(feeSubmissionDeadline),
         full_course_payment_deadline: d.full_course_payment_deadline || DEFAULT_FULL_COURSE_PAYMENT_DEADLINE,
+      });
+      setBankDetails({
+        beneficiary_name: d.loan_letter_bank_beneficiary_name || DEFAULT_BANK_DETAILS.beneficiary_name,
+        bank_name: d.loan_letter_bank_name || DEFAULT_BANK_DETAILS.bank_name,
+        account_no: d.loan_letter_bank_account_no || DEFAULT_BANK_DETAILS.account_no,
+        ifsc: d.loan_letter_bank_ifsc || DEFAULT_BANK_DETAILS.ifsc,
+        branch: d.loan_letter_bank_branch || DEFAULT_BANK_DETAILS.branch,
+        upi_id: d.loan_letter_bank_upi_id || DEFAULT_BANK_DETAILS.upi_id,
       });
     }
 
@@ -195,6 +271,24 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   };
 
   useEffect(() => { load(); }, [applicationId]);
+
+  useEffect(() => {
+    if (!feeStatus) return;
+
+    const nextOutstanding = Math.max(0, feeStatus.token_required - feeStatus.token_paid);
+
+    setInstalmentPreset((current) => {
+      if (current === null || current <= nextOutstanding) return current;
+      return nextOutstanding > 0 ? nextOutstanding : null;
+    });
+
+    setCustomAmt((current) => {
+      if (!current) return current;
+      const parsed = parseFloat(current);
+      if (!Number.isFinite(parsed) || parsed <= nextOutstanding) return current;
+      return nextOutstanding > 0 ? String(nextOutstanding) : "";
+    });
+  }, [feeStatus]);
 
   // Listen for the popup's success/failure ping.
   useEffect(() => {
@@ -267,13 +361,314 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     }
   };
 
+  const generateLocalLoanLetterPreview = async () => {
+    if (!offer || !lead || !feeStatus) throw new Error("Offer details are not loaded yet");
+
+    const { default: jsPDF } = await import("jspdf");
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 36;
+    let y = 90;
+    let bottomReserve = 50;
+
+    try {
+      const [letterhead, footer] = await Promise.all([
+        loadImageForPdf(DEFAULT_NIMT_LETTERHEAD_URL),
+        loadImageForPdf(DEFAULT_NIMT_FOOTER_URL),
+      ]);
+      const aspectHW = letterhead.height / letterhead.width;
+      if (aspectHW >= 1.2) {
+        doc.addImage(letterhead.dataUrl, "PNG", 0, 0, pageWidth, pageHeight);
+        y = 150;
+        bottomReserve = 104;
+      } else {
+        const h = pageWidth * aspectHW;
+        doc.addImage(letterhead.dataUrl, "PNG", 0, 0, pageWidth, h);
+        y = h + 16;
+        const footerAspect = footer.height / footer.width;
+        const footerH = Math.min(pageWidth * footerAspect, 120);
+        doc.addImage(footer.dataUrl, "PNG", 0, pageHeight - footerH, pageWidth, footerH);
+        bottomReserve = footerH + 8;
+      }
+    } catch {
+      doc.setFillColor(20, 24, 40);
+      doc.rect(0, 0, pageWidth, 70, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(14);
+      doc.text("NIMT Educational Institutions", margin, 36);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.text("Greater Noida - Ghaziabad - Kotputli, Jaipur", margin, 54);
+      doc.setTextColor(20, 24, 40);
+      y = 90;
+    }
+
+    const fmt = (n: number) => `Rs. ${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const ensureSpace = (need: number) => {
+      if (y + need < pageHeight - bottomReserve) return;
+      doc.addPage();
+      y = 90;
+      doc.setFillColor(20, 24, 40);
+      doc.rect(0, 0, pageWidth, 70, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(14);
+      doc.text("NIMT Educational Institutions", margin, 36);
+      doc.setTextColor(20, 24, 40);
+    };
+    const write = (text: string, size = 7.7, gap = 2) => {
+      ensureSpace(28);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(size);
+      const lines = doc.splitTextToSize(text, pageWidth - margin * 2);
+      doc.text(lines, margin, y);
+      y += lines.length * (size + 3) + gap;
+    };
+    const heading = (text: string) => {
+      ensureSpace(18);
+      doc.setFillColor(20, 24, 40);
+      doc.rect(margin, y - 12, pageWidth - margin * 2, 14, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.8);
+      doc.text(text, margin + 8, y - 1);
+      doc.setTextColor(20, 24, 40);
+      y += 16;
+    };
+    const kvGrid = (pairs: { label: string; value: string }[], cols = 4) => {
+      const totalW = pageWidth - margin * 2;
+      const cellW = totalW / cols;
+      const valueSize = 6.8;
+      const valueLineH = valueSize + 2.2;
+      for (let i = 0; i < pairs.length; i += cols) {
+        const row = pairs.slice(i, i + cols);
+        const wrappedValues = row.map(pair => doc.splitTextToSize(pair.value || "-", cellW - 8).slice(0, 2));
+        const maxLines = Math.max(1, ...wrappedValues.map(lines => lines.length));
+        const cellH = Math.max(25, 18 + maxLines * valueLineH);
+        ensureSpace(cellH + 4);
+        let x = margin;
+        for (let j = 0; j < cols; j++) {
+          const pair = row[j];
+          doc.setDrawColor(140, 140, 153);
+          doc.setFillColor(255, 255, 255);
+          doc.rect(x, y - 16, cellW, cellH);
+          if (pair) {
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(5.8);
+            doc.setTextColor(105, 105, 115);
+            doc.text(pair.label, x + 4, y - 6);
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(valueSize);
+            doc.setTextColor(20, 24, 40);
+            const valueLines = wrappedValues[j] || ["-"];
+            valueLines.forEach((line: string, index: number) => {
+              doc.text(line, x + 4, y + 3 + index * valueLineH);
+            });
+          }
+          x += cellW;
+        }
+        y += cellH;
+      }
+    };
+    const feeTable = (rows: { label: string; dueDate: string; published: number; waiver: number; applicable: number; total?: boolean }[]) => {
+      const totalW = pageWidth - margin * 2;
+      const widths = [totalW * 0.28, totalW * 0.18, totalW * 0.18, totalW * 0.18, totalW * 0.18];
+      const xs = [margin, margin + widths[0], margin + widths[0] + widths[1], margin + widths[0] + widths[1] + widths[2], margin + widths[0] + widths[1] + widths[2] + widths[3]];
+      const draw = (values: string[], header = false, total = false) => {
+        ensureSpace(16);
+        values.forEach((value, i) => {
+          doc.setDrawColor(140, 140, 153);
+          if (header) doc.setFillColor(237, 237, 245);
+          else if (total) doc.setFillColor(240, 247, 240);
+          else doc.setFillColor(255, 255, 255);
+          doc.rect(xs[i], y - 14, widths[i], 16, "FD");
+          doc.setFont("helvetica", header || total || i === 4 ? "bold" : "normal");
+          doc.setFontSize(header ? 6.6 : 6.8);
+          doc.setTextColor(20, 24, 40);
+          if (i === 0) {
+            doc.text(value, xs[i] + 8, y - 1);
+          } else {
+            const textWidth = doc.getTextWidth(value);
+            doc.text(value, xs[i] + widths[i] - textWidth - 8, y - 1);
+          }
+        });
+        y += 16;
+      };
+      draw(["Year", "Due Date", "Published", "Waiver", "Applicable"], true);
+      rows.forEach(row => draw([
+        row.label,
+        row.dueDate,
+        fmt(row.published),
+        row.waiver > 0 ? `- ${fmt(row.waiver)}` : "-",
+        fmt(row.applicable),
+      ], false, !!row.total));
+    };
+
+    const feeRows = buildApplicantFeeBreakdownRows({
+      yearFeesNet: yearFees,
+      offerWaivers,
+      scholarshipAmount: offer.scholarship_amount || 0,
+      feeStatus,
+    });
+    const generatedAt = new Date();
+    const generatedStamp = generatedAt.toLocaleString("en-IN", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+    const totalCourseFee = feeRows.reduce((sum, r) => sum + r.net, 0) || offer.net_fee || offer.total_fee || 0;
+    const programmeName = courseName || "the selected programme";
+    const paidTowardCourse = feeStatus.paid_toward_course ?? Math.max(0, (feeStatus.total_paid || 0) - (feeStatus.application_paid || 0));
+    const firstYearNet = feeRows.find(r => r.term === "year_1")?.net || feeStatus.post_scholarship_year_1 || 0;
+    const firstYearAmountDue = Math.max(0, firstYearNet - paidTowardCourse);
+    const loanReferenceNo = buildLoanReferenceNo(offer.id, applicationId);
+    const admissionMode = offer.admission_mode === "entrance"
+      ? `Entrance / Counselling${offer.entrance_exam_name ? ` - ${offer.entrance_exam_name}` : ""}`
+      : "Direct Admission";
+    const fmtShortDate = (value: string | null) =>
+      value ? new Date(value).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "-";
+    const estimatedDueDate = (term: string) => {
+      const match = term.match(/^year_(\d+)$/);
+      if (!match) return "-";
+      const base = new Date(deadlines.fee_submission_deadline || DEFAULT_FEE_SUBMISSION_DEADLINE);
+      base.setFullYear(base.getFullYear() + Math.max(0, Number(match[1]) - 1));
+      return fmtShortDate(base.toISOString());
+    };
+
+    const badgeLabel = "Application ID";
+    const badgeRef = applicationId || "";
+    const badgeW = Math.max(doc.getTextWidth(badgeLabel), doc.getTextWidth(badgeRef)) + 36;
+    const badgeH = 58;
+    const badgeX = pageWidth - margin - badgeW;
+    doc.setFillColor(51, 176, 99);
+    doc.roundedRect(badgeX, 18, badgeW, badgeH, 10, 10, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text(badgeLabel, badgeX + (badgeW - doc.getTextWidth(badgeLabel)) / 2, 39);
+    doc.setFontSize(16);
+    doc.text(badgeRef, badgeX + (badgeW - doc.getTextWidth(badgeRef)) / 2, 62);
+    doc.setTextColor(20, 24, 40);
+
+    y += 14;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(105, 105, 115);
+    doc.text(`Letter Date: ${generatedAt.toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}`, margin, y);
+    doc.text(`Reference No.: ${loanReferenceNo}`, pageWidth - margin, y, { align: "right" });
+    y += 18;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("EDUCATION LOAN SUPPORT LETTER", margin, y);
+    doc.setTextColor(20, 24, 40);
+    y += 16;
+
+    write("To Whom It May Concern,", 8, 2);
+    write(`This is to certify that ${lead.name || applicantName || "the applicant"} has been offered provisional admission to ${programmeName} at NIMT Educational Institutions.`);
+    write(`The applicant has paid at least ${fmt(LOAN_LETTER_UNLOCK_TOKEN_FEE)} as token fee against the admission offer. This letter is issued to support the applicant's education loan application with a bank or financial institution. Please quote Loan Reference Letter No. ${loanReferenceNo} for verification.`);
+
+    heading("APPLICANT AND PROGRAMME DETAILS");
+    kvGrid([
+      { label: "Applicant Name", value: lead.name || applicantName || "-" },
+      { label: "Application ID", value: applicationId || "-" },
+      { label: "Loan Reference Letter No.", value: loanReferenceNo },
+      { label: "Programme", value: programmeName },
+      { label: "Pre-Admission No.", value: lead.pre_admission_no || "-" },
+      { label: "Admission Mode", value: admissionMode },
+    ]);
+
+    y += 3;
+    heading("INSTITUTION BANK ACCOUNT DETAILS");
+    kvGrid([
+      { label: "Beneficiary Name", value: bankDetails.beneficiary_name },
+      { label: "Bank Name", value: bankDetails.bank_name },
+      { label: "Account No.", value: bankDetails.account_no },
+      { label: "IFSC Code", value: bankDetails.ifsc },
+      { label: "Branch", value: bankDetails.branch },
+      { label: "UPI ID", value: bankDetails.upi_id },
+    ], 3);
+
+    y += 3;
+    write(`Banks may remit the sanctioned education-loan amount directly to the above college account on behalf of ${lead.name || applicantName || "the applicant"}.`, 7, 2);
+    y += 1;
+    heading("FEE DETAILS");
+    feeTable([
+      ...feeRows.map(r => ({
+        label: r.term.replace("year_", "Year "),
+        dueDate: estimatedDueDate(r.term),
+        published: r.raw,
+        waiver: r.totalDeduction,
+        applicable: r.net,
+      })),
+      {
+        label: "Total Programme Fee",
+        dueDate: "-",
+        published: feeRows.reduce((sum, r) => sum + r.raw, 0),
+        waiver: feeRows.reduce((sum, r) => sum + r.totalDeduction, 0),
+        applicable: totalCourseFee,
+        total: true,
+      },
+    ]);
+    y += 3;
+    kvGrid([
+      { label: "Token Fee Required", value: fmt(feeStatus.token_required || offer.token_fee_amount || 0) },
+      { label: "Token Fee Paid", value: fmt(feeStatus.token_paid) },
+      { label: "First-Year Amount Due", value: fmt(firstYearAmountDue) },
+    ], 3);
+
+    y += 3;
+    write("Examination Fee, Uniform Fee and other university / examination-body charges are not included in the above fee structure.", 7, 2);
+    write("This letter does not constitute a guarantee of loan approval. Final sanction, amount, terms, and disbursement are subject to the lending institution's policies and verification.", 7, 5);
+
+    ensureSpace(42);
+    const signRowH = 32;
+    const totalW = pageWidth - margin * 2;
+    doc.setDrawColor(140, 140, 153);
+    doc.rect(margin, y, totalW * 0.55, signRowH);
+    doc.rect(margin + totalW * 0.55, y, totalW * 0.45, signRowH);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(105, 105, 115);
+    doc.text("Principal / Director Signature & Seal", margin + 6, y + 9);
+    doc.text("For the Institution", margin + totalW * 0.55 + 6, y + 9);
+    doc.line(margin + 12, y + 24, margin + totalW * 0.55 - 12, y + 24);
+    doc.line(margin + totalW * 0.55 + 12, y + 22, margin + totalW - 12, y + 22);
+    doc.setFont("helvetica", "bold");
+    doc.text("AUTHORISED SIGNATORY", margin + totalW * 0.55 + 6, y + signRowH - 6);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(6.5);
+    doc.setTextColor(105, 105, 115);
+    doc.text(`System-generated loan support letter. Generated: ${generatedStamp}`, margin, pageHeight - bottomReserve + 10);
+    doc.text("Page 1 of 1", pageWidth / 2, pageHeight - bottomReserve + 10, { align: "center" });
+
+    return URL.createObjectURL(doc.output("blob"));
+  };
+
   const generateLoanLetter = async () => {
     if (!offer) return;
+    const previewWindow = window.open("about:blank", "_blank");
     setGeneratingLoanLetter(true);
     setError(null);
     try {
+      if (shouldUseLocalLoanLetterPreview()) {
+        const localUrl = await generateLocalLoanLetterPreview();
+        setOffer(prev => {
+          if (prev?.loan_letter_url?.startsWith("blob:")) URL.revokeObjectURL(prev.loan_letter_url);
+          return prev ? { ...prev, loan_letter_url: localUrl } : prev;
+        });
+        openPdfUrl(localUrl, previewWindow);
+        return;
+      }
+
       const { data, error: invErr } = await supabase.functions.invoke("generate-loan-letter", {
-        body: { offer_letter_id: offer.id, application_id: applicationId },
+        body: { offer_letter_id: offer.id, application_id: applicationId, force: true },
       });
       if (invErr) {
         let detail = invErr.message;
@@ -291,9 +686,26 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
       const url = data?.loan_letter_url;
       if (!url) throw new Error("No loan letter URL returned");
       setOffer(prev => prev ? { ...prev, loan_letter_url: url } : prev);
-      window.open(url, "_blank", "noopener,noreferrer");
+      openPdfUrl(url, previewWindow);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to generate loan letter");
+      const message = e instanceof Error ? e.message : "Failed to generate loan letter";
+      const canPreviewLocally = import.meta.env.DEV && /failed to send a request|failed to fetch|network/i.test(message);
+      if (!canPreviewLocally) {
+        previewWindow?.close();
+        setError(message);
+      } else {
+        try {
+          const localUrl = await generateLocalLoanLetterPreview();
+          setOffer(prev => {
+            if (prev?.loan_letter_url?.startsWith("blob:")) URL.revokeObjectURL(prev.loan_letter_url);
+            return prev ? { ...prev, loan_letter_url: localUrl } : prev;
+          });
+          openPdfUrl(localUrl, previewWindow);
+        } catch (fallbackErr) {
+          previewWindow?.close();
+          setError(fallbackErr instanceof Error ? fallbackErr.message : message);
+        }
+      }
     } finally {
       setGeneratingLoanLetter(false);
     }
@@ -331,8 +743,10 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   const coursePaid = feeStatus.total_paid - feeStatus.application_paid;
   const towardsAdmission = Math.max(0, feeStatus.twenty_five_pct - coursePaid);
   const minInstalment = feeStatus.min_token_instalment ?? 5000;
+  const loanLetterUnlocked = feeStatus.token_paid >= LOAN_LETTER_UNLOCK_TOKEN_FEE;
   const isAdmitted = !!lead.admission_no;
   const isPreAdmitted = !!lead.pre_admission_no;
+  const useLocalLoanLetterPreview = shouldUseLocalLoanLetterPreview();
 
   // Deadline calculations
   const deadlineDate = offer.acceptance_deadline ? new Date(offer.acceptance_deadline) : null;
@@ -427,53 +841,33 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
       </div>
 
       {/* ── Education loan letter ───────────────────────── */}
-      <div className={`rounded-2xl border p-4 shadow-sm ${
-        feeStatus.token_complete ? "border-indigo-100 bg-indigo-50" : "border-gray-100 bg-white"
-      }`}>
-        <div className="flex items-start gap-3">
-          <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${
-            feeStatus.token_complete ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-400"
-          }`}>
-            <FileText className="h-5 w-5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className={`text-sm font-bold ${feeStatus.token_complete ? "text-indigo-950" : "text-gray-700"}`}>
-              Education Loan Letter
-            </p>
-            <p className={`text-xs mt-0.5 leading-snug ${feeStatus.token_complete ? "text-indigo-700" : "text-gray-500"}`}>
-              {feeStatus.token_complete
-                ? "Your token fee is paid. Download the loan support letter for bank processing."
-                : `Unlocked after token fee payment of ₹${feeStatus.token_required.toLocaleString("en-IN")}.`}
-            </p>
-          </div>
-          {feeStatus.token_complete ? (
-            offer.loan_letter_url ? (
-              <a
-                href={offer.loan_letter_url}
-                target="_blank"
-                rel="noopener"
-                className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-bold text-white hover:bg-indigo-700 transition-colors"
-              >
-                <FileText className="h-3.5 w-3.5" />
-                View
-              </a>
-            ) : (
+      {loanLetterUnlocked && (
+        <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-4 shadow-sm">
+          <div className="flex items-start gap-3">
+            <div className="h-10 w-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
+              <FileText className="h-5 w-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-indigo-950">
+                Education Loan Letter
+              </p>
+              <p className="text-xs mt-0.5 leading-snug text-indigo-700">
+                You have paid at least ₹{LOAN_LETTER_UNLOCK_TOKEN_FEE.toLocaleString("en-IN")} token fee. Download the loan support letter for bank processing.
+              </p>
+            </div>
+            <div className="shrink-0 flex items-center gap-2">
               <button
                 disabled={generatingLoanLetter}
                 onClick={generateLoanLetter}
                 className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-bold text-white hover:bg-indigo-700 transition-colors disabled:opacity-50"
               >
                 {generatingLoanLetter ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
-                Generate
+                {useLocalLoanLetterPreview ? "Preview latest local" : offer.loan_letter_url ? "View Latest" : "Generate"}
               </button>
-            )
-          ) : (
-            <span className="shrink-0 rounded-full bg-gray-100 px-2.5 py-1 text-[10px] font-semibold text-gray-500">
-              Locked
-            </span>
-          )}
+            </div>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* ── Journey Steps ──────────────────────────────── */}
       <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
@@ -855,8 +1249,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         // Installment presets for the token fee alternative
         const presets: number[] = [];
         let p = minInstalment;
-        while (p < tokenOutstanding && presets.length < 4) { presets.push(p); p += minInstalment; }
-        if (!presets.includes(tokenOutstanding) && tokenOutstanding > 0) presets.push(tokenOutstanding);
+        while (p < feeStatus.token_required && presets.length < 4) { presets.push(p); p += minInstalment; }
+        if (!presets.includes(feeStatus.token_required) && feeStatus.token_required > 0) presets.push(feeStatus.token_required);
 
         const selectedAmt = instalmentPreset !== null
           ? instalmentPreset
@@ -937,19 +1331,22 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
 
                     {/* Pay in parts toggle */}
                     <button
-                      onClick={() => setInstalmentPreset(v => v === null ? minInstalment : null)}
+                      onClick={() => {
+                        setInstalmentPreset(v => v === tokenOutstanding ? minInstalment : tokenOutstanding);
+                        setCustomAmt("");
+                      }}
                       className="text-xs text-blue-600 hover:text-blue-700 font-medium underline underline-offset-2"
                     >
-                      {instalmentPreset === null && customAmt === "" && instalmentPreset !== tokenOutstanding
+                      {instalmentPreset !== tokenOutstanding
                         ? "Hide instalment options"
                         : "Pay in parts instead (min ₹" + minInstalment.toLocaleString("en-IN") + ")"}
                     </button>
 
                     {/* Instalment chips — revealed on toggle */}
-                    {instalmentPreset !== null && instalmentPreset !== tokenOutstanding && (
+                    {instalmentPreset !== tokenOutstanding && (
                       <div className="space-y-3 pt-1">
                         <div className="flex flex-wrap gap-2">
-                          {presets.filter(p => p < tokenOutstanding).map(amt => (
+                          {presets.filter(p => p <= tokenOutstanding).map(amt => (
                             <button
                               key={amt}
                               onClick={() => { setInstalmentPreset(amt); setCustomAmt(""); }}

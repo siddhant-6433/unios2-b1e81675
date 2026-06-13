@@ -432,9 +432,18 @@ const PendingFollowups = () => {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(r => (
+                {filtered.map((r, rowIndex) => (
                   <tr key={r.id} className={`border-b border-border/40 hover:bg-muted/20 cursor-pointer ${selected.has(r.lead_id) ? "bg-primary/5" : ""}`}
-                    onClick={() => navigate(`/admissions/${r.lead_id}`)}>
+                    onClick={() => navigate(`/admissions/${r.lead_id}`, {
+                      state: {
+                        followupQueue: {
+                          ids: filtered.map(f => f.lead_id),
+                          index: rowIndex,
+                          tab,
+                          returnUrl: `/pending-followups?tab=${tab}`,
+                        },
+                      },
+                    })}>
                     {!isCounsellor && (
                       <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
                         <input type="checkbox" checked={selected.has(r.lead_id)}

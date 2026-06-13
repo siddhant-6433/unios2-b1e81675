@@ -42,6 +42,16 @@ describe("hot list database load guardrails", () => {
     }
   });
 
+  it("keeps Lead Buckets counts and bulk selection honest under pagination", () => {
+    const leadBuckets = read("src/pages/LeadBuckets.tsx");
+
+    expect(leadBuckets).toContain("const PAGE_SIZE = 50");
+    expect(leadBuckets).not.toContain('count: "planned"');
+    expect(leadBuckets).toContain("exactFilteredCount === null");
+    expect(leadBuckets).toContain("fetchAllScopedIds()");
+    expect(leadBuckets).toContain("Select all ${filteredCountLabel} matching filter");
+  });
+
   it("keeps the overview dashboard on the single aggregate payload", () => {
     const dashboard = read("src/pages/Dashboard.tsx");
     const dashboardOverview = read("supabase/migrations/20260618211200_dashboard_overview_rpc.sql");

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, lazy, Suspense } from "react";
-import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useParams, Link, useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
@@ -95,9 +95,18 @@ const shouldAutoAdvance = (currentStage: string, newStage: string) => {
   return stageIndex(newStage) > stageIndex(currentStage);
 };
 
+type FollowupQueueState = {
+  ids: string[];
+  index: number;
+  tab: string;
+  returnUrl: string;
+};
+
 const LeadDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const followupQueue = (location.state as { followupQueue?: FollowupQueueState } | null)?.followupQueue;
   const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
   const { user, role, profile } = useAuth();
@@ -1011,6 +1020,47 @@ const LeadDetail = () => {
             </div>
           </div>
           <button onClick={unmarkDnc} className="text-xs font-medium text-red-600 hover:underline shrink-0">Remove DNC</button>
+        </div>
+      )}
+
+      {/* Followup queue navigation bar */}
+      {followupQueue && followupQueue.ids.length > 0 && (
+        <div className="flex items-center gap-3 rounded-xl border border-amber-400/50 bg-amber-50 dark:bg-amber-950/30 px-3 py-2">
+          <Link
+            to={followupQueue.returnUrl}
+            className="flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-100 shrink-0"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Back to follow-ups
+          </Link>
+          <span className="text-amber-400/60">/</span>
+          <span className="text-xs text-amber-700 dark:text-amber-300 flex-1">
+            {followupQueue.index + 1} / {followupQueue.ids.length} in queue
+          </span>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              disabled={followupQueue.index === 0}
+              className="flex h-7 w-7 items-center justify-center rounded-lg border border-amber-400/40 bg-white/60 dark:bg-white/10 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              onClick={() => {
+                const prevId = followupQueue.ids[followupQueue.index - 1];
+                if (prevId) navigate(`/admissions/${prevId}`, { state: { followupQueue: { ...followupQueue, index: followupQueue.index - 1 } } });
+              }}
+              title="Previous lead"
+            >
+              <ChevronRight className="h-3.5 w-3.5 rotate-180" />
+            </button>
+            <button
+              disabled={followupQueue.index >= followupQueue.ids.length - 1}
+              className="flex h-7 w-7 items-center justify-center rounded-lg border border-amber-400/40 bg-white/60 dark:bg-white/10 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              onClick={() => {
+                const nextId = followupQueue.ids[followupQueue.index + 1];
+                if (nextId) navigate(`/admissions/${nextId}`, { state: { followupQueue: { ...followupQueue, index: followupQueue.index + 1 } } });
+              }}
+              title="Next lead"
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       )}
 

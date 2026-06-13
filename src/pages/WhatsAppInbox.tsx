@@ -16,12 +16,15 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  cahetDeadlineDescription,
+  cahetDeadlineMessage,
+} from "@/lib/deadlineRollover";
 
 const CONVERSATION_PAGE_SIZE = 120;
 
 const TEMPLATE_MESSAGE_TEXTS: Record<string, string> = {
-  bpt_bmrit_cahet_deadline:
-    "Dear Applicant,\n\nThis is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *10th June 2026, 11:59 PM*\n\nFor admission Candidates *MUST*\n\n1. Complete College Application Online at https://apply.nimt.ac.in\n2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nPlease note both form submissions are mandatory by 10th June 2026, 11:59 PM to be included in the admission process for session 2026-27.\n\nFor any details please call 9555192192\n9667691872\n7428499849",
+  bpt_bmrit_cahet_deadline: cahetDeadlineMessage(),
   course_info_generic:
     "Hi {{student_name}}, thanks for your interest in NIMT Educational Institutions. We offer programmes in nursing, paramedical, pharma, management, education, law, and engineering across our Greater Noida, Ghaziabad, and Kotputli campuses. Browse the full list, fees, and eligibility on our website. Reply STOP to opt out.",
   course_info_v4:
@@ -144,11 +147,18 @@ const INBOX_TEMPLATES = [
     preview: "Hi {{student_name}}, this is a reminder that your fee of ₹{{amount}} is due by {{due_date}}. Please complete the payment to secure your seat.",
   },
   {
+    key: "nimt_followup_v2",
+    label: "Follow-up",
+    description: "Approved follow-up template for expired WhatsApp windows",
+    params: ["student_name", "followup_date"],
+    preview: "Hi {{student_name}}, this is a follow-up from NIMT Educational Institutions. Our counsellor will connect with you {{followup_date}}. Please reply here if you would like to continue the conversation.",
+  },
+  {
     key: "bpt_bmrit_cahet_deadline",
     label: "BPT/BMRIT CAHET Deadline",
-    description: "10 June 2026 application + CAHET registration deadline",
+    description: cahetDeadlineDescription(),
     params: [],
-    preview: "Dear Applicant,\n\nThis is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *10th June 2026, 11:59 PM*\n\nFor admission Candidates *MUST*\n\n1. Complete College Application Online at https://apply.nimt.ac.in\n2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nPlease note both form submissions are mandatory by 10th June 2026, 11:59 PM to be included in the admission process for session 2026-27.\n\nFor any details please call 9555192192\n9667691872\n7428499849",
+    preview: cahetDeadlineMessage(),
   },
   {
     key: "course_info_v4",
@@ -1386,10 +1396,18 @@ const WhatsAppInbox = () => {
       case "application_received": params = [leadName, "N/A"]; break;
       case "fee_reminder": params = [leadName, "the pending amount", "the due date"]; break;
       case "course_details": params = [leadName, courseName]; break;
+      case "nimt_followup_v2": params = [leadName, "soon"]; break;
     }
 
     const { data, error } = await invokeEdge<any>("whatsapp-send", {
-      body: { template_key: selectedTemplate, phone: selectedPhone, params, lead_id: conv?.lead_id || null, ...(buttonUrls ? { button_urls: buttonUrls } : {}) },
+      body: {
+        template_key: selectedTemplate,
+        phone: selectedPhone,
+        params,
+        lead_id: conv?.lead_id || null,
+        clear_unread_after_send: true,
+        ...(buttonUrls ? { button_urls: buttonUrls } : {}),
+      },
     });
 
     if (error) {
@@ -1426,6 +1444,7 @@ const WhatsAppInbox = () => {
       application_id: "N/A",
       amount: "the pending amount",
       due_date: "the due date",
+      followup_date: "soon",
     };
 
     return tmpl.preview.replace(/\{\{(\w+)\}\}/g, (_, key) => values[key] || `{{${key}}}`);
