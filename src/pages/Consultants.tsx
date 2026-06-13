@@ -13,6 +13,7 @@ import { PhoneInput } from "@/components/ui/phone-input";
 import { CourseCommissions } from "@/components/consultant/CourseCommissions";
 import { CommissionApprovalPanel } from "@/components/consultant/CommissionApprovalPanel";
 import { useAuth } from "@/contexts/AuthContext";
+import { LeadAssociationRequestsPanel } from "@/components/admissions/LeadAssociationRequestsPanel";
 
 const STAGES = ["new", "contacted", "onboarded", "active", "inactive"] as const;
 const stageLabels: Record<string, string> = { new: "New", contacted: "Contacted", onboarded: "Onboarded", active: "Active", inactive: "Inactive" };
@@ -31,7 +32,7 @@ const Consultants = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState("all");
-  const [tab, setTab] = useState<"list" | "requests">("list");
+  const [tab, setTab] = useState<"list" | "requests" | "association_requests">("list");
   const canSeeRequests = ["super_admin", "principal", "admission_head", "campus_admin"].includes(role || "");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -148,11 +149,21 @@ const Consultants = () => {
           >
             Commission Edit Requests
           </button>
+          <button
+            onClick={() => setTab("association_requests")}
+            className={`rounded-lg px-4 py-1.5 text-xs font-medium transition-colors ${
+              tab === "association_requests" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Lead Association Requests
+          </button>
         </div>
       )}
 
       {tab === "requests" ? (
         <CommissionApprovalPanel />
+      ) : tab === "association_requests" ? (
+        <LeadAssociationRequestsPanel requesterType="consultant" />
       ) : (<>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {stats.map(s => (

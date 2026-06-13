@@ -47,6 +47,7 @@ const ALL_ROLES: { value: AppRole; label: string }[] = [
   { value: "office_assistant", label: "Office Assistant" },
   { value: "hostel_warden", label: "Hostel Warden" },
   { value: "consultant", label: "Consultant" },
+  { value: "academic_partner", label: "Academic Partner" },
   { value: "student", label: "Student" },
   { value: "parent", label: "Parent" },
 ];
@@ -93,7 +94,7 @@ const AdminPanel = () => {
   const [publishers, setPublishers] = useState<any[]>([]);
   const [publishersLoading, setPublishersLoading] = useState(false);
   const [search, setSearch] = useState("");
-  const [userSubTab, setUserSubTab] = useState<"employees" | "consultants" | "publishers" | "families" | "leads">("employees");
+  const [userSubTab, setUserSubTab] = useState<"employees" | "consultants" | "academic_partners" | "publishers" | "families" | "leads">("employees");
   const [roleFilter, setRoleFilter] = useState<AppRole | "all" | "none">("all");
   const [editingUser, setEditingUser] = useState<string | null>(null);
   const [savingUser, setSavingUser] = useState<string | null>(null);
@@ -252,9 +253,29 @@ const AdminPanel = () => {
         }
       }
 
+      // Auto-create academic partner profile when role is set to academic_partner
+      if (newRole === "academic_partner") {
+        const { data: existing } = await supabase.from("academic_partners").select("id").eq("user_id", userId).maybeSingle();
+        if (!existing) {
+          const { error: apErr } = await supabase.from("academic_partners").insert({
+            name: user.display_name || "Unnamed Academic Partner",
+            email: user.email || null,
+            phone: user.phone || null,
+            user_id: userId,
+            status: "active",
+          });
+          if (apErr) console.error("Failed to create academic partner profile:", apErr.message);
+        }
+      }
+
       // Unlink consultant profile if role changed away from consultant
       if (user.role === "consultant" && newRole !== "consultant") {
         await supabase.from("consultants").update({ user_id: null }).eq("user_id", userId);
+      }
+
+      // Unlink academic partner profile if role changed away from academic_partner
+      if (user.role === "academic_partner" && newRole !== "academic_partner") {
+        await supabase.from("academic_partners").update({ user_id: null }).eq("user_id", userId);
       }
 
       // Unlink publisher profile if role changed away from publisher
@@ -451,6 +472,7 @@ const AdminPanel = () => {
               {([
                 { key: "employees" as const, label: "Employees" },
                 { key: "consultants" as const, label: "Consultants" },
+                { key: "academic_partners" as const, label: "Academic Partners" },
                 { key: "publishers" as const, label: "Publishers" },
                 { key: "families" as const, label: "Students & Families" },
                 { key: "leads" as const, label: "Leads & Applicants" },
@@ -483,7 +505,7 @@ const AdminPanel = () => {
                   className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
                 >
                   <option value="all">All Roles</option>
-                  {ALL_ROLES.filter((r) => !["student", "parent", "consultant"].includes(r.value)).map((r) => (
+                  {ALL_ROLES.filter((r) => !["student", "parent", "consultant", "academic_partner"].includes(r.value)).map((r) => (
                     <option key={r.value} value={r.value}>{r.label} ({users.filter((u) => u.role === r.value).length})</option>
                   ))}
                 </select>
@@ -492,15 +514,17 @@ const AdminPanel = () => {
 
             {(() => {
               const subFiltered = filtered.filter((u) => {
-                if (userSubTab === "employees") return u.role && !["student", "parent", "consultant", "publisher"].includes(u.role);
+                if (userSubTab === "employees") return u.role && !["student", "parent", "consultant", "academic_partner", "publisher"].includes(u.role);
                 if (userSubTab === "consultants") return u.role === "consultant";
+                if (userSubTab === "academic_partners") return u.role === "academic_partner";
                 if (userSubTab === "publishers") return u.role === "publisher";
                 if (userSubTab === "families") return u.role === "student" || u.role === "parent";
                 return !u.role;
               });
               const allSubUsers = users.filter((u) => {
-                if (userSubTab === "employees") return u.role && !["student", "parent", "consultant", "publisher"].includes(u.role);
+                if (userSubTab === "employees") return u.role && !["student", "parent", "consultant", "academic_partner", "publisher"].includes(u.role);
                 if (userSubTab === "consultants") return u.role === "consultant";
+                if (userSubTab === "academic_partners") return u.role === "academic_partner";
                 if (userSubTab === "publishers") return u.role === "publisher";
                 if (userSubTab === "families") return u.role === "student" || u.role === "parent";
                 return !u.role;
@@ -517,6 +541,12 @@ const AdminPanel = () => {
                 <SummaryCard label="Total Consultants" value={allSubUsers.length} bg="bg-pastel-purple" />
                 <SummaryCard label="With Phone" value={allSubUsers.filter((u) => u.phone).length} bg="bg-pastel-green" />
                 <SummaryCard label="With Email" value={allSubUsers.filter((u) => u.email).length} bg="bg-pastel-blue" />
+                <SummaryCard label="Shown" value={subFiltered.length} bg="bg-pastel-yellow" />
+              </>)}
+              {userSubTab === "academic_partners" && (<>
+                <SummaryCard label="Total Partners" value={allSubUsers.length} bg="bg-pastel-blue" />
+                <SummaryCard label="With Phone" value={allSubUsers.filter((u) => u.phone).length} bg="bg-pastel-green" />
+                <SummaryCard label="With Email" value={allSubUsers.filter((u) => u.email).length} bg="bg-pastel-purple" />
                 <SummaryCard label="Shown" value={subFiltered.length} bg="bg-pastel-yellow" />
               </>)}
               {userSubTab === "publishers" && (<>

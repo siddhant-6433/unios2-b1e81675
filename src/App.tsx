@@ -51,12 +51,14 @@ const ResetPassword        = lazy(() => import("./pages/ResetPassword"));
 const AdminPanel           = lazy(() => import("./pages/AdminPanel"));
 const ApplyPortal          = lazy(() => import("./pages/ApplyPortal"));
 const Consultants          = lazy(() => import("./pages/Consultants"));
+const AcademicPartners     = lazy(() => import("./pages/AcademicPartners"));
 const AdmissionAnalytics   = lazy(() => import("./pages/AdmissionAnalytics"));
 const CounsellorDashboard  = lazy(() => import("./pages/CounsellorDashboard"));
 const WhatsAppInbox        = lazy(() => import("./pages/WhatsAppInbox"));
 const WhatsAppHealth       = lazy(() => import("./pages/WhatsAppHealth"));
 const AutomationRules      = lazy(() => import("./pages/AutomationRules"));
 const ConsultantPortal     = lazy(() => import("./pages/ConsultantPortal"));
+const AcademicPartnerPortal = lazy(() => import("./pages/AcademicPartnerPortal"));
 const PublisherPortal      = lazy(() => import("./pages/PublisherPortal"));
 const PublisherLogin       = lazy(() => import("./pages/PublisherLogin"));
 const PublisherAnalytics   = lazy(() => import("./pages/PublisherAnalytics"));
@@ -287,7 +289,9 @@ const App = () => (
 
                       {/* Portals */}
                       <Route path="/consultants" element={<RequirePermission module="consultants" action="view"><Consultants /></RequirePermission>} />
+                      <Route path="/academic-partners" element={<RequirePermission module="academic_partners" action="view"><AcademicPartners /></RequirePermission>} />
                       <Route path="/consultant-portal" element={<RequirePermission module="consultant_portal" action="view"><ConsultantPortal /></RequirePermission>} />
+                      <Route path="/academic-partner-portal" element={<RequirePermission module="academic_partner_portal" action="view"><AcademicPartnerPortal /></RequirePermission>} />
                       <Route path="/consultant-guide" element={<RequirePermission module="consultant_portal" action="view"><ConsultantGuide /></RequirePermission>} />
                       <Route path="/publisher-portal" element={<RequirePermission module="publisher_portal" action="view"><PublisherPortal /></RequirePermission>} />
                       <Route path="/publisher-analytics" element={<RequirePermission module="publisher_portal" action="view"><PublisherAnalytics /></RequirePermission>} />

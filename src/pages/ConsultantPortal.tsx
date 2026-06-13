@@ -21,6 +21,7 @@ import { useNavigate } from "react-router-dom";
 import { ConsultantTour } from "@/components/consultant/ConsultantTour";
 import { VoiceMessageRecorder } from "@/components/consultant/VoiceMessageRecorder";
 import { BookOpen } from "lucide-react";
+import { LeadAssociationRequestsPanel } from "@/components/admissions/LeadAssociationRequestsPanel";
 
 interface DashboardStats {
   consultant_id: string;
@@ -173,16 +174,26 @@ const ConsultantPortal = () => {
   const handleAddLead = async () => {
     if (!form.name.trim() || !form.phone.trim() || !consultantId) return;
     setSaving(true);
-    const { data, error } = await supabase.from("leads").insert({
-      name: form.name.trim(), phone: form.phone.trim(), email: form.email.trim() || null,
-      source: "consultant" as any, consultant_id: consultantId,
-      course_id: form.course_id || null, campus_id: form.campus_id || null,
-      notes: form.notes.trim() || null,
-    }).select("id").single();
+    const { data, error } = await supabase.rpc("submit_lead_association_request", {
+      _requester_type: "consultant",
+      _name: form.name.trim(),
+      _phone: form.phone.trim(),
+      _email: form.email.trim() || null,
+      _course_id: form.course_id || null,
+      _campus_id: form.campus_id || null,
+      _notes: form.notes.trim() || null,
+      _consultant_id: consultantId,
+      _academic_partner_id: null,
+    });
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); }
     else {
-      if (data) await supabase.from("lead_activities").insert({ lead_id: data.id, type: "lead_created", description: "Lead added via consultant portal", user_id: user?.id || null });
-      toast({ title: "Lead added" });
+      const result = data as { status?: string } | null;
+      toast({
+        title: result?.status === "pending" ? "Duplicate sent for approval" : "Lead added",
+        description: result?.status === "pending"
+          ? "This phone already exists in CRM. It will show as associated only after superadmin approval."
+          : undefined,
+      });
       setForm({ name: "", phone: "", email: "", course_id: "", campus_id: "", notes: "" });
       setShowAdd(false);
       await fetchAll(consultantId);
@@ -299,7 +310,7 @@ const ConsultantPortal = () => {
 
       <Tabs defaultValue="leads" className="w-full">
         <TabsList className="bg-transparent border-b border-border rounded-none p-0 h-auto gap-0 w-full justify-start">
-          {["Leads", "Payments", "Commissions"].map(t => (
+          {["Leads", "Payments", "Commissions", "Requests"].map(t => (
             <TabsTrigger key={t} value={t.toLowerCase()} data-tour={`${t.toLowerCase()}-tab`}
               className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
               {t}
@@ -467,6 +478,10 @@ const ConsultantPortal = () => {
           <p className="text-[10px] text-muted-foreground">
             Commission payouts are released proportionally to student fee payments. Minimum 25% of annual fee must be paid by the student before payout is eligible.
           </p>
+        </TabsContent>
+
+        <TabsContent value="requests" className="mt-4">
+          <LeadAssociationRequestsPanel requesterType="consultant" />
         </TabsContent>
       </Tabs>
 
