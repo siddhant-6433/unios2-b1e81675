@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Mail, MessageCircle, Loader2, ShieldCheck, ArrowLeft } from "lucide-react";
+import { Mail, MessageCircle, Loader2, ShieldCheck, ArrowLeft, KeyRound } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PhoneInput, parsePhone } from "@/components/ui/phone-input";
 import { COUNTRIES } from "@/components/apply/countries";
@@ -109,6 +109,32 @@ const Login = () => {
       if (error) throw error;
     } catch (error: unknown) {
       toast({ title: "Error", description: getErrorMessage(error), variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handlePasskeyLogin = async () => {
+    if (!("PublicKeyCredential" in window)) {
+      toast({
+        title: "Passkeys unavailable",
+        description: "This browser or device does not support passkey sign-in.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const { error } = await supabase.auth.signInWithPasskey();
+      if (error) throw error;
+      navigate("/");
+    } catch (error: unknown) {
+      toast({
+        title: "Could not sign in with passkey",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
     } finally {
       setSubmitting(false);
     }
@@ -524,6 +550,23 @@ const Login = () => {
                     <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
                     <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
                   </svg>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handlePasskeyLogin}
+                disabled={submitting}
+                className="w-full rounded-xl border border-input bg-card px-4 py-3 text-sm font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50 flex items-center justify-between gap-3"
+              >
+                <span className="flex min-w-0 flex-col items-start text-left">
+                  <span className="truncate">Sign in with passkey</span>
+                  <span className="text-xs font-normal text-muted-foreground">Face ID, fingerprint, or security key</span>
+                </span>
+                {submitting ? (
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                ) : (
+                  <KeyRound className="h-4 w-4 shrink-0 text-primary" />
                 )}
               </button>
             </div>
