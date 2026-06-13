@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const adminApplicationView = readFileSync("src/pages/AdminApplicationView.tsx", "utf8");
 const docReviewPanel = readFileSync("src/components/admissions/DocReviewPanel.tsx", "utf8");
+const listAppDocs = readFileSync("supabase/functions/list-app-docs/index.ts", "utf8");
 const migration = readFileSync("supabase/migrations/20260619101000_restrict_application_doc_review_approvals.sql", "utf8");
 
 describe("application document review access", () => {
@@ -25,5 +26,18 @@ describe("application document review access", () => {
     expect(writePolicyBlock).toContain("public.has_role(auth.uid(), 'principal')");
     expect(writePolicyBlock).toContain("JOIN public.teams t ON t.leader_id = p.id");
     expect(writePolicyBlock).not.toContain("'counsellor'");
+  });
+
+  it("does not allow staff to verify or re-reject an already rejected document", () => {
+    expect(docReviewPanel).toContain('activeStatus === "rejected"');
+    expect(docReviewPanel).toContain("Waiting for the applicant to re-upload this document");
+    expect(docReviewPanel).not.toContain("Update rejection");
+  });
+
+  it("treats a replacement upload as the active document for review", () => {
+    expect(listAppDocs).toContain("latestByDocKey");
+    expect(listAppDocs).toContain("staleReviewPaths");
+    expect(adminApplicationView).toContain("activeDocPaths");
+    expect(adminApplicationView).toContain("if (activeDocPaths.has(r.file_path))");
   });
 });

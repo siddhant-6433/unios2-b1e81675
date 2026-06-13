@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X, KeyRound, Trash2, UserCheck, Lock, LockOpen, ArrowRightLeft, AlertTriangle
+  Users, UserPlus, FileSpreadsheet, Search, Loader2, Shield, Phone, Eye, X, KeyRound, Trash2, UserCheck, Lock, LockOpen, ArrowRightLeft, AlertTriangle, Archive, ArchiveRestore
 } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -65,6 +65,7 @@ interface UserWithRole {
   profile_updated_at: string | null;
   login_disabled: boolean;
   last_seen_at: string | null;
+  archived_at: string | null;
 }
 
 function isOnline(lastSeenAt: string | null): boolean {
@@ -108,6 +109,8 @@ const AdminPanel = () => {
   const [deleting, setDeleting] = useState(false);
   const [disableTarget, setDisableTarget] = useState<{ userId: string; name: string; nextDisabled: boolean } | null>(null);
   const [togglingLogin, setTogglingLogin] = useState(false);
+  const [showArchivedUsers, setShowArchivedUsers] = useState(false);
+  const [archivingUser, setArchivingUser] = useState<string | null>(null);
   const [transferTarget, setTransferTarget] = useState<{ profileId: string; userId: string; name: string } | null>(null);
   const [linkingPubId, setLinkingPubId] = useState<string | null>(null);
   const [linkUserId, setLinkUserId] = useState<string>("");
@@ -118,10 +121,17 @@ const AdminPanel = () => {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const { data: profiles, error: profileError } = await supabase
+      let profileQuery = supabase
         .from("profiles")
-        .select("id, user_id, display_name, email, phone, campus, updated_at, login_disabled, last_seen_at")
+        .select("id, user_id, display_name, email, phone, campus, updated_at, login_disabled, last_seen_at, archived_at")
+        .is("deleted_at", null)
         .order("created_at", { ascending: false });
+
+      profileQuery = showArchivedUsers
+        ? profileQuery.not("archived_at", "is", null)
+        : profileQuery.is("archived_at", null);
+
+      const { data: profiles, error: profileError } = await profileQuery;
 
       if (profileError) {
         toast({ title: "Error loading profiles", description: profileError.message, variant: "destructive" });
@@ -156,6 +166,7 @@ const AdminPanel = () => {
           profile_updated_at: p.updated_at || null,
           login_disabled: !!p.login_disabled,
           last_seen_at: p.last_seen_at || null,
+          archived_at: p.archived_at || null,
         };
       });
 
@@ -183,7 +194,7 @@ const AdminPanel = () => {
 
   useEffect(() => {
     if (canManageUsers) { fetchUsers(); fetchPublishers(); }
-  }, [canManageUsers]);
+  }, [canManageUsers, showArchivedUsers]);
 
   const handleLinkPublisher = async (publisherId: string, userId: string) => {
     if (!userId) return;
@@ -312,7 +323,7 @@ const AdminPanel = () => {
         throw new Error(message);
       }
       if (data?.error) throw new Error(data.error);
-      toast({ title: "User deleted", description: `${deleteTarget.name} has been permanently deleted.` });
+      toast({ title: "User deleted", description: `${deleteTarget.name} has been removed from active user management.` });
       setDeleteTarget(null);
       await fetchUsers();
     } catch (err: any) {
@@ -353,6 +364,36 @@ const AdminPanel = () => {
       toast({ title: "Action failed", description: err.message, variant: "destructive" });
     } finally {
       setTogglingLogin(false);
+    }
+  };
+
+  const handleArchiveUser = async (target: UserWithRole, archived: boolean) => {
+    if (archived && !target.login_disabled) {
+      toast({ title: "Archive unavailable", description: "Disable login before archiving a user.", variant: "destructive" });
+      return;
+    }
+
+    setArchivingUser(target.user_id);
+    try {
+      const payload = archived
+        ? { archived_at: new Date().toISOString(), archived_by: authUser?.id ?? null }
+        : { archived_at: null, archived_by: null };
+      const { error } = await (supabase.from("profiles") as any)
+        .update(payload)
+        .eq("user_id", target.user_id);
+      if (error) throw error;
+
+      toast({
+        title: archived ? "User archived" : "User restored",
+        description: archived
+          ? `${target.display_name || "User"} has been hidden from the main user list.`
+          : `${target.display_name || "User"} is visible in the main user list again.`,
+      });
+      await fetchUsers();
+    } catch (err: any) {
+      toast({ title: archived ? "Archive failed" : "Restore failed", description: err.message, variant: "destructive" });
+    } finally {
+      setArchivingUser(null);
     }
   };
 
@@ -509,6 +550,12 @@ const AdminPanel = () => {
                     <option key={r.value} value={r.value}>{r.label} ({users.filter((u) => u.role === r.value).length})</option>
                   ))}
                 </select>
+              )}
+              {isSuperAdmin && (
+                <label className="flex items-center gap-2 rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground">
+                  <Switch checked={showArchivedUsers} onCheckedChange={setShowArchivedUsers} />
+                  <span>{showArchivedUsers ? "Showing archived" : "Show archived"}</span>
+                </label>
               )}
             </div>
 
@@ -742,6 +789,11 @@ const AdminPanel = () => {
                                     <Lock className="h-2.5 w-2.5" /> Login disabled
                                   </span>
                                 )}
+                                {user.archived_at && (
+                                  <span className="inline-flex items-center gap-1 self-start rounded-md bg-slate-500/10 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 dark:text-slate-300">
+                                    <Archive className="h-2.5 w-2.5" /> Archived
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </td>
@@ -845,6 +897,31 @@ const AdminPanel = () => {
                                     </button>
                                   )}
                                   {isSuperAdmin && user.role !== "super_admin" && user.user_id !== authUser?.id && (
+                                    showArchivedUsers ? (
+                                      <button
+                                        onClick={() => handleArchiveUser(user, false)}
+                                        disabled={archivingUser === user.user_id}
+                                        className="rounded-lg bg-emerald-500/10 p-1.5 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+                                        title="Restore to main user list"
+                                      >
+                                        {archivingUser === user.user_id
+                                          ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                          : <ArchiveRestore className="h-3.5 w-3.5" />}
+                                      </button>
+                                    ) : user.login_disabled ? (
+                                      <button
+                                        onClick={() => handleArchiveUser(user, true)}
+                                        disabled={archivingUser === user.user_id}
+                                        className="rounded-lg bg-slate-500/10 p-1.5 text-slate-700 dark:text-slate-300 hover:bg-slate-500/20 transition-colors disabled:opacity-50"
+                                        title="Archive inactive user"
+                                      >
+                                        {archivingUser === user.user_id
+                                          ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                          : <Archive className="h-3.5 w-3.5" />}
+                                      </button>
+                                    ) : null
+                                  )}
+                                  {isSuperAdmin && user.role !== "super_admin" && user.user_id !== authUser?.id && (
                                     <button onClick={() => setTransferTarget({ profileId: user.profile_id, userId: user.user_id, name: user.display_name || "Unnamed" })}
                                       className="rounded-lg bg-violet-500/10 p-1.5 text-violet-700 dark:text-violet-400 hover:bg-violet-500/20 transition-colors"
                                       title="Transfer account data">
@@ -896,7 +973,7 @@ const AdminPanel = () => {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Delete "{deleteTarget?.name}"?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This will permanently delete the user account and all associated data. This action cannot be undone.
+                    This will remove the user's login and hide them from active user management. Historical records remain linked for audit and reporting.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>

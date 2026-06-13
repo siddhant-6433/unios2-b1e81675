@@ -116,6 +116,16 @@ Deno.serve(async (req) => {
     const path = docKey === "passport_photo"
       ? `${applicationId}/passport_photo.${safeName.split(".").pop() || "png"}`
       : `${applicationId}/${docKey}-${safeName}`;
+    const { data: existingFiles } = await admin.storage
+      .from("application-documents")
+      .list(applicationId, { limit: 100 });
+    const oldPaths = (existingFiles || [])
+      .filter((f: any) => {
+        if (!f?.name || f.name.startsWith(".")) return false;
+        if (docKey === "passport_photo") return f.name.startsWith("passport_photo.");
+        return f.name.startsWith(`${docKey}-`);
+      })
+      .map((f: any) => `${applicationId}/${f.name}`);
 
     const buf = new Uint8Array(await file.arrayBuffer());
     const { error: upErr } = await admin.storage
@@ -126,6 +136,24 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: upErr.message }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    const staleObjectPaths = oldPaths.filter((oldPath: string) => oldPath !== path);
+    if (staleObjectPaths.length > 0) {
+      const { error: rmErr } = await admin.storage
+        .from("application-documents")
+        .remove(staleObjectPaths);
+      if (rmErr) console.error("[apply-portal-upload-doc] stale file cleanup error:", rmErr);
+    }
+
+    const reviewPathsToReset = Array.from(new Set([...oldPaths, path]));
+    if (reviewPathsToReset.length > 0) {
+      const { error: reviewErr } = await admin
+        .from("application_doc_reviews")
+        .delete()
+        .eq("application_id", applicationId)
+        .in("file_path", reviewPathsToReset);
+      if (reviewErr) console.error("[apply-portal-upload-doc] review reset error:", reviewErr);
     }
 
     const { data: pub } = admin.storage.from("application-documents").getPublicUrl(path);

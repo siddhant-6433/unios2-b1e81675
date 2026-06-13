@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { deleteApplication as deleteApplicationRequest } from "@/lib/deleteApplication";
 import { useIsTeamLeader } from "@/hooks/useTeamLeader";
+import { fetchCahetRegistration, isBptOrBmritCourseName, type CahetRegistrationDetails } from "@/lib/cahet";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -44,6 +45,7 @@ export default function AdminApplicationView() {
   } | null>(null);
   const [hasOffer, setHasOffer] = useState(false);
   const [appFeePaid, setAppFeePaid] = useState(0);
+  const [cahetRegistration, setCahetRegistration] = useState<CahetRegistrationDetails | null>(null);
   const [docs, setDocs] = useState<PreviewDoc[]>([]);
   const [reviews, setReviews] = useState<Record<string, DocReview>>({});
   const [decisionBusy, setDecisionBusy] = useState(false);
@@ -73,16 +75,20 @@ export default function AdminApplicationView() {
       ]);
       if (appErr) throw appErr;
       setApp(appRow);
-      setDocs(((fnRes?.data as any)?.docs || []) as PreviewDoc[]);
+      const activeDocs = (((fnRes?.data as any)?.docs || []) as PreviewDoc[]);
+      const activeDocPaths = new Set(activeDocs.map(d => d.path).filter(Boolean));
+      setDocs(activeDocs);
       const map: Record<string, DocReview> = {};
-      (reviewRows as DocReview[] | null || []).forEach(r => { map[r.file_path] = r; });
+      (reviewRows as DocReview[] | null || []).forEach(r => {
+        if (activeDocPaths.has(r.file_path)) map[r.file_path] = r;
+      });
       setReviews(map);
 
       // Pull lead's course/campus IDs — needed by OfferLetterDialog. course_selections
       // on the application only has names, so we read them from the linked lead.
       // Also pulls PAN/AN for the lifecycle stepper.
       if (appRow?.lead_id) {
-        const [{ data: leadRow }, { data: offerRows }, { data: pmtRows }] = await Promise.all([
+        const [{ data: leadRow }, { data: offerRows }, { data: pmtRows }, cahetRow] = await Promise.all([
           supabase.from("leads")
             .select("id, name, course_id, campus_id, pre_admission_no, admission_no, course:course_id(name,code,duration_years,eligibility,entrance_exam,entrance_mandatory)")
             .eq("id", appRow.lead_id).maybeSingle(),
@@ -92,14 +98,18 @@ export default function AdminApplicationView() {
             .eq("lead_id", appRow.lead_id)
             .eq("type", "application_fee")
             .eq("status", "confirmed"),
+          fetchCahetRegistration(supabase, appRow.lead_id),
         ]);
         setLead(leadRow as any);
         setHasOffer(!!(offerRows && offerRows.length));
         setAppFeePaid((pmtRows || []).reduce((sum, p: any) => sum + Number(p.amount || 0), 0));
+        const courseName = (leadRow as any)?.course?.name || ((appRow.course_selections || [])[0] as any)?.course_name || null;
+        setCahetRegistration(isBptOrBmritCourseName(courseName) ? cahetRow : null);
       } else {
         setLead(null);
         setHasOffer(false);
         setAppFeePaid(0);
+        setCahetRegistration(null);
       }
     } catch (e: any) {
       console.error("[AdminApplicationView] refresh failed:", e);
@@ -511,9 +521,10 @@ export default function AdminApplicationView() {
           entranceExam: lead.course.entrance_exam,
           entranceMandatory: lead.course.entrance_mandatory,
         } : null}
+        cahetRegistration={cahetRegistration}
       />
 
-      <ApplicationPreview app={app} docs={docs} />
+      <ApplicationPreview app={app} docs={docs} cahetRegistration={cahetRegistration} />
 
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <AlertDialogContent>
@@ -547,6 +558,7 @@ export default function AdminApplicationView() {
           leadName={lead.name || app.full_name}
           courseId={lead.course_id}
           campusId={lead.campus_id}
+          cahetRegistration={cahetRegistration}
           onSuccess={() => { setShowOfferLetter(false); refresh(); }}
         />
       )}

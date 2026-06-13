@@ -570,6 +570,39 @@ function fmtPersonName(p: any): string {
   return [p.title, p.first_name, p.middle_name, p.last_name, p.name].filter(Boolean).join(" ") || (p.name || "-");
 }
 
+function isBptOrBmritSelection(app: any): boolean {
+  const selections = Array.isArray(app?.course_selections) ? app.course_selections : [];
+  return selections.some((s: any) => {
+    const text = `${s?.course_name || ""} ${s?.course_code || ""}`.toLowerCase();
+    return text.includes("bpt") ||
+      text.includes("physiotherapy") ||
+      text.includes("bmrit") ||
+      (text.includes("radiology") && text.includes("imaging")) ||
+      (text.includes("radiology") && text.includes("b.sc"));
+  });
+}
+
+function withCahetEntranceExam(app: any, cahetRegistration: any | null): any {
+  if (!cahetRegistration || !isBptOrBmritSelection(app)) return app;
+  const academic = { ...(app.academic_details || {}) };
+  const exams: any[] = Array.isArray(academic.entrance_exams) ? [...academic.entrance_exams] : [];
+  const idx = exams.findIndex((e: any) => /cahet/i.test(e?.exam_name || ""));
+  const cahetExam = {
+    exam_name: "CAHET",
+    status: "registered",
+    registration_no: cahetRegistration.registration_no,
+    registered_name: app.full_name || "",
+    document_url: cahetRegistration.document_url || null,
+  };
+  if (idx >= 0) {
+    exams[idx] = { ...exams[idx], ...cahetExam };
+  } else {
+    exams.push(cahetExam);
+  }
+  academic.entrance_exams = exams;
+  return { ...app, academic_details: academic };
+}
+
 // ───────────────────────── builder ─────────────────────────
 
 // ───────────────────────── handler ─────────────────────────
@@ -596,19 +629,30 @@ Deno.serve(async (req) => {
       });
     }
 
+    let cahetRegistration: any = null;
+    if (app.lead_id) {
+      const { data: cahetRow } = await admin
+        .from("cahet_registrations")
+        .select("registration_no, document_url, notes, registered_at")
+        .eq("lead_id", app.lead_id)
+        .maybeSingle();
+      cahetRegistration = cahetRow || null;
+    }
+    const appForPdf = withCahetEntranceExam(app, cahetRegistration);
+
     const { data: branding } = await admin.rpc("lead_branding" as any, {
-      _lead_id: app.lead_id, _doc_type: "application_form",
+      _lead_id: appForPdf.lead_id, _doc_type: "application_form",
     });
 
     // Resolve session name for the header.
     let sessionName: string | null = null;
-    if (app.session_id) {
-      const { data: sess } = await admin.from("admission_sessions").select("name").eq("id", app.session_id).maybeSingle();
+    if (appForPdf.session_id) {
+      const { data: sess } = await admin.from("admission_sessions").select("name").eq("id", appForPdf.session_id).maybeSingle();
       sessionName = sess?.name || null;
     }
 
     // Eligibility rules for every selected course (for mismatch flags).
-    const courseIds = (app.course_selections || []).map((c: any) => c.course_id).filter(Boolean);
+    const courseIds = (appForPdf.course_selections || []).map((c: any) => c.course_id).filter(Boolean);
     let eligibilityRules: any[] = [];
     if (courseIds.length > 0) {
       const { data: rules } = await admin.from("eligibility_rules")
@@ -616,13 +660,13 @@ Deno.serve(async (req) => {
         .in("course_id", courseIds);
       eligibilityRules = rules || [];
     }
-    const mismatches = computeMismatches(app, eligibilityRules, sessionName);
+    const mismatches = computeMismatches(appForPdf, eligibilityRules, sessionName);
 
     // List uploaded files for this application from storage.
     const documents: { name: string; url: string }[] = [];
     let photoUrl: string | null = null;
     try {
-      const { data: files } = await admin.storage.from("application-documents").list(app.application_id, {
+      const { data: files } = await admin.storage.from("application-documents").list(appForPdf.application_id, {
         limit: 200, sortBy: { column: "name", order: "asc" },
       });
       // Photo conventions vary - PhotoUpload uses passport_photo.png; school
@@ -631,7 +675,7 @@ Deno.serve(async (req) => {
       const photoPattern = /^(passport_photo|student_photo|applicant_photo)/i;
       for (const f of (files ?? [])) {
         if (!f.name) continue;
-        const path = `${app.application_id}/${f.name}`;
+        const path = `${appForPdf.application_id}/${f.name}`;
         const { data: pub } = admin.storage.from("application-documents").getPublicUrl(path);
         const url = pub?.publicUrl || path;
         if (!photoUrl && photoPattern.test(f.name)) {
@@ -653,11 +697,11 @@ Deno.serve(async (req) => {
     // Look up the application-fee payment for this lead so we can render
     // the receipt details (ref, amount, paid-on timestamp) on the form.
     let appFeePayment: any = null;
-    if (app.lead_id) {
+    if (appForPdf.lead_id) {
       const { data: lp } = await admin
         .from("lead_payments")
         .select("amount, payment_mode, gateway, transaction_ref, receipt_no, payment_date, created_at, status")
-        .eq("lead_id", app.lead_id)
+        .eq("lead_id", appForPdf.lead_id)
         .eq("type", "application_fee")
         .eq("status", "confirmed")
         .order("created_at", { ascending: false })
@@ -667,14 +711,14 @@ Deno.serve(async (req) => {
     }
     // Fall back to applications.payment_ref if no lead_payments row exists yet
     // (older flow stored the gateway ref directly on applications).
-    if (!appFeePayment && app.payment_status === "paid") {
+    if (!appFeePayment && appForPdf.payment_status === "paid") {
       appFeePayment = {
-        amount: app.fee_amount,
+        amount: appForPdf.fee_amount,
         payment_mode: "gateway",
         gateway: "easebuzz", // pre-ICICI applications were all routed through Easebuzz
-        transaction_ref: app.payment_ref,
+        transaction_ref: appForPdf.payment_ref,
         receipt_no: null,
-        payment_date: app.submitted_at || app.updated_at,
+        payment_date: appForPdf.submitted_at || appForPdf.updated_at,
         status: "confirmed",
       };
     }
@@ -687,7 +731,7 @@ Deno.serve(async (req) => {
     const ftr   = await fetchImage(p, branding?.footer_url ?? null);
     const photo = await fetchImage(p, photoUrl);
     const sig   = await fetchImage(p, branding?.signature_url ?? null);
-    const out = await buildApplicationPdfInline(p, f, b, app, branding, lh, ftr, photo, sig, documents, appFeePayment, sessionName, mismatches);
+    const out = await buildApplicationPdfInline(p, f, b, appForPdf, branding, lh, ftr, photo, sig, documents, appFeePayment, sessionName, mismatches);
 
     const path = `applications/${app.application_id}.pdf`;
     const { error: upErr } = await admin.storage
@@ -1070,7 +1114,7 @@ async function buildApplicationPdfInline(
       const isCahet = /cahet/i.test(e.exam_name || "");
       drawValueRow(ctx, [
         { value: norm(e.exam_name), w: cols[0].w },
-        { value: isCahet && e.status === "registered" ? "registered" : norm(e.status), w: cols[1].w },
+        { value: isCahet && e.status === "registered" ? `REGISTERED${e.document_url ? " / PROOF YES" : ""}` : norm(e.status), w: cols[1].w },
         { value: isCahet ? norm(e.registration_no) : norm(e.score), w: cols[2].w },
         { value: isCahet ? norm(e.registered_name) : fmtDate(e.expected_date), w: cols[3].w },
       ], 22);
