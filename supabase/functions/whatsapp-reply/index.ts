@@ -2,6 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   digits,
   errorMessage,
+  isLikelyBusinessPhoneNumber,
   sendWhatsAppText,
   type WhatsAppChannelHint,
   type WhatsAppProvider,
@@ -85,8 +86,15 @@ Deno.serve(async (req) => {
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
     const requestedProvider: WhatsAppProvider | null = provider === "plivo" || provider === "meta" ? provider : null;
-    const requestedPhoneNumberId = typeof business_phone_number_id === "string" ? business_phone_number_id : null;
-    const requestedBusinessNumber = typeof business_number === "string" ? digits(business_number) : null;
+    const rawRequestedPhoneNumberId = typeof business_phone_number_id === "string" ? business_phone_number_id : null;
+    const requestedPhoneNumberId = rawRequestedPhoneNumberId && !isLikelyBusinessPhoneNumber(rawRequestedPhoneNumberId)
+      ? rawRequestedPhoneNumberId
+      : null;
+    const requestedBusinessNumber = typeof business_number === "string"
+      ? digits(business_number)
+      : rawRequestedPhoneNumberId && isLikelyBusinessPhoneNumber(rawRequestedPhoneNumberId)
+        ? digits(rawRequestedPhoneNumberId)
+        : null;
     const channelHint: WhatsAppChannelHint = requestedProvider
       ? {
         provider: requestedProvider,

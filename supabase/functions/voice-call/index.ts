@@ -25,6 +25,37 @@ function json(data: any, status = 200) {
   });
 }
 
+async function loadAdmissionsMemoryExamples(
+  db: ReturnType<typeof createClient>,
+  query: string,
+  courseId: string | null,
+): Promise<{ leadAsked: string; counsellorReplied: string; sourceChannel: string | null }[]> {
+  if (!query || query.trim().length < 3) return [];
+  try {
+    const { data, error } = await db.rpc("match_admissions_ai_reply_examples", {
+      p_query: query,
+      p_course_id: courseId,
+      p_target_channel: "voice",
+      p_limit: 3,
+    });
+    if (error) {
+      console.warn("Voice admissions memory lookup failed:", error.message);
+      return [];
+    }
+    return ((data || []) as any[])
+      .filter((example) => (example.score ?? 0) >= 0.15)
+      .slice(0, 3)
+      .map((example) => ({
+        leadAsked: example.query_text,
+        counsellorReplied: example.reply_text,
+        sourceChannel: example.source_channel || null,
+      }));
+  } catch (err) {
+    console.warn("Voice admissions memory lookup error:", err instanceof Error ? err.message : String(err));
+    return [];
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -114,18 +145,31 @@ Deno.serve(async (req) => {
 
       // Generate a unique call ID
       const callId = crypto.randomUUID();
+      const courseName = (activeLead.courses as any)?.name || null;
+      const courseCode = (activeLead.courses as any)?.code || null;
+      const admissionsMemoryExamples = await loadAdmissionsMemoryExamples(
+        db,
+        [
+          courseName,
+          courseCode,
+          activeLead.source,
+          "admission fees eligibility duration campus application counselling objections",
+        ].filter(Boolean).join(" "),
+        activeLead.course_id || null,
+      );
 
       // Set call context on the voice agent server
       const contextPayload = {
         direction: "outbound",
         leadId: lead_id,
         leadName: activeLead.name,
-        courseName: (activeLead.courses as any)?.name || null,
-        courseCode: (activeLead.courses as any)?.code || null,
+        courseName,
+        courseCode,
         campusName: (activeLead.campuses as any)?.name || null,
         leadSource: activeLead.source,
         guardianName: activeLead.guardian_name,
         assignedCounsellorName,
+        admissionsMemoryExamples,
       };
 
       const ctxRes = await fetch(`${VOICE_AGENT_URL}/context/${callId}`, {

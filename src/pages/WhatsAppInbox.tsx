@@ -26,6 +26,8 @@ const TEMPLATE_MESSAGE_TEXTS: Record<string, string> = {
     "Hi {{student_name}}, thanks for your interest in NIMT Educational Institutions. We offer programmes in nursing, paramedical, pharma, management, education, law, and engineering across our Greater Noida, Ghaziabad, and Kotputli campuses. Browse the full list, fees, and eligibility on our website. Reply STOP to opt out.",
   course_info_v4:
     "Hi {{student_name}}, here are the details for {{course_name}} at NIMT Educational Institutions:\n\nDuration: {{duration}}\nEligibility: {{eligibility}}\nApproval: {{approval}}\nCourse video: {{video_url}}\n\nOpen the course page below for fees and application steps. Reply STOP to opt out.",
+  course_info_video_v2:
+    "Hi {{student_name}}, here are the details you requested for {{course_name}} at NIMT Educational Institutions:\n\nCourse information: {{course_url}}\nCampus locations: {{campus_url}}\nApplication portal: {{apply_url}}\n\nReply to this message if you have any questions - our admissions team will be glad to assist you.",
 };
 
 const TEMPLATE_PLACEHOLDER_RE = /^\s*(?:\[Campaign:[^\]]+\]\s*)?\[Template:\s*([^\]]+)\]\s*$/i;
@@ -74,6 +76,7 @@ interface Message {
 }
 
 interface MessageConversationSeed {
+  id?: string | null;
   phone: string | null;
   lead_id: string | null;
   direction: string | null;
@@ -146,6 +149,20 @@ const INBOX_TEMPLATES = [
     description: "10 June 2026 application + CAHET registration deadline",
     params: [],
     preview: "Dear Applicant,\n\nThis is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *10th June 2026, 11:59 PM*\n\nFor admission Candidates *MUST*\n\n1. Complete College Application Online at https://apply.nimt.ac.in\n2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nPlease note both form submissions are mandatory by 10th June 2026, 11:59 PM to be included in the admission process for session 2026-27.\n\nFor any details please call 9555192192\n9667691872\n7428499849",
+  },
+  {
+    key: "course_info_v4",
+    label: "Course Info",
+    description: "Auto-filled course duration, eligibility, approval and video",
+    params: [],
+    preview: TEMPLATE_MESSAGE_TEXTS.course_info_v4,
+  },
+  {
+    key: "course_info_video_v2",
+    label: "Course Links",
+    description: "Auto-filled course, campus and application links",
+    params: [],
+    preview: TEMPLATE_MESSAGE_TEXTS.course_info_video_v2,
   },
   // ── Knowledge Base Quick Replies ─────────────────────────────────────────
   {
@@ -348,6 +365,32 @@ const withConversationDefaults = (row: any): Conversation => ({
   last_confidence: row.last_confidence ?? null,
   last_bot_action: row.last_bot_action || null,
 });
+
+const conversationIdentityKey = (c: Conversation) =>
+  `${c.phone}:${conversationBusinessKey(c) || ""}`;
+
+const mergeConversationRows = (primaryRows: Conversation[], fallbackRows: Conversation[]) => {
+  const merged = new Map<string, Conversation>();
+  for (const row of [...primaryRows, ...fallbackRows]) {
+    const key = conversationIdentityKey(row);
+    const existing = merged.get(key);
+    if (!existing || new Date(row.last_message_at).getTime() > new Date(existing.last_message_at).getTime()) {
+      merged.set(key, row);
+    }
+  }
+  return [...merged.values()]
+    .sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime());
+};
+
+const replyChannelPayload = (conv: Conversation | null | undefined) => {
+  const phoneNumberIdLooksLikeBusinessNumber =
+    conv?.provider === "meta" && isBusinessPhoneNumberChannel(conv.business_phone_number_id);
+  return {
+    provider: conv?.provider || null,
+    business_phone_number_id: phoneNumberIdLooksLikeBusinessNumber ? null : conv?.business_phone_number_id || null,
+    business_number: conv?.business_phone_number || (phoneNumberIdLooksLikeBusinessNumber ? conv?.business_phone_number_id || null : null),
+  };
+};
 
 const WhatsAppInbox = () => {
   const navigate = useNavigate();
@@ -607,23 +650,47 @@ const WhatsAppInbox = () => {
     const variants = businessChannelVariants(selectedBusinessNumber);
     if (variants.length === 0) return [];
 
-    let messageQuery = supabase
-      .from("whatsapp_messages" as any)
-      .select("phone, lead_id, direction, content, created_at, provider, business_phone_number_id, business_phone_number, is_read")
-      .order("created_at", { ascending: false })
-      .limit(CONVERSATION_PAGE_SIZE * 5);
-
-    messageQuery = messageQuery.or(
+    const messageColumns = "id, phone, lead_id, direction, content, created_at, provider, business_phone_number_id, business_phone_number, is_read";
+    const applyChannelFilter = (query: any) => query.or(
       variants
         .flatMap(v => [`business_phone_number_id.eq.${v}`, `business_phone_number.eq.${v}`])
         .join(","),
     );
 
-    const { data, error } = await messageQuery;
+    const recentMessagesQuery = applyChannelFilter(
+      supabase
+        .from("whatsapp_messages" as any)
+        .select(messageColumns)
+        .order("created_at", { ascending: false })
+        .limit(CONVERSATION_PAGE_SIZE * 5),
+    );
+
+    const inboundMessagesQuery = applyChannelFilter(
+      supabase
+        .from("whatsapp_messages" as any)
+        .select(messageColumns)
+        .eq("direction", "inbound")
+        .order("created_at", { ascending: false })
+        .limit(CONVERSATION_PAGE_SIZE * 5),
+    );
+
+    const [recentMessages, inboundMessages] = await Promise.all([
+      recentMessagesQuery,
+      inboundMessagesQuery,
+    ]);
+
+    const error = recentMessages.error || inboundMessages.error;
     if (error) throw error;
 
-    const seedRows = ((data || []) as any[] as MessageConversationSeed[])
-      .filter(row => row.phone && row.created_at);
+    const seedById = new Map<string, MessageConversationSeed>();
+    for (const row of ([...(recentMessages.data || []), ...(inboundMessages.data || [])] as any[] as MessageConversationSeed[])) {
+      const key = row.id || `${row.phone}:${row.created_at}:${row.direction}:${row.content || ""}`;
+      if (!seedById.has(key)) seedById.set(key, row);
+    }
+
+    const seedRows = [...seedById.values()]
+      .filter(row => row.phone && row.created_at)
+      .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
     if (seedRows.length === 0) return [];
 
     const leadIds = Array.from(new Set(seedRows.map(row => row.lead_id).filter((id): id is string => Boolean(id))));
@@ -800,14 +867,15 @@ const WhatsAppInbox = () => {
       }
 
       if (lastError && rows.length === 0) throw lastError;
-      if (reset && rows.length === 0 && businessNumber !== "primary" && isBusinessPhoneNumberChannel(businessNumber)) {
-        rows = await fetchMessageBackedConversationRows(businessNumber);
+      if (reset && businessNumber !== "primary" && isBusinessPhoneNumberChannel(businessNumber)) {
+        const messageBackedRows = await fetchMessageBackedConversationRows(businessNumber);
+        rows = rows.length === 0 ? messageBackedRows : mergeConversationRows(rows, messageBackedRows);
       }
 
       setConversations(prev => {
         if (reset) return rows;
-        const seen = new Set(prev.map(c => `${c.phone}:${conversationBusinessKey(c) || ""}`));
-        const nextRows = rows.filter(c => !seen.has(`${c.phone}:${conversationBusinessKey(c) || ""}`));
+        const seen = new Set(prev.map(conversationIdentityKey));
+        const nextRows = rows.filter(c => !seen.has(conversationIdentityKey(c)));
         return [...prev, ...nextRows];
       });
 
@@ -1228,9 +1296,7 @@ const WhatsAppInbox = () => {
         phone: selectedPhone,
         message: messageText,
         lead_id: conv?.lead_id || null,
-        provider: conv?.provider || null,
-        business_phone_number_id: conv?.business_phone_number_id || null,
-        business_number: conv?.business_phone_number || null,
+        ...replyChannelPayload(conv),
       },
     });
 
@@ -1272,9 +1338,7 @@ const WhatsAppInbox = () => {
           phone: selectedPhone,
           message: previewText,
           lead_id: conv?.lead_id || null,
-          provider: conv?.provider || null,
-          business_phone_number_id: conv?.business_phone_number_id || null,
-          business_number: conv?.business_phone_number || null,
+          ...replyChannelPayload(conv),
         },
       });
       if (error) {
@@ -1324,7 +1388,7 @@ const WhatsAppInbox = () => {
       case "course_details": params = [leadName, courseName]; break;
     }
 
-    const { data, error } = await supabase.functions.invoke("whatsapp-send", {
+    const { data, error } = await invokeEdge<any>("whatsapp-send", {
       body: { template_key: selectedTemplate, phone: selectedPhone, params, lead_id: conv?.lead_id || null, ...(buttonUrls ? { button_urls: buttonUrls } : {}) },
     });
 
@@ -1458,13 +1522,11 @@ const WhatsAppInbox = () => {
     const { error: replyErr } = await invokeEdge("whatsapp-reply", {
       body: {
         phone: selectedPhone,
-          message,
-          lead_id: leadId,
-          provider: selectedConv?.provider || null,
-          business_phone_number_id: selectedConv?.business_phone_number_id || null,
-          business_number: selectedConv?.business_phone_number || null,
-        },
-      });
+        message,
+        lead_id: leadId,
+        ...replyChannelPayload(selectedConv),
+      },
+    });
 
     if (replyErr) {
       toast({
@@ -1983,9 +2045,7 @@ const WhatsAppInbox = () => {
                             message: "You have been added to our Do Not Contact list. We will not reach out to you via call or WhatsApp going forward. If this was a mistake, please reply START or call us at +91 9555192192.",
                             lead_id: dncLeadId,
                             bypass_dnc: true,
-                            provider: selectedConv?.provider || null,
-                            business_phone_number_id: selectedConv?.business_phone_number_id || null,
-                            business_number: selectedConv?.business_phone_number || null,
+                            ...replyChannelPayload(selectedConv),
                           },
                         });
                         // Reflect new DNC status locally so composer disables immediately

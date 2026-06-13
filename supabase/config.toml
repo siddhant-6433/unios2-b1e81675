@@ -84,6 +84,9 @@ verify_jwt = false
 [functions.whatsapp-route-health]
 verify_jwt = false
 
+[functions.whatsapp-reply-learning]
+verify_jwt = false
+
 [functions.whatsapp-campaign-send]
 verify_jwt = false
 
