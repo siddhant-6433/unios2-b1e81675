@@ -1,20 +1,199 @@
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeEdge } from "@/integrations/supabase/edge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, User, Phone, Mail, MapPin, Calendar, Heart, GraduationCap, Check, X, Clock, BookOpen, Loader2, TrendingUp, BarChart3, Activity, Filter, Users, RefreshCw, FileText, Download, ExternalLink, ShieldCheck, AlertCircle, Clock3 } from "lucide-react";
+import { ArrowLeft, User, Phone, Mail, MapPin, Calendar, Heart, GraduationCap, Check, X, Clock, BookOpen, Loader2, TrendingUp, BarChart3, Activity, Filter, Users, RefreshCw, FileText, Download, ExternalLink, ShieldCheck, AlertCircle, Clock3, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
+import { usePermissions } from "@/contexts/PermissionContext";
 import { StudentFeePanel } from "@/components/finance/StudentFeePanel";
+
+interface StudentDocument {
+  id: string;
+  document_name: string;
+  file_url: string;
+  file_name: string | null;
+  file_size: number | null;
+  mime_type: string | null;
+  uploaded_at: string | null;
+  created_at: string | null;
+}
+
+interface StudentRecord {
+  id: string;
+  lead_id: string | null;
+  name: string;
+  status: string;
+  admission_no: string | null;
+  pre_admission_no: string | null;
+  father_user_id: string | null;
+  mother_user_id: string | null;
+  guardian_user_id: string | null;
+  courses?: { name: string | null } | null;
+  campuses?: { name: string | null } | null;
+  batches?: { name: string | null } | null;
+  admission_sessions?: { name: string | null } | null;
+  first_name?: string | null;
+  middle_name?: string | null;
+  last_name?: string | null;
+  dob?: string | null;
+  gender?: string | null;
+  blood_group?: string | null;
+  nationality?: string | null;
+  phone?: string | null;
+  whatsapp_no?: string | null;
+  email?: string | null;
+  student_email?: string | null;
+  school_email?: string | null;
+  student_aadhar?: string | null;
+  biometric_id?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  pincode?: string | null;
+  birth_place?: string | null;
+  religion?: string | null;
+  caste?: string | null;
+  sub_caste?: string | null;
+  caste_category?: string | null;
+  mother_tongue?: string | null;
+  language_spoken?: string | null;
+  second_language?: string | null;
+  third_language?: string | null;
+  house?: string | null;
+  sports?: string | null;
+  food_habits?: string | null;
+  student_type?: string | null;
+  hostel_type?: string | null;
+  sr_number?: string | null;
+  school_admission_no?: string | null;
+  class_roll_no?: string | null;
+  father_name?: string | null;
+  father_phone?: string | null;
+  father_whatsapp?: string | null;
+  father_email?: string | null;
+  father_occupation?: string | null;
+  father_designation?: string | null;
+  father_organization?: string | null;
+  father_qualification?: string | null;
+  father_income?: string | null;
+  father_aadhar?: string | null;
+  mother_name?: string | null;
+  mother_phone?: string | null;
+  mother_whatsapp?: string | null;
+  mother_email?: string | null;
+  mother_occupation?: string | null;
+  mother_organization?: string | null;
+  mother_aadhar?: string | null;
+  guardian_name?: string | null;
+  guardian_phone?: string | null;
+  section?: string | null;
+  admission_date?: string | null;
+  date_of_admission?: string | null;
+  form_filling_date?: string | null;
+  joining_class?: string | null;
+  previous_school?: string | null;
+  previous_class?: string | null;
+  previous_board?: string | null;
+  joining_academic_year?: string | null;
+  concession_category?: string | null;
+  fee_profile_type?: string | null;
+  fee_remarks?: string | null;
+  rte_student?: boolean | null;
+  pen?: string | null;
+  udise?: string | null;
+  apaar_id?: string | null;
+  tc_submitted?: boolean | null;
+  marksheet_submitted?: boolean | null;
+  dob_certificate_submitted?: boolean | null;
+  transport_required?: boolean | null;
+  is_asthmatic?: boolean | null;
+  allergies_medicine?: string | null;
+  allergies_food?: string | null;
+  vision?: string | null;
+  medical_ailments?: string | null;
+  physical_handicap?: string | null;
+  ongoing_treatment?: string | null;
+  identification_mark_1?: string | null;
+  identification_mark_2?: string | null;
+  bank_name?: string | null;
+  ifsc_code?: string | null;
+  bank_account_no?: string | null;
+  bank_reference_no?: string | null;
+}
+
+interface FeeLedgerRow {
+  total_amount: number | string | null;
+  paid_amount: number | string | null;
+  balance: number | string | null;
+}
+
+interface AttendanceRow {
+  id: string;
+  date: string;
+  subject: string | null;
+  status: string;
+}
+
+interface ExamRow {
+  id: string;
+  subject: string | null;
+  exam_type: string | null;
+  max_marks: number;
+  obtained_marks: number;
+  grade: string | null;
+  exam_date: string | null;
+}
+
+interface SiblingRecord {
+  id: string;
+  name: string;
+  admission_no: string | null;
+  section: string | null;
+  status: string | null;
+  father_user_id: string | null;
+  mother_user_id: string | null;
+  guardian_user_id: string | null;
+  courses?: { name: string | null } | null;
+  relationship?: string;
+}
+
+interface LeadDocument {
+  id: string;
+  document_name: string;
+  file_url: string | null;
+  file_name: string | null;
+  status: string | null;
+  rejection_reason: string | null;
+  verified_at: string | null;
+}
+
+const MAX_DOCUMENT_BYTES = 5 * 1024 * 1024;
+const isAcceptedDocument = (file: File) =>
+  file.type === "application/pdf" ||
+  file.type.startsWith("image/") ||
+  /\.(pdf|png|jpe?g|gif|webp)$/i.test(file.name);
 
 const StudentProfile = () => {
   const { admissionNo } = useParams<{ admissionNo: string }>();
-  const [student, setStudent] = useState<any>(null);
-  const [fees, setFees] = useState<any[]>([]);
-  const [attendance, setAttendance] = useState<any[]>([]);
-  const [exams, setExams] = useState<any[]>([]);
-  const [siblings, setSiblings] = useState<any[]>([]);
-  const [leadDocs, setLeadDocs] = useState<any[]>([]);
+  const { toast } = useToast();
+  const { can } = usePermissions();
+  const [student, setStudent] = useState<StudentRecord | null>(null);
+  const [fees, setFees] = useState<FeeLedgerRow[]>([]);
+  const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
+  const [exams, setExams] = useState<ExamRow[]>([]);
+  const [siblings, setSiblings] = useState<SiblingRecord[]>([]);
+  const [leadDocs, setLeadDocs] = useState<LeadDocument[]>([]);
   const [appDocs, setAppDocs] = useState<{ name: string; url: string; path: string }[]>([]);
+  const [studentDocs, setStudentDocs] = useState<StudentDocument[]>([]);
+  const [documentName, setDocumentName] = useState("");
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [documentInputKey, setDocumentInputKey] = useState(0);
+  const [uploadingDocument, setUploadingDocument] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
@@ -23,6 +202,9 @@ const StudentProfile = () => {
 
   const fetchStudent = async () => {
     setLoading(true);
+    setLeadDocs([]);
+    setAppDocs([]);
+    setStudentDocs([]);
     let { data } = await supabase.from("students")
       .select("*, courses:course_id(name), campuses:campus_id(name), batches:batch_id(name), admission_sessions:session_id(name)")
       .eq("admission_no", admissionNo)
@@ -37,32 +219,39 @@ const StudentProfile = () => {
     }
 
     if (data) {
-      setStudent(data);
-      const [feesRes, attendanceRes, examsRes] = await Promise.all([
-        supabase.from("fee_ledger").select("*, fee_codes:fee_code_id(code, name, category)").eq("student_id", data.id).order("due_date"),
-        supabase.from("daily_attendance").select("*").eq("student_id", data.id).order("date", { ascending: false }).limit(50),
-        supabase.from("exam_records").select("*").eq("student_id", data.id).order("exam_date", { ascending: false }),
+      const currentStudent = data as StudentRecord;
+      setStudent(currentStudent);
+      const [feesRes, attendanceRes, examsRes, studentDocsRes] = await Promise.all([
+        supabase.from("fee_ledger").select("*, fee_codes:fee_code_id(code, name, category)").eq("student_id", currentStudent.id).order("due_date"),
+        supabase.from("daily_attendance").select("*").eq("student_id", currentStudent.id).order("date", { ascending: false }).limit(50),
+        supabase.from("exam_records").select("*").eq("student_id", currentStudent.id).order("exam_date", { ascending: false }),
+        supabase
+          .from("student_documents" as never)
+          .select("id, document_name, file_url, file_name, file_size, mime_type, uploaded_at, created_at")
+          .eq("student_id", currentStudent.id)
+          .order("created_at", { ascending: false }),
       ]);
-      if (feesRes.data) setFees(feesRes.data);
-      if (attendanceRes.data) setAttendance(attendanceRes.data);
-      if (examsRes.data) setExams(examsRes.data);
+      if (feesRes.data) setFees(feesRes.data as FeeLedgerRow[]);
+      if (attendanceRes.data) setAttendance(attendanceRes.data as AttendanceRow[]);
+      if (examsRes.data) setExams(examsRes.data as ExamRow[]);
+      setStudentDocs((studentDocsRes.data ?? []) as StudentDocument[]);
 
       // Sibling lookup
       const orParts: string[] = [];
-      if (data.father_user_id) orParts.push(`father_user_id.eq.${data.father_user_id}`);
-      if (data.mother_user_id) orParts.push(`mother_user_id.eq.${data.mother_user_id}`);
-      if (data.guardian_user_id) orParts.push(`guardian_user_id.eq.${data.guardian_user_id}`);
+      if (currentStudent.father_user_id) orParts.push(`father_user_id.eq.${currentStudent.father_user_id}`);
+      if (currentStudent.mother_user_id) orParts.push(`mother_user_id.eq.${currentStudent.mother_user_id}`);
+      if (currentStudent.guardian_user_id) orParts.push(`guardian_user_id.eq.${currentStudent.guardian_user_id}`);
 
       if (orParts.length > 0) {
         const { data: sibs } = await supabase.from("students")
           .select("id, name, admission_no, course_id, section, status, father_user_id, mother_user_id, guardian_user_id, courses:course_id(name)")
           .or(orParts.join(","))
-          .neq("id", data.id);
-        if (sibs) setSiblings(sibs.map(s => {
+          .neq("id", currentStudent.id);
+        if (sibs) setSiblings((sibs as SiblingRecord[]).map(s => {
           const rels: string[] = [];
-          if (data.father_user_id && s.father_user_id === data.father_user_id) rels.push("Same Father");
-          if (data.mother_user_id && s.mother_user_id === data.mother_user_id) rels.push("Same Mother");
-          if (data.guardian_user_id && s.guardian_user_id === data.guardian_user_id) rels.push("Same Guardian");
+          if (currentStudent.father_user_id && s.father_user_id === currentStudent.father_user_id) rels.push("Same Father");
+          if (currentStudent.mother_user_id && s.mother_user_id === currentStudent.mother_user_id) rels.push("Same Mother");
+          if (currentStudent.guardian_user_id && s.guardian_user_id === currentStudent.guardian_user_id) rels.push("Same Guardian");
           return { ...s, relationship: rels.join(", ") || "Sibling" };
         }));
       } else {
@@ -70,20 +259,20 @@ const StudentProfile = () => {
       }
 
       // Lead documents + application documents
-      if (data.lead_id) {
+      if (currentStudent.lead_id) {
         const [ldRes, appRes] = await Promise.all([
           supabase
             .from("lead_documents")
             .select("id, document_name, file_url, file_name, status, rejection_reason, verified_at")
-            .eq("lead_id", data.lead_id)
+            .eq("lead_id", currentStudent.lead_id)
             .order("created_at"),
           supabase
             .from("applications")
             .select("application_id")
-            .eq("lead_id", data.lead_id)
+            .eq("lead_id", currentStudent.lead_id)
             .maybeSingle(),
         ]);
-        setLeadDocs(ldRes.data ?? []);
+        setLeadDocs((ldRes.data ?? []) as LeadDocument[]);
 
         if (appRes.data?.application_id) {
           const { data: fnData } = await supabase.functions.invoke("list-app-docs", {
@@ -125,7 +314,7 @@ const StudentProfile = () => {
     const d = new Date(v);
     return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
   };
-  const bool = (v: any) => (v === true ? "Yes" : v === false ? "No" : "—");
+  const bool = (v: boolean | null | undefined) => (v === true ? "Yes" : v === false ? "No" : "—");
 
   const statusBg: Record<string, string> = { present: "bg-success/10 text-success", absent: "bg-destructive/10 text-destructive", late: "bg-warning/10 text-warning" };
   const gradeColor = (grade: string) => {
@@ -134,20 +323,82 @@ const StudentProfile = () => {
     if (grade.startsWith("B")) return "bg-info/10 text-info";
     return "bg-warning/10 text-warning";
   };
+  const canUploadDocuments = can("documents", "upload");
 
   const syncFromApplication = async () => {
     setSyncing(true);
     setSyncMsg(null);
-    const { data, error } = await (supabase.rpc as any)("backfill_student_from_application", { p_student_id: student.id });
+    const { data, error } = await supabase.rpc("backfill_student_from_application" as never, { p_student_id: student.id } as never);
+    const syncData = data as { ok?: boolean; reason?: string; app_status?: string } | null;
     if (error) {
       setSyncMsg(`Error: ${error.message}`);
-    } else if (data?.ok === false) {
-      setSyncMsg(`Nothing synced: ${data.reason}`);
+    } else if (syncData?.ok === false) {
+      setSyncMsg(`Nothing synced: ${syncData.reason}`);
     } else {
-      setSyncMsg(`Synced from application (${data?.app_status ?? "unknown"} status).`);
+      setSyncMsg(`Synced from application (${syncData?.app_status ?? "unknown"} status).`);
       await fetchStudent();
     }
     setSyncing(false);
+  };
+
+  const handleDocumentFileChange = (file: File | null) => {
+    if (!file) {
+      setDocumentFile(null);
+      return;
+    }
+    if (!isAcceptedDocument(file)) {
+      toast({ title: "Unsupported file", description: "Upload a PDF or image file.", variant: "destructive" });
+      setDocumentInputKey((key) => key + 1);
+      return;
+    }
+    if (file.size > MAX_DOCUMENT_BYTES) {
+      toast({ title: "File too large", description: "Upload a file smaller than 5 MB.", variant: "destructive" });
+      setDocumentInputKey((key) => key + 1);
+      return;
+    }
+    setDocumentFile(file);
+    if (!documentName.trim()) {
+      setDocumentName(file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " "));
+    }
+  };
+
+  const uploadStudentDocument = async () => {
+    if (!student || !documentFile) return;
+    const cleanName = documentName.trim() || documentFile.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ") || "Student document";
+    setUploadingDocument(true);
+
+    try {
+      const form = new FormData();
+      form.append("file", documentFile);
+      form.append("filename", documentFile.name);
+      form.append("prefix", `student_documents/${student.id}`);
+
+      const { data, error } = await invokeEdge<{ url?: string; key?: string }>("r2-upload", { body: form });
+      if (error) throw new Error(error.message);
+      if (!data?.url) throw new Error("Upload returned no document URL.");
+
+      const studentDocumentPayload = {
+        student_id: student.id,
+        document_name: cleanName,
+        file_url: data.url,
+        file_name: documentFile.name,
+        file_size: documentFile.size,
+        mime_type: documentFile.type || null,
+      };
+      const { error: insertError } = await supabase.from("student_documents" as never).insert(studentDocumentPayload as never);
+      if (insertError) throw insertError;
+
+      toast({ title: "Document uploaded" });
+      setDocumentName("");
+      setDocumentFile(null);
+      setDocumentInputKey((key) => key + 1);
+      await fetchStudent();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast({ title: "Upload failed", description: message, variant: "destructive" });
+    } finally {
+      setUploadingDocument(false);
+    }
   };
 
   return (
@@ -254,7 +505,7 @@ const StudentProfile = () => {
         <TabsList className="bg-card border border-border rounded-lg p-1 h-auto flex-wrap">
           <TabsTrigger value="details" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Details</TabsTrigger>
           <TabsTrigger value="documents" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-            Documents{(leadDocs.length + appDocs.length) > 0 && <span className="ml-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold">{leadDocs.length + appDocs.length}</span>}
+            Documents{(studentDocs.length + leadDocs.length + appDocs.length) > 0 && <span className="ml-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold">{studentDocs.length + leadDocs.length + appDocs.length}</span>}
           </TabsTrigger>
           <TabsTrigger value="fees" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Fee Ledger</TabsTrigger>
           <TabsTrigger value="attendance" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Attendance</TabsTrigger>
@@ -366,7 +617,7 @@ const StudentProfile = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {siblings.map((sib: any) => (
+                      {siblings.map((sib) => (
                         <tr key={sib.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
                           <td className="px-4 py-2.5">
                             <Link to={`/students/${sib.admission_no}`} className="font-medium text-primary hover:underline">
@@ -465,13 +716,83 @@ const StudentProfile = () => {
 
         <TabsContent value="documents">
           <div className="mt-4 space-y-4">
-            {leadDocs.length === 0 && appDocs.length === 0 && (
+            {canUploadDocuments && (
+              <div className="rounded-xl bg-card card-shadow p-5 space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-foreground">Upload Document</h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">PDF or image, up to 5 MB.</p>
+                  </div>
+                  <div className="h-9 w-9 rounded bg-primary/10 flex items-center justify-center shrink-0">
+                    <Upload className="h-4 w-4 text-primary" />
+                  </div>
+                </div>
+                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_auto] md:items-end">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="student-document-name" className="text-xs">Document name</Label>
+                    <Input
+                      id="student-document-name"
+                      value={documentName}
+                      onChange={(event) => setDocumentName(event.target.value)}
+                      placeholder="Aadhaar card"
+                      disabled={uploadingDocument}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="student-document-file" className="text-xs">File</Label>
+                    <Input
+                      key={documentInputKey}
+                      id="student-document-file"
+                      type="file"
+                      accept="application/pdf,image/*"
+                      disabled={uploadingDocument}
+                      onChange={(event) => handleDocumentFileChange(event.target.files?.[0] ?? null)}
+                    />
+                  </div>
+                  <Button className="gap-2" onClick={uploadStudentDocument} disabled={!documentFile || uploadingDocument}>
+                    {uploadingDocument ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                    Upload
+                  </Button>
+                </div>
+                {documentFile && (
+                  <p className="text-xs text-muted-foreground truncate">{documentFile.name}</p>
+                )}
+              </div>
+            )}
+
+            {studentDocs.length === 0 && leadDocs.length === 0 && appDocs.length === 0 && (
               <div className="rounded-xl bg-card card-shadow p-10 flex flex-col items-center gap-2 text-muted-foreground">
                 <FileText className="h-8 w-8 opacity-30" />
                 <p className="text-sm">No documents found for this student.</p>
-                {!student.lead_id && (
-                  <p className="text-xs">Student has no linked lead — documents are only available for students admitted via the apply portal.</p>
-                )}
+              </div>
+            )}
+
+            {studentDocs.length > 0 && (
+              <div className="rounded-xl bg-card card-shadow p-5 space-y-3">
+                <h3 className="text-sm font-semibold text-foreground">Student Documents</h3>
+                <div className="divide-y divide-border">
+                  {studentDocs.map((doc) => {
+                    const isImage = (doc.mime_type?.startsWith("image/") ?? false) || /\.(jpg|jpeg|png|gif|webp)$/i.test(doc.file_name ?? "");
+                    return (
+                      <div key={doc.id} className="flex items-center gap-3 py-2.5">
+                        {isImage
+                          ? <img src={doc.file_url} alt={doc.document_name} className="h-9 w-9 rounded object-cover border border-border shrink-0" />
+                          : <div className="h-9 w-9 rounded bg-muted flex items-center justify-center shrink-0"><FileText className="h-4 w-4 text-muted-foreground" /></div>
+                        }
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-foreground truncate">{doc.document_name}</p>
+                          <p className="text-[11px] text-muted-foreground truncate">{doc.file_name || "Document"} · {fmtDate(doc.uploaded_at || doc.created_at)}</p>
+                        </div>
+                        <a href={doc.file_url} target="_blank" rel="noreferrer" className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-primary shrink-0">
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                        <a href={doc.file_url} download className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-primary shrink-0">
+                          <Download className="h-3.5 w-3.5" />
+                        </a>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
@@ -564,7 +885,7 @@ const StudentProfile = () => {
                 <tbody>
                   {attendance.length === 0 ? (
                     <tr><td colSpan={3} className="px-4 py-8 text-center text-muted-foreground">No attendance records</td></tr>
-                  ) : attendance.map((a: any) => (
+                  ) : attendance.map((a) => (
                     <tr key={a.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
                       <td className="px-4 py-3 text-foreground">{new Date(a.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td>
                       <td className="px-4 py-3 text-muted-foreground">{a.subject || "—"}</td>
@@ -602,7 +923,7 @@ const StudentProfile = () => {
                 <tbody>
                   {exams.length === 0 ? (
                     <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No exam records</td></tr>
-                  ) : exams.map((e: any) => (
+                  ) : exams.map((e) => (
                     <tr key={e.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
                       <td className="px-4 py-3 font-medium text-foreground">{e.subject}</td>
                       <td className="px-4 py-3 text-muted-foreground capitalize">{(e.exam_type || "").replace("_", " ")}</td>
