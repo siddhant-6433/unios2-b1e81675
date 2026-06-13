@@ -73,6 +73,11 @@ export function digits(value: string | null | undefined): string {
   return (value || "").replace(/[^0-9]/g, "");
 }
 
+export function isLikelyBusinessPhoneNumber(value: string | null | undefined): boolean {
+  const normalized = digits(value);
+  return normalized.length === 10 || (normalized.length === 12 && normalized.startsWith("91"));
+}
+
 export function errorMessage(value: unknown, fallback: string): string {
   if (value instanceof Error) return value.message;
   if (value && typeof value === "object") {
@@ -134,12 +139,14 @@ function channelAllowed(channel: WhatsAppChannel, hint: WhatsAppChannelHint): bo
 
 function scoreChannel(channel: WhatsAppChannel, hint: WhatsAppChannelHint): number {
   let score = 0;
-  const hintedBusinessNumber = digits(hint.businessNumber);
+  const hintedBusinessNumber = digits(
+    hint.businessNumber || (isLikelyBusinessPhoneNumber(hint.businessPhoneNumberId) ? hint.businessPhoneNumberId : null),
+  );
   const channelBusinessNumber = digits(channel.business_number);
 
   if (hint.provider && channel.provider !== hint.provider) return -1;
   if (hint.route && channel.route === hint.route) score += 2;
-  if (hint.businessPhoneNumberId && channel.meta_phone_number_id === hint.businessPhoneNumberId) score += 5;
+  if (hint.businessPhoneNumberId && !isLikelyBusinessPhoneNumber(hint.businessPhoneNumberId) && channel.meta_phone_number_id === hint.businessPhoneNumberId) score += 5;
   if (hintedBusinessNumber && channelBusinessNumber && hintedBusinessNumber === channelBusinessNumber) score += 5;
   if (!channelAllowed(channel, hint)) return -1;
   return score;
@@ -165,7 +172,9 @@ export async function resolveWhatsAppChannel(
   admin: SupabaseLike,
   hint: WhatsAppChannelHint,
 ): Promise<WhatsAppChannel> {
-  const requestedMetaPhoneNumberId = hint.provider !== "plivo" && hint.businessPhoneNumberId
+  const requestedMetaPhoneNumberId = hint.provider !== "plivo"
+    && hint.businessPhoneNumberId
+    && !isLikelyBusinessPhoneNumber(hint.businessPhoneNumberId)
     ? hint.businessPhoneNumberId
     : null;
   const { data, error } = await admin

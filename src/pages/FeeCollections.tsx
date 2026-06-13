@@ -9,6 +9,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { usePermissions } from "@/contexts/PermissionContext";
 
 const modeBadge: Record<string, string> = {
   online: "bg-pastel-blue", cash: "bg-pastel-green", cheque: "bg-pastel-yellow",
@@ -23,6 +24,8 @@ const FeeCollections = () => {
   const [loading, setLoading] = useState(true);
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
   const { selectedCampusId } = useCampus();
+  const { can } = usePermissions();
+  const canCreateFinance = can("finance", "create");
 
   useEffect(() => {
     fetchPayments();
@@ -99,9 +102,11 @@ const FeeCollections = () => {
               {isToday ? "Today's" : new Date(dateFilter).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })} collections and receipts
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <Button className="gap-2"><Plus className="h-4 w-4" /> Record Payment</Button>
-          </div>
+          {canCreateFinance && (
+            <div className="flex items-center gap-2">
+              <Button className="gap-2"><Plus className="h-4 w-4" /> Record Payment</Button>
+            </div>
+          )}
         </div>
 
         {/* Stats row */}

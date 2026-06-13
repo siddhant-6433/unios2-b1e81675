@@ -28,7 +28,7 @@ interface ParsedRow {
   fee_type: string;
   // Resolved
   course_id: string | null;
-  fee_version: "new_admission" | "existing_parent" | "standard";
+  fee_version: "new_admission" | "existing_parent" | "standard" | "stetho_batch";
   // Status
   valid: boolean;
   error: string;
@@ -98,6 +98,12 @@ function resolveCourse(raw: string, courses: Course[]): string | null {
     courses.find(c => c.name.toLowerCase().includes(key) || key.includes(c.code.toLowerCase()))?.id ||
     null
   );
+}
+
+function isDaottCourse(course: Course | undefined) {
+  const code = String(course?.code || "").toUpperCase();
+  const name = String(course?.name || "").toLowerCase();
+  return code.includes("DAOTT") || code.includes("DOTT") || /ana?esthesia.*operation theatre/.test(name);
 }
 
 function parseCsv(text: string): string[][] {
@@ -235,10 +241,11 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
           error = isSchool ? `Unknown grade: "${grade}"` : `Unknown course: "${grade}"`;
         }
 
-        const fee_version: "new_admission" | "existing_parent" | "standard" = isSchool
+        const resolvedCourse = course_id ? courses.find(c => c.id === course_id) : undefined;
+        const fee_version: "new_admission" | "existing_parent" | "standard" | "stetho_batch" = isSchool
           ? ((applyExistingFeeToAll || admission_no || fee_type === "existing")
               ? "existing_parent" : "new_admission")
-          : "standard";
+          : isDaottCourse(resolvedCourse) ? "stetho_batch" : "standard";
 
         return {
           name, dob, gender, grade, section, admission_no,

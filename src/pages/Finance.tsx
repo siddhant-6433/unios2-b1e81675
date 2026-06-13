@@ -18,6 +18,7 @@ import { FinanceOverview } from "@/components/finance/FinanceOverview";
 import { OfferWaiverApprovalPanel } from "@/components/finance/OfferWaiverApprovalPanel";
 import { LateFeeConfigPanel } from "@/components/finance/LateFeeConfigPanel";
 import { PaymentAuditLog } from "@/components/finance/PaymentAuditLog";
+import { usePermissions } from "@/contexts/PermissionContext";
 
 const statusStyles: Record<string, string> = {
   paid: "bg-pastel-green text-foreground/80",
@@ -46,6 +47,9 @@ const Finance = () => {
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
   const [pendingWaiverCount, setPendingWaiverCount] = useState(0);
   const { selectedCampusId } = useCampus();
+  const { can } = usePermissions();
+  const canCreateFinance = can("finance", "create");
+  const canEditFinance = can("finance", "edit");
 
   useEffect(() => { fetchAll(); }, [selectedCampusId]);
 
@@ -116,7 +120,7 @@ const Finance = () => {
     { id: "late-fees" as const,            label: "Late Fees",           icon: TimerOff,   badge: 0 },
     { id: "reports" as const,              label: "Reports",             icon: BarChart3,  badge: 0 },
     { id: "audit" as const,                label: "Audit Log",           icon: ScrollText, badge: 0 },
-  ];
+  ].filter((t) => canEditFinance || !["concessions", "waivers", "late-fees", "audit"].includes(t.id));
 
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
 
@@ -131,7 +135,7 @@ const Finance = () => {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" className="gap-2"><Download className="h-4 w-4" /> Export</Button>
-          <Button className="gap-2"><Plus className="h-4 w-4" /> Record Payment</Button>
+          {canCreateFinance && <Button className="gap-2"><Plus className="h-4 w-4" /> Record Payment</Button>}
         </div>
       </div>
 

@@ -71,6 +71,7 @@ interface EligibilityData {
   entrance_exam_name: string | null;
   entrance_exam_required: boolean | null;
   class_12_min_marks: number | null;
+  sc_st_min_marks: number | null;
   graduation_min_marks: number | null;
   requires_graduation: boolean | null;
   min_age: number | null;
@@ -241,7 +242,14 @@ export function CourseInfoPanel({ courseId }: Props) {
             {eligibility.class_12_min_marks && (
               <div className="flex items-center gap-2">
                 <span className="text-muted-foreground w-28 shrink-0">12th Min Marks</span>
-                <span className="text-foreground font-medium">{eligibility.class_12_min_marks}%</span>
+                <span className="text-foreground font-medium">
+                  {eligibility.class_12_min_marks}%
+                  {eligibility.sc_st_min_marks != null && eligibility.sc_st_min_marks !== eligibility.class_12_min_marks && (
+                    <span className="ml-1.5 text-muted-foreground font-normal text-[11px]">
+                      (SC/ST: {eligibility.sc_st_min_marks}%)
+                    </span>
+                  )}
+                </span>
               </div>
             )}
             {eligibility.requires_graduation && (

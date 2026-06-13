@@ -91,15 +91,39 @@ type MismatchSection =
   | "entrance";       // entrance exam missing
 interface Mismatch { section: MismatchSection; message: string }
 
-function ageInYears(dob?: string | null): number | null {
+function ageInYearsAtCutoff(dob: string | null | undefined, admissionYear: number, cutoffMonth: number, cutoffDay: number): number | null {
   if (!dob) return null;
   const d = new Date(dob);
   if (isNaN(d.getTime())) return null;
-  const now = new Date();
-  let years = now.getFullYear() - d.getFullYear();
-  const m = now.getMonth() - d.getMonth();
-  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) years--;
-  return years;
+  const cutoff = new Date(admissionYear, cutoffMonth, cutoffDay);
+  const diffMs = cutoff.getTime() - d.getTime();
+  if (diffMs < 0) return 0;
+  const years = diffMs / (1000 * 60 * 60 * 24 * 365.25);
+  return Math.round(years * 10) / 10;
+}
+
+function getAdmissionYear(app: any, sessionName?: string | null): number {
+  const sessionYear = sessionName?.match(/\b(20\d{2})\b/)?.[1];
+  if (sessionYear) return Number(sessionYear);
+
+  const submittedYear = app.submitted_at ? new Date(app.submitted_at).getFullYear() : NaN;
+  if (!isNaN(submittedYear)) return submittedYear;
+
+  return new Date().getFullYear();
+}
+
+function getAgeCutoff(app: any, admissionYear: number): { month: number; day: number; label: string } {
+  if (app.program_category === "school") {
+    const selections = Array.isArray(app.course_selections) ? app.course_selections : [];
+    const isMirai = selections.some((s: any) =>
+      `${s.campus_name || ""} ${s.course_name || ""}`.toLowerCase().includes("mirai")
+    );
+    return isMirai
+      ? { month: 5, day: 1, label: `June 1, ${admissionYear}` }
+      : { month: 6, day: 31, label: `July 31, ${admissionYear}` };
+  }
+
+  return { month: 11, day: 31, label: `December 31, ${admissionYear}` };
 }
 
 function parseMarks(v: any): number | null {
@@ -112,7 +136,7 @@ function parseMarks(v: any): number | null {
   return n <= 10 ? n * 9.5 : n; // rough CGPA -> percent conversion
 }
 
-function computeMismatches(app: any, rules: any[]): Mismatch[] {
+function computeMismatches(app: any, rules: any[], sessionName?: string | null): Mismatch[] {
   const out: Mismatch[] = [];
   const flags = new Set<string>(Array.isArray(app.flags) ? app.flags : []);
   if (flags.has("custom_board")) {
@@ -133,7 +157,9 @@ function computeMismatches(app: any, rules: any[]): Mismatch[] {
   const ad = app.academic_details || {};
   const c12Marks = parseMarks(ad.class_12?.marks);
   const gradMarks = parseMarks(ad.graduation?.marks ?? ad.graduation?.cgpa_till_sem);
-  const candidateAge = ageInYears(app.dob);
+  const admissionYear = getAdmissionYear(app, sessionName);
+  const ageCutoff = getAgeCutoff(app, admissionYear);
+  const candidateAge = ageInYearsAtCutoff(app.dob, admissionYear, ageCutoff.month, ageCutoff.day);
   const exams: any[] = Array.isArray(ad.entrance_exams) ? ad.entrance_exams : [];
 
   // Aggregate per-course findings; surface the strictest one for each section.
@@ -145,10 +171,10 @@ function computeMismatches(app: any, rules: any[]): Mismatch[] {
   rules.forEach(r => {
     if (candidateAge != null) {
       if (r.min_age != null && candidateAge < r.min_age) {
-        ageWarnings.push(`Below minimum age (${candidateAge} < ${r.min_age}).`);
+        ageWarnings.push(`Below minimum age as of ${ageCutoff.label} (${candidateAge} < ${r.min_age}).`);
       }
       if (r.max_age != null && candidateAge > r.max_age) {
-        ageWarnings.push(`Above maximum age (${candidateAge} > ${r.max_age}).`);
+        ageWarnings.push(`Above maximum age as of ${ageCutoff.label} (${candidateAge} > ${r.max_age}).`);
       }
     }
     if (r.class_12_min_marks != null && c12Marks != null && c12Marks < Number(r.class_12_min_marks)) {
@@ -590,7 +616,7 @@ Deno.serve(async (req) => {
         .in("course_id", courseIds);
       eligibilityRules = rules || [];
     }
-    const mismatches = computeMismatches(app, eligibilityRules);
+    const mismatches = computeMismatches(app, eligibilityRules, sessionName);
 
     // List uploaded files for this application from storage.
     const documents: { name: string; url: string }[] = [];

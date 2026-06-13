@@ -26,7 +26,7 @@ import { useCampus } from "@/contexts/CampusContext";
 type AppRole =
   | "super_admin" | "campus_admin" | "principal" | "admission_head"
   | "counsellor" | "accountant" | "faculty" | "teacher"
-  | "data_entry" | "office_admin" | "office_assistant" | "hostel_warden" | "consultant" | "student" | "parent"
+  | "data_entry" | "office_admin" | "office_assistant" | "hostel_warden" | "consultant" | "academic_partner" | "student" | "parent"
   | "ib_coordinator" | "video_editor";
 
 type MenuItem = { title: string; url: string; icon: any; permission?: string; anyPermission?: string[]; badge?: number; hideForSuperAdmin?: boolean };
@@ -47,7 +47,7 @@ const mainMenu: MenuItem[] = [
 
 const admissionSubMenu: MenuItem[] = [
   { title: "Leads", url: "/admissions", icon: GraduationCap, permission: "leads:view" },
-  { title: "Applications", url: "/applications", icon: FileText, permission: "leads:view" },
+  { title: "Applications", url: "/applications", icon: FileText, permission: "students:view" },
   { title: "Cloud Dialer", url: "/cloud-dialer", icon: PhoneCall, permission: "call_log:view" },
   { title: "CAHET Sprint", url: "/cahet-sprint", icon: Flame, permission: "call_log:view" },
   { title: "Missed Calls", url: "/missed-calls", icon: PhoneMissed, permission: "call_log:view" },
@@ -65,9 +65,11 @@ const admissionSubMenu: MenuItem[] = [
   { title: "AI Call Log", url: "/ai-call-log", icon: Bot, permission: "automation:view" },
   { title: "Automation", url: "/automation-rules", icon: Zap, permission: "automation:view" },
   { title: "Consultants", url: "/consultants", icon: Handshake, permission: "consultants:view" },
+  { title: "Academic Partners", url: "/academic-partners", icon: School, permission: "academic_partners:view" },
   { title: "Templates", url: "/template-manager", icon: Newspaper, permission: "templates:view" },
   { title: "Courses & Fees", url: "/fee-structures", icon: IndianRupee, permission: "courses_fees:view" },
   { title: "My Leads", url: "/consultant-portal", icon: Users, permission: "consultant_portal:view", hideForSuperAdmin: true },
+  { title: "My Batches", url: "/academic-partner-portal", icon: School, permission: "academic_partner_portal:view", hideForSuperAdmin: true },
   { title: "Publisher Leads", url: "/publisher-portal", icon: Users, permission: "publisher_portal:view", hideForSuperAdmin: true },
   { title: "Publisher Portal", url: "/publisher-portal", icon: Users, permission: "user_management:view" },
   { title: "Publisher Analytics", url: "/publisher-analytics", icon: PieChart, permission: "user_management:view" },
@@ -118,6 +120,8 @@ const roleLabels: Record<string, string> = {
   faculty: "Faculty", teacher: "Teacher", student: "Student", parent: "Parent",
   counsellor: "Counsellor", accountant: "Accountant", admission_head: "Admission Head",
   data_entry: "Data Entry", office_admin: "Office Administrator", office_assistant: "Office Assistant", hostel_warden: "Hostel Warden",
+  consultant: "Consultant",
+  academic_partner: "Academic Partner",
   ib_coordinator: "IB Coordinator",
   video_editor: "Video Editor",
 };

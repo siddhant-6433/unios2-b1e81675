@@ -861,6 +861,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
         courseRules,
         SESSION_YEAR,
         additionalQualifications,
+        data.category,
       )
     : [];
 

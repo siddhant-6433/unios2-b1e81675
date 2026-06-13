@@ -85,6 +85,8 @@ interface Counsellor {
   display_name: string;
 }
 
+type FilterMode = "include" | "exclude";
+
 const SOURCE_LABELS: Record<string, string> = {
   website: "Website", meta_ads: "Meta Ads", google_ads: "Google Ads",
   web_chat: "Web Chat", website_chat: "Web Chat",
@@ -154,7 +156,9 @@ export default function LeadBuckets() {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [courseFilter, setCourseFilter] = useState<string>("all");
+  const [courseFilterMode, setCourseFilterMode] = useState<FilterMode>("include");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const [sourceFilterMode, setSourceFilterMode] = useState<FilterMode>("include");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectingAllFiltered, setSelectingAllFiltered] = useState(false);
 
@@ -250,13 +254,23 @@ export default function LeadBuckets() {
       // lands on the school bucket with the initial schoolFilter === "all".
       q = q.eq("school_brand", "nimt");
     }
-    if (courseFilter !== "all") q = q.eq("course_name", courseFilter);
+    if (courseFilter !== "all") {
+      q = courseFilterMode === "exclude"
+        ? q.neq("course_name", courseFilter)
+        : q.eq("course_name", courseFilter);
+    }
     if (sourceFilter !== "all") {
       // web_chat coalesces both the legacy `web_chat` and current
       // `website_chat` source values (mirrors the header chips + facets).
-      q = sourceFilter === "web_chat"
-        ? q.in("source", ["web_chat", "website_chat"])
-        : q.eq("source", sourceFilter);
+      if (sourceFilter === "web_chat") {
+        q = sourceFilterMode === "exclude"
+          ? q.not("source", "in", "(web_chat,website_chat)")
+          : q.in("source", ["web_chat", "website_chat"]);
+      } else {
+        q = sourceFilterMode === "exclude"
+          ? q.neq("source", sourceFilter)
+          : q.eq("source", sourceFilter);
+      }
     }
     // Strip PostgREST filter-syntax chars so user input can't break the or().
     const s = debouncedSearch.replace(/[%,()]/g, "").trim();
@@ -322,7 +336,10 @@ export default function LeadBuckets() {
       ? null
       : schoolFilter === "mirai" ? "mirai" : "nimt";
     const { data, error } = await supabase.rpc("unassigned_bucket_facets" as any, {
-      _bucket, _school_brand, _source: sourceFilter, _course: courseFilter,
+      _bucket,
+      _school_brand,
+      _source: sourceFilterMode === "include" ? sourceFilter : "all",
+      _course: courseFilterMode === "include" ? courseFilter : "all",
     });
     if (error) { console.error("Facets fetch error:", error); return; }
     const courses: { name: string; count: number }[] = [];
@@ -372,15 +389,20 @@ export default function LeadBuckets() {
   useEffect(() => { fetchCounts(); }, [selectedCampusId]);
   // Facets are linked to the active source/course filter, so refetch when
   // either changes (not just on bucket switch).
-  useEffect(() => { fetchFacets(); }, [activeBucket, schoolFilter, sourceFilter, courseFilter, selectedCampusId]);
+  useEffect(() => { fetchFacets(); }, [activeBucket, schoolFilter, sourceFilter, sourceFilterMode, courseFilter, courseFilterMode, selectedCampusId]);
   // Reload page 0 whenever the bucket or any server-side filter changes.
-  useEffect(() => { fetchPage(true); }, [activeBucket, schoolFilter, courseFilter, sourceFilter, debouncedSearch, selectedCampusId]);
+  useEffect(() => { fetchPage(true); }, [activeBucket, schoolFilter, courseFilter, courseFilterMode, sourceFilter, sourceFilterMode, debouncedSearch, selectedCampusId]);
 
   // Reset course filter when the bucket / school sub-filter changes — a
   // course relevant in the college bucket is rarely relevant in the school
   // bucket and vice versa, so an unintended carry-over would silently
   // produce an empty list.
-  useEffect(() => { setCourseFilter("all"); setSourceFilter("all"); }, [activeBucket, schoolFilter]);
+  useEffect(() => {
+    setCourseFilter("all");
+    setSourceFilter("all");
+    setCourseFilterMode("include");
+    setSourceFilterMode("include");
+  }, [activeBucket, schoolFilter]);
 
   // Fetch every lead id matching the current scope (beyond the loaded page).
   // Used by "Save filter as list" so the saved list covers all matches, not
@@ -464,6 +486,9 @@ export default function LeadBuckets() {
   const exactFilteredCount = (() => {
     if (!hasMore) return loadedFilteredCount;
     if (debouncedSearch) return null;
+    if (courseFilterMode === "exclude" || sourceFilterMode === "exclude") {
+      return null;
+    }
     if (courseFilter !== "all") {
       return exactCountOrUnknown(courseFacets.find((c) => c.name === courseFilter)?.count);
     }
@@ -575,7 +600,9 @@ export default function LeadBuckets() {
       bucket: activeBucket,
       school_filter: schoolFilter,
       source: sourceFilter,
+      source_mode: sourceFilterMode,
       course: courseFilter,
+      course_mode: courseFilterMode,
       search: search || null,
     };
 
@@ -764,6 +791,16 @@ export default function LeadBuckets() {
           />
         </div>
         <select
+          value={courseFilterMode}
+          onChange={(e) => setCourseFilterMode(e.target.value as FilterMode)}
+          disabled={courseFilter === "all"}
+          className="rounded-xl border border-input bg-card py-2.5 px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:opacity-50"
+          title="Course filter mode"
+        >
+          <option value="include">Only course</option>
+          <option value="exclude">Except course</option>
+        </select>
+        <select
           value={courseFilter}
           onChange={(e) => setCourseFilter(e.target.value)}
           className="rounded-xl border border-input bg-card py-2.5 px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 max-w-xs"
@@ -780,11 +817,24 @@ export default function LeadBuckets() {
           </Button>
         )}
         <select
+          value={sourceFilterMode}
+          onChange={(e) => setSourceFilterMode(e.target.value as FilterMode)}
+          disabled={sourceFilter === "all"}
+          className="rounded-xl border border-input bg-card py-2.5 px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:opacity-50"
+          title="Source filter mode"
+        >
+          <option value="include">Only source</option>
+          <option value="exclude">Except source</option>
+        </select>
+        <select
           value={sourceFilter}
           // Changing source clears the course filter: the previously selected
           // course may not exist for the new source (e.g. Meta Ads leads carry
           // no course), which would otherwise blank the list.
-          onChange={(e) => { setSourceFilter(e.target.value); setCourseFilter("all"); }}
+          onChange={(e) => {
+            setSourceFilter(e.target.value);
+            if (sourceFilterMode === "include") setCourseFilter("all");
+          }}
           className="rounded-xl border border-input bg-card py-2.5 px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 max-w-xs"
           title="Filter by source"
         >

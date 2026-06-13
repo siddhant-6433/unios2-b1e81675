@@ -450,6 +450,13 @@ Deno.serve(async (req) => {
         ? `[System note: ${menuCtx}]\n\nUser message: ${content}`
         : content;
 
+      const { data: recentMsgs } = await admin
+        .from("whatsapp_messages")
+        .select("direction, content")
+        .eq("phone", phone)
+        .order("created_at", { ascending: false })
+        .limit(6);
+
       const aiRes = await fetch(`${supabaseUrl}/functions/v1/whatsapp-ai-reply`, {
         method: "POST",
         headers: {
@@ -462,6 +469,8 @@ Deno.serve(async (req) => {
           provider,
           business_phone_number_id: provider === "meta" ? businessNumber : undefined,
           business_number: provider === "plivo" ? businessNumber : undefined,
+          lead_stage: leadStage,
+          recent_messages: (recentMsgs || []).reverse(),
         }),
       });
 

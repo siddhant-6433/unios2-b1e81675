@@ -16,19 +16,35 @@ interface TransferLeadDialogProps {
   leadIds: string[];
   leadNames?: string[];
   onSuccess: () => void;
+  pageSize?: number;
+  totalMatchingLeads?: number;
+  fetchLeadIdsForTransfer?: (scope: { mode: "pages" | "all"; pageCount?: number }) => Promise<string[]>;
 }
 
-export function TransferLeadDialog({ open, onOpenChange, leadIds, leadNames, onSuccess }: TransferLeadDialogProps) {
+type TransferScope = "selected" | `pages:${number}` | "all";
+
+export function TransferLeadDialog({
+  open,
+  onOpenChange,
+  leadIds,
+  leadNames,
+  onSuccess,
+  pageSize = 50,
+  totalMatchingLeads,
+  fetchLeadIdsForTransfer,
+}: TransferLeadDialogProps) {
   const { user } = useAuth();
   const { toast } = useToast();
   const [counsellors, setCounsellors] = useState<{ id: string; display_name: string }[]>([]);
   const [selectedCounsellor, setSelectedCounsellor] = useState("");
+  const [transferScope, setTransferScope] = useState<TransferScope>("selected");
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
 
   useEffect(() => {
     if (open) {
       setSelectedCounsellor("");
+      setTransferScope("selected");
       fetchCounsellors();
     }
   }, [open]);
@@ -57,47 +73,99 @@ export function TransferLeadDialog({ open, onOpenChange, leadIds, leadNames, onS
     if (!selectedCounsellor) return;
     setLoading(true);
 
-    // Get profile id for activity logging
-    let profileId: string | null = null;
-    if (user?.id) {
-      const { data } = await supabase.from("profiles").select("id").eq("user_id", user.id).single();
-      profileId = data?.id || null;
-    }
-
-    const newCounsellorName = counsellors.find(c => c.id === selectedCounsellor)?.display_name || "Unknown";
-
-    for (const leadId of leadIds) {
-      // Get old counsellor name
-      const { data: leadData } = await supabase.from("leads").select("counsellor_id, name").eq("id", leadId).single();
-      let oldName = "Unassigned";
-      if (leadData?.counsellor_id) {
-        const { data: oldProfile } = await supabase.from("profiles").select("display_name").eq("id", leadData.counsellor_id).single();
-        oldName = oldProfile?.display_name || "Unknown";
+    try {
+      const idsToTransfer = await resolveLeadIds();
+      if (idsToTransfer.length === 0) {
+        toast({ title: "No leads selected", description: "Choose at least one lead to transfer.", variant: "destructive" });
+        setLoading(false);
+        return;
       }
 
-      // Update counsellor
-      const { error } = await supabase.from("leads").update({ counsellor_id: selectedCounsellor }).eq("id", leadId);
-      if (error) {
-        toast({ title: "Error", description: `Failed to transfer ${leadData?.name || leadId}: ${error.message}`, variant: "destructive" });
-        continue;
+      // Get profile id for activity logging
+      let profileId: string | null = null;
+      if (user?.id) {
+        const { data } = await supabase.from("profiles").select("id").eq("user_id", user.id).single();
+        profileId = data?.id || null;
       }
 
-      // Log activity
-      await supabase.from("lead_activities").insert({
-        lead_id: leadId,
-        user_id: profileId,
-        type: "info_update",
-        description: `Primary counsellor transferred from "${oldName}" to "${newCounsellorName}"`,
+      const newCounsellorName = counsellors.find(c => c.id === selectedCounsellor)?.display_name || "Unknown";
+      const oldLeadRows: { id: string; name: string | null; counsellor_id: string | null }[] = [];
+
+      for (let i = 0; i < idsToTransfer.length; i += 500) {
+        const chunk = idsToTransfer.slice(i, i + 500);
+        const { data, error } = await supabase
+          .from("leads")
+          .select("id, name, counsellor_id")
+          .in("id", chunk);
+        if (error) throw error;
+        oldLeadRows.push(...((data || []) as any[]));
+      }
+
+      const oldCounsellorIds = Array.from(new Set(oldLeadRows.map(l => l.counsellor_id).filter(Boolean) as string[]));
+      const oldNamesById = new Map<string, string>();
+      if (oldCounsellorIds.length > 0) {
+        const { data: oldProfiles } = await supabase
+          .from("profiles")
+          .select("id, display_name")
+          .in("id", oldCounsellorIds);
+        (oldProfiles || []).forEach((p: any) => oldNamesById.set(p.id, p.display_name || "Unknown"));
+      }
+
+      let transferredCount = 0;
+      for (let i = 0; i < idsToTransfer.length; i += 500) {
+        const chunk = idsToTransfer.slice(i, i + 500);
+        const { error } = await supabase
+          .from("leads")
+          .update({ counsellor_id: selectedCounsellor })
+          .in("id", chunk);
+        if (error) throw error;
+        transferredCount += chunk.length;
+      }
+
+      const activities = oldLeadRows.map((lead) => {
+        const oldName = lead.counsellor_id ? (oldNamesById.get(lead.counsellor_id) || "Unknown") : "Unassigned";
+        return {
+          lead_id: lead.id,
+          user_id: profileId,
+          type: "info_update",
+          description: `Primary counsellor transferred from "${oldName}" to "${newCounsellorName}"`,
+        };
       });
-    }
+      for (let i = 0; i < activities.length; i += 500) {
+        await supabase.from("lead_activities").insert(activities.slice(i, i + 500));
+      }
 
-    toast({ title: "Leads transferred", description: `${leadIds.length} lead(s) transferred to ${newCounsellorName}` });
-    setLoading(false);
-    onOpenChange(false);
-    onSuccess();
+      toast({ title: "Leads transferred", description: `${transferredCount} lead(s) transferred to ${newCounsellorName}` });
+      onOpenChange(false);
+      onSuccess();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to transfer leads.";
+      toast({ title: "Transfer failed", description: message, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const isBulk = leadIds.length > 1;
+  const canTransferFilteredScope = !!fetchLeadIdsForTransfer && typeof totalMatchingLeads === "number" && totalMatchingLeads > 0;
+  const totalPages = canTransferFilteredScope ? Math.ceil((totalMatchingLeads || 0) / pageSize) : 0;
+  const pageOptions = Array.from({ length: Math.min(totalPages, 20) }, (_, i) => i + 1);
+  const scopeDescription = transferScope === "selected"
+    ? `${leadIds.length} selected lead${leadIds.length === 1 ? "" : "s"}`
+    : transferScope === "all"
+      ? `${totalMatchingLeads || 0} filtered lead${totalMatchingLeads === 1 ? "" : "s"}`
+      : (() => {
+          const pageCount = Number(transferScope.split(":")[1] || "1");
+          const count = Math.min(pageCount * pageSize, totalMatchingLeads || pageCount * pageSize);
+          return `First ${count} filtered lead${count === 1 ? "" : "s"}`;
+        })();
+
+  const resolveLeadIds = async () => {
+    if (transferScope === "selected" || !fetchLeadIdsForTransfer) return leadIds;
+    if (transferScope === "all") return fetchLeadIdsForTransfer({ mode: "all" });
+    const pageCount = Number(transferScope.split(":")[1] || "1");
+    return fetchLeadIdsForTransfer({ mode: "pages", pageCount });
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -115,6 +183,31 @@ export function TransferLeadDialog({ open, onOpenChange, leadIds, leadNames, onS
         </DialogHeader>
 
         <div className="space-y-4 py-2">
+          {canTransferFilteredScope && (
+            <div className="space-y-2">
+              <Label>Transfer Scope</Label>
+              <Select value={transferScope} onValueChange={(v) => setTransferScope(v as TransferScope)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="selected">{leadIds.length} selected lead{leadIds.length === 1 ? "" : "s"}</SelectItem>
+                  {pageOptions.map((pages) => {
+                    const count = Math.min(pages * pageSize, totalMatchingLeads || pages * pageSize);
+                    return (
+                      <SelectItem key={pages} value={`pages:${pages}`}>
+                        First {count} filtered lead{count === 1 ? "" : "s"} ({pages} page{pages === 1 ? "" : "s"})
+                      </SelectItem>
+                    );
+                  })}
+                  <SelectItem value="all">All filtered leads ({totalMatchingLeads})</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Scope uses the current dashboard filters and transfers in batches of {pageSize}.
+              </p>
+            </div>
+          )}
           <div className="space-y-2">
             <Label>New Primary Counsellor</Label>
             <Select value={selectedCounsellor} onValueChange={setSelectedCounsellor} disabled={fetching}>
@@ -134,7 +227,7 @@ export function TransferLeadDialog({ open, onOpenChange, leadIds, leadNames, onS
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>Cancel</Button>
           <Button onClick={handleTransfer} disabled={!selectedCounsellor || loading}>
             {loading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-            Transfer
+            Transfer {scopeDescription}
           </Button>
         </DialogFooter>
       </DialogContent>

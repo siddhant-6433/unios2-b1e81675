@@ -148,7 +148,7 @@ FEE STRUCTURE (First Year / Annual Fee):
 - D.Pharma: ₹95,000/year | Greater Noida campus
 - DPT (Diploma Physiotherapy): ₹62,000/year | Greater Noida campus
 - D.El.Ed: ₹45,000/year | Ghaziabad campus
-- OTT / D-OTT (Operation Theater Technician): ₹62,000/year | Greater Noida campus | ISCO Code 3259
+- OTT / D-OTT / DAOTT (Operation Theater Technician): Stetho Batch total ₹1,85,000 across 5 semesters | Sem 1 ₹40,000, Sem 2 ₹40,000, Sem 3 ₹40,000, Sem 4 ₹40,000, Sem 5 ₹25,000 | Greater Noida campus | ISCO Code 3259
 - MPT (Masters Physiotherapy): ₹89,000/year | Greater Noida campus
 - MMRIT (M.Sc Radiology): ₹89,000/year | Greater Noida campus
 Note: These are first-year fees. Subsequent years may vary. Scholarships available for merit/SC/ST/OBC. Contact admissions for complete fee breakup.
@@ -260,6 +260,17 @@ async function resolveCourseId(admin: SupabaseAdminClient, option: AdmissionCour
   return byName?.id || null;
 }
 
+async function loadCourseName(admin: SupabaseAdminClient, courseId: string | null): Promise<string | null> {
+  if (!courseId) return null;
+  const { data } = await admin
+    .from("courses")
+    .select("name, code")
+    .eq("id", courseId)
+    .maybeSingle();
+  const row = data as { name?: string | null; code?: string | null } | null;
+  return row?.name || row?.code || null;
+}
+
 interface CourseAdmissionBrief {
   short_name: string;
   positioning: string | null;
@@ -272,6 +283,19 @@ interface CourseAdmissionBrief {
   fee_summary: string | null;
   source_url: string | null;
   last_verified_at: string | null;
+}
+
+interface WhatsAppReplyExample {
+  id: string;
+  query_text: string;
+  reply_text: string;
+  course_id: string | null;
+  source_channel: string | null;
+  target_channels: string[] | null;
+  language: string | null;
+  tags: string[] | null;
+  quality_score: number | null;
+  score: number | null;
 }
 
 function formatList(label: string, values: string[] | null | undefined): string {
@@ -325,15 +349,56 @@ async function loadCourseAdmissionBrief(
   return formatCourseAdmissionBrief(brief);
 }
 
+function formatReplyExample(example: WhatsAppReplyExample, index: number): string {
+  return [
+    `Example ${index + 1}:`,
+    `Lead asked: ${example.query_text}`,
+    `Counsellor replied: ${example.reply_text}`,
+  ].join("\n");
+}
+
+async function loadReplyExamplesContext(
+  admin: SupabaseAdminClient,
+  query: string,
+  courseId: string | null,
+): Promise<string> {
+  if (!query || query.trim().length < 3) return "";
+  try {
+    const { data, error } = await admin.rpc("match_admissions_ai_reply_examples", {
+      p_query: query,
+      p_course_id: courseId,
+      p_target_channel: "whatsapp",
+      p_limit: 3,
+    });
+    if (error) {
+      console.warn("Reply example lookup failed:", error.message);
+      return "";
+    }
+    const examples = ((data || []) as WhatsAppReplyExample[])
+      .filter((example) => (example.score ?? 0) >= 0.15)
+      .slice(0, 3);
+    return examples.length ? examples.map(formatReplyExample).join("\n\n") : "";
+  } catch (err) {
+    console.warn("Reply example lookup error:", err instanceof Error ? err.message : String(err));
+    return "";
+  }
+}
+
 const COURSE_MENU = ADMISSION_COURSE_OPTIONS
   .map((option) => `${option.number}. ${option.label}`)
   .join("\n");
 
-function buildSystemPrompt(hasName: boolean, hasCourse: boolean, courseBriefContext: string): string {
+function buildSystemPrompt(
+  hasName: boolean,
+  hasCourse: boolean,
+  courseBriefContext: string,
+  replyExamplesContext: string,
+): string {
   const introInstructions = `\n\nLEAD ENRICHMENT:
 ${!hasName ? "The student's name is not yet known. If they mention their name, extract it." : ""}
 ${!hasCourse ? `The student's course interest is not yet known. Ask them to choose from this numbered list and tell them they can reply like "Priya, 3":\n${COURSE_MENU}` : ""}
 CRITICAL RULE: If the user's message mentions or asks about a specific course (like "BPT", "MBA", "nursing", "BCA", etc.), IMMEDIATELY answer their question about that course using the knowledge base. Do NOT ask them which course they are interested in — they just told you. Extract the course name and provide the information.
+If Lead info includes a Course interest, use that course for follow-up questions about fees, yearly cost, eligibility, duration, campus, application steps, or pronouns like "it" / "this". Do NOT ask which course again when Course interest is present.
 If the user replies with a course option number, treat it as that course selection from the numbered list.
 Only ask for missing info (name or course) if the user's message does NOT contain any course reference or name. Never ask for something the user already provided in their message.
 When you detect name or course in the user's message, include at the END of your response:
@@ -387,6 +452,7 @@ If you don't know something specific, say you'll have a counsellor share the det
 
 Do NOT make up information not present in the knowledge base.${introInstructions}${classificationInstructions}
 ${courseBriefContext ? `\n\nCOURSE-SPECIFIC VERIFIED BRIEF:\n${courseBriefContext}` : ""}
+${replyExamplesContext ? `\n\nORGANISATION REPLY EXAMPLES:\nUse these as examples of how NIMT counsellors answer similar WhatsApp queries. Do not copy personal details, phone numbers, emails, or promises from examples. Verified course brief and knowledge base override examples if they conflict.\n${replyExamplesContext}` : ""}
 
 KNOWLEDGE BASE:
 ${KNOWLEDGE_BASE}`;
@@ -504,10 +570,11 @@ Deno.serve(async (req) => {
     const existingLead = existingLeads?.[0] || null;
     let leadId = existingLead?.id || null;
     let existingCourseId = existingLead?.course_id || null;
+    let existingCourseName = await loadCourseName(admin, existingCourseId);
     let hasName = !isPlaceholderLeadName(existingLead?.name, normalizedPhone);
-    let hasCourse = !!(existingCourseId || course_interest);
     let leadNameForPrompt = lead_name || (hasName ? existingLead?.name || null : null);
-    let courseInterestForPrompt = course_interest || null;
+    let courseInterestForPrompt = course_interest || existingCourseName || null;
+    let hasCourse = !!(existingCourseId || courseInterestForPrompt);
 
     // ── Short-circuit: don't pitch admissions to job applicants / vendors ────
     // Send a single templated reply instead and let HR / procurement take over.
@@ -603,6 +670,8 @@ Deno.serve(async (req) => {
       if (courseId) {
         await admin.from("leads").update({ course_id: courseId }).eq("id", leadId);
         existingCourseId = courseId;
+        existingCourseName = await loadCourseName(admin, courseId);
+        courseInterestForPrompt = existingCourseName || courseInterestForPrompt;
       }
 
       await admin.from("lead_notes").insert({
@@ -623,14 +692,15 @@ Deno.serve(async (req) => {
       }
     }
     const leadContext = leadNameForPrompt || courseInterestForPrompt || existingCourseId
-      ? `[Lead info: Name=${leadNameForPrompt || "not specified"}, Stage=${lead_stage || "unknown"}, Course interest=${courseInterestForPrompt || (existingCourseId ? "already selected in CRM" : "not specified")}]\n\n`
+      ? `[Lead info: Name=${leadNameForPrompt || "not specified"}, Stage=${lead_stage || "unknown"}, Course interest=${courseInterestForPrompt || (existingCourseId ? "selected in CRM" : "not specified")}]\n\n`
       : "";
     contextParts.push({ role: "user", parts: [{ text: leadContext + message }] });
 
     const courseBriefContext = await loadCourseAdmissionBrief(admin, existingCourseId, courseInterestForPrompt);
+    const replyExamplesContext = await loadReplyExamplesContext(admin, message, existingCourseId);
 
     // Call Gemini with dynamic system prompt
-    const systemPrompt = buildSystemPrompt(hasName, hasCourse, courseBriefContext);
+    const systemPrompt = buildSystemPrompt(hasName, hasCourse, courseBriefContext, replyExamplesContext);
     const geminiRes = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${googleApiKey}`,
       {

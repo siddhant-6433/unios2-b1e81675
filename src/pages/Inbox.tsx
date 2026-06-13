@@ -24,7 +24,7 @@ interface InboxCategory {
   color: string;
 }
 
-type CategoryId = "offer_waivers" | "offer_approvals" | "applications" | "followups" | "whatsapp" | "video_approvals" | "voice_messages";
+type CategoryId = "offer_waivers" | "offer_approvals" | "contact_changes" | "applications" | "followups" | "whatsapp" | "video_approvals" | "voice_messages";
 
 interface WaiverItem {
   id: string;
@@ -53,6 +53,20 @@ interface OfferApprovalItem {
   created_at: string;
   requested_by_name: string | null;
   application_id: string | null;
+}
+
+interface ContactChangeItem {
+  id: string;
+  student_id: string;
+  student_name: string;
+  admission_no: string | null;
+  field_name: string;
+  old_value: string | null;
+  new_value: string;
+  reason: string;
+  requested_by_name: string | null;
+  requested_by_role: string | null;
+  created_at: string;
 }
 
 interface ApplicationItem {
@@ -107,7 +121,7 @@ interface VoiceMessageItem {
   sender_name: string;
 }
 
-type InboxItem = WaiverItem | OfferApprovalItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
+type InboxItem = WaiverItem | OfferApprovalItem | ContactChangeItem | ApplicationItem | FollowupItem | WhatsAppItem | VideoApprovalInboxItem | VoiceMessageItem;
 
 // Label a source link by host so the inbox doesn't say "Drive" for a YouTube URL.
 const videoSourceLabel = (url: string) => /youtube\.com|youtu\.be/i.test(url) ? "YouTube" : "Drive";
@@ -160,6 +174,7 @@ export default function Inbox() {
   const [counts, setCounts] = useState<Record<CategoryId, number>>({
     offer_waivers: 0,
     offer_approvals: 0,
+    contact_changes: 0,
     applications: 0,
     followups: 0,
     whatsapp: 0,
@@ -193,6 +208,14 @@ export default function Inbox() {
       count: counts.offer_approvals,
       roles: APPROVER_ROLES,
       color: "text-blue-600",
+    },
+    {
+      id: "contact_changes",
+      label: "Contact Changes",
+      icon: User,
+      count: counts.contact_changes,
+      roles: ["super_admin", "principal"],
+      color: "text-cyan-600",
     },
     {
       id: "applications",
@@ -261,6 +284,14 @@ export default function Inbox() {
             .eq("approval_status", "pending_principal")
         : Promise.resolve({ count: 0 }),
 
+      // contact changes — principal/super_admin
+      (isSuperAdmin || isPrincipal)
+        ? supabase
+            .from("student_contact_change_requests" as any)
+            .select("id", { count: "planned", head: true })
+            .eq("status", "pending")
+        : Promise.resolve({ count: 0 }),
+
       // applications — admissions (submitted apps awaiting review)
       isAdmissions
         ? supabase
@@ -272,7 +303,7 @@ export default function Inbox() {
       // followups — admissions
       isAdmissions
         ? (() => {
-            let q = supabase
+            const q = supabase
               .from("lead_followups")
               .select("id", { count: "planned", head: true })
               .eq("status", "pending")
@@ -316,13 +347,14 @@ export default function Inbox() {
     setCounts({
       offer_waivers: get(0),
       offer_approvals: get(1),
-      applications: get(2),
-      followups: get(3),
-      whatsapp: get(4),
-      video_approvals: get(5),
-      voice_messages: get(6),
+      contact_changes: get(2),
+      applications: get(3),
+      followups: get(4),
+      whatsapp: get(5),
+      video_approvals: get(6),
+      voice_messages: get(7),
     });
-  }, [role, isSuperAdmin, isApprover, isAdmissions, profile?.id]);
+  }, [role, isSuperAdmin, isPrincipal, isApprover, isAdmissions, profile?.id]);
 
   useEffect(() => {
     fetchCounts();
@@ -443,6 +475,34 @@ export default function Inbox() {
             requested_by_name: null,
             application_id: null,
           } as OfferApprovalItem))
+        );
+      } else if (cat === "contact_changes") {
+        const { data, error } = await supabase
+          .from("student_contact_change_requests" as any)
+          .select(`
+            id, student_id, field_name, old_value, new_value, reason,
+            requested_by_name, requested_by_role, created_at,
+            students!student_id ( name, admission_no, pre_admission_no )
+          `)
+          .eq("status", "pending")
+          .order("created_at", { ascending: false })
+          .limit(100);
+
+        if (error) throw error;
+        setItems(
+          (data || []).map((r: any) => ({
+            id: r.id,
+            student_id: r.student_id,
+            student_name: r.students?.name || "—",
+            admission_no: r.students?.admission_no || r.students?.pre_admission_no || null,
+            field_name: r.field_name,
+            old_value: r.old_value,
+            new_value: r.new_value,
+            reason: r.reason,
+            requested_by_name: r.requested_by_name,
+            requested_by_role: r.requested_by_role,
+            created_at: r.created_at,
+          } as ContactChangeItem))
         );
       } else if (cat === "applications") {
         const { data, error } = await (supabase as any)
@@ -637,6 +697,33 @@ export default function Inbox() {
     }
   };
 
+  const decideContactChange = async (request: ContactChangeItem, decision: "approved" | "rejected") => {
+    if (!isSuperAdmin && !isPrincipal) return;
+    let notes: string | undefined;
+    if (decision === "rejected") {
+      const r = window.prompt("Reason for rejection (optional):");
+      if (r === null) return;
+      notes = r || undefined;
+    }
+    setProcessing(request.id);
+    try {
+      const { error } = await (supabase as any).rpc("review_student_contact_change_request", {
+        _request_id: request.id,
+        _decision: decision,
+        _notes: notes || null,
+      });
+      if (error) throw error;
+      toast({ title: decision === "approved" ? "Contact change approved" : "Contact change rejected" });
+      setSelectedItem(null);
+      loadItems("contact_changes");
+      fetchCounts();
+    } catch (e: any) {
+      toast({ title: "Action failed", description: e.message, variant: "destructive" });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
   const decideVideo = async (video: VideoApprovalInboxItem, decision: "approved" | "rejected") => {
     if (!isSuperAdmin) return;
     let rejection_reason: string | null = null;
@@ -748,6 +835,22 @@ export default function Inbox() {
             <span className="text-[10px] text-amber-600 font-medium shrink-0">Pending</span>
           </div>
           <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(o.created_at)}</p>
+        </button>
+      );
+    }
+
+    if (selected === "contact_changes") {
+      const c = item as ContactChangeItem;
+      return (
+        <button key={c.id} className={baseClass} onClick={() => setSelectedItem(c)}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground truncate">{c.student_name}</p>
+              <p className="text-xs text-muted-foreground truncate">{c.field_name.replace(/_/g, " ")}</p>
+            </div>
+            <span className="text-[10px] text-amber-600 font-medium shrink-0">Pending</span>
+          </div>
+          <p className="text-[10px] text-muted-foreground/60 mt-1">{fmtTime(c.created_at)}</p>
         </button>
       );
     }
@@ -984,6 +1087,67 @@ export default function Inbox() {
               </Button>
             )}
           </div>
+        </div>
+      );
+    }
+
+    if (selected === "contact_changes") {
+      const c = selectedItem as ContactChangeItem;
+      return (
+        <div className="p-5 space-y-5">
+          <div>
+            <h3 className="text-base font-semibold text-foreground">{c.student_name}</h3>
+            {c.admission_no && <p className="text-sm text-muted-foreground font-mono">{c.admission_no}</p>}
+          </div>
+
+          <div className="rounded-xl border border-border bg-card divide-y divide-border">
+            <Row label="Field" value={c.field_name.replace(/_/g, " ")} />
+            <Row label="Current Number" value={c.old_value || "—"} />
+            <Row label="Requested Number" value={c.new_value} highlight />
+            <Row label="Reason" value={c.reason || "—"} />
+            <Row label="Requested By" value={
+              c.requested_by_name
+                ? `${c.requested_by_name}${c.requested_by_role ? ` (${c.requested_by_role.replace("_", " ")})` : ""}`
+                : "—"
+            } />
+            <Row label="Requested On" value={fmtDate(c.created_at)} />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              className="flex-1 bg-success/90 hover:bg-success text-white"
+              disabled={(!isSuperAdmin && !isPrincipal) || processing === c.id}
+              onClick={() => decideContactChange(c, "approved")}
+            >
+              {processing === c.id ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <><CheckCircle className="h-4 w-4 mr-1.5" />Approve</>
+              )}
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              className="flex-1"
+              disabled={(!isSuperAdmin && !isPrincipal) || processing === c.id}
+              onClick={() => decideContactChange(c, "rejected")}
+            >
+              <XCircle className="h-4 w-4 mr-1.5" />Reject
+            </Button>
+          </div>
+
+          {c.admission_no && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              onClick={() => navigate(`/students/${c.admission_no}`)}
+            >
+              <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+              View Student Profile
+            </Button>
+          )}
         </div>
       );
     }

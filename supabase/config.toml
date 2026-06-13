@@ -39,6 +39,9 @@ verify_jwt = false
 [functions.easebuzz-payment]
 verify_jwt = false
 
+[functions.easebuzz-webhook]
+verify_jwt = false
+
 [functions.icici-payment]
 verify_jwt = false
 
@@ -82,6 +85,9 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.whatsapp-route-health]
+verify_jwt = false
+
+[functions.whatsapp-reply-learning]
 verify_jwt = false
 
 [functions.whatsapp-campaign-send]
