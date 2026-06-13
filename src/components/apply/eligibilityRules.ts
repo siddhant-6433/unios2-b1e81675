@@ -168,6 +168,21 @@ export function calculateAgeAtCutoff(dob: string, admissionYear: number, cutoffM
   return Math.round(years * 10) / 10;
 }
 
+export function getDobEligibilityCutoff(
+  programCategory: string,
+  admissionYear: number,
+  campusName?: string,
+): { month: number; day: number; label: string } {
+  if (programCategory === 'school') {
+    const isMirai = campusName?.toLowerCase().includes('mirai');
+    return isMirai
+      ? { month: 5, day: 1, label: `June 1, ${admissionYear}` }
+      : { month: 6, day: 31, label: `July 31, ${admissionYear}` };
+  }
+
+  return { month: 11, day: 31, label: `December 31, ${admissionYear}` };
+}
+
 export interface ValidationResult {
   field: string;
   message: string;
@@ -383,13 +398,9 @@ export function validateDobEligibility(
   const rules = getRule(programCategory, courseRule);
   if (!dob) return null;
 
-  // Mirai uses June 1st cutoff (Month index 5)
-  const isMirai = campusName?.toLowerCase().includes('mirai');
-  const cutoffMonth = isMirai ? 5 : 6;
-  const cutoffDay = isMirai ? 1 : 31;
-  const cutoffLabel = isMirai ? `June 1, ${admissionYear}` : `July 31, ${admissionYear}`;
+  const cutoff = getDobEligibilityCutoff(programCategory, admissionYear, campusName);
 
-  const age = calculateAgeAtCutoff(dob, admissionYear, cutoffMonth, cutoffDay);
+  const age = calculateAgeAtCutoff(dob, admissionYear, cutoff.month, cutoff.day);
   if (age === null) return null;
 
   const isGrade1 = courseName?.toLowerCase().includes('grade i') || courseName?.toLowerCase().includes('pyp 1');
@@ -406,7 +417,7 @@ export function validateDobEligibility(
   if (rules.minAge && age < rules.minAge) {
     return {
       field: 'dob',
-      message: `Minimum age ${rules.minAge} years required (as of ${cutoffLabel}). Applicant is ${age} years old.`,
+      message: `Minimum age ${rules.minAge} years required (as of ${cutoff.label}). Applicant is ${age} years old.`,
       type: getValidationType(true),
     };
   }
@@ -414,7 +425,7 @@ export function validateDobEligibility(
   if (rules.maxAge && age > rules.maxAge) {
     return {
       field: 'dob',
-      message: `Maximum age ${rules.maxAge} years allowed (as of ${cutoffLabel}). Applicant is ${age} years old.`,
+      message: `Maximum age ${rules.maxAge} years allowed (as of ${cutoff.label}). Applicant is ${age} years old.`,
       type: getValidationType(false),
     };
   }
