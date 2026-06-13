@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -44,7 +45,10 @@ const DEADLINE_LABELS: Record<DeadlineKey, { title: string; help: string }> = {
 const Settings = () => {
   const { role, user } = useAuth();
   const { toast } = useToast();
-  const [tab, setTab] = useState<"account" | "geofence" | "deadlines">("account");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const initialTab = requestedTab === "geofence" || requestedTab === "deadlines" ? requestedTab : "account";
+  const [tab, setTab] = useState<"account" | "geofence" | "deadlines">(initialTab);
 
   // ── Deadlines state ────────────────────────────────────────────
   const [deadlines, setDeadlines] = useState<Record<DeadlineKey, string>>({
@@ -66,10 +70,29 @@ const Settings = () => {
   const isSuperAdmin = role === "super_admin";
 
   useEffect(() => {
+    const nextTab = requestedTab === "geofence" || requestedTab === "deadlines" ? requestedTab : "account";
+    setTab(nextTab);
+  }, [requestedTab]);
+
+  useEffect(() => {
+    fetchPasskeys();
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!isSuperAdmin) {
+      setLoading(false);
+      setDeadlinesLoading(false);
+      return;
+    }
+
     fetchCampuses();
     fetchDeadlines();
-    fetchPasskeys();
-  }, []);
+  }, [isSuperAdmin]);
+
+  const selectTab = (nextTab: "account" | "geofence" | "deadlines") => {
+    setTab(nextTab);
+    setSearchParams(nextTab === "account" ? {} : { tab: nextTab });
+  };
 
   const fetchPasskeys = async () => {
     if (!user) {
@@ -219,7 +242,7 @@ const Settings = () => {
       {/* Tabs */}
       <div className="flex items-center gap-1 rounded-xl border border-input bg-card p-1 w-fit">
         <button
-          onClick={() => setTab("account")}
+          onClick={() => selectTab("account")}
           className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
             tab === "account" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
           }`}
@@ -227,7 +250,7 @@ const Settings = () => {
           <KeyRound className="h-4 w-4" /> Account
         </button>
         <button
-          onClick={() => setTab("geofence")}
+          onClick={() => selectTab("geofence")}
           className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
             tab === "geofence" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
           }`}
@@ -235,7 +258,7 @@ const Settings = () => {
           <MapPin className="h-4 w-4" /> Campus Geofence
         </button>
         <button
-          onClick={() => setTab("deadlines")}
+          onClick={() => selectTab("deadlines")}
           className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
             tab === "deadlines" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
           }`}

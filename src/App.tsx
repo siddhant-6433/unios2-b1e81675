@@ -272,7 +272,7 @@ const App = () => (
 
                       {/* Admin — user_management:view */}
                       <Route path="/admin" element={<RequirePermission module="user_management" action="view"><AdminPanel /></RequirePermission>} />
-                      <Route path="/settings" element={<RequirePermission module="user_management" action="view"><Settings /></RequirePermission>} />
+                      <Route path="/settings" element={<Settings />} />
 
                       {/* Comms */}
                       <Route path="/inbox" element={<Inbox />} />

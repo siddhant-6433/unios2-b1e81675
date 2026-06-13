@@ -10,6 +10,7 @@ import { WhatsAppPanel } from "@/components/layout/WhatsAppPanel";
 import { HeaderSearch } from "@/components/layout/HeaderSearch";
 import { HeaderProfile } from "@/components/layout/HeaderProfile";
 import { HeaderFeedbackWidget } from "@/components/layout/HeaderFeedbackWidget";
+import { PasskeySetupBanner } from "@/components/layout/PasskeySetupBanner";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { CounsellorFilterProvider } from "@/contexts/CounsellorFilterContext";
@@ -110,6 +111,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             </header>
             {deferredShellReady && <CahetSprintTicker />}
             {deferredShellReady && <ApplicantDeadlineTicker />}
+            {deferredShellReady && <PasskeySetupBanner />}
             {deferredShellReady && <GlobalActionBar />}
             {deferredShellReady && <LiveCallBar />}
             <main className="flex-1 overflow-auto p-6">
