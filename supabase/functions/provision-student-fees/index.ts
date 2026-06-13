@@ -37,6 +37,21 @@ function quarterDueDate(term: string, year: number): string | null {
   return map[term] || null;
 }
 
+/** Stetho Batch stores semester rows as year_1..year_5 for compatibility. */
+function stethoSemesterDueDate(term: string, year: number, day: number): string | null {
+  const safeDay = Math.min(Math.max(day || 10, 1), 28);
+  const map: Record<string, { yearOffset: number; month: string }> = {
+    year_1: { yearOffset: 0, month: "04" },
+    year_2: { yearOffset: 0, month: "10" },
+    year_3: { yearOffset: 1, month: "04" },
+    year_4: { yearOffset: 1, month: "10" },
+    year_5: { yearOffset: 2, month: "04" },
+  };
+  const spec = map[term];
+  if (!spec) return null;
+  return `${year + spec.yearOffset}-${spec.month}-${String(safeDay).padStart(2, "0")}`;
+}
+
 interface ProvisionRequest {
   student_id?: string;
   student_ids?: string[];
@@ -159,6 +174,7 @@ async function provisionStudent(
     fsRows.find((r: any) => r.version === version) ||
     fsRows.find((r: any) => r.version === "standard") ||
     fsRows[0];
+  const appliedVersion = feeStructure.version || version;
 
   // 3. Fetch fee_structure_items with fee_codes
   const { data: items } = await db
@@ -181,9 +197,10 @@ async function provisionStudent(
     // Tuition → always include
     if (category === "tuition") return true;
 
-    // Enrollment (registration, admission fees) → only for new admissions
+    // Enrollment (registration, admission/seat-block fees) → only for new admissions
+    // or explicit batch structures that include their own enrollment component.
     if (category === "enrollment") {
-      return version === "new_admission";
+      return appliedVersion === "new_admission" || appliedVersion === "stetho_batch";
     }
 
     // Transport → only if transport_required AND matching zone
@@ -235,7 +252,9 @@ async function provisionStudent(
   // 7. Build ledger rows
   const rows = filtered.map((item: any) => {
     const term = item.term;
-    let dueDate = quarterDueDate(term, academicYear);
+    let dueDate = feeStructure.version === "stetho_batch"
+      ? stethoSemesterDueDate(term, academicYear, Number(item.due_day || 10))
+      : quarterDueDate(term, academicYear);
 
     // For non-quarter terms (registration, admission), due immediately
     if (!dueDate) {

@@ -394,7 +394,7 @@ function drawFeeLedger(ctx: Ctx, rows: LedgerRow[]) {
 interface BuildOpts {
   offer: { net_fee: number; total_fee: number; scholarship_amount: number | null; acceptance_deadline: string | null; created_at: string };
   lead: { name: string; phone: string | null; email: string | null; application_id: string | null; pre_admission_no: string | null };
-  course: { name: string; duration_years?: number | null } | null;
+  course: { name: string; code?: string | null; duration_years?: number | null } | null;
   campus: { name: string; address?: string | null } | null;
   yearItems: { term: string; total: number }[];
   branding: any;
@@ -408,6 +408,12 @@ interface BuildOpts {
   // deduction rows in the fee table; the displayed Net Offer Fee is
   // recomputed to subtract these from the post-scholarship total.
   waivers: { term: string; amount: number }[];
+}
+
+function isDaottCourse(course: BuildOpts["course"]) {
+  const code = String(course?.code || "").toUpperCase();
+  const name = String(course?.name || "").toLowerCase();
+  return code.includes("DAOTT") || code.includes("DOTT") || /ana?esthesia.*operation theatre/.test(name);
 }
 
 async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
@@ -430,6 +436,7 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
   };
 
   await newPage(ctx);
+  const isDaott = isDaottCourse(opts.course);
 
   // ── Date + greeting (compact — single line each) ────────────────────────
   ctx.page.drawText(`Date: ${fmtDate(opts.offer.created_at)}`, {
@@ -453,7 +460,7 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
   drawSection(ctx, "PROGRAMME DETAILS");
   drawKVGrid(ctx, [
     { label: "Programme",         value: opts.course?.name || "-" },
-    { label: "Duration",          value: opts.course?.duration_years ? `${opts.course.duration_years} year${opts.course.duration_years > 1 ? "s" : ""}` : "-" },
+    { label: "Duration",          value: isDaott ? "2.5 years (5 semesters)" : opts.course?.duration_years ? `${opts.course.duration_years} year${opts.course.duration_years > 1 ? "s" : ""}` : "-" },
     { label: "Campus",            value: opts.campus?.name || "-" },
     { label: "Academic Session",  value: opts.sessionName || "-" },
     { label: "Applicant Name",    value: opts.lead.name || "-" },
@@ -486,7 +493,9 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
   let totalApplicable = 0;
 
   for (const it of opts.yearItems) {
-    const yearLabel = it.term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+    const yearLabel = isDaott
+      ? it.term.replace(/^year_(\d+)$/, "Semester $1")
+      : it.term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
     const waiverForYear = opts.waivers
       .filter(w => w.term === it.term)
       .reduce((s, w) => s + Number(w.amount || 0), 0);
@@ -659,7 +668,7 @@ Deno.serve(async (req) => {
         token_fee_amount, acceptance_deadline, created_at,
         lead_id, course_id, campus_id, session_id,
         leads:lead_id ( id, name, phone, email, application_id, pre_admission_no, token_amount ),
-        courses:course_id ( name, duration_years ),
+        courses:course_id ( name, code, duration_years ),
         campuses:campus_id ( name, address )
       `)
       .eq("id", offer_letter_id)
