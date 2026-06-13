@@ -9,6 +9,7 @@ export interface EligibilityRule {
   minAge?: number;
   maxAge?: number;
   class12MinMarks?: number;
+  scStMinMarks?: number;
   graduationMinMarks?: number;
   requiresGraduation?: boolean;
   entranceExamName?: string;
@@ -25,6 +26,7 @@ export interface EligibilityRuleDB {
   min_age: number | null;
   max_age: number | null;
   class_12_min_marks: number | null;
+  sc_st_min_marks: number | null;
   graduation_min_marks: number | null;
   requires_graduation: boolean;
   entrance_exam_name: string | null;
@@ -40,6 +42,7 @@ export function dbRuleToEligibility(row: EligibilityRuleDB): EligibilityRule {
     minAge: row.min_age ?? undefined,
     maxAge: row.max_age ?? undefined,
     class12MinMarks: row.class_12_min_marks ?? undefined,
+    scStMinMarks: row.sc_st_min_marks ?? undefined,
     graduationMinMarks: row.graduation_min_marks ?? undefined,
     requiresGraduation: row.requires_graduation,
     entranceExamName: row.entrance_exam_name ?? undefined,
@@ -176,24 +179,32 @@ function getRule(programCategory: string, courseRule?: EligibilityRule): Eligibi
   return courseRule || ELIGIBILITY_RULES[programCategory] || {};
 }
 
+const SC_ST_CATEGORIES = new Set(['SC', 'ST']);
+
 export function validateAcademicEligibility(
   programCategory: string,
   academicDetails: Record<string, any>,
   courseRule?: EligibilityRule,
   additionalQualifications?: Record<string, any>[],
+  applicantCategory?: string,
 ): ValidationResult[] {
   const rules = getRule(programCategory, courseRule);
   const results: ValidationResult[] = [];
 
-  // Class 12 marks check
-  if (rules.class12MinMarks) {
+  // Class 12 marks check — SC/ST applicants use scStMinMarks when set.
+  const isScSt = applicantCategory ? SC_ST_CATEGORIES.has(applicantCategory.toUpperCase()) : false;
+  const effectiveMinMarks = (isScSt && rules.scStMinMarks != null)
+    ? rules.scStMinMarks
+    : rules.class12MinMarks;
+
+  if (effectiveMinMarks) {
     const c12 = academicDetails?.class_12;
     if (c12 && c12.result_status !== 'not_declared') {
       const pct = parseMarksToPercentage(c12?.marks);
-      if (pct !== null && pct < rules.class12MinMarks) {
+      if (pct !== null && pct < effectiveMinMarks) {
         results.push({
           field: 'class_12',
-          message: `Minimum ${rules.class12MinMarks}% required in Class 12. You have ${pct.toFixed(1)}%.`,
+          message: `Minimum ${effectiveMinMarks}% required in Class 12 (${applicantCategory || 'General'}). You have ${pct.toFixed(1)}%.`,
           type: 'error',
         });
       }
@@ -489,10 +500,11 @@ export function validatePerCourseEligibility(
   courseRules: Record<string, EligibilityRule>,
   sessionYear: number,
   additionalQualifications?: Record<string, any>[],
+  applicantCategory?: string,
 ): CourseEligibilityResult[] {
   return courseSelections.map(cs => {
     const rule = courseRules[cs.course_id];
-    const results = validateAcademicEligibility(programCategory, academicDetails, rule, additionalQualifications);
+    const results = validateAcademicEligibility(programCategory, academicDetails, rule, additionalQualifications, applicantCategory);
     const dobResult = validateDobEligibility(programCategory, dob, sessionYear, rule, cs.course_name, cs.campus_name);
     const yearResults = validateAcademicYears(academicDetails, sessionYear, rule?.requiresGraduation);
     const hasErrors = results.some(r => r.type === 'error')
