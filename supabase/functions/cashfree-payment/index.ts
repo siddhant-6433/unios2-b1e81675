@@ -216,18 +216,22 @@ Deno.serve(async (req) => {
 
       if (data.order_status === "PAID") {
         const admin = await getAdmin();
-        const paymentRef = order_id;
+        const paymentRef = `CASHFREE_${order_id}`;
 
         // Application fee payment
         if (order_id.startsWith("APP_")) {
           const match = order_id.match(/^APP_(.+)_\d+$/);
           const applicationId = match ? match[1].replace(/_/g, "-") : "";
           if (applicationId) {
-            await admin
+            const { error: appErr } = await admin
               .from("applications")
               .update({ payment_status: "paid", payment_ref: paymentRef })
               .eq("application_id", applicationId);
-            console.log("[cashfree] verify-payment: updated application", applicationId);
+            if (appErr) {
+              console.error("[cashfree] verify-payment: application update failed", applicationId, appErr.message);
+            } else {
+              console.log("[cashfree] verify-payment: updated application", applicationId);
+            }
           }
         }
 
@@ -268,7 +272,7 @@ Deno.serve(async (req) => {
 
         if (orderData && orderData.order_status === "PAID") {
           const orderId = orderData.order_id || "";
-          const paymentRef = paymentData?.cf_payment_id || orderId;
+          const paymentRef = `CASHFREE_${paymentData?.cf_payment_id || orderId}`;
           const admin = await getAdmin();
 
           // Application fee payment

@@ -6,10 +6,14 @@ const mirrorMigration = readFileSync(
   "utf8",
 );
 
-describe("Easebuzz application payment mirror", () => {
-  it("stamps mirrored application-fee rows with the Easebuzz gateway", () => {
+describe("Gateway application payment mirror", () => {
+  it("stamps mirrored application-fee rows with a gateway source", () => {
     expect(mirrorMigration).toContain("gateway, transaction_ref");
     expect(mirrorMigration).toContain("'easebuzz'");
+    expect(mirrorMigration).toContain("'cashfree'");
+    expect(mirrorMigration).toContain("'icici'");
+    expect(mirrorMigration).toContain("'offline'");
+    expect(mirrorMigration).toContain("'online'");
     expect(mirrorMigration).toContain("notes LIKE 'Auto-mirrored from application %'");
   });
 
@@ -17,5 +21,16 @@ describe("Easebuzz application payment mirror", () => {
     expect(mirrorMigration).toContain("EXCEPTION WHEN OTHERS THEN");
     expect(mirrorMigration).toContain("RAISE WARNING '[mirror-app-payment] skipped");
     expect(mirrorMigration).toMatch(/RETURN NEW;\s*END;\s*\$\$/s);
+  });
+
+  it("allows failed lead-payment attempts to be recorded for support", () => {
+    expect(mirrorMigration).toContain("DROP CONSTRAINT IF EXISTS lead_payments_status_check");
+    expect(mirrorMigration).toContain("'failed'");
+  });
+
+  it("keeps app-layer gateway rows out of DB notification side effects", () => {
+    expect(mirrorMigration).toContain("fn_notify_app_fee_paid");
+    expect(mirrorMigration).toContain("fn_notify_payment_received");
+    expect(mirrorMigration).toContain("('offline','easebuzz','icici','cashfree','online')");
   });
 });

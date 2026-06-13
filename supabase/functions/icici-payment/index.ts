@@ -246,6 +246,7 @@ Deno.serve(async (req) => {
 
       const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
       const paymentRef = pgTxnNo || merchantTxnNo || null;
+      const appPaymentRef = paymentRef ? `ICICI_${paymentRef}` : null;
 
       // Lead-side payment (addl1 is the lead_payments.id)
       if (addl1 && /^[0-9a-f-]{36}$/i.test(addl1)) {
@@ -289,7 +290,7 @@ Deno.serve(async (req) => {
       if (addl2 && isSuccess) {
         const { data: updated, error: dbErr } = await admin
           .from("applications")
-          .update({ payment_status: "paid", payment_ref: paymentRef })
+          .update({ payment_status: "paid", payment_ref: appPaymentRef })
           .eq("application_id", addl2)
           .select("application_id");
         if (dbErr || !updated?.length) {
@@ -520,7 +521,7 @@ Deno.serve(async (req) => {
         if (addl1 && /^[0-9a-f-]{36}$/i.test(addl1)) {
           await admin.from("lead_payments").update({ status: "confirmed", transaction_ref: paymentRef }).eq("id", addl1);
         } else if (addl2) {
-          await admin.from("applications").update({ payment_status: "paid", payment_ref: paymentRef }).eq("application_id", addl2);
+          await admin.from("applications").update({ payment_status: "paid", payment_ref: `ICICI_${paymentRef}` }).eq("application_id", addl2);
         }
       }
 
