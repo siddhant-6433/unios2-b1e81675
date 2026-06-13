@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import uniosLogo from "@/assets/unios-logo.png";
 import {
   LayoutDashboard, Users, GraduationCap, IndianRupee,
-  ClipboardCheck, Settings, LogOut,
+  ClipboardCheck, Settings, LogOut, CreditCard,
   BookOpen, BarChart3, FileText, Search, Shuffle, Handshake, PieChart,
   ChevronDown, Phone, Calendar, MessageSquare, Newspaper, Building2, School, ShieldCheck, Zap, Inbox,
   Globe, FolderOpen, Heart, Award, Target, GitMerge, Bot, Gift, AlertTriangle, Sparkles, Receipt,
@@ -29,7 +29,7 @@ type AppRole =
   | "data_entry" | "office_admin" | "office_assistant" | "hostel_warden" | "consultant" | "academic_partner" | "student" | "parent"
   | "ib_coordinator" | "video_editor";
 
-type MenuItem = { title: string; url: string; icon: any; permission?: string; anyPermission?: string[]; badge?: number; hideForSuperAdmin?: boolean };
+type MenuItem = { title: string; url: string; icon: any; permission?: string; anyPermission?: string[]; roles?: AppRole[]; badge?: number; hideForSuperAdmin?: boolean };
 
 const mainMenu: MenuItem[] = [
   { title: "Overview", url: "/", icon: LayoutDashboard, permission: "dashboard:view" },
@@ -108,6 +108,13 @@ const managementMenu: MenuItem[] = [
     icon: ShieldCheck,
     anyPermission: ["campuses_courses:view", "user_management:view", "permissions:view"],
   },
+  {
+    title: "ID Card Center",
+    url: "/id-card-center",
+    icon: CreditCard,
+    roles: ["super_admin", "principal", "office_admin", "office_assistant", "campus_admin"],
+    anyPermission: ["hr:view"],
+  },
   { title: "WhatsApp Health", url: "/whatsapp-health", icon: AlertTriangle, permission: "user_management:view" },
   { title: "Documents", url: "/documents", icon: FileText, permission: "documents:view" },
   { title: "Alumni Verification", url: "/alumni-verifications", icon: ShieldCheck, permission: "alumni_verification:view" },
@@ -153,11 +160,14 @@ export function AppSidebar() {
     // sidebar link, where accountants might have only user_management
     // and counsellors might have only campuses_courses.
     if (item.anyPermission && item.anyPermission.length > 0) {
-      return item.anyPermission.some(p => {
+      const hasAnyPermission = item.anyPermission.some(p => {
         const [mod, act] = p.split(":");
         return can(mod, act);
       });
+      if (hasAnyPermission) return true;
+      if (!item.roles) return false;
     }
+    if (item.roles && role) return item.roles.includes(role);
     if (!item.permission) return true;
     const [mod, act] = item.permission.split(":");
     return can(mod, act);
@@ -481,7 +491,7 @@ export function AppSidebar() {
         {visibleMgmt.length > 0 && (
           <SidebarGroup>
             <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/50 px-4 mb-0.5">
-              Management
+              Administrative
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
