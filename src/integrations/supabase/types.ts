@@ -81,6 +81,135 @@ export type Database = {
         }
         Relationships: []
       }
+      academic_partner_assignments: {
+        Row: {
+          batch_id: string | null
+          course_id: string
+          created_at: string
+          id: string
+          is_active: boolean
+          partner_id: string
+          payout_percentage: number | null
+          updated_at: string
+        }
+        Insert: {
+          batch_id?: string | null
+          course_id: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          partner_id: string
+          payout_percentage?: number | null
+          updated_at?: string
+        }
+        Update: {
+          batch_id?: string | null
+          course_id?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          partner_id?: string
+          payout_percentage?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      academic_partner_payouts: {
+        Row: {
+          approved_by: string | null
+          batch_id: string | null
+          course_id: string | null
+          created_at: string
+          fee_paid: number
+          id: string
+          lead_id: string | null
+          lead_payment_id: string | null
+          notes: string | null
+          paid_at: string | null
+          partner_id: string
+          payout_amount: number
+          payout_percentage: number
+          status: string
+          student_id: string | null
+        }
+        Insert: {
+          approved_by?: string | null
+          batch_id?: string | null
+          course_id?: string | null
+          created_at?: string
+          fee_paid?: number
+          id?: string
+          lead_id?: string | null
+          lead_payment_id?: string | null
+          notes?: string | null
+          paid_at?: string | null
+          partner_id: string
+          payout_amount?: number
+          payout_percentage?: number
+          status?: string
+          student_id?: string | null
+        }
+        Update: {
+          approved_by?: string | null
+          batch_id?: string | null
+          course_id?: string | null
+          created_at?: string
+          fee_paid?: number
+          id?: string
+          lead_id?: string | null
+          lead_payment_id?: string | null
+          notes?: string | null
+          paid_at?: string | null
+          partner_id?: string
+          payout_amount?: number
+          payout_percentage?: number
+          status?: string
+          student_id?: string | null
+        }
+        Relationships: []
+      }
+      academic_partners: {
+        Row: {
+          created_at: string
+          default_payout_percentage: number
+          email: string | null
+          id: string
+          name: string
+          notes: string | null
+          organization: string | null
+          phone: string | null
+          status: string
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          default_payout_percentage?: number
+          email?: string | null
+          id?: string
+          name: string
+          notes?: string | null
+          organization?: string | null
+          phone?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          default_payout_percentage?: number
+          email?: string | null
+          id?: string
+          name?: string
+          notes?: string | null
+          organization?: string | null
+          phone?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       ai_call_logs: {
         Row: {
           ai_transcript: string | null
@@ -6090,6 +6219,69 @@ export type Database = {
           },
         ]
       }
+      lead_association_requests: {
+        Row: {
+          academic_partner_id: string | null
+          consultant_id: string | null
+          created_at: string
+          id: string
+          lead_id: string | null
+          proposed_campus_id: string | null
+          proposed_course_id: string | null
+          proposed_email: string | null
+          proposed_name: string
+          proposed_notes: string | null
+          requested_by: string | null
+          requested_phone: string
+          requester_type: string
+          review_notes: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          academic_partner_id?: string | null
+          consultant_id?: string | null
+          created_at?: string
+          id?: string
+          lead_id?: string | null
+          proposed_campus_id?: string | null
+          proposed_course_id?: string | null
+          proposed_email?: string | null
+          proposed_name: string
+          proposed_notes?: string | null
+          requested_by?: string | null
+          requested_phone: string
+          requester_type: string
+          review_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          academic_partner_id?: string | null
+          consultant_id?: string | null
+          created_at?: string
+          id?: string
+          lead_id?: string | null
+          proposed_campus_id?: string | null
+          proposed_course_id?: string | null
+          proposed_email?: string | null
+          proposed_name?: string
+          proposed_notes?: string | null
+          requested_by?: string | null
+          requested_phone?: string
+          requester_type?: string
+          review_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       leads: {
         Row: {
           admission_no: string | null
@@ -6103,6 +6295,7 @@ export type Database = {
           ai_transcript: string | null
           application_id: string | null
           application_progress: Json | null
+          academic_partner_id: string | null
           area: string | null
           assigned_at: string | null
           auto_returned_count: number
@@ -6161,6 +6354,7 @@ export type Database = {
           ai_transcript?: string | null
           application_id?: string | null
           application_progress?: Json | null
+          academic_partner_id?: string | null
           area?: string | null
           assigned_at?: string | null
           auto_returned_count?: number
@@ -6219,6 +6413,7 @@ export type Database = {
           ai_transcript?: string | null
           application_id?: string | null
           application_progress?: Json | null
+          academic_partner_id?: string | null
           area?: string | null
           assigned_at?: string | null
           auto_returned_count?: number
@@ -8585,6 +8780,45 @@ export type Database = {
         }
         Relationships: []
       }
+      academic_partner_assignment_summary: {
+        Row: {
+          batch_id: string | null
+          batch_name: string | null
+          candidates: number | null
+          course_id: string | null
+          course_name: string | null
+          effective_payout_percentage: number | null
+          fee_collected: number | null
+          id: string | null
+          is_active: boolean | null
+          partner_id: string | null
+          payout_percentage: number | null
+        }
+        Relationships: []
+      }
+      academic_partner_dashboard: {
+        Row: {
+          assigned_batches: number | null
+          assigned_courses: number | null
+          conversions: number | null
+          default_payout_percentage: number | null
+          email: string | null
+          organization: string | null
+          paid_payout: number | null
+          partner_id: string | null
+          partner_name: string | null
+          pending_payout: number | null
+          phone: string | null
+          pipeline: number | null
+          status: string | null
+          total_candidates: number | null
+          total_fee_collected: number | null
+          total_leads: number | null
+          total_payout: number | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
       consultant_dashboard: {
         Row: {
           commission_paid: number | null
@@ -10087,6 +10321,32 @@ export type Database = {
           stage: string
         }[]
       }
+      normalize_lead_phone: {
+        Args: { _phone: string }
+        Returns: string
+      }
+      review_lead_association_request: {
+        Args: {
+          _approved: boolean
+          _request_id: string
+          _review_notes?: string | null
+        }
+        Returns: Json
+      }
+      submit_lead_association_request: {
+        Args: {
+          _academic_partner_id?: string | null
+          _campus_id?: string | null
+          _consultant_id?: string | null
+          _course_id?: string | null
+          _email?: string | null
+          _name: string
+          _notes?: string | null
+          _phone: string
+          _requester_type: string
+        }
+        Returns: Json
+      }
       fn_cleanup_stale_ai_calls: { Args: never; Returns: undefined }
       fn_next_business_hour: {
         Args: { p_delay_minutes?: number }
@@ -10219,6 +10479,8 @@ export type Database = {
         | "ib_coordinator"
         | "office_admin"
         | "publisher"
+        | "video_editor"
+        | "academic_partner"
       ib_programme: "pyp" | "myp"
       lead_source:
         | "website"
@@ -10236,6 +10498,12 @@ export type Database = {
         | "mirai_website"
         | "salahlo"
         | "dialer"
+        | "direct_walkin"
+        | "website_chat"
+        | "whatsapp"
+        | "inbound_call"
+        | "school_outreach"
+        | "academic_partner"
       lead_stage:
         | "new_lead"
         | "application_in_progress"
@@ -10410,6 +10678,8 @@ export const Constants = {
         "ib_coordinator",
         "office_admin",
         "publisher",
+        "video_editor",
+        "academic_partner",
       ],
       ib_programme: ["pyp", "myp"],
       lead_source: [
@@ -10428,6 +10698,12 @@ export const Constants = {
         "mirai_website",
         "salahlo",
         "dialer",
+        "direct_walkin",
+        "website_chat",
+        "whatsapp",
+        "inbound_call",
+        "school_outreach",
+        "academic_partner",
       ],
       lead_stage: [
         "new_lead",
