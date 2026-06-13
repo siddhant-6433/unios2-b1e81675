@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { invokeEdge } from "@/integrations/supabase/edge";
@@ -194,7 +194,8 @@ const StudentProfile = () => {
   const { admissionNo } = useParams<{ admissionNo: string }>();
   const { toast } = useToast();
   const { can } = usePermissions();
-  const { role } = useAuth();
+  const { role, realRole } = useAuth();
+  const documentUploadRef = useRef<HTMLDivElement | null>(null);
   const [student, setStudent] = useState<StudentRecord | null>(null);
   const [fees, setFees] = useState<FeeLedgerRow[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
@@ -207,6 +208,7 @@ const StudentProfile = () => {
   const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [documentInputKey, setDocumentInputKey] = useState(0);
   const [uploadingDocument, setUploadingDocument] = useState(false);
+  const [activeTab, setActiveTab] = useState("details");
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
@@ -341,7 +343,12 @@ const StudentProfile = () => {
     if (grade.startsWith("B")) return "bg-info/10 text-info";
     return "bg-warning/10 text-warning";
   };
-  const canUploadDocuments = can("documents", "upload");
+  const canUploadDocuments =
+    can("documents", "upload") ||
+    role === "office_assistant" ||
+    role === "office_admin" ||
+    role === "super_admin" ||
+    realRole === "super_admin";
 
   const syncFromApplication = async () => {
     setSyncing(true);
@@ -459,6 +466,13 @@ const StudentProfile = () => {
     setContactDialogOpen(false);
   };
 
+  const openDocumentUpload = () => {
+    setActiveTab("documents");
+    requestAnimationFrame(() => {
+      documentUploadRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
   return (
     <div className="space-y-5 animate-fade-in">
       <Link to="/students" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
@@ -483,6 +497,11 @@ const StudentProfile = () => {
         </div>
         <div className="flex items-center gap-2">
           {syncMsg && <span className="text-xs text-muted-foreground">{syncMsg}</span>}
+          {canUploadDocuments && (
+            <Button variant="default" size="sm" className="gap-2 rounded-lg" onClick={openDocumentUpload}>
+              <Upload className="h-3.5 w-3.5" /> Add Document
+            </Button>
+          )}
           <Button variant="outline" size="sm" className="gap-2 rounded-lg" onClick={syncFromApplication} disabled={syncing}>
             {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
             Sync from Application
@@ -559,7 +578,7 @@ const StudentProfile = () => {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="details" className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="bg-card border border-border rounded-lg p-1 h-auto flex-wrap">
           <TabsTrigger value="details" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Details</TabsTrigger>
           <TabsTrigger value="documents" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
@@ -812,7 +831,7 @@ const StudentProfile = () => {
         <TabsContent value="documents">
           <div className="mt-4 space-y-4">
             {canUploadDocuments && (
-              <div className="rounded-xl bg-card card-shadow p-5 space-y-4">
+              <div ref={documentUploadRef} className="rounded-xl bg-card card-shadow p-5 space-y-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-semibold text-foreground">Upload Document</h3>
