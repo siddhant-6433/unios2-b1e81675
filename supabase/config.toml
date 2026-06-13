@@ -39,6 +39,9 @@ verify_jwt = false
 [functions.easebuzz-payment]
 verify_jwt = false
 
+[functions.easebuzz-webhook]
+verify_jwt = false
+
 [functions.icici-payment]
 verify_jwt = false
 
