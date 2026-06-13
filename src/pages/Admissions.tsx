@@ -116,6 +116,7 @@ const stageIcons: Record<string, typeof Users> = {
 // Lead sources imported from @/config/leadSources
 
 type LeadInstitutionType = "all" | "school" | "college";
+type FilterMode = "include" | "exclude";
 
 const PERSON_ROLE_COLORS: Record<string, string> = {
   lead: "bg-pastel-yellow text-foreground/80",
@@ -194,8 +195,10 @@ const Admissions = () => {
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const [sourceFilterMode, setSourceFilterMode] = useState<FilterMode>("include");
   const [leadInstitutionType, setLeadInstitutionType] = useState<LeadInstitutionType>("all");
   const [courseFilter, setCourseFilter] = useState<string[]>([]);
+  const [courseFilterMode, setCourseFilterMode] = useState<FilterMode>("include");
   const [debouncedCourseFilter, setDebouncedCourseFilter] = useState<string[]>([]);
   const [courseOptions, setCourseOptions] = useState<(CourseLike & { id: string; name: string })[]>([]);
   const [courseSearch, setCourseSearch] = useState("");
@@ -381,6 +384,91 @@ const Admissions = () => {
     return debouncedCourseFilter.filter((id) => categorySet.has(id));
   }, [categoryCourseIds, debouncedCourseFilter, leadInstitutionType]);
 
+  const scopedSelectedCourseFilterIds = useMemo(() => {
+    if (leadInstitutionType === "all") return debouncedCourseFilter;
+    const categorySet = new Set(categoryCourseIds);
+    return debouncedCourseFilter.filter((id) => categorySet.has(id));
+  }, [categoryCourseIds, debouncedCourseFilter, leadInstitutionType]);
+
+  const postgrestList = (values: string[]) => `(${values.join(",")})`;
+
+  const applyListQueryFilters = (query: any) => {
+    // Counsellor / campus scope
+    if (role === "counsellor" && profile?.id) {
+      query = query.eq("counsellor_id", profile.id);
+    } else if (counsellorFilter === "unassigned") {
+      query = query.is("counsellor_id", null);
+    } else if (counsellorFilter !== "all") {
+      query = query.eq("counsellor_id", counsellorFilter);
+    } else if (selectedCampusId !== "all") {
+      query = query.eq("campus_id", selectedCampusId);
+    }
+
+    // Stage / source / role / temperature
+    if (stageFilter !== "all") {
+      const stages = stageFilter.split(",").map(s => s.trim()).filter(Boolean);
+      if (stages.length === 1) query = query.eq("stage", stages[0]);
+      else if (stages.length > 1) query = query.in("stage", stages);
+    }
+    if (sourceFilter !== "all") {
+      query = sourceFilterMode === "exclude"
+        ? query.neq("source", sourceFilter)
+        : query.eq("source", sourceFilter);
+    }
+
+    if (leadInstitutionType !== "all") {
+      if (courseFilterMode === "include") {
+        const includeIds = scopedSelectedCourseFilterIds.length > 0
+          ? scopedSelectedCourseFilterIds
+          : categoryCourseIds;
+        if (includeIds.length > 0) query = query.in("course_id", includeIds);
+      } else {
+        if (categoryCourseIds.length > 0) query = query.in("course_id", categoryCourseIds);
+        if (scopedSelectedCourseFilterIds.length > 0) {
+          query = query.not("course_id", "in", postgrestList(scopedSelectedCourseFilterIds));
+        }
+      }
+    } else if (debouncedCourseFilter.length > 0) {
+      query = courseFilterMode === "exclude"
+        ? query.not("course_id", "in", postgrestList(debouncedCourseFilter))
+        : query.in("course_id", debouncedCourseFilter);
+    }
+
+    if (roleFilter !== "all") query = query.eq("person_role", roleFilter);
+    if (tempFilter !== "all") query = query.eq("lead_temperature", tempFilter);
+
+    // Date range (applied to created_at)
+    if (fromDate) query = query.gte("created_at", `${fromDate}T00:00:00`);
+    if (toDate) query = query.lte("created_at", `${toDate}T23:59:59.999`);
+
+    // Multi-field search (server-side ilike OR). Triggered after >= 2 chars.
+    if (debouncedSearch.length >= 2) {
+      const q = debouncedSearch;
+      const digits = q.replace(/\D/g, "");
+      const phoneTerm = digits.length >= 3 ? digits : q;
+      // Escape any commas in the user-supplied search to avoid breaking the OR string
+      const safe = (s: string) => s.replace(/,/g, "");
+      query = query.or(
+        `name.ilike.%${safe(q)}%,phone.ilike.%${safe(phoneTerm)}%,email.ilike.%${safe(q)}%,application_id.ilike.%${safe(q)}%`
+      );
+    }
+
+    // ID-set filters: intersect any active sets and pass the result as .in("id", ...)
+    const idSets: (Set<string> | null)[] = [inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds];
+    const activeSets = idSets.filter((s): s is Set<string> => s !== null);
+    if (activeSets.length > 0) {
+      let intersection = Array.from(activeSets[0]);
+      for (let i = 1; i < activeSets.length; i++) {
+        const other = activeSets[i];
+        intersection = intersection.filter(id => other.has(id));
+      }
+      if (intersection.length === 0) return { query, empty: true };
+      query = query.in("id", intersection);
+    }
+
+    return { query, empty: false };
+  };
+
   useEffect(() => {
     if (leadInstitutionType === "all" || courseOptions.length === 0) return;
     const allowed = new Set(categoryCourseIds);
@@ -500,68 +588,25 @@ const Admissions = () => {
         .order("id", { ascending: false })
         .limit(PAGE_SIZE + 1);
 
-      // Counsellor / campus scope
-      if (role === "counsellor" && profile?.id) {
-        query = query.eq("counsellor_id", profile.id);
-      } else if (counsellorFilter === "unassigned") {
-        query = query.is("counsellor_id", null);
-      } else if (counsellorFilter !== "all") {
-        query = query.eq("counsellor_id", counsellorFilter);
-      } else if (selectedCampusId !== "all") {
-        query = query.eq("campus_id", selectedCampusId);
-      }
-
-      // Stage / source / role / temperature
-      if (stageFilter !== "all") {
-        const stages = stageFilter.split(",").map(s => s.trim()).filter(Boolean);
-        if (stages.length === 1) query = query.eq("stage", stages[0]);
-        else if (stages.length > 1) query = query.in("stage", stages);
-      }
-      if (sourceFilter !== "all") query = query.eq("source", sourceFilter);
-      if (leadInstitutionType !== "all" && effectiveCourseFilterIds.length === 0) {
+      if (
+        leadInstitutionType !== "all" &&
+        (categoryCourseIds.length === 0 || (courseFilterMode === "include" && effectiveCourseFilterIds.length === 0))
+      ) {
         setLeads([]); setTotalCount(0); setSelectedIds(new Set()); setHasLoadedOnce(true);
         setHasNextLeadPage(false); setLeadPageCursors({});
         return;
       }
-      if (effectiveCourseFilterIds.length > 0) query = query.in("course_id", effectiveCourseFilterIds);
-      if (roleFilter !== "all") query = query.eq("person_role", roleFilter);
-      if (tempFilter !== "all") query = query.eq("lead_temperature", tempFilter);
 
-      // Date range (applied to created_at)
-      if (fromDate) query = query.gte("created_at", `${fromDate}T00:00:00`);
-      if (toDate) query = query.lte("created_at", `${toDate}T23:59:59.999`);
-
-      // Multi-field search (server-side ilike OR). Triggered after ≥ 2 chars.
-      if (debouncedSearch.length >= 2) {
-        const q = debouncedSearch;
-        const digits = q.replace(/\D/g, "");
-        const phoneTerm = digits.length >= 3 ? digits : q;
-        // Escape any commas in the user-supplied search to avoid breaking the OR string
-        const safe = (s: string) => s.replace(/,/g, "");
-        query = query.or(
-          `name.ilike.%${safe(q)}%,phone.ilike.%${safe(phoneTerm)}%,email.ilike.%${safe(q)}%,application_id.ilike.%${safe(q)}%`
-        );
+      const scoped = applyListQueryFilters(query);
+      if (scoped.empty) {
+        setLeads([]); setTotalCount(0); setSelectedIds(new Set()); setHasLoadedOnce(true);
+        setHasNextLeadPage(false); setLeadPageCursors({});
+        return;
       }
+      query = scoped.query;
 
       if (pageCursor) {
         query = query.or(`created_at.lt.${pageCursor.created_at},and(created_at.eq.${pageCursor.created_at},id.lt.${pageCursor.id})`);
-      }
-
-      // ID-set filters: intersect any active sets and pass the result as .in("id", …)
-      const idSets: (Set<string> | null)[] = [inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds];
-      const activeSets = idSets.filter((s): s is Set<string> => s !== null);
-      if (activeSets.length > 0) {
-        let intersection = Array.from(activeSets[0]);
-        for (let i = 1; i < activeSets.length; i++) {
-          const other = activeSets[i];
-          intersection = intersection.filter(id => other.has(id));
-        }
-        if (intersection.length === 0) {
-          setLeads([]); setTotalCount(0); setSelectedIds(new Set()); setHasLoadedOnce(true);
-          setHasNextLeadPage(false); setLeadPageCursors({});
-          return;
-        }
-        query = query.in("id", intersection);
       }
 
       const { data, count, error } = await query;
@@ -615,7 +660,7 @@ const Admissions = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     view, page, selectedCampusId, counsellorFilter, role, profile?.id,
-    stageFilter, sourceFilter, leadInstitutionType, effectiveCourseFilterIds, roleFilter, tempFilter,
+    stageFilter, sourceFilter, sourceFilterMode, leadInstitutionType, effectiveCourseFilterIds, courseFilterMode, roleFilter, tempFilter,
     fromDate, toDate, debouncedSearch,
     inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds,
   ]);
@@ -889,8 +934,23 @@ const Admissions = () => {
       (l.application_id || "").toLowerCase().includes(q) ||
       (digits.length >= 3 && phoneDigits.includes(digits));
     const matchesStage = stageFilter === "all" || stageFilter.split(",").includes(l.stage);
-    const matchesSource = sourceFilter === "all" || l.source === sourceFilter;
-    const matchesCourse = effectiveCourseFilterIds.length === 0 || (l.course_id != null && effectiveCourseFilterIds.includes(l.course_id));
+    const matchesSource = sourceFilter === "all"
+      || (sourceFilterMode === "exclude" ? l.source !== sourceFilter : l.source === sourceFilter);
+    const matchesCourse = (() => {
+      if (leadInstitutionType !== "all") {
+        const inCategory = l.course_id != null && categoryCourseIds.includes(l.course_id);
+        if (!inCategory) return false;
+        if (courseFilterMode === "exclude") {
+          return l.course_id == null || !scopedSelectedCourseFilterIds.includes(l.course_id);
+        }
+        return scopedSelectedCourseFilterIds.length === 0
+          || (l.course_id != null && scopedSelectedCourseFilterIds.includes(l.course_id));
+      }
+      if (debouncedCourseFilter.length === 0) return true;
+      return courseFilterMode === "exclude"
+        ? l.course_id == null || !debouncedCourseFilter.includes(l.course_id)
+        : l.course_id != null && debouncedCourseFilter.includes(l.course_id);
+    })();
     const matchesRole = roleFilter === "all" || l.person_role === roleFilter;
     const matchesTemp = tempFilter === "all" || l.lead_temperature === tempFilter;
     const matchesInactive = !inactiveIds || inactiveIds.has(l.id);
@@ -928,7 +988,7 @@ const Admissions = () => {
     setPage(1);
     setLeadPageCursors({});
     setHasNextLeadPage(false);
-  }, [stageFilter, sourceFilter, leadInstitutionType, effectiveCourseFilterIds, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, fromDate, toDate]);
+  }, [stageFilter, sourceFilter, sourceFilterMode, leadInstitutionType, effectiveCourseFilterIds, courseFilterMode, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, fromDate, toDate]);
 
   // Funnel click → translate bucket into a stageFilter (comma-separated raw
   // lead_stage values that the existing `matchesStage` filter already
@@ -1120,6 +1180,42 @@ const Admissions = () => {
     { label: "Pre-Admitted", value: preAdmitted, sub: "PAN/AN pending", icon: Shield, iconBg: "bg-pastel-purple", filterStage: "pre_admitted", action: "" },
     { label: "Admitted", value: admitted, sub: "Fully admitted", icon: UserCheck, iconBg: "bg-pastel-green", filterStage: "admitted", action: "" },
   ];
+
+  const fetchLeadIdsForTransfer = async ({ mode, pageCount }: { mode: "pages" | "all"; pageCount?: number }) => {
+    const ids: string[] = [];
+    const target = mode === "all" ? Infinity : Math.max(0, (pageCount || 1) * PAGE_SIZE);
+    let cursor: { created_at: string; id: string } | null = null;
+
+    while (ids.length < target) {
+      const remaining = target === Infinity ? 999 : target - ids.length;
+      const step = Math.min(999, remaining);
+      let query: any = supabase
+        .from("leads")
+        .select("id, created_at")
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(step + 1);
+
+      const scoped = applyListQueryFilters(query);
+      if (scoped.empty) break;
+      query = scoped.query;
+
+      if (cursor) {
+        query = query.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      const fetched = (data || []) as { id: string; created_at: string }[];
+      const rows = fetched.slice(0, step);
+      ids.push(...rows.map((row) => row.id));
+      const last = rows[rows.length - 1];
+      if (!last || fetched.length <= step) break;
+      cursor = { created_at: last.created_at, id: last.id };
+    }
+
+    return ids;
+  };
 
   // Only show the full-page spinner on the very first load (before any
   // result has come back). Refetches keep the page mounted so controls
@@ -1649,6 +1745,13 @@ const Admissions = () => {
             <option value="all">All Stages</option>
             {STAGES.map((s) => <option key={s} value={s}>{STAGE_LABELS[s]}</option>)}
           </select>
+          <select value={sourceFilterMode} onChange={(e) => setSourceFilterMode(e.target.value as FilterMode)}
+            disabled={sourceFilter === "all"}
+            title="Source filter mode"
+            className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:opacity-50">
+            <option value="include">Only source</option>
+            <option value="exclude">Except source</option>
+          </select>
           <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}
             className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
             <option value="all">All Sources</option>
@@ -1674,10 +1777,10 @@ const Admissions = () => {
                         ? "All College Courses"
                         : "All Courses"
                     : courseFilter.length === 1
-                      ? (courseOptions.find(c => c.id === courseFilter[0])?.name || "1 course")
+                      ? `${courseFilterMode === "exclude" ? "Except " : ""}${courseOptions.find(c => c.id === courseFilter[0])?.name || "1 course"}`
                       : leadInstitutionType === "school"
-                        ? `${courseFilter.length} grades`
-                        : `${courseFilter.length} courses`}
+                        ? `${courseFilterMode === "exclude" ? "Except " : ""}${courseFilter.length} grades`
+                        : `${courseFilterMode === "exclude" ? "Except " : ""}${courseFilter.length} courses`}
                 </span>
                 <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
               </button>
@@ -1701,6 +1804,22 @@ const Admissions = () => {
                     Clear
                   </button>
                 )}
+              </div>
+              <div className="flex items-center gap-1 border-b border-border/60 px-2 py-2">
+                <button
+                  type="button"
+                  onClick={() => setCourseFilterMode("include")}
+                  className={`rounded-md px-2 py-1 text-[11px] font-medium ${courseFilterMode === "include" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                >
+                  Only selected
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCourseFilterMode("exclude")}
+                  className={`rounded-md px-2 py-1 text-[11px] font-medium ${courseFilterMode === "exclude" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                >
+                  Except selected
+                </button>
               </div>
               <div className="max-h-80 overflow-y-auto p-1">
                 {(() => {
@@ -2252,6 +2371,9 @@ const Admissions = () => {
             onOpenChange={setShowTransfer}
             leadIds={Array.from(selectedIds)}
             leadNames={selectedLeadNames}
+            pageSize={PAGE_SIZE}
+            totalMatchingLeads={filteredCount}
+            fetchLeadIdsForTransfer={fetchLeadIdsForTransfer}
             onSuccess={fetchLeads}
           />
         </Suspense>
