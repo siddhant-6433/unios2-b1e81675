@@ -24,6 +24,8 @@ import { DocumentUpload } from "@/components/apply/DocumentUpload";
 import { PortalProvider } from "@/components/apply/PortalContext";
 import type { ApplicationData } from "@/components/apply/types";
 import { ApplyMagicLinkButton } from "@/components/leads/ApplyMagicLinkButton";
+import { CahetRegistrationDetails } from "@/components/leads/CahetRegistrationDetails";
+import { fetchCahetRegistration, isBptOrBmritCourseName, type CahetRegistrationDetails as CahetRegistrationDetailsType } from "@/lib/cahet";
 
 interface ApplicationRow {
   id: string;
@@ -121,18 +123,28 @@ interface Props {
 
 export function ApplicationProgress({ leadId, leadPhone, applicationId, canImpersonate, compact }: Props) {
   const [app, setApp] = useState<ApplicationRow | null>(null);
+  const [cahetRegistration, setCahetRegistration] = useState<CahetRegistrationDetailsType | null>(null);
   const [loading, setLoading] = useState(true);
   const [showPreview, setShowPreview] = useState(false);
 
   const fetchApp = async () => {
     setLoading(true);
+    setCahetRegistration(null);
     if (leadId) {
       const { data: byLead } = await (supabase as any)
         .from("applications").select("*")
         .eq("lead_id", leadId)
         .order("created_at", { ascending: false })
         .limit(1).maybeSingle();
-      if (byLead) { setApp(byLead); setLoading(false); return; }
+      if (byLead) {
+        setApp(byLead);
+        const firstCourse = ((byLead.course_selections || [])[0] as any)?.course_name || null;
+        if (isBptOrBmritCourseName(firstCourse)) {
+          setCahetRegistration(await fetchCahetRegistration(supabase, leadId));
+        }
+        setLoading(false);
+        return;
+      }
     }
     if (applicationId) {
       const { data: byAppId } = await (supabase as any)
@@ -264,6 +276,7 @@ export function ApplicationProgress({ leadId, leadPhone, applicationId, canImper
           app={app}
           steps={steps}
           isSchool={isSchool}
+          cahetRegistration={cahetRegistration}
           onClose={() => setShowPreview(false)}
           onSaved={fetchApp}
         />
@@ -277,6 +290,7 @@ function ApplicationEditDialog({ app, steps, isSchool, onClose, onSaved }: {
   app: ApplicationRow;
   steps: typeof DEFAULT_STEPS;
   isSchool: boolean;
+  cahetRegistration: CahetRegistrationDetailsType | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -450,6 +464,7 @@ function ApplicationEditDialog({ app, steps, isSchool, onClose, onSaved }: {
                 : app.status}
             </Badge>
           </div>
+          <CahetRegistrationDetails registration={cahetRegistration} compact className="mt-2" />
         </DialogHeader>
 
         {view === "audit" ? (

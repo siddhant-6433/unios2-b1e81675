@@ -901,7 +901,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                         : <span className="text-[10px] font-semibold text-blue-700 bg-blue-100 border border-blue-200 px-2 py-0.5 rounded-full">Action Required</span>}
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5 leading-snug">
-                      Pay 10% of first-year fee to secure your seat and receive your Pre-Admission Number.
+                      Pay the token fee shown on your offer to secure your seat and receive your Pre-Admission Number.
                       {tokenOutstanding > minInstalment && !done && ` You can pay in instalments of ₹${minInstalment.toLocaleString("en-IN")} or more.`}
                     </p>
                     <div className="mt-2.5 h-2 rounded-full bg-gray-200 overflow-hidden">
@@ -1235,7 +1235,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
             <div className="min-w-0">
               <p className="text-sm font-bold text-blue-900">Token fee holds your seat · 25% confirms it</p>
               <p className="text-xs text-blue-700 mt-0.5 leading-snug">
-                Paying 10% (token fee) reserves your seat for <span className="font-semibold">5 days</span>.
+                Paying the token fee reserves your seat for <span className="font-semibold">5 days</span>.
                 You must pay 25% within those 5 days to receive your Admission Number and confirm enrollment.
                 Admission is <span className="font-semibold">not confirmed</span> until 25% is paid.
               </p>

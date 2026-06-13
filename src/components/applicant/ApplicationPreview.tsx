@@ -4,12 +4,15 @@ import {
   FileText, Eye, Download, CheckCircle, AlertCircle,
   GraduationCap, User, Users, MapPin, BookOpen, Award, Image as ImageIcon,
 } from "lucide-react";
+import { CahetRegistrationDetails } from "@/components/leads/CahetRegistrationDetails";
+import type { CahetRegistrationDetails as CahetRegistrationDetailsType } from "@/lib/cahet";
 
-export type PreviewDoc = { name: string; url: string };
+export type PreviewDoc = { name: string; url: string; path?: string };
 
 interface Props {
   app: any;
   docs: PreviewDoc[];
+  cahetRegistration?: CahetRegistrationDetailsType | null;
 }
 
 /**
@@ -17,7 +20,7 @@ interface Props {
  * /applications/:id (admin view) and the apply portal's "View Submission"
  * tile so staff and students see the same comprehensive layout.
  */
-export function ApplicationPreview({ app, docs }: Props) {
+export function ApplicationPreview({ app, docs, cahetRegistration }: Props) {
   const courses = (app?.course_selections as any[]) || [];
   const photo = docs.find(d => /^(applicant|student)_photo|passport_photo|^photo[-_]/i.test(d.name));
   const otherDocs = docs.filter(d => d !== photo);
@@ -98,6 +101,7 @@ export function ApplicationPreview({ app, docs }: Props) {
               ))}
             </div>
           )}
+          <CahetRegistrationDetails registration={cahetRegistration} compact className="mt-3" />
         </CardContent>
       </Card>
 

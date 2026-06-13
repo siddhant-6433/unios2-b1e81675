@@ -9,6 +9,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { CheckCircle2, Loader2, Upload } from "lucide-react";
+import { isBptOrBmritCourseName } from "@/lib/cahet";
 
 export interface CahetRegisterTarget {
   lead_id: string;
@@ -153,13 +154,5 @@ export function CahetRegisterDialog({ target, onClose, onSaved }: Props) {
 
 /** Client-side BPT/BMRIT detection by course name (avoids extra DB call in dialer). */
 export function isBptOrBmritCourse(courseName: string | null | undefined): boolean {
-  if (!courseName) return false;
-  const c = courseName.toLowerCase();
-  return (
-    c.includes("bpt") ||
-    c.includes("physiotherapy") ||
-    c.includes("bmrit") ||
-    (c.includes("radiology") && c.includes("b.sc")) ||
-    (c.includes("radiology") && c.includes("imaging"))
-  );
+  return isBptOrBmritCourseName(courseName);
 }

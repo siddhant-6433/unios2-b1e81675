@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, FileText, Plus, Gift, CheckCircle, XCircle, ShieldCheck, RefreshCw, ExternalLink, Pencil, Coins, Trash2 } from "lucide-react";
+import { CahetRegistrationDetails } from "@/components/leads/CahetRegistrationDetails";
+import { fetchCahetRegistration, type CahetRegistrationDetails as CahetRegistrationDetailsType } from "@/lib/cahet";
 
 interface OfferLetterDialogProps {
   open: boolean;
@@ -15,6 +17,7 @@ interface OfferLetterDialogProps {
   leadName: string;
   courseId: string | null;
   campusId: string | null;
+  cahetRegistration?: CahetRegistrationDetailsType | null;
   onSuccess: () => void;
 }
 
@@ -84,7 +87,7 @@ const ENTRANCE_OPTIONS = [
   "Other",
 ];
 
-export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, courseId, campusId, onSuccess }: OfferLetterDialogProps) {
+export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, courseId, campusId, cahetRegistration: cahetRegistrationProp, onSuccess }: OfferLetterDialogProps) {
   const { user, role } = useAuth();
   const { toast } = useToast();
   const [offers, setOffers] = useState<OfferLetter[]>([]);
@@ -146,6 +149,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   // browser actually fetches the new bytes — the storage path is reused on
   // upsert, so without this the cached PDF stays on screen.
   const [pdfBust, setPdfBust] = useState<number>(() => Date.now());
+  const [fetchedCahetRegistration, setFetchedCahetRegistration] = useState<CahetRegistrationDetailsType | null>(null);
+  const cahetRegistration = cahetRegistrationProp ?? fetchedCahetRegistration;
 
   const fetchOffers = async () => {
     setLoading(true);
@@ -222,6 +227,15 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
 
   useEffect(() => { if (open) fetchOffers(); }, [open]);
 
+  useEffect(() => {
+    if (!open || cahetRegistrationProp !== undefined) return;
+    let cancelled = false;
+    fetchCahetRegistration(supabase, leadId).then((row) => {
+      if (!cancelled) setFetchedCahetRegistration(row);
+    });
+    return () => { cancelled = true; };
+  }, [open, leadId, cahetRegistrationProp]);
+
   // Pull sessions whenever the form opens so the select has data + the active
   // session is preselected as default for the offer.
   useEffect(() => {
@@ -295,14 +309,14 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
 
   // Net Year-1 fee = gross Year-1 fee minus any year_1 waivers already
   // staged in the pre-issuance waiver list. The loan-letter token fee
-  // defaults to 10% of this net figure.
+  // defaults to 25% of this net figure.
   const netFirstYearFee = Math.max(0, firstYearFee - preWaiverTotalForTerm("year_1"));
 
-  // Token fee defaults to 10% of net Year-1. Admissions can lower it while
+  // Token fee defaults to 25% of net Year-1. Admissions can lower it while
   // issuing the offer, but never below ₹5,000.
   const tokenFloor = 5000;
   const tokenDefault = netFirstYearFee > 0
-    ? Math.max(Math.round(netFirstYearFee * 0.10), tokenFloor)
+    ? Math.max(Math.round(netFirstYearFee * 0.25), tokenFloor)
     : 0;
 
   // Whenever the net Year-1 fee changes (waiver added/removed), always
@@ -726,6 +740,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
         <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-[minmax(360px,420px)_1fr]">
           {/* ─── Left: list + new-offer form ─── */}
           <div className="overflow-y-auto px-5 py-4 space-y-4 border-b md:border-b-0 md:border-r border-border">
+          <CahetRegistrationDetails registration={cahetRegistration} />
           {!showForm && (
             <Button onClick={() => setShowForm(true)} size="sm" className="gap-1.5"><Plus className="h-4 w-4" />New Offer</Button>
           )}
@@ -966,7 +981,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                   </div>
                 )}
 
-                {/* Token fee — defaults to 10% of Year-1, editable but floored at
+                {/* Token fee — defaults to 25% of Year-1, editable but floored at
                     ₹5,000. The pencil icon flips edit mode;
                     the field is read-only otherwise to discourage casual changes. */}
                 <div>
@@ -1004,7 +1019,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                         </>
                       ) : (
                         <>
-                          Default = 10% of net Year-1 fee (₹{netFirstYearFee.toLocaleString("en-IN")}) = ₹{tokenDefault.toLocaleString("en-IN")}.
+                          Default = 25% of net Year-1 fee (₹{netFirstYearFee.toLocaleString("en-IN")}) = ₹{tokenDefault.toLocaleString("en-IN")}.
                           {firstYearFee !== netFirstYearFee && (
                             <> Gross ₹{firstYearFee.toLocaleString("en-IN")} minus ₹{(firstYearFee - netFirstYearFee).toLocaleString("en-IN")} Year-1 waiver.</>
                           )}
@@ -1031,7 +1046,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                     ))}
                   </select>
                   <p className="mt-1 text-[10px] text-muted-foreground/70">
-                    Locks the fee structure for this offer. Token amount defaults to 10% of first-year fee from this session's structure.
+                    Locks the fee structure for this offer. Token amount defaults to 25% of first-year fee from this session's structure.
                     {!isSuperAdmin && " Only super admin can pick a non-active session."}
                   </p>
                 </div>
