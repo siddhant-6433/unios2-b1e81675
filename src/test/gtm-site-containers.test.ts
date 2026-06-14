@@ -8,6 +8,8 @@ describe("site GTM container mapping", () => {
   it("maps public marketing hostnames to their site-level GTM containers", () => {
     expect(indexHtml).toContain('"nimt.ac.in": "GTM-NHC65VZ"');
     expect(indexHtml).toContain('"www.nimt.ac.in": "GTM-NHC65VZ"');
+    expect(indexHtml).toContain('"uni.nimt.ac.in": "GTM-NHC65VZ"');
+    expect(indexHtml).toContain('"apply.nimt.ac.in": "GTM-NHC65VZ"');
     expect(indexHtml).toContain('"miraischool.in": "GTM-WL5MTC3D"');
     expect(indexHtml).toContain('"www.miraischool.in": "GTM-WL5MTC3D"');
     expect(indexHtml).toContain('"school.nimt.ac.in": "GTM-M9J8RJ7V"');
@@ -15,10 +17,9 @@ describe("site GTM container mapping", () => {
     expect(indexHtml).toContain('"www.seralislab.com": "GTM-NN2LQW8T"');
   });
 
-  it("keeps GTM host-gated instead of loading a marketing container globally", () => {
+  it("keeps GTM host-gated instead of loading a marketing container on unknown hosts", () => {
     expect(indexHtml).toContain("var i = containers[host];");
     expect(indexHtml).toContain("if (!i) return;");
-    expect(indexHtml).not.toContain('"uni.nimt.ac.in": "GTM-');
   });
 
   it("loads brand GTM containers on student-facing uni.nimt.ac.in application paths only", () => {
