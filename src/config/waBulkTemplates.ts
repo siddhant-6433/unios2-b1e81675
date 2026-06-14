@@ -96,6 +96,23 @@ export const WA_BULK_TEMPLATES: WaBulkTemplate[] = [
     ],
   },
   {
+    key: "bsc_nursing_cnet_deadline",
+    metaTemplateName: "bsc_nursing_cnet_deadline_v1",
+    label: "B.Sc Nursing CNET Deadline",
+    description: "Tells B.Sc Nursing applicants to complete both NIMT application and ABVMUP CNET registration by the entered deadline.",
+    expectedBody: "{{1}} deadline variable",
+    requiredApprovedBodyPattern: /\{\{\s*1\s*\}\}/,
+    blockedApprovedBodyPattern: /5(?:th)?\s+June\s+2026/i,
+    params: [
+      {
+        name: "deadline_date",
+        source: "static",
+        placeholder: effectiveCahetWhatsAppDeadlineText().bodyDate,
+        help: "This exact value fills the approved Meta template's deadline variable for every recipient.",
+      },
+    ],
+  },
+  {
     key: "application_received",
     metaTemplateName: "application_submitted",
     label: "Application Received",

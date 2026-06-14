@@ -21,6 +21,7 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   application_received: { name: "application_submitted", params: ["student_name", "application_id"] },
   fee_reminder: { name: "fee_reminder", params: ["student_name", "amount", "due_date"] },
   bpt_bmrit_cahet_deadline: { name: "bpt_bmrit_cahet_deadline_v2", params: ["deadline_date"] },
+  bsc_nursing_cnet_deadline: { name: "bsc_nursing_cnet_deadline_v1", params: ["deadline_date"] },
   course_details: { name: "course_details", params: ["student_name", "course_name"] },
   counsellor_lead_assigned: { name: "counsellor_lead_assigned", params: ["counsellor_name", "lead_name", "lead_phone_last4", "sla_hours"] },
   counsellor_sla_warning: { name: "counsellor_sla_warning", params: ["lead_name", "hours_remaining"] },
@@ -28,6 +29,11 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   counsellor_visit_confirmation: { name: "counsellor_visit_confirmation", params: ["lead_name", "visit_date", "campus_name"] },
   counsellor_followup_overdue: { name: "counsellor_followup_overdue", params: ["lead_name", "followup_date"] },
 };
+
+const DEADLINE_TEMPLATE_KEYS = new Set([
+  "bpt_bmrit_cahet_deadline",
+  "bsc_nursing_cnet_deadline",
+]);
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -99,7 +105,7 @@ function validateCampaignStaticParams(
 }
 
 async function validateApprovedTemplateBeforeSend(templateKey: string, metaTemplateName: string) {
-  if (templateKey !== "bpt_bmrit_cahet_deadline") return null;
+  if (!DEADLINE_TEMPLATE_KEYS.has(templateKey)) return null;
 
   const { body, error } = await fetchApprovedTemplateBody(metaTemplateName);
   if (error) return error;

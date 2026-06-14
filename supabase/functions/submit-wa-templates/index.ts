@@ -54,6 +54,23 @@ For any details please call 9555192192
 7428499849`;
 }
 
+function bscNursingCnetDeadlineMessageWithVariable(): string {
+  return `Dear Applicant,
+
+This is to inform you that for admission to *B.Sc Nursing* at NIMT Educational Institutions, the last date for Application Submission is *{{1}}*
+
+For admission Candidates *MUST*
+
+1. Complete College Application Online at https://apply.nimt.ac.in
+2. Complete the ABVMUP CNET registration as required for B.Sc Nursing admission.
+
+Please note both steps are mandatory by {{1}} to be included in the admission process for session 2026-27.
+
+For any details please call 9555192192
+9667691872
+7428499849`;
+}
+
 // Each template has BODY (parameterised) + optionally BUTTONS.
 // Button URLs follow Meta's rules: full URL prefix + {{1}} suffix.
 // For PDF receipts (no fixed prefix possible) we use a static button to
@@ -418,6 +435,18 @@ const TEMPLATES = [
       {
         type: "BODY",
         text: cahetDeadlineMessageWithVariable(),
+        example: { body_text: [["14th June 2026, 11:59 PM"]] },
+      },
+    ],
+  },
+  {
+    name: "bsc_nursing_cnet_deadline_v1",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: bscNursingCnetDeadlineMessageWithVariable(),
         example: { body_text: [["14th June 2026, 11:59 PM"]] },
       },
     ],

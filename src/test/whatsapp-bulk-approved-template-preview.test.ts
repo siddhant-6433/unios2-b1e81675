@@ -18,15 +18,18 @@ describe("bulk WhatsApp approved-template safety", () => {
   it("maps internal template keys to the exact Meta template name used at send time", () => {
     expect(bulkTemplates).toContain('metaTemplateName: "application_submitted"');
     expect(bulkTemplates).toContain('metaTemplateName: "bpt_bmrit_cahet_deadline_v2"');
+    expect(bulkTemplates).toContain('metaTemplateName: "bsc_nursing_cnet_deadline_v1"');
     expect(bulkTemplates).toContain('name: "deadline_date"');
     expect(bulkTemplates).toContain("requiredApprovedBodyPattern");
     expect(bulkTemplates).toContain("blockedApprovedBodyPattern");
   });
 
-  it("blocks the CAHET deadline campaign if Meta still has old approved copy", () => {
+  it("blocks deadline campaigns if Meta still has old approved copy", () => {
     expect(whatsappCampaignSender).toContain("validateApprovedTemplateBeforeSend");
     expect(whatsappCampaignSender).toContain("validateCampaignStaticParams");
     expect(whatsappCampaignSender).toContain("bpt_bmrit_cahet_deadline_v2");
+    expect(whatsappCampaignSender).toContain("bsc_nursing_cnet_deadline_v1");
+    expect(whatsappCampaignSender).toContain("DEADLINE_TEMPLATE_KEYS");
     expect(whatsappCampaignSender).toContain("deadline_date");
     expect(whatsappCampaignSender).toContain("fetchApprovedTemplateBody");
     expect(whatsappCampaignSender).toContain("old 5 June deadline");
