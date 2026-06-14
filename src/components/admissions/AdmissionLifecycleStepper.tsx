@@ -262,7 +262,7 @@ function computeNextAction(p: LifecycleProps, currentKey: string | undefined, al
       return {
         Icon: Coins,
         title: "Awaiting token-fee payment",
-        body: "Offer was sent. Once the applicant pays the token fee (10% of year-1), a Pre-Admission Number is auto-issued.",
+        body: "Offer was sent. Once the applicant pays the token fee, a Pre-Admission Number is auto-issued.",
         tone: "border-amber-200 bg-amber-50/60", iconCls: "text-amber-600", titleCls: "text-amber-900 dark:text-amber-200",
       };
     case "admitted":

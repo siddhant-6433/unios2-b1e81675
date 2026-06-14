@@ -91,6 +91,11 @@ const fmtDateShort = (d?: string | null) => {
 
 const RUP = "Rs. ";
 
+const appIdFromNotes = (notes?: unknown): string | null => {
+  const match = String(notes || "").match(/APP-\d{2}-[A-Z0-9]+/i);
+  return match?.[0]?.toUpperCase() || null;
+};
+
 interface Branding {
   slug?: string | null;
   name: string;
@@ -309,14 +314,26 @@ Deno.serve(async (req) => {
     if (app.lead_id) {
       const { data: lp } = await admin
         .from("lead_payments")
-        .select("id, receipt_no, amount, payment_mode, gateway, transaction_ref, payment_date, created_at, status")
+        .select("id, receipt_no, amount, payment_mode, gateway, transaction_ref, payment_date, created_at, status, application_id, notes")
         .eq("lead_id", app.lead_id)
         .eq("type", "application_fee")
         .eq("status", "confirmed")
+        .eq("application_id", app.application_id)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
       payment = lp || null;
+    }
+    if (!payment && app.lead_id) {
+      const { data: rows } = await admin
+        .from("lead_payments")
+        .select("id, receipt_no, amount, payment_mode, gateway, transaction_ref, payment_date, created_at, status, application_id, notes")
+        .eq("lead_id", app.lead_id)
+        .eq("type", "application_fee")
+        .eq("status", "confirmed")
+        .order("created_at", { ascending: false })
+        .limit(10);
+      payment = (rows || []).find((row: any) => appIdFromNotes(row.notes) === app.application_id) || null;
     }
     if (!payment && app.payment_status === "paid") {
       payment = {

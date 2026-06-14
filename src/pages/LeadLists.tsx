@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -58,6 +59,7 @@ const CAMPAIGN_STATUS_BADGE: Record<CampaignQueueItem["status"], string> = {
 
 export default function LeadLists() {
   const { toast } = useToast();
+  const { profile } = useAuth();
   const [lists, setLists] = useState<LeadList[]>([]);
   const [loading, setLoading] = useState(true);
   const [importOpen, setImportOpen] = useState(false);
@@ -260,6 +262,9 @@ export default function LeadLists() {
         list_id: waList.id,
         total_recipients: valid.length,
         static_params: staticParamsToSend,
+        created_by: profile?.id || null,
+        next_attempt_at: new Date().toISOString(),
+        worker_locked_at: null,
         status: "pending",
       })
       .select("id")
@@ -285,17 +290,13 @@ export default function LeadLists() {
       if (error) console.error("Recipient insert failed:", error);
     }
 
-    const { error: invokeErr } = await supabase.functions.invoke("whatsapp-campaign-send", {
-      body: { campaign_id: campaignId },
-    });
-
     setWaSending(false);
     setWaOpen(false);
-    if (invokeErr) {
-      toast({ title: "Send started but errored", description: invokeErr.message, variant: "destructive" });
-    } else {
-      toast({ title: "WhatsApp campaign sent", description: `Dispatched to ${valid.length} lead${valid.length === 1 ? "" : "s"}.` });
-    }
+    toast({
+      title: "WhatsApp campaign queued",
+      description: `${valid.length} recipients queued. You can close this screen; progress is tracked in Marketing.`,
+    });
+    supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1 } }).catch(() => {});
     await fetchLists();
     await fetchCampaignQueue();
   };
@@ -340,6 +341,9 @@ export default function LeadLists() {
         custom_subject: emailMode === "custom" ? emailSubject.trim() : null,
         custom_body: emailMode === "custom" ? emailBody : null,
         total_recipients: valid.length,
+        created_by: profile?.id || null,
+        next_attempt_at: new Date().toISOString(),
+        worker_locked_at: null,
         status: "pending",
       })
       .select("id")
@@ -363,17 +367,13 @@ export default function LeadLists() {
       if (error) console.error("Email recipient insert failed:", error);
     }
 
-    const { error: invokeErr } = await supabase.functions.invoke("email-campaign-send", {
-      body: { campaign_id: campaignId },
-    });
-
     setEmailSending(false);
     setEmailOpen(false);
-    if (invokeErr) {
-      toast({ title: "Send started but errored", description: invokeErr.message, variant: "destructive" });
-    } else {
-      toast({ title: "Email campaign sent", description: `Dispatched to ${valid.length} lead${valid.length === 1 ? "" : "s"}.` });
-    }
+    toast({
+      title: "Email campaign queued",
+      description: `${valid.length} recipients queued. You can close this screen; progress is tracked in Marketing.`,
+    });
+    supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1 } }).catch(() => {});
     await fetchLists();
     await fetchCampaignQueue();
   };

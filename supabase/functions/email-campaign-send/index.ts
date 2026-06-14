@@ -10,29 +10,39 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "authorization, x-client-info, apikey, content-type, x-cron-secret, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function syncCampaignCounts(admin: any, campaignId: string) {
-  const { count: sentCount } = await admin
-    .from("email_campaign_recipients")
-    .select("id", { count: "exact", head: true })
-    .eq("campaign_id", campaignId)
-    .eq("status", "sent");
-  const { count: failedCount } = await admin
-    .from("email_campaign_recipients")
-    .select("id", { count: "exact", head: true })
-    .eq("campaign_id", campaignId)
-    .eq("status", "failed");
+  const [
+    { count: totalSent },
+    { count: totalFailed },
+    { count: pendingCount },
+  ] = await Promise.all([
+    admin
+      .from("email_campaign_recipients")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignId)
+      .eq("status", "sent"),
+    admin
+      .from("email_campaign_recipients")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignId)
+      .in("status", ["failed", "skipped"]),
+    admin
+      .from("email_campaign_recipients")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignId)
+      .eq("status", "pending"),
+  ]);
 
-  await admin.from("email_campaigns").update({
-    sent_count: sentCount || 0,
-    failed_count: failedCount || 0,
-  }).eq("id", campaignId);
-
-  return { sent_count: sentCount || 0, failed_count: failedCount || 0 };
+  return {
+    totalSent: totalSent || 0,
+    totalFailed: totalFailed || 0,
+    pendingCount: pendingCount || 0,
+  };
 }
 
 type LeadVars = {
@@ -68,24 +78,7 @@ Deno.serve(async (req) => {
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // Validate user auth (campaigns are user-initiated).
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user }, error: authError } = await userClient.auth.getUser();
-    if (authError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const { campaign_id } = await req.json();
+    const { campaign_id, batch_size } = await req.json();
     if (!campaign_id) {
       return new Response(JSON.stringify({ error: "campaign_id is required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -93,6 +86,32 @@ Deno.serve(async (req) => {
     }
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
+    const batchSize = Math.max(1, Math.min(Number(batch_size) || 50, 100));
+
+    const authHeader = req.headers.get("Authorization") || "";
+    const expectedCronSecret = Deno.env.get("CRON_SECRET") || "";
+    const isTrustedWorker =
+      (!!expectedCronSecret && req.headers.get("x-cron-secret") === expectedCronSecret) ||
+      authHeader === `Bearer ${serviceRoleKey}`;
+
+    let actorUserId: string | null = null;
+    if (!isTrustedWorker) {
+      if (!authHeader) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: { user }, error: authError } = await userClient.auth.getUser();
+      if (authError || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      actorUserId = user.id;
+    }
 
     const { data: campaign, error: campaignError } = await admin
       .from("email_campaigns")
@@ -106,16 +125,34 @@ Deno.serve(async (req) => {
     }
 
     if ((campaign as any).status === "paused" || (campaign as any).status === "terminated") {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          paused: (campaign as any).status === "paused",
-          terminated: (campaign as any).status === "terminated",
-          status: (campaign as any).status,
-          message: `Campaign is ${(campaign as any).status}.`,
-        }),
-        { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({
+        success: true,
+        done: true,
+        paused: (campaign as any).status === "paused",
+        terminated: (campaign as any).status === "terminated",
+        message: `Campaign is ${(campaign as any).status}`,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    let actorProfileId: string | null = (campaign as any).created_by || null;
+    if (!actorUserId && actorProfileId) {
+      const { data: ownerProfile } = await admin
+        .from("profiles")
+        .select("user_id")
+        .eq("id", actorProfileId)
+        .maybeSingle();
+      actorUserId = (ownerProfile as any)?.user_id || null;
+    }
+    if (!actorProfileId && actorUserId) {
+      const { data: ownerProfile } = await admin
+        .from("profiles")
+        .select("id")
+        .eq("user_id", actorUserId)
+        .maybeSingle();
+      actorProfileId = (ownerProfile as any)?.id || null;
     }
 
     // Resolve template (slug → subject/body) once.
@@ -150,7 +187,8 @@ Deno.serve(async (req) => {
       .from("email_campaign_recipients")
       .select("id, campaign_id, lead_id, to_email, status, leads(name, stage, courses(name), campuses(name))")
       .eq("campaign_id", campaign_id)
-      .eq("status", "pending");
+      .eq("status", "pending")
+      .limit(batchSize);
 
     if (recError) {
       console.error("Failed to fetch recipients:", recError);
@@ -165,12 +203,11 @@ Deno.serve(async (req) => {
         .from("email_campaigns")
         .update({ status: "completed", completed_at: new Date().toISOString() })
         .eq("id", campaign_id);
-      return new Response(JSON.stringify({ success: true, sent: 0, failed: 0, message: "No pending recipients" }), {
+      return new Response(JSON.stringify({ success: true, sent: 0, failed: 0, total_sent: 0, total_failed: 0, pending: 0, done: true, message: "No pending recipients" }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const { data: profile } = await admin.from("profiles").select("id").eq("user_id", user.id).single();
     const fromEmail = Deno.env.get("EMAIL_FROM") || "admissions@nimt.ac.in";
     const trackingBaseUrl = `${supabaseUrl}/functions/v1/track-engagement`;
 
@@ -184,7 +221,11 @@ Deno.serve(async (req) => {
         .single();
 
       if (liveCampaign?.status === "paused") {
-        const totals = await syncCampaignCounts(admin, campaign_id);
+        const counts = await syncCampaignCounts(admin, campaign_id);
+        await admin.from("email_campaigns").update({
+          sent_count: counts.totalSent,
+          failed_count: counts.totalFailed,
+        }).eq("id", campaign_id);
         return new Response(
           JSON.stringify({
             success: true,
@@ -192,8 +233,10 @@ Deno.serve(async (req) => {
             sent,
             failed,
             skipped,
-            total_sent: totals.sent_count,
-            total_failed: totals.failed_count,
+            total_sent: counts.totalSent,
+            total_failed: counts.totalFailed,
+            pending: counts.pendingCount,
+            done: false,
           }),
           { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
@@ -204,7 +247,11 @@ Deno.serve(async (req) => {
           .update({ status: "canceled", error_message: "Campaign terminated before send" })
           .eq("campaign_id", campaign_id)
           .eq("status", "pending");
-        const totals = await syncCampaignCounts(admin, campaign_id);
+        const counts = await syncCampaignCounts(admin, campaign_id);
+        await admin.from("email_campaigns").update({
+          sent_count: counts.totalSent,
+          failed_count: counts.totalFailed,
+        }).eq("id", campaign_id);
         return new Response(
           JSON.stringify({
             success: true,
@@ -212,8 +259,10 @@ Deno.serve(async (req) => {
             sent,
             failed,
             skipped,
-            total_sent: totals.sent_count,
-            total_failed: totals.failed_count,
+            total_sent: counts.totalSent,
+            total_failed: counts.totalFailed,
+            pending: counts.pendingCount,
+            done: true,
           }),
           { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
@@ -266,13 +315,13 @@ Deno.serve(async (req) => {
             body_html: bodyHtml,
             status: "sent",
             provider_id: result?.id || null,
-            sent_by: profile?.id || null,
+            sent_by: actorProfileId,
             sent_at: new Date().toISOString(),
           });
 
           await admin.from("lead_activities").insert({
             lead_id: r.lead_id,
-            user_id: user.id,
+            user_id: actorProfileId,
             type: "email",
             description: `Email campaign "${(campaign as any).name}" — ${subject}`,
           });
@@ -296,8 +345,7 @@ Deno.serve(async (req) => {
       await delay(250);
     }
 
-    const totals = await syncCampaignCounts(admin, campaign_id);
-
+    const counts = await syncCampaignCounts(admin, campaign_id);
     const { data: finalCampaign } = await admin
       .from("email_campaigns")
       .select("status")
@@ -305,6 +353,10 @@ Deno.serve(async (req) => {
       .single();
 
     if (finalCampaign?.status === "paused" || finalCampaign?.status === "terminated") {
+      await admin.from("email_campaigns").update({
+        sent_count: counts.totalSent,
+        failed_count: counts.totalFailed,
+      }).eq("id", campaign_id);
       return new Response(
         JSON.stringify({
           success: true,
@@ -314,22 +366,35 @@ Deno.serve(async (req) => {
           sent,
           failed,
           skipped,
-          total_sent: totals.sent_count,
-          total_failed: totals.failed_count,
+          total_sent: counts.totalSent,
+          total_failed: counts.totalFailed,
+          pending: counts.pendingCount,
+          done: finalCampaign.status === "terminated",
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
+    const done = counts.pendingCount === 0;
+
     await admin.from("email_campaigns").update({
-      sent_count: totals.sent_count,
-      failed_count: totals.failed_count,
-      status: "completed",
-      completed_at: new Date().toISOString(),
+      sent_count: counts.totalSent,
+      failed_count: counts.totalFailed,
+      status: done ? "completed" : "sending",
+      completed_at: done ? new Date().toISOString() : null,
     }).eq("id", campaign_id);
 
     return new Response(
-      JSON.stringify({ success: true, sent, failed, skipped, total_sent: totals.sent_count, total_failed: totals.failed_count }),
+      JSON.stringify({
+        success: true,
+        sent,
+        failed,
+        skipped,
+        total_sent: counts.totalSent,
+        total_failed: counts.totalFailed,
+        pending: counts.pendingCount,
+        done,
+      }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err: any) {

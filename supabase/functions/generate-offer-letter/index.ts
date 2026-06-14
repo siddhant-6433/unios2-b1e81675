@@ -392,7 +392,7 @@ function drawFeeLedger(ctx: Ctx, rows: LedgerRow[]) {
 // ───────────────────────── builder ─────────────────────────
 
 interface BuildOpts {
-  offer: { net_fee: number; total_fee: number; scholarship_amount: number | null; acceptance_deadline: string | null; created_at: string };
+  offer: { net_fee: number; total_fee: number; scholarship_amount: number | null; acceptance_deadline: string | null; created_at: string; admission_mode?: string | null; entrance_exam_name?: string | null };
   lead: { name: string; phone: string | null; email: string | null; application_id: string | null; pre_admission_no: string | null };
   course: { name: string; code?: string | null; duration_years?: number | null } | null;
   campus: { name: string; address?: string | null } | null;
@@ -408,12 +408,25 @@ interface BuildOpts {
   // deduction rows in the fee table; the displayed Net Offer Fee is
   // recomputed to subtract these from the post-scholarship total.
   waivers: { term: string; amount: number }[];
+  cahetRegistration?: { registration_no: string; document_url: string | null; notes: string | null; registered_at: string | null } | null;
 }
 
 function isDaottCourse(course: BuildOpts["course"]) {
   const code = String(course?.code || "").toUpperCase();
   const name = String(course?.name || "").toLowerCase();
   return code.includes("DAOTT") || code.includes("DOTT") || /ana?esthesia.*operation theatre/.test(name);
+}
+
+function isBptOrBmritCourse(course: BuildOpts["course"]) {
+  const code = String(course?.code || "").toLowerCase();
+  const name = String(course?.name || "").toLowerCase();
+  return code.includes("bpt") ||
+    name.includes("bpt") ||
+    name.includes("physiotherapy") ||
+    code.includes("bmrit") ||
+    name.includes("bmrit") ||
+    (name.includes("radiology") && name.includes("imaging")) ||
+    (name.includes("radiology") && name.includes("b.sc"));
 }
 
 async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
@@ -437,6 +450,7 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
 
   await newPage(ctx);
   const isDaott = isDaottCourse(opts.course);
+  const isCahetRoute = String(opts.offer.entrance_exam_name || "").toLowerCase().includes("cahet");
 
   // ── Date + greeting (compact — single line each) ────────────────────────
   ctx.page.drawText(`Date: ${fmtDate(opts.offer.created_at)}`, {
@@ -474,6 +488,19 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
     const w = ctx.width - ctx.margin * 2;
     drawCell(ctx, ctx.margin, ctx.y, w, 28, "Campus Address", opts.campus.address, { maxLines: 2 });
     ctx.y -= 28;
+  }
+
+  if (opts.cahetRegistration && (isBptOrBmritCourse(opts.course) || isCahetRoute)) {
+    ctx.y -= 4;
+    drawKVGrid(ctx, [
+      { label: "CAHET Status", value: "Registered" },
+      { label: "CAHET Registration No.", value: opts.cahetRegistration.registration_no || "-" },
+      { label: "Registered On", value: fmtDate(opts.cahetRegistration.registered_at) },
+      { label: "Proof", value: opts.cahetRegistration.document_url ? "Uploaded" : "Not attached" },
+    ]);
+    if (opts.cahetRegistration.notes) {
+      drawKVGrid(ctx, [{ label: "CAHET Notes", value: opts.cahetRegistration.notes }], 26, 1);
+    }
   }
 
   ctx.y -= 6;
@@ -665,7 +692,7 @@ Deno.serve(async (req) => {
       .from("offer_letters")
       .select(`
         id, total_fee, scholarship_amount, net_fee, approval_status,
-        token_fee_amount, acceptance_deadline, created_at,
+        token_fee_amount, acceptance_deadline, created_at, admission_mode, entrance_exam_name,
         lead_id, course_id, campus_id, session_id,
         leads:lead_id ( id, name, phone, email, application_id, pre_admission_no, token_amount ),
         courses:course_id ( name, code, duration_years ),
@@ -749,8 +776,14 @@ Deno.serve(async (req) => {
       amount: Number(w.amount || 0),
     }));
 
+    const { data: cahetRegistration } = await admin
+      .from("cahet_registrations")
+      .select("registration_no, document_url, notes, registered_at")
+      .eq("lead_id", offer.lead_id)
+      .maybeSingle();
+
     // Token fee on the PDF: this is the amount the candidate must pay before
-    // downloading the education-loan support letter — i.e. 10% of the
+    // downloading the education-loan support letter — i.e. 25% of the
     // post-scholarship + post-waiver Year-1 fee, floored at ₹5,000.
     //
     //   1. If the offer carries an explicit token_fee_amount (set when the
@@ -769,7 +802,7 @@ Deno.serve(async (req) => {
         .reduce((s, w) => s + Number(w.amount || 0), 0);
       const postY1 = Math.max(0, y1Total - scholarship - y1Waivers);
       tokenAmount = postY1 > 0
-        ? Math.max(Math.round(postY1 * 0.10), 5000)
+        ? Math.max(Math.round(postY1 * 0.25), 5000)
         : Number(lead?.token_amount || 0);
     }
 
@@ -785,6 +818,7 @@ Deno.serve(async (req) => {
       sessionName,
       applicationId,
       waivers,
+      cahetRegistration: cahetRegistration || null,
     });
 
     const path = `offer-letters/${offer.lead_id}/${offer.id}.pdf`;

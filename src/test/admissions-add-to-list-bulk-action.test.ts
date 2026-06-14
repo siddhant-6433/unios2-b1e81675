@@ -18,4 +18,17 @@ describe("Admissions selected-lead list action", () => {
     expect(admissions).toContain("ignoreDuplicates: true");
     expect(admissions).toContain('onConflict: "list_id,lead_id"');
   });
+
+  it("can add all filtered leads to a list without selecting every page", () => {
+    expect(admissions).toContain('const [listScope, setListScope] = useState<"selected" | "filtered">("selected")');
+    expect(admissions).toContain('fetchLeadIdsForTransfer({ mode: "all" })');
+    expect(admissions).toContain("All filtered");
+    expect(admissions).toContain('source: listScope === "filtered" ? "filter" : "manual"');
+  });
+
+  it("renders the selected-leads action bar near the active lead surface", () => {
+    expect(admissions).toContain("const bulkActionBar = selectedIds.size > 0 ?");
+    expect(admissions).toContain("{bulkActionBar && <div className=\"mb-3\">{bulkActionBar}</div>}");
+    expect(admissions).toContain("{bulkActionBar}");
+  });
 });

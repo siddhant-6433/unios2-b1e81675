@@ -21,6 +21,8 @@ import {
   ExternalLink, RefreshCw, FileText, Image as ImageIcon, GraduationCap,
 } from "lucide-react";
 import type { PreviewDoc } from "@/components/applicant/ApplicationPreview";
+import { CahetRegistrationDetails } from "@/components/leads/CahetRegistrationDetails";
+import type { CahetRegistrationDetails as CahetRegistrationDetailsType } from "@/lib/cahet";
 
 type DocStatus = "pending" | "verified" | "rejected";
 
@@ -53,9 +55,10 @@ interface Props {
    *  has been decided so operators aren't prompted to re-review docs. */
   readOnly?: boolean;
   readOnlyReason?: string;
+  cahetRegistration?: CahetRegistrationDetailsType | null;
 }
 
-export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnly, readOnlyReason }: Props) {
+export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnly, readOnlyReason, cahetRegistration }: Props) {
   const [activeIdx, setActiveIdx] = useState(0);
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
@@ -130,7 +133,7 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
             </span>
           </h3>
           <p className="text-[11px] text-muted-foreground">
-            Approve, reject (with reason), or request a re-upload. The applicant gets the rejection note via WhatsApp.
+            Approve valid files or reject with a reason. Rejected files stay locked here until the applicant uploads a replacement.
           </p>
         </div>
         <div className="flex items-center gap-1.5 text-[11px]">
@@ -169,6 +172,11 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
               </p>
             )}
           </div>
+        </div>
+      )}
+      {cahetRegistration && (
+        <div className="px-4 py-2.5 border-b border-border bg-emerald-50/50 dark:bg-emerald-950/20">
+          <CahetRegistrationDetails registration={cahetRegistration} compact />
         </div>
       )}
 
@@ -229,6 +237,21 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
                 )}
               </div>
             </div>
+          ) : activeStatus === "rejected" ? (
+            <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2.5 dark:bg-rose-950/20 dark:border-rose-900/40">
+              <div className="flex items-center gap-2">
+                <XCircle className="h-4 w-4 text-rose-600" />
+                <p className="text-xs font-semibold text-rose-800 dark:text-rose-200">Rejected</p>
+              </div>
+              <p className="text-[11px] text-rose-700/90 dark:text-rose-300/80 mt-1 leading-snug">
+                Waiting for the applicant to re-upload this document from the apply portal. Review actions will appear on the replacement file.
+              </p>
+              {activeReview?.reviewed_at && (
+                <p className="text-[10px] text-rose-700/70 dark:text-rose-300/70 mt-1.5">
+                  {new Date(activeReview.reviewed_at).toLocaleString()}
+                </p>
+              )}
+            </div>
           ) : readOnly ? (
             <div className="rounded-lg bg-muted/40 border border-border px-3 py-2.5">
               <p className="text-xs font-semibold text-foreground">
@@ -242,7 +265,7 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
             <>
               <div>
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">
-                  Notes {activeStatus === "rejected" || notes ? "" : "(required for rejection)"}
+                  Notes {notes ? "" : "(required for rejection)"}
                 </label>
                 <Textarea
                   id="doc-reject-notes"
@@ -271,7 +294,7 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
                   disabled={busy}
                 >
                   <XCircle className="h-3.5 w-3.5 mr-1.5" />
-                  {activeStatus === "rejected" ? "Update rejection" : "Reject — request re-upload"}
+                  Reject — request re-upload
                 </Button>
               </div>
             </>

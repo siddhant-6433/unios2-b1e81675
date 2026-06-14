@@ -50,6 +50,7 @@ const Finance              = lazy(() => import("./pages/Finance"));
 const Login                = lazy(() => import("./pages/Login"));
 const ResetPassword        = lazy(() => import("./pages/ResetPassword"));
 const AdminPanel           = lazy(() => import("./pages/AdminPanel"));
+const IdCardCenter         = lazy(() => import("./pages/IdCardCenter"));
 const ApplyPortal          = lazy(() => import("./pages/ApplyPortal"));
 const Consultants          = lazy(() => import("./pages/Consultants"));
 const AcademicPartners     = lazy(() => import("./pages/AcademicPartners"));
@@ -278,6 +279,7 @@ const App = () => (
 
                       {/* Admin — user_management:view */}
                       <Route path="/admin" element={<RequirePermission module="user_management" action="view"><AdminPanel /></RequirePermission>} />
+                      <Route path="/id-card-center" element={<IdCardCenter />} />
                       <Route path="/settings" element={<RequirePermission module="user_management" action="view"><Settings /></RequirePermission>} />
 
                       {/* Comms */}

@@ -251,6 +251,7 @@ const Admissions = () => {
   const [showBulkWhatsApp, setShowBulkWhatsApp] = useState(false);
   const [showAddToList, setShowAddToList] = useState(false);
   const [listMode, setListMode] = useState<"new" | "existing">("new");
+  const [listScope, setListScope] = useState<"selected" | "filtered">("selected");
   const [newListName, setNewListName] = useState("");
   const [existingListId, setExistingListId] = useState("");
   const [existingLists, setExistingLists] = useState<ExistingList[]>([]);
@@ -791,6 +792,7 @@ const Admissions = () => {
   };
 
   const openAddToListDialog = async () => {
+    setListScope("selected");
     setShowAddToList(true);
     const { data, error } = await supabase
       .from("lead_lists" as any)
@@ -810,9 +812,6 @@ const Admissions = () => {
   };
 
   const handleAddSelectedToList = async () => {
-    const leadIds = Array.from(selectedIds);
-    if (!leadIds.length) return;
-
     let listId = existingListId;
     let listName = existingLists.find((list) => list.id === existingListId)?.name || "";
 
@@ -825,13 +824,57 @@ const Admissions = () => {
         setSavingList(false);
         return;
       }
+    } else if (!listId) {
+      toast({ title: "Choose a list", description: "Select an existing list first.", variant: "destructive" });
+      setSavingList(false);
+      return;
+    }
+
+    let leadIds: string[] = [];
+    try {
+      leadIds = listScope === "filtered"
+        ? await fetchLeadIdsForTransfer({ mode: "all" })
+        : Array.from(selectedIds);
+    } catch (e: any) {
+      toast({ title: "Could not load filtered leads", description: e?.message || "Try again.", variant: "destructive" });
+      setSavingList(false);
+      return;
+    }
+
+    if (!leadIds.length) {
+      toast({
+        title: "No leads to add",
+        description: listScope === "filtered" ? "The current filters do not match any leads." : "Select at least one lead first.",
+        variant: "destructive",
+      });
+      setSavingList(false);
+      return;
+    }
+
+    if (listMode === "new") {
+      const name = newListName.trim();
 
       const { data: list, error: listErr } = await supabase
         .from("lead_lists" as any)
         .insert({
           name,
-          source: "manual",
-          description: `Saved from Admissions — ${leadIds.length} selected leads`,
+          source: listScope === "filtered" ? "filter" : "manual",
+          filters_snapshot: listScope === "filtered" ? {
+            stageFilter,
+            sourceFilter,
+            sourceFilterMode,
+            leadInstitutionType,
+            courseFilter: debouncedCourseFilter,
+            courseFilterMode,
+            roleFilter,
+            tempFilter,
+            counsellorFilter,
+            selectedCampusId,
+            fromDate,
+            toDate,
+            search: debouncedSearch,
+          } : {},
+          description: `Saved from Admissions — ${leadIds.length} ${listScope === "filtered" ? "filtered" : "selected"} leads`,
           created_by: profile?.id || null,
         })
         .select("id, name")
@@ -845,10 +888,6 @@ const Admissions = () => {
 
       listId = (list as any).id;
       listName = (list as any).name;
-    } else if (!listId) {
-      toast({ title: "Choose a list", description: "Select an existing list first.", variant: "destructive" });
-      setSavingList(false);
-      return;
     }
 
     const members = leadIds.map((lead_id) => ({ list_id: listId, lead_id }));
@@ -877,12 +916,13 @@ const Admissions = () => {
 
     toast({
       title: listMode === "new" ? "List created" : "List updated",
-      description: `"${listName}" — ${leadIds.length} selected lead${leadIds.length === 1 ? "" : "s"} added.`,
+      description: `"${listName}" — ${leadIds.length} ${listScope === "filtered" ? "filtered" : "selected"} lead${leadIds.length === 1 ? "" : "s"} added.`,
     });
     setShowAddToList(false);
     setNewListName("");
     setExistingListId("");
     setListMode("new");
+    setListScope("selected");
     setSelectedIds(new Set());
   };
 
@@ -1242,6 +1282,52 @@ const Admissions = () => {
   }
 
   const selectedLeadNames = Array.from(selectedIds).map(id => leads.find(l => l.id === id)?.name || "").filter(Boolean);
+  const bulkActionBar = selectedIds.size > 0 ? (
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
+      <span className="text-sm font-medium text-foreground">{selectedIds.size} lead{selectedIds.size > 1 ? "s" : ""} selected</span>
+      <div className="ml-auto flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" className="gap-2" onClick={openAddToListDialog}>
+          <ListPlus className="h-4 w-4" /> Add to List
+        </Button>
+        <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowBulkWhatsApp(true)}>
+          <Send className="h-4 w-4" /> WhatsApp
+        </Button>
+        {canTransfer && (
+          <>
+            <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowTransfer(true)}>
+              <ArrowRightLeft className="h-4 w-4" /> Transfer
+            </Button>
+            <Button variant="outline" size="sm" className="gap-2" onClick={async () => {
+              const ids = Array.from(selectedIds);
+              const { error } = await supabase
+                .from("leads")
+                .update({ counsellor_id: null } as any)
+                .in("id", ids);
+              if (error) {
+                toast({ title: "Error", description: error.message, variant: "destructive" });
+              } else {
+                toast({ title: "Moved to bucket", description: `${ids.length} lead${ids.length > 1 ? "s" : ""} unassigned and moved to lead buckets.` });
+                setSelectedIds(new Set());
+                fetchLeads();
+              }
+            }}>
+              <Inbox className="h-4 w-4" /> Move to Bucket
+            </Button>
+          </>
+        )}
+        {isSuperAdmin ? (
+          <Button variant="destructive" size="sm" className="gap-2" onClick={() => setShowDeleteConfirm(true)}>
+            <Trash2 className="h-4 w-4" /> Delete
+          </Button>
+        ) : (
+          <Button variant="outline" size="sm" className="gap-2 text-destructive border-destructive/30 hover:bg-destructive/5" onClick={() => setShowDeleteRequest(true)}>
+            <Flag className="h-4 w-4" /> Request Deletion
+          </Button>
+        )}
+        <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>Clear</Button>
+      </div>
+    </div>
+  ) : null;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -1331,54 +1417,6 @@ const Admissions = () => {
           onResume={(id) => { setResumeDraftId(id); setShowAddLead(true); }}
         />
       </Suspense>
-
-      {/* Bulk action bar */}
-      {selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
-          <span className="text-sm font-medium text-foreground">{selectedIds.size} lead{selectedIds.size > 1 ? "s" : ""} selected</span>
-          <div className="ml-auto flex gap-2">
-            <Button variant="outline" size="sm" className="gap-2" onClick={openAddToListDialog}>
-              <ListPlus className="h-4 w-4" /> Add to List
-            </Button>
-            <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowBulkWhatsApp(true)}>
-              <Send className="h-4 w-4" /> WhatsApp
-            </Button>
-            {canTransfer && (
-              <>
-                <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowTransfer(true)}>
-                  <ArrowRightLeft className="h-4 w-4" /> Transfer
-                </Button>
-                <Button variant="outline" size="sm" className="gap-2" onClick={async () => {
-                  const ids = Array.from(selectedIds);
-                  const { error } = await supabase
-                    .from("leads")
-                    .update({ counsellor_id: null } as any)
-                    .in("id", ids);
-                  if (error) {
-                    toast({ title: "Error", description: error.message, variant: "destructive" });
-                  } else {
-                    toast({ title: "Moved to bucket", description: `${ids.length} lead${ids.length > 1 ? "s" : ""} unassigned and moved to lead buckets.` });
-                    setSelectedIds(new Set());
-                    fetchLeads();
-                  }
-                }}>
-                  <Inbox className="h-4 w-4" /> Move to Bucket
-                </Button>
-              </>
-            )}
-            {isSuperAdmin ? (
-              <Button variant="destructive" size="sm" className="gap-2" onClick={() => setShowDeleteConfirm(true)}>
-                <Trash2 className="h-4 w-4" /> Delete
-              </Button>
-            ) : (
-              <Button variant="outline" size="sm" className="gap-2 text-destructive border-destructive/30 hover:bg-destructive/5" onClick={() => setShowDeleteRequest(true)}>
-                <Flag className="h-4 w-4" /> Request Deletion
-              </Button>
-            )}
-            <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>Clear</Button>
-          </div>
-        </div>
-      )}
 
       {/* Pipelines zone (spine + visit) then the visit action center — all
           hidden during the action-center / counsellor focus view to keep that
@@ -2019,79 +2057,82 @@ const Admissions = () => {
           <PaymentReconciliation />
         </Suspense>
       ) : view === "pipeline" ? (
-        <div className="flex gap-4 overflow-x-auto pb-4 -mx-6 px-6">
-          {STAGES.map((stage) => {
-            const stageLeads = filtered.filter((l) => l.stage === stage);
-            const StageIcon = stageIcons[stage] || FileText;
-            return (
-              <div key={stage} className="min-w-[280px] max-w-[280px] flex-shrink-0">
-                <div className="flex items-center gap-2 mb-3 px-1">
-                  <StageIcon className="h-4 w-4 text-muted-foreground" />
-                  <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">{STAGE_LABELS[stage]}</h3>
-                  <span className="ml-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
-                    {stageLeads.length}
-                  </span>
-                </div>
-                <div className="space-y-2.5">
-                  {stageLeads.map((lead) => (
-                    <Card key={lead.id} className="border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer group relative">
-                      {(isSuperAdmin || canTransfer) && (
-                        <div className="absolute top-3 right-3 z-10" onClick={(e) => e.stopPropagation()}>
-                          <Checkbox
-                            checked={selectedIds.has(lead.id)}
-                            onCheckedChange={() => toggleSelect(lead.id)}
-                            className="h-4 w-4"
-                          />
-                        </div>
-                      )}
-                      <CardContent className="p-4" onClick={() => navigate(`/admissions/${lead.id}`)}>
-                        <div className="flex items-start justify-between">
-                          <div className="pr-6">
-                            <div className="flex items-center gap-1.5">
-                              <h4 className="text-sm font-semibold text-foreground">{lead.name}</h4>
-                              <LeadTemperatureBadge temperature={lead.lead_temperature} score={lead.lead_score} />
-                            </div>
-                            <p className="text-xs text-primary font-medium mt-0.5">{lead.course_name}</p>
-                          </div>
-                          <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                        </div>
-                        <p className="text-[11px] text-muted-foreground mt-1">{lead.campus_name}</p>
-                        <div className="flex items-center gap-3 mt-3 text-[11px] text-muted-foreground">
-                          <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{lead.phone.slice(-4)}</span>
-                          {lead.application_id && <span className="font-mono text-primary/70">{lead.application_id}</span>}
-                          <AppProgressBadge pct={lead.app_completion_pct} paymentStatus={lead.app_payment_status} />
-                        </div>
-                        {(lead.pre_admission_no || lead.admission_no) && (
-                          <div className="mt-2">
-                            {lead.pre_admission_no && !lead.admission_no && (
-                              <Badge variant="outline" className="text-[10px] text-primary border-primary/30">PAN: {lead.pre_admission_no}</Badge>
-                            )}
-                            {lead.admission_no && (
-                              <Badge className="text-[10px] bg-primary text-primary-foreground">AN: {lead.admission_no}</Badge>
-                            )}
+        <div className="space-y-3">
+          {bulkActionBar}
+          <div className="flex gap-4 overflow-x-auto pb-4 -mx-6 px-6">
+            {STAGES.map((stage) => {
+              const stageLeads = filtered.filter((l) => l.stage === stage);
+              const StageIcon = stageIcons[stage] || FileText;
+              return (
+                <div key={stage} className="min-w-[280px] max-w-[280px] flex-shrink-0">
+                  <div className="flex items-center gap-2 mb-3 px-1">
+                    <StageIcon className="h-4 w-4 text-muted-foreground" />
+                    <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">{STAGE_LABELS[stage]}</h3>
+                    <span className="ml-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
+                      {stageLeads.length}
+                    </span>
+                  </div>
+                  <div className="space-y-2.5">
+                    {stageLeads.map((lead) => (
+                      <Card key={lead.id} className="border-border/60 shadow-none hover:shadow-sm transition-all cursor-pointer group relative">
+                        {(isSuperAdmin || canTransfer) && (
+                          <div className="absolute top-3 right-3 z-10" onClick={(e) => e.stopPropagation()}>
+                            <Checkbox
+                              checked={selectedIds.has(lead.id)}
+                              onCheckedChange={() => toggleSelect(lead.id)}
+                              className="h-4 w-4"
+                            />
                           </div>
                         )}
-                        <div className="flex items-center justify-between mt-3 pt-2 border-t border-border/40">
-                          <div className="flex items-center gap-1.5">
-                            <Badge className={`text-[10px] font-medium border-0 ${SOURCE_BADGE_COLORS[lead.source] || "bg-muted"}`}>{SOURCE_LABELS[lead.source] || lead.source}</Badge>
-                            <Badge className={`text-[10px] font-medium border-0 capitalize ${PERSON_ROLE_COLORS[lead.person_role] || "bg-muted"}`}>{lead.person_role}</Badge>
+                        <CardContent className="p-4" onClick={() => navigate(`/admissions/${lead.id}`)}>
+                          <div className="flex items-start justify-between">
+                            <div className="pr-6">
+                              <div className="flex items-center gap-1.5">
+                                <h4 className="text-sm font-semibold text-foreground">{lead.name}</h4>
+                                <LeadTemperatureBadge temperature={lead.lead_temperature} score={lead.lead_score} />
+                              </div>
+                              <p className="text-xs text-primary font-medium mt-0.5">{lead.course_name}</p>
+                            </div>
+                            <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                           </div>
-                          <div className="flex items-center gap-1">
-                            <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary"><Phone className="h-3.5 w-3.5" /></Button>
-                            <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary"><MessageSquare className="h-3.5 w-3.5" /></Button>
+                          <p className="text-[11px] text-muted-foreground mt-1">{lead.campus_name}</p>
+                          <div className="flex items-center gap-3 mt-3 text-[11px] text-muted-foreground">
+                            <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{lead.phone.slice(-4)}</span>
+                            {lead.application_id && <span className="font-mono text-primary/70">{lead.application_id}</span>}
+                            <AppProgressBadge pct={lead.app_completion_pct} paymentStatus={lead.app_payment_status} />
                           </div>
-                        </div>
-                        <p className="text-[10px] text-muted-foreground mt-1">{lead.counsellor_name}</p>
-                      </CardContent>
-                    </Card>
-                  ))}
-                  {stageLeads.length === 0 && (
-                    <div className="rounded-xl border-2 border-dashed border-border p-8 text-center text-xs text-muted-foreground">No leads</div>
-                  )}
+                          {(lead.pre_admission_no || lead.admission_no) && (
+                            <div className="mt-2">
+                              {lead.pre_admission_no && !lead.admission_no && (
+                                <Badge variant="outline" className="text-[10px] text-primary border-primary/30">PAN: {lead.pre_admission_no}</Badge>
+                              )}
+                              {lead.admission_no && (
+                                <Badge className="text-[10px] bg-primary text-primary-foreground">AN: {lead.admission_no}</Badge>
+                              )}
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between mt-3 pt-2 border-t border-border/40">
+                            <div className="flex items-center gap-1.5">
+                              <Badge className={`text-[10px] font-medium border-0 ${SOURCE_BADGE_COLORS[lead.source] || "bg-muted"}`}>{SOURCE_LABELS[lead.source] || lead.source}</Badge>
+                              <Badge className={`text-[10px] font-medium border-0 capitalize ${PERSON_ROLE_COLORS[lead.person_role] || "bg-muted"}`}>{lead.person_role}</Badge>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary"><Phone className="h-3.5 w-3.5" /></Button>
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary"><MessageSquare className="h-3.5 w-3.5" /></Button>
+                            </div>
+                          </div>
+                          <p className="text-[10px] text-muted-foreground mt-1">{lead.counsellor_name}</p>
+                        </CardContent>
+                      </Card>
+                    ))}
+                    {stageLeads.length === 0 && (
+                      <div className="rounded-xl border-2 border-dashed border-border p-8 text-center text-xs text-muted-foreground">No leads</div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       ) : (
         <>
@@ -2115,6 +2156,7 @@ const Admissions = () => {
             </div>
           )}
         </div>
+        {bulkActionBar && <div className="mb-3">{bulkActionBar}</div>}
         <Card className="border-border/60 shadow-none overflow-hidden">
           <CardContent className="p-0">
             <table className="w-full text-sm">
@@ -2280,6 +2322,7 @@ const Admissions = () => {
           setNewListName("");
           setExistingListId("");
           setListMode("new");
+          setListScope("selected");
         }
       }}>
         <DialogContent>
@@ -2288,8 +2331,28 @@ const Admissions = () => {
           </DialogHeader>
           <div className="space-y-4 py-2">
             <p className="text-sm text-muted-foreground">
-              {selectedIds.size} selected lead{selectedIds.size === 1 ? "" : "s"} will be saved to a static list for bulk WhatsApp or email campaigns.
+              {listScope === "filtered"
+                ? `All ${filteredCount.toLocaleString("en-IN")} filtered leads will be saved to a static list for bulk WhatsApp or email campaigns.`
+                : `${selectedIds.size} selected lead${selectedIds.size === 1 ? "" : "s"} will be saved to a static list for bulk WhatsApp or email campaigns.`}
             </p>
+            {filteredCount > selectedIds.size && (
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant={listScope === "selected" ? "default" : "outline"}
+                  onClick={() => setListScope("selected")}
+                >
+                  Selected ({selectedIds.size})
+                </Button>
+                <Button
+                  type="button"
+                  variant={listScope === "filtered" ? "default" : "outline"}
+                  onClick={() => setListScope("filtered")}
+                >
+                  All filtered ({filteredCount.toLocaleString("en-IN")})
+                </Button>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-2">
               <Button
                 type="button"

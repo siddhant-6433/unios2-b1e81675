@@ -46,11 +46,12 @@ interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   leadId: string;
+  applicationId?: string | null;
   defaultType?: string;
   onRecorded?: () => void;
 }
 
-export function OfflinePaymentDialog({ open, onOpenChange, leadId, defaultType, onRecorded }: Props) {
+export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId, defaultType, onRecorded }: Props) {
   const { profile, role } = useAuth();
   const { toast } = useToast();
 
@@ -104,6 +105,7 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, defaultType, 
     // Pack mode-specific context into notes so the receipt + audit trail
     // captures it (we don't want to grow the schema for every mode).
     const noteBits: string[] = [];
+    if (type === "application_fee" && applicationId) noteBits.push(`Application: ${applicationId}`);
     if (mode === "cheque" && bank) noteBits.push(`Bank: ${bank}`);
     if (mode === "bank_transfer" && bank) noteBits.push(`Bank: ${bank}`);
     if (mode === "upi" && wallet) noteBits.push(`Wallet/App: ${wallet}`);
@@ -143,6 +145,7 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, defaultType, 
       gateway:         "offline",
       notes:           notes || null,
       proof_url:       proofUrl,
+      application_id:   type === "application_fee" ? applicationId || null : null,
     }).select("id").maybeSingle();
     setSubmitting(false);
 
@@ -162,7 +165,7 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, defaultType, 
     if (paymentId) {
       const event = type === "application_fee" ? "app_fee_paid" : "payment_received";
       supabase.functions.invoke("notify-event", {
-        body: { event, lead_id: leadId, context: { payment_id: paymentId } },
+        body: { event, lead_id: leadId, context: { payment_id: paymentId, application_id: applicationId || undefined } },
       }).catch(e => console.error("[OfflinePaymentDialog] notify-event failed:", e));
     }
 

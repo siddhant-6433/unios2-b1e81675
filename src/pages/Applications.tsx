@@ -1082,6 +1082,7 @@ export default function Applications() {
           leadId={offlinePaymentApp.lead_id}
           leadName={offlinePaymentApp.full_name}
           defaultType="application_fee"
+          applicationId={offlinePaymentApp.application_id}
           title="Record Offline Payment"
           onSuccess={handleOfflinePaymentSuccess}
         />
@@ -1092,6 +1093,7 @@ export default function Applications() {
           open={!!offlineReceiptApp}
           onOpenChange={(o) => { if (!o) setOfflineReceiptApp(null); }}
           leadId={offlineReceiptApp.lead_id}
+          applicationId={offlineReceiptApp.application_id}
           onRecorded={() => setOfflineReceiptApp(null)}
         />
       )}

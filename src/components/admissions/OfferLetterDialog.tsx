@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, FileText, Plus, Gift, CheckCircle, XCircle, ShieldCheck, RefreshCw, ExternalLink, Pencil, Coins, Trash2 } from "lucide-react";
+import { CahetRegistrationDetails } from "@/components/leads/CahetRegistrationDetails";
+import { fetchCahetRegistration, type CahetRegistrationDetails as CahetRegistrationDetailsType } from "@/lib/cahet";
 
 interface OfferLetterDialogProps {
   open: boolean;
@@ -15,6 +17,7 @@ interface OfferLetterDialogProps {
   leadName: string;
   courseId: string | null;
   campusId: string | null;
+  cahetRegistration?: CahetRegistrationDetailsType | null;
   onSuccess: () => void;
 }
 
@@ -68,6 +71,7 @@ interface OfferLetterEditRequest {
 }
 
 const ENTRANCE_OPTIONS = [
+  "CAHET",
   "CAT",
   "MAT",
   "XAT",
@@ -84,7 +88,7 @@ const ENTRANCE_OPTIONS = [
   "Other",
 ];
 
-export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, courseId, campusId, onSuccess }: OfferLetterDialogProps) {
+export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, courseId, campusId, cahetRegistration: cahetRegistrationProp, onSuccess }: OfferLetterDialogProps) {
   const { user, role } = useAuth();
   const { toast } = useToast();
   const [offers, setOffers] = useState<OfferLetter[]>([]);
@@ -146,6 +150,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   // browser actually fetches the new bytes — the storage path is reused on
   // upsert, so without this the cached PDF stays on screen.
   const [pdfBust, setPdfBust] = useState<number>(() => Date.now());
+  const [fetchedCahetRegistration, setFetchedCahetRegistration] = useState<CahetRegistrationDetailsType | null>(null);
+  const cahetRegistration = cahetRegistrationProp ?? fetchedCahetRegistration;
 
   const fetchOffers = async () => {
     setLoading(true);
@@ -222,6 +228,15 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
 
   useEffect(() => { if (open) fetchOffers(); }, [open]);
 
+  useEffect(() => {
+    if (!open || cahetRegistrationProp !== undefined) return;
+    let cancelled = false;
+    fetchCahetRegistration(supabase, leadId).then((row) => {
+      if (!cancelled) setFetchedCahetRegistration(row);
+    });
+    return () => { cancelled = true; };
+  }, [open, leadId, cahetRegistrationProp]);
+
   // Pull sessions whenever the form opens so the select has data + the active
   // session is preselected as default for the offer.
   useEffect(() => {
@@ -278,6 +293,13 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   // This is the canonical source of truth for the offer's "total fee" — the
   // form no longer asks the user to type it.
   const programmeTotal = yearTotals.reduce((sum, y) => sum + y.total, 0);
+  const preWaiverTotal = preWaivers.reduce((sum, waiver) => sum + Number(waiver.amount || 0), 0);
+  const previewNetFee = Math.max(0, programmeTotal - preWaiverTotal);
+  const selectedSessionName = sessions.find(s => s.id === form.session_id)?.name || null;
+  const selectedEntranceName = form.entrance_exam_name === "Other"
+    ? form.entrance_exam_other.trim()
+    : form.entrance_exam_name.trim();
+  const isCahetOffer = form.admission_mode === "entrance" && selectedEntranceName.toLowerCase().includes("cahet");
 
   /** Fee for a given term (e.g. 'year_1') from the active fee structure. */
   const feeForTerm = (term: string): number =>
@@ -295,14 +317,14 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
 
   // Net Year-1 fee = gross Year-1 fee minus any year_1 waivers already
   // staged in the pre-issuance waiver list. The loan-letter token fee
-  // defaults to 10% of this net figure.
+  // defaults to 25% of this net figure.
   const netFirstYearFee = Math.max(0, firstYearFee - preWaiverTotalForTerm("year_1"));
 
-  // Token fee defaults to 10% of net Year-1. Admissions can lower it while
+  // Token fee defaults to 25% of net Year-1. Admissions can lower it while
   // issuing the offer, but never below ₹5,000.
   const tokenFloor = 5000;
   const tokenDefault = netFirstYearFee > 0
-    ? Math.max(Math.round(netFirstYearFee * 0.10), tokenFloor)
+    ? Math.max(Math.round(netFirstYearFee * 0.25), tokenFloor)
     : 0;
 
   // Whenever the net Year-1 fee changes (waiver added/removed), always
@@ -726,6 +748,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
         <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-[minmax(360px,420px)_1fr]">
           {/* ─── Left: list + new-offer form ─── */}
           <div className="overflow-y-auto px-5 py-4 space-y-4 border-b md:border-b-0 md:border-r border-border">
+          <CahetRegistrationDetails registration={cahetRegistration} />
           {!showForm && (
             <Button onClick={() => setShowForm(true)} size="sm" className="gap-1.5"><Plus className="h-4 w-4" />New Offer</Button>
           )}
@@ -966,7 +989,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                   </div>
                 )}
 
-                {/* Token fee — defaults to 10% of Year-1, editable but floored at
+                {/* Token fee — defaults to 25% of Year-1, editable but floored at
                     ₹5,000. The pencil icon flips edit mode;
                     the field is read-only otherwise to discourage casual changes. */}
                 <div>
@@ -1004,7 +1027,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                         </>
                       ) : (
                         <>
-                          Default = 10% of net Year-1 fee (₹{netFirstYearFee.toLocaleString("en-IN")}) = ₹{tokenDefault.toLocaleString("en-IN")}.
+                          Default = 25% of net Year-1 fee (₹{netFirstYearFee.toLocaleString("en-IN")}) = ₹{tokenDefault.toLocaleString("en-IN")}.
                           {firstYearFee !== netFirstYearFee && (
                             <> Gross ₹{firstYearFee.toLocaleString("en-IN")} minus ₹{(firstYearFee - netFirstYearFee).toLocaleString("en-IN")} Year-1 waiver.</>
                           )}
@@ -1031,7 +1054,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                     ))}
                   </select>
                   <p className="mt-1 text-[10px] text-muted-foreground/70">
-                    Locks the fee structure for this offer. Token amount defaults to 10% of first-year fee from this session's structure.
+                    Locks the fee structure for this offer. Token amount defaults to 25% of first-year fee from this session's structure.
                     {!isSuperAdmin && " Only super admin can pick a non-active session."}
                   </p>
                 </div>
@@ -1440,11 +1463,13 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
           )}
           </div>
 
-          {/* ─── Right: PDF preview pane ─── */}
+          {/* ─── Right: PDF / pre-issue preview pane ─── */}
           <div className="flex flex-col bg-muted/20 min-h-[400px]">
             <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-b border-border bg-card shrink-0">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                {selectedOffer ? `Preview · ₹${selectedOffer.net_fee.toLocaleString("en-IN")}` : "Preview"}
+                {showForm
+                  ? `Draft Preview · ₹${previewNetFee.toLocaleString("en-IN")}`
+                  : selectedOffer ? `Preview · ₹${selectedOffer.net_fee.toLocaleString("en-IN")}` : "Preview"}
               </p>
               {selectedOffer && (
                 <div className="flex items-center gap-1.5">
@@ -1471,7 +1496,75 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
               )}
             </div>
             <div className="flex-1 min-h-0 relative">
-              {!selectedOffer ? (
+              {showForm ? (
+                <div className="absolute inset-0 overflow-auto bg-white">
+                  <div className="mx-auto my-6 max-w-[720px] rounded-sm border border-border bg-white p-8 shadow-sm">
+                    <div className="border-b border-border pb-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Offer Letter Preview</p>
+                      <h3 className="mt-1 text-xl font-bold text-foreground">Provisional Admission Offer</h3>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        This preview is based on the form values on the left. The final PDF is generated after issuing and approval.
+                      </p>
+                    </div>
+
+                    <div className="mt-5 space-y-4 text-sm">
+                      <p>Dear <span className="font-semibold">{leadName || "Applicant"}</span>,</p>
+                      <p className="leading-relaxed text-muted-foreground">
+                        Congratulations. We are pleased to offer you provisional admission to the selected programme. Pay the token fee before the acceptance deadline to confirm your seat.
+                      </p>
+
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        {[
+                          ["Admission Route", form.admission_mode === "entrance" ? `Entrance / Counselling${selectedEntranceName ? ` - ${selectedEntranceName}` : ""}` : "Direct Admission"],
+                          ["Academic Session", selectedSessionName || "-"],
+                          ["Programme Fee", programmeTotal > 0 ? `₹${programmeTotal.toLocaleString("en-IN")}` : "-"],
+                          ["Waivers / Discounts", preWaiverTotal > 0 ? `₹${preWaiverTotal.toLocaleString("en-IN")}` : "None"],
+                          ["Net Programme Fee", previewNetFee > 0 ? `₹${previewNetFee.toLocaleString("en-IN")}` : "-"],
+                          ["Token Fee Payable", Number(form.token_fee_amount || tokenDefault || 0) > 0 ? `₹${Number(form.token_fee_amount || tokenDefault || 0).toLocaleString("en-IN")}` : "-"],
+                          ["Acceptance Deadline", form.acceptance_deadline ? new Date(form.acceptance_deadline).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "-"],
+                        ].map(([label, value]) => (
+                          <div key={label} className="rounded-md border border-border/70 p-3">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+                            <p className="mt-1 font-medium text-foreground">{value}</p>
+                          </div>
+                        ))}
+                      </div>
+
+                      {isCahetOffer && cahetRegistration && (
+                        <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">CAHET Registration</p>
+                          <p className="mt-1 text-sm font-semibold text-emerald-950">
+                            Registration No. {cahetRegistration.registration_no}
+                          </p>
+                          {cahetRegistration.notes && (
+                            <p className="mt-1 text-xs text-emerald-900/80">{cahetRegistration.notes}</p>
+                          )}
+                        </div>
+                      )}
+
+                      {isCahetOffer && !cahetRegistration && (
+                        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                          CAHET is selected, but this candidate is not marked CAHET registered yet. The registration number will appear on the final offer only after registration is recorded.
+                        </div>
+                      )}
+
+                      {yearTotals.length > 0 && (
+                        <div className="rounded-md border border-border/70">
+                          <div className="border-b border-border/70 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Fee Structure</div>
+                          <div className="divide-y divide-border/60">
+                            {yearTotals.map((year) => (
+                              <div key={year.term} className="flex items-center justify-between px-3 py-2">
+                                <span>{year.term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}</span>
+                                <span className="font-medium">₹{year.total.toLocaleString("en-IN")}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : !selectedOffer ? (
                 <div className="absolute inset-0 flex items-center justify-center text-center px-6">
                   <div className="text-muted-foreground">
                     <FileText className="h-10 w-10 mx-auto mb-3 opacity-30" />
