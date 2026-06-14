@@ -764,11 +764,11 @@ export default function LeadLists() {
 
       {/* WhatsApp send dialog */}
       <Dialog open={waOpen} onOpenChange={setWaOpen}>
-        <DialogContent>
-          <DialogHeader>
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-hidden [display:flex] flex-col">
+          <DialogHeader className="shrink-0 pr-8">
             <DialogTitle>Send WhatsApp to "{waList?.name}"</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto py-2 pr-1">
             <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
               <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
               <p className="text-xs text-amber-800">
@@ -876,7 +876,7 @@ export default function LeadLists() {
               Sending to <strong className="text-foreground">{waList?.member_count}</strong> lead{waList?.member_count === 1 ? "" : "s"} on this list (DNC + no-phone excluded at send time).
             </p>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border pt-4">
             <Button variant="outline" onClick={() => setWaOpen(false)}>Cancel</Button>
             <Button onClick={handleSendWhatsApp} disabled={waSending || waMissingStatic || !!waApprovedIssue} className="gap-2">
               {waSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}

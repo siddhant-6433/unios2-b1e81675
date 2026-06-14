@@ -13,6 +13,9 @@ describe("bulk WhatsApp approved-template safety", () => {
     expect(leadLists).toContain("waApprovedIssue");
     expect(leadLists).toContain("Approved params");
     expect(leadLists).toContain("Sender params");
+    expect(leadLists).toContain("max-h-[90vh]");
+    expect(leadLists).toContain("overflow-y-auto");
+    expect(leadLists).toContain("shrink-0 border-t");
   });
 
   it("maps internal template keys to the exact Meta template name used at send time", () => {
