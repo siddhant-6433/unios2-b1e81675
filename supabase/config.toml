@@ -93,6 +93,15 @@ verify_jwt = false
 [functions.whatsapp-campaign-send]
 verify_jwt = false
 
+[functions.email-campaign-send]
+verify_jwt = false
+
+# Called by pg_cron with x-cron-secret and by signed-in admins from the UI.
+# The function performs its own auth, so gateway JWT verification must stay off
+# for cron requests that do not carry an Authorization header.
+[functions.campaign-dispatcher]
+verify_jwt = false
+
 [functions.automation-engine]
 verify_jwt = false
 
