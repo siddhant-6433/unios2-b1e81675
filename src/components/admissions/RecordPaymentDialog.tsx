@@ -32,11 +32,12 @@ interface RecordPaymentDialogProps {
   defaultType?: string;
   requireScreenshot?: boolean;
   title?: string;
+  applicationId?: string | null;
 }
 
 export function RecordPaymentDialog({
   open, onOpenChange, leadId, leadName, onSuccess,
-  defaultType, requireScreenshot, title,
+  defaultType, requireScreenshot, title, applicationId,
 }: RecordPaymentDialogProps) {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -152,10 +153,11 @@ export function RecordPaymentDialog({
       transaction_ref: transactionRef || null,
       receipt_no: receiptNo || null,
       receipt_url: receiptUrl,
-      notes: notes || null,
+      notes: [type === "application_fee" && applicationId ? `Application: ${applicationId}` : "", notes || ""].filter(Boolean).join(" · ") || null,
       recorded_by: profileId,
       gateway: "offline",
       status: "confirmed",
+      application_id: type === "application_fee" ? applicationId || null : null,
     } as any).select("id").single();
 
     if (error) {
@@ -169,7 +171,7 @@ export function RecordPaymentDialog({
     if (inserted?.id) {
       const evt = type === "application_fee" ? "app_fee_paid" : "payment_received";
       supabase.functions.invoke("notify-event", {
-        body: { event: evt, lead_id: leadId, context: { payment_id: inserted.id } },
+        body: { event: evt, lead_id: leadId, context: { payment_id: inserted.id, application_id: applicationId || undefined } },
       }).catch((e) => console.error("[RecordPaymentDialog] notify-event failed:", e));
     }
 

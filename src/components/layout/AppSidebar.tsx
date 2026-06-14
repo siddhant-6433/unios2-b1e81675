@@ -8,6 +8,7 @@ import {
   Globe, FolderOpen, Heart, Award, Target, GitMerge, Bot, Gift, AlertTriangle, Sparkles, Receipt,
   Briefcase, CalendarOff, UserCheck, Fingerprint, PhoneCall, PhoneMissed, Send, UserPlus, Footprints,
   FolderLock, Flame, Video, ListPlus,
+  Megaphone,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -52,11 +53,9 @@ const admissionSubMenu: MenuItem[] = [
   { title: "CAHET Sprint", url: "/cahet-sprint", icon: Flame, permission: "call_log:view" },
   { title: "Missed Calls", url: "/missed-calls", icon: PhoneMissed, permission: "call_log:view" },
   { title: "WhatsApp", url: "/whatsapp-inbox", icon: MessageSquare, permission: "whatsapp:view" },
-  { title: "WA Outbound", url: "/whatsapp-inbox?mode=outbound", icon: Send, permission: "whatsapp:view" },
   { title: "Performance", url: "/counsellor-dashboard", icon: BarChart3, permission: "performance:view" },
   { title: "Lead Assignments", url: "/lead-assignments", icon: UserCheck, permission: "leads:view" },
   { title: "Lead Buckets", url: "/lead-buckets", icon: Inbox, permission: "lead_buckets:view" },
-  { title: "Lists & Campaigns", url: "/lists", icon: ListPlus, permission: "leads:view" },
   { title: "Lead Allocation", url: "/lead-allocation", icon: Shuffle, permission: "lead_allocation:view" },
   { title: "Fresh Leads", url: "/fresh-leads", icon: Sparkles, permission: "call_log:view" },
   { title: "Pending Follow-ups", url: "/pending-followups", icon: AlertTriangle, permission: "call_log:view" },
@@ -66,7 +65,6 @@ const admissionSubMenu: MenuItem[] = [
   { title: "Automation", url: "/automation-rules", icon: Zap, permission: "automation:view" },
   { title: "Consultants", url: "/consultants", icon: Handshake, permission: "consultants:view" },
   { title: "Academic Partners", url: "/academic-partners", icon: School, permission: "academic_partners:view" },
-  { title: "Templates", url: "/template-manager", icon: Newspaper, permission: "templates:view" },
   { title: "Courses & Fees", url: "/fee-structures", icon: IndianRupee, permission: "courses_fees:view" },
   { title: "My Leads", url: "/consultant-portal", icon: Users, permission: "consultant_portal:view", hideForSuperAdmin: true },
   { title: "My Batches", url: "/academic-partner-portal", icon: School, permission: "academic_partner_portal:view", hideForSuperAdmin: true },
@@ -74,6 +72,13 @@ const admissionSubMenu: MenuItem[] = [
   { title: "Publisher Portal", url: "/publisher-portal", icon: Users, permission: "user_management:view" },
   { title: "Publisher Analytics", url: "/publisher-analytics", icon: PieChart, permission: "user_management:view" },
   { title: "Analytics", url: "/admission-analytics", icon: PieChart, permission: "analytics:view" },
+];
+
+const marketingSubMenu: MenuItem[] = [
+  { title: "Overview", url: "/marketing", icon: Megaphone, permission: "leads:view" },
+  { title: "Lists", url: "/lists", icon: ListPlus, permission: "leads:view" },
+  { title: "Templates", url: "/template-manager", icon: Newspaper, permission: "templates:view" },
+  { title: "WA Outbound", url: "/whatsapp-inbox?mode=outbound", icon: Send, permission: "whatsapp:view" },
 ];
 
 const ibAcademicsSubMenu: MenuItem[] = [
@@ -268,10 +273,12 @@ export function AppSidebar() {
     return item;
   }
   );
+  const visibleMarketing = marketingSubMenu.filter(canSee);
   const visibleIB = ibAcademicsSubMenu.filter(canSee);
   const visibleHr = hrSubMenu.filter(canSee);
   const visibleMgmt = managementMenu.filter(canSee);
   const isAdmissionActive = admissionSubMenu.some(item => isActive(item.url));
+  const isMarketingActive = marketingSubMenu.some(item => isActive(item.url));
   const isIBActive = ibAcademicsSubMenu.some(item => isActive(item.url) || location.pathname.startsWith("/ib/"));
   const isHrActive = hrSubMenu.some(item => isActive(item.url) || location.pathname.startsWith("/hr"));
 
@@ -393,6 +400,39 @@ export function AppSidebar() {
                           </SidebarMenuSubItem>
                           );
                         })}
+                      </SidebarMenuSub>
+                    </CollapsibleContent>
+                  </SidebarMenuItem>
+                </Collapsible>
+              )}
+
+              {/* Marketing */}
+              {visibleMarketing.length > 0 && (
+                <Collapsible defaultOpen={isMarketingActive} className="group/collapsible">
+                  <SidebarMenuItem>
+                    <CollapsibleTrigger asChild>
+                      <SidebarMenuButton className={`${linkClass} justify-between`} isActive={isMarketingActive}>
+                        <span className="flex items-center gap-3">
+                          <Megaphone className="h-[17px] w-[17px]" />
+                          {!collapsed && <span>Marketing</span>}
+                        </span>
+                        {!collapsed && (
+                          <ChevronDown className="h-3.5 w-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                        )}
+                      </SidebarMenuButton>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <SidebarMenuSub>
+                        {visibleMarketing.map((item) => (
+                          <SidebarMenuSubItem key={item.title}>
+                            <SidebarMenuSubButton asChild isActive={isActive(item.url)}>
+                              <NavLink to={item.url} className={subLinkClass} activeClassName={activeClass}>
+                                <item.icon className="h-3.5 w-3.5" />
+                                <span>{item.title}</span>
+                              </NavLink>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        ))}
                       </SidebarMenuSub>
                     </CollapsibleContent>
                   </SidebarMenuItem>

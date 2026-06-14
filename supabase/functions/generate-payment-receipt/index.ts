@@ -128,6 +128,11 @@ function wrapText(text: string, font: any, size: number, maxWidth: number, maxLi
 // throws on missing glyphs, so use "Rs." in the body and the band.
 const RUP = "Rs. ";
 
+const appIdFromNotes = (notes?: unknown): string | null => {
+  const match = String(notes || "").match(/APP-\d{2}-[A-Z0-9]+/i);
+  return match?.[0]?.toUpperCase() || null;
+};
+
 interface Branding {
   slug?: string | null;
   name: string;
@@ -330,6 +335,7 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
     const lead_payment_id = body.lead_payment_id || body.payment_id;
+    const requestedApplicationId = body.application_id || null;
     if (!lead_payment_id) {
       return new Response(JSON.stringify({ error: "lead_payment_id required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -340,7 +346,7 @@ Deno.serve(async (req) => {
       .from("lead_payments")
       .select(`
         id, receipt_no, type, amount, payment_mode, gateway, transaction_ref,
-        payment_date, status, receipt_url, created_at, recorded_by, notes,
+        payment_date, status, receipt_url, created_at, recorded_by, notes, application_id,
         leads:lead_id (
           id, name, phone, email, application_id, pre_admission_no, admission_no,
           courses:course_id ( name ),
@@ -362,7 +368,23 @@ Deno.serve(async (req) => {
     }
 
     const lead: any = lp.leads;
-    const courseName = lead?.courses?.name ?? null;
+    const isApp = lp.type === "application_fee";
+    const resolvedApplicationId =
+      isApp
+        ? requestedApplicationId || lp.application_id || appIdFromNotes(lp.notes) || lead?.application_id || null
+        : null;
+    let app: any = null;
+    if (resolvedApplicationId && lead?.id) {
+      const { data } = await admin
+        .from("applications")
+        .select("application_id, full_name, phone, email, course_selections")
+        .eq("lead_id", lead.id)
+        .eq("application_id", resolvedApplicationId)
+        .maybeSingle();
+      app = data || null;
+    }
+    const firstChoice = (app?.course_selections || [])[0] || {};
+    const courseName = isApp ? firstChoice.course_name ?? lead?.courses?.name ?? null : lead?.courses?.name ?? null;
     const campusName = lead?.campuses?.name ?? null;
 
     const { data: branding } = await admin.rpc("lead_branding" as any, {
@@ -386,13 +408,12 @@ Deno.serve(async (req) => {
       paymentMode = MODE_LABELS[lp.payment_mode] || lp.payment_mode || "—";
     }
 
-    const isApp = lp.type === "application_fee";
     const rows: [string, string][] = [
-      ["Name",  lead?.name || "—"],
-      ["Phone", lead?.phone || "—"],
+      ["Name",  app?.full_name || lead?.name || "—"],
+      ["Phone", app?.phone || lead?.phone || "—"],
     ];
-    if (lead?.email) rows.push(["Email", lead.email]);
-    if (isApp && lead?.application_id) rows.push(["Application ID", lead.application_id]);
+    if (app?.email || lead?.email) rows.push(["Email", app?.email || lead?.email]);
+    if (isApp && resolvedApplicationId) rows.push(["Application ID", resolvedApplicationId]);
     if (!isApp) {
       if (lead?.admission_no) rows.push(["Admission No", lead.admission_no]);
       else if (lead?.pre_admission_no) rows.push(["Pre-Admission No", lead.pre_admission_no]);
@@ -447,9 +468,16 @@ Deno.serve(async (req) => {
     const receiptUrl = urlData?.publicUrl || path;
 
     await admin.from("lead_payments").update({ receipt_url: receiptUrl }).eq("id", lp.id);
+    if (isApp && resolvedApplicationId) {
+      await admin
+        .from("applications")
+        .update({ fee_receipt_url: receiptUrl })
+        .eq("application_id", resolvedApplicationId)
+        .eq("lead_id", lead?.id);
+    }
 
     return new Response(JSON.stringify({
-      ok: true, receipt_no: lp.receipt_no, receipt_url: receiptUrl,
+      ok: true, receipt_no: lp.receipt_no, receipt_url: receiptUrl, application_id: resolvedApplicationId,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (err) {
