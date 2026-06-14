@@ -34,37 +34,29 @@ For any details please call 9555192192
 function cnetNotQualifiedBptBmritMessage(): string {
   return `Dear {{1}}
 
-CNET result has been declared. In case you have NOT Qualified, you still have the opportunity of pursuing a career in the healthcare sector.
+CNET result is declared. If you have NOT qualified, you can still choose healthcare career options: *BPT* or *BMRIT*.
 
-*BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *14th June 2026*.
+Last date: *14th June 2026*.
 
-For admission Candidates MUST
+Both are mandatory:
+1. NIMT application: https://apply.nimt.ac.in
+2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4
 
-1. Complete College Application Online at https://apply.nimt.ac.in
-
-2. Complete the *CAHET Registration on ABVMUP by 14th June 11:59 PM* (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh): https://www.abvmucet26.co.in/entrance2026/login?form=4
-
-Please note both form submissions are mandatory by 14th June 2026 to be included in the admission process for session 2026-27.
-
-For any details please call 7428499849, 9667691872, 9555192192
+Help: 7428499849, 9667691872, 9555192192
 
 ---
 
 प्रिय {{1}}
 
-CNET result घोषित हो चुका है। यदि आप qualify नहीं हुए हैं, तब भी healthcare sector में career बनाने का अवसर उपलब्ध है।
+CNET result आ गया है। यदि आप qualify नहीं हुए हैं, तब भी healthcare career के लिए *BPT* या *BMRIT* option है।
 
-*BPT (Bachelor of Physiotherapy) और BMRIT (Bachelor of Medical Radiological Imaging Technology)* - Application Submission की अंतिम तिथि *14th June 2026* है।
+Last date: *14th June 2026*.
 
-Admission के लिए Candidates को अनिवार्य रूप से
+दोनों mandatory हैं:
+1. NIMT application: https://apply.nimt.ac.in
+2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4
 
-1. College Application Online complete करना होगा: https://apply.nimt.ac.in
-
-2. *CAHET Registration on ABVMUP by 14th June 11:59 PM* complete करना होगा (Uttar Pradesh में BPT/BMRIT admission के लिए यह mandatory है): https://www.abvmucet26.co.in/entrance2026/login?form=4
-
-कृपया ध्यान दें कि session 2026-27 admission process में शामिल होने के लिए दोनों form submissions 14th June 2026 तक mandatory हैं।
-
-किसी भी जानकारी के लिए call करें: 7428499849, 9667691872, 9555192192`;
+Help: 7428499849, 9667691872, 9555192192`;
 }
 
 // Template definitions with their expected parameters
