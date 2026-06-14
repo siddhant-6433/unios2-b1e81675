@@ -1,10 +1,10 @@
 // GitHub sync confirmed - test commit March 8, 2026 v2
-import { Component, ReactNode, Suspense, lazy } from "react";
+import { Component, ReactNode, Suspense, lazy, useEffect, useRef } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate, useParams, useSearchParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { CampusProvider } from "@/contexts/CampusContext";
 import { PermissionProvider } from "@/contexts/PermissionContext";
@@ -125,6 +125,50 @@ const queryClient = new QueryClient({
   },
 });
 
+const GLOBAL_MEASUREMENT_ID = "G-9TPSZXEVZ3";
+const APPLY_MEASUREMENT_ID = "G-MKHMKH1DE9";
+const APPLY_LINKER_DOMAINS = ["nimt.ac.in", "miraischool.in", "school.nimt.ac.in"];
+
+function isApplyAnalyticsSurface(pathname: string) {
+  if (typeof window === "undefined") return false;
+  const host = window.location.hostname;
+  return host === "apply.nimt.ac.in" || (host === "uni.nimt.ac.in" && pathname.startsWith("/apply"));
+}
+
+function GoogleRouteTracker() {
+  const location = useLocation();
+  const didMount = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!didMount.current) {
+      didMount.current = true;
+      return;
+    }
+
+    const gtag = (window as any).gtag;
+    if (!gtag) return;
+
+    const pagePath = `${location.pathname}${location.search}${location.hash}`;
+    const pageParams = {
+      page_path: pagePath,
+      page_location: `${window.location.origin}${pagePath}`,
+      page_title: document.title,
+    };
+
+    gtag("config", GLOBAL_MEASUREMENT_ID, pageParams);
+
+    if (isApplyAnalyticsSurface(location.pathname)) {
+      gtag("config", APPLY_MEASUREMENT_ID, {
+        ...pageParams,
+        linker: { domains: APPLY_LINKER_DOMAINS },
+      });
+    }
+  }, [location.pathname, location.search, location.hash]);
+
+  return null;
+}
+
 class AppErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   constructor(props: { children: ReactNode }) {
     super(props);
@@ -173,6 +217,7 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
+        <GoogleRouteTracker />
         <AuthProvider>
           {/* All routes are React.lazy() — wrap in Suspense so concurrent
               renders can pause for the chunk instead of throwing
