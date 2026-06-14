@@ -46,6 +46,7 @@ interface CampaignQueueItem {
 
 type WaPhoneHealth = {
   phone_number_id: string;
+  business_phone_number?: string | null;
   total: number;
   failed: number;
   read: number;
@@ -133,6 +134,17 @@ const renderTemplatePreview = (preview: string, staticParams: Record<string, str
     const typed = staticParams[name]?.trim();
     return typed || sampleValueForParam(name);
   });
+
+const senderSelectLabel = (sender: WaSenderOption) => {
+  const formattedNumber = formatSenderNumber(sender.businessNumber);
+  const numberSuffix = formattedNumber && !sender.label.includes(formattedNumber)
+    ? ` (${formattedNumber})`
+    : "";
+  const healthSuffix = sender.total != null
+    ? ` — 7d failed ${formatPct(sender.failedPct)}, read ${formatPct(sender.readPct)}`
+    : "";
+  return `${sender.label}${numberSuffix}${healthSuffix}`;
+};
 
 export default function LeadLists() {
   const { toast } = useToast();
@@ -296,12 +308,13 @@ export default function LeadLists() {
         if (!phoneNumberId && !businessNumber) continue;
         const value = `${channel.provider}:${phoneNumberId || businessNumber}`;
         const health = phoneNumberId ? healthByPhone.get(phoneNumberId) : undefined;
+        const resolvedBusinessNumber = businessNumber || health?.business_phone_number || null;
         options.set(value, {
           value,
-          label: channel.label || formatSenderNumber(businessNumber) || phoneNumberId || "WhatsApp sender",
+          label: formatSenderNumber(resolvedBusinessNumber) || channel.label || phoneNumberId || "WhatsApp sender",
           provider: channel.provider === "plivo" ? "plivo" : "meta",
           phoneNumberId,
-          businessNumber,
+          businessNumber: resolvedBusinessNumber,
           total: health?.total ?? null,
           failed: health?.failed ?? null,
           failedPct: health?.failed_pct ?? null,
@@ -315,12 +328,13 @@ export default function LeadLists() {
       if (!health.phone_number_id || health.phone_number_id === "(unset)") continue;
       const value = `meta:${health.phone_number_id}`;
       const existing = options.get(value);
+      const businessNumber = existing?.businessNumber || health.business_phone_number || null;
       options.set(value, {
         value,
-        label: existing?.label || `Meta sender ${health.phone_number_id}`,
+        label: formatSenderNumber(businessNumber) || existing?.label || `Meta sender ${health.phone_number_id}`,
         provider: "meta",
         phoneNumberId: health.phone_number_id,
-        businessNumber: existing?.businessNumber || null,
+        businessNumber,
         total: health.total,
         failed: health.failed,
         failedPct: health.failed_pct,
@@ -887,9 +901,7 @@ export default function LeadLists() {
               >
                 {waSenderOptions.map((sender) => (
                   <option key={sender.value} value={sender.value}>
-                    {sender.label}
-                    {sender.businessNumber ? ` (${formatSenderNumber(sender.businessNumber)})` : ""}
-                    {sender.total != null ? ` — 7d failed ${formatPct(sender.failedPct)}, read ${formatPct(sender.readPct)}` : ""}
+                    {senderSelectLabel(sender)}
                   </option>
                 ))}
               </select>
