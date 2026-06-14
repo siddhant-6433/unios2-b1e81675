@@ -117,6 +117,46 @@ const stageIcons: Record<string, typeof Users> = {
 
 type LeadInstitutionType = "all" | "school" | "college";
 type FilterMode = "include" | "exclude";
+type ApplicationStageFilter =
+  | "pre_application"
+  | "no_application"
+  | "application_in_progress"
+  | "application_fee_paid"
+  | "application_submitted"
+  | "token_fee_paid";
+
+const APPLICATION_STAGE_OPTIONS: { value: ApplicationStageFilter; label: string; description: string }[] = [
+  {
+    value: "pre_application",
+    label: "Not submitted / paid",
+    description: "No submitted application, application fee, or token fee",
+  },
+  {
+    value: "no_application",
+    label: "No application",
+    description: "No associated application yet",
+  },
+  {
+    value: "application_in_progress",
+    label: "Application in progress",
+    description: "Draft application, no fee or submission yet",
+  },
+  {
+    value: "application_fee_paid",
+    label: "Application fee paid",
+    description: "Fee paid, not submitted or token-paid",
+  },
+  {
+    value: "application_submitted",
+    label: "Application submitted",
+    description: "Submitted or under review, not token-paid",
+  },
+  {
+    value: "token_fee_paid",
+    label: "Token fee paid",
+    description: "Token fee paid or later admission stage",
+  },
+];
 
 const PERSON_ROLE_COLORS: Record<string, string> = {
   lead: "bg-pastel-yellow text-foreground/80",
@@ -203,6 +243,10 @@ const Admissions = () => {
   const [courseOptions, setCourseOptions] = useState<(CourseLike & { id: string; name: string })[]>([]);
   const [courseSearch, setCourseSearch] = useState("");
   const [coursePopoverOpen, setCoursePopoverOpen] = useState(false);
+  const [applicationStageFilter, setApplicationStageFilter] = useState<ApplicationStageFilter[]>([]);
+  const [applicationStageLeadIds, setApplicationStageLeadIds] = useState<Set<string> | null>(null);
+  const [applicationStageResolving, setApplicationStageResolving] = useState(false);
+  const [applicationStagePopoverOpen, setApplicationStagePopoverOpen] = useState(false);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [tempFilter, setTempFilter] = useState<string>("all");
@@ -391,6 +435,126 @@ const Admissions = () => {
     return debouncedCourseFilter.filter((id) => categorySet.has(id));
   }, [categoryCourseIds, debouncedCourseFilter, leadInstitutionType]);
 
+  const applicationStageFilterLabel = useMemo(() => {
+    if (applicationStageFilter.length === 0) return "All Application Stages";
+    if (applicationStageFilter.length === 1) {
+      return APPLICATION_STAGE_OPTIONS.find((o) => o.value === applicationStageFilter[0])?.label || "1 stage";
+    }
+    return `${applicationStageFilter.length} application stages`;
+  }, [applicationStageFilter]);
+
+  const fetchAllQueryRows = async <T,>(makeQuery: (from: number, to: number) => any) => {
+    const rows: T[] = [];
+    const pageSize = 1000;
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await makeQuery(from, from + pageSize - 1);
+      if (error) throw error;
+      const batch = (data || []) as T[];
+      rows.push(...batch);
+      if (batch.length < pageSize) break;
+    }
+    return rows;
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    if (applicationStageFilter.length === 0) {
+      setApplicationStageLeadIds(null);
+      setApplicationStageResolving(false);
+      return;
+    }
+
+    setApplicationStageResolving(true);
+    setApplicationStageLeadIds(null);
+
+    (async () => {
+      try {
+        const [leadRows, appRows, paymentRows] = await Promise.all([
+          fetchAllQueryRows<{ id: string; stage: string }>((from, to) =>
+            supabase.from("leads").select("id, stage").range(from, to)
+          ),
+          fetchAllQueryRows<{ lead_id: string | null; status: string | null; submitted_at: string | null; payment_status: string | null }>((from, to) =>
+            supabase.from("applications").select("lead_id, status, submitted_at, payment_status").range(from, to)
+          ),
+          fetchAllQueryRows<{ lead_id: string | null; type: string | null; status: string | null }>((from, to) =>
+            supabase.from("lead_payments" as any).select("lead_id, type, status").range(from, to)
+          ),
+        ]);
+
+        const allLeadIds = new Set(leadRows.map((lead) => lead.id));
+        const appLeadIds = new Set<string>();
+        const submittedIds = new Set<string>();
+        const applicationFeePaidIds = new Set<string>();
+        const tokenFeePaidIds = new Set<string>();
+
+        for (const app of appRows) {
+          if (!app.lead_id) continue;
+          appLeadIds.add(app.lead_id);
+          const status = app.status || "";
+          if (app.submitted_at || (status && !["draft", "in_progress"].includes(status))) {
+            submittedIds.add(app.lead_id);
+          }
+          if (app.payment_status === "paid") {
+            applicationFeePaidIds.add(app.lead_id);
+          }
+        }
+
+        for (const payment of paymentRows) {
+          if (!payment.lead_id || payment.status !== "confirmed") continue;
+          if (payment.type === "application_fee") applicationFeePaidIds.add(payment.lead_id);
+          if (payment.type === "token_fee") tokenFeePaidIds.add(payment.lead_id);
+        }
+
+        for (const lead of leadRows) {
+          if (["token_paid", "pre_admitted", "admitted"].includes(lead.stage)) {
+            tokenFeePaidIds.add(lead.id);
+          }
+        }
+
+        const advancedIds = new Set<string>([
+          ...Array.from(submittedIds),
+          ...Array.from(applicationFeePaidIds),
+          ...Array.from(tokenFeePaidIds),
+        ]);
+
+        const buckets: Record<ApplicationStageFilter, Set<string>> = {
+          pre_application: new Set(Array.from(allLeadIds).filter((id) => !advancedIds.has(id))),
+          no_application: new Set(Array.from(allLeadIds).filter((id) => !appLeadIds.has(id) && !advancedIds.has(id))),
+          application_in_progress: new Set(Array.from(appLeadIds).filter((id) => !advancedIds.has(id))),
+          application_fee_paid: new Set(Array.from(applicationFeePaidIds).filter((id) => !submittedIds.has(id) && !tokenFeePaidIds.has(id))),
+          application_submitted: new Set(Array.from(submittedIds).filter((id) => !tokenFeePaidIds.has(id))),
+          token_fee_paid: tokenFeePaidIds,
+        };
+
+        const matchingIds = new Set<string>();
+        for (const stage of applicationStageFilter) {
+          for (const id of buckets[stage] || []) matchingIds.add(id);
+        }
+
+        if (!cancelled) {
+          setApplicationStageLeadIds(matchingIds);
+        }
+      } catch (error) {
+        console.error("[Admissions] failed to resolve application stage filter", error);
+        if (!cancelled) {
+          setApplicationStageLeadIds(new Set());
+          toast({
+            title: "Application stage filter failed",
+            description: error instanceof Error ? error.message : "Unable to resolve matching leads.",
+            variant: "destructive",
+          });
+        }
+      } finally {
+        if (!cancelled) setApplicationStageResolving(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applicationStageFilter]);
+
   const postgrestList = (values: string[]) => `(${values.join(",")})`;
 
   const applyListQueryFilters = (query: any) => {
@@ -455,7 +619,17 @@ const Admissions = () => {
     }
 
     // ID-set filters: intersect any active sets and pass the result as .in("id", ...)
-    const idSets: (Set<string> | null)[] = [inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds];
+    if (applicationStageFilter.length > 0 && applicationStageLeadIds === null) {
+      return { query, empty: true };
+    }
+    const idSets: (Set<string> | null)[] = [
+      inactiveIds,
+      followupLeadIds,
+      visitLeadIds,
+      actionLeadIds,
+      notCalledIds,
+      applicationStageFilter.length > 0 ? applicationStageLeadIds : null,
+    ];
     const activeSets = idSets.filter((s): s is Set<string> => s !== null);
     if (activeSets.length > 0) {
       let intersection = Array.from(activeSets[0]);
@@ -662,7 +836,7 @@ const Admissions = () => {
   }, [
     view, page, selectedCampusId, counsellorFilter, role, profile?.id,
     stageFilter, sourceFilter, sourceFilterMode, leadInstitutionType, effectiveCourseFilterIds, courseFilterMode, roleFilter, tempFilter,
-    fromDate, toDate, debouncedSearch,
+    applicationStageFilter, applicationStageLeadIds, fromDate, toDate, debouncedSearch,
     inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds,
   ]);
 
@@ -866,6 +1040,7 @@ const Admissions = () => {
             leadInstitutionType,
             courseFilter: debouncedCourseFilter,
             courseFilterMode,
+            applicationStageFilter,
             roleFilter,
             tempFilter,
             counsellorFilter,
@@ -1000,6 +1175,8 @@ const Admissions = () => {
       || (counsellorFilter === "unassigned" ? !l.counsellor_id : l.counsellor_id === counsellorFilter);
     const matchesNotCalled = !notCalledIds || notCalledIds.has(l.id);
     const matchesAction = !actionLeadIds || actionLeadIds.has(l.id);
+    const matchesApplicationStage = applicationStageFilter.length === 0
+      || (applicationStageLeadIds != null && applicationStageLeadIds.has(l.id));
     // Date-range filter (URL ?from=YYYY-MM-DD&to=YYYY-MM-DD or in-page state)
     let matchesDate = true;
     if (fromDate || toDate) {
@@ -1013,7 +1190,7 @@ const Admissions = () => {
         if (t > to) matchesDate = false;
       }
     }
-    return matchesSearch && matchesStage && matchesSource && matchesCourse && matchesRole && matchesTemp && matchesInactive && matchesFollowup && matchesVisit && matchesCounsellor && matchesNotCalled && matchesAction && matchesDate;
+    return matchesSearch && matchesStage && matchesSource && matchesCourse && matchesRole && matchesTemp && matchesInactive && matchesFollowup && matchesVisit && matchesCounsellor && matchesNotCalled && matchesAction && matchesApplicationStage && matchesDate;
   });
 
   // List view paginates server-side: `leads` is already the current page
@@ -1028,7 +1205,7 @@ const Admissions = () => {
     setPage(1);
     setLeadPageCursors({});
     setHasNextLeadPage(false);
-  }, [stageFilter, sourceFilter, sourceFilterMode, leadInstitutionType, effectiveCourseFilterIds, courseFilterMode, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, fromDate, toDate]);
+  }, [stageFilter, sourceFilter, sourceFilterMode, leadInstitutionType, effectiveCourseFilterIds, courseFilterMode, applicationStageFilter, applicationStageLeadIds, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, fromDate, toDate]);
 
   // Funnel click → translate bucket into a stageFilter (comma-separated raw
   // lead_stage values that the existing `matchesStage` filter already
@@ -1967,6 +2144,62 @@ const Admissions = () => {
                     );
                   });
                 })()}
+              </div>
+            </PopoverContent>
+          </Popover>
+          <Popover open={applicationStagePopoverOpen} onOpenChange={setApplicationStagePopoverOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="flex items-center gap-2 rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 hover:bg-muted/40"
+              >
+                {applicationStageResolving ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                ) : (
+                  <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                )}
+                <span>{applicationStageFilterLabel}</span>
+                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-80 p-0">
+              <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
+                <span className="text-xs font-semibold text-foreground">Application stage</span>
+                {applicationStageFilter.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setApplicationStageFilter([])}
+                    className="text-[10px] text-primary hover:underline"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <div className="p-1">
+                {APPLICATION_STAGE_OPTIONS.map((option) => {
+                  const checked = applicationStageFilter.includes(option.value);
+                  return (
+                    <label
+                      key={option.value}
+                      className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-2 text-xs hover:bg-muted/50"
+                    >
+                      <Checkbox
+                        checked={checked}
+                        onCheckedChange={(v) => {
+                          setApplicationStageFilter((prev) =>
+                            v
+                              ? Array.from(new Set([...prev, option.value]))
+                              : prev.filter((stage) => stage !== option.value)
+                          );
+                        }}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-medium text-foreground">{option.label}</span>
+                        <span className="block text-[11px] leading-snug text-muted-foreground">{option.description}</span>
+                      </span>
+                    </label>
+                  );
+                })}
               </div>
             </PopoverContent>
           </Popover>
