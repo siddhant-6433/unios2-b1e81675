@@ -407,9 +407,10 @@ export default function LeadLists() {
       setWaSenderError(channelsRes.error?.message || healthRes.error?.message || "Could not load WhatsApp sender health.");
     }
 
-    const nextOptions = [...options.values()];
+    const concreteOptions = [...options.values()].filter((option) => option.value !== DEFAULT_WA_SENDER);
+    const nextOptions = concreteOptions.length > 0 ? concreteOptions : [defaultWaSenderOption()];
     setWaSenderOptions(nextOptions);
-    setWaSenderValue((current) => nextOptions.some((o) => o.value === current) ? current : DEFAULT_WA_SENDER);
+    setWaSenderValue((current) => nextOptions.some((o) => o.value === current) ? current : nextOptions[0]?.value || DEFAULT_WA_SENDER);
     setWaSenderLoading(false);
   };
 
