@@ -81,6 +81,15 @@ const TEMPLATES = [
     preview: cahetDeadlineMessage(),
   },
   {
+    key: "cnet_not_qualified_bpt_bmrit",
+    label: "CNET Not Qualified → BPT/BMRIT",
+    description: "Bilingual CNET result follow-up with BPT/BMRIT and CAHET instructions",
+    badge: "CNET",
+    followUpMsg: null,
+    buildParams: (lead: any) => [lead.name],
+    preview: "Dear {{1}}\n\nCNET result has been declared. In case you have NOT Qualified, you still have the opportunity of pursuing a career in the healthcare sector.\n\n*BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *14th June 2026*.\n\nFor admission Candidates MUST\n\n1. Complete College Application Online at https://apply.nimt.ac.in\n\n2. Complete the *CAHET Registration on ABVMUP by 14th June 11:59 PM* (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh): https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nPlease note both form submissions are mandatory by 14th June 2026 to be included in the admission process for session 2026-27.\n\nFor any details please call 7428499849, 9667691872, 9555192192\n\n---\n\nप्रिय {{1}}\n\nCNET result घोषित हो चुका है। यदि आप qualify नहीं हुए हैं, तब भी healthcare sector में career बनाने का अवसर उपलब्ध है।\n\n*BPT (Bachelor of Physiotherapy) और BMRIT (Bachelor of Medical Radiological Imaging Technology)* - Application Submission की अंतिम तिथि *14th June 2026* है।\n\nAdmission के लिए Candidates को अनिवार्य रूप से\n\n1. College Application Online complete करना होगा: https://apply.nimt.ac.in\n\n2. *CAHET Registration on ABVMUP by 14th June 11:59 PM* complete करना होगा (Uttar Pradesh में BPT/BMRIT admission के लिए यह mandatory है): https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nकृपया ध्यान दें कि session 2026-27 admission process में शामिल होने के लिए दोनों form submissions 14th June 2026 तक mandatory हैं।\n\nकिसी भी जानकारी के लिए call करें: 7428499849, 9667691872, 9555192192",
+  },
+  {
     key: "course_details",
     label: "Course Details",
     description: "Send course information",

@@ -31,6 +31,42 @@ For any details please call 9555192192
 7428499849`;
 }
 
+function cnetNotQualifiedBptBmritMessage(): string {
+  return `Dear {{1}}
+
+CNET result has been declared. In case you have NOT Qualified, you still have the opportunity of pursuing a career in the healthcare sector.
+
+*BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *14th June 2026*.
+
+For admission Candidates MUST
+
+1. Complete College Application Online at https://apply.nimt.ac.in
+
+2. Complete the *CAHET Registration on ABVMUP by 14th June 11:59 PM* (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh): https://www.abvmucet26.co.in/entrance2026/login?form=4
+
+Please note both form submissions are mandatory by 14th June 2026 to be included in the admission process for session 2026-27.
+
+For any details please call 7428499849, 9667691872, 9555192192
+
+---
+
+प्रिय {{1}}
+
+CNET result घोषित हो चुका है। यदि आप qualify नहीं हुए हैं, तब भी healthcare sector में career बनाने का अवसर उपलब्ध है।
+
+*BPT (Bachelor of Physiotherapy) और BMRIT (Bachelor of Medical Radiological Imaging Technology)* - Application Submission की अंतिम तिथि *14th June 2026* है।
+
+Admission के लिए Candidates को अनिवार्य रूप से
+
+1. College Application Online complete करना होगा: https://apply.nimt.ac.in
+
+2. *CAHET Registration on ABVMUP by 14th June 11:59 PM* complete करना होगा (Uttar Pradesh में BPT/BMRIT admission के लिए यह mandatory है): https://www.abvmucet26.co.in/entrance2026/login?form=4
+
+कृपया ध्यान दें कि session 2026-27 admission process में शामिल होने के लिए दोनों form submissions 14th June 2026 तक mandatory हैं।
+
+किसी भी जानकारी के लिए call करें: 7428499849, 9667691872, 9555192192`;
+}
+
 // Template definitions with their expected parameters
 const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   lead_welcome: { name: "admissions_lead_intro", params: ["student_name", "course_name", "lead_source"] },
@@ -50,6 +86,7 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   // untagged campus, and the correct uni.nimt.ac.in apply domain.
   course_info_video_v2: { name: "course_info_video_v2", params: ["student_name", "course_label", "course_url", "campus_url", "apply_url"] },
   bpt_bmrit_cahet_deadline: { name: "bpt_bmrit_cahet_deadline", params: [] },
+  cnet_not_qualified_bpt_bmrit: { name: "cnet_not_qualified_bpt_bmrit", params: ["student_name"] },
   // Counsellor utility — tap-to-call link sent to counsellor's own phone
   counsellor_call_lead: { name: "lead_queue_item", params: ["counsellor_name", "lead_name", "lead_phone", "course"] },
   // Call disposition auto-replies to leads
@@ -565,6 +602,7 @@ Deno.serve(async (req) => {
       course_info_video: "Hi {{1}}, here are the details for {{2}} at NIMT Educational Institutions:\n\nDuration: {{3}}\nEligibility: {{4}}\nCampus: {{5}}",
       course_info_video_v2: "Hi {{1}}, here are the details you requested for {{2}} at NIMT Educational Institutions:\n\n📚 Course information: {{3}}\n📍 Campus locations: {{4}}\n📝 Application portal: {{5}}\n\nReply to this message if you have any questions — our admissions team will be glad to assist you.",
       bpt_bmrit_cahet_deadline: cahetDeadlineMessage(),
+      cnet_not_qualified_bpt_bmrit: cnetNotQualifiedBptBmritMessage(),
       counsellor_lead_assigned: "Hi {{1}}, a new lead has been assigned to you: {{2}} (Phone: ****{{3}}). Please make first contact within {{4}} hours.",
       counsellor_sla_warning: "Reminder: Lead {{1}} has not been contacted yet. You have {{2}} hour(s) remaining.",
       counsellor_lead_reclaimed: "Lead {{1}} ({{2}}) has been returned to the unassigned bucket due to SLA breach.",
