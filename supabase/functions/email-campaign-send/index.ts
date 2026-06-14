@@ -15,6 +15,26 @@ const corsHeaders = {
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+async function syncCampaignCounts(admin: any, campaignId: string) {
+  const { count: sentCount } = await admin
+    .from("email_campaign_recipients")
+    .select("id", { count: "exact", head: true })
+    .eq("campaign_id", campaignId)
+    .eq("status", "sent");
+  const { count: failedCount } = await admin
+    .from("email_campaign_recipients")
+    .select("id", { count: "exact", head: true })
+    .eq("campaign_id", campaignId)
+    .eq("status", "failed");
+
+  await admin.from("email_campaigns").update({
+    sent_count: sentCount || 0,
+    failed_count: failedCount || 0,
+  }).eq("id", campaignId);
+
+  return { sent_count: sentCount || 0, failed_count: failedCount || 0 };
+}
+
 type LeadVars = {
   student_name: string;
   course_name: string;
@@ -85,6 +105,19 @@ Deno.serve(async (req) => {
       });
     }
 
+    if ((campaign as any).status === "paused" || (campaign as any).status === "terminated") {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          paused: (campaign as any).status === "paused",
+          terminated: (campaign as any).status === "terminated",
+          status: (campaign as any).status,
+          message: `Campaign is ${(campaign as any).status}.`,
+        }),
+        { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // Resolve template (slug → subject/body) once.
     let subjectTpl = (campaign as any).custom_subject as string | null;
     let bodyTpl = (campaign as any).custom_body as string | null;
@@ -144,6 +177,48 @@ Deno.serve(async (req) => {
     let sent = 0, failed = 0, skipped = 0;
 
     for (const r of recipients) {
+      const { data: liveCampaign } = await admin
+        .from("email_campaigns")
+        .select("status")
+        .eq("id", campaign_id)
+        .single();
+
+      if (liveCampaign?.status === "paused") {
+        const totals = await syncCampaignCounts(admin, campaign_id);
+        return new Response(
+          JSON.stringify({
+            success: true,
+            paused: true,
+            sent,
+            failed,
+            skipped,
+            total_sent: totals.sent_count,
+            total_failed: totals.failed_count,
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (liveCampaign?.status === "terminated") {
+        await admin.from("email_campaign_recipients")
+          .update({ status: "canceled", error_message: "Campaign terminated before send" })
+          .eq("campaign_id", campaign_id)
+          .eq("status", "pending");
+        const totals = await syncCampaignCounts(admin, campaign_id);
+        return new Response(
+          JSON.stringify({
+            success: true,
+            terminated: true,
+            sent,
+            failed,
+            skipped,
+            total_sent: totals.sent_count,
+            total_failed: totals.failed_count,
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
       const lead = (r as any).leads || {};
       // Skip DNC leads — same rule as the single-send path.
       if (lead.stage === "dnc") {
@@ -221,23 +296,40 @@ Deno.serve(async (req) => {
       await delay(250);
     }
 
-    const { data: updatedCampaign } = await admin
+    const totals = await syncCampaignCounts(admin, campaign_id);
+
+    const { data: finalCampaign } = await admin
       .from("email_campaigns")
-      .select("sent_count, failed_count")
+      .select("status")
       .eq("id", campaign_id)
       .single();
-    const totalSent = (updatedCampaign?.sent_count || 0) + sent;
-    const totalFailed = (updatedCampaign?.failed_count || 0) + failed;
+
+    if (finalCampaign?.status === "paused" || finalCampaign?.status === "terminated") {
+      return new Response(
+        JSON.stringify({
+          success: true,
+          status: finalCampaign.status,
+          paused: finalCampaign.status === "paused",
+          terminated: finalCampaign.status === "terminated",
+          sent,
+          failed,
+          skipped,
+          total_sent: totals.sent_count,
+          total_failed: totals.failed_count,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     await admin.from("email_campaigns").update({
-      sent_count: totalSent,
-      failed_count: totalFailed,
+      sent_count: totals.sent_count,
+      failed_count: totals.failed_count,
       status: "completed",
       completed_at: new Date().toISOString(),
     }).eq("id", campaign_id);
 
     return new Response(
-      JSON.stringify({ success: true, sent, failed, skipped, total_sent: totalSent, total_failed: totalFailed }),
+      JSON.stringify({ success: true, sent, failed, skipped, total_sent: totals.sent_count, total_failed: totals.failed_count }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err: any) {
