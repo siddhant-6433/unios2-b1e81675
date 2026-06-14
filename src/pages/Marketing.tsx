@@ -13,8 +13,11 @@ import {
   Mail,
   Megaphone,
   MessageSquare,
+  PauseCircle,
+  PlayCircle,
   RefreshCw,
   Send,
+  StopCircle,
   XCircle,
 } from "lucide-react";
 
@@ -48,6 +51,8 @@ const statusTone = (status: string) => {
   if (status === "completed") return "bg-emerald-100 text-emerald-700";
   if (status === "failed") return "bg-red-100 text-red-700";
   if (status === "sending") return "bg-blue-100 text-blue-700";
+  if (status === "paused") return "bg-slate-100 text-slate-700";
+  if (status === "terminated") return "bg-zinc-200 text-zinc-700";
   return "bg-amber-100 text-amber-700";
 };
 
@@ -103,7 +108,7 @@ export default function Marketing() {
         total,
         sent,
         failed,
-        pending: Math.max(0, total - sent - failed),
+        pending: row.status === "completed" || row.status === "failed" || row.status === "terminated" ? 0 : Math.max(0, total - sent - failed),
         status: row.status || "pending",
         createdAt: row.created_at,
         completedAt: row.completed_at,
@@ -124,7 +129,7 @@ export default function Marketing() {
         total,
         sent,
         failed,
-        pending: Math.max(0, total - sent - failed),
+        pending: row.status === "completed" || row.status === "failed" || row.status === "terminated" ? 0 : Math.max(0, total - sent - failed),
         status: row.status || "pending",
         createdAt: row.created_at,
         completedAt: row.completed_at,
@@ -195,7 +200,47 @@ export default function Marketing() {
       await load();
       return;
     }
-    supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1 } }).catch(() => {});
+    supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1, batch_size: 10 } }).catch(() => {});
+    setQueueingId(null);
+    await load();
+  };
+
+  const pauseCampaign = async (campaign: CampaignRow) => {
+    setQueueingId(campaign.id);
+    setQueueError(null);
+    const table = campaign.channel === "whatsapp" ? "whatsapp_campaigns" : "email_campaigns";
+    const { error } = await supabase
+      .from(table as any)
+      .update({
+        status: "paused",
+        next_attempt_at: null,
+        worker_locked_at: null,
+        worker_error: null,
+      })
+      .eq("id", campaign.id);
+    if (error) setQueueError(error.message);
+    setQueueingId(null);
+    await load();
+  };
+
+  const terminateCampaign = async (campaign: CampaignRow) => {
+    const ok = window.confirm(`Terminate "${campaign.name}"? Pending recipients will not be sent.`);
+    if (!ok) return;
+
+    setQueueingId(campaign.id);
+    setQueueError(null);
+    const table = campaign.channel === "whatsapp" ? "whatsapp_campaigns" : "email_campaigns";
+    const { error } = await supabase
+      .from(table as any)
+      .update({
+        status: "terminated",
+        completed_at: new Date().toISOString(),
+        next_attempt_at: null,
+        worker_locked_at: null,
+        worker_error: null,
+      })
+      .eq("id", campaign.id);
+    if (error) setQueueError(error.message);
     setQueueingId(null);
     await load();
   };
@@ -302,16 +347,50 @@ export default function Marketing() {
                       <td className="px-4 py-3 text-right">{pct(campaign.sent, campaign.sent + campaign.failed)}</td>
                       <td className="px-4 py-3 text-muted-foreground">{fmtDate(campaign.createdAt)}</td>
                       <td className="px-4 py-3 text-right">
-                        {campaign.pending > 0 && (
+                        <div className="flex flex-wrap justify-end gap-2">
+                        {campaign.pending > 0 && campaign.status !== "paused" && (
                           <Button
                             variant="outline"
                             size="sm"
-                            className="mr-2"
                             onClick={() => resumeCampaign(campaign)}
                             disabled={queueingId === campaign.id}
                           >
                             {queueingId === campaign.id ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
                             Queue
+                          </Button>
+                        )}
+                        {campaign.status === "paused" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => resumeCampaign(campaign)}
+                            disabled={queueingId === campaign.id}
+                          >
+                            {queueingId === campaign.id ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <PlayCircle className="mr-1 h-3.5 w-3.5" />}
+                            Resume
+                          </Button>
+                        )}
+                        {campaign.pending > 0 && ["pending", "sending"].includes(campaign.status) && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => pauseCampaign(campaign)}
+                            disabled={queueingId === campaign.id}
+                          >
+                            <PauseCircle className="mr-1 h-3.5 w-3.5" />
+                            Pause
+                          </Button>
+                        )}
+                        {campaign.pending > 0 && ["pending", "sending", "paused"].includes(campaign.status) && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-red-700 hover:text-red-700"
+                            onClick={() => terminateCampaign(campaign)}
+                            disabled={queueingId === campaign.id}
+                          >
+                            <StopCircle className="mr-1 h-3.5 w-3.5" />
+                            Terminate
                           </Button>
                         )}
                         <Button
@@ -322,6 +401,7 @@ export default function Marketing() {
                         >
                           Failures
                         </Button>
+                        </div>
                       </td>
                     </tr>
                   ))}
