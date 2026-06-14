@@ -16,6 +16,7 @@ const TEMPLATES = [
   { key: "application_received", label: "Application Received", description: "Acknowledge application submission" },
   { key: "fee_reminder", label: "Fee Reminder", description: "Remind about pending fee payment" },
   { key: "course_details", label: "Course Details + Brochure", description: "Send course information and brochure" },
+  { key: "cnet_not_qualified_bpt_bmrit", label: "CNET Not Qualified → BPT/BMRIT", description: "Bilingual CNET result follow-up with BPT/BMRIT and CAHET instructions" },
 ];
 
 interface Lead {
