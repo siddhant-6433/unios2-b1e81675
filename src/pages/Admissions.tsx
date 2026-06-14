@@ -124,6 +124,7 @@ type ApplicationStageFilter =
   | "application_fee_paid"
   | "application_submitted"
   | "token_fee_paid";
+type ApplicationStageLeadScope = { mode: "include" | "exclude"; ids: Set<string> };
 
 const APPLICATION_STAGE_OPTIONS: { value: ApplicationStageFilter; label: string; description: string }[] = [
   {
@@ -244,7 +245,7 @@ const Admissions = () => {
   const [courseSearch, setCourseSearch] = useState("");
   const [coursePopoverOpen, setCoursePopoverOpen] = useState(false);
   const [applicationStageFilter, setApplicationStageFilter] = useState<ApplicationStageFilter[]>([]);
-  const [applicationStageLeadIds, setApplicationStageLeadIds] = useState<Set<string> | null>(null);
+  const [applicationStageLeadScope, setApplicationStageLeadScope] = useState<ApplicationStageLeadScope | null>(null);
   const [applicationStageResolving, setApplicationStageResolving] = useState(false);
   const [applicationStagePopoverOpen, setApplicationStagePopoverOpen] = useState(false);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
@@ -459,13 +460,13 @@ const Admissions = () => {
   useEffect(() => {
     let cancelled = false;
     if (applicationStageFilter.length === 0) {
-      setApplicationStageLeadIds(null);
+      setApplicationStageLeadScope(null);
       setApplicationStageResolving(false);
       return;
     }
 
     setApplicationStageResolving(true);
-    setApplicationStageLeadIds(null);
+    setApplicationStageLeadScope(null);
 
     (async () => {
       try {
@@ -531,13 +532,21 @@ const Admissions = () => {
           for (const id of buckets[stage] || []) matchingIds.add(id);
         }
 
+        const excludedIds = new Set<string>();
+        for (const id of allLeadIds) {
+          if (!matchingIds.has(id)) excludedIds.add(id);
+        }
+        const scope: ApplicationStageLeadScope = matchingIds.size <= excludedIds.size
+          ? { mode: "include", ids: matchingIds }
+          : { mode: "exclude", ids: excludedIds };
+
         if (!cancelled) {
-          setApplicationStageLeadIds(matchingIds);
+          setApplicationStageLeadScope(scope);
         }
       } catch (error) {
         console.error("[Admissions] failed to resolve application stage filter", error);
         if (!cancelled) {
-          setApplicationStageLeadIds(new Set());
+          setApplicationStageLeadScope({ mode: "include", ids: new Set() });
           toast({
             title: "Application stage filter failed",
             description: error instanceof Error ? error.message : "Unable to resolve matching leads.",
@@ -618,8 +627,10 @@ const Admissions = () => {
       );
     }
 
-    // ID-set filters: intersect any active sets and pass the result as .in("id", ...)
-    if (applicationStageFilter.length > 0 && applicationStageLeadIds === null) {
+    // ID-set filters: intersect any active sets and pass the result as .in("id", ...).
+    // Broad application-stage buckets use an exclusion scope so the URL does
+    // not explode with thousands of lead ids.
+    if (applicationStageFilter.length > 0 && applicationStageLeadScope === null) {
       return { query, empty: true };
     }
     const idSets: (Set<string> | null)[] = [
@@ -628,7 +639,7 @@ const Admissions = () => {
       visitLeadIds,
       actionLeadIds,
       notCalledIds,
-      applicationStageFilter.length > 0 ? applicationStageLeadIds : null,
+      applicationStageLeadScope?.mode === "include" ? applicationStageLeadScope.ids : null,
     ];
     const activeSets = idSets.filter((s): s is Set<string> => s !== null);
     if (activeSets.length > 0) {
@@ -639,6 +650,13 @@ const Admissions = () => {
       }
       if (intersection.length === 0) return { query, empty: true };
       query = query.in("id", intersection);
+    }
+
+    if (applicationStageLeadScope?.mode === "exclude" && applicationStageLeadScope.ids.size > 0) {
+      const ids = Array.from(applicationStageLeadScope.ids);
+      for (let i = 0; i < ids.length; i += 100) {
+        query = query.not("id", "in", postgrestList(ids.slice(i, i + 100)));
+      }
     }
 
     return { query, empty: false };
@@ -703,6 +721,11 @@ const Admissions = () => {
   };
 
   const fetchLeads = async () => {
+    if (applicationStageFilter.length > 0 && applicationStageLeadScope === null) {
+      setLoading(true);
+      return;
+    }
+
     setLoading(true);
     setLoadError(null);
 
@@ -836,7 +859,7 @@ const Admissions = () => {
   }, [
     view, page, selectedCampusId, counsellorFilter, role, profile?.id,
     stageFilter, sourceFilter, sourceFilterMode, leadInstitutionType, effectiveCourseFilterIds, courseFilterMode, roleFilter, tempFilter,
-    applicationStageFilter, applicationStageLeadIds, fromDate, toDate, debouncedSearch,
+    applicationStageFilter, applicationStageLeadScope, fromDate, toDate, debouncedSearch,
     inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds,
   ]);
 
@@ -1176,7 +1199,11 @@ const Admissions = () => {
     const matchesNotCalled = !notCalledIds || notCalledIds.has(l.id);
     const matchesAction = !actionLeadIds || actionLeadIds.has(l.id);
     const matchesApplicationStage = applicationStageFilter.length === 0
-      || (applicationStageLeadIds != null && applicationStageLeadIds.has(l.id));
+      || (applicationStageLeadScope?.mode === "include"
+        ? applicationStageLeadScope.ids.has(l.id)
+        : applicationStageLeadScope?.mode === "exclude"
+          ? !applicationStageLeadScope.ids.has(l.id)
+          : false);
     // Date-range filter (URL ?from=YYYY-MM-DD&to=YYYY-MM-DD or in-page state)
     let matchesDate = true;
     if (fromDate || toDate) {
@@ -1205,7 +1232,7 @@ const Admissions = () => {
     setPage(1);
     setLeadPageCursors({});
     setHasNextLeadPage(false);
-  }, [stageFilter, sourceFilter, sourceFilterMode, leadInstitutionType, effectiveCourseFilterIds, courseFilterMode, applicationStageFilter, applicationStageLeadIds, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, fromDate, toDate]);
+  }, [stageFilter, sourceFilter, sourceFilterMode, leadInstitutionType, effectiveCourseFilterIds, courseFilterMode, applicationStageFilter, applicationStageLeadScope, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, fromDate, toDate]);
 
   // Funnel click → translate bucket into a stageFilter (comma-separated raw
   // lead_stage values that the existing `matchesStage` filter already
