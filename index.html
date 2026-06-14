@@ -24,6 +24,7 @@
     <script>
       (function(w,d,s,l){
         var host = (w.location.hostname || "").toLowerCase();
+        var path = w.location.pathname || "/";
         var containers = {
           "nimt.ac.in": "GTM-NHC65VZ",
           "www.nimt.ac.in": "GTM-NHC65VZ",
@@ -34,6 +35,15 @@
           "www.seralislab.com": "GTM-NN2LQW8T"
         };
         var i = containers[host];
+        if (!i && host === "uni.nimt.ac.in") {
+          if (/^\/applly\/nimt\/?$/i.test(path) || /^\/apply\/nimt\/?$/i.test(path)) {
+            i = "GTM-NHC65VZ";
+          } else if (/^\/apply\.mirai\/?$/i.test(path) || /^\/apply\/mirai\/?$/i.test(path)) {
+            i = "GTM-WL5MTC3D";
+          } else if (/^\/apply\/beacon\/?$/i.test(path)) {
+            i = "GTM-M9J8RJ7V";
+          }
+        }
         if (!i) return;
         w[l]=w[l]||[];
         w[l].push({"gtm.start": new Date().getTime(), event: "gtm.js"});

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const indexHtml = readFileSync("index.html", "utf8");
+const appTsx = readFileSync("src/App.tsx", "utf8");
 
 describe("site GTM container mapping", () => {
   it("maps public marketing hostnames to their site-level GTM containers", () => {
@@ -18,5 +19,22 @@ describe("site GTM container mapping", () => {
     expect(indexHtml).toContain("var i = containers[host];");
     expect(indexHtml).toContain("if (!i) return;");
     expect(indexHtml).not.toContain('"uni.nimt.ac.in": "GTM-');
+  });
+
+  it("loads brand GTM containers on student-facing uni.nimt.ac.in application paths only", () => {
+    expect(indexHtml).toContain('host === "uni.nimt.ac.in"');
+    expect(indexHtml).toContain('/^\\/apply\\/nimt\\/?$/i.test(path)');
+    expect(indexHtml).toContain('/^\\/apply\\/mirai\\/?$/i.test(path)');
+    expect(indexHtml).toContain('/^\\/apply\\/beacon\\/?$/i.test(path)');
+    expect(indexHtml).toContain('i = "GTM-NHC65VZ"');
+    expect(indexHtml).toContain('i = "GTM-WL5MTC3D"');
+    expect(indexHtml).toContain('i = "GTM-M9J8RJ7V"');
+  });
+
+  it("redirects common application URL typos to canonical apply routes", () => {
+    expect(appTsx).toContain('path="/applly/nimt"');
+    expect(appTsx).toContain('to="/apply/nimt"');
+    expect(appTsx).toContain('path="/apply.mirai"');
+    expect(appTsx).toContain('to="/apply/mirai"');
   });
 });
