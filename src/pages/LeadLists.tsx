@@ -5,14 +5,19 @@ import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
   ListPlus, Loader2, Send, Mail, Trash2, Users, MessageSquare, AlertTriangle, Upload,
-  Pause, PlayCircle, RefreshCw, XCircle, Phone,
+  Pause, PlayCircle, RefreshCw, XCircle, Phone, Check, ChevronDown,
 } from "lucide-react";
 import { WA_BULK_TEMPLATES } from "@/config/waBulkTemplates";
+import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 
 const BulkLeadImportDialog = lazy(() =>
   import("@/components/admissions/BulkLeadImportDialog").then((m) => ({ default: m.BulkLeadImportDialog })));
@@ -83,6 +88,11 @@ const CAMPAIGN_STATUS_BADGE: Record<CampaignQueueItem["status"], string> = {
 };
 
 const DEFAULT_WA_SENDER = "__default_bulk_sender__";
+const WHATSAPP_BUSINESS_NAME = "NIMT Educational Institutions";
+const KNOWN_META_PHONE_NUMBER_ID_TO_NUMBER: Record<string, string> = {
+  "1075269918995469": "917428499849",
+  "970526789470416": "919599675267",
+};
 
 const defaultWaSenderOption = (): WaSenderOption => ({
   value: DEFAULT_WA_SENDER,
@@ -118,6 +128,15 @@ const senderHealthClass = (failedPct: number | null | undefined) => {
   return "bg-emerald-100 text-emerald-700";
 };
 
+const resolveBusinessNumber = (
+  phoneNumberId: string | null | undefined,
+  businessNumber: string | null | undefined,
+) => {
+  const numberDigits = digitsOnly(businessNumber);
+  if (numberDigits) return numberDigits;
+  return phoneNumberId ? KNOWN_META_PHONE_NUMBER_ID_TO_NUMBER[phoneNumberId] || null : null;
+};
+
 const sampleValueForParam = (name: string) => {
   if (name === "student_name") return "Rahul Sharma";
   if (name === "course_name") return "BPT";
@@ -135,15 +154,56 @@ const renderTemplatePreview = (preview: string, staticParams: Record<string, str
     return typed || sampleValueForParam(name);
   });
 
-const senderSelectLabel = (sender: WaSenderOption) => {
+const WhatsAppBusinessIdentity = ({
+  sender,
+  selected,
+  compact = false,
+}: {
+  sender: WaSenderOption;
+  selected?: boolean;
+  compact?: boolean;
+}) => {
   const formattedNumber = formatSenderNumber(sender.businessNumber);
-  const numberSuffix = formattedNumber && !sender.label.includes(formattedNumber)
-    ? ` (${formattedNumber})`
-    : "";
-  const healthSuffix = sender.total != null
-    ? ` — 7d failed ${formatPct(sender.failedPct)}, read ${formatPct(sender.readPct)}`
-    : "";
-  return `${sender.label}${numberSuffix}${healthSuffix}`;
+  const primaryLabel = formattedNumber || sender.label || "Default bulk route";
+  const countryLabel = formattedNumber ? "🇮🇳 India" : "Default route";
+
+  return (
+    <div className={`flex w-full items-center gap-3 ${compact ? "py-1" : "rounded-md p-2"}`}>
+      <Avatar className={compact ? "h-9 w-9 border bg-white" : "h-10 w-10 border bg-white"}>
+        <AvatarImage src={nimtLogo} alt={WHATSAPP_BUSINESS_NAME} className="object-contain p-1" />
+        <AvatarFallback className="bg-emerald-50 text-[10px] font-semibold text-emerald-700">NIMT</AvatarFallback>
+      </Avatar>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className="truncate text-sm font-semibold text-foreground">{primaryLabel}</p>
+          {sender.provider === "meta" && (
+            <Badge variant="outline" className="h-5 rounded-full px-1.5 text-[10px]">Meta</Badge>
+          )}
+        </div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+          <span>{countryLabel}</span>
+          <span className="hidden sm:inline">•</span>
+          <span className="truncate">{WHATSAPP_BUSINESS_NAME}</span>
+          {!compact && <span>Name visible to customers</span>}
+        </div>
+        {!compact && (
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <Badge className={`border-0 text-[10px] ${senderHealthClass(sender.failedPct)}`}>
+              7d failed {formatPct(sender.failedPct)}
+            </Badge>
+            <span className="text-[11px] text-muted-foreground">Read {formatPct(sender.readPct)}</span>
+            {sender.total != null && (
+              <span className="text-[11px] text-muted-foreground">{sender.total.toLocaleString("en-IN")} sends</span>
+            )}
+            {sender.qualityRiskLevel && (
+              <span className="text-[11px] text-muted-foreground">Risk: {sender.qualityRiskLevel}</span>
+            )}
+          </div>
+        )}
+      </div>
+      {selected && <Check className="h-4 w-4 shrink-0 text-emerald-600" />}
+    </div>
+  );
 };
 
 export default function LeadLists() {
@@ -308,7 +368,7 @@ export default function LeadLists() {
         if (!phoneNumberId && !businessNumber) continue;
         const value = `${channel.provider}:${phoneNumberId || businessNumber}`;
         const health = phoneNumberId ? healthByPhone.get(phoneNumberId) : undefined;
-        const resolvedBusinessNumber = businessNumber || health?.business_phone_number || null;
+        const resolvedBusinessNumber = resolveBusinessNumber(phoneNumberId, businessNumber || health?.business_phone_number);
         options.set(value, {
           value,
           label: formatSenderNumber(resolvedBusinessNumber) || channel.label || phoneNumberId || "WhatsApp sender",
@@ -328,7 +388,7 @@ export default function LeadLists() {
       if (!health.phone_number_id || health.phone_number_id === "(unset)") continue;
       const value = `meta:${health.phone_number_id}`;
       const existing = options.get(value);
-      const businessNumber = existing?.businessNumber || health.business_phone_number || null;
+      const businessNumber = resolveBusinessNumber(health.phone_number_id, existing?.businessNumber || health.business_phone_number);
       options.set(value, {
         value,
         label: formatSenderNumber(businessNumber) || existing?.label || `Meta sender ${health.phone_number_id}`,
@@ -893,18 +953,33 @@ export default function LeadLists() {
                   Refresh
                 </Button>
               </div>
-              <select
-                value={waSenderValue}
-                onChange={(e) => setWaSenderValue(e.target.value)}
-                disabled={waSenderLoading}
-                className="mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
-              >
-                {waSenderOptions.map((sender) => (
-                  <option key={sender.value} value={sender.value}>
-                    {senderSelectLabel(sender)}
-                  </option>
-                ))}
-              </select>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    disabled={waSenderLoading}
+                    className="mt-1 flex w-full items-center gap-2 rounded-lg border border-input bg-card px-3 py-2 text-left text-sm transition-colors hover:bg-muted/40 focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {waSelectedSender ? (
+                      <WhatsAppBusinessIdentity sender={waSelectedSender} compact />
+                    ) : (
+                      <span className="flex-1 text-muted-foreground">Select outgoing WhatsApp number</span>
+                    )}
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)] p-1.5">
+                  {waSenderOptions.map((sender) => (
+                    <DropdownMenuItem
+                      key={sender.value}
+                      onSelect={() => setWaSenderValue(sender.value)}
+                      className="cursor-pointer p-0 focus:bg-muted"
+                    >
+                      <WhatsAppBusinessIdentity sender={sender} selected={sender.value === waSenderValue} />
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
               {waSelectedSender && (
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
                   <Badge variant="outline" className="gap-1 text-[10px]">
