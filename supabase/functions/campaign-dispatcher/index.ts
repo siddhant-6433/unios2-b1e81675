@@ -48,7 +48,7 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json().catch(() => ({}));
     const limit = Math.max(1, Math.min(Number(body?.limit) || 4, 10));
-    const batchSize = Math.max(1, Math.min(Number(body?.batch_size) || 50, 100));
+    const batchSize = Math.max(1, Math.min(Number(body?.batch_size) || 10, 50));
 
     const { data: claimed, error: claimError } = await admin.rpc("claim_due_marketing_campaigns" as any, {
       _limit: limit,
@@ -77,11 +77,13 @@ Deno.serve(async (req) => {
 
         if (!res.ok || payload?.error) {
           const message = payload?.error || `HTTP ${res.status}`;
+          const retryable = res.status >= 500 || res.status === 429;
+          const nextStatus = payload?.paused ? "paused" : retryable ? "pending" : "failed";
           await admin.from(table).update({
-            status: "failed",
+            status: nextStatus,
             worker_locked_at: null,
             worker_error: message,
-            next_attempt_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+            next_attempt_at: nextStatus === "paused" ? null : new Date(Date.now() + 10 * 60 * 1000).toISOString(),
           } as any).eq("id", campaign.campaign_id);
           results.push({ ...campaign, ok: false, error: message });
           continue;
@@ -95,7 +97,7 @@ Deno.serve(async (req) => {
         results.push({ ...campaign, ok: true, ...payload });
       } catch (err: any) {
         await admin.from(table).update({
-          status: "failed",
+          status: "pending",
           worker_locked_at: null,
           worker_error: err?.message || "Dispatcher error",
           next_attempt_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
