@@ -392,7 +392,7 @@ function drawFeeLedger(ctx: Ctx, rows: LedgerRow[]) {
 // ───────────────────────── builder ─────────────────────────
 
 interface BuildOpts {
-  offer: { net_fee: number; total_fee: number; scholarship_amount: number | null; acceptance_deadline: string | null; created_at: string };
+  offer: { net_fee: number; total_fee: number; scholarship_amount: number | null; acceptance_deadline: string | null; created_at: string; admission_mode?: string | null; entrance_exam_name?: string | null };
   lead: { name: string; phone: string | null; email: string | null; application_id: string | null; pre_admission_no: string | null };
   course: { name: string; code?: string | null; duration_years?: number | null } | null;
   campus: { name: string; address?: string | null } | null;
@@ -450,6 +450,7 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
 
   await newPage(ctx);
   const isDaott = isDaottCourse(opts.course);
+  const isCahetRoute = String(opts.offer.entrance_exam_name || "").toLowerCase().includes("cahet");
 
   // ── Date + greeting (compact — single line each) ────────────────────────
   ctx.page.drawText(`Date: ${fmtDate(opts.offer.created_at)}`, {
@@ -489,7 +490,7 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
     ctx.y -= 28;
   }
 
-  if (opts.cahetRegistration && isBptOrBmritCourse(opts.course)) {
+  if (opts.cahetRegistration && (isBptOrBmritCourse(opts.course) || isCahetRoute)) {
     ctx.y -= 4;
     drawKVGrid(ctx, [
       { label: "CAHET Status", value: "Registered" },
@@ -691,7 +692,7 @@ Deno.serve(async (req) => {
       .from("offer_letters")
       .select(`
         id, total_fee, scholarship_amount, net_fee, approval_status,
-        token_fee_amount, acceptance_deadline, created_at,
+        token_fee_amount, acceptance_deadline, created_at, admission_mode, entrance_exam_name,
         lead_id, course_id, campus_id, session_id,
         leads:lead_id ( id, name, phone, email, application_id, pre_admission_no, token_amount ),
         courses:course_id ( name, code, duration_years ),

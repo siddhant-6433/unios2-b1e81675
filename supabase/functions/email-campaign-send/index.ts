@@ -10,7 +10,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "authorization, x-client-info, apikey, content-type, x-cron-secret, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -48,24 +48,7 @@ Deno.serve(async (req) => {
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // Validate user auth (campaigns are user-initiated).
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user }, error: authError } = await userClient.auth.getUser();
-    if (authError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const { campaign_id } = await req.json();
+    const { campaign_id, batch_size } = await req.json();
     if (!campaign_id) {
       return new Response(JSON.stringify({ error: "campaign_id is required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -73,6 +56,32 @@ Deno.serve(async (req) => {
     }
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
+    const batchSize = Math.max(1, Math.min(Number(batch_size) || 50, 100));
+
+    const authHeader = req.headers.get("Authorization") || "";
+    const expectedCronSecret = Deno.env.get("CRON_SECRET") || "";
+    const isTrustedWorker =
+      (!!expectedCronSecret && req.headers.get("x-cron-secret") === expectedCronSecret) ||
+      authHeader === `Bearer ${serviceRoleKey}`;
+
+    let actorUserId: string | null = null;
+    if (!isTrustedWorker) {
+      if (!authHeader) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: { user }, error: authError } = await userClient.auth.getUser();
+      if (authError || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      actorUserId = user.id;
+    }
 
     const { data: campaign, error: campaignError } = await admin
       .from("email_campaigns")
@@ -83,6 +92,24 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Campaign not found" }), {
         status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    let actorProfileId: string | null = (campaign as any).created_by || null;
+    if (!actorUserId && actorProfileId) {
+      const { data: ownerProfile } = await admin
+        .from("profiles")
+        .select("user_id")
+        .eq("id", actorProfileId)
+        .maybeSingle();
+      actorUserId = (ownerProfile as any)?.user_id || null;
+    }
+    if (!actorProfileId && actorUserId) {
+      const { data: ownerProfile } = await admin
+        .from("profiles")
+        .select("id")
+        .eq("user_id", actorUserId)
+        .maybeSingle();
+      actorProfileId = (ownerProfile as any)?.id || null;
     }
 
     // Resolve template (slug → subject/body) once.
@@ -117,7 +144,8 @@ Deno.serve(async (req) => {
       .from("email_campaign_recipients")
       .select("id, campaign_id, lead_id, to_email, status, leads(name, stage, courses(name), campuses(name))")
       .eq("campaign_id", campaign_id)
-      .eq("status", "pending");
+      .eq("status", "pending")
+      .limit(batchSize);
 
     if (recError) {
       console.error("Failed to fetch recipients:", recError);
@@ -132,12 +160,11 @@ Deno.serve(async (req) => {
         .from("email_campaigns")
         .update({ status: "completed", completed_at: new Date().toISOString() })
         .eq("id", campaign_id);
-      return new Response(JSON.stringify({ success: true, sent: 0, failed: 0, message: "No pending recipients" }), {
+      return new Response(JSON.stringify({ success: true, sent: 0, failed: 0, total_sent: 0, total_failed: 0, pending: 0, done: true, message: "No pending recipients" }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const { data: profile } = await admin.from("profiles").select("id").eq("user_id", user.id).single();
     const fromEmail = Deno.env.get("EMAIL_FROM") || "admissions@nimt.ac.in";
     const trackingBaseUrl = `${supabaseUrl}/functions/v1/track-engagement`;
 
@@ -191,13 +218,13 @@ Deno.serve(async (req) => {
             body_html: bodyHtml,
             status: "sent",
             provider_id: result?.id || null,
-            sent_by: profile?.id || null,
+            sent_by: actorProfileId,
             sent_at: new Date().toISOString(),
           });
 
           await admin.from("lead_activities").insert({
             lead_id: r.lead_id,
-            user_id: user.id,
+            user_id: actorProfileId,
             type: "email",
             description: `Email campaign "${(campaign as any).name}" — ${subject}`,
           });
@@ -221,23 +248,47 @@ Deno.serve(async (req) => {
       await delay(250);
     }
 
-    const { data: updatedCampaign } = await admin
-      .from("email_campaigns")
-      .select("sent_count, failed_count")
-      .eq("id", campaign_id)
-      .single();
-    const totalSent = (updatedCampaign?.sent_count || 0) + sent;
-    const totalFailed = (updatedCampaign?.failed_count || 0) + failed;
+    const [
+      { count: totalSent },
+      { count: totalFailed },
+      { count: pendingCount },
+    ] = await Promise.all([
+      admin
+        .from("email_campaign_recipients")
+        .select("id", { count: "exact", head: true })
+        .eq("campaign_id", campaign_id)
+        .eq("status", "sent"),
+      admin
+        .from("email_campaign_recipients")
+        .select("id", { count: "exact", head: true })
+        .eq("campaign_id", campaign_id)
+        .in("status", ["failed", "skipped"]),
+      admin
+        .from("email_campaign_recipients")
+        .select("id", { count: "exact", head: true })
+        .eq("campaign_id", campaign_id)
+        .eq("status", "pending"),
+    ]);
+    const done = (pendingCount || 0) === 0;
 
     await admin.from("email_campaigns").update({
-      sent_count: totalSent,
-      failed_count: totalFailed,
-      status: "completed",
-      completed_at: new Date().toISOString(),
+      sent_count: totalSent || 0,
+      failed_count: totalFailed || 0,
+      status: done ? "completed" : "sending",
+      completed_at: done ? new Date().toISOString() : null,
     }).eq("id", campaign_id);
 
     return new Response(
-      JSON.stringify({ success: true, sent, failed, skipped, total_sent: totalSent, total_failed: totalFailed }),
+      JSON.stringify({
+        success: true,
+        sent,
+        failed,
+        skipped,
+        total_sent: totalSent || 0,
+        total_failed: totalFailed || 0,
+        pending: pendingCount || 0,
+        done,
+      }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err: any) {

@@ -8,7 +8,7 @@ import {
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "authorization, x-client-info, apikey, content-type, x-cron-secret, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 // Same template definitions as whatsapp-send
@@ -55,27 +55,7 @@ Deno.serve(async (req) => {
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // Validate auth
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user }, error: authError } = await userClient.auth.getUser();
-    if (authError || !user) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const { campaign_id } = await req.json();
+    const { campaign_id, batch_size } = await req.json();
 
     if (!campaign_id) {
       return new Response(
@@ -85,6 +65,35 @@ Deno.serve(async (req) => {
     }
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
+    const batchSize = Math.max(1, Math.min(Number(batch_size) || 50, 100));
+
+    const authHeader = req.headers.get("Authorization") || "";
+    const expectedCronSecret = Deno.env.get("CRON_SECRET") || "";
+    const isTrustedWorker =
+      (!!expectedCronSecret && req.headers.get("x-cron-secret") === expectedCronSecret) ||
+      authHeader === `Bearer ${serviceRoleKey}`;
+
+    let actorUserId: string | null = null;
+    if (!isTrustedWorker) {
+      if (!authHeader) {
+        return new Response(
+          JSON.stringify({ error: "Unauthorized" }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: { user }, error: authError } = await userClient.auth.getUser();
+      if (authError || !user) {
+        return new Response(
+          JSON.stringify({ error: "Unauthorized" }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      actorUserId = user.id;
+    }
 
     // Fetch the campaign record
     const { data: campaign, error: campaignError } = await adminClient
@@ -98,6 +107,24 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: "Campaign not found" }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    let actorProfileId: string | null = (campaign as any).created_by || null;
+    if (!actorUserId && actorProfileId) {
+      const { data: profile } = await adminClient
+        .from("profiles")
+        .select("user_id")
+        .eq("id", actorProfileId)
+        .maybeSingle();
+      actorUserId = (profile as any)?.user_id || null;
+    }
+    if (!actorProfileId && actorUserId) {
+      const { data: profile } = await adminClient
+        .from("profiles")
+        .select("id")
+        .eq("user_id", actorUserId)
+        .maybeSingle();
+      actorProfileId = (profile as any)?.id || null;
     }
 
     const templateDef = TEMPLATES[campaign.template_key];
@@ -121,7 +148,8 @@ Deno.serve(async (req) => {
       .from("whatsapp_campaign_recipients")
       .select("id, campaign_id, lead_id, phone, status, leads(name, courses(name), campuses(name))")
       .eq("campaign_id", campaign_id)
-      .eq("status", "pending");
+      .eq("status", "pending")
+      .limit(batchSize);
 
     if (recipientsError) {
       console.error("Failed to fetch recipients:", recipientsError);
@@ -141,7 +169,7 @@ Deno.serve(async (req) => {
         .update({ status: "completed", completed_at: new Date().toISOString() })
         .eq("id", campaign_id);
       return new Response(
-        JSON.stringify({ success: true, sent: 0, failed: 0, message: "No pending recipients" }),
+        JSON.stringify({ success: true, sent: 0, failed: 0, total_sent: 0, total_failed: 0, pending: 0, done: true, message: "No pending recipients" }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -213,7 +241,7 @@ Deno.serve(async (req) => {
             provider: sendResult.provider,
             business_phone_number_id: sendResult.businessPhoneNumberId,
             business_phone_number: sendResult.businessNumber,
-            sender_user_id: user.id,
+            sender_user_id: actorUserId,
           }).select("id").maybeSingle();
 
           await recordWhatsAppOutboundContext(adminClient, {
@@ -232,7 +260,7 @@ Deno.serve(async (req) => {
             metadata: {
               campaign_name: campaign.name,
               static_params: staticParams,
-              sent_by_user_id: user.id,
+              sent_by_user_id: actorUserId,
             },
             expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
           });
@@ -241,7 +269,7 @@ Deno.serve(async (req) => {
           if (recipient.lead_id) {
             await adminClient.from("lead_activities").insert({
               lead_id: recipient.lead_id,
-              user_id: user.id,
+              user_id: actorProfileId,
               type: "whatsapp",
               description: `WhatsApp campaign "${campaign.name}" — Template: ${campaign.template_key.replace(/_/g, " ")}`,
             });
@@ -280,24 +308,37 @@ Deno.serve(async (req) => {
       await delay(200);
     }
 
-    // Update campaign totals
-    // Fetch current counts in case there were already some sent/failed from a previous run
-    const { data: updatedCampaign } = await adminClient
-      .from("whatsapp_campaigns")
-      .select("sent_count, failed_count")
-      .eq("id", campaign_id)
-      .single();
+    const [
+      { count: totalSent },
+      { count: totalFailed },
+      { count: pendingCount },
+    ] = await Promise.all([
+      adminClient
+        .from("whatsapp_campaign_recipients")
+        .select("id", { count: "exact", head: true })
+        .eq("campaign_id", campaign_id)
+        .eq("status", "sent"),
+      adminClient
+        .from("whatsapp_campaign_recipients")
+        .select("id", { count: "exact", head: true })
+        .eq("campaign_id", campaign_id)
+        .eq("status", "failed"),
+      adminClient
+        .from("whatsapp_campaign_recipients")
+        .select("id", { count: "exact", head: true })
+        .eq("campaign_id", campaign_id)
+        .eq("status", "pending"),
+    ]);
 
-    const totalSent = (updatedCampaign?.sent_count || 0) + sentCount;
-    const totalFailed = (updatedCampaign?.failed_count || 0) + failedCount;
+    const done = (pendingCount || 0) === 0;
 
     await adminClient
       .from("whatsapp_campaigns")
       .update({
-        sent_count: totalSent,
-        failed_count: totalFailed,
-        status: "completed",
-        completed_at: new Date().toISOString(),
+        sent_count: totalSent || 0,
+        failed_count: totalFailed || 0,
+        status: done ? "completed" : "sending",
+        completed_at: done ? new Date().toISOString() : null,
       })
       .eq("id", campaign_id);
 
@@ -306,8 +347,10 @@ Deno.serve(async (req) => {
         success: true,
         sent: sentCount,
         failed: failedCount,
-        total_sent: totalSent,
-        total_failed: totalFailed,
+        total_sent: totalSent || 0,
+        total_failed: totalFailed || 0,
+        pending: pendingCount || 0,
+        done,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
