@@ -25,6 +25,8 @@ const CONVERSATION_PAGE_SIZE = 120;
 
 const TEMPLATE_MESSAGE_TEXTS: Record<string, string> = {
   bpt_bmrit_cahet_deadline: cahetDeadlineMessage(),
+  cnet_not_qualified_bpt_bmrit:
+    "Dear {{student_name}}\n\nCNET result is declared. If you have NOT qualified, you can still choose healthcare career options: *BPT* or *BMRIT*.\n\nLast date: *14th June 2026*.\n\nBoth are mandatory:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667691872, 9555192192\n\n---\n\nप्रिय {{student_name}}\n\nCNET result आ गया है। यदि आप qualify नहीं हुए हैं, तब भी healthcare career के लिए *BPT* या *BMRIT* option है।\n\nLast date: *14th June 2026*.\n\nदोनों mandatory हैं:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667691872, 9555192192",
   course_info_generic:
     "Hi {{student_name}}, thanks for your interest in NIMT Educational Institutions. We offer programmes in nursing, paramedical, pharma, management, education, law, and engineering across our Greater Noida, Ghaziabad, and Kotputli campuses. Browse the full list, fees, and eligibility on our website. Reply STOP to opt out.",
   course_info_v4:
@@ -159,6 +161,13 @@ const INBOX_TEMPLATES = [
     description: cahetDeadlineDescription(),
     params: [],
     preview: cahetDeadlineMessage(),
+  },
+  {
+    key: "cnet_not_qualified_bpt_bmrit",
+    label: "CNET Not Qualified → BPT/BMRIT",
+    description: "Bilingual CNET result follow-up with BPT/BMRIT and CAHET instructions",
+    params: ["student_name"],
+    preview: TEMPLATE_MESSAGE_TEXTS.cnet_not_qualified_bpt_bmrit,
   },
   {
     key: "course_info_v4",

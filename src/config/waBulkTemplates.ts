@@ -81,6 +81,14 @@ export const WA_BULK_TEMPLATES: WaBulkTemplate[] = [
     params: [],
   },
   {
+    key: "cnet_not_qualified_bpt_bmrit",
+    label: "CNET Not Qualified → BPT/BMRIT",
+    description: "Bilingual CNET result follow-up for candidates who did not qualify, with BPT/BMRIT and CAHET instructions.",
+    params: [
+      { name: "student_name", source: "auto" },
+    ],
+  },
+  {
     key: "application_received",
     label: "Application Received",
     description: "For bulk this defaults to a placeholder application ID — only useful when you've already created applications.",

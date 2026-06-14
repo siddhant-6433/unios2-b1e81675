@@ -81,6 +81,15 @@ const TEMPLATES = [
     preview: cahetDeadlineMessage(),
   },
   {
+    key: "cnet_not_qualified_bpt_bmrit",
+    label: "CNET Not Qualified → BPT/BMRIT",
+    description: "Bilingual CNET result follow-up with BPT/BMRIT and CAHET instructions",
+    badge: "CNET",
+    followUpMsg: null,
+    buildParams: (lead: any) => [lead.name],
+    preview: "Dear {{1}}\n\nCNET result is declared. If you have NOT qualified, you can still choose healthcare career options: *BPT* or *BMRIT*.\n\nLast date: *14th June 2026*.\n\nBoth are mandatory:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667691872, 9555192192\n\n---\n\nप्रिय {{1}}\n\nCNET result आ गया है। यदि आप qualify नहीं हुए हैं, तब भी healthcare career के लिए *BPT* या *BMRIT* option है।\n\nLast date: *14th June 2026*.\n\nदोनों mandatory हैं:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667691872, 9555192192",
+  },
+  {
     key: "course_details",
     label: "Course Details",
     description: "Send course information",

@@ -31,6 +31,34 @@ For any details please call 9555192192
 7428499849`;
 }
 
+function cnetNotQualifiedBptBmritMessage(): string {
+  return `Dear {{1}}
+
+CNET result is declared. If you have NOT qualified, you can still choose healthcare career options: *BPT* or *BMRIT*.
+
+Last date: *14th June 2026*.
+
+Both are mandatory:
+1. NIMT application: https://apply.nimt.ac.in
+2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4
+
+Help: 7428499849, 9667691872, 9555192192
+
+---
+
+प्रिय {{1}}
+
+CNET result आ गया है। यदि आप qualify नहीं हुए हैं, तब भी healthcare career के लिए *BPT* या *BMRIT* option है।
+
+Last date: *14th June 2026*.
+
+दोनों mandatory हैं:
+1. NIMT application: https://apply.nimt.ac.in
+2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4
+
+Help: 7428499849, 9667691872, 9555192192`;
+}
+
 // Template definitions with their expected parameters
 const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   lead_welcome: { name: "admissions_lead_intro", params: ["student_name", "course_name", "lead_source"] },
@@ -50,6 +78,7 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   // untagged campus, and the correct uni.nimt.ac.in apply domain.
   course_info_video_v2: { name: "course_info_video_v2", params: ["student_name", "course_label", "course_url", "campus_url", "apply_url"] },
   bpt_bmrit_cahet_deadline: { name: "bpt_bmrit_cahet_deadline", params: [] },
+  cnet_not_qualified_bpt_bmrit: { name: "cnet_not_qualified_bpt_bmrit", params: ["student_name"] },
   // Counsellor utility — tap-to-call link sent to counsellor's own phone
   counsellor_call_lead: { name: "lead_queue_item", params: ["counsellor_name", "lead_name", "lead_phone", "course"] },
   // Call disposition auto-replies to leads
@@ -565,6 +594,7 @@ Deno.serve(async (req) => {
       course_info_video: "Hi {{1}}, here are the details for {{2}} at NIMT Educational Institutions:\n\nDuration: {{3}}\nEligibility: {{4}}\nCampus: {{5}}",
       course_info_video_v2: "Hi {{1}}, here are the details you requested for {{2}} at NIMT Educational Institutions:\n\n📚 Course information: {{3}}\n📍 Campus locations: {{4}}\n📝 Application portal: {{5}}\n\nReply to this message if you have any questions — our admissions team will be glad to assist you.",
       bpt_bmrit_cahet_deadline: cahetDeadlineMessage(),
+      cnet_not_qualified_bpt_bmrit: cnetNotQualifiedBptBmritMessage(),
       counsellor_lead_assigned: "Hi {{1}}, a new lead has been assigned to you: {{2}} (Phone: ****{{3}}). Please make first contact within {{4}} hours.",
       counsellor_sla_warning: "Reminder: Lead {{1}} has not been contacted yet. You have {{2}} hour(s) remaining.",
       counsellor_lead_reclaimed: "Lead {{1}} ({{2}}) has been returned to the unassigned bucket due to SLA breach.",

@@ -37,6 +37,34 @@ For any details please call 9555192192
 7428499849`;
 }
 
+function cnetNotQualifiedBptBmritMessage(): string {
+  return `Dear {{1}}
+
+CNET result is declared. If you have NOT qualified, you can still choose healthcare career options: *BPT* or *BMRIT*.
+
+Last date: *14th June 2026*.
+
+Both are mandatory:
+1. NIMT application: https://apply.nimt.ac.in
+2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4
+
+Help: 7428499849, 9667691872, 9555192192
+
+---
+
+प्रिय {{1}}
+
+CNET result आ गया है। यदि आप qualify नहीं हुए हैं, तब भी healthcare career के लिए *BPT* या *BMRIT* option है।
+
+Last date: *14th June 2026*.
+
+दोनों mandatory हैं:
+1. NIMT application: https://apply.nimt.ac.in
+2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4
+
+Help: 7428499849, 9667691872, 9555192192`;
+}
+
 // Each template has BODY (parameterised) + optionally BUTTONS.
 // Button URLs follow Meta's rules: full URL prefix + {{1}} suffix.
 // For PDF receipts (no fixed prefix possible) we use a static button to
@@ -390,6 +418,18 @@ const TEMPLATES = [
       {
         type: "BODY",
         text: cahetDeadlineMessage(),
+      },
+    ],
+  },
+  {
+    name: "cnet_not_qualified_bpt_bmrit",
+    category: "MARKETING",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: cnetNotQualifiedBptBmritMessage(),
+        example: { body_text: [["Rahul Sharma"]] },
       },
     ],
   },
