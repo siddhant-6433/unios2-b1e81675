@@ -318,28 +318,6 @@ export default function LeadLists() {
     }
     setWaSending(true);
 
-    // Fetch members + lead phone/stage so we can materialize recipients with
-    // the same shape whatsapp-campaign-send expects, skipping DNC leads.
-    const { data: members, error: memErr } = await supabase
-      .from("lead_list_members" as any)
-      .select("lead_id, leads(id, phone, stage)")
-      .eq("list_id", waList.id);
-    if (memErr || !members) {
-      toast({ title: "Could not load list members", description: memErr?.message, variant: "destructive" });
-      setWaSending(false);
-      return;
-    }
-
-    const valid = (members as any)
-      .map((m: any) => m.leads)
-      .filter((l: any) => l && l.phone && l.stage !== "dnc");
-
-    if (!valid.length) {
-      toast({ title: "No reachable leads", description: "All members are DNC or missing a phone.", variant: "destructive" });
-      setWaSending(false);
-      return;
-    }
-
     // Trim and keep only the static params for the chosen template — guards
     // against stray values the user may have typed under a previous selection.
     const staticParamsToSend: Record<string, string> = {};
@@ -354,10 +332,10 @@ export default function LeadLists() {
         name: waCampaignName.trim() || `${waList.name} — WhatsApp`,
         template_key: waTemplate,
         list_id: waList.id,
-        total_recipients: valid.length,
+        total_recipients: 0,
         static_params: staticParamsToSend,
         created_by: profile?.id || null,
-        next_attempt_at: new Date().toISOString(),
+        next_attempt_at: null,
         worker_locked_at: null,
         status: "pending",
       })
@@ -371,24 +349,42 @@ export default function LeadLists() {
     }
 
     const campaignId = (campaign as any).id;
-    const rows = valid.map((l: any) => ({
-      campaign_id: campaignId,
-      lead_id: l.id,
-      phone: l.phone,
-    }));
-
-    // Chunked insert to stay under PostgREST's request size cap.
-    for (let i = 0; i < rows.length; i += 500) {
-      const chunk = rows.slice(i, i + 500);
-      const { error } = await supabase.from("whatsapp_campaign_recipients" as any).insert(chunk);
-      if (error) console.error("Recipient insert failed:", error);
+    const { data: materializedCount, error: materializeErr } = await (supabase.rpc as any)(
+      "materialize_whatsapp_campaign_recipients",
+      { _campaign_id: campaignId }
+    );
+    if (materializeErr) {
+      await supabase.from("whatsapp_campaigns" as any).delete().eq("id", campaignId);
+      toast({
+        title: "Could not create campaign recipients",
+        description: materializeErr.message,
+        variant: "destructive",
+      });
+      setWaSending(false);
+      return;
     }
+    const recipientCount = Number(materializedCount || 0);
+    if (!recipientCount) {
+      await supabase.from("whatsapp_campaigns" as any).delete().eq("id", campaignId);
+      toast({
+        title: "No reachable leads",
+        description: "All members are DNC or missing a phone.",
+        variant: "destructive",
+      });
+      setWaSending(false);
+      return;
+    }
+
+    await supabase
+      .from("whatsapp_campaigns" as any)
+      .update({ next_attempt_at: new Date().toISOString() })
+      .eq("id", campaignId);
 
     setWaSending(false);
     setWaOpen(false);
     toast({
       title: "WhatsApp campaign queued",
-      description: `${valid.length} recipients queued. You can close this screen; progress is tracked in Marketing.`,
+      description: `${recipientCount} recipients queued. You can close this screen; progress is tracked in Marketing.`,
     });
     supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1 } }).catch(() => {});
     await fetchLists();

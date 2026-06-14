@@ -4,6 +4,10 @@ import { describe, expect, it } from "vitest";
 const leadLists = readFileSync("src/pages/LeadLists.tsx", "utf8");
 const bulkTemplates = readFileSync("src/config/waBulkTemplates.ts", "utf8");
 const whatsappCampaignSender = readFileSync("supabase/functions/whatsapp-campaign-send/index.ts", "utf8");
+const materializeRecipientsMigration = readFileSync(
+  "supabase/migrations/20260619144000_fix_whatsapp_materializer_stage_enum.sql",
+  "utf8"
+);
 
 describe("bulk WhatsApp approved-template safety", () => {
   it("shows the actual approved Meta template body before a list campaign can be sent", () => {
@@ -38,5 +42,15 @@ describe("bulk WhatsApp approved-template safety", () => {
     expect(whatsappCampaignSender).toContain("old 5 June deadline");
     expect(whatsappCampaignSender).toContain("{{1}} for the campaign deadline value");
     expect(whatsappCampaignSender).toContain('status: "paused"');
+  });
+
+  it("materializes list recipients server-side instead of using client-visible leads", () => {
+    expect(leadLists).toContain("materialize_whatsapp_campaign_recipients");
+    expect(leadLists).not.toContain(".from(\"whatsapp_campaign_recipients\" as any).insert");
+    expect(leadLists).toContain("next_attempt_at: null");
+    expect(materializeRecipientsMigration).toContain("SECURITY DEFINER");
+    expect(materializeRecipientsMigration).toContain("public.lead_list_members");
+    expect(materializeRecipientsMigration).toContain("coalesce(l.stage::text, '') <> 'dnc'");
+    expect(materializeRecipientsMigration).toContain("total_recipients = v_total");
   });
 });
