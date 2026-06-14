@@ -20,15 +20,18 @@
 
     <!-- Google Tag Manager — public marketing-site containers.
          The same build can be served from multiple hostnames; choose the GTM
-         container by hostname and keep it off the internal CRM hostname. -->
+         container by hostname. UniOs uses the parent NIMT container so CRM and
+         apply routes both satisfy site-wide Google tag diagnostics. -->
     <script>
       (function(w,d,s,l){
         var host = (w.location.hostname || "").toLowerCase();
         var path = w.location.pathname || "/";
         var containers = {
-          "nimt.ac.in": "GTM-NHC65VZ",
-          "www.nimt.ac.in": "GTM-NHC65VZ",
-          "miraischool.in": "GTM-WL5MTC3D",
+	          "nimt.ac.in": "GTM-NHC65VZ",
+	          "www.nimt.ac.in": "GTM-NHC65VZ",
+	          "uni.nimt.ac.in": "GTM-NHC65VZ",
+	          "apply.nimt.ac.in": "GTM-NHC65VZ",
+	          "miraischool.in": "GTM-WL5MTC3D",
           "www.miraischool.in": "GTM-WL5MTC3D",
           "school.nimt.ac.in": "GTM-M9J8RJ7V",
           "seralislab.com": "GTM-NN2LQW8T",
