@@ -73,6 +73,7 @@ interface BucketLead {
   last_ai_summary: string | null;
   last_ai_disposition: string | null;
   last_ai_conversion_pct: number | null;
+  has_paid_or_submitted_application: boolean;
 }
 
 interface LeadBucketCursor {
@@ -86,6 +87,7 @@ interface Counsellor {
 }
 
 type FilterMode = "include" | "exclude";
+type ApplicationFilter = "all" | "none_paid_or_submitted" | "has_paid_or_submitted";
 
 const SOURCE_LABELS: Record<string, string> = {
   website: "Website", meta_ads: "Meta Ads", google_ads: "Google Ads",
@@ -159,6 +161,7 @@ export default function LeadBuckets() {
   const [courseFilterMode, setCourseFilterMode] = useState<FilterMode>("include");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [sourceFilterMode, setSourceFilterMode] = useState<FilterMode>("include");
+  const [applicationFilter, setApplicationFilter] = useState<ApplicationFilter>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectingAllFiltered, setSelectingAllFiltered] = useState(false);
 
@@ -272,6 +275,11 @@ export default function LeadBuckets() {
           : q.eq("source", sourceFilter);
       }
     }
+    if (applicationFilter === "none_paid_or_submitted") {
+      q = q.eq("has_paid_or_submitted_application", false);
+    } else if (applicationFilter === "has_paid_or_submitted") {
+      q = q.eq("has_paid_or_submitted_application", true);
+    }
     // Strip PostgREST filter-syntax chars so user input can't break the or().
     const s = debouncedSearch.replace(/[%,()]/g, "").trim();
     if (s) q = q.or(`name.ilike.%${s}%,course_name.ilike.%${s}%`);
@@ -291,7 +299,7 @@ export default function LeadBuckets() {
       .select(
         `id, name, phone, stage, source, course_name, campus_name, created_at,
          lead_score, lead_temperature, bucket, jd_category, last_ai_summary,
-         last_ai_disposition, last_ai_conversion_pct`
+         last_ai_disposition, last_ai_conversion_pct, has_paid_or_submitted_application`
       )
       .order("created_at", { ascending: true }) // oldest (most urgent) first
       .order("id", { ascending: true })
@@ -340,6 +348,7 @@ export default function LeadBuckets() {
       _school_brand,
       _source: sourceFilterMode === "include" ? sourceFilter : "all",
       _course: courseFilterMode === "include" ? courseFilter : "all",
+      _application_state: applicationFilter,
     });
     if (error) { console.error("Facets fetch error:", error); return; }
     const courses: { name: string; count: number }[] = [];
@@ -389,9 +398,9 @@ export default function LeadBuckets() {
   useEffect(() => { fetchCounts(); }, [selectedCampusId]);
   // Facets are linked to the active source/course filter, so refetch when
   // either changes (not just on bucket switch).
-  useEffect(() => { fetchFacets(); }, [activeBucket, schoolFilter, sourceFilter, sourceFilterMode, courseFilter, courseFilterMode, selectedCampusId]);
+  useEffect(() => { fetchFacets(); }, [activeBucket, schoolFilter, sourceFilter, sourceFilterMode, courseFilter, courseFilterMode, applicationFilter, selectedCampusId]);
   // Reload page 0 whenever the bucket or any server-side filter changes.
-  useEffect(() => { fetchPage(true); }, [activeBucket, schoolFilter, courseFilter, courseFilterMode, sourceFilter, sourceFilterMode, debouncedSearch, selectedCampusId]);
+  useEffect(() => { fetchPage(true); }, [activeBucket, schoolFilter, courseFilter, courseFilterMode, sourceFilter, sourceFilterMode, applicationFilter, debouncedSearch, selectedCampusId]);
 
   // Reset course filter when the bucket / school sub-filter changes — a
   // course relevant in the college bucket is rarely relevant in the school
@@ -603,6 +612,7 @@ export default function LeadBuckets() {
       source_mode: sourceFilterMode,
       course: courseFilter,
       course_mode: courseFilterMode,
+      application_filter: applicationFilter,
       search: search || null,
     };
 
@@ -848,6 +858,21 @@ export default function LeadBuckets() {
         {sourceFilter !== "all" && (
           <Button variant="ghost" size="sm" className="h-9 px-2 text-xs" onClick={() => setSourceFilter("all")}>
             Clear source
+          </Button>
+        )}
+        <select
+          value={applicationFilter}
+          onChange={(e) => setApplicationFilter(e.target.value as ApplicationFilter)}
+          className="rounded-xl border border-input bg-card py-2.5 px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+          title="Filter by linked application"
+        >
+          <option value="all">All application states</option>
+          <option value="none_paid_or_submitted">No paid/submitted application</option>
+          <option value="has_paid_or_submitted">Has paid/submitted application</option>
+        </select>
+        {applicationFilter !== "all" && (
+          <Button variant="ghost" size="sm" className="h-9 px-2 text-xs" onClick={() => setApplicationFilter("all")}>
+            Clear application
           </Button>
         )}
         <Button
