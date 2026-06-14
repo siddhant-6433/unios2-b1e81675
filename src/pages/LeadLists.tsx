@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   ListPlus, Loader2, Send, Mail, Trash2, Users, MessageSquare, AlertTriangle, Upload,
+  Pause, PlayCircle, RefreshCw, XCircle,
 } from "lucide-react";
 import { WA_BULK_TEMPLATES } from "@/config/waBulkTemplates";
 
@@ -26,10 +27,34 @@ interface LeadList {
   created_at: string;
 }
 
+type CampaignChannel = "whatsapp" | "email";
+
+interface CampaignQueueItem {
+  id: string;
+  channel: CampaignChannel;
+  name: string;
+  template: string | null;
+  status: "pending" | "sending" | "paused" | "completed" | "failed" | "terminated";
+  total_recipients: number;
+  sent_count: number;
+  failed_count: number;
+  created_at: string;
+  completed_at: string | null;
+}
+
 const SOURCE_BADGE: Record<LeadList["source"], { label: string; cls: string }> = {
   manual:  { label: "Manual",   cls: "bg-pastel-blue text-foreground/70" },
   import:  { label: "Imported", cls: "bg-pastel-green text-foreground/70" },
   filter:  { label: "Filter",   cls: "bg-pastel-yellow text-foreground/70" },
+};
+
+const CAMPAIGN_STATUS_BADGE: Record<CampaignQueueItem["status"], string> = {
+  pending: "bg-blue-100 text-blue-700",
+  sending: "bg-emerald-100 text-emerald-700",
+  paused: "bg-amber-100 text-amber-700",
+  completed: "bg-muted text-muted-foreground",
+  failed: "bg-rose-100 text-rose-700",
+  terminated: "bg-zinc-200 text-zinc-700",
 };
 
 export default function LeadLists() {
@@ -38,6 +63,9 @@ export default function LeadLists() {
   const [lists, setLists] = useState<LeadList[]>([]);
   const [loading, setLoading] = useState(true);
   const [importOpen, setImportOpen] = useState(false);
+  const [campaignQueue, setCampaignQueue] = useState<CampaignQueueItem[]>([]);
+  const [queueLoading, setQueueLoading] = useState(true);
+  const [queueBusyId, setQueueBusyId] = useState<string | null>(null);
 
   // Send-WhatsApp dialog
   const [waOpen, setWaOpen] = useState(false);
@@ -90,7 +118,59 @@ export default function LeadLists() {
     setLoading(false);
   };
 
-  useEffect(() => { fetchLists(); }, []);
+  const fetchCampaignQueue = async () => {
+    setQueueLoading(true);
+    const [waRes, emailRes] = await Promise.all([
+      supabase
+        .from("whatsapp_campaigns" as any)
+        .select("id,name,template_key,status,total_recipients,sent_count,failed_count,created_at,completed_at")
+        .order("created_at", { ascending: false })
+        .limit(20),
+      supabase
+        .from("email_campaigns" as any)
+        .select("id,name,template_slug,status,total_recipients,sent_count,failed_count,created_at,completed_at")
+        .order("created_at", { ascending: false })
+        .limit(20),
+    ]);
+
+    if (waRes.error) console.error("Fetch WhatsApp campaigns failed:", waRes.error);
+    if (emailRes.error) console.error("Fetch email campaigns failed:", emailRes.error);
+
+    const wa = ((waRes.data || []) as any[]).map((c) => ({
+      id: c.id,
+      channel: "whatsapp" as const,
+      name: c.name,
+      template: c.template_key || null,
+      status: c.status,
+      total_recipients: c.total_recipients || 0,
+      sent_count: c.sent_count || 0,
+      failed_count: c.failed_count || 0,
+      created_at: c.created_at,
+      completed_at: c.completed_at || null,
+    }));
+    const email = ((emailRes.data || []) as any[]).map((c) => ({
+      id: c.id,
+      channel: "email" as const,
+      name: c.name,
+      template: c.template_slug || "custom",
+      status: c.status,
+      total_recipients: c.total_recipients || 0,
+      sent_count: c.sent_count || 0,
+      failed_count: c.failed_count || 0,
+      created_at: c.created_at,
+      completed_at: c.completed_at || null,
+    }));
+
+    setCampaignQueue([...wa, ...email]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, 20));
+    setQueueLoading(false);
+  };
+
+  useEffect(() => {
+    fetchLists();
+    fetchCampaignQueue();
+  }, []);
 
   useEffect(() => {
     if (!emailOpen) return;
@@ -218,6 +298,7 @@ export default function LeadLists() {
     });
     supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1 } }).catch(() => {});
     await fetchLists();
+    await fetchCampaignQueue();
   };
 
   const handleSendEmail = async () => {
@@ -294,6 +375,85 @@ export default function LeadLists() {
     });
     supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1 } }).catch(() => {});
     await fetchLists();
+    await fetchCampaignQueue();
+  };
+
+  const campaignTables = (channel: CampaignChannel) => ({
+    campaign: channel === "whatsapp" ? "whatsapp_campaigns" : "email_campaigns",
+    recipients: channel === "whatsapp" ? "whatsapp_campaign_recipients" : "email_campaign_recipients",
+    sender: channel === "whatsapp" ? "whatsapp-campaign-send" : "email-campaign-send",
+  });
+
+  const pauseCampaign = async (item: CampaignQueueItem) => {
+    const tables = campaignTables(item.channel);
+    setQueueBusyId(item.id);
+    const { error } = await supabase
+      .from(tables.campaign as any)
+      .update({ status: "paused" })
+      .eq("id", item.id)
+      .in("status", ["pending", "sending"]);
+    setQueueBusyId(null);
+    if (error) {
+      toast({ title: "Could not pause campaign", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Campaign paused", description: "The sender will stop before the next pending recipient." });
+    }
+    await fetchCampaignQueue();
+  };
+
+  const resumeCampaign = async (item: CampaignQueueItem) => {
+    const tables = campaignTables(item.channel);
+    setQueueBusyId(item.id);
+    const { error } = await supabase
+      .from(tables.campaign as any)
+      .update({ status: "pending", completed_at: null })
+      .eq("id", item.id)
+      .eq("status", "paused");
+    if (error) {
+      setQueueBusyId(null);
+      toast({ title: "Could not resume campaign", description: error.message, variant: "destructive" });
+      await fetchCampaignQueue();
+      return;
+    }
+
+    const { error: invokeErr } = await supabase.functions.invoke(tables.sender, {
+      body: { campaign_id: item.id },
+    });
+    setQueueBusyId(null);
+    if (invokeErr) {
+      toast({ title: "Resume requested but sender errored", description: invokeErr.message, variant: "destructive" });
+    } else {
+      toast({ title: "Campaign resumed", description: "Remaining pending recipients are being processed." });
+    }
+    await fetchCampaignQueue();
+  };
+
+  const terminateCampaign = async (item: CampaignQueueItem) => {
+    const ok = window.confirm(`Terminate "${item.name}"? Pending recipients will be canceled and cannot be resumed.`);
+    if (!ok) return;
+
+    const tables = campaignTables(item.channel);
+    setQueueBusyId(item.id);
+    const { error: campaignErr } = await supabase
+      .from(tables.campaign as any)
+      .update({ status: "terminated", completed_at: new Date().toISOString() })
+      .eq("id", item.id)
+      .in("status", ["pending", "sending", "paused", "failed"]);
+
+    const { error: recipientErr } = await supabase
+      .from(tables.recipients as any)
+      .update({ status: "canceled", error_message: "Campaign terminated by operator" })
+      .eq("campaign_id", item.id)
+      .eq("status", "pending");
+
+    setQueueBusyId(null);
+    const error = campaignErr || recipientErr;
+    if (error) {
+      toast({ title: "Could not terminate campaign", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Campaign terminated", description: "Pending recipients were canceled." });
+    }
+    await fetchCampaignQueue();
   };
 
   const handleDelete = async () => {
@@ -324,6 +484,101 @@ export default function LeadLists() {
           Import CSV
         </Button>
       </div>
+
+      <Card className="border-border/60 shadow-none">
+        <CardContent className="p-0">
+          <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Campaign Queue</p>
+              <p className="text-xs text-muted-foreground">Pause, resume, or terminate bulk message queues before old recipients are processed.</p>
+            </div>
+            <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={fetchCampaignQueue} disabled={queueLoading}>
+              {queueLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              Refresh
+            </Button>
+          </div>
+
+          {queueLoading ? (
+            <div className="flex h-24 items-center justify-center">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : campaignQueue.length === 0 ? (
+            <div className="px-4 py-8 text-center text-sm text-muted-foreground">No campaigns queued yet.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[820px] text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/30">
+                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Campaign</th>
+                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Channel</th>
+                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Status</th>
+                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Progress</th>
+                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Created</th>
+                    <th className="px-4 py-2.5 text-right font-medium text-muted-foreground">Controls</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {campaignQueue.map((item) => {
+                    const busy = queueBusyId === item.id;
+                    const active = item.status === "pending" || item.status === "sending";
+                    const canResume = item.status === "paused";
+                    const canTerminate = ["pending", "sending", "paused", "failed"].includes(item.status);
+                    const accounted = item.sent_count + item.failed_count;
+                    const pending = Math.max(item.total_recipients - accounted, 0);
+                    return (
+                      <tr key={`${item.channel}-${item.id}`} className="border-b border-border/50 last:border-0">
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-foreground truncate max-w-[280px]">{item.name}</p>
+                          {item.template && <p className="text-[11px] text-muted-foreground mt-0.5">{item.template}</p>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge variant="outline" className="text-[10px] capitalize">{item.channel}</Badge>
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge className={`border-0 text-[10px] capitalize ${CAMPAIGN_STATUS_BADGE[item.status] || "bg-muted text-muted-foreground"}`}>
+                            {item.status}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-muted-foreground">
+                          <span className="font-semibold text-foreground">{item.sent_count}</span> sent
+                          <span className="mx-1.5">/</span>
+                          <span className="font-semibold text-foreground">{pending}</span> pending
+                          {item.failed_count > 0 && <span className="ml-1.5 text-rose-600">({item.failed_count} failed)</span>}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-muted-foreground">
+                          {new Date(item.created_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end gap-2">
+                            {active && (
+                              <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => pauseCampaign(item)} disabled={busy}>
+                                {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pause className="h-3.5 w-3.5" />}
+                                Pause
+                              </Button>
+                            )}
+                            {canResume && (
+                              <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => resumeCampaign(item)} disabled={busy}>
+                                {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlayCircle className="h-3.5 w-3.5" />}
+                                Resume
+                              </Button>
+                            )}
+                            {canTerminate && (
+                              <Button size="sm" variant="ghost" className="h-8 gap-1.5 text-destructive hover:text-destructive" onClick={() => terminateCampaign(item)} disabled={busy}>
+                                <XCircle className="h-3.5 w-3.5" />
+                                Terminate
+                              </Button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {loading ? (
         <div className="flex h-40 items-center justify-center">

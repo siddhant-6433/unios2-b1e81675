@@ -31,6 +31,36 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+async function syncCampaignCounts(adminClient: any, campaignId: string) {
+  const [
+    { count: totalSent },
+    { count: totalFailed },
+    { count: pendingCount },
+  ] = await Promise.all([
+    adminClient
+      .from("whatsapp_campaign_recipients")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignId)
+      .eq("status", "sent"),
+    adminClient
+      .from("whatsapp_campaign_recipients")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignId)
+      .eq("status", "failed"),
+    adminClient
+      .from("whatsapp_campaign_recipients")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignId)
+      .eq("status", "pending"),
+  ]);
+
+  return {
+    totalSent: totalSent || 0,
+    totalFailed: totalFailed || 0,
+    pendingCount: pendingCount || 0,
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -197,6 +227,68 @@ Deno.serve(async (req) => {
     const staticParams: Record<string, string> = ((campaign as any).static_params || {}) as any;
 
     for (const recipient of recipients) {
+      const { data: liveCampaign } = await adminClient
+        .from("whatsapp_campaigns")
+        .select("status")
+        .eq("id", campaign_id)
+        .single();
+
+      if (liveCampaign?.status === "paused") {
+        const counts = await syncCampaignCounts(adminClient, campaign_id);
+        await adminClient
+          .from("whatsapp_campaigns")
+          .update({
+            sent_count: counts.totalSent,
+            failed_count: counts.totalFailed,
+          })
+          .eq("id", campaign_id);
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            paused: true,
+            sent: sentCount,
+            failed: failedCount,
+            total_sent: counts.totalSent,
+            total_failed: counts.totalFailed,
+            pending: counts.pendingCount,
+            done: false,
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (liveCampaign?.status === "terminated") {
+        await adminClient
+          .from("whatsapp_campaign_recipients")
+          .update({ status: "canceled", error_message: "Campaign terminated before send" })
+          .eq("campaign_id", campaign_id)
+          .eq("status", "pending");
+
+        const counts = await syncCampaignCounts(adminClient, campaign_id);
+        await adminClient
+          .from("whatsapp_campaigns")
+          .update({
+            sent_count: counts.totalSent,
+            failed_count: counts.totalFailed,
+          })
+          .eq("id", campaign_id);
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            terminated: true,
+            sent: sentCount,
+            failed: failedCount,
+            total_sent: counts.totalSent,
+            total_failed: counts.totalFailed,
+            pending: counts.pendingCount,
+            done: true,
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
       const lead = (recipient as any).leads || {};
       const leadName = lead.name || "Student";
       const courseName = lead.courses?.name || "";
@@ -321,35 +413,46 @@ Deno.serve(async (req) => {
       await delay(200);
     }
 
-    const [
-      { count: totalSent },
-      { count: totalFailed },
-      { count: pendingCount },
-    ] = await Promise.all([
-      adminClient
-        .from("whatsapp_campaign_recipients")
-        .select("id", { count: "exact", head: true })
-        .eq("campaign_id", campaign_id)
-        .eq("status", "sent"),
-      adminClient
-        .from("whatsapp_campaign_recipients")
-        .select("id", { count: "exact", head: true })
-        .eq("campaign_id", campaign_id)
-        .eq("status", "failed"),
-      adminClient
-        .from("whatsapp_campaign_recipients")
-        .select("id", { count: "exact", head: true })
-        .eq("campaign_id", campaign_id)
-        .eq("status", "pending"),
-    ]);
+    const counts = await syncCampaignCounts(adminClient, campaign_id);
+    const { data: finalCampaign } = await adminClient
+      .from("whatsapp_campaigns")
+      .select("status")
+      .eq("id", campaign_id)
+      .single();
 
-    const done = (pendingCount || 0) === 0;
+    if (finalCampaign?.status === "paused" || finalCampaign?.status === "terminated") {
+      await adminClient
+        .from("whatsapp_campaigns")
+        .update({
+          sent_count: counts.totalSent,
+          failed_count: counts.totalFailed,
+        })
+        .eq("id", campaign_id);
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          status: finalCampaign.status,
+          paused: finalCampaign.status === "paused",
+          terminated: finalCampaign.status === "terminated",
+          sent: sentCount,
+          failed: failedCount,
+          total_sent: counts.totalSent,
+          total_failed: counts.totalFailed,
+          pending: counts.pendingCount,
+          done: finalCampaign.status === "terminated",
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const done = counts.pendingCount === 0;
 
     await adminClient
       .from("whatsapp_campaigns")
       .update({
-        sent_count: totalSent || 0,
-        failed_count: totalFailed || 0,
+        sent_count: counts.totalSent,
+        failed_count: counts.totalFailed,
         status: done ? "completed" : "sending",
         completed_at: done ? new Date().toISOString() : null,
       })
@@ -360,9 +463,9 @@ Deno.serve(async (req) => {
         success: true,
         sent: sentCount,
         failed: failedCount,
-        total_sent: totalSent || 0,
-        total_failed: totalFailed || 0,
-        pending: pendingCount || 0,
+        total_sent: counts.totalSent,
+        total_failed: counts.totalFailed,
+        pending: counts.pendingCount,
         done,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }

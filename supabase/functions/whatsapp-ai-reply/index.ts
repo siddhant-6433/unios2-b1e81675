@@ -58,7 +58,7 @@ GNM (General Nursing & Midwifery):
 - Campus: Greater Noida
 - UNIQUE: Open to Arts and Commerce students — Science NOT mandatory
 - Eligibility: 10+2 from ANY stream. Min 40%. Age 17-35.
-- Entrance: UPCNET / merit-based
+- Entrance: UP GNM Entrance Test (UPGET) / merit-based
 
 BPT (Bachelor of Physiotherapy):
 - Duration: 5 Years (4 academic years + 1-year compulsory internship)

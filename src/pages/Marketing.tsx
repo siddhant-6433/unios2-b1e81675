@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   AlertTriangle,
+  CalendarDays,
   CheckCircle2,
   ListPlus,
   Loader2,
@@ -22,6 +23,7 @@ import {
 } from "lucide-react";
 
 type Channel = "whatsapp" | "email";
+type DatePreset = "all" | "7d" | "30d" | "90d" | "custom";
 
 interface CampaignRow {
   id: string;
@@ -71,28 +73,79 @@ const fmtDate = (value: string | null) => {
   });
 };
 
+const toDateInputValue = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getPresetStart = (preset: Exclude<DatePreset, "all" | "custom">) => {
+  const days = preset === "7d" ? 7 : preset === "30d" ? 30 : 90;
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() - days + 1);
+  return date.toISOString();
+};
+
+const getEndExclusive = (dateValue: string) => {
+  const date = new Date(`${dateValue}T00:00:00`);
+  date.setDate(date.getDate() + 1);
+  return date.toISOString();
+};
+
 export default function Marketing() {
+  const today = useMemo(() => toDateInputValue(new Date()), []);
+  const thirtyDaysAgo = useMemo(() => {
+    const date = new Date();
+    date.setDate(date.getDate() - 29);
+    return toDateInputValue(date);
+  }, []);
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [datePreset, setDatePreset] = useState<DatePreset>("all");
+  const [dateFrom, setDateFrom] = useState(thirtyDaysAgo);
+  const [dateTo, setDateTo] = useState(today);
   const [detailCampaign, setDetailCampaign] = useState<CampaignRow | null>(null);
   const [failures, setFailures] = useState<FailureRow[]>([]);
   const [failuresLoading, setFailuresLoading] = useState(false);
   const [queueingId, setQueueingId] = useState<string | null>(null);
   const [queueError, setQueueError] = useState<string | null>(null);
 
-  const load = async () => {
+  const dateBounds = useMemo(() => {
+    if (datePreset === "all") return { from: null, to: null };
+    if (datePreset !== "custom") return { from: getPresetStart(datePreset), to: null };
+    return {
+      from: dateFrom ? new Date(`${dateFrom}T00:00:00`).toISOString() : null,
+      to: dateTo ? getEndExclusive(dateTo) : null,
+    };
+  }, [dateFrom, datePreset, dateTo]);
+
+  const load = useCallback(async () => {
     setLoading(true);
+    let whatsappQuery = supabase
+      .from("whatsapp_campaigns" as any)
+      .select("id,name,template_key,total_recipients,sent_count,failed_count,status,created_at,completed_at,worker_error,lead_lists(name)")
+      .order("created_at", { ascending: false })
+      .limit(100);
+    let emailQuery = supabase
+      .from("email_campaigns" as any)
+      .select("id,name,template_slug,total_recipients,sent_count,failed_count,status,created_at,completed_at,worker_error,lead_lists(name)")
+      .order("created_at", { ascending: false })
+      .limit(100);
+
+    if (dateBounds.from) {
+      whatsappQuery = whatsappQuery.gte("created_at", dateBounds.from);
+      emailQuery = emailQuery.gte("created_at", dateBounds.from);
+    }
+    if (dateBounds.to) {
+      whatsappQuery = whatsappQuery.lt("created_at", dateBounds.to);
+      emailQuery = emailQuery.lt("created_at", dateBounds.to);
+    }
+
     const [waRes, emailRes] = await Promise.all([
-      supabase
-        .from("whatsapp_campaigns" as any)
-        .select("id,name,template_key,total_recipients,sent_count,failed_count,status,created_at,completed_at,worker_error,lead_lists(name)")
-        .order("created_at", { ascending: false })
-        .limit(100),
-      supabase
-        .from("email_campaigns" as any)
-        .select("id,name,template_slug,total_recipients,sent_count,failed_count,status,created_at,completed_at,worker_error,lead_lists(name)")
-        .order("created_at", { ascending: false })
-        .limit(100),
+      whatsappQuery,
+      emailQuery,
     ]);
 
     const waRows: CampaignRow[] = ((waRes.data as any[]) || []).map((row) => {
@@ -139,9 +192,9 @@ export default function Marketing() {
 
     setCampaigns([...waRows, ...emailRows].sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
     setLoading(false);
-  };
+  }, [dateBounds]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
   const totals = useMemo(() => {
     return campaigns.reduce(
@@ -254,7 +307,43 @@ export default function Marketing() {
             Campaign performance for WhatsApp and email outbound.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
+            <CalendarDays className="h-4 w-4 text-muted-foreground" />
+            <select
+              value={datePreset}
+              onChange={(event) => setDatePreset(event.target.value as DatePreset)}
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+              aria-label="Campaign date range"
+            >
+              <option value="all">All time</option>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+              <option value="90d">Last 90 days</option>
+              <option value="custom">Custom</option>
+            </select>
+            {datePreset === "custom" && (
+              <>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  max={dateTo || undefined}
+                  onChange={(event) => setDateFrom(event.target.value)}
+                  className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                  aria-label="Campaign start date"
+                />
+                <span className="text-xs text-muted-foreground">to</span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  min={dateFrom || undefined}
+                  onChange={(event) => setDateTo(event.target.value)}
+                  className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                  aria-label="Campaign end date"
+                />
+              </>
+            )}
+          </div>
           <Button asChild variant="outline" size="sm">
             <Link to="/lists"><ListPlus className="mr-2 h-4 w-4" /> Lists</Link>
           </Button>

@@ -185,6 +185,8 @@ const App = () => (
             <Route path="/apply/nimt" element={<ApplyPortal />} />
             <Route path="/apply/beacon" element={<ApplyPortal />} />
             <Route path="/apply/mirai" element={<ApplyPortal />} />
+            <Route path="/applly/nimt" element={<Navigate to="/apply/nimt" replace />} />
+            <Route path="/apply.mirai" element={<Navigate to="/apply/mirai" replace />} />
             {/*
               Magic-link entry point used by the offer_letter_acceptance
               WhatsApp template. The button URL is

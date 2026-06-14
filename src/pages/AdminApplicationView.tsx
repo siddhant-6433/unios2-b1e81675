@@ -43,6 +43,11 @@ export default function AdminApplicationView() {
     pre_admission_no: string | null; admission_no: string | null;
     course?: { name: string; code: string | null; duration_years: number | null; eligibility: string | null; entrance_exam: string | null; entrance_mandatory: boolean | null } | null;
   } | null>(null);
+  const [eligibilityRule, setEligibilityRule] = useState<{
+    notes: string | null;
+    entrance_exam_name: string | null;
+    entrance_exam_required: boolean | null;
+  } | null>(null);
   const [hasOffer, setHasOffer] = useState(false);
   const [appFeePaid, setAppFeePaid] = useState(0);
   const [cahetRegistration, setCahetRegistration] = useState<CahetRegistrationDetails | null>(null);
@@ -100,13 +105,24 @@ export default function AdminApplicationView() {
             .eq("status", "confirmed"),
           fetchCahetRegistration(supabase, appRow.lead_id),
         ]);
+        let ruleRow = null;
+        if (leadRow?.course_id) {
+          const { data } = await supabase
+            .from("eligibility_rules")
+            .select("notes, entrance_exam_name, entrance_exam_required")
+            .eq("course_id", leadRow.course_id)
+            .maybeSingle();
+          ruleRow = data;
+        }
         setLead(leadRow as any);
+        setEligibilityRule(ruleRow);
         setHasOffer(!!(offerRows && offerRows.length));
         setAppFeePaid((pmtRows || []).reduce((sum, p: any) => sum + Number(p.amount || 0), 0));
         const courseName = (leadRow as any)?.course?.name || ((appRow.course_selections || [])[0] as any)?.course_name || null;
         setCahetRegistration(isBptOrBmritCourseName(courseName) ? cahetRow : null);
       } else {
         setLead(null);
+        setEligibilityRule(null);
         setHasOffer(false);
         setAppFeePaid(0);
         setCahetRegistration(null);
@@ -517,9 +533,9 @@ export default function AdminApplicationView() {
           name: lead.course.name,
           code: lead.course.code,
           durationYears: lead.course.duration_years,
-          eligibility: lead.course.eligibility,
-          entranceExam: lead.course.entrance_exam,
-          entranceMandatory: lead.course.entrance_mandatory,
+          eligibility: eligibilityRule?.notes || lead.course.eligibility,
+          entranceExam: eligibilityRule?.entrance_exam_name || lead.course.entrance_exam,
+          entranceMandatory: eligibilityRule?.entrance_exam_required ?? lead.course.entrance_mandatory,
         } : null}
         cahetRegistration={cahetRegistration}
       />
