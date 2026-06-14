@@ -19,8 +19,12 @@ export type WaParamSource = "auto" | "static";
 
 export interface WaBulkTemplate {
   key: string;            // template_key written to whatsapp_campaigns.template_key
+  metaTemplateName?: string; // approved Meta template name when it differs from key
   label: string;          // human label for the picker
   description?: string;   // optional one-liner shown under the picker
+  expectedBody?: string;  // local expected copy, used only to compare against Meta's approved body
+  requiredApprovedBodyPattern?: RegExp;
+  blockedApprovedBodyPattern?: RegExp;
   params: { name: string; source: WaParamSource; placeholder?: string; help?: string }[];
 }
 
@@ -78,10 +82,14 @@ export const WA_BULK_TEMPLATES: WaBulkTemplate[] = [
     key: "bpt_bmrit_cahet_deadline",
     label: "BPT/BMRIT CAHET Deadline",
     description: cahetBulkDescription,
+    expectedBody: effectiveCahetWhatsAppDeadlineText().bodyDate,
+    requiredApprovedBodyPattern: /14(?:th)?\s+June\s+2026/i,
+    blockedApprovedBodyPattern: /5(?:th)?\s+June\s+2026/i,
     params: [],
   },
   {
     key: "application_received",
+    metaTemplateName: "application_submitted",
     label: "Application Received",
     description: "For bulk this defaults to a placeholder application ID — only useful when you've already created applications.",
     params: [

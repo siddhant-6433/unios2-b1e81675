@@ -61,6 +61,46 @@ async function syncCampaignCounts(adminClient: any, campaignId: string) {
   };
 }
 
+async function fetchApprovedTemplateBody(templateName: string) {
+  const wabaId = Deno.env.get("WHATSAPP_WABA_ID");
+  const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
+  if (!wabaId || !waToken) {
+    return { error: "Cannot verify approved Meta template: WHATSAPP_WABA_ID or WHATSAPP_API_TOKEN is missing." };
+  }
+
+  const res = await fetch(
+    `https://graph.facebook.com/v21.0/${wabaId}/message_templates?fields=name,status,components&limit=200&access_token=${waToken}`,
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    return { error: data?.error?.message || "Cannot verify approved Meta template." };
+  }
+
+  const template = (data?.data || []).find((item: any) => item?.name === templateName);
+  if (!template) return { error: `Approved Meta template "${templateName}" was not found.` };
+  if (template.status !== "APPROVED") {
+    return { error: `Meta template "${templateName}" is ${template.status}; only APPROVED templates can be sent.` };
+  }
+
+  const body = template.components?.find((component: any) => component?.type === "BODY")?.text || "";
+  return { body };
+}
+
+async function validateApprovedTemplateBeforeSend(templateKey: string, metaTemplateName: string) {
+  if (templateKey !== "bpt_bmrit_cahet_deadline") return null;
+
+  const { body, error } = await fetchApprovedTemplateBody(metaTemplateName);
+  if (error) return error;
+  if (!body) return `Approved Meta template "${metaTemplateName}" has no body text.`;
+  if (/5(?:th)?\s+June\s+2026/i.test(body)) {
+    return `Approved Meta template "${metaTemplateName}" still contains the old 5 June deadline.`;
+  }
+  if (!/14(?:th)?\s+June\s+2026/i.test(body)) {
+    return `Approved Meta template "${metaTemplateName}" does not contain the expected 14 June 2026 deadline.`;
+  }
+  return null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -175,6 +215,31 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({ error: `Unknown template: ${campaign.template_key}` }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const approvedTemplateError = await validateApprovedTemplateBeforeSend(
+      campaign.template_key,
+      templateDef.name,
+    );
+    if (approvedTemplateError) {
+      await adminClient
+        .from("whatsapp_campaigns")
+        .update({
+          status: "paused",
+          worker_locked_at: null,
+          next_attempt_at: null,
+          worker_error: approvedTemplateError,
+        })
+        .eq("id", campaign_id);
+
+      return new Response(
+        JSON.stringify({
+          error: approvedTemplateError,
+          paused: true,
+          done: false,
+        }),
+        { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 

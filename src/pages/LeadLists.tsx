@@ -42,6 +42,15 @@ interface CampaignQueueItem {
   completed_at: string | null;
 }
 
+type MetaTemplate = {
+  id: string;
+  name: string;
+  status: string;
+  category: string;
+  language: string;
+  components?: Array<{ type?: string; text?: string }>;
+};
+
 const SOURCE_BADGE: Record<LeadList["source"], { label: string; cls: string }> = {
   manual:  { label: "Manual",   cls: "bg-pastel-blue text-foreground/70" },
   import:  { label: "Imported", cls: "bg-pastel-green text-foreground/70" },
@@ -55,6 +64,17 @@ const CAMPAIGN_STATUS_BADGE: Record<CampaignQueueItem["status"], string> = {
   completed: "bg-muted text-muted-foreground",
   failed: "bg-rose-100 text-rose-700",
   terminated: "bg-zinc-200 text-zinc-700",
+};
+
+const getMetaTemplateBody = (template?: MetaTemplate | null) =>
+  template?.components?.find((component) => component.type === "BODY")?.text || "";
+
+const getTemplateParamCount = (body: string) => {
+  let max = 0;
+  for (const match of body.matchAll(/\{\{\s*(\d+)\s*\}\}/g)) {
+    max = Math.max(max, Number(match[1]) || 0);
+  }
+  return max;
 };
 
 export default function LeadLists() {
@@ -74,6 +94,9 @@ export default function LeadLists() {
   const [waCampaignName, setWaCampaignName] = useState("");
   const [waStaticParams, setWaStaticParams] = useState<Record<string, string>>({});
   const [waSending, setWaSending] = useState(false);
+  const [waMetaTemplates, setWaMetaTemplates] = useState<Record<string, MetaTemplate>>({});
+  const [waMetaLoading, setWaMetaLoading] = useState(false);
+  const [waMetaError, setWaMetaError] = useState<string | null>(null);
 
   // Selected template definition — drives which static inputs we render.
   const waTemplateDef = useMemo(
@@ -85,6 +108,39 @@ export default function LeadLists() {
     [waTemplateDef]
   );
   const waMissingStatic = waStaticFields.some(p => !waStaticParams[p.name]?.trim());
+  const waMetaTemplateName = waTemplateDef.metaTemplateName || waTemplateDef.key;
+  const waApprovedTemplate = waMetaTemplates[waMetaTemplateName] || null;
+  const waApprovedBody = getMetaTemplateBody(waApprovedTemplate);
+  const waApprovedParamCount = getTemplateParamCount(waApprovedBody);
+  const waExpectedParamCount = waTemplateDef.params.length;
+  const waApprovedIssue = useMemo(() => {
+    if (!waOpen) return null;
+    if (waMetaLoading) return "Loading the approved Meta template preview...";
+    if (waMetaError) return waMetaError;
+    if (!waApprovedTemplate) return `Meta template "${waMetaTemplateName}" was not found.`;
+    if (waApprovedTemplate.status !== "APPROVED") return `Meta template status is ${waApprovedTemplate.status}; only APPROVED templates can be sent.`;
+    if (!waApprovedBody) return "Approved Meta template body is empty or unavailable.";
+    if (waApprovedParamCount !== waExpectedParamCount) {
+      return `Approved Meta template has ${waApprovedParamCount} body parameter(s), but this sender provides ${waExpectedParamCount}.`;
+    }
+    if (waTemplateDef.requiredApprovedBodyPattern && !waTemplateDef.requiredApprovedBodyPattern.test(waApprovedBody)) {
+      return `Approved Meta template does not contain the expected current deadline marker: ${waTemplateDef.expectedBody || "current copy"}.`;
+    }
+    if (waTemplateDef.blockedApprovedBodyPattern && waTemplateDef.blockedApprovedBodyPattern.test(waApprovedBody)) {
+      return "Approved Meta template still contains an old blocked deadline.";
+    }
+    return null;
+  }, [
+    waApprovedBody,
+    waApprovedParamCount,
+    waApprovedTemplate,
+    waExpectedParamCount,
+    waMetaError,
+    waMetaLoading,
+    waMetaTemplateName,
+    waOpen,
+    waTemplateDef,
+  ]);
 
   // Send-Email dialog
   const [emailOpen, setEmailOpen] = useState(false);
@@ -173,6 +229,36 @@ export default function LeadLists() {
   }, []);
 
   useEffect(() => {
+    if (!waOpen) return;
+    let active = true;
+    setWaMetaLoading(true);
+    setWaMetaError(null);
+    supabase.functions.invoke("whatsapp-templates", { body: { action: "list" } })
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error || data?.error) {
+          setWaMetaTemplates({});
+          setWaMetaError(data?.error || error?.message || "Could not load approved Meta templates.");
+          return;
+        }
+        const templates = ((data?.templates || []) as MetaTemplate[]).reduce<Record<string, MetaTemplate>>((acc, template) => {
+          acc[template.name] = template;
+          return acc;
+        }, {});
+        setWaMetaTemplates(templates);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setWaMetaTemplates({});
+        setWaMetaError(err?.message || "Could not load approved Meta templates.");
+      })
+      .finally(() => {
+        if (active) setWaMetaLoading(false);
+      });
+    return () => { active = false; };
+  }, [waOpen]);
+
+  useEffect(() => {
     if (!emailOpen) return;
     (async () => {
       const { data } = await supabase
@@ -222,6 +308,14 @@ export default function LeadLists() {
 
   const handleSendWhatsApp = async () => {
     if (!waList) return;
+    if (waApprovedIssue) {
+      toast({
+        title: "Approved template preview is not safe",
+        description: waApprovedIssue,
+        variant: "destructive",
+      });
+      return;
+    }
     setWaSending(true);
 
     // Fetch members + lead phone/stage so we can materialize recipients with
@@ -706,6 +800,53 @@ export default function LeadLists() {
               )}
             </div>
 
+            <div className={`rounded-lg border p-3 ${
+              waApprovedIssue
+                ? "border-red-200 bg-red-50"
+                : "border-emerald-200 bg-emerald-50"
+            }`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className={`text-[11px] font-semibold uppercase tracking-wide ${
+                    waApprovedIssue ? "text-red-800" : "text-emerald-800"
+                  }`}>
+                    Approved Meta template preview
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">
+                    Sending uses Meta template <code>{waMetaTemplateName}</code>, not local preview text.
+                  </p>
+                </div>
+                {waMetaLoading ? (
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+                ) : (
+                  <Badge className={`border-0 text-[10px] ${
+                    waApprovedIssue ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"
+                  }`}>
+                    {waApprovedTemplate?.status || "missing"}
+                  </Badge>
+                )}
+              </div>
+              {waApprovedBody ? (
+                <pre className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-border/70 bg-background p-3 text-xs leading-relaxed text-foreground">
+                  {waApprovedBody}
+                </pre>
+              ) : (
+                <div className="mt-3 rounded-md border border-border/70 bg-background p-3 text-xs text-muted-foreground">
+                  {waMetaLoading ? "Loading approved template body..." : "No approved body loaded."}
+                </div>
+              )}
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                <span>Approved params: <strong>{waApprovedParamCount}</strong></span>
+                <span>Sender params: <strong>{waExpectedParamCount}</strong></span>
+              </div>
+              {waApprovedIssue && (
+                <div className="mt-2 flex items-start gap-2 text-xs text-red-700">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>{waApprovedIssue}</span>
+                </div>
+              )}
+            </div>
+
             {/* Per-template static params — one input per non-auto-filled slot */}
             {waStaticFields.length > 0 && (
               <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-3">
@@ -737,7 +878,7 @@ export default function LeadLists() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setWaOpen(false)}>Cancel</Button>
-            <Button onClick={handleSendWhatsApp} disabled={waSending || waMissingStatic} className="gap-2">
+            <Button onClick={handleSendWhatsApp} disabled={waSending || waMissingStatic || !!waApprovedIssue} className="gap-2">
               {waSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Send
             </Button>
