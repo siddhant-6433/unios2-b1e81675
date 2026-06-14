@@ -37,6 +37,23 @@ For any details please call 9555192192
 7428499849`;
 }
 
+function cahetDeadlineMessageWithVariable(): string {
+  return `Dear Applicant,
+
+This is to inform you that for admission to *BPT (Bachelors of Physiotherapy) and BMRIT (Bachelors of Medical Radiological Imaging Technology)* - Last date for Application Submission is *{{1}}*
+
+For admission Candidates *MUST*
+
+1. Complete College Application Online at https://apply.nimt.ac.in
+2. Complete the CAHET Registration on ABVMUP (This is mandatory for admission to BPT/BMRIT across Uttar Pradesh) : https://www.abvmucet26.co.in/entrance2026/login?form=4
+
+Please note both form submissions are mandatory by {{1}} to be included in the admission process for session 2026-27.
+
+For any details please call 9555192192
+9667691872
+7428499849`;
+}
+
 // Each template has BODY (parameterised) + optionally BUTTONS.
 // Button URLs follow Meta's rules: full URL prefix + {{1}} suffix.
 // For PDF receipts (no fixed prefix possible) we use a static button to
@@ -393,6 +410,18 @@ const TEMPLATES = [
       },
     ],
   },
+  {
+    name: "bpt_bmrit_cahet_deadline_v2",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "BODY",
+        text: cahetDeadlineMessageWithVariable(),
+        example: { body_text: [["14th June 2026, 11:59 PM"]] },
+      },
+    ],
+  },
   // Visit reminder with counsellor name. Replaces the older visit_reminder
   // (which did not name the counsellor) — kept as a separate template so
   // the old one stays available during Meta review.
@@ -523,6 +552,16 @@ Deno.serve(async (req) => {
   try {
     const wabaId = Deno.env.get("WHATSAPP_WABA_ID");
     const waToken = Deno.env.get("WHATSAPP_API_TOKEN");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    const cronSecret = Deno.env.get("CRON_SECRET") || "";
+    const authHeader = req.headers.get("Authorization") || req.headers.get("authorization") || "";
+    const isServiceRole = !!serviceRoleKey && authHeader === `Bearer ${serviceRoleKey}`;
+    const isCron = !!cronSecret && req.headers.get("x-cron-secret") === cronSecret;
+    if (!isServiceRole && !isCron) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     if (!wabaId || !waToken) {
       return new Response(JSON.stringify({ error: "WHATSAPP_WABA_ID and WHATSAPP_API_TOKEN required" }), {
         status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" },

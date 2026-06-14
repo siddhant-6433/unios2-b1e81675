@@ -80,12 +80,20 @@ export const WA_BULK_TEMPLATES: WaBulkTemplate[] = [
   },
   {
     key: "bpt_bmrit_cahet_deadline",
+    metaTemplateName: "bpt_bmrit_cahet_deadline_v2",
     label: "BPT/BMRIT CAHET Deadline",
     description: cahetBulkDescription,
-    expectedBody: effectiveCahetWhatsAppDeadlineText().bodyDate,
-    requiredApprovedBodyPattern: /14(?:th)?\s+June\s+2026/i,
+    expectedBody: "{{1}} deadline variable",
+    requiredApprovedBodyPattern: /\{\{\s*1\s*\}\}/,
     blockedApprovedBodyPattern: /5(?:th)?\s+June\s+2026/i,
-    params: [],
+    params: [
+      {
+        name: "deadline_date",
+        source: "static",
+        placeholder: effectiveCahetWhatsAppDeadlineText().bodyDate,
+        help: "This exact value fills the approved Meta template's deadline variable for every recipient.",
+      },
+    ],
   },
   {
     key: "application_received",

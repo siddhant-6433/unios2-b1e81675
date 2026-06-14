@@ -20,7 +20,7 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   // template is named `application_submitted` (see submit-wa-templates).
   application_received: { name: "application_submitted", params: ["student_name", "application_id"] },
   fee_reminder: { name: "fee_reminder", params: ["student_name", "amount", "due_date"] },
-  bpt_bmrit_cahet_deadline: { name: "bpt_bmrit_cahet_deadline", params: [] },
+  bpt_bmrit_cahet_deadline: { name: "bpt_bmrit_cahet_deadline_v2", params: ["deadline_date"] },
   course_details: { name: "course_details", params: ["student_name", "course_name"] },
   counsellor_lead_assigned: { name: "counsellor_lead_assigned", params: ["counsellor_name", "lead_name", "lead_phone_last4", "sla_hours"] },
   counsellor_sla_warning: { name: "counsellor_sla_warning", params: ["lead_name", "hours_remaining"] },
@@ -86,6 +86,18 @@ async function fetchApprovedTemplateBody(templateName: string) {
   return { body };
 }
 
+function validateCampaignStaticParams(
+  templateDef: { name: string; params: string[] },
+  staticParams: Record<string, string>,
+) {
+  const requiredStatic = templateDef.params.filter((name) =>
+    !["student_name", "course_name", "campus_name"].includes(name)
+  );
+  const missing = requiredStatic.filter((name) => !String(staticParams[name] || "").trim());
+  if (!missing.length) return null;
+  return `Missing required template value(s): ${missing.join(", ")}.`;
+}
+
 async function validateApprovedTemplateBeforeSend(templateKey: string, metaTemplateName: string) {
   if (templateKey !== "bpt_bmrit_cahet_deadline") return null;
 
@@ -95,8 +107,8 @@ async function validateApprovedTemplateBeforeSend(templateKey: string, metaTempl
   if (/5(?:th)?\s+June\s+2026/i.test(body)) {
     return `Approved Meta template "${metaTemplateName}" still contains the old 5 June deadline.`;
   }
-  if (!/14(?:th)?\s+June\s+2026/i.test(body)) {
-    return `Approved Meta template "${metaTemplateName}" does not contain the expected 14 June 2026 deadline.`;
+  if (!/\{\{\s*1\s*\}\}/.test(body)) {
+    return `Approved Meta template "${metaTemplateName}" must contain {{1}} for the campaign deadline value.`;
   }
   return null;
 }
@@ -218,6 +230,29 @@ Deno.serve(async (req) => {
       );
     }
 
+    const staticParams: Record<string, string> = ((campaign as any).static_params || {}) as any;
+    const staticParamError = validateCampaignStaticParams(templateDef, staticParams);
+    if (staticParamError) {
+      await adminClient
+        .from("whatsapp_campaigns")
+        .update({
+          status: "paused",
+          worker_locked_at: null,
+          next_attempt_at: null,
+          worker_error: staticParamError,
+        })
+        .eq("id", campaign_id);
+
+      return new Response(
+        JSON.stringify({
+          error: staticParamError,
+          paused: true,
+          done: false,
+        }),
+        { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const approvedTemplateError = await validateApprovedTemplateBeforeSend(
       campaign.template_key,
       templateDef.name,
@@ -289,8 +324,6 @@ Deno.serve(async (req) => {
     // Used to plug params that aren't per-lead — visit_date, fee amount,
     // due_date, application_id, etc. Auto-filled per-lead from the leads
     // join: student_name, course_name, campus_name.
-    const staticParams: Record<string, string> = ((campaign as any).static_params || {}) as any;
-
     for (const recipient of recipients) {
       const { data: liveCampaign } = await adminClient
         .from("whatsapp_campaigns")
