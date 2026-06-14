@@ -94,6 +94,19 @@ Deno.serve(async (req) => {
       });
     }
 
+    if ((campaign as any).status === "paused" || (campaign as any).status === "terminated") {
+      return new Response(JSON.stringify({
+        success: true,
+        done: true,
+        paused: (campaign as any).status === "paused",
+        terminated: (campaign as any).status === "terminated",
+        message: `Campaign is ${(campaign as any).status}`,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     let actorProfileId: string | null = (campaign as any).created_by || null;
     if (!actorUserId && actorProfileId) {
       const { data: ownerProfile } = await admin
