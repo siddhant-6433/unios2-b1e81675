@@ -29,6 +29,7 @@ const inboundEventsMigration = readFileSync("supabase/migrations/20260618212400_
 const replyLearningMigration = readFileSync("supabase/migrations/20260619120500_whatsapp_reply_learning.sql", "utf8");
 const campaignSenderMigration = readFileSync("supabase/migrations/20260614203000_whatsapp_campaign_sender_selection.sql", "utf8");
 const healthPhoneMigration = readFileSync("supabase/migrations/20260614205000_whatsapp_health_phone_numbers.sql", "utf8");
+const bulkSenderNumbersMigration = readFileSync("supabase/migrations/20260619133000_bulk_whatsapp_sender_numbers.sql", "utf8");
 const supabaseConfig = readFileSync("supabase/config.toml", "utf8");
 
 describe("WhatsApp inbound auto-reply and qualification routing", () => {
@@ -150,6 +151,10 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(campaignSenderMigration).toContain("business_phone_number_id text");
     expect(campaignSenderMigration).toContain("business_phone_number text");
     expect(healthPhoneMigration).toContain("business_phone_number");
+    expect(bulkSenderNumbersMigration).toContain("919667691872");
+    expect(bulkSenderNumbersMigration).toContain("917428499849");
+    expect(bulkSenderNumbersMigration).toContain("919555192192");
+    expect(bulkSenderNumbersMigration).toContain("allow_bulk = true");
     expect(campaignSend).toContain("campaignBusinessPhoneNumberId");
     expect(campaignSend).toContain("businessPhoneNumberId: campaignBusinessPhoneNumberId");
     expect(campaignSend).toContain("businessNumber: campaignBusinessNumber");

@@ -389,18 +389,24 @@ export default function LeadLists() {
       const value = `meta:${health.phone_number_id}`;
       const existing = options.get(value);
       const businessNumber = resolveBusinessNumber(health.phone_number_id, existing?.businessNumber || health.business_phone_number);
-      options.set(value, {
-        value,
-        label: formatSenderNumber(businessNumber) || existing?.label || `Meta sender ${health.phone_number_id}`,
+      const existingByNumber = businessNumber
+        ? [...options.values()].find((option) =>
+            option.provider === "meta" && digitsOnly(option.businessNumber) === digitsOnly(businessNumber))
+        : null;
+      const targetValue = existingByNumber?.value || value;
+      options.set(targetValue, {
+        value: targetValue,
+        label: formatSenderNumber(businessNumber) || existingByNumber?.label || existing?.label || `Meta sender ${health.phone_number_id}`,
         provider: "meta",
-        phoneNumberId: health.phone_number_id,
+        phoneNumberId: existingByNumber?.phoneNumberId || health.phone_number_id,
         businessNumber,
         total: health.total,
         failed: health.failed,
         failedPct: health.failed_pct,
         readPct: health.read_pct,
-        qualityRiskLevel: existing?.qualityRiskLevel || null,
+        qualityRiskLevel: existingByNumber?.qualityRiskLevel || existing?.qualityRiskLevel || null,
       });
+      if (targetValue !== value) options.delete(value);
     }
 
     if (channelsRes.error || healthRes.error) {
