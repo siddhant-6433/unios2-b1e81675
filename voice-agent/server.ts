@@ -2110,6 +2110,45 @@ Deno.serve({ port: PORT }, async (req) => {
       console.error(`[${callId}] Lead lookup failed:`, e);
     }
 
+    // Intake round-robin: a lead with no assigned counsellor (fresh inbound, or
+    // an old lead nobody owns) is distributed across the admin-maintained intake
+    // pool (preferring counsellors who are currently online). The DB function
+    // sets leads.counsellor_id and returns the chosen profile id; we then
+    // resolve their phone so the call can be forwarded to them. Returns null
+    // when no pool is configured / nobody is reachable → the AI agent answers
+    // from the start (the fallback below). The same pool backs WhatsApp intake.
+    if (leadId && !counsellorPhone && SUPABASE_URL) {
+      try {
+        const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/fn_intake_round_robin_assign`, {
+          method: "POST",
+          headers: dbHeaders,
+          body: JSON.stringify({ _lead_id: leadId }),
+        });
+        const assignedProfileId = await rpcRes.json().catch(() => null);
+        if (assignedProfileId && typeof assignedProfileId === "string") {
+          const profRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/profiles?id=eq.${assignedProfileId}&select=phone,display_name,user_id`,
+            { headers: dbHeaders },
+          );
+          const prof = (await profRes.json().catch(() => []))?.[0];
+          if (prof?.phone) {
+            counsellorPhone = prof.phone.replace(/[^0-9+]/g, "");
+            if (counsellorPhone.startsWith("+")) counsellorPhone = counsellorPhone.substring(1);
+            if (counsellorPhone.length === 10) counsellorPhone = `91${counsellorPhone}`;
+            counsellorName = prof.display_name || "Counsellor";
+            counsellorUserId = prof.user_id || "";
+            console.log(`[${callId}] Intake round-robin assigned lead ${leadId} → ${counsellorName} (${counsellorPhone})`);
+          } else {
+            console.log(`[${callId}] Intake round-robin picked ${assignedProfileId} but no phone on file — AI will handle`);
+          }
+        } else {
+          console.log(`[${callId}] No intake-pool counsellor available — AI will handle`);
+        }
+      } catch (e) {
+        console.error(`[${callId}] Intake round-robin assign failed:`, (e as Error).message);
+      }
+    }
+
     activeCallContexts.set(callId, {
       direction: "inbound",
       leadId: leadId || undefined,
@@ -2145,15 +2184,13 @@ Deno.serve({ port: PORT }, async (req) => {
     const istDayEarly  = new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata", weekday: "short" });
     const offHours = !((istHourEarly >= 9 && istHourEarly < 20) && istDayEarly !== "Sun");
 
-    // Will the AI actually handle this call from the start? True when:
-    //   - Lead dialed an AI-dedicated DID, OR
-    //   - It's outside business hours, OR
-    //   - The lead has no assigned counsellor (or no counsellor phone), OR
-    //   - There's no lead at all (cold caller, not in DB)
-    // When this is true, the call goes straight to the AI <Stream> below and
-    // no counsellor leg is ever attempted.
-    const aiHandlesFromStart =
-      isAiInboundNumberEarly || offHours || !counsellorPhone || !leadId;
+    // Will the AI actually handle this call from the start? Only when there is
+    // no counsellor we can forward to — i.e. no lead, or no reachable counsellor
+    // (the lead's own AND the intake round-robin pool both came up empty). When
+    // a counsellor phone exists we always forward first (during AND outside
+    // business hours) and the AI is the no-answer fallback. `offHours` is still
+    // tracked below purely to flag the call for next-day follow-up.
+    const aiHandlesFromStart = !counsellorPhone || !leadId;
 
     // Create ai_call_records entry for real-time tracking (LiveCallBar, timeline)
     if (leadId && SUPABASE_URL) {
@@ -2181,44 +2218,32 @@ Deno.serve({ port: PORT }, async (req) => {
     const recordingCallbackUrl = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/voice-call-callback` : "";
     const hangupUrl = `https://${host}/inbound-hangup/${callId}`;
 
-    // Routing decision based on which DID the lead dialed:
+    // Routing: forward the call to a counsellor whenever we have one — the
+    // lead's own assigned counsellor (existing leads, incl. callbacks), or one
+    // just picked from the intake round-robin pool (new/unowned leads). This
+    // holds during AND outside business hours: off-hours still rings the
+    // counsellor's phone, with the AI as the no-answer fallback. The AI answers
+    // from the start only when no counsellor is reachable (empty/absent pool).
     //
-    //  - AI primary (PLIVO_AI_PHONE_NUMBER) or its HA backup
-    //    → answer with the AI agent immediately. This is the dedicated
-    //      inbound number leads call after seeing it on a marketing
-    //      landing page or a previous AI outbound; they expect the AI.
-    //
-    //  - Dialer number (PLIVO_DIALER_PHONE_NUMBER) or any other DID
-    //    → ring assigned counsellor first (20s) then fall back to AI.
-    //      ONLY during business hours (9 AM-8 PM IST, Mon-Sat). Outside
-    //      that window, no counsellor is on duty so every inbound goes
-    //      straight to the AI agent, and the call is flagged for
-    //      next-day counsellor follow-up via the missed-calls queue.
-    //
-    // Phone normalisation: Plivo strips the leading + from params.To
-    // (so "918035374903" arrives) but our env vars store with the +
-    // ("+918035374903"). Without normalising both sides to digits-only,
-    // no DID ever matched and every call fell through to the counsellor
-    // branch — the bug behind "AI primary number rings counsellor".
-    const onlyDigits = (s: string) => (s || "").replace(/\D/g, "");
-    const dialedTo  = onlyDigits(params.To as string);
-    const aiPrimary = onlyDigits(Deno.env.get("PLIVO_AI_PHONE_NUMBER") || "");
-    const aiBackup  = onlyDigits(Deno.env.get("PLIVO_AI_BACKUP_PHONE_NUMBER") || "");
-    const isAiInboundNumber = !!dialedTo && (dialedTo === aiPrimary || dialedTo === aiBackup);
-
+    // This intentionally supersedes the old DID-based split (AI number → AI,
+    // dialer number → counsellor): every inbound now tries a human first and
+    // uses the AI as a safety net via /answer/inbound-ai.
     const istHour = parseInt(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata", hour: "2-digit", hour12: false }).match(/\d+/)?.[0] || "0", 10);
     const istDay  = new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata", weekday: "short" });
     const inBusinessHours = (istHour >= 9 && istHour < 20) && istDay !== "Sun";
 
-    if (!isAiInboundNumber && inBusinessHours && leadId && counsellorPhone) {
+    if (counsellorPhone) {
       const aiUrl = `https://${host}/answer/inbound-ai/${callId}`;
+      const holdMsg = inBusinessHours
+        ? "Connecting you to your counsellor. Please hold."
+        : "Connecting your call. Please hold.";
 
-      console.log(`[${callId}] Inbound to dialer DID ${dialedTo} → ringing counsellor ${counsellorName} (${counsellorPhone})`);
+      console.log(`[${callId}] Inbound → forwarding to counsellor ${counsellorName} (${counsellorPhone})${inBusinessHours ? "" : " [off-hours]"}`);
 
       const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Record recordSession="true" redirect="false" maxLength="3600"${recordingCallbackUrl ? ` callbackUrl="${recordingCallbackUrl}" callbackMethod="POST"` : ""} />
-  <Speak voice="Polly.Kajal">Connecting you to your counsellor. Please hold.</Speak>
+  <Speak voice="Polly.Kajal">${holdMsg}</Speak>
   <Dial callerId="${PLIVO_PHONE_NUMBER}" action="${aiUrl}" method="POST" timeout="20" hangupOnStar="true">
     <Number>${counsellorPhone}</Number>
   </Dial>
@@ -2227,7 +2252,8 @@ Deno.serve({ port: PORT }, async (req) => {
       return new Response(xml, { headers: { "Content-Type": "application/xml" } });
     }
 
-    // AI inbound DID, OR no counsellor assigned → straight to AI agent.
+    // No counsellor reachable (no intake pool configured, or nobody on file) →
+    // AI agent answers directly.
     const wsUrl = `${wsProtocol}://${host}/ws/${callId}`;
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -2235,8 +2261,7 @@ Deno.serve({ port: PORT }, async (req) => {
   <Stream streamTimeout="600" keepCallAlive="true" bidirectional="true" contentType="audio/x-mulaw;rate=8000">${wsUrl}</Stream>
 </Response>`;
 
-    const reason = isAiInboundNumber ? "AI DID" : !inBusinessHours ? "outside business hours" : !counsellorPhone ? "no counsellor assigned" : "fallthrough";
-    console.log(`[${callId}] Inbound from ${callerPhone} to ${dialedTo || "?"} (${reason}, IST hour=${istHour}, day=${istDay}) → AI agent. lead: ${leadName || "unknown"}`);
+    console.log(`[${callId}] Inbound from ${callerPhone} (no counsellor reachable, IST hour=${istHour}, day=${istDay}) → AI agent. lead: ${leadName || "unknown"}`);
     return new Response(xml, { headers: { "Content-Type": "application/xml" } });
   }
 
