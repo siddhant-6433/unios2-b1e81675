@@ -26,6 +26,7 @@ import {
   type ApplicationFunnelStage,
 } from "@/lib/applicationFunnel";
 import { deleteApplication as deleteApplicationRequest } from "@/lib/deleteApplication";
+import { exportRowsXlsx, formatExportDateTime } from "@/lib/xlsxExport";
 import { useToast } from "@/hooks/use-toast";
 
 interface AppRow {
@@ -167,6 +168,7 @@ export default function Applications() {
   const [deleteTarget, setDeleteTarget] = useState<AppRow | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [nudgeTarget, setNudgeTarget] = useState<AppRow | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const handleOfflinePaymentSuccess = async () => {
     if (!offlinePaymentApp) return;
@@ -539,6 +541,59 @@ export default function Applications() {
     });
   };
 
+  const handleExportApplications = async () => {
+    setExporting(true);
+    try {
+      const { count } = await exportRowsXlsx(
+        filtered.map((app) => {
+          const courses = (app.course_selections || []).map((c: any) => c.course_name).filter(Boolean);
+          const campuses = (app.course_selections || []).map((c: any) => c.campus_name).filter(Boolean);
+          const completed = completedCount(app.completed_sections);
+          const total = totalCount(app.completed_sections);
+          return {
+            "Application ID": app.application_id,
+            "Applicant Name": app.full_name || "",
+            Phone: app.phone || "",
+            Email: app.email || "",
+            Courses: courses.join(", "),
+            Campuses: Array.from(new Set(campuses)).join(", "),
+            "Application Status": app.status || "",
+            "Payment Status": app.payment_status || "pending",
+            "Payment Ref": app.payment_ref || "",
+            "Fee Amount": app.fee_amount ?? "",
+            "Completion %": total > 0 ? Math.round((completed / total) * 100) : 0,
+            "Sections Completed": `${completed}/${total}`,
+            "Lead Stage": app.lead_stage || "",
+            Counsellor: app.counsellor_name || "",
+            PAN: app.lead_pre_admission_no || "",
+            AN: app.lead_admission_no || "",
+            Gender: app.gender || "",
+            DOB: app.dob || "",
+            Category: app.category || "",
+            City: app.address?.city || "",
+            State: app.address?.state || "",
+            "Submitted At": formatExportDateTime(app.submitted_at),
+            "Created At": formatExportDateTime(app.created_at),
+          };
+        }),
+        "Applications",
+        "applications-export",
+      );
+      toast({
+        title: count > 0 ? "Applications exported" : "No applications to export",
+        description: count > 0 ? `${count} filtered application${count === 1 ? "" : "s"} exported.` : undefined,
+      });
+    } catch (error) {
+      toast({
+        title: "Export failed",
+        description: error instanceof Error ? error.message : "Unable to export applications.",
+        variant: "destructive",
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
 
   return (
@@ -550,6 +605,17 @@ export default function Applications() {
           <p className="text-sm text-muted-foreground mt-1">{isCounsellor ? "Applications for your assigned leads" : "All online applications with payment and document status"}</p>
         </div>
         <div className="flex items-center gap-2">
+          {isSuperAdmin && (
+            <button
+              onClick={handleExportApplications}
+              disabled={exporting}
+              className="flex items-center gap-1.5 rounded-lg border border-input bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
+              title="Export applications matching the current filters"
+            >
+              {exporting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+              Export
+            </button>
+          )}
           {!isCounsellor && (
             <button onClick={regenerateAll} disabled={!!bulkRegen}
               className="flex items-center gap-1.5 rounded-lg border border-input bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted/50 disabled:opacity-50">

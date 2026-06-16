@@ -12,7 +12,7 @@ import {
   Phone, MessageSquare, ChevronRight, Plus, Search, Filter, Upload,
   Eye, Calendar, MoreHorizontal, Users, TrendingUp, ArrowUpRight,
   Bot, UserCheck, MapPin, FileText, CheckCircle, XCircle, Clock, Loader2,
-  Trash2, ArrowRightLeft, Send, Flag, Inbox, Gift, Shield, CreditCard, ListPlus, Bell,
+  Trash2, ArrowRightLeft, Send, Flag, Inbox, Gift, Shield, CreditCard, ListPlus, Bell, Download,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +35,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ChevronDown } from "lucide-react";
 import { groupCourses, type CourseLike } from "@/lib/courseSort";
+import { exportRowsXlsx, formatExportDateTime } from "@/lib/xlsxExport";
 
 const AddLeadDialog = lazy(() =>
   import("@/components/admissions/AddLeadDialog").then((m) => ({ default: m.AddLeadDialog })));
@@ -306,6 +307,7 @@ const Admissions = () => {
   const [deleteReason, setDeleteReason] = useState<string>("duplicate");
   const [deleteCustomMsg, setDeleteCustomMsg] = useState("");
   const [submittingRequest, setSubmittingRequest] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const isSuperAdmin = role === "super_admin";
   const { myDefaults } = useTatDefaults();
@@ -1160,6 +1162,102 @@ const Admissions = () => {
     setSelectedIds(new Set());
   };
 
+  const fetchFilteredLeadsForExport = async () => {
+    if (
+      leadInstitutionType !== "all" &&
+      (categoryCourseIds.length === 0 || (courseFilterMode === "include" && effectiveCourseFilterIds.length === 0))
+    ) {
+      return [];
+    }
+
+    const rows: Lead[] = [];
+    const exportPageSize = 1000;
+    let cursor: { created_at: string; id: string } | null = null;
+
+    for (;;) {
+      let query: any = supabase
+        .from("leads")
+        .select(
+          `id, name, phone, email, stage, source, person_role, created_at,
+           application_id, pre_admission_no, admission_no, course_id, campus_id,
+           counsellor_id, lead_score, lead_temperature, ai_called,
+           courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`
+        )
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(exportPageSize);
+
+      const scoped = applyListQueryFilters(query);
+      if (scoped.empty) return [];
+      query = scoped.query;
+
+      if (cursor) {
+        query = query.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const batch = ((data || []) as any[]).map((l: any) => ({
+        ...l,
+        course_name: l.courses?.name || "",
+        campus_name: l.campuses?.name || "",
+        counsellor_name: l.profiles?.display_name || "Unassigned",
+        app_completion_pct: null,
+        app_payment_status: null,
+        app_fee_amount: null,
+      })) as Lead[];
+
+      rows.push(...batch);
+      const last = batch[batch.length - 1];
+      if (batch.length < exportPageSize || !last) break;
+      cursor = { created_at: last.created_at, id: last.id };
+    }
+
+    return rows;
+  };
+
+  const handleExportLeads = async () => {
+    setExporting(true);
+    try {
+      const rows = await fetchFilteredLeadsForExport();
+      const { count } = await exportRowsXlsx(
+        rows.map((lead) => ({
+          "Lead Name": lead.name || "",
+          Phone: lead.phone || "",
+          Email: lead.email || "",
+          Course: lead.course_name || "",
+          Campus: lead.campus_name || "",
+          Stage: STAGE_LABELS[lead.stage] || lead.stage || "",
+          Source: SOURCE_LABELS[lead.source] || lead.source || "",
+          Role: lead.person_role || "",
+          Counsellor: lead.counsellor_name || "",
+          "Lead Temperature": lead.lead_temperature || "",
+          "Lead Score": lead.lead_score ?? "",
+          "AI Called": lead.ai_called ? "Yes" : "No",
+          "Application ID": lead.application_id || "",
+          PAN: lead.pre_admission_no || "",
+          AN: lead.admission_no || "",
+          "Created At": formatExportDateTime(lead.created_at),
+        })),
+        "Leads",
+        "leads-export",
+      );
+      toast({
+        title: count > 0 ? "Leads exported" : "No leads to export",
+        description: count > 0 ? `${count} filtered lead${count === 1 ? "" : "s"} exported.` : undefined,
+      });
+    } catch (error) {
+      toast({
+        title: "Export failed",
+        description: error instanceof Error ? error.message : "Unable to export leads.",
+        variant: "destructive",
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const filtered = leads.filter((l) => {
     const q = search.toLowerCase().trim();
     const digits = q.replace(/\D/g, "");
@@ -1554,6 +1652,19 @@ const Admissions = () => {
         </div>
         <div className="flex items-center gap-3">
           {role === "counsellor" && <CounsellorScoreBadge />}
+          {isSuperAdmin && (
+            <Button
+              variant="pill-outline"
+              size="pill"
+              onClick={handleExportLeads}
+              disabled={exporting}
+              className="gap-2"
+              title="Export leads matching the current filters"
+            >
+              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Export
+            </Button>
+          )}
           <Button variant="pill-outline" size="pill" onClick={() => setShowBulkImport(true)} className="gap-2"><Upload className="h-4 w-4" />Import CSV</Button>
           <Button variant="pill" size="pill" onClick={() => { setResumeDraftId(undefined); setShowAddLead(true); }} className="gap-2"><Plus className="h-4 w-4" />Add Lead</Button>
         </div>
