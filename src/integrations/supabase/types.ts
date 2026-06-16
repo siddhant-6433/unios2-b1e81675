@@ -5492,6 +5492,7 @@ export type Database = {
           created_by: string | null
           id: string
           is_active: boolean
+          is_intake_pool: boolean
           name: string
           priority: number
           round_robin_pool: string[] | null
@@ -5505,6 +5506,7 @@ export type Database = {
           created_by?: string | null
           id?: string
           is_active?: boolean
+          is_intake_pool?: boolean
           name: string
           priority?: number
           round_robin_pool?: string[] | null
@@ -5518,6 +5520,7 @@ export type Database = {
           created_by?: string | null
           id?: string
           is_active?: boolean
+          is_intake_pool?: boolean
           name?: string
           priority?: number
           round_robin_pool?: string[] | null
