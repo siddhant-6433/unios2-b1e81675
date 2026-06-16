@@ -5,14 +5,19 @@ import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
   ListPlus, Loader2, Send, Mail, Trash2, Users, MessageSquare, AlertTriangle, Upload,
-  Pause, PlayCircle, RefreshCw, XCircle,
+  Pause, PlayCircle, RefreshCw, XCircle, Phone, Check, ChevronDown,
 } from "lucide-react";
 import { WA_BULK_TEMPLATES } from "@/config/waBulkTemplates";
+import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 
 const BulkLeadImportDialog = lazy(() =>
   import("@/components/admissions/BulkLeadImportDialog").then((m) => ({ default: m.BulkLeadImportDialog })));
@@ -38,9 +43,34 @@ interface CampaignQueueItem {
   total_recipients: number;
   sent_count: number;
   failed_count: number;
+  business_phone_number_id: string | null;
+  business_phone_number: string | null;
   created_at: string;
   completed_at: string | null;
 }
+
+type WaPhoneHealth = {
+  phone_number_id: string;
+  business_phone_number?: string | null;
+  total: number;
+  failed: number;
+  read: number;
+  failed_pct: number | null;
+  read_pct: number | null;
+};
+
+type WaSenderOption = {
+  value: string;
+  label: string;
+  provider: "meta" | "plivo";
+  phoneNumberId: string | null;
+  businessNumber: string | null;
+  total: number | null;
+  failed: number | null;
+  failedPct: number | null;
+  readPct: number | null;
+  qualityRiskLevel: string | null;
+};
 
 const SOURCE_BADGE: Record<LeadList["source"], { label: string; cls: string }> = {
   manual:  { label: "Manual",   cls: "bg-pastel-blue text-foreground/70" },
@@ -55,6 +85,125 @@ const CAMPAIGN_STATUS_BADGE: Record<CampaignQueueItem["status"], string> = {
   completed: "bg-muted text-muted-foreground",
   failed: "bg-rose-100 text-rose-700",
   terminated: "bg-zinc-200 text-zinc-700",
+};
+
+const DEFAULT_WA_SENDER = "__default_bulk_sender__";
+const WHATSAPP_BUSINESS_NAME = "NIMT Educational Institutions";
+const KNOWN_META_PHONE_NUMBER_ID_TO_NUMBER: Record<string, string> = {
+  "1075269918995469": "917428499849",
+  "970526789470416": "919599675267",
+};
+
+const defaultWaSenderOption = (): WaSenderOption => ({
+  value: DEFAULT_WA_SENDER,
+  label: "Bulk default sender",
+  provider: "meta",
+  phoneNumberId: null,
+  businessNumber: null,
+  total: null,
+  failed: null,
+  failedPct: null,
+  readPct: null,
+  qualityRiskLevel: null,
+});
+
+const digitsOnly = (value: string | null | undefined) => (value || "").replace(/[^0-9]/g, "");
+
+const formatSenderNumber = (value: string | null | undefined) => {
+  const digits = digitsOnly(value);
+  if (digits.length === 12 && digits.startsWith("91")) {
+    return `+91 ${digits.slice(2, 7)} ${digits.slice(7)}`;
+  }
+  if (digits.length === 10) return `${digits.slice(0, 5)} ${digits.slice(5)}`;
+  return value || "";
+};
+
+const formatPct = (value: number | null | undefined) =>
+  typeof value === "number" ? `${value.toFixed(1)}%` : "n/a";
+
+const senderHealthClass = (failedPct: number | null | undefined) => {
+  if (typeof failedPct !== "number") return "bg-muted text-muted-foreground";
+  if (failedPct >= 10) return "bg-rose-100 text-rose-700";
+  if (failedPct >= 5) return "bg-amber-100 text-amber-700";
+  return "bg-emerald-100 text-emerald-700";
+};
+
+const resolveBusinessNumber = (
+  phoneNumberId: string | null | undefined,
+  businessNumber: string | null | undefined,
+) => {
+  const numberDigits = digitsOnly(businessNumber);
+  if (numberDigits) return numberDigits;
+  return phoneNumberId ? KNOWN_META_PHONE_NUMBER_ID_TO_NUMBER[phoneNumberId] || null : null;
+};
+
+const sampleValueForParam = (name: string) => {
+  if (name === "student_name") return "Rahul Sharma";
+  if (name === "course_name") return "BPT";
+  if (name === "campus_name") return "NIMT Greater Noida";
+  if (name === "visit_date") return "14 Jun 2026, 11:00 AM";
+  if (name === "amount") return "5,000";
+  if (name === "due_date") return "14 Jun 2026";
+  if (name === "application_id") return "NIMT-2026-001";
+  return name.replace(/_/g, " ");
+};
+
+const renderTemplatePreview = (preview: string, staticParams: Record<string, string>) =>
+  preview.replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, (_match, name: string) => {
+    const typed = staticParams[name]?.trim();
+    return typed || sampleValueForParam(name);
+  });
+
+const WhatsAppBusinessIdentity = ({
+  sender,
+  selected,
+  compact = false,
+}: {
+  sender: WaSenderOption;
+  selected?: boolean;
+  compact?: boolean;
+}) => {
+  const formattedNumber = formatSenderNumber(sender.businessNumber);
+  const primaryLabel = formattedNumber || sender.label || "Default bulk route";
+  const countryLabel = formattedNumber ? "🇮🇳 India" : "Default route";
+
+  return (
+    <div className={`flex w-full items-center gap-3 ${compact ? "py-1" : "rounded-md p-2"}`}>
+      <Avatar className={compact ? "h-9 w-9 border bg-white" : "h-10 w-10 border bg-white"}>
+        <AvatarImage src={nimtLogo} alt={WHATSAPP_BUSINESS_NAME} className="object-contain p-1" />
+        <AvatarFallback className="bg-emerald-50 text-[10px] font-semibold text-emerald-700">NIMT</AvatarFallback>
+      </Avatar>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className="truncate text-sm font-semibold text-foreground">{primaryLabel}</p>
+          {sender.provider === "meta" && (
+            <Badge variant="outline" className="h-5 rounded-full px-1.5 text-[10px]">Meta</Badge>
+          )}
+        </div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+          <span>{countryLabel}</span>
+          <span className="hidden sm:inline">•</span>
+          <span className="truncate">{WHATSAPP_BUSINESS_NAME}</span>
+          {!compact && <span>Name visible to customers</span>}
+        </div>
+        {!compact && (
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <Badge className={`border-0 text-[10px] ${senderHealthClass(sender.failedPct)}`}>
+              7d failed {formatPct(sender.failedPct)}
+            </Badge>
+            <span className="text-[11px] text-muted-foreground">Read {formatPct(sender.readPct)}</span>
+            {sender.total != null && (
+              <span className="text-[11px] text-muted-foreground">{sender.total.toLocaleString("en-IN")} sends</span>
+            )}
+            {sender.qualityRiskLevel && (
+              <span className="text-[11px] text-muted-foreground">Risk: {sender.qualityRiskLevel}</span>
+            )}
+          </div>
+        )}
+      </div>
+      {selected && <Check className="h-4 w-4 shrink-0 text-emerald-600" />}
+    </div>
+  );
 };
 
 export default function LeadLists() {
@@ -73,6 +222,10 @@ export default function LeadLists() {
   const [waTemplate, setWaTemplate] = useState<string>(WA_BULK_TEMPLATES[0].key);
   const [waCampaignName, setWaCampaignName] = useState("");
   const [waStaticParams, setWaStaticParams] = useState<Record<string, string>>({});
+  const [waSenderValue, setWaSenderValue] = useState(DEFAULT_WA_SENDER);
+  const [waSenderOptions, setWaSenderOptions] = useState<WaSenderOption[]>(() => [defaultWaSenderOption()]);
+  const [waSenderLoading, setWaSenderLoading] = useState(false);
+  const [waSenderError, setWaSenderError] = useState<string | null>(null);
   const [waSending, setWaSending] = useState(false);
 
   // Selected template definition — drives which static inputs we render.
@@ -85,6 +238,14 @@ export default function LeadLists() {
     [waTemplateDef]
   );
   const waMissingStatic = waStaticFields.some(p => !waStaticParams[p.name]?.trim());
+  const waSelectedSender = useMemo(
+    () => waSenderOptions.find((s) => s.value === waSenderValue) || waSenderOptions[0] || null,
+    [waSenderOptions, waSenderValue]
+  );
+  const waRenderedPreview = useMemo(
+    () => renderTemplatePreview(waTemplateDef.preview, waStaticParams),
+    [waTemplateDef.preview, waStaticParams]
+  );
 
   // Send-Email dialog
   const [emailOpen, setEmailOpen] = useState(false);
@@ -123,7 +284,7 @@ export default function LeadLists() {
     const [waRes, emailRes] = await Promise.all([
       supabase
         .from("whatsapp_campaigns" as any)
-        .select("id,name,template_key,status,total_recipients,sent_count,failed_count,created_at,completed_at")
+        .select("id,name,template_key,status,total_recipients,sent_count,failed_count,business_phone_number_id,business_phone_number,created_at,completed_at")
         .order("created_at", { ascending: false })
         .limit(20),
       supabase
@@ -145,6 +306,8 @@ export default function LeadLists() {
       total_recipients: c.total_recipients || 0,
       sent_count: c.sent_count || 0,
       failed_count: c.failed_count || 0,
+      business_phone_number_id: c.business_phone_number_id || null,
+      business_phone_number: c.business_phone_number || null,
       created_at: c.created_at,
       completed_at: c.completed_at || null,
     }));
@@ -157,6 +320,8 @@ export default function LeadLists() {
       total_recipients: c.total_recipients || 0,
       sent_count: c.sent_count || 0,
       failed_count: c.failed_count || 0,
+      business_phone_number_id: null,
+      business_phone_number: null,
       created_at: c.created_at,
       completed_at: c.completed_at || null,
     }));
@@ -171,6 +336,93 @@ export default function LeadLists() {
     fetchLists();
     fetchCampaignQueue();
   }, []);
+
+  const loadWaSenders = async () => {
+    setWaSenderLoading(true);
+    setWaSenderError(null);
+
+    const [channelsRes, healthRes] = await Promise.all([
+      supabase
+        .from("whatsapp_channels" as any)
+        .select("id,label,provider,route,business_number,meta_phone_number_id,allow_bulk,quality_risk_level")
+        .eq("is_active", true)
+        .eq("allow_bulk", true)
+        .order("label", { ascending: true }),
+      supabase.rpc("fn_whatsapp_health_dashboard" as any, { p_days: 7 }),
+    ]);
+
+    const healthRows = ((healthRes.data as any)?.phones || []) as WaPhoneHealth[];
+    const healthByPhone = new Map(
+      healthRows
+        .filter((p) => p.phone_number_id && p.phone_number_id !== "(unset)")
+        .map((p) => [p.phone_number_id, p])
+    );
+
+    const options = new Map<string, WaSenderOption>();
+    options.set(DEFAULT_WA_SENDER, defaultWaSenderOption());
+
+    if (!channelsRes.error) {
+      for (const channel of ((channelsRes.data || []) as any[])) {
+        const phoneNumberId = channel.meta_phone_number_id || null;
+        const businessNumber = channel.business_number || null;
+        if (!phoneNumberId && !businessNumber) continue;
+        const value = `${channel.provider}:${phoneNumberId || businessNumber}`;
+        const health = phoneNumberId ? healthByPhone.get(phoneNumberId) : undefined;
+        const resolvedBusinessNumber = resolveBusinessNumber(phoneNumberId, businessNumber || health?.business_phone_number);
+        options.set(value, {
+          value,
+          label: formatSenderNumber(resolvedBusinessNumber) || channel.label || phoneNumberId || "WhatsApp sender",
+          provider: channel.provider === "plivo" ? "plivo" : "meta",
+          phoneNumberId,
+          businessNumber: resolvedBusinessNumber,
+          total: health?.total ?? null,
+          failed: health?.failed ?? null,
+          failedPct: health?.failed_pct ?? null,
+          readPct: health?.read_pct ?? null,
+          qualityRiskLevel: channel.quality_risk_level || null,
+        });
+      }
+    }
+
+    for (const health of healthRows) {
+      if (!health.phone_number_id || health.phone_number_id === "(unset)") continue;
+      const value = `meta:${health.phone_number_id}`;
+      const existing = options.get(value);
+      const businessNumber = resolveBusinessNumber(health.phone_number_id, existing?.businessNumber || health.business_phone_number);
+      const existingByNumber = businessNumber
+        ? [...options.values()].find((option) =>
+            option.provider === "meta" && digitsOnly(option.businessNumber) === digitsOnly(businessNumber))
+        : null;
+      const targetValue = existingByNumber?.value || value;
+      options.set(targetValue, {
+        value: targetValue,
+        label: formatSenderNumber(businessNumber) || existingByNumber?.label || existing?.label || `Meta sender ${health.phone_number_id}`,
+        provider: "meta",
+        phoneNumberId: existingByNumber?.phoneNumberId || health.phone_number_id,
+        businessNumber,
+        total: health.total,
+        failed: health.failed,
+        failedPct: health.failed_pct,
+        readPct: health.read_pct,
+        qualityRiskLevel: existingByNumber?.qualityRiskLevel || existing?.qualityRiskLevel || null,
+      });
+      if (targetValue !== value) options.delete(value);
+    }
+
+    if (channelsRes.error || healthRes.error) {
+      setWaSenderError(channelsRes.error?.message || healthRes.error?.message || "Could not load WhatsApp sender health.");
+    }
+
+    const concreteOptions = [...options.values()].filter((option) => option.value !== DEFAULT_WA_SENDER);
+    const nextOptions = concreteOptions.length > 0 ? concreteOptions : [defaultWaSenderOption()];
+    setWaSenderOptions(nextOptions);
+    setWaSenderValue((current) => nextOptions.some((o) => o.value === current) ? current : nextOptions[0]?.value || DEFAULT_WA_SENDER);
+    setWaSenderLoading(false);
+  };
+
+  useEffect(() => {
+    if (waOpen) loadWaSenders();
+  }, [waOpen]);
 
   useEffect(() => {
     if (!emailOpen) return;
@@ -190,6 +442,7 @@ export default function LeadLists() {
     setWaCampaignName(`${list.name} — WhatsApp`);
     setWaTemplate(WA_BULK_TEMPLATES[0].key);
     setWaStaticParams({});
+    setWaSenderValue(DEFAULT_WA_SENDER);
     setWaOpen(true);
   };
 
@@ -262,6 +515,8 @@ export default function LeadLists() {
         list_id: waList.id,
         total_recipients: valid.length,
         static_params: staticParamsToSend,
+        business_phone_number_id: waSelectedSender?.phoneNumberId || null,
+        business_phone_number: waSelectedSender?.businessNumber || null,
         created_by: profile?.id || null,
         next_attempt_at: new Date().toISOString(),
         worker_locked_at: null,
@@ -670,7 +925,7 @@ export default function LeadLists() {
 
       {/* WhatsApp send dialog */}
       <Dialog open={waOpen} onOpenChange={setWaOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Send WhatsApp to "{waList?.name}"</DialogTitle>
           </DialogHeader>
@@ -689,6 +944,70 @@ export default function LeadLists() {
                 onChange={(e) => setWaCampaignName(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
               />
+            </div>
+            <div>
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-medium text-muted-foreground">Outgoing WhatsApp number</label>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={loadWaSenders}
+                  disabled={waSenderLoading}
+                  className="h-6 gap-1 px-1.5 text-[11px]"
+                >
+                  {waSenderLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                  Refresh
+                </Button>
+              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    disabled={waSenderLoading}
+                    className="mt-1 flex w-full items-center gap-2 rounded-lg border border-input bg-card px-3 py-2 text-left text-sm transition-colors hover:bg-muted/40 focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {waSelectedSender ? (
+                      <WhatsAppBusinessIdentity sender={waSelectedSender} compact />
+                    ) : (
+                      <span className="flex-1 text-muted-foreground">Select outgoing WhatsApp number</span>
+                    )}
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)] p-1.5">
+                  {waSenderOptions.map((sender) => (
+                    <DropdownMenuItem
+                      key={sender.value}
+                      onSelect={() => setWaSenderValue(sender.value)}
+                      className="cursor-pointer p-0 focus:bg-muted"
+                    >
+                      <WhatsAppBusinessIdentity sender={sender} selected={sender.value === waSenderValue} />
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {waSelectedSender && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                  <Badge variant="outline" className="gap-1 text-[10px]">
+                    <Phone className="h-3 w-3" />
+                    {waSelectedSender.businessNumber
+                      ? formatSenderNumber(waSelectedSender.businessNumber)
+                      : waSelectedSender.phoneNumberId || "Default bulk route"}
+                  </Badge>
+                  <Badge className={`border-0 text-[10px] ${senderHealthClass(waSelectedSender.failedPct)}`}>
+                    7d failed {formatPct(waSelectedSender.failedPct)}
+                  </Badge>
+                  <span>Read {formatPct(waSelectedSender.readPct)}</span>
+                  {waSelectedSender.total != null && <span>{waSelectedSender.total.toLocaleString("en-IN")} sends</span>}
+                  {waSelectedSender.qualityRiskLevel && <span>Risk: {waSelectedSender.qualityRiskLevel}</span>}
+                </div>
+              )}
+              {waSenderError && (
+                <p className="mt-1 text-[11px] text-amber-700">
+                  Could not refresh sender health: {waSenderError}
+                </p>
+              )}
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground">Template</label>
@@ -730,6 +1049,16 @@ export default function LeadLists() {
                 </p>
               </div>
             )}
+
+            <div className="rounded-lg border border-border bg-muted/30 p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-foreground">Template preview</p>
+                <span className="text-[11px] text-muted-foreground">Sample values shown</span>
+              </div>
+              <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-background px-3 py-2 text-xs leading-relaxed text-foreground">
+                {waRenderedPreview}
+              </pre>
+            </div>
 
             <p className="text-xs text-muted-foreground">
               Sending to <strong className="text-foreground">{waList?.member_count}</strong> lead{waList?.member_count === 1 ? "" : "s"} on this list (DNC + no-phone excluded at send time).

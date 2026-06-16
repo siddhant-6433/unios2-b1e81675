@@ -8,6 +8,10 @@ import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   MessageSquare, Search, Send, Loader2, User, Clock, ExternalLink, ArrowLeft,
   FileDown, AlertTriangle, LayoutTemplate, X, Check, ChevronDown, Zap, Ban, Settings,
@@ -20,6 +24,7 @@ import {
   cahetDeadlineDescription,
   cahetDeadlineMessage,
 } from "@/lib/deadlineRollover";
+import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 
 const CONVERSATION_PAGE_SIZE = 120;
 
@@ -261,6 +266,11 @@ const HR_BUSINESS_PNID = "970526789470416";
 const HR_BUSINESS_NUMBER = "9599675267";
 const PLIVO_WHATSAPP_NUMBER = "919555192192";
 const PRIMARY_META_WHATSAPP_NUMBER = "919667691872";
+const WHATSAPP_BUSINESS_NAME = "NIMT Educational Institutions";
+const KNOWN_META_PHONE_NUMBER_ID_TO_NUMBER: Record<string, string> = {
+  "1075269918995469": "917428499849",
+  [HR_BUSINESS_PNID]: `91${HR_BUSINESS_NUMBER}`,
+};
 const KNOWN_ADMISSIONS_PHONE_CHANNELS = [
   { id: PLIVO_WHATSAPP_NUMBER, label: "9555192192 Inbox", provider: "plivo" },
   { id: PRIMARY_META_WHATSAPP_NUMBER, label: "9667691872 Inbox", provider: "meta" },
@@ -320,6 +330,71 @@ const formatInboxLabel = (id: string, label?: string | null) => {
   if (digits.length === 12 && digits.startsWith("91")) return `${digits.slice(2)} Inbox`;
   if (digits.length === 10) return `${digits} Inbox`;
   return label || id;
+};
+
+const resolveInboxBusinessNumber = (id: string | null | undefined, label?: string | null) => {
+  const labelDigits = normalizeBusinessChannel(label);
+  if (isBusinessPhoneNumberChannel(labelDigits)) return labelDigits;
+  const idDigits = normalizeBusinessChannel(id);
+  if (isBusinessPhoneNumberChannel(idDigits)) return idDigits;
+  return id ? KNOWN_META_PHONE_NUMBER_ID_TO_NUMBER[id] || null : null;
+};
+
+const formatBusinessDisplayNumber = (value: string | null | undefined) => {
+  const digits = normalizeBusinessChannel(value);
+  if (digits.length === 12 && digits.startsWith("91")) {
+    return `+91 ${digits.slice(2, 7)} ${digits.slice(7)}`;
+  }
+  if (digits.length === 10) return `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`;
+  return value || "";
+};
+
+type InboxPickerOption = {
+  id: string;
+  label: string;
+  provider: string | null;
+  businessNumber: string | null;
+  count?: number;
+};
+
+const WhatsAppInboxIdentity = ({
+  option,
+  selected,
+  compact = false,
+}: {
+  option: InboxPickerOption;
+  selected?: boolean;
+  compact?: boolean;
+}) => {
+  const displayNumber = formatBusinessDisplayNumber(option.businessNumber);
+  const primaryLabel = displayNumber || option.label;
+
+  return (
+    <div className={`flex w-full items-center gap-3 ${compact ? "py-0.5" : "rounded-md p-2"}`}>
+      <Avatar className={compact ? "h-8 w-8 border bg-white" : "h-10 w-10 border bg-white"}>
+        <AvatarImage src={nimtLogo} alt={WHATSAPP_BUSINESS_NAME} className="object-contain p-1" />
+        <AvatarFallback className="bg-emerald-50 text-[10px] font-semibold text-emerald-700">NIMT</AvatarFallback>
+      </Avatar>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className={`${compact ? "text-xs" : "text-sm"} truncate font-semibold text-foreground`}>{primaryLabel}</p>
+          {option.provider && (
+            <Badge variant="outline" className="h-5 rounded-full px-1.5 text-[10px] capitalize">
+              {option.provider}
+            </Badge>
+          )}
+        </div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+          <span>{displayNumber ? "🇮🇳 India" : "Inbox route"}</span>
+          <span className="hidden sm:inline">•</span>
+          <span className="truncate">{WHATSAPP_BUSINESS_NAME}</span>
+          {!compact && <span>Name visible to customers</span>}
+          {!compact && typeof option.count === "number" && <span>{option.count.toLocaleString("en-IN")} chats</span>}
+        </div>
+      </div>
+      {selected && <Check className="h-4 w-4 shrink-0 text-emerald-600" />}
+    </div>
+  );
 };
 
 const STATE_LABELS: Record<string, string> = {
@@ -599,7 +674,7 @@ const WhatsAppInbox = () => {
     const secondaryInboxes = sorted
       .filter(item => item.id !== primary)
       .filter(item => !primaryUsesMetaFallbackLabel || item.id !== primaryMetaFallback?.id)
-      .map(item => ({ id: item.id, label: item.label }));
+      .map(item => ({ id: item.id, label: item.label, n: item.n }));
     return {
       primaryPnid: primary as string | null,
       primaryInboxLabel: primaryMetaFallback?.label || primaryItem?.label || "Primary Inbox",
@@ -607,6 +682,25 @@ const WhatsAppInbox = () => {
     };
   })();
   const hasOtherInbox = otherInboxes.length > 0;
+  const inboxPickerOptions: InboxPickerOption[] = [
+    {
+      id: "primary",
+      label: primaryInboxLabel,
+      provider: "meta",
+      businessNumber: PRIMARY_META_WHATSAPP_NUMBER,
+    },
+    ...otherInboxes.map((inbox) => {
+      const known = findKnownAdmissionsChannel(inbox.id, inbox.label);
+      return {
+        id: inbox.id,
+        label: inbox.label,
+        provider: known?.provider || "meta",
+        businessNumber: resolveInboxBusinessNumber(inbox.id, inbox.label),
+        count: inbox.n,
+      };
+    }),
+  ];
+  const selectedInboxOption = inboxPickerOptions.find(option => option.id === businessNumber) || inboxPickerOptions[0];
 
   // Pre-fill backfill form when dialog opens, using detected pnids if any
   const openBackfill = () => {
@@ -1735,17 +1829,29 @@ const WhatsAppInbox = () => {
         </div>
         <div className="flex items-center gap-2">
           {hasOtherInbox && !isHrScope && (
-            <select
-              value={businessNumber}
-              onChange={e => { setBusinessNumber(e.target.value); setSelectedPhone(null); }}
-              className="rounded-lg border border-input bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/50"
-              title="Select inbox"
-            >
-              <option value="primary">{primaryInboxLabel}</option>
-              {otherInboxes.map(o => (
-                <option key={o.id} value={o.id}>{o.label}</option>
-              ))}
-            </select>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="flex min-w-[260px] items-center gap-2 rounded-lg border border-input bg-background px-3 py-1.5 text-left text-xs font-medium text-foreground transition-colors hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-ring/20"
+                  title="Select inbox"
+                >
+                  <WhatsAppInboxIdentity option={selectedInboxOption} compact />
+                  <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-[360px] p-1.5">
+                {inboxPickerOptions.map(option => (
+                  <DropdownMenuItem
+                    key={option.id}
+                    onSelect={() => { setBusinessNumber(option.id); setSelectedPhone(null); }}
+                    className="cursor-pointer p-0 focus:bg-muted"
+                  >
+                    <WhatsAppInboxIdentity option={option} selected={option.id === businessNumber} />
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
           {isAdminRole(role) && (
             <button

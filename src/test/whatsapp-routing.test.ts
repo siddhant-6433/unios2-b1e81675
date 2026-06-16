@@ -26,7 +26,10 @@ const eventsMigration = readFileSync("supabase/migrations/20260618212100_whatsap
 const courseBriefMigration = readFileSync("supabase/migrations/20260618212200_course_admission_briefs.sql", "utf8");
 const outboundContextMigration = readFileSync("supabase/migrations/20260618212300_whatsapp_outbound_context.sql", "utf8");
 const inboundEventsMigration = readFileSync("supabase/migrations/20260618212400_whatsapp_inbound_events.sql", "utf8");
-const replyLearningMigration = readFileSync("supabase/migrations/20260618212900_whatsapp_reply_learning.sql", "utf8");
+const replyLearningMigration = readFileSync("supabase/migrations/20260619120500_whatsapp_reply_learning.sql", "utf8");
+const campaignSenderMigration = readFileSync("supabase/migrations/20260614203000_whatsapp_campaign_sender_selection.sql", "utf8");
+const healthPhoneMigration = readFileSync("supabase/migrations/20260614205000_whatsapp_health_phone_numbers.sql", "utf8");
+const bulkSenderNumbersMigration = readFileSync("supabase/migrations/20260619133000_bulk_whatsapp_sender_numbers.sql", "utf8");
 const supabaseConfig = readFileSync("supabase/config.toml", "utf8");
 
 describe("WhatsApp inbound auto-reply and qualification routing", () => {
@@ -142,6 +145,20 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(aiReply).toContain("sendWhatsAppText(admin");
     expect(templateSend).toContain("sendWhatsAppTemplate(admin");
     expect(campaignSend).toContain("sendWhatsAppTemplate(adminClient");
+  });
+
+  it("lets bulk campaigns persist and use an operator-selected WhatsApp sender", () => {
+    expect(campaignSenderMigration).toContain("business_phone_number_id text");
+    expect(campaignSenderMigration).toContain("business_phone_number text");
+    expect(healthPhoneMigration).toContain("business_phone_number");
+    expect(bulkSenderNumbersMigration).toContain("919667691872");
+    expect(bulkSenderNumbersMigration).toContain("917428499849");
+    expect(bulkSenderNumbersMigration).toContain("919555192192");
+    expect(bulkSenderNumbersMigration).toContain("allow_bulk = true");
+    expect(campaignSend).toContain("campaignBusinessPhoneNumberId");
+    expect(campaignSend).toContain("businessPhoneNumberId: campaignBusinessPhoneNumberId");
+    expect(campaignSend).toContain("businessNumber: campaignBusinessNumber");
+    expect(campaignSend).toContain("selected_business_phone_number_id");
   });
 
   it("tracks rich conversation state for AI/human handoff", () => {

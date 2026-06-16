@@ -226,6 +226,14 @@ Deno.serve(async (req) => {
     // due_date, application_id, etc. Auto-filled per-lead from the leads
     // join: student_name, course_name, campus_name.
     const staticParams: Record<string, string> = ((campaign as any).static_params || {}) as any;
+    const campaignBusinessPhoneNumberId =
+      typeof (campaign as any).business_phone_number_id === "string"
+        ? (campaign as any).business_phone_number_id
+        : null;
+    const campaignBusinessNumber =
+      typeof (campaign as any).business_phone_number === "string"
+        ? (campaign as any).business_phone_number
+        : null;
 
     for (const recipient of recipients) {
       const { data: liveCampaign } = await adminClient
@@ -312,6 +320,8 @@ Deno.serve(async (req) => {
         const sendResult = await sendWhatsAppTemplate(adminClient, {
           route: "bulk",
           requireBulk: true,
+          businessPhoneNumberId: campaignBusinessPhoneNumberId,
+          businessNumber: campaignBusinessNumber,
         }, waPhone, {
           name: templateDef.name,
           language: "en",
@@ -366,6 +376,8 @@ Deno.serve(async (req) => {
             metadata: {
               campaign_name: campaign.name,
               static_params: staticParams,
+              selected_business_phone_number_id: campaignBusinessPhoneNumberId,
+              selected_business_number: campaignBusinessNumber,
               sent_by_user_id: actorUserId,
             },
             expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
