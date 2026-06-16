@@ -27,7 +27,10 @@ describe("hot list database load guardrails", () => {
 
   it("keeps exact counts out of hot dashboard and list paths", () => {
     const hotCountFiles = [
-      ...hotListFiles,
+      // Admissions is excluded here: its list view gates exact counts behind
+      // an active filter (see the dedicated assertion below). The blanket ban
+      // still applies to every other hot path.
+      ...hotListFiles.filter((f) => f !== "src/pages/Admissions.tsx"),
       "src/components/admissions/CloudDialerNudge.tsx",
       "src/components/admissions/InactivityAlertBanner.tsx",
       "src/pages/CloudDialer.tsx",
@@ -40,6 +43,15 @@ describe("hot list database load guardrails", () => {
     for (const file of hotCountFiles) {
       expect(read(file), `${file} should avoid count exact`).not.toContain('count: "exact"');
     }
+  });
+
+  it("gates the admissions list exact count behind an active filter", () => {
+    // The unfiltered org-wide view stays on the cheap `planned` estimate
+    // (#122). An exact count is used only when a filter narrows the query —
+    // where the planner estimate diverges from reality ("Showing 0 of 280").
+    const admissions = read("src/pages/Admissions.tsx");
+    expect(admissions).toContain("hasActiveListFilters");
+    expect(admissions).toContain('count: hasActiveListFilters ? "exact" : "planned"');
   });
 
   it("keeps Lead Buckets counts and bulk selection honest under pagination", () => {

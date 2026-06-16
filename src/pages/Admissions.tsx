@@ -775,6 +775,35 @@ const Admissions = () => {
         setPage(1);
         return;
       }
+      // The total ("of N") uses a `planned` planner estimate to avoid an
+      // expensive COUNT(*) over the full leads table on the unfiltered hot
+      // path (#122). That estimate is accurate only when no filter narrows the
+      // query — once filters stack, the planner can't estimate the
+      // intersection (it sizes off a single predicate's selectivity) and
+      // reports a number wholly decoupled from the real result, producing the
+      // "Showing 0 of 280" contradiction. So switch to an `exact` count
+      // whenever any list filter is active: that's precisely when the estimate
+      // breaks and when the filtered set is small enough for an exact count to
+      // be cheap.
+      const hasActiveListFilters =
+        stageFilter !== "all" ||
+        sourceFilter !== "all" ||
+        roleFilter !== "all" ||
+        tempFilter !== "all" ||
+        leadInstitutionType !== "all" ||
+        debouncedCourseFilter.length > 0 ||
+        applicationStageFilter.length > 0 ||
+        counsellorFilter !== "all" ||
+        selectedCampusId !== "all" ||
+        role === "counsellor" ||
+        debouncedSearch.length >= 2 ||
+        !!fromDate ||
+        !!toDate ||
+        inactiveIds !== null ||
+        followupLeadIds !== null ||
+        visitLeadIds !== null ||
+        actionLeadIds !== null ||
+        notCalledIds !== null;
       let query: any = supabase
         .from("leads")
         .select(
@@ -782,7 +811,7 @@ const Admissions = () => {
            application_id, pre_admission_no, admission_no, course_id, campus_id,
            counsellor_id, lead_score, lead_temperature, ai_called,
            courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`,
-          page === 1 ? { count: "planned" } : undefined
+          page === 1 ? { count: hasActiveListFilters ? "exact" : "planned" } : undefined
         )
         .order("created_at", { ascending: false })
         .order("id", { ascending: false })
