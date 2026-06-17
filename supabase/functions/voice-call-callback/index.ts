@@ -186,8 +186,13 @@ async function autoAssignCounsellor(
   db: any,
   leadId: string,
   disposition: string | null,
+  conversionProb: number | null,
 ): Promise<void> {
-  if (!disposition || !["interested", "callback_requested"].includes(disposition)) return;
+  const isHighIntent =
+    disposition === "interested" ||
+    disposition === "callback_requested" ||
+    (typeof conversionProb === "number" && conversionProb >= 60);
+  if (!isHighIntent) return;
 
   const { data: lead } = await db.from("leads")
     .select("id, counsellor_id, campus_id, course_id, name, stage")
@@ -204,71 +209,26 @@ async function autoAssignCounsellor(
     return;
   }
 
-  // ── Determine which team to assign from ──
-  const MIRAI_CAMPUS  = "c0000002-0000-0000-0000-000000000001";
-  const BEACON_CAMPUS = "9bb6b4cc-c992-4af1-b9d3-384537a510c8";
-
-  let teamName = "Grn Counselling"; // default fallback
-
-  // Check campus first (school leads)
-  if (lead.campus_id === MIRAI_CAMPUS) {
-    teamName = "Mirai Admissions";
-  } else if (lead.campus_id === BEACON_CAMPUS) {
-    teamName = "NSAE II Admissions";
-  } else if (lead.course_id) {
-    // Check course department
-    const { data: course } = await db.from("courses")
-      .select("id, department_id, departments:department_id(name)")
-      .eq("id", lead.course_id).single();
-    const dept = (course?.departments as any)?.name || "";
-
-    if (dept === "Education") {
-      teamName = "Grn BEd Admissions";
-    } else if (dept === "Law") {
-      teamName = "Grn Law Admissions";
-    } else if (dept === "Management") {
-      teamName = "Grn Mgmt Faculty Admissions";
-    }
-    // Medical, Nursing, Pharmacy, CS → default Grn Counselling
+  const { data: teamName } = await db.rpc("fn_team_for_lead" as any, { _lead_id: leadId });
+  const { data: chosenId, error: assignErr } = await db.rpc("fn_round_robin_assign_counsellor" as any, {
+    _lead_id: leadId,
+  });
+  if (assignErr || !chosenId) {
+    console.warn(`Auto-assign skipped for lead ${leadId}:`, assignErr?.message || "no eligible counsellor");
+    return;
   }
 
-  // ── Get team members ──
-  const { data: teams } = await db.from("teams").select("id").eq("name", teamName).limit(1);
-  if (!teams?.length) {
-    console.warn(`Team "${teamName}" not found, falling back to Grn Counselling`);
-    const { data: fallback } = await db.from("teams").select("id").eq("name", "Grn Counselling").limit(1);
-    if (!fallback?.length) return;
-    teams[0] = fallback[0];
-  }
+  const { data: chosen } = await db.from("profiles")
+    .select("id, user_id, display_name")
+    .eq("id", chosenId)
+    .maybeSingle();
+  if (!chosen?.user_id) return;
 
-  const { data: members } = await db.from("team_members").select("user_id").eq("team_id", teams[0].id);
-  if (!members?.length) return;
-
-  const userIds = members.map((m: any) => m.user_id);
-  const { data: profiles } = await db.from("profiles").select("id, user_id, display_name").in("user_id", userIds);
-  if (!profiles?.length) return;
-
-  // ── Round-robin: fewest active leads first ──
-  const profileIds = profiles.map((p: any) => p.id);
-  const { data: leadCounts } = await db
-    .from("leads")
-    .select("counsellor_id")
-    .in("counsellor_id", profileIds)
-    .not("stage", "in", "(not_interested,ineligible,dnc,rejected,admitted)");
-
-  const countMap: Record<string, number> = {};
-  for (const pid of profileIds) countMap[pid] = 0;
-  for (const lc of leadCounts || []) {
-    if (lc.counsellor_id) countMap[lc.counsellor_id] = (countMap[lc.counsellor_id] || 0) + 1;
-  }
-
-  const sorted = profiles.sort((a: any, b: any) => (countMap[a.id] || 0) - (countMap[b.id] || 0));
-  const chosen = sorted[0];
-
-  // ── Assign ──
+  const nextStage = typeof conversionProb === "number" && conversionProb >= 60
+    ? "priority_interested"
+    : "counsellor_call";
   await db.from("leads").update({
-    counsellor_id: chosen.id,
-    stage: "counsellor_call",
+    stage: lead.stage === "priority_interested" ? "priority_interested" : nextStage,
   }).eq("id", leadId);
 
   const scheduledAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
@@ -277,13 +237,14 @@ async function autoAssignCounsellor(
     scheduled_at: scheduledAt,
     type: "call",
     status: "pending",
-    notes: `AI call outcome: ${disposition}. Auto-assigned to ${teamName} team.`,
+    user_id: chosen.user_id,
+    notes: `AI call outcome: ${disposition || "high conversion"}. Auto-assigned to ${teamName || "admissions"} team.`,
   });
 
   await db.from("lead_activities").insert({
     lead_id: leadId,
     type: "system",
-    description: `Auto-assigned to ${chosen.display_name} (${teamName}) after AI call (${disposition})`,
+    description: `Auto-assigned to ${chosen.display_name || "counsellor"} (${teamName || "admissions"}) after AI call (${disposition || `${conversionProb}% conversion`})`,
   });
 
   // notifications.user_id FKs auth.users(id), so pass profiles.user_id — NOT profiles.id.
@@ -291,12 +252,12 @@ async function autoAssignCounsellor(
     user_id: chosen.user_id,
     type: "lead_assigned",
     title: `New lead assigned: ${lead.name || "Unknown"}`,
-    body: `AI call outcome: ${disposition}. Follow up within 30 minutes.`,
+    body: `AI call outcome: ${disposition || `${conversionProb}% conversion`}. Follow up within 30 minutes.`,
     link: `/admissions/${leadId}`,
     lead_id: leadId,
   });
 
-  console.log(`Auto-assigned lead ${leadId} to ${chosen.display_name} (${teamName}, ${disposition})`);
+  console.log(`Auto-assigned lead ${leadId} to ${chosen.display_name} (${teamName}, ${disposition || conversionProb})`);
 }
 
 Deno.serve(async (req) => {
@@ -392,8 +353,8 @@ Deno.serve(async (req) => {
               }
               // Apply disposition → stage mapping (not_interested / wrong_number)
               await applyDispositionToLeadStage(db, callRecord.lead_id, result.disposition);
-              // Auto-assign counsellor if interested / callback_requested
-              await autoAssignCounsellor(db, callRecord.lead_id, result.disposition);
+              // Auto-assign counsellor if interested / callback_requested / high conversion
+              await autoAssignCounsellor(db, callRecord.lead_id, result.disposition, result.conversionProb);
               console.log(`Gemini transcribe+summarize done for call ${callRecord.id}`);
             }).catch(e => console.error("Background transcription error:", e));
           }
@@ -542,7 +503,7 @@ Deno.serve(async (req) => {
                 });
               }
               await applyDispositionToLeadStage(db, call.lead_id, result.disposition);
-              await autoAssignCounsellor(db, call.lead_id, result.disposition);
+              await autoAssignCounsellor(db, call.lead_id, result.disposition, result.conversionProb);
             }
           }
         }
@@ -583,7 +544,7 @@ Deno.serve(async (req) => {
               description: `AI Call Summary: ${result.summary}`,
             });
           }
-          await autoAssignCounsellor(db, call.lead_id, result.disposition);
+          await autoAssignCounsellor(db, call.lead_id, result.disposition, result.conversionProb);
           console.log(`Transcribed call ${call.id}: ${result.disposition}, ${result.conversionProb}%`);
         }
       }
