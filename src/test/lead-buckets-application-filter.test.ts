@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const migration = readFileSync("supabase/migrations/20260619130000_unassigned_bucket_application_filter.sql", "utf8");
+const routingMigration = readFileSync("supabase/migrations/20260620113000_ai_call_interest_assignment_and_cold_bucket.sql", "utf8");
 const leadBuckets = readFileSync("src/pages/LeadBuckets.tsx", "utf8");
 
 describe("lead bucket application filter", () => {
@@ -30,5 +31,22 @@ describe("lead bucket application filter", () => {
     expect(leadBuckets).toContain("No paid/submitted application");
     expect(leadBuckets).toContain("_application_state: applicationFilter");
     expect(leadBuckets).toContain("application_filter: applicationFilter");
+  });
+
+  it("adds created-date filters and reversible newest-first sorting to Lead Buckets", () => {
+    expect(leadBuckets).toContain('const [fromDate, setFromDate] = useState("")');
+    expect(leadBuckets).toContain('const [toDate, setToDate] = useState("")');
+    expect(leadBuckets).toContain('const [sortOrder, setSortOrder] = useState<BucketSortOrder>("newest")');
+    expect(leadBuckets).toContain('q.gte("created_at", `${fromDate}T00:00:00`)');
+    expect(leadBuckets).toContain('q.lte("created_at", `${toDate}T23:59:59.999`)');
+    expect(leadBuckets).toContain('sortOrder === "newest" ? "Newest first" : "Oldest first"');
+    expect(leadBuckets).toContain("from_date: fromDate || null");
+    expect(leadBuckets).toContain("to_date: toDate || null");
+  });
+
+  it("keeps cold unassigned leads in the pickup bucket", () => {
+    expect(routingMigration).toContain("keep cold");
+    expect(routingMigration).toContain("l.stage NOT IN ('admitted', 'rejected', 'not_interested', 'dnc', 'ineligible')");
+    expect(routingMigration).not.toContain("l.stage NOT IN ('admitted', 'rejected', 'not_interested', 'dnc', 'ineligible', 'cold')");
   });
 });
