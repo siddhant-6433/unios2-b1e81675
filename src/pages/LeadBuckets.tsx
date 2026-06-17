@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCampus } from "@/contexts/CampusContext";
 import { useToast } from "@/hooks/use-toast";
-import { School, GraduationCap, Search, Loader2, UserPlus, CheckCircle, AlertTriangle, ListPlus } from "lucide-react";
+import { School, GraduationCap, Search, Loader2, UserPlus, CheckCircle, AlertTriangle, ListPlus, Calendar, ArrowUpDown } from "lucide-react";
 import { jdCategoryHint } from "@/lib/jdCategoryHint";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
 import { isBptOrBmritCourse } from "@/components/leads/CahetRegisterDialog";
@@ -88,6 +88,7 @@ interface Counsellor {
 
 type FilterMode = "include" | "exclude";
 type ApplicationFilter = "all" | "none_paid_or_submitted" | "has_paid_or_submitted";
+type BucketSortOrder = "newest" | "oldest";
 
 const SOURCE_LABELS: Record<string, string> = {
   website: "Website", meta_ads: "Meta Ads", google_ads: "Google Ads",
@@ -162,6 +163,9 @@ export default function LeadBuckets() {
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [sourceFilterMode, setSourceFilterMode] = useState<FilterMode>("include");
   const [applicationFilter, setApplicationFilter] = useState<ApplicationFilter>("all");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [sortOrder, setSortOrder] = useState<BucketSortOrder>("newest");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectingAllFiltered, setSelectingAllFiltered] = useState(false);
 
@@ -280,6 +284,8 @@ export default function LeadBuckets() {
     } else if (applicationFilter === "has_paid_or_submitted") {
       q = q.eq("has_paid_or_submitted_application", true);
     }
+    if (fromDate) q = q.gte("created_at", `${fromDate}T00:00:00`);
+    if (toDate) q = q.lte("created_at", `${toDate}T23:59:59.999`);
     // Strip PostgREST filter-syntax chars so user input can't break the or().
     const s = debouncedSearch.replace(/[%,()]/g, "").trim();
     if (s) q = q.or(`name.ilike.%${s}%,course_name.ilike.%${s}%`);
@@ -294,6 +300,7 @@ export default function LeadBuckets() {
     const cursor = reset ? null : cursorRef.current;
     if (reset) cursorRef.current = null;
 
+    const ascending = sortOrder === "oldest";
     let query = supabase
       .from("unassigned_leads_bucket" as any)
       .select(
@@ -301,11 +308,13 @@ export default function LeadBuckets() {
          lead_score, lead_temperature, bucket, jd_category, last_ai_summary,
          last_ai_disposition, last_ai_conversion_pct, has_paid_or_submitted_application`
       )
-      .order("created_at", { ascending: true }) // oldest (most urgent) first
-      .order("id", { ascending: true })
+      .order("created_at", { ascending })
+      .order("id", { ascending })
       .limit(PAGE_SIZE + 1);
     if (cursor) {
-      query = query.or(`created_at.gt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.gt.${cursor.id})`);
+      query = ascending
+        ? query.or(`created_at.gt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.gt.${cursor.id})`)
+        : query.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
     }
     query = applyScope(query);
 
@@ -400,7 +409,7 @@ export default function LeadBuckets() {
   // either changes (not just on bucket switch).
   useEffect(() => { fetchFacets(); }, [activeBucket, schoolFilter, sourceFilter, sourceFilterMode, courseFilter, courseFilterMode, applicationFilter, selectedCampusId]);
   // Reload page 0 whenever the bucket or any server-side filter changes.
-  useEffect(() => { fetchPage(true); }, [activeBucket, schoolFilter, courseFilter, courseFilterMode, sourceFilter, sourceFilterMode, applicationFilter, debouncedSearch, selectedCampusId]);
+  useEffect(() => { fetchPage(true); }, [activeBucket, schoolFilter, courseFilter, courseFilterMode, sourceFilter, sourceFilterMode, applicationFilter, fromDate, toDate, sortOrder, debouncedSearch, selectedCampusId]);
 
   // Reset course filter when the bucket / school sub-filter changes — a
   // course relevant in the college bucket is rarely relevant in the school
@@ -421,14 +430,17 @@ export default function LeadBuckets() {
     const STEP = 1000;
     let cursor: LeadBucketCursor | null = null;
     while (true) {
+      const ascending = sortOrder === "oldest";
       let q = supabase
         .from("unassigned_leads_bucket" as any)
         .select("id, created_at")
-        .order("created_at", { ascending: true })
-        .order("id", { ascending: true })
+        .order("created_at", { ascending })
+        .order("id", { ascending })
         .limit(STEP + 1);
       if (cursor) {
-        q = q.or(`created_at.gt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.gt.${cursor.id})`);
+        q = ascending
+          ? q.or(`created_at.gt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.gt.${cursor.id})`)
+          : q.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
       }
       q = applyScope(q);
       const { data, error } = await q;
@@ -494,6 +506,7 @@ export default function LeadBuckets() {
   };
   const exactFilteredCount = (() => {
     if (!hasMore) return loadedFilteredCount;
+    if (fromDate || toDate) return null;
     if (debouncedSearch) return null;
     if (courseFilterMode === "exclude" || sourceFilterMode === "exclude") {
       return null;
@@ -613,6 +626,8 @@ export default function LeadBuckets() {
       course: courseFilter,
       course_mode: courseFilterMode,
       application_filter: applicationFilter,
+      from_date: fromDate || null,
+      to_date: toDate || null,
       search: search || null,
     };
 
@@ -875,6 +890,39 @@ export default function LeadBuckets() {
             Clear application
           </Button>
         )}
+        <div className="flex items-center gap-1.5 rounded-xl border border-input bg-card px-3 py-2">
+          <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+          <input
+            type="date"
+            value={fromDate}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="w-[128px] bg-transparent text-xs text-foreground outline-none"
+            title="Created from"
+          />
+          <span className="text-xs text-muted-foreground">to</span>
+          <input
+            type="date"
+            value={toDate}
+            onChange={(e) => setToDate(e.target.value)}
+            className="w-[128px] bg-transparent text-xs text-foreground outline-none"
+            title="Created to"
+          />
+        </div>
+        {(fromDate || toDate) && (
+          <Button variant="ghost" size="sm" className="h-9 px-2 text-xs" onClick={() => { setFromDate(""); setToDate(""); }}>
+            Clear dates
+          </Button>
+        )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 px-3 text-xs gap-1.5"
+          onClick={() => setSortOrder((current) => current === "newest" ? "oldest" : "newest")}
+          title="Reverse bucket sort order"
+        >
+          <ArrowUpDown className="h-3.5 w-3.5" />
+          {sortOrder === "newest" ? "Newest first" : "Oldest first"}
+        </Button>
         <Button
           variant="outline"
           size="sm"

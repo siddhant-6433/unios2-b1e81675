@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   FileText, Download, Eye, Loader2, Search, Filter, ExternalLink,
   CheckCircle, Clock, CreditCard, Upload, AlertCircle, ChevronDown, ChevronUp, ChevronRight, X,
-  Sparkles, Send, Gift, Wallet, UserCheck, GraduationCap, Receipt, RefreshCw, ClipboardCheck, Trash2, MessageCircle,
+  Sparkles, Send, Gift, Wallet, UserCheck, GraduationCap, Receipt, RefreshCw, ClipboardCheck, Trash2, MessageCircle, Calendar,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -157,6 +157,8 @@ export default function Applications() {
   const [paymentFilter, setPaymentFilter] = useState<"all" | "paid" | "pending">("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "draft" | "submitted">("all");
   const [stageFilter, setStageFilter] = useState<string | null>(null);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [sortMode, setSortMode] = useState<"date" | "nudge">("date");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [docsDialog, setDocsDialog] = useState<{ appId: string; applicationId: string } | null>(null);
@@ -437,6 +439,11 @@ export default function Applications() {
     } else if (stageFilter && a.lead_stage !== stageFilter) {
       // Legacy stage-key passthrough (kept for any external callers).
       return false;
+    }
+    if (fromDate || toDate) {
+      const t = new Date(a.created_at).getTime();
+      if (fromDate && t < new Date(`${fromDate}T00:00:00`).getTime()) return false;
+      if (toDate && t > new Date(`${toDate}T23:59:59.999`).getTime()) return false;
     }
     if (!search) return true;
     const q = search.toLowerCase();
@@ -751,8 +758,26 @@ export default function Applications() {
           <option value="draft">Draft</option>
           <option value="submitted">Submitted</option>
         </select>
-        {(paymentFilter !== "all" || statusFilter !== "all" || stageFilter) && (
-          <Button variant="ghost" size="sm" onClick={() => { setPaymentFilter("all"); setStatusFilter("all"); setStageFilter(null); }}>
+        <div className="flex items-center gap-1.5 rounded-xl border border-input bg-background px-3 py-2">
+          <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+          <input
+            type="date"
+            value={fromDate}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="w-[128px] bg-transparent text-xs text-foreground outline-none"
+            title="Created from"
+          />
+          <span className="text-xs text-muted-foreground">to</span>
+          <input
+            type="date"
+            value={toDate}
+            onChange={(e) => setToDate(e.target.value)}
+            className="w-[128px] bg-transparent text-xs text-foreground outline-none"
+            title="Created to"
+          />
+        </div>
+        {(paymentFilter !== "all" || statusFilter !== "all" || stageFilter || fromDate || toDate) && (
+          <Button variant="ghost" size="sm" onClick={() => { setPaymentFilter("all"); setStatusFilter("all"); setStageFilter(null); setFromDate(""); setToDate(""); }}>
             <X className="h-3.5 w-3.5 mr-1" />Clear
           </Button>
         )}
