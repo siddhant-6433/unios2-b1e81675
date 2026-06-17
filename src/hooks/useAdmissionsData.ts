@@ -49,6 +49,8 @@ export interface AdmissionsOverviewPayload {
   new_lead_assignment_counts: {
     assigned: number;
     unassigned: number;
+    unassigned_ai_called: number;
+    unassigned_not_ai_called: number;
   };
   interested_lead_ids: string[];
   visit_action_counts: {
@@ -118,6 +120,8 @@ export function useAdmissionsOverview(opts: {
         new_lead_assignment_counts: {
           assigned: 0,
           unassigned: 0,
+          unassigned_ai_called: 0,
+          unassigned_not_ai_called: 0,
         },
         interested_lead_ids: [],
         visit_action_counts: {

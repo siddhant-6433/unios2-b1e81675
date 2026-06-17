@@ -126,6 +126,7 @@ type ApplicationStageFilter =
   | "application_submitted"
   | "token_fee_paid";
 type ApplicationStageLeadScope = { mode: "include" | "exclude"; ids: Set<string> };
+type NewLeadAssignmentFilter = "assigned" | "unassigned";
 
 const APPLICATION_STAGE_OPTIONS: { value: ApplicationStageFilter; label: string; description: string }[] = [
   {
@@ -266,6 +267,7 @@ const Admissions = () => {
   const [visitLeadIds, setVisitLeadIds] = useState<Set<string> | null>(null);
   const [actionLeadIds, setActionLeadIds] = useState<Set<string> | null>(null);
   const [actionBucketLabel, setActionBucketLabel] = useState<string>("");
+  const [newLeadAssignmentFilter, setNewLeadAssignmentFilter] = useState<NewLeadAssignmentFilter | null>(null);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
   const [leadPageCursors, setLeadPageCursors] = useState<Record<number, { created_at: string; id: string }>>({});
@@ -613,6 +615,13 @@ const Admissions = () => {
     if (roleFilter !== "all") query = query.eq("person_role", roleFilter);
     if (tempFilter !== "all") query = query.eq("lead_temperature", tempFilter);
 
+    if (newLeadAssignmentFilter) {
+      query = query.eq("stage", "new_lead").eq("is_mirror", false);
+      query = newLeadAssignmentFilter === "assigned"
+        ? query.not("counsellor_id", "is", null)
+        : query.is("counsellor_id", null);
+    }
+
     // Date range (applied to created_at)
     if (fromDate) query = query.gte("created_at", `${fromDate}T00:00:00`);
     if (toDate) query = query.lte("created_at", `${toDate}T23:59:59.999`);
@@ -799,6 +808,7 @@ const Admissions = () => {
         debouncedSearch.length >= 2 ||
         !!fromDate ||
         !!toDate ||
+        newLeadAssignmentFilter !== null ||
         inactiveIds !== null ||
         followupLeadIds !== null ||
         visitLeadIds !== null ||
@@ -891,7 +901,7 @@ const Admissions = () => {
     view, page, selectedCampusId, counsellorFilter, role, profile?.id,
     stageFilter, sourceFilter, sourceFilterMode, leadInstitutionType, effectiveCourseFilterIds, courseFilterMode, roleFilter, tempFilter,
     applicationStageFilter, applicationStageLeadScope, fromDate, toDate, debouncedSearch,
-    inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds,
+    inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds, newLeadAssignmentFilter,
   ]);
 
   // Fetch course options for the multi-select filter, joined with the
@@ -1325,6 +1335,10 @@ const Admissions = () => {
       || (counsellorFilter === "unassigned" ? !l.counsellor_id : l.counsellor_id === counsellorFilter);
     const matchesNotCalled = !notCalledIds || notCalledIds.has(l.id);
     const matchesAction = !actionLeadIds || actionLeadIds.has(l.id);
+    const matchesNewLeadAssignment = !newLeadAssignmentFilter
+      || (l.stage === "new_lead" && (
+        newLeadAssignmentFilter === "assigned" ? !!l.counsellor_id : !l.counsellor_id
+      ));
     const matchesApplicationStage = applicationStageFilter.length === 0
       || (applicationStageLeadScope?.mode === "include"
         ? applicationStageLeadScope.ids.has(l.id)
@@ -1344,7 +1358,7 @@ const Admissions = () => {
         if (t > to) matchesDate = false;
       }
     }
-    return matchesSearch && matchesStage && matchesSource && matchesCourse && matchesRole && matchesTemp && matchesInactive && matchesFollowup && matchesVisit && matchesCounsellor && matchesNotCalled && matchesAction && matchesApplicationStage && matchesDate;
+    return matchesSearch && matchesStage && matchesSource && matchesCourse && matchesRole && matchesTemp && matchesInactive && matchesFollowup && matchesVisit && matchesCounsellor && matchesNotCalled && matchesAction && matchesNewLeadAssignment && matchesApplicationStage && matchesDate;
   });
 
   // List view paginates server-side: `leads` is already the current page
@@ -1359,13 +1373,34 @@ const Admissions = () => {
     setPage(1);
     setLeadPageCursors({});
     setHasNextLeadPage(false);
-  }, [stageFilter, sourceFilter, sourceFilterMode, leadInstitutionType, effectiveCourseFilterIds, courseFilterMode, applicationStageFilter, applicationStageLeadScope, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, fromDate, toDate]);
+  }, [stageFilter, sourceFilter, sourceFilterMode, leadInstitutionType, effectiveCourseFilterIds, courseFilterMode, applicationStageFilter, applicationStageLeadScope, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, newLeadAssignmentFilter, fromDate, toDate]);
+
+  const handleNewLeadAssignmentClick = (assignment: NewLeadAssignmentFilter | null) => {
+    setNewLeadAssignmentFilter(assignment);
+    setFunnelStage(null);
+    setVisitAction(null);
+    setVisitFunnelBox(null);
+    setStageFilter("all");
+    setActionLeadIds(null);
+    setActionBucketLabel("");
+    setVisitLeadIds(null);
+    setFollowupLeadIds(null);
+    setInactiveIds(null);
+    setNotCalledIds(null);
+    setSourceFilter("all");
+    setRoleFilter("all");
+    setTempFilter("all");
+    setSearch("");
+    setView("list");
+    setPage(1);
+  };
 
   // Funnel click → translate bucket into a stageFilter (comma-separated raw
   // lead_stage values that the existing `matchesStage` filter already
   // understands via `.split(",").includes(l.stage)`).
   const handleFunnelClick = async (bucket: LeadFunnelStage | "leakage" | null) => {
     setFunnelStage(bucket);
+    setNewLeadAssignmentFilter(null);
     if (!bucket) {
       setStageFilter("all");
       setActionLeadIds(null);
@@ -1376,6 +1411,7 @@ const Admissions = () => {
     setVisitLeadIds(null);
     setFollowupLeadIds(null);
     setInactiveIds(null);
+    setNotCalledIds(null);
 
     if (bucket === "hot") {
       // Union of canonical hot stages + interested-disposition leads.
@@ -1409,6 +1445,7 @@ const Admissions = () => {
     setFunnelStage(null);
     setStageFilter("all");
     setActionLeadIds(null);
+    setNewLeadAssignmentFilter(null);
     setVisitAction(null);
     setFollowupLeadIds(null);
     setInactiveIds(null);
@@ -1426,6 +1463,7 @@ const Admissions = () => {
     if (!a) { setActionLeadIds(null); setActionBucketLabel(""); return; }
     setFunnelStage(null);
     setStageFilter("all");
+    setNewLeadAssignmentFilter(null);
     setFollowupLeadIds(null);
     setVisitLeadIds(null);
     setInactiveIds(null);
@@ -1521,6 +1559,8 @@ const Admissions = () => {
   const newLeads        = stageCounts.new_lead ?? statsData?.new_leads ?? 0;
   const assignedNewLeads = newLeadAssignmentCounts.assigned ?? 0;
   const bucketNewLeads = newLeadAssignmentCounts.unassigned ?? 0;
+  const bucketAiCalledNewLeads = newLeadAssignmentCounts.unassigned_ai_called ?? 0;
+  const bucketNotAiCalledNewLeads = newLeadAssignmentCounts.unassigned_not_ai_called ?? 0;
   const todayLeads      = statsData?.today_leads       ?? 0;
   const appStarted      = statsData?.app_started       ?? 0;
   const feePaid         = statsData?.fee_paid          ?? 0;
@@ -1541,7 +1581,7 @@ const Admissions = () => {
 
   // Row 1: Lead data
   const leadStats = [
-    { label: "Untouched Total", value: newLeads, sub: `${bucketNewLeads} in bucket · ${assignedNewLeads} assigned`, icon: Users, iconBg: "bg-pastel-blue", filterStage: "new_lead", link: "" },
+    { label: "Untouched Total", value: newLeads, sub: `Bucket ${bucketNewLeads}: ${bucketAiCalledNewLeads} AI / ${bucketNotAiCalledNewLeads} not called`, icon: Users, iconBg: "bg-pastel-blue", filterStage: "new_lead", link: "" },
     { label: "Assigned Untouched", value: assignedNewLeads, sub: "Assigned to counsellors", icon: UserCheck, iconBg: "bg-pastel-mint", filterStage: "", link: "", action: "assigned_new_leads" },
     { label: "Pending Follow-ups", value: pendingFollowups, sub: `${overdueFollowups} overdue · ${todayFollowups} today`, icon: Clock, iconBg: "bg-pastel-orange", filterStage: "", link: "", action: "followups" },
     { label: "Upcoming Visits", value: upcomingVisits, sub: "Scheduled & confirmed", icon: MapPin, iconBg: "bg-pastel-yellow", filterStage: "", link: "", action: "upcoming_visits" },
