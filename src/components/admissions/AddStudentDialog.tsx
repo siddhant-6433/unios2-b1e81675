@@ -1,13 +1,14 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import type { Database } from "@/integrations/supabase/types";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, UserPlus, School, Users, Banknote, ChevronRight, ChevronLeft, Save } from "lucide-react";
 
-interface Campus      { id: string; name: string; }
+interface Campus      { id: string; name: string; code: string; }
 interface Institution { id: string; name: string; code: string; type: string; }
 interface Course      { id: string; name: string; code: string; }
 interface Session     { id: string; name: string; }
@@ -25,6 +26,26 @@ interface AddStudentDialogProps {
 }
 
 type FeeVersion = "new_admission" | "existing_parent" | "standard" | "stetho_batch";
+type StudentInsert = Database["public"]["Tables"]["students"]["Insert"];
+type StudentForm = {
+  name: string;
+  dob: string;
+  gender: string;
+  campus_id: string;
+  institution_id: string;
+  course_id: string;
+  session_id: string;
+  section: string;
+  class_roll_no: string;
+  student_type: string;
+  school_admission_no: string;
+  father_name: string;
+  father_phone: string;
+  mother_name: string;
+  mother_phone: string;
+  admission_date: string;
+  fee_version: FeeVersion;
+};
 
 // School grade suffix → readable label
 const GRADE_LABELS: Record<string, string> = {
@@ -53,12 +74,13 @@ function isDaottCourse(course: Course | null) {
 const STEPS = ["Student Details", "Parent / Guardian", "Programme & Session"];
 
 export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusId, resumeDraftId, onDraftChange }: AddStudentDialogProps) {
-  const { user } = useAuth();
+  const { user, role, profile } = useAuth();
   const { toast } = useToast();
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
 
   const [allCampuses,   setAllCampuses]   = useState<Campus[]>([]);
+  const [campusesLoaded, setCampusesLoaded] = useState(false);
   const [institutions,  setInstitutions]  = useState<Institution[]>([]);
   const [courses,       setCourses]       = useState<Course[]>([]);
   const [sessions,      setSessions]      = useState<Session[]>([]);
@@ -70,7 +92,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
   const draftIdRef = useRef<string | null>(null);
   const skipNextAutosave = useRef(false);
 
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<StudentForm>({
     name: "", dob: "", gender: "", campus_id: defaultCampusId || "",
     institution_id: "", course_id: "", session_id: "",
     section: "", class_roll_no: "", student_type: "day_scholar",
@@ -83,6 +105,27 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
+  // Office assistants and principals may add students only for their OWN assigned
+  // campus (the students INSERT RLS policy enforces user_can_access_assigned_campus).
+  // Restrict the picker so a scoped user can't pick a campus the DB would reject
+  // with a 42501. Other roles (admin / admission_head / counsellor / ...) keep the
+  // full list.
+  const isCampusScoped = role === "office_assistant" || role === "principal";
+  const assignedCampus = (profile?.campus || "").trim().toLowerCase();
+  const allowedCampuses = useMemo(
+    () =>
+      isCampusScoped
+        ? allCampuses.filter(
+            (c) =>
+              c.name.toLowerCase() === assignedCampus ||
+              (c.code || "").toLowerCase() === assignedCampus,
+          )
+        : allCampuses,
+    [allCampuses, assignedCampus, isCampusScoped],
+  );
+  const noCampusAssigned = isCampusScoped && campusesLoaded && allowedCampuses.length === 0;
+  const campusLocked = isCampusScoped && allowedCampuses.length === 1;
+
   // On open: reset + load campuses & sessions, OR load a draft if resuming.
   useEffect(() => {
     if (!open) return;
@@ -90,12 +133,14 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
     // Reset transient state regardless of mode.
     setStep(0);
     setDraftStatus("idle");
+    setCampusesLoaded(false);
 
     Promise.all([
-      supabase.from("campuses").select("id, name").order("name"),
+      supabase.from("campuses").select("id, name, code").order("name"),
       supabase.from("admission_sessions").select("id, name").eq("is_active", true),
     ]).then(([cam, ses]) => {
       if (cam.data) setAllCampuses(cam.data);
+      setCampusesLoaded(true);
       if (ses.data) { setSessions(ses.data); if (ses.data.length === 1 && !resumeDraftId) set("session_id", ses.data[0].id); }
     });
 
@@ -109,7 +154,10 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
         .eq("id", resumeDraftId)
         .maybeSingle()
         .then(({ data }) => {
-          if (data?.data) setForm(prev => ({ ...prev, ...(data.data as any) }));
+          const draftData = data?.data;
+          if (draftData && typeof draftData === "object" && !Array.isArray(draftData)) {
+            setForm(prev => ({ ...prev, ...(draftData as Partial<StudentForm>) }));
+          }
           if (typeof data?.step === "number") setStep(data.step);
         });
     } else {
@@ -190,25 +238,37 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
       .select("id, name, code, departments!inner(institution_id)")
       .eq("departments.institution_id", form.institution_id)
       .order("code")
-      .then(({ data }) => setCourses((data as any) || []));
+      .then(({ data }) => setCourses((data || []).map(c => ({ id: c.id, name: c.name, code: c.code }))));
   }, [form.institution_id, institutions]);
+
+  const selectedInstitution = institutions.find(i => i.id === form.institution_id) || null;
+  const selectedCourse = courses.find(c => c.id === form.course_id) || null;
+  const isSchool = isSchoolInstitution(selectedInstitution);
 
   // Auto-switch to existing_parent when admission no entered (school only)
   useEffect(() => {
     if (form.school_admission_no.trim() && selectedInstitution && isSchoolInstitution(selectedInstitution)) {
       setForm(f => ({ ...f, fee_version: "existing_parent" }));
     }
-  }, [form.school_admission_no]);
-
-  const selectedInstitution = institutions.find(i => i.id === form.institution_id) || null;
-  const selectedCourse = courses.find(c => c.id === form.course_id) || null;
-  const isSchool = isSchoolInstitution(selectedInstitution);
+  }, [form.school_admission_no, selectedInstitution]);
 
   useEffect(() => {
     if (isDaottCourse(selectedCourse)) {
       setForm(f => ({ ...f, fee_version: "stetho_batch" }));
     }
-  }, [selectedCourse?.id]);
+  }, [selectedCourse]);
+
+  // Keep a scoped user's campus selection within what the INSERT policy allows:
+  // pin to their one allowed campus, or clear it entirely if none is assigned
+  // (e.g. a draft carried a campus the user can't write to).
+  useEffect(() => {
+    if (!open || !isCampusScoped) return;
+    if (campusLocked && form.campus_id !== allowedCampuses[0].id) {
+      set("campus_id", allowedCampuses[0].id);
+    } else if (noCampusAssigned && form.campus_id) {
+      set("campus_id", "");
+    }
+  }, [open, isCampusScoped, campusLocked, noCampusAssigned, allowedCampuses, form.campus_id]);
 
   const step0Valid = !!form.name && !!form.dob && !!form.gender && !!form.campus_id && !!form.institution_id && !!form.course_id;
   const canSubmit  = step0Valid && !!form.session_id;
@@ -221,7 +281,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
       ? null
       : `PAN-${Date.now().toString(36).toUpperCase()}`;
 
-    const { error } = await supabase.from("students").insert({
+    const student: StudentInsert = {
       name: form.name.trim(),
       dob:  form.dob  || null,
       gender: form.gender ? form.gender.toLowerCase() : null,
@@ -242,9 +302,11 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
       guardian_name:  form.father_name.trim()  || null,
       guardian_phone: form.father_phone.trim() || null,
       fee_structure_version: form.fee_version,
-      status: "active" as any,
+      status: "active",
       created_by: user?.id || null,
-    } as any);
+    };
+
+    const { error } = await supabase.from("students").insert(student);
 
     setSaving(false);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
@@ -334,10 +396,21 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
             {/* Campus → Institution → Course cascade */}
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Campus <span className="text-destructive">*</span></label>
-              <select className={sel} value={form.campus_id} onChange={e => set("campus_id", e.target.value)}>
-                <option value="">Select campus</option>
-                {allCampuses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              {noCampusAssigned ? (
+                <p className="rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">
+                  No campus is assigned to your account, so a student can't be added. Contact an administrator.
+                </p>
+              ) : (
+                <select
+                  className={sel}
+                  value={form.campus_id}
+                  onChange={e => set("campus_id", e.target.value)}
+                  disabled={!campusesLoaded || campusLocked}
+                >
+                  <option value="">{campusesLoaded ? "Select campus" : "Loading campuses..."}</option>
+                  {allowedCampuses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              )}
             </div>
 
             <div>
