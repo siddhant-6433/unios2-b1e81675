@@ -1581,8 +1581,8 @@ const Admissions = () => {
 
   // Row 1: Lead data
   const leadStats = [
-    { label: "Untouched Total", value: newLeads, sub: `Bucket ${bucketNewLeads}: ${bucketAiCalledNewLeads} AI / ${bucketNotAiCalledNewLeads} not called`, icon: Users, iconBg: "bg-pastel-blue", filterStage: "new_lead", link: "" },
-    { label: "Assigned Untouched", value: assignedNewLeads, sub: "Assigned to counsellors", icon: UserCheck, iconBg: "bg-pastel-mint", filterStage: "", link: "", action: "assigned_new_leads" },
+    { label: "Unassigned Untouched", value: bucketNewLeads, sub: `${bucketAiCalledNewLeads} AI / ${bucketNotAiCalledNewLeads} not called`, icon: Users, iconBg: "bg-pastel-blue", filterStage: "", link: "", action: "unassigned_new_leads" },
+    { label: "Assigned Untouched", value: assignedNewLeads, sub: `${newLeads} total untouched`, icon: UserCheck, iconBg: "bg-pastel-mint", filterStage: "", link: "", action: "assigned_new_leads" },
     { label: "Pending Follow-ups", value: pendingFollowups, sub: `${overdueFollowups} overdue · ${todayFollowups} today`, icon: Clock, iconBg: "bg-pastel-orange", filterStage: "", link: "", action: "followups" },
     { label: "Upcoming Visits", value: upcomingVisits, sub: "Scheduled & confirmed", icon: MapPin, iconBg: "bg-pastel-yellow", filterStage: "", link: "", action: "upcoming_visits" },
     { label: "Completed Visits", value: completedVisits, sub: "Campus visits done", icon: CheckCircle, iconBg: "bg-pastel-green", filterStage: "", link: "", action: "completed_visits" },
@@ -1821,6 +1821,9 @@ const Admissions = () => {
               extraHot={extraHotCount}
               activeStage={funnelStage}
               onStageClick={handleFunnelClick}
+              newLeadAssignmentCounts={newLeadAssignmentCounts}
+              activeNewLeadAssignment={newLeadAssignmentFilter}
+              onNewLeadAssignmentClick={handleNewLeadAssignmentClick}
             />
             <VisitPipeline
               counts={visitFunnelCounts}
@@ -1846,7 +1849,8 @@ const Admissions = () => {
         {/* Lead stats */}
         {leadStats.map((stat) => {
           const isActive = (stat.filterStage && stageFilter === stat.filterStage) ||
-            (stat.action === "assigned_new_leads" && actionLeadIds && actionBucketLabel === "Assigned Untouched") ||
+            (stat.action === "unassigned_new_leads" && newLeadAssignmentFilter === "unassigned") ||
+            (stat.action === "assigned_new_leads" && newLeadAssignmentFilter === "assigned") ||
             (stat.action === "followups" && !!followupLeadIds) ||
             ((stat.action === "upcoming_visits" || stat.action === "completed_visits") && !!visitLeadIds);
           return (
@@ -1859,26 +1863,15 @@ const Admissions = () => {
                   const { data } = await supabase.from("lead_followups").select("lead_id").eq("status", "pending").limit(500);
                   const ids = new Set<string>((data || []).map((r: any) => r.lead_id));
                   setFollowupLeadIds(ids); setVisitLeadIds(null); setInactiveIds(null);
-                  setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setSearch(""); setView("list"); return;
+                  setNewLeadAssignmentFilter(null); setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setSearch(""); setView("list"); return;
+                }
+                if (stat.action === "unassigned_new_leads") {
+                  handleNewLeadAssignmentClick(newLeadAssignmentFilter === "unassigned" ? null : "unassigned");
+                  return;
                 }
                 if (stat.action === "assigned_new_leads") {
-                  if (actionLeadIds && actionBucketLabel === "Assigned Untouched") {
-                    setActionLeadIds(null); setActionBucketLabel(""); setPage(1); return;
-                  }
-                  let assignedQ = supabase
-                    .from("leads")
-                    .select("id")
-                    .eq("stage", "new_lead")
-                    .eq("is_mirror", false)
-                    .not("counsellor_id", "is", null)
-                    .limit(1000);
-                  if (role === "counsellor" && profile?.id) assignedQ = assignedQ.eq("counsellor_id", profile.id);
-                  else if (selectedCampusId !== "all") assignedQ = assignedQ.eq("campus_id", selectedCampusId);
-                  const { data } = await assignedQ;
-                  const ids = new Set<string>((data || []).map((r: any) => r.id).filter(Boolean));
-                  setActionLeadIds(ids); setActionBucketLabel("Assigned Untouched");
-                  setFollowupLeadIds(null); setVisitLeadIds(null); setInactiveIds(null);
-                  setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setCounsellorFilter("all"); setSearch(""); setView("list"); setPage(1); return;
+                  handleNewLeadAssignmentClick(newLeadAssignmentFilter === "assigned" ? null : "assigned");
+                  return;
                 }
                 if (stat.action === "upcoming_visits") {
                   if (visitLeadIds) { setVisitLeadIds(null); setPage(1); return; }
@@ -1891,7 +1884,7 @@ const Admissions = () => {
                     if (extraLeads) setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({ ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—", counsellor_name: l.profiles?.display_name || "Unassigned" }))]);
                   }
                   setVisitLeadIds(new Set(ids)); setFollowupLeadIds(null); setInactiveIds(null);
-                  setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setCounsellorFilter("all"); setSearch(""); setView("list"); setPage(1); return;
+                  setNewLeadAssignmentFilter(null); setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setCounsellorFilter("all"); setSearch(""); setView("list"); setPage(1); return;
                 }
                 if (stat.action === "completed_visits") {
                   if (visitLeadIds) { setVisitLeadIds(null); setPage(1); return; }
@@ -1903,7 +1896,7 @@ const Admissions = () => {
                     if (extraLeads) setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({ ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—", counsellor_name: l.profiles?.display_name || "Unassigned" }))]);
                   }
                   setVisitLeadIds(new Set(ids)); setFollowupLeadIds(null); setInactiveIds(null);
-                  setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setCounsellorFilter("all"); setSearch(""); setView("list"); setPage(1); return;
+                  setNewLeadAssignmentFilter(null); setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setCounsellorFilter("all"); setSearch(""); setView("list"); setPage(1); return;
                 }
                 if (stat.link) { navigate(stat.link); return; }
                 if (stat.filterStage) {
@@ -1926,7 +1919,7 @@ const Admissions = () => {
                     });
                   }
                   setStageFilter(stat.filterStage);
-                  setFollowupLeadIds(null); setVisitLeadIds(null); setInactiveIds(null); setView("list"); setPage(1);
+                  setNewLeadAssignmentFilter(null); setFollowupLeadIds(null); setVisitLeadIds(null); setInactiveIds(null); setView("list"); setPage(1);
                 }
               }}
             >
@@ -1990,6 +1983,7 @@ const Admissions = () => {
                   }
                 }
                 setActionLeadIds(allIds); setActionBucketLabel("Fee Paid");
+                setNewLeadAssignmentFilter(null);
                 setStageFilter("all"); setFollowupLeadIds(null); setVisitLeadIds(null); setInactiveIds(null);
                 setView("list"); setPage(1);
                 return;
@@ -2023,7 +2017,7 @@ const Admissions = () => {
                     return newLeads.length > 0 ? [...prev, ...newLeads] : prev;
                   });
                 }
-                setStageFilter(stat.filterStage); setActionLeadIds(null); setActionBucketLabel("");
+                setStageFilter(stat.filterStage); setActionLeadIds(null); setActionBucketLabel(""); setNewLeadAssignmentFilter(null);
                 setFollowupLeadIds(null); setVisitLeadIds(null); setInactiveIds(null);
                 setView("list"); setPage(1);
               }
@@ -2143,6 +2137,21 @@ const Admissions = () => {
         </div>
       )}
 
+      {newLeadAssignmentFilter && (
+        <div className="flex items-center gap-2 rounded-lg bg-slate-50 dark:bg-slate-950/20 border border-slate-200 dark:border-slate-800/40 px-3 py-2 text-sm">
+          <Users className="h-3.5 w-3.5 text-slate-600" />
+          <span className="font-medium text-slate-800 dark:text-slate-300">
+            Showing {newLeadAssignmentFilter === "assigned" ? "assigned" : "unassigned"} untouched leads
+          </span>
+          <button
+            onClick={() => setNewLeadAssignmentFilter(null)}
+            className="ml-2 rounded-md bg-slate-200 dark:bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-800 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-700"
+          >
+            Clear filter
+          </button>
+        </div>
+      )}
+
       {actionLeadIds && (
         <div className="flex items-center gap-2 rounded-lg bg-primary/5 border border-primary/20 px-3 py-2 text-sm">
           <Filter className="h-3.5 w-3.5 text-primary" />
@@ -2189,7 +2198,7 @@ const Admissions = () => {
               onChange={(e) => setSearch(e.target.value)}
               className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20" />
           </div>
-          <select value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}
+          <select value={stageFilter} onChange={(e) => { setNewLeadAssignmentFilter(null); setStageFilter(e.target.value); }}
             className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
             <option value="all">All Stages</option>
             {STAGES.map((s) => <option key={s} value={s}>{STAGE_LABELS[s]}</option>)}
@@ -2500,6 +2509,7 @@ const Admissions = () => {
                 }
                 setActionLeadIds(new Set(leadIds));
                 setActionBucketLabel(labels[bucket] || bucket);
+                setNewLeadAssignmentFilter(null);
                 setFollowupLeadIds(null);
                 setVisitLeadIds(null);
                 setInactiveIds(null);
