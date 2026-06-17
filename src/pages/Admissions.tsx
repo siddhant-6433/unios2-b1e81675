@@ -1485,6 +1485,10 @@ const Admissions = () => {
     () => admissionsOverview?.stage_counts ?? {},
     [admissionsOverview?.stage_counts],
   );
+  const newLeadAssignmentCounts = admissionsOverview?.new_lead_assignment_counts ?? {
+    assigned: 0,
+    unassigned: 0,
+  };
   const interestedLeadIds = useMemo(
     () => new Set<string>(admissionsOverview?.interested_lead_ids ?? []),
     [admissionsOverview?.interested_lead_ids],
@@ -1514,7 +1518,9 @@ const Admissions = () => {
   const visitFunnelLeakage = admissionsOverview?.visit_funnel_leakage ?? 0;
   const visitFunnelBoxIds = admissionsOverview?.visit_funnel_box_ids ?? {};
 
-  const newLeads        = statsData?.new_leads         ?? 0;
+  const newLeads        = stageCounts.new_lead ?? statsData?.new_leads ?? 0;
+  const assignedNewLeads = newLeadAssignmentCounts.assigned ?? 0;
+  const bucketNewLeads = newLeadAssignmentCounts.unassigned ?? 0;
   const todayLeads      = statsData?.today_leads       ?? 0;
   const appStarted      = statsData?.app_started       ?? 0;
   const feePaid         = statsData?.fee_paid          ?? 0;
@@ -1535,7 +1541,8 @@ const Admissions = () => {
 
   // Row 1: Lead data
   const leadStats = [
-    { label: "New Leads", value: newLeads, sub: `+${todayLeads} today`, icon: Users, iconBg: "bg-pastel-blue", filterStage: "new_lead", link: "" },
+    { label: "Untouched Total", value: newLeads, sub: `${bucketNewLeads} in bucket · ${assignedNewLeads} assigned`, icon: Users, iconBg: "bg-pastel-blue", filterStage: "new_lead", link: "" },
+    { label: "Assigned Untouched", value: assignedNewLeads, sub: "Assigned to counsellors", icon: UserCheck, iconBg: "bg-pastel-mint", filterStage: "", link: "", action: "assigned_new_leads" },
     { label: "Pending Follow-ups", value: pendingFollowups, sub: `${overdueFollowups} overdue · ${todayFollowups} today`, icon: Clock, iconBg: "bg-pastel-orange", filterStage: "", link: "", action: "followups" },
     { label: "Upcoming Visits", value: upcomingVisits, sub: "Scheduled & confirmed", icon: MapPin, iconBg: "bg-pastel-yellow", filterStage: "", link: "", action: "upcoming_visits" },
     { label: "Completed Visits", value: completedVisits, sub: "Campus visits done", icon: CheckCircle, iconBg: "bg-pastel-green", filterStage: "", link: "", action: "completed_visits" },
@@ -1793,12 +1800,13 @@ const Admissions = () => {
       {/* Stat cards & filter banners — hidden when Action Center is active */}
       {view !== "action_center" && <>
       {/* Compact stats: Leads + Applications in a single row.
-          11 cards total — tight on lg+; wraps to 2 rows of 6 at md, and
+          12 cards total — tight on lg+; wraps to 2 rows of 6 at md, and
           to 4 rows of 3 on mobile. */}
-      <div className="grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-11 gap-1.5">
+      <div className="grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-12 gap-1.5">
         {/* Lead stats */}
         {leadStats.map((stat) => {
           const isActive = (stat.filterStage && stageFilter === stat.filterStage) ||
+            (stat.action === "assigned_new_leads" && actionLeadIds && actionBucketLabel === "Assigned Untouched") ||
             (stat.action === "followups" && !!followupLeadIds) ||
             ((stat.action === "upcoming_visits" || stat.action === "completed_visits") && !!visitLeadIds);
           return (
@@ -1812,6 +1820,25 @@ const Admissions = () => {
                   const ids = new Set<string>((data || []).map((r: any) => r.lead_id));
                   setFollowupLeadIds(ids); setVisitLeadIds(null); setInactiveIds(null);
                   setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setSearch(""); setView("list"); return;
+                }
+                if (stat.action === "assigned_new_leads") {
+                  if (actionLeadIds && actionBucketLabel === "Assigned Untouched") {
+                    setActionLeadIds(null); setActionBucketLabel(""); setPage(1); return;
+                  }
+                  let assignedQ = supabase
+                    .from("leads")
+                    .select("id")
+                    .eq("stage", "new_lead")
+                    .eq("is_mirror", false)
+                    .not("counsellor_id", "is", null)
+                    .limit(1000);
+                  if (role === "counsellor" && profile?.id) assignedQ = assignedQ.eq("counsellor_id", profile.id);
+                  else if (selectedCampusId !== "all") assignedQ = assignedQ.eq("campus_id", selectedCampusId);
+                  const { data } = await assignedQ;
+                  const ids = new Set<string>((data || []).map((r: any) => r.id).filter(Boolean));
+                  setActionLeadIds(ids); setActionBucketLabel("Assigned Untouched");
+                  setFollowupLeadIds(null); setVisitLeadIds(null); setInactiveIds(null);
+                  setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setCounsellorFilter("all"); setSearch(""); setView("list"); setPage(1); return;
                 }
                 if (stat.action === "upcoming_visits") {
                   if (visitLeadIds) { setVisitLeadIds(null); setPage(1); return; }

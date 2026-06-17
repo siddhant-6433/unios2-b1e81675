@@ -46,6 +46,10 @@ export interface AdmissionsStats {
 
 export interface AdmissionsOverviewPayload {
   stage_counts: Record<string, number>;
+  new_lead_assignment_counts: {
+    assigned: number;
+    unassigned: number;
+  };
   interested_lead_ids: string[];
   visit_action_counts: {
     missedCallbacks: number;
@@ -111,6 +115,10 @@ export function useAdmissionsOverview(opts: {
       if (error) throw error;
       return (data || {
         stage_counts: {},
+        new_lead_assignment_counts: {
+          assigned: 0,
+          unassigned: 0,
+        },
         interested_lead_ids: [],
         visit_action_counts: {
           missedCallbacks: 0,
