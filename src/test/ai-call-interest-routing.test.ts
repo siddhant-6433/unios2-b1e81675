@@ -28,6 +28,9 @@ describe("AI call interest routing", () => {
     expect(callback).toContain("disposition === \"callback_requested\"");
     expect(callback).toContain("conversionProb >= 60");
     expect(callback).toContain("fn_round_robin_assign_counsellor");
+    expect(callback).toContain("lead_assignment_history");
+    expect(callback).toContain('assignment_source: "ai_priority"');
+    expect(callback).toContain("existingHistory");
   });
 
   it("returns max-failed AI calls to bucket instead of assigning them", () => {

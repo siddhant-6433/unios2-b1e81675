@@ -231,6 +231,28 @@ async function autoAssignCounsellor(
     stage: lead.stage === "priority_interested" ? "priority_interested" : nextStage,
   }).eq("id", leadId);
 
+  if (nextStage === "priority_interested") {
+    const { data: existingHistory } = await db.from("lead_assignment_history")
+      .select("id")
+      .eq("lead_id", leadId)
+      .eq("assigned_to", chosenId)
+      .eq("assignment_source", "ai_priority")
+      .maybeSingle();
+
+    if (!existingHistory) {
+      await db.from("lead_assignment_history").insert({
+        lead_id: leadId,
+        assigned_to: chosenId,
+        previous_counsellor_id: null,
+        assigned_by_profile_id: null,
+        assigned_by_user_id: null,
+        assignment_source: "ai_priority",
+        bucket_name: "AI Priority Interested",
+        lead_stage_at_assignment: lead.stage,
+      });
+    }
+  }
+
   const scheduledAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
   await db.from("lead_followups").insert({
     lead_id: leadId,
