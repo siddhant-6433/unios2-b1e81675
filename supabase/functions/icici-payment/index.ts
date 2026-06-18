@@ -1,10 +1,10 @@
 // ICICI PG (TSP v2 / PhiCommerce) integration.
 //
-// Endpoints (UAT):
+// Endpoints:
 //   Initiate sale: https://pgpayuat.icicibank.com/tsp/pg/api/v2/initiateSale
 //   Status/refund: https://pgpayuat.icicibank.com/tsp/pg/api/command
-// Production:
-//   Replace pgpayuat → pgpay
+//   Initiate sale: https://pgpay.icicibank.com/pg/api/v2/initiateSale
+//   Status/refund: https://pgpay.icicibank.com/pg/api/command
 //
 // Hash convention per integration kit:
 //   1. Take all request fields except `secureHash`.
@@ -15,11 +15,13 @@
 // NOTE: ICICI's worked example in the integration kit doesn't validate against
 // any common SHA-256/HMAC scheme — the sample's hashText shows merchantId
 // "T_S0001" while the payload shows "100000000006873", so the example is
-// internally inconsistent. We log full request/response on each call so the
-// real algorithm can be confirmed on the first UAT round-trip.
+// internally inconsistent. Keep production logs redacted; use UAT logs for
+// request/response diagnostics.
 //
 // Secrets (set via `supabase secrets set`):
 //   ICICI_MID, ICICI_AGG_ID, ICICI_API_KEY, ICICI_ENV (uat | production)
+//   ICICI_RETURN_URL (optional; production should use a bank-whitelisted domain)
+//   ICICI_RETURN_URLS (optional comma-list; picks a return URL by request Origin)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -72,8 +74,6 @@ async function signPayload(
   // their values are empty.
   const text = canonicalHashText(payload);
   const secureHash = await hmacSha256Hex(apiKey, text);
-  console.log(`[${FN_NAME}] hashText:`, text);
-  console.log(`[${FN_NAME}] secureHash:`, secureHash);
   return { ...payload, secureHash };
 }
 
@@ -169,6 +169,157 @@ function istTxnDate(): string {
   return `${ist.getUTCFullYear()}${pad(ist.getUTCMonth() + 1)}${pad(ist.getUTCDate())}${pad(ist.getUTCHours())}${pad(ist.getUTCMinutes())}${pad(ist.getUTCSeconds())}`;
 }
 
+function normalizeUrlHost(value: string): string | null {
+  try {
+    return new URL(value).host.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function resolveReturnUrl(req: Request, fallback: string): string {
+  const configured = (Deno.env.get("ICICI_RETURN_URLS") || Deno.env.get("ICICI_RETURN_URL") || "")
+    .split(",")
+    .map((url) => url.trim())
+    .filter(Boolean);
+  if (configured.length === 0) return fallback;
+
+  const originHost = normalizeUrlHost(req.headers.get("origin") || "");
+  const byOrigin = originHost
+    ? configured.find((url) => normalizeUrlHost(url) === originHost)
+    : null;
+  return byOrigin || configured[0];
+}
+
+function redactSecureHash(payload: Record<string, unknown>): Record<string, unknown> {
+  const copy = { ...payload };
+  if ("secureHash" in copy) copy.secureHash = "[redacted]";
+  return copy;
+}
+
+function redactRawSecureHash(value: string): string {
+  return value
+    .replace(/("secureHash"\s*:\s*")[^"]*(")/gi, "$1[redacted]$2")
+    .replace(/(secureHash=)[^&\s]*/gi, "$1[redacted]");
+}
+
+async function settleStudentFee(
+  admin: any,
+  supabaseUrl: string,
+  serviceKey: string,
+  studentId: string,
+  paidAmount: number,
+  paymentRef: string | null,
+): Promise<{ ok: boolean; message?: string }> {
+  const { data: rows, error: feeErr } = await admin
+    .from("fee_ledger")
+    .select("id, total_amount, balance")
+    .eq("student_id", studentId)
+    .in("status", ["due", "overdue"]);
+  if (feeErr) return { ok: false, message: feeErr.message };
+  if (!rows?.length) return { ok: true };
+
+  const expectedTotal = rows.reduce((sum: number, row: any) => sum + Number(row.balance ?? row.total_amount), 0);
+  if (Math.abs(paidAmount - expectedTotal) > 1) {
+    return { ok: false, message: `Amount mismatch: received ${paidAmount}, expected ${expectedTotal}` };
+  }
+
+  for (const row of rows) {
+    const { error: updateErr } = await admin
+      .from("fee_ledger")
+      .update({ paid_amount: row.total_amount, status: "paid" })
+      .eq("id", row.id);
+    if (updateErr) return { ok: false, message: updateErr.message };
+  }
+
+  const { data: student } = await admin
+    .from("students")
+    .select("lead_id")
+    .eq("id", studentId)
+    .maybeSingle();
+
+  if (student?.lead_id) {
+    let lp: { id: string } | null = null;
+    if (paymentRef) {
+      const { data: existing } = await admin
+        .from("lead_payments")
+        .select("id")
+        .eq("lead_id", student.lead_id)
+        .eq("gateway", "icici")
+        .eq("transaction_ref", paymentRef)
+        .maybeSingle();
+      lp = existing;
+    }
+    if (!lp?.id) {
+      const { data: inserted, error: lpErr } = await admin
+        .from("lead_payments")
+        .insert({
+          lead_id: student.lead_id,
+          type: "other",
+          amount: paidAmount,
+          payment_mode: "gateway",
+          gateway: "icici",
+          transaction_ref: paymentRef,
+          status: "confirmed",
+          applied_to_ledger: true,
+          notes: "Course-fee instalment via ICICI",
+        } as any)
+        .select("id")
+        .maybeSingle();
+      if (lpErr) return { ok: false, message: lpErr.message };
+      lp = inserted;
+    }
+    if (lp?.id) {
+      fetch(`${supabaseUrl}/functions/v1/notify-event`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+        body: JSON.stringify({
+          event: "payment_received",
+          lead_id: student.lead_id,
+          context: { payment_id: lp.id },
+        }),
+      }).catch((e) => console.error(`[${FN_NAME}] student-fee notify-event failed:`, e));
+    }
+  }
+
+  return { ok: true };
+}
+
+async function settleAlumniService(
+  admin: any,
+  requestId: string,
+  amount: number,
+  paymentRef: string | null,
+  rawResponse: Record<string, any>,
+): Promise<{ ok: boolean; message?: string }> {
+  await admin.from("pg_transactions").insert({
+    txn_id: rawResponse.merchantTxnNo || paymentRef || requestId,
+    context: "alumni_service",
+    context_id: requestId,
+    amount,
+    status: "success",
+    gateway: "icici",
+    gateway_ref: paymentRef,
+    payer_name: rawResponse.customerName || "",
+    payer_email: rawResponse.customerEmailID || "",
+    payer_phone: rawResponse.customerMobileNo || "",
+    product_info: "Alumni Service Fee",
+    raw_response: rawResponse,
+  });
+
+  const { error } = await admin
+    .from("alumni_verification_requests")
+    .update({
+      status: "paid",
+      payment_ref: paymentRef,
+      payment_method: "icici",
+      paid_at: new Date().toISOString(),
+    })
+    .eq("id", requestId);
+  if (error) return { ok: false, message: error.message };
+  return { ok: true };
+}
+
 // ── Main handler ────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
@@ -192,11 +343,11 @@ Deno.serve(async (req) => {
     }
 
     const baseUrl = env === "production"
-      ? "https://pgpay.icicibank.com"
-      : "https://pgpayuat.icicibank.com";
-    const initiateUrl = `${baseUrl}/tsp/pg/api/v2/initiateSale`;
-    const commandUrl  = `${baseUrl}/tsp/pg/api/command`;
-    const selfUrl     = `${supabaseUrl}/functions/v1/icici-payment`;
+      ? "https://pgpay.icicibank.com/pg/api"
+      : "https://pgpayuat.icicibank.com/tsp/pg/api";
+    const initiateUrl = `${baseUrl}/v2/initiateSale`;
+    const commandUrl  = `${baseUrl}/command`;
+    const selfUrl     = resolveReturnUrl(req, `${supabaseUrl}/functions/v1/icici-payment`);
 
     const rawBody = await req.text();
     const contentType = req.headers.get("content-type") || "";
@@ -220,10 +371,21 @@ Deno.serve(async (req) => {
       } else {
         new URLSearchParams(rawBody).forEach((v, k) => { fields[k] = v; });
       }
-      console.log(`[${FN_NAME}] callback fields:`, JSON.stringify(fields));
+      const redactedFields = redactSecureHash(fields);
+      console.log(`[${FN_NAME}] callback fields:`, JSON.stringify(redactedFields));
 
       const sigCheck = await verifySignature(fields, apiKey);
-      console.log(`[${FN_NAME}] callback signature:`, sigCheck);
+      console.log(`[${FN_NAME}] callback signature valid:`, sigCheck.valid);
+      if (!sigCheck.valid && env === "production") {
+        console.error(`[${FN_NAME}] rejected callback with invalid signature`);
+        return returnPage(
+          "Payment Verification Failed",
+          "We could not verify the payment response. Please contact support if money was deducted.",
+          false,
+        );
+      } else if (!sigCheck.valid) {
+        console.warn(`[${FN_NAME}] accepting UAT callback with invalid signature for gateway testing`);
+      }
 
       const merchantTxnNo = fields.merchantTxnNo || "";
       const responseCode  = fields.responseCode || "";
@@ -281,8 +443,36 @@ Deno.serve(async (req) => {
             ? "Your payment has been received. The receipt has been emailed to you. You may close this window."
             : failureMessage(fields),
           isSuccess,
-          isSuccess ? undefined : fields,
+          isSuccess ? undefined : redactedFields,
         );
+      }
+
+      // Student fee ledger payment (addl1=student_fee, addl2=student_id)
+      if (addl1 === "student_fee" && addl2 && /^[0-9a-f-]{36}$/i.test(addl2)) {
+        if (!isSuccess) {
+          return returnPage("Payment Failed", failureMessage(fields), false, redactedFields);
+        }
+        const amount = parseFloat(fields.amount || "0");
+        const settled = await settleStudentFee(admin, supabaseUrl, serviceKey, addl2, amount, paymentRef);
+        if (!settled.ok) {
+          console.error(`[${FN_NAME}] student fee settlement error:`, settled.message);
+          return returnPage("Payment Received", `Payment confirmed but fee records could not be updated. Contact support. Txn: ${paymentRef}`, false);
+        }
+        return returnPage("Payment Successful", "Your fee payment has been received. You may close this window.", true);
+      }
+
+      // Alumni service payment (addl1=alumni_service, addl2=request_id)
+      if (addl1 === "alumni_service" && addl2 && /^[0-9a-f-]{36}$/i.test(addl2)) {
+        if (!isSuccess) {
+          return returnPage("Payment Failed", failureMessage(fields), false, redactedFields);
+        }
+        const amount = parseFloat(fields.amount || "0");
+        const settled = await settleAlumniService(admin, addl2, amount, paymentRef, redactedFields);
+        if (!settled.ok) {
+          console.error(`[${FN_NAME}] alumni settlement error:`, settled.message);
+          return returnPage("Payment Received", `Payment confirmed but alumni request could not be updated. Contact support. Txn: ${paymentRef}`, false);
+        }
+        return returnPage("Payment Successful", "Your alumni service payment has been received. You may close this window.", true);
       }
 
       // Application-fee payment (addl2 is the application_id string)
@@ -307,11 +497,11 @@ Deno.serve(async (req) => {
       }
 
       if (!isSuccess) {
-        return returnPage("Payment Failed", failureMessage(fields), false, fields);
+        return returnPage("Payment Failed", failureMessage(fields), false, redactedFields);
       }
 
       // Success but no addl* — log loudly so we can investigate.
-      console.error(`[${FN_NAME}] success callback with no row identifier — fields:`, JSON.stringify(fields));
+      console.error(`[${FN_NAME}] success callback with no row identifier — fields:`, JSON.stringify(redactedFields));
       return returnPage("Payment Received", `Payment received but could not be linked automatically. Contact support with txn: ${paymentRef}`, false);
     }
 
@@ -322,8 +512,29 @@ Deno.serve(async (req) => {
     // ── Initiate APPLICATION-fee payment ─────────────────────────────────
     if (action === "initiate") {
       const { application_id, txnid, amount, productinfo: _pi, firstname, email, phone } = body;
-      if (!txnid || !amount || !firstname || !phone) {
+      if (!application_id || !txnid || !amount || !firstname || !phone) {
         return new Response(JSON.stringify({ error: "Missing required fields" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+      const { data: appRow, error: appErr } = await admin
+        .from("applications")
+        .select("application_id, fee_amount, payment_status")
+        .eq("application_id", application_id)
+        .maybeSingle();
+      if (appErr || !appRow) {
+        return new Response(JSON.stringify({ error: "Application not found" }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      if (appRow.payment_status === "paid") {
+        return new Response(JSON.stringify({ error: "Application fee is already paid" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      const expectedAmount = Number(appRow.fee_amount || 0);
+      const requestedAmount = Number(amount || 0);
+      if (expectedAmount <= 0 || Math.abs(expectedAmount - requestedAmount) > 0.01) {
+        return new Response(JSON.stringify({ error: "Amount does not match application fee" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
@@ -331,7 +542,7 @@ Deno.serve(async (req) => {
         merchantId:       mid,
         aggregatorID:     aggId,
         merchantTxnNo:    String(txnid),
-        amount:           parseFloat(amount).toFixed(2),
+        amount:           expectedAmount.toFixed(2),
         currencyCode:     "356",          // INR
         payType:          "0",            // 0 = all enabled, 1 = card, etc.
         customerEmailID:  email || "noreply@nimteducation.com",
@@ -341,18 +552,18 @@ Deno.serve(async (req) => {
         customerMobileNo: String(phone).replace(/\D/g, "").slice(-10).padStart(10, "0"),
         customerName:     firstname,
         addlParam1:       "",                 // reserved for lead_payment_id (lead flow)
-        addlParam2:       application_id || "", // application_id (app-fee flow)
+        addlParam2:       application_id, // application_id (app-fee flow)
       };
       const signed = await signPayload(payload, apiKey);
 
-      console.log(`[${FN_NAME}] initiateSale request:`, JSON.stringify(signed));
+      console.log(`[${FN_NAME}] initiateSale request:`, JSON.stringify(redactSecureHash(signed)));
       const res = await fetch(initiateUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify(signed),
       });
       const data = await res.json().catch(() => ({}));
-      console.log(`[${FN_NAME}] initiateSale response:`, JSON.stringify(data));
+      console.log(`[${FN_NAME}] initiateSale response:`, JSON.stringify(redactSecureHash(data)));
 
       if (data.responseCode !== "R1000" || !data.redirectURI || !data.tranCtx) {
         const desc = bestDescription(data);
@@ -365,6 +576,10 @@ Deno.serve(async (req) => {
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
+      await admin
+        .from("applications")
+        .update({ pending_txnid: String(txnid) })
+        .eq("application_id", application_id);
       const payUrl = `${data.redirectURI}?tranCtx=${encodeURIComponent(data.tranCtx)}`;
       return new Response(JSON.stringify({ txnid, pay_url: payUrl, tranCtx: data.tranCtx }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -423,14 +638,14 @@ Deno.serve(async (req) => {
       };
       const signed = await signPayload(payload, apiKey);
 
-      console.log(`[${FN_NAME}] initiate-lead-payment request:`, JSON.stringify(signed));
+      console.log(`[${FN_NAME}] initiate-lead-payment request:`, JSON.stringify(redactSecureHash(signed)));
       const res = await fetch(initiateUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify(signed),
       });
       const data = await res.json().catch(() => ({}));
-      console.log(`[${FN_NAME}] initiate-lead-payment response:`, JSON.stringify(data));
+      console.log(`[${FN_NAME}] initiate-lead-payment response:`, JSON.stringify(redactSecureHash(data)));
 
       if (data.responseCode !== "R1000" || !data.redirectURI || !data.tranCtx) {
         // Mark the row as failed instead of deleting it. Keeping the row gives
@@ -464,6 +679,151 @@ Deno.serve(async (req) => {
         { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // ── Initiate STUDENT fee-ledger payment ─────────────────────────────
+    if (action === "initiate-fee-payment") {
+      const { student_id, txnid, productinfo: _pi, firstname, email, phone } = body;
+      if (!student_id || !txnid || !firstname || !phone) {
+        return new Response(JSON.stringify({ error: "Missing required fields (student_id, txnid, firstname, phone)" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+      const { data: dueRows, error: dueErr } = await admin
+        .from("fee_ledger")
+        .select("balance")
+        .eq("student_id", student_id)
+        .in("status", ["due", "overdue"]);
+      if (dueErr || !dueRows?.length) {
+        return new Response(JSON.stringify({ error: "No outstanding fees found for this student" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      const totalDue = dueRows.reduce((sum: number, row: any) => sum + Number(row.balance || 0), 0);
+      const payload: Record<string, string> = {
+        merchantId:       mid,
+        aggregatorID:     aggId,
+        merchantTxnNo:    String(txnid).replace(/[^a-zA-Z0-9]/g, "").slice(0, 20),
+        amount:           totalDue.toFixed(2),
+        currencyCode:     "356",
+        payType:          "0",
+        customerEmailID:  email || "noreply@nimteducation.com",
+        transactionType:  "SALE",
+        returnURL:        selfUrl,
+        txnDate:          istTxnDate(),
+        customerMobileNo: String(phone).replace(/\D/g, "").slice(-10).padStart(10, "0"),
+        customerName:     firstname,
+        addlParam1:       "student_fee",
+        addlParam2:       student_id,
+      };
+      const signed = await signPayload(payload, apiKey);
+      console.log(`[${FN_NAME}] initiate-fee-payment request:`, JSON.stringify(redactSecureHash(signed)));
+      const res = await fetch(initiateUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(signed),
+      });
+      const data = await res.json().catch(() => ({}));
+      console.log(`[${FN_NAME}] initiate-fee-payment response:`, JSON.stringify(redactSecureHash(data)));
+      if (data.responseCode !== "R1000" || !data.redirectURI || !data.tranCtx) {
+        const desc = bestDescription(data);
+        const code = data.responseCode || data.respCode;
+        return new Response(
+          JSON.stringify({ error: desc ? `${desc}${code ? ` (${code})` : ""}` : `ICICI rejected the request${code ? ` (${code})` : ""}`, raw: data }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      const payUrl = `${data.redirectURI}?tranCtx=${encodeURIComponent(data.tranCtx)}`;
+      return new Response(JSON.stringify({ txnid: payload.merchantTxnNo, pay_url: payUrl, tranCtx: data.tranCtx }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // ── Initiate ALUMNI service payment ─────────────────────────────────
+    if (action === "initiate-alumni-payment") {
+      const { request_id, amount, firstname, email, phone, productinfo: _pi } = body;
+      if (!request_id || !amount || !firstname || !phone) {
+        return new Response(JSON.stringify({ error: "Missing required fields" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+      const { data: requestRow, error: reqErr } = await admin
+        .from("alumni_verification_requests")
+        .select("id, fee_amount")
+        .eq("id", request_id)
+        .maybeSingle();
+      if (reqErr || !requestRow) {
+        return new Response(JSON.stringify({ error: "Alumni request not found" }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      const expectedAmount = Number(requestRow.fee_amount || 0);
+      const requestedAmount = Number(amount || 0);
+      if (Math.abs(expectedAmount - requestedAmount) > 0.01) {
+        return new Response(JSON.stringify({ error: "Amount does not match alumni request fee" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      const txnid = `AL${String(request_id).replace(/[^a-zA-Z0-9]/g, "").slice(0, 8)}${Date.now()}`.slice(0, 20);
+      await admin.from("pg_transactions").insert({
+        txn_id: txnid,
+        context: "alumni_service",
+        context_id: request_id,
+        amount: expectedAmount,
+        status: "initiated",
+        gateway: "icici",
+        payer_name: firstname,
+        payer_email: email || "noreply@nimteducation.com",
+        payer_phone: phone,
+        product_info: "Alumni Service Fee",
+      });
+
+      const payload: Record<string, string> = {
+        merchantId:       mid,
+        aggregatorID:     aggId,
+        merchantTxnNo:    txnid,
+        amount:           expectedAmount.toFixed(2),
+        currencyCode:     "356",
+        payType:          "0",
+        customerEmailID:  email || "noreply@nimteducation.com",
+        transactionType:  "SALE",
+        returnURL:        selfUrl,
+        txnDate:          istTxnDate(),
+        customerMobileNo: String(phone).replace(/\D/g, "").slice(-10).padStart(10, "0"),
+        customerName:     firstname,
+        addlParam1:       "alumni_service",
+        addlParam2:       request_id,
+      };
+      const signed = await signPayload(payload, apiKey);
+      console.log(`[${FN_NAME}] initiate-alumni-payment request:`, JSON.stringify(redactSecureHash(signed)));
+      const res = await fetch(initiateUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(signed),
+      });
+      const data = await res.json().catch(() => ({}));
+      console.log(`[${FN_NAME}] initiate-alumni-payment response:`, JSON.stringify(redactSecureHash(data)));
+      if (data.responseCode !== "R1000" || !data.redirectURI || !data.tranCtx) {
+        const desc = bestDescription(data);
+        const code = data.responseCode || data.respCode;
+        await admin.from("pg_transactions").insert({
+          txn_id: txnid,
+          context: "alumni_service",
+          context_id: request_id,
+          amount: expectedAmount,
+          status: "failed",
+          gateway: "icici",
+          gateway_ref: txnid,
+          raw_response: data,
+        });
+        return new Response(
+          JSON.stringify({ error: desc ? `${desc}${code ? ` (${code})` : ""}` : `ICICI rejected the request${code ? ` (${code})` : ""}`, raw: data }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      const payUrl = `${data.redirectURI}?tranCtx=${encodeURIComponent(data.tranCtx)}`;
+      return new Response(JSON.stringify({ txnid, pay_url: payUrl, tranCtx: data.tranCtx }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     // ── /command endpoint helpers (status check + refund) ───────────────
     // Per spec, /command takes form-encoded body (not JSON) and discriminates
     // between operations via `transactionType` (STATUS, REFUND, AUTH, VOID...).
@@ -475,22 +835,27 @@ Deno.serve(async (req) => {
       for (const [k, v] of Object.entries(signed)) {
         if (v !== "" && v !== null && v !== undefined) form.append(k, String(v));
       }
-      console.log(`[${FN_NAME}] /command(${payload.transactionType}) form:`, form.toString());
+      const redactedForm = new URLSearchParams(form);
+      if (redactedForm.has("secureHash")) redactedForm.set("secureHash", "[redacted]");
+      console.log(`[${FN_NAME}] /command(${payload.transactionType}) form:`, redactedForm.toString());
       const res = await fetch(commandUrl, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
         body: form.toString(),
       });
       const text = await res.text();
-      console.log(`[${FN_NAME}] /command(${payload.transactionType}) response:`, text);
       let data: any = {};
       try { data = JSON.parse(text); } catch { /* leave as raw */ }
+      const redactedResponse = data && typeof data === "object" && !Array.isArray(data)
+        ? JSON.stringify(redactSecureHash(data))
+        : redactRawSecureHash(text);
+      console.log(`[${FN_NAME}] /command(${payload.transactionType}) response:`, redactedResponse);
       return { ok: res.ok, data, raw: text };
     };
 
     // ── Status check (post-payment verify) ───────────────────────────────
     if (action === "verify-payment") {
-      const { txnid, original_txn_no } = body;
+      const { txnid, original_txn_no, lead_payment_id, student_id, alumni_request_id, application_id } = body;
       if (!txnid) {
         return new Response(JSON.stringify({ error: "txnid is required" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -515,16 +880,42 @@ Deno.serve(async (req) => {
       if (isSettled) {
         const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
         const paymentRef = data?.txnID || data?.merchantTxnNo || txnid;
-        const addl1 = data?.addlParam1 || "";
-        const addl2 = data?.addlParam2 || "";
+        const addl1 = data?.addlParam1 || (lead_payment_id ? String(lead_payment_id) : student_id ? "student_fee" : alumni_request_id ? "alumni_service" : "");
+        const addl2 = data?.addlParam2 || String(student_id || alumni_request_id || application_id || "");
         if (addl1 && /^[0-9a-f-]{36}$/i.test(addl1)) {
           await admin.from("lead_payments").update({ status: "confirmed", transaction_ref: paymentRef }).eq("id", addl1);
+          const { data: lpRow } = await admin
+            .from("lead_payments")
+            .select("lead_id, type")
+            .eq("id", addl1)
+            .maybeSingle();
+          if (lpRow?.lead_id) {
+            const evt = lpRow.type === "application_fee" ? "app_fee_paid" : "payment_received";
+            fetch(`${supabaseUrl}/functions/v1/notify-event`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+              body: JSON.stringify({ event: evt, lead_id: lpRow.lead_id, context: { payment_id: addl1 } }),
+            }).catch((e) => console.error(`[${FN_NAME}] verify notify-event failed:`, e));
+          }
+        } else if (addl1 === "student_fee" && addl2 && /^[0-9a-f-]{36}$/i.test(addl2)) {
+          await settleStudentFee(admin, supabaseUrl, serviceKey, addl2, Number(data?.amount || 0), paymentRef);
+        } else if (addl1 === "alumni_service" && addl2 && /^[0-9a-f-]{36}$/i.test(addl2)) {
+          await settleAlumniService(admin, addl2, Number(data?.amount || 0), paymentRef, data);
         } else if (addl2) {
           await admin.from("applications").update({ payment_status: "paid", payment_ref: paymentRef }).eq("application_id", addl2);
+          fetch(`${supabaseUrl}/functions/v1/generate-application-fee-receipt`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+            body: JSON.stringify({ application_id: addl2 }),
+          }).catch((e) => console.error(`[${FN_NAME}] verify receipt invoke failed:`, e));
         }
       }
 
-      return new Response(JSON.stringify({ status: txnStatus || respCode, raw: data, raw_text: ok ? undefined : raw }),
+      return new Response(JSON.stringify({
+        status: txnStatus || respCode,
+        raw: data && typeof data === "object" && !Array.isArray(data) ? redactSecureHash(data) : data,
+        raw_text: ok ? undefined : redactRawSecureHash(raw),
+      }),
         { status: ok ? 200 : 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -545,7 +936,10 @@ Deno.serve(async (req) => {
         addlParam1:      reason ? String(reason).slice(0, 64) : "",
       };
       const { ok, data, raw } = await commandRequest(payload);
-      return new Response(JSON.stringify({ raw: data, raw_text: ok ? undefined : raw }),
+      return new Response(JSON.stringify({
+        raw: data && typeof data === "object" && !Array.isArray(data) ? redactSecureHash(data) : data,
+        raw_text: ok ? undefined : redactRawSecureHash(raw),
+      }),
         { status: ok ? 200 : 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 

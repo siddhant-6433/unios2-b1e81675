@@ -6,6 +6,7 @@ import {
   effectiveApplicationDeadline,
   INITIAL_APPLICATION_DEADLINE,
 } from "@/lib/deadlineRollover";
+import { useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
 
 // Fallbacks if the get_applicant_deadlines RPC is unreachable.
 // The single source of truth is _app_config — these are last-resort
@@ -161,11 +162,26 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   const [instalmentPreset, setInstalmentPreset] = useState<number | null>(null);
   const [customAmt, setCustomAmt] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [selectedGateway, setSelectedGateway] = useState<string | null>(null);
   const [deadlines, setDeadlines] = useState<{ fee_submission_deadline: string; full_course_payment_deadline: string }>({
     fee_submission_deadline:      DEFAULT_FEE_SUBMISSION_DEADLINE,
     full_course_payment_deadline: DEFAULT_FULL_COURSE_PAYMENT_DEADLINE,
   });
   const [bankDetails, setBankDetails] = useState<BankDetails>(DEFAULT_BANK_DETAILS);
+  const { gateways: tokenGateways, loading: tokenGatewayLoading } = useScopedPaymentGateways({
+    context: "token_fee",
+    applicationId,
+    enabled: !!lead,
+  });
+
+  useEffect(() => {
+    if (tokenGatewayLoading) return;
+    if (tokenGateways.length === 1) {
+      setSelectedGateway(tokenGateways[0].gateway);
+    } else if (selectedGateway && !tokenGateways.some((g) => g.gateway === selectedGateway)) {
+      setSelectedGateway(null);
+    }
+  }, [tokenGatewayLoading, tokenGateways, selectedGateway]);
 
   const load = async () => {
     setLoading(true);
@@ -293,7 +309,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   // Listen for the popup's success/failure ping.
   useEffect(() => {
     const handler = (e: MessageEvent) => {
-      if (e.data?.eb_payment === "success") {
+      if (e.data?.eb_payment === "success" || e.data?.icici_payment === "success") {
         // Refresh after a beat — gives the trigger time to commit.
         setTimeout(() => load(), 1500);
         onPayment?.();
@@ -318,7 +334,9 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     setPaying(true);
     setError(null);
     try {
-      const { data, error: invErr } = await supabase.functions.invoke("easebuzz-payment", {
+      const gateway = selectedGateway || tokenGateways[0]?.gateway || "easebuzz";
+      const functionName = gateway === "icici" ? "icici-payment" : "easebuzz-payment";
+      const { data, error: invErr } = await supabase.functions.invoke(functionName, {
         body: {
           action: "initiate-lead-payment",
           lead_id: lead.id,
@@ -1243,6 +1261,27 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
           </div>
         );
       })()}
+
+      {!feeStatus.twenty_five_complete && !tokenGatewayLoading && tokenGateways.length > 1 && (
+        <div className="rounded-2xl border border-gray-200 bg-white p-3 space-y-2">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Payment Gateway</p>
+          <div className="flex flex-wrap gap-2">
+            {tokenGateways.map((gateway) => (
+              <button
+                key={gateway.gateway}
+                onClick={() => setSelectedGateway(gateway.gateway)}
+                className={`rounded-xl border px-3 py-2 text-xs font-semibold transition-all ${
+                  selectedGateway === gateway.gateway
+                    ? "border-blue-500 bg-blue-50 text-blue-700"
+                    : "border-gray-200 text-gray-600 hover:border-blue-300 hover:bg-blue-50"
+                }`}
+              >
+                {gateway.display_name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Payment CTAs ──────────────────────────────── */}
       {!feeStatus.twenty_five_complete && towardsAdmission > 0 && (() => {

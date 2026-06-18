@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowRight, ArrowLeft, Loader2, CreditCard, CheckCircle, Shield, AlertCircle, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
-import { usePaymentGateways, type PaymentGateway } from "@/hooks/usePaymentGateways";
-import { useAuth } from "@/contexts/AuthContext";
+import { useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
 import { ApplicationData } from "./types";
 import { usePortal } from "./PortalContext";
 import { ReceiptDialog, ReceiptData } from "@/components/receipts/ReceiptDialog";
@@ -47,23 +46,16 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
     primaryColor: portal.primaryColor,
   };
 
-  const { portalGateways: dbGateways, loading: gwLoading } = usePaymentGateways();
-  const { role } = useAuth();
-  const isSuperAdmin = role === "super_admin";
-
-  // Super-admin-only ICICI test option, injected on top of the DB-driven list.
-  // Hidden from regular applicants until ICICI goes through full UAT sign-off
-  // and we flip its row in payment_gateway_config.
-  const portalGateways: PaymentGateway[] = useMemo(() => {
-    const hasIcici = dbGateways.some(g => g.gateway === "icici");
-    if (!isSuperAdmin || hasIcici) return dbGateways;
-    return [...dbGateways, {
-      gateway: "icici",
-      display_name: "ICICI (UAT — admin only)",
-      is_enabled_fee_collection: true,
-      is_enabled_portal_payment: true,
-    }];
-  }, [dbGateways, isSuperAdmin]);
+  const firstSelection = data.course_selections[0];
+  const { gateways: portalGateways, loading: gwLoading } = useScopedPaymentGateways({
+    context: "application_fee",
+    applicationId: data.application_id,
+    courseId: firstSelection?.course_id,
+    campusId: firstSelection?.campus_id,
+    institutionId: firstSelection?.institution_id,
+    institutionType: firstSelection?.program_category === "school" ? "school" : null,
+    enabled: !isPaid && !isWaived,
+  });
 
   const [selectedGateway, setSelectedGateway] = useState<string | null>(null);
   const [loading, setLoading]   = useState(false);
@@ -91,10 +83,13 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
 
   // Auto-select single gateway
   useEffect(() => {
-    if (!gwLoading && portalGateways.length === 1) {
+    if (gwLoading) return;
+    if (portalGateways.length === 1) {
       setSelectedGateway(portalGateways[0].gateway);
+    } else if (selectedGateway && !portalGateways.some((g) => g.gateway === selectedGateway)) {
+      setSelectedGateway(null);
     }
-  }, [gwLoading, portalGateways]);
+  }, [gwLoading, portalGateways, selectedGateway]);
 
   // Load Cashfree JS SDK only when cashfree is selected
   useEffect(() => {
@@ -362,7 +357,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
           // Fallback: ask ICICI directly via /command STATUS
           try {
             const { data: verifyData } = await supabase.functions.invoke("icici-payment", {
-              body: { action: "verify-payment", txnid },
+              body: { action: "verify-payment", txnid, application_id: data.application_id },
             });
             if (verifyData?.status === "SUC" || verifyData?.raw?.responseCode === "0000" || verifyData?.raw?.responseCode === "000") {
               await checkAndUpdatePayment();

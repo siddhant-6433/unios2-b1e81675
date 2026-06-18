@@ -17,6 +17,7 @@ interface AppTransaction {
   fee_amount: number;
   payment_status: string;
   payment_ref: string | null;
+  pending_txnid?: string | null;
   fee_receipt_url?: string | null;
   updated_at: string;
   created_at: string;
@@ -62,6 +63,10 @@ function fmtDate(iso: string) {
 
 function fmtAmount(n: number) {
   return "₹" + n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function downloadCSV(rows: string[][], filename: string) {
@@ -114,6 +119,7 @@ export default function TransactionHistoryPanel() {
   const [receipt, setReceipt]             = useState<ReceiptData | null>(null);
   const [togglingId, setTogglingId]       = useState<string | null>(null);
   const [reconciling, setReconciling]     = useState(false);
+  const [iciciVerifyingId, setIciciVerifyingId] = useState<string | null>(null);
   const [reconcileResult, setReconcileResult] = useState<string | null>(null);
 
   const { selectedCampusId } = useCampus();
@@ -143,7 +149,7 @@ export default function TransactionHistoryPanel() {
         .from("applications")
         .select(`
           application_id, full_name, phone, email,
-          fee_amount, payment_status, payment_ref, fee_receipt_url,
+          fee_amount, payment_status, payment_ref, pending_txnid, fee_receipt_url,
           updated_at, created_at,
           flags, program_category, applicant_type, lead_id,
           leads ( admission_no, pre_admission_no, campus_id )
@@ -338,6 +344,92 @@ export default function TransactionHistoryPanel() {
       setReconcileResult(`Reconcile by UDF1 failed: ${e.message}`);
     } finally {
       setReconciling(false);
+    }
+  };
+
+  const reconcilePendingIcici = async () => {
+    setReconciling(true);
+    setReconcileResult(null);
+    let updated = 0;
+    let skipped = 0;
+    const pending = appTxns.filter((t) =>
+      t.payment_status === "pending" &&
+      t.fee_amount > 0 &&
+      t.source !== "lead_payment" &&
+      !!t.pending_txnid,
+    );
+
+    for (const txn of pending) {
+      try {
+        const { data } = await supabase.functions.invoke("icici-payment", {
+          body: {
+            action: "verify-payment",
+            txnid: txn.pending_txnid,
+            application_id: txn.application_id,
+          },
+        });
+        const responseCode = data?.raw?.responseCode;
+        if (data?.status === "SUC" || responseCode === "000" || responseCode === "0000") updated++;
+        else skipped++;
+      } catch (_) {
+        skipped++;
+      }
+    }
+
+    let sweepSummary = "";
+    try {
+      const { data, error } = await supabase.functions.invoke("icici-payment", {
+        body: { action: "reconcile-pending" },
+      });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      sweepSummary = ` · lead-payment sweep: ${data?.confirmed || 0} confirmed, ${data?.failed || 0} failed, ${data?.still_pending || 0} still pending`;
+    } catch (e) {
+      sweepSummary = ` · lead-payment sweep failed: ${errorMessage(e)}`;
+    }
+
+    const missing = appTxns.filter((t) =>
+      t.payment_status === "pending" &&
+      t.fee_amount > 0 &&
+      t.source !== "lead_payment" &&
+      !t.pending_txnid,
+    ).length;
+    setReconcileResult(
+      `ICICI reconciled ${updated} of ${pending.length} stored pending payments${skipped ? ` (${skipped} not settled)` : ""}${missing ? ` · ${missing} pending rows need row-level txn id` : ""}${sweepSummary}`,
+    );
+    fetchAppTxns();
+    setReconciling(false);
+  };
+
+  const verifyIciciTxn = async (txn: AppTransaction) => {
+    const txnid = window.prompt(
+      `Enter ICICI merchant transaction number for ${txn.application_id}:`,
+      txn.pending_txnid || "",
+    );
+    if (!txnid) return;
+    setIciciVerifyingId(txn.application_id);
+    setReconcileResult(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("icici-payment", {
+        body: {
+          action: "verify-payment",
+          txnid: txnid.trim(),
+          application_id: txn.application_id,
+        },
+      });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      const responseCode = data?.raw?.responseCode;
+      if (data?.status === "SUC" || responseCode === "000" || responseCode === "0000") {
+        setReconcileResult(`ICICI verified ${txn.application_id} · ref ${data?.raw?.txnID || txnid}`);
+        fetchAppTxns();
+      } else {
+        setReconcileResult(`ICICI did not confirm ${txn.application_id}: ${data?.raw_text || data?.raw?.respDescription || data?.status || "not settled"}`);
+      }
+    } catch (e) {
+      setReconcileResult(`ICICI verify failed for ${txn.application_id}: ${errorMessage(e)}`);
+    } finally {
+      setIciciVerifyingId(null);
     }
   };
 
@@ -655,6 +747,15 @@ export default function TransactionHistoryPanel() {
               {reconciling ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
               Reconcile via EaseBuzz (UDF1)
             </button>
+            <button
+              onClick={reconcilePendingIcici}
+              disabled={reconciling}
+              className="flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-700 hover:bg-sky-100 transition-colors disabled:opacity-50"
+              title="Verify stored ICICI merchant transaction IDs and sweep stale ICICI lead-payment intents"
+            >
+              {reconciling ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              Reconcile ICICI
+            </button>
           </>
         )}
 
@@ -810,22 +911,30 @@ export default function TransactionHistoryPanel() {
                             </button>
                           )
                         ) : t.payment_status === "pending" && t.fee_amount > 0 && t.source !== "lead_payment" ? (
-                          // Mark-Paid-by-UTR only makes sense for applications-table
-                          // rows (their reconcile chain flips payment_status + writes
-                          // a mirror to lead_payments). Lead_payments are intent rows
-                          // owned by the offer flow and shouldn't be force-confirmed
-                          // through this admin path.
-                          <button
-                            onClick={() => markPaidByUtr(t.application_id)}
-                            disabled={markingPaidId === t.application_id}
-                            className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-60"
-                            title="Mark as paid using a bank UTR / PhonePe / GPay transaction ID"
-                          >
-                            {markingPaidId === t.application_id
-                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              : <CheckCircle2 className="h-3.5 w-3.5" />}
-                            Mark Paid by UTR
-                          </button>
+                          <div className="flex flex-wrap gap-1.5">
+                            <button
+                              onClick={() => verifyIciciTxn(t)}
+                              disabled={iciciVerifyingId === t.application_id}
+                              className="flex items-center gap-1.5 rounded-lg border border-sky-300 bg-sky-50 px-2.5 py-1 text-[11px] font-medium text-sky-700 hover:bg-sky-100 transition-colors disabled:opacity-60"
+                              title="Verify this pending application against ICICI STATUS using the stored or pasted merchant transaction number"
+                            >
+                              {iciciVerifyingId === t.application_id
+                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                : <CheckCircle2 className="h-3.5 w-3.5" />}
+                              Verify ICICI
+                            </button>
+                            <button
+                              onClick={() => markPaidByUtr(t.application_id)}
+                              disabled={markingPaidId === t.application_id}
+                              className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-60"
+                              title="Mark as paid using a bank UTR / PhonePe / GPay transaction ID"
+                            >
+                              {markingPaidId === t.application_id
+                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                : <CheckCircle2 className="h-3.5 w-3.5" />}
+                              Mark Paid by UTR
+                            </button>
+                          </div>
                         ) : <span className="text-muted-foreground">—</span>}
                       </td>
                     </tr>
