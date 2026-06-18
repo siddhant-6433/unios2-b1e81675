@@ -316,7 +316,7 @@ const PendingFollowups = () => {
     fetchPayload();
   };
 
-  const totalAll = counts.overdue + counts.today + counts.upcoming + counts.visit_confirm + counts.post_visit;
+  const totalAll = counts.overdue + counts.today + counts.upcoming + counts.visit_confirm + counts.unclosed_visits + counts.post_visit;
 
   const fmtOverdue = (d: number) => d === 0 ? "Today" : d === 1 ? "1 day overdue" : `${d} days overdue`;
   const fmtDate = (s: string) => {
