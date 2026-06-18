@@ -10,6 +10,10 @@ const admissionsStatsMigration = readFileSync(
   "supabase/migrations/20260620120000_align_admissions_followup_stats.sql",
   "utf8",
 );
+const remainingSurfacesMigration = readFileSync(
+  "supabase/migrations/20260620121000_align_remaining_followup_surfaces.sql",
+  "utf8",
+);
 
 describe("pending follow-up count alignment", () => {
   it("keeps the page headline total aligned with every visible follow-up tab", () => {
@@ -46,5 +50,16 @@ describe("pending follow-up count alignment", () => {
     );
     expect(admissionsStatsMigration).toContain("'{overdue_followups}'");
     expect(admissionsStatsMigration).toContain("'{today_followups}'");
+  });
+
+  it("aligns dashboard cards and direct overdue view consumers", () => {
+    expect(remainingSurfacesMigration).toContain("CREATE OR REPLACE VIEW public.overdue_followups");
+    expect(remainingSurfacesMigration).toContain("lf.scheduled_at < date_trunc('day', now())");
+    expect(remainingSurfacesMigration).toContain("CREATE OR REPLACE VIEW public.counsellor_tat_defaults");
+    expect(remainingSurfacesMigration).toContain("CREATE OR REPLACE FUNCTION public.my_tat_defaults");
+    expect(remainingSurfacesMigration).toContain("CREATE OR REPLACE FUNCTION public.action_center_payload");
+    expect(remainingSurfacesMigration).toContain("CREATE OR REPLACE FUNCTION public.admissions_overview");
+    expect(remainingSurfacesMigration).toContain("CREATE OR REPLACE FUNCTION public.counsellor_calling_summary");
+    expect(remainingSurfacesMigration).toContain("CREATE OR REPLACE FUNCTION public.get_counsellor_performance_stats");
   });
 });
