@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
+import { useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
 import uniosLogo from "@/assets/unios-logo.png";
 import {
   Loader2, AlertCircle, CheckCircle, CreditCard, ShieldCheck,
@@ -23,6 +24,8 @@ interface StudentInfo {
   id: string;
   name: string;
   admission_no: string;
+  course_id: string | null;
+  campus_id: string | null;
   course_name: string;
   semester: string;
   campus_name: string;
@@ -44,17 +47,34 @@ export default function PaymentPortal() {
   const [fees, setFees]         = useState<StudentFee[]>([]);
   const [receipt, setReceipt]   = useState<ReceiptData | null>(null);
   const [paidTxnId, setPaidTxnId] = useState<string | null>(null);
+  const [selectedGateway, setSelectedGateway] = useState<string | null>(null);
 
   const popupRef = useRef<Window | null>(null);
   const pollRef  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { gateways: feeGateways, loading: gatewaysLoading } = useScopedPaymentGateways({
+    context: "student_fee",
+    studentId: student?.id,
+    courseId: student?.course_id,
+    campusId: student?.campus_id,
+    enabled: !!student,
+  });
 
   // Cleanup poll on unmount
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
-  // Listen for postMessage from Easebuzz popup
+  useEffect(() => {
+    if (gatewaysLoading) return;
+    if (feeGateways.length === 1) {
+      setSelectedGateway(feeGateways[0].gateway);
+    } else if (selectedGateway && !feeGateways.some((g) => g.gateway === selectedGateway)) {
+      setSelectedGateway(null);
+    }
+  }, [gatewaysLoading, feeGateways, selectedGateway]);
+
+  // Listen for postMessage from popup gateways
   useEffect(() => {
     const handler = (e: MessageEvent) => {
-      if (e.data?.eb_payment === "success") {
+      if (e.data?.eb_payment === "success" || e.data?.icici_payment === "success") {
         stopPolling();
         checkFeesPaid();
       }
@@ -77,7 +97,7 @@ export default function PaymentPortal() {
     setError(null);
     const { data, error: err } = await supabase
       .from("students")
-      .select("id, name, admission_no, pre_admission_no, semester, phone, father_phone, mother_phone, guardian_phone, campuses:campus_id(name), courses:course_id(name)")
+      .select("id, name, admission_no, pre_admission_no, semester, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, campuses:campus_id(name), courses:course_id(name)")
       .eq("id", studentParam!)
       .single();
     if (err || !data) { setError("Invalid link. Contact the institution."); setLoading(false); return; }
@@ -92,6 +112,8 @@ export default function PaymentPortal() {
       id: data.id,
       name: data.name,
       admission_no: data.admission_no || data.pre_admission_no || "",
+      course_id: data.course_id || null,
+      campus_id: data.campus_id || null,
       course_name: data.courses?.name || "",
       semester: data.semester || "",
       campus_name: data.campuses?.name || "",
@@ -106,7 +128,7 @@ export default function PaymentPortal() {
 
     const { data: studentData } = await supabase
       .from("students")
-      .select("id, name, admission_no, pre_admission_no, semester, phone, father_phone, mother_phone, guardian_phone, campuses:campus_id(name), courses:course_id(name)")
+      .select("id, name, admission_no, pre_admission_no, semester, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, campuses:campus_id(name), courses:course_id(name)")
       .or([
         `phone.eq.${phone}`, `phone.eq.+91${phone}`,
         `father_phone.eq.${phone}`, `father_phone.eq.+91${phone}`,
@@ -201,8 +223,10 @@ export default function PaymentPortal() {
     try {
       const nameParts = student.name.trim().split(" ");
       const txnid = `FEE${student.id.replace(/[^a-zA-Z0-9]/g, "").slice(0, 10)}${Date.now()}`.slice(0, 50);
+      const gateway = selectedGateway || feeGateways[0]?.gateway || "easebuzz";
+      const functionName = gateway === "icici" ? "icici-payment" : "easebuzz-payment";
 
-      const { data: fnData, error: fnError } = await supabase.functions.invoke("easebuzz-payment", {
+      const { data: fnData, error: fnError } = await supabase.functions.invoke(functionName, {
         body: {
           action: "initiate-fee-payment",
           student_id: student.id,
@@ -240,11 +264,15 @@ export default function PaymentPortal() {
           stopPolling();
           const alreadyPaid = await checkFeesPaid();
           if (!alreadyPaid) {
-            // DB not yet updated — ask EaseBuzz server to confirm, then re-check DB
-            const { data: verifyData } = await supabase.functions.invoke("easebuzz-payment", {
+            // DB not yet updated — ask the gateway server to confirm, then re-check DB
+            const { data: verifyData } = await supabase.functions.invoke(functionName, {
               body: { action: "verify-payment", txnid, application_id: "" },
             });
-            if (verifyData?.status?.toLowerCase() === "success") {
+            const verified = verifyData?.status?.toLowerCase() === "success" ||
+              verifyData?.status === "SUC" ||
+              verifyData?.raw?.responseCode === "0000" ||
+              verifyData?.raw?.responseCode === "000";
+            if (verified) {
               // Server confirmed success — re-check DB to confirm ledger is updated
               const confirmedPaid = await checkFeesPaid();
               if (!confirmedPaid) {
@@ -394,6 +422,27 @@ export default function PaymentPortal() {
                       <p className="text-lg font-bold text-gray-900">₹{totalDue.toLocaleString("en-IN")}</p>
                     </div>
                   </div>
+
+                  {!gatewaysLoading && feeGateways.length > 1 && (
+                    <div className="rounded-xl bg-white border border-gray-200 p-4 space-y-2">
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Payment Gateway</p>
+                      <div className="flex flex-wrap gap-2">
+                        {feeGateways.map((gateway) => (
+                          <button
+                            key={gateway.gateway}
+                            onClick={() => setSelectedGateway(gateway.gateway)}
+                            className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
+                              selectedGateway === gateway.gateway
+                                ? "border-primary bg-primary/10 text-primary"
+                                : "border-gray-200 text-gray-600 hover:border-primary/40"
+                            }`}
+                          >
+                            {gateway.display_name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   <button onClick={handlePay} className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-semibold text-white hover:bg-primary/90 transition-colors">
                     <CreditCard className="h-4 w-4" />

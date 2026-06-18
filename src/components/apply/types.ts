@@ -1,6 +1,7 @@
 export interface CourseSelection {
   course_id: string;
   campus_id: string;
+  institution_id?: string | null;
   course_name: string;
   campus_name: string;
   preference_order: number;

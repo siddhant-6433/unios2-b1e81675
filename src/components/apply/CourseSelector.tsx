@@ -222,6 +222,7 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
 
     const campusName = course.departments?.institutions?.campuses?.name || '';
     const campusId = course.departments?.institutions?.campus_id || '';
+    const institutionId = course.departments?.institutions?.id || null;
     const programCat = determineProgramCategory(course.code, course.name);
 
     setSelections(prev => [
@@ -229,6 +230,7 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
       {
         course_id: course.id,
         campus_id: campusId,
+        institution_id: institutionId,
         course_name: course.name,
         campus_name: campusName,
         preference_order: prev.length + 1,

@@ -3,6 +3,12 @@
   publish = "dist"
 
 [[redirects]]
+  from = "/api/icici-payment"
+  to = "https://deylhigsisuexszsmypq.supabase.co/functions/v1/icici-payment"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
