@@ -158,6 +158,8 @@ export async function recordCallDisposition(args: RecordCallDispositionArgs): Pr
     p_new_stage:               newStage,
     p_stage_activity_desc:     stageActivityDesc,
     p_future_eligible_session: futureEligibleSession,
+    p_cnet_appeared:           data.cnet_appeared ?? null,
+    p_cahet_registered:        data.cahet_registered ?? null,
     p_followup_at:             followupAt,
     p_followup_notes:          followupNotes,
     p_followup_activity_desc:  followupActivityDesc,

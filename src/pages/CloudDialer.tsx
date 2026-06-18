@@ -22,6 +22,8 @@ import {
 } from "@/components/ui/collapsible";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
 import { useCloudDialerBootstrap, useCloudDialerListQueue, useCloudDialerQueue, useMyProfileId } from "@/hooks/useAdmissionsData";
+import { isBscNursingCourse } from "@/lib/bscNursing";
+import { isBptOrBmritCourseName } from "@/lib/cahet";
 
 const CourseInfoPanel = lazy(() =>
   import("@/components/leads/CourseInfoPanel").then((m) => ({ default: m.CourseInfoPanel })));
@@ -228,6 +230,8 @@ export default function CloudDialer() {
   const [visitTime, setVisitTime] = useState("10:00");
   const [futureSession, setFutureSession] = useState("2027-28");
   const [notIntCategory, setNotIntCategory] = useState<"lead" | "job_applicant" | "vendor" | "other">("lead");
+  const [cnetAppeared, setCnetAppeared] = useState<"yes" | "no" | null>(null);
+  const [cahetRegistered, setCahetRegistered] = useState<"yes" | "no" | null>(null);
   const [stats, setStats] = useState<DialerStats>({ connected: 0, busy: 0, noAnswer: 0, voicemail: 0, interested: 0, totalTalkTime: 0 });
 
   // Call history for current lead
@@ -262,6 +266,16 @@ export default function CloudDialer() {
   const preDispositionRef = useRef<string | null>(null);
 
   const currentLead = queue[currentIdx] || null;
+  const asksCnetAppeared = !!currentLead && isBscNursingCourse(currentLead.course_name);
+  const asksCahetRegistered = !!currentLead && isBptOrBmritCourseName(currentLead.course_name);
+  const qualifierRequiredUnanswered =
+    (asksCnetAppeared && !cnetAppeared) ||
+    (asksCahetRegistered && !cahetRegistered);
+
+  useEffect(() => {
+    setCnetAppeared(null);
+    setCahetRegistered(null);
+  }, [currentLead?.id, currentLead?.course_name]);
 
   // Returns minutes until this lead is auto-reclaimed by the SLA cron, or null
   // if the lead isn't reclaim-eligible (already contacted, not in an early
@@ -781,6 +795,14 @@ export default function CloudDialer() {
   // ── Pre-select disposition during connected call ─────────────────────────
 
   const preSelectDisposition = (disposition: string) => {
+    if (asksCnetAppeared && !cnetAppeared) {
+      toast({ title: "CNET required", description: "Mark whether the B.Sc Nursing lead appeared for CNET first.", variant: "destructive" });
+      return;
+    }
+    if (asksCahetRegistered && !cahetRegistered) {
+      toast({ title: "CAHET required", description: "Mark whether the BPT/BMRIT lead registered for CAHET first.", variant: "destructive" });
+      return;
+    }
     preDispositionRef.current = disposition;
     setCallState(prev => ({ ...prev, disposition }));
     toast({ title: "Disposition saved", description: `Marked as "${disposition.replace("_", " ")}". Will finalize when call ends.` });
@@ -793,10 +815,36 @@ export default function CloudDialer() {
       .eq("lead_id", currentLead.id).eq("status", "pending");
   };
 
+  const persistCnetAppearedForCurrentLead = async () => {
+    if (!currentLead || !asksCnetAppeared || !cnetAppeared) return;
+    await supabase
+      .from("leads")
+      .update({ cnet_appeared: cnetAppeared === "yes", updated_at: new Date().toISOString() } as any)
+      .eq("id", currentLead.id);
+  };
+
+  const persistCahetRegisteredForCurrentLead = async () => {
+    if (!currentLead || !asksCahetRegistered || !cahetRegistered) return;
+    await supabase
+      .from("leads")
+      .update({ cahet_registered: cahetRegistered === "yes", updated_at: new Date().toISOString() } as any)
+      .eq("id", currentLead.id);
+  };
+
   // ── Finalize a pre-selected disposition after call ends ─────────────────
 
   const finalizeDisposition = async (disposition: string, duration: number) => {
     if (!currentLead) return;
+    if (asksCnetAppeared && !cnetAppeared) {
+      toast({ title: "CNET required", description: "Mark whether the B.Sc Nursing lead appeared for CNET first.", variant: "destructive" });
+      setCallState(prev => ({ ...prev, status: "ended" }));
+      return;
+    }
+    if (asksCahetRegistered && !cahetRegistered) {
+      toast({ title: "CAHET required", description: "Mark whether the BPT/BMRIT lead registered for CAHET first.", variant: "destructive" });
+      setCallState(prev => ({ ...prev, status: "ended" }));
+      return;
+    }
 
     // Route through the merge RPC keyed on cloud_call_uuid so this manual
     // save lands on the same row as the voice-agent's bridge-hangup webhook
@@ -828,6 +876,9 @@ export default function CloudDialer() {
         p_call_source:   "cloud_dialer",
       });
     }
+
+    await persistCnetAppearedForCurrentLead();
+    await persistCahetRegisteredForCurrentLead();
 
     // Mark pending followups as completed (clears overdue status)
     await completePendingFollowupsForCurrentLead();
@@ -862,6 +913,14 @@ export default function CloudDialer() {
 
   const markDisposition = async (disposition: string) => {
     if (!currentLead) return;
+    if (asksCnetAppeared && !cnetAppeared) {
+      toast({ title: "CNET required", description: "Mark whether the B.Sc Nursing lead appeared for CNET first.", variant: "destructive" });
+      return;
+    }
+    if (asksCahetRegistered && !cahetRegistered) {
+      toast({ title: "CAHET required", description: "Mark whether the BPT/BMRIT lead registered for CAHET first.", variant: "destructive" });
+      return;
+    }
 
     // Log to call_logs via the merge RPC — see finalizeDisposition for why.
     const callUuid = callIdRef.current;
@@ -890,6 +949,9 @@ export default function CloudDialer() {
         p_call_source:   "cloud_dialer",
       });
     }
+
+    await persistCnetAppearedForCurrentLead();
+    await persistCahetRegisteredForCurrentLead();
 
     // Mark pending followups as completed (clears overdue status)
     await completePendingFollowupsForCurrentLead();
@@ -1367,12 +1429,60 @@ export default function CloudDialer() {
                   <p className="text-xs font-semibold text-primary uppercase tracking-wide">
                     {callState.status === "connected" ? "Mark during call" : "Mark outcome"}
                   </p>
+                  {asksCnetAppeared && (
+                    <div className="rounded-lg border border-blue-200 bg-blue-50/70 p-2 dark:border-blue-900/50 dark:bg-blue-950/20">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-800 dark:text-blue-200 mb-1.5">
+                        CNET appeared? <span className="text-destructive">*</span>
+                      </p>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {(["yes", "no"] as const).map(value => (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => setCnetAppeared(value)}
+                            className={`rounded-md border px-2 py-1.5 text-[11px] font-medium transition-colors ${
+                              cnetAppeared === value
+                                ? "border-blue-600 bg-blue-600 text-white"
+                                : "border-blue-200 bg-background text-foreground hover:bg-blue-50 dark:border-blue-900"
+                            }`}
+                          >
+                            {value === "yes" ? "Yes" : "No"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {asksCahetRegistered && (
+                    <div className="rounded-lg border border-rose-200 bg-rose-50/70 p-2 dark:border-rose-900/50 dark:bg-rose-950/20">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-rose-800 dark:text-rose-200 mb-1.5">
+                        Registered for CAHET? <span className="text-destructive">*</span>
+                      </p>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {(["yes", "no"] as const).map(value => (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => setCahetRegistered(value)}
+                            className={`rounded-md border px-2 py-1.5 text-[11px] font-medium transition-colors ${
+                              cahetRegistered === value
+                                ? "border-rose-600 bg-rose-600 text-white"
+                                : "border-rose-200 bg-background text-foreground hover:bg-rose-50 dark:border-rose-900"
+                            }`}
+                          >
+                            {value === "yes" ? "Yes" : "No"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-2">
                     {CONNECTED_DISPOSITIONS.map(d => (
                       <button key={d.value} onClick={() => dispoOnClick(d.value)}
+                        disabled={qualifierRequiredUnanswered}
                         className={`flex items-center justify-center gap-1.5 min-h-[48px] px-3 rounded-xl border text-sm font-medium transition-colors ${
                           callState.status === "connected" && callState.disposition === d.value
                             ? "ring-2 ring-primary bg-primary/10 border-primary" : d.color
+                        } ${qualifierRequiredUnanswered ? "opacity-50 cursor-not-allowed" : ""
                         }`}>
                         <d.icon className="h-4 w-4 shrink-0" />{d.label}
                       </button>
@@ -1895,14 +2005,62 @@ export default function CloudDialer() {
                           </div>
                         )}
                       </div>
+                      {asksCnetAppeared && (
+                        <div className="mb-2 rounded-lg border border-blue-200 bg-blue-50/70 p-2 dark:border-blue-900/50 dark:bg-blue-950/20">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-800 dark:text-blue-200 mb-1.5">
+                            CNET appeared? <span className="text-destructive">*</span>
+                          </p>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            {(["yes", "no"] as const).map(value => (
+                              <button
+                                key={value}
+                                type="button"
+                                onClick={() => setCnetAppeared(value)}
+                                className={`rounded-md border px-2 py-1.5 text-[11px] font-medium transition-colors ${
+                                  cnetAppeared === value
+                                    ? "border-blue-600 bg-blue-600 text-white"
+                                    : "border-blue-200 bg-background text-foreground hover:bg-blue-50 dark:border-blue-900"
+                                }`}
+                              >
+                                {value === "yes" ? "Yes" : "No"}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {asksCahetRegistered && (
+                        <div className="mb-2 rounded-lg border border-rose-200 bg-rose-50/70 p-2 dark:border-rose-900/50 dark:bg-rose-950/20">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-rose-800 dark:text-rose-200 mb-1.5">
+                            Registered for CAHET? <span className="text-destructive">*</span>
+                          </p>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            {(["yes", "no"] as const).map(value => (
+                              <button
+                                key={value}
+                                type="button"
+                                onClick={() => setCahetRegistered(value)}
+                                className={`rounded-md border px-2 py-1.5 text-[11px] font-medium transition-colors ${
+                                  cahetRegistered === value
+                                    ? "border-rose-600 bg-rose-600 text-white"
+                                    : "border-rose-200 bg-background text-foreground hover:bg-rose-50 dark:border-rose-900"
+                                }`}
+                              >
+                                {value === "yes" ? "Yes" : "No"}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       <div className="flex flex-wrap gap-1.5">
                         {CONNECTED_DISPOSITIONS.map(d => (
                           <button key={d.value}
                             onClick={() => callState.status === "connected" ? preSelectDisposition(d.value) : markDisposition(d.value)}
+                            disabled={qualifierRequiredUnanswered}
                             className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${
                               callState.status === "connected" && callState.disposition === d.value
                                 ? "ring-2 ring-primary bg-primary/10 border-primary"
                                 : d.color
+                            } ${qualifierRequiredUnanswered ? "opacity-50 cursor-not-allowed" : ""
                             }`}>
                             <d.icon className="h-3 w-3" />{d.label}
                           </button>

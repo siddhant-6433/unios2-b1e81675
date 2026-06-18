@@ -9,6 +9,8 @@ import { PhoneInput } from "@/components/ui/phone-input";
 import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
 import { DuplicateLeadWarning } from "@/components/admissions/DuplicateLeadWarning";
 import { LEAD_SOURCES } from "@/config/leadSources";
+import { isBscNursingCourse } from "@/lib/bscNursing";
+import { isBptOrBmritCourseName } from "@/lib/cahet";
 
 interface AddLeadDialogProps {
   open: boolean;
@@ -23,6 +25,8 @@ interface AddLeadDialogProps {
 const EMPTY_FORM = {
   name: "", phone: "", email: "", guardian_name: "", guardian_phone: "",
   source: "" as string, course_id: "", campus_id: "", counsellor_id: "", consultant_id: "", notes: "",
+  cnet_appeared: "" as "" | "yes" | "no",
+  cahet_registered: "" as "" | "yes" | "no",
 };
 
 export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, onDraftChange }: AddLeadDialogProps) {
@@ -42,6 +46,9 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
   const skipNextAutosave = useRef(false);
 
   const filteredCampuses = getCampusesForCourse(form.course_id || null);
+  const selectedCourse = coursesByDepartment.flatMap(g => g.courses).find(c => c.id === form.course_id);
+  const asksCnetAppeared = isBscNursingCourse(selectedCourse || null);
+  const asksCahetRegistered = isBptOrBmritCourseName(selectedCourse?.name);
 
   // Counsellor list — fetched once on open.
   useEffect(() => {
@@ -129,12 +136,27 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
   // Auto-select campus when course changes
   const handleCourseChange = (courseId: string) => {
     const campuses = getCampusesForCourse(courseId || null);
-    setForm(p => ({ ...p, course_id: courseId, campus_id: campuses.length === 1 ? campuses[0].id : "" }));
+    const course = coursesByDepartment.flatMap(g => g.courses).find(c => c.id === courseId);
+    setForm(p => ({
+      ...p,
+      course_id: courseId,
+      campus_id: campuses.length === 1 ? campuses[0].id : "",
+      cnet_appeared: isBscNursingCourse(course || null) ? p.cnet_appeared : "",
+      cahet_registered: isBptOrBmritCourseName(course?.name) ? p.cahet_registered : "",
+    }));
   };
 
   const handleSubmit = async () => {
     if (!form.name.trim() || !form.phone.trim() || !form.source) {
       toast({ title: "Required", description: "Name, phone and source are required", variant: "destructive" });
+      return;
+    }
+    if (asksCnetAppeared && !form.cnet_appeared) {
+      toast({ title: "Required", description: "Please mark whether the B.Sc Nursing lead appeared for CNET", variant: "destructive" });
+      return;
+    }
+    if (asksCahetRegistered && !form.cahet_registered) {
+      toast({ title: "Required", description: "Please mark whether the BPT/BMRIT lead registered for CAHET", variant: "destructive" });
       return;
     }
     setSaving(true);
@@ -151,6 +173,8 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
       _counsellor_id: form.counsellor_id || null,
       _notes: form.notes.trim() || null,
       _consultant_id: form.source === "consultant" ? (form.consultant_id || null) : null,
+      _cnet_appeared: asksCnetAppeared ? form.cnet_appeared === "yes" : null,
+      _cahet_registered: asksCahetRegistered ? form.cahet_registered === "yes" : null,
     });
     setSaving(false);
     if (error) {
@@ -254,6 +278,52 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
               </select>
             </div>
           </div>
+          {asksCnetAppeared && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3 dark:border-blue-900/50 dark:bg-blue-950/20">
+              <label className="block text-[11px] font-medium text-blue-900 dark:text-blue-200 mb-2">
+                CNET appeared? <span className="text-destructive">*</span>
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {(["yes", "no"] as const).map(value => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setForm(p => ({ ...p, cnet_appeared: value }))}
+                    className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                      form.cnet_appeared === value
+                        ? "border-blue-600 bg-blue-600 text-white"
+                        : "border-blue-200 bg-background text-foreground hover:bg-blue-50 dark:border-blue-900"
+                    }`}
+                  >
+                    {value === "yes" ? "Yes" : "No"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {asksCahetRegistered && (
+            <div className="rounded-xl border border-rose-200 bg-rose-50/60 p-3 dark:border-rose-900/50 dark:bg-rose-950/20">
+              <label className="block text-[11px] font-medium text-rose-900 dark:text-rose-200 mb-2">
+                Registered for CAHET? <span className="text-destructive">*</span>
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {(["yes", "no"] as const).map(value => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setForm(p => ({ ...p, cahet_registered: value }))}
+                    className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                      form.cahet_registered === value
+                        ? "border-rose-600 bg-rose-600 text-white"
+                        : "border-rose-200 bg-background text-foreground hover:bg-rose-50 dark:border-rose-900"
+                    }`}
+                  >
+                    {value === "yes" ? "Yes" : "No"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Campus</label>

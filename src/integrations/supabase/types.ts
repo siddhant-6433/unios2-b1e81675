@@ -6304,7 +6304,9 @@ export type Database = {
           auto_returned_count: number
           campus_id: string | null
           category: string | null
+          cahet_registered: boolean | null
           city: string | null
+          cnet_appeared: boolean | null
           consultant_id: string | null
           counsellor_id: string | null
           course_id: string | null
@@ -6363,7 +6365,9 @@ export type Database = {
           auto_returned_count?: number
           campus_id?: string | null
           category?: string | null
+          cahet_registered?: boolean | null
           city?: string | null
+          cnet_appeared?: boolean | null
           consultant_id?: string | null
           counsellor_id?: string | null
           course_id?: string | null
@@ -6422,7 +6426,9 @@ export type Database = {
           auto_returned_count?: number
           campus_id?: string | null
           category?: string | null
+          cahet_registered?: boolean | null
           city?: string | null
+          cnet_appeared?: boolean | null
           consultant_id?: string | null
           counsellor_id?: string | null
           course_id?: string | null
@@ -10412,7 +10418,10 @@ export type Database = {
       }
       insert_lead: {
         Args: {
+          _cahet_registered?: boolean | null
           _campus_id?: string
+          _cnet_appeared?: boolean | null
+          _consultant_id?: string | null
           _counsellor_id?: string
           _course_id?: string
           _email?: string
