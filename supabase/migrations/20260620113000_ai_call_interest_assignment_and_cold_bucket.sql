@@ -53,7 +53,7 @@ BEGIN
   FROM public.profiles
   WHERE id = v_assigned_to;
 
-  v_team_name := public.fn_team_for_lead(_lead_id);
+  v_team_name := array_to_string(public.fn_teams_for_lead(_lead_id), ', ');
 
   IF v_assigned_user_id IS NOT NULL
      AND NOT EXISTS (
@@ -213,7 +213,7 @@ BEGIN
   FROM public.profiles
   WHERE id = v_assigned_to;
 
-  v_team_name := public.fn_team_for_lead(NEW.lead_id);
+  v_team_name := array_to_string(public.fn_teams_for_lead(NEW.lead_id), ', ');
 
   IF v_assigned_user_id IS NOT NULL
      AND NOT EXISTS (
@@ -273,6 +273,9 @@ DROP TRIGGER IF EXISTS trg_auto_elevate_priority_interested ON public.ai_call_re
 CREATE TRIGGER trg_auto_elevate_priority_interested
   AFTER INSERT OR UPDATE OF status, conversion_probability, disposition ON public.ai_call_records
   FOR EACH ROW EXECUTE FUNCTION public.fn_auto_elevate_priority_interested();
+
+DROP VIEW IF EXISTS public.unassigned_leads_bucket;
+DROP FUNCTION IF EXISTS public.get_unassigned_leads_bucket();
 
 CREATE OR REPLACE FUNCTION public.get_unassigned_leads_bucket()
 RETURNS TABLE (
@@ -379,6 +382,13 @@ AS $$
 $$;
 
 GRANT EXECUTE ON FUNCTION public.get_unassigned_leads_bucket() TO authenticated;
+
+CREATE VIEW public.unassigned_leads_bucket
+WITH (security_invoker = true)
+AS
+  SELECT * FROM public.get_unassigned_leads_bucket();
+
+GRANT SELECT ON public.unassigned_leads_bucket TO authenticated;
 
 DO $$
 DECLARE

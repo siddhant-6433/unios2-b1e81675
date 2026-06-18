@@ -9,6 +9,8 @@ import {
   AlertCircle, MessageSquare, GraduationCap, Globe, FileText, X,
 } from "lucide-react";
 import { SOURCE_LABELS, SOURCE_BADGE_COLORS } from "@/config/leadSources";
+import { isBscNursingCourse } from "@/lib/bscNursing";
+import { isBptOrBmritCourseName } from "@/lib/cahet";
 
 export type CallDisposition =
   | "interested"
@@ -34,6 +36,10 @@ export interface CallDispositionData {
   suppress_auto_whatsapp?: boolean;
   /** Also fire course_info_v1 after the disposition WA template */
   send_course_info?: boolean;
+  /** B.Sc Nursing-only qualifier captured when the lead/course requires CNET context */
+  cnet_appeared?: boolean | null;
+  /** BPT/BMRIT-only qualifier captured when the lead/course requires CAHET context */
+  cahet_registered?: boolean | null;
 }
 
 /**
@@ -216,6 +222,8 @@ export function CallDispositionDialog({
   // opt out of the auto-send or also fire course_info_v1 alongside.
   const [suppressAutoWa, setSuppressAutoWa] = useState(false);
   const [sendCourseInfo, setSendCourseInfo] = useState(false);
+  const [cnetAppeared, setCnetAppeared] = useState<"yes" | "no" | null>(null);
+  const [cahetRegistered, setCahetRegistered] = useState<"yes" | "no" | null>(null);
   // Live elapsed timer for the connected phase. Starts when the parent flips
   // callStatus → "connected" and stops when the dialog closes. Pure UI; the
   // real call duration is whatever Plivo reports at hangup. Declared up here
@@ -245,6 +253,8 @@ export function CallDispositionDialog({
   const dateInputRef = useRef<HTMLInputElement>(null);
 
   const selectedDisp = DISPOSITIONS.find(d => d.value === disposition);
+  const asksCnetAppeared = isBscNursingCourse(courseName || null);
+  const asksCahetRegistered = isBptOrBmritCourseName(courseName);
 
   // Plivo-driven auto-disposition: when the caller signals busy / no_answer /
   // failed via callStatus, pre-select the matching disposition pill so the
@@ -283,10 +293,14 @@ export function CallDispositionDialog({
     setFutureSession(null);
     setSuppressAutoWa(false);
     setSendCourseInfo(false);
+    setCnetAppeared(null);
+    setCahetRegistered(null);
   };
 
   const handleSubmit = async (opts: { scheduleFollowup?: boolean; scheduleVisit?: boolean } = {}) => {
     if (!disposition) return;
+    if (asksCnetAppeared && !cnetAppeared) return;
+    if (asksCahetRegistered && !cahetRegistered) return;
     setSaving(true);
     const visit = opts.scheduleVisit && visitDate && visitTime
       ? { visit_date: new Date(`${visitDate}T${visitTime}:00`).toISOString(), campus_id: visitCampusId }
@@ -304,6 +318,8 @@ export function CallDispositionDialog({
       future_eligible_session: disposition === "ineligible" ? futureSession : null,
       suppress_auto_whatsapp: suppressAutoWa,
       send_course_info: sendCourseInfo,
+      cnet_appeared: asksCnetAppeared ? cnetAppeared === "yes" : null,
+      cahet_registered: asksCahetRegistered ? cahetRegistered === "yes" : null,
     });
     setSaving(false);
     resetState();
@@ -845,6 +861,54 @@ export function CallDispositionDialog({
             );
           })()}
 
+          {asksCnetAppeared && disposition && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3 dark:border-blue-900/50 dark:bg-blue-950/20">
+              <label className="block text-xs font-semibold text-blue-900 dark:text-blue-200 mb-2">
+                CNET appeared? <span className="text-destructive">*</span>
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {(["yes", "no"] as const).map(value => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setCnetAppeared(value)}
+                    className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                      cnetAppeared === value
+                        ? "border-blue-600 bg-blue-600 text-white"
+                        : "border-blue-200 bg-background text-foreground hover:bg-blue-50 dark:border-blue-900"
+                    }`}
+                  >
+                    {value === "yes" ? "Yes" : "No"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {asksCahetRegistered && disposition && (
+            <div className="rounded-xl border border-rose-200 bg-rose-50/60 p-3 dark:border-rose-900/50 dark:bg-rose-950/20">
+              <label className="block text-xs font-semibold text-rose-900 dark:text-rose-200 mb-2">
+                Registered for CAHET? <span className="text-destructive">*</span>
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {(["yes", "no"] as const).map(value => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setCahetRegistered(value)}
+                    className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                      cahetRegistered === value
+                        ? "border-rose-600 bg-rose-600 text-white"
+                        : "border-rose-200 bg-background text-foreground hover:bg-rose-50 dark:border-rose-900"
+                    }`}
+                  >
+                    {value === "yes" ? "Yes" : "No"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Inline follow-up scheduling — mandatory for actionable dispositions */}
           {(() => {
             const noFollowupRequired = ["not_interested", "ineligible", "wrong_number", "do_not_contact"];
@@ -929,13 +993,16 @@ export function CallDispositionDialog({
           {(() => {
             const noFollowupRequired = ["not_interested", "ineligible", "wrong_number", "do_not_contact"];
             const requiresAction = disposition && !noFollowupRequired.includes(disposition);
+            const qualifierRequiredUnanswered =
+              (asksCnetAppeared && !cnetAppeared) ||
+              (asksCahetRegistered && !cahetRegistered);
 
             return (
               <div className="flex flex-col gap-2 pt-1">
                 {requiresAction && showVisitForm && (
                   <Button
                     onClick={() => handleSubmit({ scheduleVisit: true })}
-                    disabled={!disposition || !visitCampusId || saving}
+                    disabled={!disposition || !visitCampusId || qualifierRequiredUnanswered || saving}
                     className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700"
                   >
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />}
@@ -945,7 +1012,7 @@ export function CallDispositionDialog({
                 {requiresAction && !showVisitForm && (
                   <Button
                     onClick={() => handleSubmit({ scheduleFollowup: true })}
-                    disabled={!disposition || saving}
+                    disabled={!disposition || qualifierRequiredUnanswered || saving}
                     className="w-full gap-2"
                   >
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock className="h-4 w-4" />}
@@ -956,7 +1023,7 @@ export function CallDispositionDialog({
                   <Button
                     variant="outline"
                     onClick={() => handleSubmit({})}
-                    disabled={!disposition || saving}
+                    disabled={!disposition || qualifierRequiredUnanswered || saving}
                     className="w-full"
                   >
                     {saving ? "Saving..." : "Save"}

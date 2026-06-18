@@ -125,6 +125,30 @@ describe("recordCallDisposition — single consolidated RPC", () => {
     expect(params.p_followup_activity_desc).toContain("Follow-up scheduled");
   });
 
+  it("passes the B.Sc Nursing CNET appeared answer when captured", async () => {
+    const { client, rpcCalls } = makeMockSupabase();
+    const data: CallDispositionData = {
+      ...interestedNoFollowup,
+      cnet_appeared: false,
+    };
+
+    await recordCallDisposition(baseArgs(data, client));
+
+    expect(rpcCalls[0].params.p_cnet_appeared).toBe(false);
+  });
+
+  it("passes the BPT/BMRIT CAHET registered answer when captured", async () => {
+    const { client, rpcCalls } = makeMockSupabase();
+    const data: CallDispositionData = {
+      ...interestedNoFollowup,
+      cahet_registered: true,
+    };
+
+    await recordCallDisposition(baseArgs(data, client));
+
+    expect(rpcCalls[0].params.p_cahet_registered).toBe(true);
+  });
+
   it("resolves the deferred stage + future session for an ineligible-but-future lead", async () => {
     // Arrange
     const { client, rpcCalls } = makeMockSupabase();
