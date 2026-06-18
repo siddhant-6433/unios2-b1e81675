@@ -30,12 +30,20 @@ describe("Applications funnel stage", () => {
     }))).toBe("pre_admitted");
   });
 
-  it("treats approved paid applications as pending offer even when lead_stage is stale", () => {
+  it("treats approved applications as pending offer even when lead_stage is stale", () => {
     expect(applicationFunnelStageOf(app({
       status: "approved",
       payment_status: "paid",
-      lead_stage: "application_submitted",
-      has_offer: false,
+      lead_stage: "counsellor_call",
     }))).toBe("approved");
+  });
+
+  it("keeps offer-sent ahead of approved once an offer exists", () => {
+    expect(applicationFunnelStageOf(app({
+      status: "approved",
+      payment_status: "paid",
+      lead_stage: "counsellor_call",
+      has_offer: true,
+    }))).toBe("offer_sent");
   });
 });

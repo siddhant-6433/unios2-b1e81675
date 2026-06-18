@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCampus } from "@/contexts/CampusContext";
 import { useToast } from "@/hooks/use-toast";
-import { School, GraduationCap, Search, Loader2, UserPlus, CheckCircle, AlertTriangle, ListPlus, Calendar, ArrowUpDown } from "lucide-react";
+import { School, GraduationCap, Search, Loader2, UserPlus, CheckCircle, AlertTriangle, ListPlus, Calendar, ArrowUpDown, Bot, PhoneOff } from "lucide-react";
 import { jdCategoryHint } from "@/lib/jdCategoryHint";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
 import { isBptOrBmritCourse } from "@/components/leads/CahetRegisterDialog";
@@ -73,6 +73,9 @@ interface BucketLead {
   last_ai_summary: string | null;
   last_ai_disposition: string | null;
   last_ai_conversion_pct: number | null;
+  ai_called: boolean;
+  ai_queue_status: string | null;
+  ai_not_called_reason: string | null;
   has_paid_or_submitted_application: boolean;
 }
 
@@ -89,6 +92,8 @@ interface Counsellor {
 type FilterMode = "include" | "exclude";
 type ApplicationFilter = "all" | "none_paid_or_submitted" | "has_paid_or_submitted";
 type BucketSortOrder = "newest" | "oldest";
+type AiCallFilter = "all" | "called" | "not_called";
+type AiCallBreakdown = { called: number; not_called: number };
 
 const SOURCE_LABELS: Record<string, string> = {
   website: "Website", meta_ads: "Meta Ads", google_ads: "Google Ads",
@@ -141,6 +146,41 @@ function SourceChips({ breakdown, onPick }: SourceChipsProps) {
   );
 }
 
+function AiCallChips({
+  breakdown,
+  active,
+  onPick,
+}: {
+  breakdown: AiCallBreakdown;
+  active: AiCallFilter;
+  onPick: (filter: Exclude<AiCallFilter, "all">) => void;
+}) {
+  const chips: Array<{ key: Exclude<AiCallFilter, "all">; label: string; count: number; icon: typeof Bot; cls: string }> = [
+    { key: "called", label: "AI Called", count: breakdown.called, icon: Bot, cls: "bg-sky-50 text-sky-700 ring-sky-200 dark:bg-sky-950/30 dark:text-sky-300 dark:ring-sky-900" },
+    { key: "not_called", label: "Not Called", count: breakdown.not_called, icon: PhoneOff, cls: "bg-slate-50 text-slate-700 ring-slate-200 dark:bg-slate-950/30 dark:text-slate-300 dark:ring-slate-900" },
+  ];
+  return (
+    <div className="mt-3 flex flex-wrap gap-1.5">
+      {chips.map((c) => {
+        const Icon = c.icon;
+        return (
+          <button
+            key={c.key}
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onPick(c.key); }}
+            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset transition-opacity ${c.cls} ${active === c.key ? "ring-2" : ""} ${c.count === 0 ? "opacity-50" : "hover:opacity-80"}`}
+            title={`${c.label}: ${c.count}`}
+          >
+            <Icon className="h-3 w-3" />
+            <span>{c.label}</span>
+            <span className="font-bold">{c.count}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function LeadBuckets() {
   const { user, role, profile } = useAuth();
   const { selectedCampusId } = useCampus();
@@ -163,6 +203,7 @@ export default function LeadBuckets() {
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [sourceFilterMode, setSourceFilterMode] = useState<FilterMode>("include");
   const [applicationFilter, setApplicationFilter] = useState<ApplicationFilter>("all");
+  const [aiCallFilter, setAiCallFilter] = useState<AiCallFilter>("all");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [sortOrder, setSortOrder] = useState<BucketSortOrder>("newest");
@@ -189,6 +230,10 @@ export default function LeadBuckets() {
   const [collegeSources, setCollegeSources] = useState<SourceBreakdown>(emptyBreakdown);
   const [nimtSources, setNimtSources] = useState<SourceBreakdown>(emptyBreakdown);
   const [miraiSources, setMiraiSources] = useState<SourceBreakdown>(emptyBreakdown);
+  const emptyAiBreakdown: AiCallBreakdown = { called: 0, not_called: 0 };
+  const [collegeAiCalls, setCollegeAiCalls] = useState<AiCallBreakdown>(emptyAiBreakdown);
+  const [nimtAiCalls, setNimtAiCalls] = useState<AiCallBreakdown>(emptyAiBreakdown);
+  const [miraiAiCalls, setMiraiAiCalls] = useState<AiCallBreakdown>(emptyAiBreakdown);
 
   // Batched CAHET registration status per lead — populated after each page fetch
   // to avoid per-row cahet_registrations queries on render.
@@ -219,8 +264,12 @@ export default function LeadBuckets() {
     // GROUP BY pass over get_unassigned_leads_bucket(). Replaces the old
     // 15-query fan-out (3 bucket totals + 3×4 source breakdown) that each
     // re-ran the full 6-table join — the primary cause of slow load on mobile.
-    const { data, error } = await supabase.rpc("unassigned_bucket_counts" as any);
+    const [{ data, error }, { data: aiRows, error: aiError }] = await Promise.all([
+      supabase.rpc("unassigned_bucket_counts" as any),
+      supabase.rpc("unassigned_bucket_ai_call_counts" as any),
+    ]);
     if (error) { console.error("Bucket counts error:", error); return; }
+    if (aiError) { console.error("Bucket AI-call counts error:", aiError); }
 
     const rows = (data || []) as { bucket_key: string | null; source_key: string | null; n: number }[];
     const sourceKeys: (keyof SourceBreakdown)[] = ["meta_ads", "google_ads", "website", "web_chat"];
@@ -246,6 +295,21 @@ export default function LeadBuckets() {
     setCollegeSources(next.college);
     setNimtSources(next.nimt);
     setMiraiSources(next.mirai);
+
+    const aiNext: Record<string, AiCallBreakdown> = {
+      college: { ...emptyAiBreakdown },
+      nimt: { ...emptyAiBreakdown },
+      mirai: { ...emptyAiBreakdown },
+    };
+    for (const r of (aiRows || []) as { bucket_key: string | null; ai_called: boolean | null; n: number }[]) {
+      const bk = r.bucket_key;
+      if (!bk || !aiNext[bk]) continue;
+      if (r.ai_called) aiNext[bk].called += Number(r.n);
+      else aiNext[bk].not_called += Number(r.n);
+    }
+    setCollegeAiCalls(aiNext.college);
+    setNimtAiCalls(aiNext.nimt);
+    setMiraiAiCalls(aiNext.mirai);
   };
 
   // Apply the active bucket + course/source/search predicates to a query.
@@ -284,6 +348,11 @@ export default function LeadBuckets() {
     } else if (applicationFilter === "has_paid_or_submitted") {
       q = q.eq("has_paid_or_submitted_application", true);
     }
+    if (aiCallFilter === "called") {
+      q = q.eq("ai_called", true);
+    } else if (aiCallFilter === "not_called") {
+      q = q.eq("ai_called", false);
+    }
     if (fromDate) q = q.gte("created_at", `${fromDate}T00:00:00`);
     if (toDate) q = q.lte("created_at", `${toDate}T23:59:59.999`);
     // Strip PostgREST filter-syntax chars so user input can't break the or().
@@ -305,8 +374,9 @@ export default function LeadBuckets() {
       .from("unassigned_leads_bucket" as any)
       .select(
         `id, name, phone, stage, source, course_name, campus_name, created_at,
-         lead_score, lead_temperature, bucket, jd_category, last_ai_summary,
-         last_ai_disposition, last_ai_conversion_pct, has_paid_or_submitted_application`
+         lead_score, lead_temperature, bucket, jd_category, ai_called, ai_queue_status,
+         ai_not_called_reason, last_ai_summary, last_ai_disposition,
+         last_ai_conversion_pct, has_paid_or_submitted_application`
       )
       .order("created_at", { ascending })
       .order("id", { ascending })
@@ -409,7 +479,7 @@ export default function LeadBuckets() {
   // either changes (not just on bucket switch).
   useEffect(() => { fetchFacets(); }, [activeBucket, schoolFilter, sourceFilter, sourceFilterMode, courseFilter, courseFilterMode, applicationFilter, selectedCampusId]);
   // Reload page 0 whenever the bucket or any server-side filter changes.
-  useEffect(() => { fetchPage(true); }, [activeBucket, schoolFilter, courseFilter, courseFilterMode, sourceFilter, sourceFilterMode, applicationFilter, fromDate, toDate, sortOrder, debouncedSearch, selectedCampusId]);
+  useEffect(() => { fetchPage(true); }, [activeBucket, schoolFilter, courseFilter, courseFilterMode, sourceFilter, sourceFilterMode, applicationFilter, aiCallFilter, fromDate, toDate, sortOrder, debouncedSearch, selectedCampusId]);
 
   // Reset course filter when the bucket / school sub-filter changes — a
   // course relevant in the college bucket is rarely relevant in the school
@@ -508,6 +578,7 @@ export default function LeadBuckets() {
     if (!hasMore) return loadedFilteredCount;
     if (fromDate || toDate) return null;
     if (debouncedSearch) return null;
+    if (aiCallFilter !== "all") return null;
     if (courseFilterMode === "exclude" || sourceFilterMode === "exclude") {
       return null;
     }
@@ -626,6 +697,7 @@ export default function LeadBuckets() {
       course: courseFilter,
       course_mode: courseFilterMode,
       application_filter: applicationFilter,
+      ai_call_filter: aiCallFilter,
       from_date: fromDate || null,
       to_date: toDate || null,
       search: search || null,
@@ -681,7 +753,7 @@ export default function LeadBuckets() {
       <div className="flex gap-3">
         <Card
           className={`flex-1 cursor-pointer transition-all hover:shadow-sm ${activeBucket === "college" ? "ring-2 ring-primary/40 bg-primary/5" : "border-border/60"}`}
-          onClick={() => { setActiveBucket("college"); setSchoolFilter("all"); }}
+          onClick={() => { setActiveBucket("college"); setSchoolFilter("all"); setAiCallFilter("all"); }}
         >
           <CardContent className="p-4">
             <SourceChips breakdown={collegeSources} onPick={(src) => { setActiveBucket("college"); setSchoolFilter("all"); setCourseFilter("all"); setSourceFilter(src); }} />
@@ -695,12 +767,17 @@ export default function LeadBuckets() {
               </div>
               <span className="text-xl font-bold text-foreground">{collegeCount}</span>
             </div>
+            <AiCallChips
+              breakdown={collegeAiCalls}
+              active={activeBucket === "college" ? aiCallFilter : "all"}
+              onPick={(filter) => { setActiveBucket("college"); setSchoolFilter("all"); setAiCallFilter(filter); }}
+            />
           </CardContent>
         </Card>
 
         <Card
           className={`flex-1 cursor-pointer transition-all hover:shadow-sm ${activeBucket === "school" && schoolFilter !== "mirai" ? "ring-2 ring-primary/40 bg-primary/5" : "border-border/60"}`}
-          onClick={() => { setActiveBucket("school"); setSchoolFilter("nimt"); }}
+          onClick={() => { setActiveBucket("school"); setSchoolFilter("nimt"); setAiCallFilter("all"); }}
         >
           <CardContent className="p-4">
             <SourceChips breakdown={nimtSources} onPick={(src) => { setActiveBucket("school"); setSchoolFilter("nimt"); setCourseFilter("all"); setSourceFilter(src); }} />
@@ -714,12 +791,17 @@ export default function LeadBuckets() {
               </div>
               <span className="text-xl font-bold text-foreground">{nimtSchoolCount}</span>
             </div>
+            <AiCallChips
+              breakdown={nimtAiCalls}
+              active={activeBucket === "school" && schoolFilter !== "mirai" ? aiCallFilter : "all"}
+              onPick={(filter) => { setActiveBucket("school"); setSchoolFilter("nimt"); setAiCallFilter(filter); }}
+            />
           </CardContent>
         </Card>
 
         <Card
           className={`flex-1 cursor-pointer transition-all hover:shadow-sm ${activeBucket === "school" && schoolFilter === "mirai" ? "ring-2 ring-violet-400/60 bg-violet-50/50 dark:bg-violet-950/10" : "border-border/60"}`}
-          onClick={() => { setActiveBucket("school"); setSchoolFilter("mirai"); }}
+          onClick={() => { setActiveBucket("school"); setSchoolFilter("mirai"); setAiCallFilter("all"); }}
         >
           <CardContent className="p-4">
             <SourceChips breakdown={miraiSources} onPick={(src) => { setActiveBucket("school"); setSchoolFilter("mirai"); setCourseFilter("all"); setSourceFilter(src); }} />
@@ -733,6 +815,11 @@ export default function LeadBuckets() {
               </div>
               <span className="text-xl font-bold text-violet-600">{miraiSchoolCount}</span>
             </div>
+            <AiCallChips
+              breakdown={miraiAiCalls}
+              active={activeBucket === "school" && schoolFilter === "mirai" ? aiCallFilter : "all"}
+              onPick={(filter) => { setActiveBucket("school"); setSchoolFilter("mirai"); setAiCallFilter(filter); }}
+            />
           </CardContent>
         </Card>
       </div>
@@ -890,6 +977,26 @@ export default function LeadBuckets() {
             Clear application
           </Button>
         )}
+        <div className="inline-flex rounded-xl border border-input bg-card p-0.5" title="Filter by AI call status">
+          {([
+            ["all", "All AI"] as const,
+            ["called", "AI Called"] as const,
+            ["not_called", "Not Called"] as const,
+          ]).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setAiCallFilter(value)}
+              className={`rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+                aiCallFilter === value
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <div className="flex items-center gap-1.5 rounded-xl border border-input bg-card px-3 py-2">
           <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
           <input
@@ -992,6 +1099,14 @@ export default function LeadBuckets() {
                   <td className="px-4 py-3">
                     <p className="font-medium text-foreground flex items-center gap-1.5 flex-wrap">
                       {lead.name}
+                      <Badge
+                        variant="outline"
+                        className={`gap-1 text-[10px] ${lead.ai_called ? "border-sky-200 bg-sky-50 text-sky-700" : "border-slate-200 bg-slate-50 text-slate-600"}`}
+                        title={lead.ai_called ? "AI call was initiated" : lead.ai_not_called_reason || "AI call not initiated"}
+                      >
+                        {lead.ai_called ? <Bot className="h-3 w-3" /> : <PhoneOff className="h-3 w-3" />}
+                        {lead.ai_called ? "AI Called" : "Not Called"}
+                      </Badge>
                       <CahetPendingBadge
                         leadId={lead.id}
                         leadName={lead.name}
@@ -1000,6 +1115,15 @@ export default function LeadBuckets() {
                         registeredOverride={cahetStatusMap.has(lead.id) ? (cahetStatusMap.get(lead.id) ?? null) : undefined}
                       />
                     </p>
+                    {!lead.ai_called && lead.ai_not_called_reason && (
+                      <p className="mt-0.5 flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
+                        <PhoneOff className="h-3 w-3" />
+                        <span className="font-semibold">AI not called:</span>
+                        <span className="truncate max-w-[220px]" title={lead.ai_not_called_reason}>
+                          {lead.ai_not_called_reason}
+                        </span>
+                      </p>
+                    )}
                     {lead.jd_category && (() => {
                       const hint = jdCategoryHint(lead.jd_category);
                       return (

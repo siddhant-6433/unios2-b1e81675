@@ -66,9 +66,28 @@ interface Props {
   activeStage: LeadFunnelStage | "leakage" | null;
   /** Click handler — pass the bucket key or null to clear. */
   onStageClick: (stage: LeadFunnelStage | "leakage" | null) => void;
+  /** Split of new_lead rows by counsellor assignment. */
+  newLeadAssignmentCounts?: {
+    assigned: number;
+    unassigned: number;
+    unassigned_ai_called?: number;
+    unassigned_not_ai_called?: number;
+  };
+  /** Active assigned/unassigned untouched filter, or null for no split filter. */
+  activeNewLeadAssignment?: "assigned" | "unassigned" | null;
+  /** Click handler for the assigned/unassigned untouched split. */
+  onNewLeadAssignmentClick?: (assignment: "assigned" | "unassigned" | null) => void;
 }
 
-export function LeadPipeline({ stageCounts, extraHot = 0, activeStage, onStageClick }: Props) {
+export function LeadPipeline({
+  stageCounts,
+  extraHot = 0,
+  activeStage,
+  onStageClick,
+  newLeadAssignmentCounts,
+  activeNewLeadAssignment = null,
+  onNewLeadAssignmentClick,
+}: Props) {
   // Bucket counts by collapsing raw lead_stage rows into the 7 funnel keys.
   const bucket: Record<LeadFunnelStage, number> = {
     untouched: 0, contacted: 0, hot: 0, applied: 0, approved: 0, offered: 0, admitted: 0,
@@ -104,6 +123,12 @@ export function LeadPipeline({ stageCounts, extraHot = 0, activeStage, onStageCl
     leakageTotal += c;
   }
   const hotCount = bucket.hot;
+  const untouchedSplit = newLeadAssignmentCounts ?? {
+    assigned: bucket.untouched,
+    unassigned: 0,
+    unassigned_ai_called: 0,
+    unassigned_not_ai_called: 0,
+  };
 
   return (
     <Card className="rounded-2xl border-border/40 shadow-none">
@@ -173,30 +198,82 @@ export function LeadPipeline({ stageCounts, extraHot = 0, activeStage, onStageCl
                     <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 mt-0.5" />
                   </div>
                 )}
-                <button
-                  onClick={() => onStageClick(isActive ? null : stage)}
-                  className={`group relative rounded-xl border transition-all text-left p-3 shrink-0 ${
-                    isActive
-                      ? `${meta.tint} ring-2 ${meta.ring} border-transparent`
-                      : "border-border/50 bg-card hover:bg-muted/30 hover:border-border"
-                  }`}
-                  style={{ flex: `1 1 ${widthBasis}px`, minWidth: 96 }}
-                  title={`${stuck.toLocaleString("en-IN")} currently at ${meta.label} · ${r.toLocaleString("en-IN")} reached this stage or beyond`}
-                >
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <div className={`w-7 h-7 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
-                      <Icon className={`h-3.5 w-3.5 ${meta.iconColor}`} />
+                {stage === "untouched" ? (
+                  <div
+                    className="grid grid-cols-2 gap-1.5 shrink-0"
+                    style={{ flex: `1 1 ${Math.max(widthBasis + 92, 210)}px`, minWidth: 210 }}
+                  >
+                    {([
+                      {
+                        key: "unassigned" as const,
+                        label: "Unassigned",
+                        count: untouchedSplit.unassigned,
+                        title: "new leads not assigned to a counsellor",
+                        detail: `${(untouchedSplit.unassigned_ai_called ?? 0).toLocaleString("en-IN")} AI called / ${(untouchedSplit.unassigned_not_ai_called ?? 0).toLocaleString("en-IN")} not called`,
+                      },
+                      {
+                        key: "assigned" as const,
+                        label: "Assigned",
+                        count: untouchedSplit.assigned,
+                        title: "new leads assigned to counsellors",
+                        detail: `${stuck.toLocaleString("en-IN")} total untouched`,
+                      },
+                    ]).map((part) => {
+                      const partActive = activeNewLeadAssignment === part.key;
+                      return (
+                        <button
+                          key={part.key}
+                          onClick={() => onNewLeadAssignmentClick?.(partActive ? null : part.key)}
+                          className={`group relative rounded-xl border transition-all text-left p-3 min-w-0 ${
+                            partActive
+                              ? `${meta.tint} ring-2 ${meta.ring} border-transparent`
+                              : "border-border/50 bg-card hover:bg-muted/30 hover:border-border"
+                          }`}
+                          title={`${part.count.toLocaleString("en-IN")} ${part.title}`}
+                        >
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <div className={`w-7 h-7 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
+                              <Icon className={`h-3.5 w-3.5 ${meta.iconColor}`} />
+                            </div>
+                            <p className="text-2xl font-bold text-foreground leading-none tracking-tight">
+                              {part.count.toLocaleString("en-IN")}
+                            </p>
+                          </div>
+                          <p className="text-[11px] font-medium text-foreground/80 truncate">{part.label} untouched</p>
+                          <div className="mt-2 h-1 rounded-full bg-muted/60 overflow-hidden">
+                            <div className={`h-full ${meta.bar} transition-all`} style={{ width: `${reachPct}%` }} />
+                          </div>
+                          <p className="mt-1.5 text-[10px] text-muted-foreground truncate">{part.detail}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => onStageClick(isActive ? null : stage)}
+                    className={`group relative rounded-xl border transition-all text-left p-3 shrink-0 ${
+                      isActive
+                        ? `${meta.tint} ring-2 ${meta.ring} border-transparent`
+                        : "border-border/50 bg-card hover:bg-muted/30 hover:border-border"
+                    }`}
+                    style={{ flex: `1 1 ${widthBasis}px`, minWidth: 96 }}
+                    title={`${stuck.toLocaleString("en-IN")} currently at ${meta.label} · ${r.toLocaleString("en-IN")} reached this stage or beyond`}
+                  >
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <div className={`w-7 h-7 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
+                        <Icon className={`h-3.5 w-3.5 ${meta.iconColor}`} />
+                      </div>
+                      <p className="text-2xl font-bold text-foreground leading-none tracking-tight">{stuck.toLocaleString("en-IN")}</p>
                     </div>
-                    <p className="text-2xl font-bold text-foreground leading-none tracking-tight">{stuck.toLocaleString("en-IN")}</p>
-                  </div>
-                  <p className="text-[11px] font-medium text-foreground/80 truncate">{meta.label}</p>
-                  <div className="mt-2 h-1 rounded-full bg-muted/60 overflow-hidden">
-                    <div className={`h-full ${meta.bar} transition-all`} style={{ width: `${reachPct}%` }} />
-                  </div>
-                  <p className="mt-1.5 text-[10px] text-muted-foreground">
-                    <span className="font-semibold text-foreground/70">{r.toLocaleString("en-IN")}</span> reached
-                  </p>
-                </button>
+                    <p className="text-[11px] font-medium text-foreground/80 truncate">{meta.label}</p>
+                    <div className="mt-2 h-1 rounded-full bg-muted/60 overflow-hidden">
+                      <div className={`h-full ${meta.bar} transition-all`} style={{ width: `${reachPct}%` }} />
+                    </div>
+                    <p className="mt-1.5 text-[10px] text-muted-foreground">
+                      <span className="font-semibold text-foreground/70">{r.toLocaleString("en-IN")}</span> reached
+                    </p>
+                  </button>
+                )}
               </Fragment>
             );
           })}

@@ -118,6 +118,7 @@ const stageIcons: Record<string, typeof Users> = {
 
 type LeadInstitutionType = "all" | "school" | "college";
 type FilterMode = "include" | "exclude";
+type LeadSortOrder = "newest" | "oldest";
 type ApplicationStageFilter =
   | "pre_application"
   | "no_application"
@@ -126,6 +127,7 @@ type ApplicationStageFilter =
   | "application_submitted"
   | "token_fee_paid";
 type ApplicationStageLeadScope = { mode: "include" | "exclude"; ids: Set<string> };
+type NewLeadAssignmentFilter = "assigned" | "unassigned";
 
 const APPLICATION_STAGE_OPTIONS: { value: ApplicationStageFilter; label: string; description: string }[] = [
   {
@@ -266,6 +268,7 @@ const Admissions = () => {
   const [visitLeadIds, setVisitLeadIds] = useState<Set<string> | null>(null);
   const [actionLeadIds, setActionLeadIds] = useState<Set<string> | null>(null);
   const [actionBucketLabel, setActionBucketLabel] = useState<string>("");
+  const [newLeadAssignmentFilter, setNewLeadAssignmentFilter] = useState<NewLeadAssignmentFilter | null>(null);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
   const [leadPageCursors, setLeadPageCursors] = useState<Record<number, { created_at: string; id: string }>>({});
@@ -318,6 +321,7 @@ const Admissions = () => {
   const [pendingNotCalledFilter, setPendingNotCalledFilter] = useState<string | null>(null);
   const [fromDate, setFromDate] = useState<string>("");
   const [toDate, setToDate] = useState<string>("");
+  const [leadSortOrder, setLeadSortOrder] = useState<LeadSortOrder>("newest");
 
   // Read URL params on mount — store in ref to survive re-renders.
   // Supports drill-down from external dashboards (e.g. Publisher Analytics):
@@ -613,6 +617,13 @@ const Admissions = () => {
     if (roleFilter !== "all") query = query.eq("person_role", roleFilter);
     if (tempFilter !== "all") query = query.eq("lead_temperature", tempFilter);
 
+    if (newLeadAssignmentFilter) {
+      query = query.eq("stage", "new_lead").eq("is_mirror", false);
+      query = newLeadAssignmentFilter === "assigned"
+        ? query.not("counsellor_id", "is", null)
+        : query.is("counsellor_id", null);
+    }
+
     // Date range (applied to created_at)
     if (fromDate) query = query.gte("created_at", `${fromDate}T00:00:00`);
     if (toDate) query = query.lte("created_at", `${toDate}T23:59:59.999`);
@@ -739,7 +750,8 @@ const Admissions = () => {
         let query = supabase
           .from("leads")
           .select(`*, courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`)
-          .order("created_at", { ascending: false })
+          .order("created_at", { ascending: leadSortOrder === "oldest" })
+          .order("id", { ascending: leadSortOrder === "oldest" })
           .limit(500);
         if (role === "counsellor" && profile?.id) {
           query = query.eq("counsellor_id", profile.id);
@@ -799,6 +811,7 @@ const Admissions = () => {
         debouncedSearch.length >= 2 ||
         !!fromDate ||
         !!toDate ||
+        newLeadAssignmentFilter !== null ||
         inactiveIds !== null ||
         followupLeadIds !== null ||
         visitLeadIds !== null ||
@@ -813,8 +826,8 @@ const Admissions = () => {
            courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`,
           page === 1 ? { count: hasActiveListFilters ? "exact" : "planned" } : undefined
         )
-        .order("created_at", { ascending: false })
-        .order("id", { ascending: false })
+        .order("created_at", { ascending: leadSortOrder === "oldest" })
+        .order("id", { ascending: leadSortOrder === "oldest" })
         .limit(PAGE_SIZE + 1);
 
       if (
@@ -835,7 +848,9 @@ const Admissions = () => {
       query = scoped.query;
 
       if (pageCursor) {
-        query = query.or(`created_at.lt.${pageCursor.created_at},and(created_at.eq.${pageCursor.created_at},id.lt.${pageCursor.id})`);
+        query = leadSortOrder === "oldest"
+          ? query.or(`created_at.gt.${pageCursor.created_at},and(created_at.eq.${pageCursor.created_at},id.gt.${pageCursor.id})`)
+          : query.or(`created_at.lt.${pageCursor.created_at},and(created_at.eq.${pageCursor.created_at},id.lt.${pageCursor.id})`);
       }
 
       const { data, count, error } = await query;
@@ -890,8 +905,8 @@ const Admissions = () => {
   }, [
     view, page, selectedCampusId, counsellorFilter, role, profile?.id,
     stageFilter, sourceFilter, sourceFilterMode, leadInstitutionType, effectiveCourseFilterIds, courseFilterMode, roleFilter, tempFilter,
-    applicationStageFilter, applicationStageLeadScope, fromDate, toDate, debouncedSearch,
-    inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds,
+    applicationStageFilter, applicationStageLeadScope, fromDate, toDate, leadSortOrder, debouncedSearch,
+    inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, notCalledIds, newLeadAssignmentFilter,
   ]);
 
   // Fetch course options for the multi-select filter, joined with the
@@ -1101,6 +1116,7 @@ const Admissions = () => {
             selectedCampusId,
             fromDate,
             toDate,
+            leadSortOrder,
             search: debouncedSearch,
           } : {},
           description: `Saved from Admissions — ${leadIds.length} ${listScope === "filtered" ? "filtered" : "selected"} leads`,
@@ -1233,8 +1249,8 @@ const Admissions = () => {
            counsellor_id, lead_score, lead_temperature, ai_called,
            courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`
         )
-        .order("created_at", { ascending: false })
-        .order("id", { ascending: false })
+        .order("created_at", { ascending: leadSortOrder === "oldest" })
+        .order("id", { ascending: leadSortOrder === "oldest" })
         .limit(exportPageSize);
 
       const scoped = applyListQueryFilters(query);
@@ -1242,7 +1258,9 @@ const Admissions = () => {
       query = scoped.query;
 
       if (cursor) {
-        query = query.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
+        query = leadSortOrder === "oldest"
+          ? query.or(`created_at.gt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.gt.${cursor.id})`)
+          : query.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
       }
 
       const { data, error } = await query;
@@ -1346,6 +1364,10 @@ const Admissions = () => {
       || (counsellorFilter === "unassigned" ? !l.counsellor_id : l.counsellor_id === counsellorFilter);
     const matchesNotCalled = !notCalledIds || notCalledIds.has(l.id);
     const matchesAction = !actionLeadIds || actionLeadIds.has(l.id);
+    const matchesNewLeadAssignment = !newLeadAssignmentFilter
+      || (l.stage === "new_lead" && (
+        newLeadAssignmentFilter === "assigned" ? !!l.counsellor_id : !l.counsellor_id
+      ));
     const matchesApplicationStage = applicationStageFilter.length === 0
       || (applicationStageLeadScope?.mode === "include"
         ? applicationStageLeadScope.ids.has(l.id)
@@ -1365,7 +1387,14 @@ const Admissions = () => {
         if (t > to) matchesDate = false;
       }
     }
-    return matchesSearch && matchesStage && matchesSource && matchesCourse && matchesRole && matchesTemp && matchesInactive && matchesFollowup && matchesVisit && matchesCounsellor && matchesNotCalled && matchesAction && matchesApplicationStage && matchesDate;
+    return matchesSearch && matchesStage && matchesSource && matchesCourse && matchesRole && matchesTemp && matchesInactive && matchesFollowup && matchesVisit && matchesCounsellor && matchesNotCalled && matchesAction && matchesNewLeadAssignment && matchesApplicationStage && matchesDate;
+  }).sort((a, b) => {
+    const aTime = new Date(a.created_at).getTime();
+    const bTime = new Date(b.created_at).getTime();
+    if (aTime !== bTime) {
+      return leadSortOrder === "oldest" ? aTime - bTime : bTime - aTime;
+    }
+    return leadSortOrder === "oldest" ? a.id.localeCompare(b.id) : b.id.localeCompare(a.id);
   });
 
   // List view paginates server-side: `leads` is already the current page
@@ -1380,13 +1409,41 @@ const Admissions = () => {
     setPage(1);
     setLeadPageCursors({});
     setHasNextLeadPage(false);
-  }, [stageFilter, sourceFilter, sourceFilterMode, leadInstitutionType, effectiveCourseFilterIds, courseFilterMode, applicationStageFilter, applicationStageLeadScope, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, fromDate, toDate]);
+  }, [stageFilter, sourceFilter, sourceFilterMode, leadInstitutionType, effectiveCourseFilterIds, courseFilterMode, applicationStageFilter, applicationStageLeadScope, roleFilter, tempFilter, search, counsellorFilter, inactiveIds, followupLeadIds, visitLeadIds, actionLeadIds, newLeadAssignmentFilter, fromDate, toDate, leadSortOrder]);
+
+  const handleNewLeadAssignmentClick = (assignment: NewLeadAssignmentFilter | null) => {
+    setNewLeadAssignmentFilter(assignment);
+    setFunnelStage(null);
+    setVisitAction(null);
+    setVisitFunnelBox(null);
+    setStageFilter("all");
+    setActionLeadIds(null);
+    setActionBucketLabel("");
+    setVisitLeadIds(null);
+    setFollowupLeadIds(null);
+    setInactiveIds(null);
+    setNotCalledIds(null);
+    setSourceFilter("all");
+    setSourceFilterMode("include");
+    setLeadInstitutionType("all");
+    setCourseFilter([]);
+    setApplicationStageFilter([]);
+    setRoleFilter("all");
+    setTempFilter("all");
+    setCounsellorFilter("all");
+    setFromDate("");
+    setToDate("");
+    setSearch("");
+    setView("list");
+    setPage(1);
+  };
 
   // Funnel click → translate bucket into a stageFilter (comma-separated raw
   // lead_stage values that the existing `matchesStage` filter already
   // understands via `.split(",").includes(l.stage)`).
   const handleFunnelClick = async (bucket: LeadFunnelStage | "leakage" | null) => {
     setFunnelStage(bucket);
+    setNewLeadAssignmentFilter(null);
     if (!bucket) {
       setStageFilter("all");
       setActionLeadIds(null);
@@ -1397,6 +1454,7 @@ const Admissions = () => {
     setVisitLeadIds(null);
     setFollowupLeadIds(null);
     setInactiveIds(null);
+    setNotCalledIds(null);
 
     if (bucket === "hot") {
       // Union of canonical hot stages + interested-disposition leads.
@@ -1430,6 +1488,7 @@ const Admissions = () => {
     setFunnelStage(null);
     setStageFilter("all");
     setActionLeadIds(null);
+    setNewLeadAssignmentFilter(null);
     setVisitAction(null);
     setFollowupLeadIds(null);
     setInactiveIds(null);
@@ -1447,6 +1506,7 @@ const Admissions = () => {
     if (!a) { setActionLeadIds(null); setActionBucketLabel(""); return; }
     setFunnelStage(null);
     setStageFilter("all");
+    setNewLeadAssignmentFilter(null);
     setFollowupLeadIds(null);
     setVisitLeadIds(null);
     setInactiveIds(null);
@@ -1509,6 +1569,8 @@ const Admissions = () => {
   const newLeadAssignmentCounts = admissionsOverview?.new_lead_assignment_counts ?? {
     assigned: 0,
     unassigned: 0,
+    unassigned_ai_called: 0,
+    unassigned_not_ai_called: 0,
   };
   const interestedLeadIds = useMemo(
     () => new Set<string>(admissionsOverview?.interested_lead_ids ?? []),
@@ -1542,6 +1604,8 @@ const Admissions = () => {
   const newLeads        = stageCounts.new_lead ?? statsData?.new_leads ?? 0;
   const assignedNewLeads = newLeadAssignmentCounts.assigned ?? 0;
   const bucketNewLeads = newLeadAssignmentCounts.unassigned ?? 0;
+  const bucketAiCalledNewLeads = newLeadAssignmentCounts.unassigned_ai_called ?? 0;
+  const bucketNotAiCalledNewLeads = newLeadAssignmentCounts.unassigned_not_ai_called ?? 0;
   const todayLeads      = statsData?.today_leads       ?? 0;
   const appStarted      = statsData?.app_started       ?? 0;
   const feePaid         = statsData?.fee_paid          ?? 0;
@@ -1562,8 +1626,8 @@ const Admissions = () => {
 
   // Row 1: Lead data
   const leadStats = [
-    { label: "Untouched Total", value: newLeads, sub: `${bucketNewLeads} in bucket · ${assignedNewLeads} assigned`, icon: Users, iconBg: "bg-pastel-blue", filterStage: "new_lead", link: "" },
-    { label: "Assigned Untouched", value: assignedNewLeads, sub: "Assigned to counsellors", icon: UserCheck, iconBg: "bg-pastel-mint", filterStage: "", link: "", action: "assigned_new_leads" },
+    { label: "Unassigned Untouched", value: bucketNewLeads, sub: `${bucketAiCalledNewLeads} AI / ${bucketNotAiCalledNewLeads} not called`, icon: Users, iconBg: "bg-pastel-blue", filterStage: "", link: "", action: "unassigned_new_leads" },
+    { label: "Assigned Untouched", value: assignedNewLeads, sub: `${newLeads} total untouched`, icon: UserCheck, iconBg: "bg-pastel-mint", filterStage: "", link: "", action: "assigned_new_leads" },
     { label: "Pending Follow-ups", value: pendingFollowups, sub: `${overdueFollowups} overdue · ${todayFollowups} today`, icon: Clock, iconBg: "bg-pastel-orange", filterStage: "", link: "", action: "followups" },
     { label: "Upcoming Visits", value: upcomingVisits, sub: "Scheduled & confirmed", icon: MapPin, iconBg: "bg-pastel-yellow", filterStage: "", link: "", action: "upcoming_visits" },
     { label: "Completed Visits", value: completedVisits, sub: "Campus visits done", icon: CheckCircle, iconBg: "bg-pastel-green", filterStage: "", link: "", action: "completed_visits" },
@@ -1591,8 +1655,8 @@ const Admissions = () => {
       let query: any = supabase
         .from("leads")
         .select("id, created_at")
-        .order("created_at", { ascending: false })
-        .order("id", { ascending: false })
+        .order("created_at", { ascending: leadSortOrder === "oldest" })
+        .order("id", { ascending: leadSortOrder === "oldest" })
         .limit(step + 1);
 
       const scoped = applyListQueryFilters(query);
@@ -1600,7 +1664,9 @@ const Admissions = () => {
       query = scoped.query;
 
       if (cursor) {
-        query = query.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
+        query = leadSortOrder === "oldest"
+          ? query.or(`created_at.gt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.gt.${cursor.id})`)
+          : query.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
       }
 
       const { data, error } = await query;
@@ -1802,6 +1868,9 @@ const Admissions = () => {
               extraHot={extraHotCount}
               activeStage={funnelStage}
               onStageClick={handleFunnelClick}
+              newLeadAssignmentCounts={newLeadAssignmentCounts}
+              activeNewLeadAssignment={newLeadAssignmentFilter}
+              onNewLeadAssignmentClick={handleNewLeadAssignmentClick}
             />
             <VisitPipeline
               counts={visitFunnelCounts}
@@ -1827,7 +1896,8 @@ const Admissions = () => {
         {/* Lead stats */}
         {leadStats.map((stat) => {
           const isActive = (stat.filterStage && stageFilter === stat.filterStage) ||
-            (stat.action === "assigned_new_leads" && actionLeadIds && actionBucketLabel === "Assigned Untouched") ||
+            (stat.action === "unassigned_new_leads" && newLeadAssignmentFilter === "unassigned") ||
+            (stat.action === "assigned_new_leads" && newLeadAssignmentFilter === "assigned") ||
             (stat.action === "followups" && !!followupLeadIds) ||
             ((stat.action === "upcoming_visits" || stat.action === "completed_visits") && !!visitLeadIds);
           return (
@@ -1840,26 +1910,15 @@ const Admissions = () => {
                   const { data } = await supabase.from("lead_followups").select("lead_id").eq("status", "pending").limit(500);
                   const ids = new Set<string>((data || []).map((r: any) => r.lead_id));
                   setFollowupLeadIds(ids); setVisitLeadIds(null); setInactiveIds(null);
-                  setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setSearch(""); setView("list"); return;
+                  setNewLeadAssignmentFilter(null); setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setSearch(""); setView("list"); return;
+                }
+                if (stat.action === "unassigned_new_leads") {
+                  handleNewLeadAssignmentClick(newLeadAssignmentFilter === "unassigned" ? null : "unassigned");
+                  return;
                 }
                 if (stat.action === "assigned_new_leads") {
-                  if (actionLeadIds && actionBucketLabel === "Assigned Untouched") {
-                    setActionLeadIds(null); setActionBucketLabel(""); setPage(1); return;
-                  }
-                  let assignedQ = supabase
-                    .from("leads")
-                    .select("id")
-                    .eq("stage", "new_lead")
-                    .eq("is_mirror", false)
-                    .not("counsellor_id", "is", null)
-                    .limit(1000);
-                  if (role === "counsellor" && profile?.id) assignedQ = assignedQ.eq("counsellor_id", profile.id);
-                  else if (selectedCampusId !== "all") assignedQ = assignedQ.eq("campus_id", selectedCampusId);
-                  const { data } = await assignedQ;
-                  const ids = new Set<string>((data || []).map((r: any) => r.id).filter(Boolean));
-                  setActionLeadIds(ids); setActionBucketLabel("Assigned Untouched");
-                  setFollowupLeadIds(null); setVisitLeadIds(null); setInactiveIds(null);
-                  setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setCounsellorFilter("all"); setSearch(""); setView("list"); setPage(1); return;
+                  handleNewLeadAssignmentClick(newLeadAssignmentFilter === "assigned" ? null : "assigned");
+                  return;
                 }
                 if (stat.action === "upcoming_visits") {
                   if (visitLeadIds) { setVisitLeadIds(null); setPage(1); return; }
@@ -1872,7 +1931,7 @@ const Admissions = () => {
                     if (extraLeads) setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({ ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—", counsellor_name: l.profiles?.display_name || "Unassigned" }))]);
                   }
                   setVisitLeadIds(new Set(ids)); setFollowupLeadIds(null); setInactiveIds(null);
-                  setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setCounsellorFilter("all"); setSearch(""); setView("list"); setPage(1); return;
+                  setNewLeadAssignmentFilter(null); setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setCounsellorFilter("all"); setSearch(""); setView("list"); setPage(1); return;
                 }
                 if (stat.action === "completed_visits") {
                   if (visitLeadIds) { setVisitLeadIds(null); setPage(1); return; }
@@ -1884,7 +1943,7 @@ const Admissions = () => {
                     if (extraLeads) setLeads(prev => [...prev, ...extraLeads.map((l: any) => ({ ...l, course_name: l.courses?.name || "—", campus_name: l.campuses?.name || "—", counsellor_name: l.profiles?.display_name || "Unassigned" }))]);
                   }
                   setVisitLeadIds(new Set(ids)); setFollowupLeadIds(null); setInactiveIds(null);
-                  setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setCounsellorFilter("all"); setSearch(""); setView("list"); setPage(1); return;
+                  setNewLeadAssignmentFilter(null); setStageFilter("all"); setSourceFilter("all"); setRoleFilter("all"); setTempFilter("all"); setCounsellorFilter("all"); setSearch(""); setView("list"); setPage(1); return;
                 }
                 if (stat.link) { navigate(stat.link); return; }
                 if (stat.filterStage) {
@@ -1907,7 +1966,7 @@ const Admissions = () => {
                     });
                   }
                   setStageFilter(stat.filterStage);
-                  setFollowupLeadIds(null); setVisitLeadIds(null); setInactiveIds(null); setView("list"); setPage(1);
+                  setNewLeadAssignmentFilter(null); setFollowupLeadIds(null); setVisitLeadIds(null); setInactiveIds(null); setView("list"); setPage(1);
                 }
               }}
             >
@@ -1971,6 +2030,7 @@ const Admissions = () => {
                   }
                 }
                 setActionLeadIds(allIds); setActionBucketLabel("Fee Paid");
+                setNewLeadAssignmentFilter(null);
                 setStageFilter("all"); setFollowupLeadIds(null); setVisitLeadIds(null); setInactiveIds(null);
                 setView("list"); setPage(1);
                 return;
@@ -2004,7 +2064,7 @@ const Admissions = () => {
                     return newLeads.length > 0 ? [...prev, ...newLeads] : prev;
                   });
                 }
-                setStageFilter(stat.filterStage); setActionLeadIds(null); setActionBucketLabel("");
+                setStageFilter(stat.filterStage); setActionLeadIds(null); setActionBucketLabel(""); setNewLeadAssignmentFilter(null);
                 setFollowupLeadIds(null); setVisitLeadIds(null); setInactiveIds(null);
                 setView("list"); setPage(1);
               }
@@ -2124,6 +2184,21 @@ const Admissions = () => {
         </div>
       )}
 
+      {newLeadAssignmentFilter && (
+        <div className="flex items-center gap-2 rounded-lg bg-slate-50 dark:bg-slate-950/20 border border-slate-200 dark:border-slate-800/40 px-3 py-2 text-sm">
+          <Users className="h-3.5 w-3.5 text-slate-600" />
+          <span className="font-medium text-slate-800 dark:text-slate-300">
+            Showing {newLeadAssignmentFilter === "assigned" ? "assigned" : "unassigned"} untouched leads
+          </span>
+          <button
+            onClick={() => setNewLeadAssignmentFilter(null)}
+            className="ml-2 rounded-md bg-slate-200 dark:bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-800 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-700"
+          >
+            Clear filter
+          </button>
+        </div>
+      )}
+
       {actionLeadIds && (
         <div className="flex items-center gap-2 rounded-lg bg-primary/5 border border-primary/20 px-3 py-2 text-sm">
           <Filter className="h-3.5 w-3.5 text-primary" />
@@ -2170,7 +2245,7 @@ const Admissions = () => {
               onChange={(e) => setSearch(e.target.value)}
               className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20" />
           </div>
-          <select value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}
+          <select value={stageFilter} onChange={(e) => { setNewLeadAssignmentFilter(null); setStageFilter(e.target.value); }}
             className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
             <option value="all">All Stages</option>
             {STAGES.map((s) => <option key={s} value={s}>{STAGE_LABELS[s]}</option>)}
@@ -2443,6 +2518,42 @@ const Admissions = () => {
               ))}
             </select>
           )}
+          <div className="flex items-center gap-1.5 rounded-xl border border-input bg-card px-3 py-2.5">
+            <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="w-[128px] bg-transparent text-xs text-foreground outline-none"
+              title="Lead created from"
+            />
+            <span className="text-xs text-muted-foreground">to</span>
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="w-[128px] bg-transparent text-xs text-foreground outline-none"
+              title="Lead created to"
+            />
+            {(fromDate || toDate) && (
+              <button
+                type="button"
+                onClick={() => { setFromDate(""); setToDate(""); }}
+                className="ml-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/10"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <select
+            value={leadSortOrder}
+            onChange={(e) => setLeadSortOrder(e.target.value as LeadSortOrder)}
+            className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+            title="Sort by lead created date"
+          >
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+          </select>
         </div>
       )}
 
@@ -2481,6 +2592,7 @@ const Admissions = () => {
                 }
                 setActionLeadIds(new Set(leadIds));
                 setActionBucketLabel(labels[bucket] || bucket);
+                setNewLeadAssignmentFilter(null);
                 setFollowupLeadIds(null);
                 setVisitLeadIds(null);
                 setInactiveIds(null);

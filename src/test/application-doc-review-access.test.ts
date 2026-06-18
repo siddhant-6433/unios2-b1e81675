@@ -5,8 +5,8 @@ const adminApplicationView = readFileSync("src/pages/AdminApplicationView.tsx", 
 const docReviewPanel = readFileSync("src/components/admissions/DocReviewPanel.tsx", "utf8");
 const listAppDocs = readFileSync("supabase/functions/list-app-docs/index.ts", "utf8");
 const migration = readFileSync("supabase/migrations/20260619120700_restrict_application_doc_review_approvals.sql", "utf8");
-const principalOnlyMigration = readFileSync("supabase/migrations/20260620114000_principal_superadmin_document_review_only.sql", "utf8");
-const applicationDecisionGuard = readFileSync("supabase/migrations/20260620115000_guard_application_decision_roles.sql", "utf8");
+const principalOnlyMigration = readFileSync("supabase/migrations/20260620117000_principal_superadmin_document_review_only.sql", "utf8");
+const applicationDecisionGuard = readFileSync("supabase/migrations/20260620118000_guard_application_decision_roles.sql", "utf8");
 
 describe("application document review access", () => {
   it("keeps document approval controls read-only for non-approvers", () => {

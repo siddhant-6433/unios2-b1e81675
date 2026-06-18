@@ -14,8 +14,9 @@ export type ApplicationFunnelInput = {
 
 export function applicationFunnelStageOf(a: ApplicationFunnelInput): ApplicationFunnelStage {
   // Each later stage presupposes the earlier ones. Notable guards:
-  //   - "Approved" requires payment_status='paid' so Paid + Approved =
-  //     Paid-with-no-offer stays arithmetically consistent.
+  //   - "Approved" is based on applications.status, not lead.stage. Some
+  //     approval paths leave lead.stage stale, but the application decision is
+  //     still the lifecycle source of truth until an offer exists.
   //   - "Submitted" requires paid + post-draft status; NIMT's flow takes
   //     fee before declaration submission.
   // PAN/AN are the lifecycle source of truth; lead.stage can be stale if a
@@ -26,7 +27,8 @@ export function applicationFunnelStageOf(a: ApplicationFunnelInput): Application
   if (a.lead_stage === "pre_admitted") return "pre_admitted";
   if (a.has_token_fee_paid) return "token_paid";
   if (a.has_offer || a.lead_stage === "offer_sent") return "offer_sent";
-  if ((a.status === "approved" || a.lead_stage === "application_approved") && a.payment_status === "paid") return "approved";
+  if (a.status === "approved") return "approved";
+  if (a.lead_stage === "application_approved" && a.payment_status === "paid") return "approved";
   if (a.payment_status === "paid" && a.status && a.status !== "draft") return "submitted";
   if (a.payment_status === "paid") return "paid";
   // Unpaid but somehow past draft — shouldn't happen in NIMT's flow. Bucket
