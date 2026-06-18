@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Check, ChevronDown, Filter, History, Loader2, RefreshCw, UserCheck, X } from "lucide-react";
+import { Bot, Check, ChevronDown, Filter, History, Loader2, RefreshCw, UserCheck, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,7 +33,7 @@ type LeadAssignmentHistoryRow = {
   assigned_by_profile_id: string | null;
   assigned_by_name: string | null;
   previous_counsellor_name: string | null;
-  assignment_source: "self_picked" | "assigned" | string;
+  assignment_source: "self_picked" | "assigned" | "ai_priority" | string;
   bucket_name: string | null;
   latest_call_disposition: string | null;
   latest_call_response: string | null;
@@ -109,6 +109,7 @@ const EMPTY_FILTERS: LeadAssignmentHistoryFilters = {
 const SOURCE_OPTIONS: FilterOption[] = [
   { value: "self_picked", label: "Self picked" },
   { value: "assigned", label: "Assigned" },
+  { value: "ai_priority", label: "AI priority assigned" },
 ];
 
 const BUCKET_OPTIONS: FilterOption[] = [
@@ -178,6 +179,9 @@ function labelize(value: string | null) {
 function sourceLabel(row: LeadAssignmentHistoryRow) {
   if (row.assignment_source === "self_picked") {
     return row.bucket_name ? `Self picked from ${row.bucket_name}` : "Self picked";
+  }
+  if (row.assignment_source === "ai_priority") {
+    return "AI assigned priority-interested lead";
   }
   const assigner = row.assigned_by_name || "System";
   return row.bucket_name ? `Assigned by ${assigner} from ${row.bucket_name}` : `Assigned by ${assigner}`;
@@ -444,7 +448,8 @@ export function LeadAssignmentHistory({
 
   const totals = useMemo(() => {
     const selfPicked = rows.filter(r => r.assignment_source === "self_picked").length;
-    return { selfPicked, assigned: rows.length - selfPicked };
+    const aiPriority = rows.filter(r => r.assignment_source === "ai_priority").length;
+    return { selfPicked, aiPriority, assigned: rows.length - selfPicked - aiPriority };
   }, [rows]);
 
   const counsellorOptions = useMemo(() => {
@@ -478,6 +483,7 @@ export function LeadAssignmentHistory({
             {!compact && rows.length > 0 && (
               <div className="hidden items-center gap-2 text-[11px] text-muted-foreground sm:flex">
                 <span>{totals.selfPicked} self picked</span>
+                <span>{totals.aiPriority} AI priority</span>
                 <span>{totals.assigned} assigned</span>
               </div>
             )}
@@ -676,7 +682,10 @@ export function LeadAssignmentHistory({
                       )}
                     </td>
                     <td className="min-w-[180px] px-4 py-3 text-xs text-muted-foreground">
-                      {sourceLabel(row)}
+                      <div className="flex items-center gap-1.5">
+                        {row.assignment_source === "ai_priority" && <Bot className="h-3.5 w-3.5 text-amber-600" />}
+                        <span>{sourceLabel(row)}</span>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <Badge variant="outline" className="whitespace-nowrap text-[11px]">

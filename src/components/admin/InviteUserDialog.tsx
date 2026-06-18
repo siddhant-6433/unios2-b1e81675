@@ -53,6 +53,9 @@ const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublis
   const [selectedCampuses, setSelectedCampuses] = useState<string[]>([]);
   const [campusDropdownOpen, setCampusDropdownOpen] = useState(false);
   const [campuses, setCampuses] = useState<{ id: string; name: string }[]>([]);
+  const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
+  const [selectedTeamIds, setSelectedTeamIds] = useState<string[]>([]);
+  const [teamDropdownOpen, setTeamDropdownOpen] = useState(false);
   const [role, setRole] = useState<AppRole>(defaultRole ?? "student");
   const [publisherSource, setPublisherSource] = useState(defaultPublisherSource ?? PUBLISHER_SOURCES[0].value);
 
@@ -70,11 +73,27 @@ const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublis
     supabase.from("campuses").select("id, name").order("name").then(({ data }) => {
       if (data) setCampuses(data);
     });
+    supabase.from("teams").select("id, name").order("name").then(({ data }) => {
+      if (data) setTeams(data);
+    });
   }, []);
+
+  useEffect(() => {
+    if (role !== "counsellor") {
+      setSelectedTeamIds([]);
+      setTeamDropdownOpen(false);
+    }
+  }, [role]);
 
   const toggleCampus = (name: string) => {
     setSelectedCampuses((prev) =>
       prev.includes(name) ? prev.filter((c) => c !== name) : [...prev, name]
+    );
+  };
+
+  const toggleTeam = (id: string) => {
+    setSelectedTeamIds((prev) =>
+      prev.includes(id) ? prev.filter((teamId) => teamId !== id) : [...prev, id]
     );
   };
 
@@ -93,6 +112,7 @@ const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublis
           phone: phone.trim() || undefined,
           role,
           campus: selectedCampuses.length > 0 ? selectedCampuses.join(", ") : undefined,
+          team_ids: role === "counsellor" ? selectedTeamIds : undefined,
           password: password.trim() || undefined,
           publisher_id: role === "publisher" ? publisherId : undefined,
           publisher_source: role === "publisher" ? publisherSource : undefined,
@@ -185,6 +205,7 @@ const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublis
       setDisplayName("");
       setPhone("");
       setSelectedCampuses([]);
+      setSelectedTeamIds([]);
       setRole(defaultRole ?? "student");
       setPublisherSource(defaultPublisherSource ?? PUBLISHER_SOURCES[0].value);
       setPassword("");
@@ -204,7 +225,7 @@ const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublis
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="fixed inset-0 bg-foreground/20 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-md rounded-2xl bg-card card-shadow p-6 mx-4 animate-fade-in">
+      <div className="relative z-10 max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-card card-shadow p-6 mx-4 animate-fade-in">
         <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-2">
             <UserPlus className="h-5 w-5 text-primary" />
@@ -326,6 +347,56 @@ const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublis
                   <option key={s.value} value={s.value}>{s.label}</option>
                 ))}
               </select>
+            </div>
+          )}
+
+          {role === "counsellor" && (
+            <div className="relative">
+              <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                Teams
+                <span className="ml-1 text-muted-foreground/60 font-normal">— add counsellor to one or more teams</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => setTeamDropdownOpen((v) => !v)}
+                className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-left flex items-center justify-between focus:outline-none focus:ring-2 focus:ring-ring/20"
+              >
+                <span className={selectedTeamIds.length === 0 ? "text-muted-foreground" : "text-foreground"}>
+                  {selectedTeamIds.length === 0
+                    ? "Select teams..."
+                    : teams
+                      .filter((team) => selectedTeamIds.includes(team.id))
+                      .map((team) => team.name)
+                      .join(", ")}
+                </span>
+                <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+              </button>
+              {teamDropdownOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setTeamDropdownOpen(false)} />
+                  <div className="absolute z-20 mt-1 w-full rounded-xl border border-border bg-card shadow-lg overflow-hidden">
+                    <div className="max-h-44 overflow-y-auto py-1">
+                      {teams.map((team) => (
+                        <label
+                          key={team.id}
+                          className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted/50 cursor-pointer text-sm"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedTeamIds.includes(team.id)}
+                            onChange={() => toggleTeam(team.id)}
+                            className="h-3.5 w-3.5 rounded border-input accent-primary"
+                          />
+                          <span className="text-foreground">{team.name}</span>
+                        </label>
+                      ))}
+                      {teams.length === 0 && (
+                        <p className="px-3 py-2 text-sm text-muted-foreground">No teams found</p>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
 

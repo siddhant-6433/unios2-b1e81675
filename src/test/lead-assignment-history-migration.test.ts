@@ -17,6 +17,14 @@ const dedupeMigration = readFileSync(
   "supabase/migrations/20260619095000_dedupe_lead_assignment_history_backfill.sql",
   "utf8",
 );
+const aiPriorityMigration = readFileSync(
+  "supabase/migrations/20260620119000_ai_priority_assignment_history.sql",
+  "utf8",
+);
+const assignmentHistory = readFileSync(
+  "src/components/dashboard/LeadAssignmentHistory.tsx",
+  "utf8",
+);
 
 describe("lead assignment history migrations", () => {
   it("creates a scoped audit table for admins, counsellors, and team leaders", () => {
@@ -56,5 +64,19 @@ describe("lead assignment history migrations", () => {
     expect(filterMigration).toContain("AND h.assigned_by_profile_id IS NULL");
     expect(filterMigration).toContain("h.assignment_source = ANY(_sources)");
     expect(filterMigration).toContain("latest.disposition::text = ANY(_call_dispositions)");
+  });
+
+  it("records and displays AI priority assignments separately", () => {
+    expect(aiPriorityMigration).toContain("'ai_priority'");
+    expect(aiPriorityMigration).toContain("fn_assign_priority_interested_lead");
+    expect(aiPriorityMigration).toContain("fn_auto_elevate_priority_interested");
+    expect(aiPriorityMigration).toContain("INSERT INTO public.lead_assignment_history");
+    expect(aiPriorityMigration).toContain("UPDATE public.lead_assignment_history h");
+    expect(aiPriorityMigration).toContain("la.description ILIKE '%Priority interested lead auto-assigned%'");
+    expect(aiPriorityMigration).toContain("h.assignment_source = 'ai_priority'");
+    expect(aiPriorityMigration).toContain("'AI Priority Interested'");
+    expect(assignmentHistory).toContain('{ value: "ai_priority", label: "AI priority assigned" }');
+    expect(assignmentHistory).toContain("AI assigned priority-interested lead");
+    expect(assignmentHistory).toContain("totals.aiPriority");
   });
 });
