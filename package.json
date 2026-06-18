@@ -9,6 +9,8 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "lint:access": "node scripts/lint-access-guardrails.mjs",
+    "db:migrations:check": "node scripts/check-supabase-migration-health.mjs --mode=validate",
+    "db:migrations:clean": "node scripts/check-supabase-migration-health.mjs --mode=clean",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"
