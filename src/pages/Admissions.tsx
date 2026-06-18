@@ -1174,6 +1174,27 @@ const Admissions = () => {
   const handleBulkDelete = async () => {
     setDeleting(true);
     const ids = Array.from(selectedIds);
+    const { data: linkedApps, error: linkedAppsError } = await supabase
+      .from("applications")
+      .select("lead_id, application_id")
+      .in("lead_id", ids)
+      .limit(10);
+    if (linkedAppsError) {
+      toast({ title: "Delete failed", description: linkedAppsError.message, variant: "destructive" });
+      setDeleting(false);
+      setShowDeleteConfirm(false);
+      return;
+    }
+    if ((linkedApps || []).length > 0) {
+      toast({
+        title: "Cannot delete leads with applications",
+        description: `Remove linked applications first. Example: ${linkedApps![0].application_id}.`,
+        variant: "destructive",
+      });
+      setDeleting(false);
+      setShowDeleteConfirm(false);
+      return;
+    }
     const { error } = await supabase.from("leads").delete().in("id", ids);
     if (error) {
       toast({ title: "Delete failed", description: error.message, variant: "destructive" });
@@ -3037,7 +3058,7 @@ const Admissions = () => {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {selectedIds.size} lead{selectedIds.size > 1 ? "s" : ""}?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete the selected lead{selectedIds.size > 1 ? "s" : ""} and all associated data (notes, activities, follow-ups, offer letters, etc.). This action cannot be undone.
+              This will permanently delete the selected lead{selectedIds.size > 1 ? "s" : ""} and associated non-application data. Leads with linked applications will be blocked because admission steps depend on the lead record.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -1454,7 +1454,18 @@ const ApplyPortal = () => {
     if (appData.dob) setChildDob(appData.dob);
     setShowCourseSelector(false);
     setAppsList(null); // leave the dashboard
+    const editUnlockedUntil = existingApp.edit_unlocked_until as string | undefined;
+    const unlockedSections = existingApp.edit_unlocked_sections as string[] | null | undefined;
+    const editUnlocked = !!editUnlockedUntil && new Date(editUnlockedUntil).getTime() > Date.now();
     if (existingApp.status === 'submitted' || existingApp.status === 'under_review' || existingApp.status === 'approved') {
+      if (editUnlocked) {
+        setSubmitted(false);
+        const stepKeys = steps.map(s => s.key);
+        const preferredKey = unlockedSections?.find(key => stepKeys.includes(key)) || "documents";
+        const preferredIdx = stepKeys.indexOf(preferredKey);
+        setStep(preferredIdx >= 0 ? preferredIdx : totalSteps - 2);
+        return;
+      }
       setSubmitted(true);
       // Fetch uploaded documents for the preview view
       setPreviewDocs([]);
@@ -1842,13 +1853,19 @@ const ApplyPortal = () => {
     );
   }
 
+  const editUnlockedUntil = app ? (app as any).edit_unlocked_until as string | undefined : undefined;
+  const unlockedSections = app ? (app as any).edit_unlocked_sections as string[] | null | undefined : undefined;
+  const editUnlocked = !!editUnlockedUntil && new Date(editUnlockedUntil).getTime() > Date.now();
+
   // ── Submitted (full preview) ──
-  if (submitted && app) {
+  if (submitted && app && !editUnlocked) {
     const submittedBadge = app.status === "approved"
       ? { label: "Approved", className: "bg-green-100 text-green-700" }
       : app.status === "under_review"
       ? { label: "Under Review", className: "bg-blue-100 text-blue-700" }
       : { label: "Submitted", className: "bg-emerald-100 text-emerald-700" };
+
+    const rejectedDocs = previewDocs.filter(d => d.review_status === "rejected");
 
     return (
       <div className="min-h-screen bg-background">
@@ -1947,6 +1964,38 @@ const ApplyPortal = () => {
           })()}
 
           <ApplicationPreview app={app} docs={previewDocs} />
+          {rejectedDocs.length > 0 && (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+              <div className="mb-4 flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-rose-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-rose-900">
+                    {rejectedDocs.length} document{rejectedDocs.length === 1 ? "" : "s"} need re-upload
+                  </p>
+                  <p className="text-xs text-rose-700 mt-0.5">
+                    Re-upload the rejected document below. The admissions team will review the replacement.
+                  </p>
+                </div>
+              </div>
+              <Card className="border-rose-200 shadow-none">
+                <CardContent className="p-5">
+                  <DocumentUpload
+                    data={app}
+                    onChange={(partial) => setApp(prev => prev ? ({ ...prev, ...partial }) : prev)}
+                    onNext={() => {
+                      setPreviewDocs([]);
+                      supabase.functions
+                        .invoke("list-app-docs", { body: { application_id: app.application_id } })
+                        .then(({ data }) => setPreviewDocs(((data as any)?.docs || []) as PreviewDoc[]))
+                        .catch(() => setPreviewDocs([]));
+                    }}
+                    saving={saving}
+                    nextLabel="Submit replacement"
+                  />
+                </CardContent>
+              </Card>
+            </div>
+          )}
         </main>
       </div>
     );
@@ -1958,10 +2007,6 @@ const ApplyPortal = () => {
   const isPaid = app.payment_status === "paid";
   const paymentStepIdx = steps.findIndex(s => s.key === "payment");
   const cs = app.completed_sections as Record<string, boolean>;
-  // Staff-granted edit access window
-  const editUnlockedUntil = (app as any).edit_unlocked_until as string | undefined;
-  const unlockedSections = (app as any).edit_unlocked_sections as string[] | null | undefined;
-  const editUnlocked = !!editUnlockedUntil && new Date(editUnlockedUntil).getTime() > Date.now();
 
   // Determine if user can navigate back from current step.
   // Users CAN freely go back to edit previously completed steps.

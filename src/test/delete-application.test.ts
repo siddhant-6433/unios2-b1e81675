@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const invokeEdgeMock = vi.fn();
@@ -7,6 +8,7 @@ vi.mock("@/integrations/supabase/edge", () => ({
 }));
 
 const { deleteApplication } = await import("@/lib/deleteApplication");
+const restrictLeadDeleteMigration = readFileSync("supabase/migrations/20260620113500_restrict_application_lead_delete.sql", "utf8");
 
 describe("deleteApplication", () => {
   beforeEach(() => {
@@ -46,5 +48,11 @@ describe("deleteApplication", () => {
     });
     expect(result.data?.success).toBe(true);
     expect(result.data?.application_id).toBe("APP-26-001");
+  });
+
+  it("keeps linked lead deletion from orphaning applications", () => {
+    expect(restrictLeadDeleteMigration).toContain("DROP CONSTRAINT IF EXISTS applications_lead_id_fkey");
+    expect(restrictLeadDeleteMigration).toContain("FOREIGN KEY (lead_id)");
+    expect(restrictLeadDeleteMigration).toContain("ON DELETE RESTRICT");
   });
 });
