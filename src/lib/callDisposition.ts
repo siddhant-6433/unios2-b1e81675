@@ -12,7 +12,6 @@
  *   - any caller-specific bookkeeping (e.g. marking a missed-call resolved)
  */
 
-import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CallDispositionData } from "@/components/admissions/CallDispositionDialog";
 
 // Stage model is canonical in src/lib/leadStages.ts. Imported locally (so this
@@ -47,8 +46,40 @@ const formatFollowupDate = (iso?: string) => {
   return `${day}, ${ord(date)} ${month}`;
 };
 
+type SupabaseRpcError = {
+  code?: string;
+  message?: string;
+  details?: string;
+};
+
+type DispositionSupabaseClient = {
+  rpc: (
+    fn: string,
+    params: Record<string, unknown>,
+  ) => PromiseLike<{ data: unknown; error: SupabaseRpcError | null }>;
+  auth: {
+    getSession: () => PromiseLike<{
+      data: { session: { access_token?: string } | null };
+    }>;
+  };
+};
+
+const isLegacyDispositionRpcSignatureError = (error: unknown) => {
+  if (!error || typeof error !== "object") return false;
+  const rpcError = error as SupabaseRpcError;
+  const code = String(rpcError.code || "");
+  const message = String(rpcError.message || rpcError.details || "");
+  return (
+    code === "PGRST202" ||
+    (message.includes("record_disposition_writes") &&
+      (message.includes("Could not find") ||
+       message.includes("p_cnet_appeared") ||
+       message.includes("p_cahet_registered")))
+  );
+};
+
 export interface RecordCallDispositionArgs {
-  supabase: SupabaseClient<any, any, any>;
+  supabase: DispositionSupabaseClient;
   leadId: string;
   lead: {
     name: string;
@@ -144,7 +175,7 @@ export async function recordCallDisposition(args: RecordCallDispositionArgs): Pr
 
   // Single round-trip. The RPC reuses record_cloud_call_log internally, so the
   // Cloud Call dedup/merge (recording_url, bridge-hangup webhook row) is intact.
-  const { error } = await (supabase as any).rpc("record_disposition_writes", {
+  const rpcParams: Record<string, unknown> = {
     p_call_uuid:               callUuid || crypto.randomUUID(),
     p_lead_id:                 leadId,
     p_user_id:                 userId,
@@ -163,7 +194,21 @@ export async function recordCallDisposition(args: RecordCallDispositionArgs): Pr
     p_followup_at:             followupAt,
     p_followup_notes:          followupNotes,
     p_followup_activity_desc:  followupActivityDesc,
-  });
+  };
+  let { error } = await supabase.rpc("record_disposition_writes", rpcParams);
+
+  // Some deployed DBs may still have the pre-CNET/CAHET RPC signature. Retry
+  // that older payload so disposition + follow-up scheduling keep working;
+  // the qualifier fields will start persisting once the newer migration lands.
+  if (error && isLegacyDispositionRpcSignatureError(error)) {
+    const legacyRpcParams = { ...rpcParams };
+    delete legacyRpcParams.p_cnet_appeared;
+    delete legacyRpcParams.p_cahet_registered;
+    console.warn("record_disposition_writes legacy signature detected; retrying without qualifier params.", error);
+    const retry = await supabase.rpc("record_disposition_writes", legacyRpcParams);
+    error = retry.error;
+  }
+
   // Writes are atomic now (all-or-nothing); surface a hard failure rather than
   // letting the caller report a save that didn't happen.
   if (error) throw error;
@@ -186,7 +231,8 @@ export async function recordCallDisposition(args: RecordCallDispositionArgs): Pr
  */
 function dispatchDispositionWhatsApp(args: RecordCallDispositionArgs, _label: string): void {
   const { supabase, leadId, lead, courseName, data } = args;
-  if (!lead.phone) return;
+  const phone = lead.phone;
+  if (!phone) return;
 
   const sends: { template_key: string; params?: string[] }[] = [];
 
@@ -216,7 +262,7 @@ function dispatchDispositionWhatsApp(args: RecordCallDispositionArgs, _label: st
     const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
     for (const send of sends) {
-      const body: Record<string, any> = { template_key: send.template_key, phone: lead.phone, lead_id: leadId };
+      const body: Record<string, string | string[]> = { template_key: send.template_key, phone, lead_id: leadId };
       if (send.params) body.params = send.params;
       fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
         method: "POST",

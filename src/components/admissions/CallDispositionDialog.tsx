@@ -8,9 +8,11 @@ import {
   BanIcon, Loader2, ArrowRight, MapPin, CalendarDays, ChevronDown, Clock,
   AlertCircle, MessageSquare, GraduationCap, Globe, FileText, X,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { SOURCE_LABELS, SOURCE_BADGE_COLORS } from "@/config/leadSources";
 import { isBscNursingCourse } from "@/lib/bscNursing";
 import { isBptOrBmritCourseName } from "@/lib/cahet";
+import { useToast } from "@/hooks/use-toast";
 
 export type CallDisposition =
   | "interested"
@@ -34,7 +36,7 @@ export interface CallDispositionData {
   future_eligible_session?: "2027-28" | "2028-29" | null;
   /** Suppress the disposition-based auto WhatsApp send (counsellor opted out) */
   suppress_auto_whatsapp?: boolean;
-  /** Also fire course_info_v1 after the disposition WA template */
+  /** Also fire course_info_v4 after the disposition WA template */
   send_course_info?: boolean;
   /** B.Sc Nursing-only qualifier captured when the lead/course requires CNET context */
   cnet_appeared?: boolean | null;
@@ -128,7 +130,7 @@ interface CallDispositionDialogProps {
 const DISPOSITIONS: {
   value: CallDisposition;
   label: string;
-  icon: any;
+  icon: LucideIcon;
   color: string;
   suggestsFollowup: boolean;
   help: string;
@@ -200,6 +202,7 @@ export function CallDispositionDialog({
   leadSource, jdKeyword, inline = false,
 }: CallDispositionDialogProps) {
   const isMobile = useIsMobile();
+  const { toast } = useToast();
   const [retrying, setRetrying] = useState(false);
   const [disposition, setDisposition] = useState<CallDisposition | null>(null);
   const [duration, setDuration] = useState(0);
@@ -219,7 +222,7 @@ export function CallDispositionDialog({
   // Ineligible → future eligibility state
   const [futureSession, setFutureSession] = useState<"2027-28" | "2028-29" | null>(null);
   // WhatsApp nudge controls — visible when a disposition is set. Counsellor can
-  // opt out of the auto-send or also fire course_info_v1 alongside.
+  // opt out of the auto-send or also fire course_info_v4 alongside.
   const [suppressAutoWa, setSuppressAutoWa] = useState(false);
   const [sendCourseInfo, setSendCourseInfo] = useState(false);
   const [cnetAppeared, setCnetAppeared] = useState<"yes" | "no" | null>(null);
@@ -302,28 +305,39 @@ export function CallDispositionDialog({
     if (asksCnetAppeared && !cnetAppeared) return;
     if (asksCahetRegistered && !cahetRegistered) return;
     setSaving(true);
-    const visit = opts.scheduleVisit && visitDate && visitTime
-      ? { visit_date: new Date(`${visitDate}T${visitTime}:00`).toISOString(), campus_id: visitCampusId }
-      : undefined;
-    const followupDatetime = opts.scheduleFollowup && followupDate && followupTime
-      ? new Date(`${followupDate}T${followupTime}:00`).toISOString()
-      : undefined;
-    await onSubmit({
-      disposition,
-      duration_seconds: duration,
-      notes,
-      schedule_followup: opts.scheduleFollowup ?? false,
-      followup_date: followupDatetime,
-      visit,
-      future_eligible_session: disposition === "ineligible" ? futureSession : null,
-      suppress_auto_whatsapp: suppressAutoWa,
-      send_course_info: sendCourseInfo,
-      cnet_appeared: asksCnetAppeared ? cnetAppeared === "yes" : null,
-      cahet_registered: asksCahetRegistered ? cahetRegistered === "yes" : null,
-    });
-    setSaving(false);
-    resetState();
-    onOpenChange(false);
+    try {
+      const visit = opts.scheduleVisit && visitDate && visitTime
+        ? { visit_date: new Date(`${visitDate}T${visitTime}:00`).toISOString(), campus_id: visitCampusId }
+        : undefined;
+      const followupDatetime = opts.scheduleFollowup && followupDate && followupTime
+        ? new Date(`${followupDate}T${followupTime}:00`).toISOString()
+        : undefined;
+      await onSubmit({
+        disposition,
+        duration_seconds: duration,
+        notes,
+        schedule_followup: opts.scheduleFollowup ?? false,
+        followup_date: followupDatetime,
+        visit,
+        future_eligible_session: disposition === "ineligible" ? futureSession : null,
+        suppress_auto_whatsapp: suppressAutoWa,
+        send_course_info: sendCourseInfo,
+        cnet_appeared: asksCnetAppeared ? cnetAppeared === "yes" : null,
+        cahet_registered: asksCahetRegistered ? cahetRegistered === "yes" : null,
+      });
+      resetState();
+      onOpenChange(false);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Please try again.";
+      console.error("Call disposition save failed:", e);
+      toast({
+        title: "Couldn't save follow-up",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleClose = (v: boolean) => {
@@ -375,7 +389,7 @@ export function CallDispositionDialog({
               <X className="h-4 w-4" />
             </button>
           </div>
-          <div className="px-4 py-3 max-h-[70vh] overflow-y-auto">{body}</div>
+          <div className="px-3 py-3 lg:px-4">{body}</div>
         </div>
       );
     }
@@ -600,7 +614,7 @@ export function CallDispositionDialog({
       <Phone className="h-4 w-4 text-primary" />
       {isAutoDisposed ? "Schedule next callback" : "Log Call Outcome"}
     </>,
-    <div className="space-y-4 pt-1">
+    <div className="space-y-3 pt-1">
           {/* Connected banner with elapsed timer. Live (pulsing green) while
               the bridge is up; switches to a muted "Call ended" state with
               frozen final duration once Plivo reports the hangup. */}
@@ -645,6 +659,8 @@ export function CallDispositionDialog({
             </div>
           )}
 
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.92fr)] lg:items-start">
+            <div className="space-y-3">
           {/* Lead info + Call Now button — Call Now hidden when call already in flight */}
           <div className="flex items-center justify-between gap-3 rounded-xl bg-muted/40 px-3 py-2.5">
             <div className="min-w-0 flex-1">
@@ -795,14 +811,16 @@ export function CallDispositionDialog({
             </>
           )}
           {/* end !isAutoDisposed gate — picker, duration, notes, ineligible */}
+            </div>
 
+            <div className="space-y-3">
           {/* WhatsApp follow-up nudge — visible the moment a disposition is set
               (manual or auto). Shows the template that will auto-send and lets
               the counsellor opt out, plus offers a one-tap course-info send. */}
           {disposition && (() => {
             const autoTemplate =
               disposition === "interested" || disposition === "call_back"
-                ? "callback_scheduled"
+                ? "nimt_followup_v2"
                 : disposition === "not_answered" || disposition === "busy" || disposition === "voicemail"
                 ? "missed_call"
                 : disposition === "not_interested"
@@ -816,7 +834,7 @@ export function CallDispositionDialog({
                 ? "Apology + tap-to-call back. Works outside the 24h window."
                 : autoTemplate === "nimt_not_interested_ack"
                 ? "Polite closure note signed off by you with your contact for future revival."
-                : "Thanks-for-talking note with course mention.";
+                : "Personal follow-up note with the confirmed callback date.";
             return (
               <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/40 bg-emerald-50/60 dark:bg-emerald-950/20 p-3 space-y-2">
                 <div className="flex items-center gap-2">
@@ -853,7 +871,7 @@ export function CallDispositionDialog({
                     <span className="text-[11px] text-foreground flex items-center gap-1">
                       <GraduationCap className="h-3 w-3 text-emerald-700" />
                       Also send course details
-                      <span className="text-[10px] text-muted-foreground">(course_info_v1 — auto-filled from DB)</span>
+                      <span className="text-[10px] text-muted-foreground">(course_info_v4 - auto-filled from DB)</span>
                     </span>
                   </label>
                 )}
@@ -1032,7 +1050,9 @@ export function CallDispositionDialog({
               </div>
             );
           })()}
+            </div>
+          </div>
         </div>,
-    "max-w-md max-h-[90vh] overflow-y-auto"
+    "max-w-4xl max-h-[90vh] overflow-y-auto"
   );
 }

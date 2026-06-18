@@ -23,13 +23,14 @@ interface RpcCall {
   params: Record<string, unknown>;
 }
 
-function makeMockSupabase(opts?: { getSession?: () => Promise<unknown>; rpcError?: unknown }) {
+function makeMockSupabase(opts?: { getSession?: () => Promise<unknown>; rpcError?: unknown; rpcErrors?: unknown[] }) {
   const rpcCalls: RpcCall[] = [];
 
   const client = {
     rpc: (name: string, params: Record<string, unknown>) => {
       rpcCalls.push({ name, params });
-      return Promise.resolve({ data: "call-log-1", error: opts?.rpcError ?? null });
+      const error = opts?.rpcErrors ? opts.rpcErrors[rpcCalls.length - 1] ?? null : opts?.rpcError ?? null;
+      return Promise.resolve({ data: "call-log-1", error });
     },
     auth: {
       getSession:
@@ -147,6 +148,21 @@ describe("recordCallDisposition — single consolidated RPC", () => {
     await recordCallDisposition(baseArgs(data, client));
 
     expect(rpcCalls[0].params.p_cahet_registered).toBe(true);
+  });
+
+  it("retries the legacy RPC signature when the deployed DB lacks qualifier params", async () => {
+    const { client, rpcCalls } = makeMockSupabase({
+      rpcErrors: [{ code: "PGRST202", message: "Could not find the function public.record_disposition_writes(p_cahet_registered, p_cnet_appeared)" }, null],
+    });
+
+    await recordCallDisposition(baseArgs(interestedNoFollowup, client));
+
+    expect(rpcCalls).toHaveLength(2);
+    expect(rpcCalls[0].params).toHaveProperty("p_cnet_appeared");
+    expect(rpcCalls[0].params).toHaveProperty("p_cahet_registered");
+    expect(rpcCalls[1].params).not.toHaveProperty("p_cnet_appeared");
+    expect(rpcCalls[1].params).not.toHaveProperty("p_cahet_registered");
+    expect(rpcCalls[1].params.p_followup_at).toBeNull();
   });
 
   it("resolves the deferred stage + future session for an ineligible-but-future lead", async () => {

@@ -4,6 +4,17 @@ Snapshot of the drift between `supabase/migrations/` (git) and the
 `supabase_migrations.schema_migrations` table in production at the time
 the `db-push` CI workflow was added.
 
+## Current status (2026-06-18)
+
+`supabase db push` and `npm run db:migrations:clean` both report:
+
+```text
+Remote database is up to date.
+```
+
+There are no pending local migration files waiting to be applied to the linked
+Supabase project.
+
 ## Why this file exists
 
 The team's historical workflow was dual-track: some migrations got written
@@ -88,10 +99,18 @@ them in the correct order.
 
 ## How the CI guards this going forward
 
+`scripts/check-supabase-migration-health.mjs`:
+- `npm run db:migrations:check` → validates `supabase db push --dry-run`; pending branch migrations are allowed if Supabase can apply them cleanly.
+- `npm run db:migrations:clean` → validates `supabase db push --dry-run` and additionally requires `Remote database is up to date.`
+- In CI, missing Supabase secrets are a hard failure. A green check must mean CI actually reached the linked project.
+
 `.github/workflows/db-push.yml`:
-- **PRs touching `supabase/migrations/**`** → posts a `supabase db push --dry-run` so reviewers see what'll run.
-- **Merge to main touching `supabase/migrations/**`** → applies via `supabase db push`. Gated behind the `production-db` GitHub Environment so you can require reviewer approval if desired.
-- **`workflow_dispatch`** → manual one-click apply for ad-hoc cases.
+- **Every PR to `main`** → runs `npm run db:migrations:check` so broken migration ordering, remote drift, and duplicate-object failures block merge.
+- **Every push to `main`** → runs `supabase db push`, then `npm run db:migrations:clean`. It is safe and usually a no-op when no migration files changed, but it prevents pending migrations from accumulating silently.
+- **`workflow_dispatch` from `main`** → manual one-click apply for ad-hoc cases.
+
+`.github/workflows/db-drift-check.yml`:
+- **Daily + manual** → runs `npm run db:migrations:clean` and opens/updates a `migration-drift` issue if production ever stops matching the repo.
 
 Required repo secrets:
 - `SUPABASE_ACCESS_TOKEN`
