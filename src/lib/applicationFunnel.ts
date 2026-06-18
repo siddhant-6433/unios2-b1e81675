@@ -26,7 +26,7 @@ export function applicationFunnelStageOf(a: ApplicationFunnelInput): Application
   if (a.lead_stage === "pre_admitted") return "pre_admitted";
   if (a.has_token_fee_paid) return "token_paid";
   if (a.has_offer || a.lead_stage === "offer_sent") return "offer_sent";
-  if (a.lead_stage === "application_approved" && a.payment_status === "paid") return "approved";
+  if ((a.status === "approved" || a.lead_stage === "application_approved") && a.payment_status === "paid") return "approved";
   if (a.payment_status === "paid" && a.status && a.status !== "draft") return "submitted";
   if (a.payment_status === "paid") return "paid";
   // Unpaid but somehow past draft — shouldn't happen in NIMT's flow. Bucket

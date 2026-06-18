@@ -31,6 +31,8 @@ export interface DocReview {
   status: DocStatus;
   notes: string | null;
   reviewed_at: string | null;
+  reviewed_by?: string | null;
+  reviewed_by_name?: string | null;
 }
 
 export interface DocReviewCourseInfo {
@@ -186,6 +188,7 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
         <ul className="md:border-r border-border max-h-[480px] overflow-y-auto bg-muted/20">
           {docs.map((d, i) => {
             const s = reviews[d.path]?.status ?? "pending";
+            const review = reviews[d.path];
             const isActive = i === activeIdx;
             return (
               <li key={d.path}>
@@ -194,8 +197,15 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
                   className={`w-full text-left px-3 py-2.5 border-b border-border/40 flex items-start gap-2 transition-colors ${isActive ? "bg-blue-50 dark:bg-blue-950/20" : "hover:bg-muted/40"}`}
                 >
                   <DocStatusDot status={s} />
-                  <span className={`text-[11px] truncate flex-1 ${isActive ? "text-foreground font-medium" : "text-foreground"}`} title={d.name}>
-                    {d.name}
+                  <span className="min-w-0 flex-1">
+                    <span className={`block text-[11px] truncate ${isActive ? "text-foreground font-medium" : "text-foreground"}`} title={d.name}>
+                      {d.name}
+                    </span>
+                    {review?.reviewed_by_name && s !== "pending" && (
+                      <span className="block text-[9px] text-muted-foreground truncate">
+                        {s === "verified" ? "Verified" : "Rejected"} by {review.reviewed_by_name}
+                      </span>
+                    )}
                   </span>
                 </button>
               </li>
@@ -232,6 +242,8 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
                 <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200">Verified</p>
                 {activeReview?.reviewed_at && (
                   <p className="text-[10px] text-emerald-700/80 dark:text-emerald-300/70">
+                    {activeReview.reviewed_by_name ? `Verified by ${activeReview.reviewed_by_name}` : "Verified"}
+                    {" · "}
                     {new Date(activeReview.reviewed_at).toLocaleString()}
                   </p>
                 )}
@@ -248,6 +260,8 @@ export function DocReviewPanel({ docs, reviews, onSetStatus, courseInfo, readOnl
               </p>
               {activeReview?.reviewed_at && (
                 <p className="text-[10px] text-rose-700/70 dark:text-rose-300/70 mt-1.5">
+                  {activeReview.reviewed_by_name ? `Rejected by ${activeReview.reviewed_by_name}` : "Rejected"}
+                  {" · "}
                   {new Date(activeReview.reviewed_at).toLocaleString()}
                 </p>
               )}

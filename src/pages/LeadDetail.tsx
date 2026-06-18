@@ -939,6 +939,27 @@ const LeadDetail = () => {
   const handleDeleteLead = async () => {
     if (!id) return;
     setDeletingLead(true);
+    const { data: linkedApps, error: linkedAppsError } = await supabase
+      .from("applications")
+      .select("application_id, status, payment_status")
+      .eq("lead_id", id)
+      .limit(5);
+    if (linkedAppsError) {
+      toast({ title: "Delete failed", description: linkedAppsError.message, variant: "destructive" });
+      setDeletingLead(false);
+      setShowDeleteConfirm(false);
+      return;
+    }
+    if ((linkedApps || []).length > 0) {
+      toast({
+        title: "Cannot delete lead with applications",
+        description: `Delete or transfer linked application ${linkedApps![0].application_id} before deleting this lead.`,
+        variant: "destructive",
+      });
+      setDeletingLead(false);
+      setShowDeleteConfirm(false);
+      return;
+    }
     const { error } = await supabase.from("leads").delete().eq("id", id);
     if (error) {
       toast({ title: "Delete failed", description: error.message, variant: "destructive" });
@@ -1751,7 +1772,7 @@ const LeadDetail = () => {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete "{lead.name}"?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete this lead and all associated data (notes, activities, follow-ups, offer letters, etc.). This action cannot be undone.
+              This will permanently delete this lead and associated non-application data. Leads with linked applications cannot be deleted until the application is deleted or transferred, because admission steps depend on the lead record.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

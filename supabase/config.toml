@@ -150,3 +150,10 @@ verify_jwt = false
 # applications row, so JWT verification at the gateway is redundant.
 [functions.apply-portal-upload-doc]
 verify_jwt = false
+
+# Anonymous applicants and staff list uploaded application documents through
+# this service-role function. Apply portal access is already scoped by the
+# application flow, and gateway JWT verification would 401 applicants whose
+# browser carries a stale session before the function can run.
+[functions.list-app-docs]
+verify_jwt = false

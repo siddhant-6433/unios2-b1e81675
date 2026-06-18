@@ -4,15 +4,15 @@ import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, FileText, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Gift, User, Trash2 } from "lucide-react";
+import { ArrowLeft, FileText, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Gift, User, Trash2, Upload, UserPlus } from "lucide-react";
 import { ApplicationPreview, type PreviewDoc } from "@/components/applicant/ApplicationPreview";
+import { DocumentUpload } from "@/components/apply/DocumentUpload";
 import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
 import { AdmissionLifecycleStepper } from "@/components/admissions/AdmissionLifecycleStepper";
 import { DocReviewPanel } from "@/components/admissions/DocReviewPanel";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { deleteApplication as deleteApplicationRequest } from "@/lib/deleteApplication";
-import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { fetchCahetRegistration, isBptOrBmritCourseName, type CahetRegistrationDetails } from "@/lib/cahet";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -26,6 +26,8 @@ interface DocReview {
   status: DocStatus;
   notes: string | null;
   reviewed_at: string | null;
+  reviewed_by: string | null;
+  reviewed_by_name?: string | null;
 }
 
 export default function AdminApplicationView() {
@@ -34,8 +36,8 @@ export default function AdminApplicationView() {
   const { toast } = useToast();
 
   const { role } = useAuth();
-  const isTeamLeader = useIsTeamLeader();
-  const canApproveApplication = role === "super_admin" || role === "principal" || isTeamLeader;
+  const canApproveApplication = role === "super_admin" || role === "principal";
+  const canUploadDocuments = role === "super_admin" || role === "principal" || role === "counsellor";
   const [loading, setLoading] = useState(true);
   const [app, setApp] = useState<any | null>(null);
   const [lead, setLead] = useState<{
@@ -60,6 +62,8 @@ export default function AdminApplicationView() {
   const [deleting, setDeleting] = useState(false);
   const [showOfferLetter, setShowOfferLetter] = useState(false);
   const [generatingReceipt, setGeneratingReceipt] = useState(false);
+  const [repairingLead, setRepairingLead] = useState(false);
+  const [applicationApproverName, setApplicationApproverName] = useState<string | null>(null);
 
   // Async load can throw on any of N round-trips — wrap so a transient failure
   // shows a recoverable error instead of leaving the page in a permanent
@@ -75,7 +79,7 @@ export default function AdminApplicationView() {
         supabase.from("applications").select("*").eq("application_id", applicationId).maybeSingle(),
         supabase.functions.invoke("list-app-docs", { body: { application_id: applicationId } }).catch((e: any) => ({ data: null, error: e })),
         supabase.from("application_doc_reviews" as any)
-          .select("file_path, status, notes, reviewed_at")
+          .select("file_path, status, notes, reviewed_at, reviewed_by")
           .eq("application_id", applicationId),
       ]);
       if (appErr) throw appErr;
@@ -83,9 +87,24 @@ export default function AdminApplicationView() {
       const activeDocs = (((fnRes?.data as any)?.docs || []) as PreviewDoc[]);
       const activeDocPaths = new Set(activeDocs.map(d => d.path).filter(Boolean));
       setDocs(activeDocs);
+      const profileIds = [
+        appRow?.approved_by,
+        ...((reviewRows as DocReview[] | null) || []).map(r => r.reviewed_by),
+      ].filter(Boolean) as string[];
+      const profileNames: Record<string, string> = {};
+      if (profileIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("id, display_name")
+          .in("id", [...new Set(profileIds)]);
+        (profiles || []).forEach((p: any) => { profileNames[p.id] = p.display_name || "Staff"; });
+      }
+      setApplicationApproverName(appRow?.approved_by ? profileNames[appRow.approved_by] || null : null);
       const map: Record<string, DocReview> = {};
       (reviewRows as DocReview[] | null || []).forEach(r => {
-        if (activeDocPaths.has(r.file_path)) map[r.file_path] = r;
+        if (activeDocPaths.has(r.file_path)) {
+          map[r.file_path] = { ...r, reviewed_by_name: r.reviewed_by ? profileNames[r.reviewed_by] || null : null };
+        }
       });
       setReviews(map);
 
@@ -137,22 +156,44 @@ export default function AdminApplicationView() {
 
   useEffect(() => { refresh(); }, [applicationId]);
 
+  const insertApplicationAudit = async (
+    section: string,
+    fieldPath: string,
+    oldValue: unknown,
+    newValue: unknown,
+    actor?: { auth_user_id: string | null; display_name: string | null } | null,
+  ) => {
+    if (!app?.id) return;
+    const { error } = await supabase.from("application_audit_log" as any).insert({
+      application_id: app.id,
+      section,
+      field_path: fieldPath,
+      old_value: oldValue as any,
+      new_value: newValue as any,
+      changed_by: actor?.auth_user_id ?? null,
+      changed_by_name: actor?.display_name ?? null,
+      changed_by_role: role ?? null,
+    });
+    if (error) console.warn("[AdminApplicationView] audit insert failed:", error);
+  };
+
   // Doc-by-doc review actions. Upserts into application_doc_reviews keyed by
   // (application_id, file_path) so each click is idempotent.
   const setDocStatus = async (doc: PreviewDoc, next: DocStatus, notes?: string) => {
-    if (!applicationId) return;
+    if (!applicationId || !doc.path) return;
     if (!canApproveApplication) {
       toast({
         title: "Approval restricted",
-        description: "Only team leaders, principals, and super admins can approve or reject documents.",
+        description: "Only principals and super admins can approve or reject documents.",
         variant: "destructive",
       });
       return;
     }
     const { data: { user } } = await supabase.auth.getUser();
     const { data: profile } = user
-      ? await supabase.from("profiles").select("id").eq("user_id", user.id).maybeSingle()
+      ? await supabase.from("profiles").select("id, display_name").eq("user_id", user.id).maybeSingle()
       : { data: null };
+    const previous = reviews[doc.path] || null;
 
     const payload = {
       application_id: applicationId,
@@ -169,7 +210,14 @@ export default function AdminApplicationView() {
       toast({ title: "Couldn't save review", description: error.message, variant: "destructive" });
       return;
     }
-    setReviews(prev => ({ ...prev, [doc.path]: { ...payload } as DocReview }));
+    await insertApplicationAudit(
+      "documents",
+      `document_review.${doc.name}`,
+      previous ? { status: previous.status, notes: previous.notes, reviewed_by: previous.reviewed_by_name || previous.reviewed_by } : null,
+      { status: next, notes: payload.notes, reviewed_by: profile?.display_name || profile?.id || null },
+      { auth_user_id: user?.id ?? null, display_name: profile?.display_name || null },
+    );
+    setReviews(prev => ({ ...prev, [doc.path!]: { ...payload, reviewed_by_name: profile?.display_name || null } as DocReview }));
   };
 
   // Application-level approve/reject. AN issuance does NOT hard-gate on this
@@ -191,7 +239,7 @@ export default function AdminApplicationView() {
     setDecisionBusy(true);
     const { data: { user } } = await supabase.auth.getUser();
     const { data: profile } = user
-      ? await supabase.from("profiles").select("id").eq("user_id", user.id).maybeSingle()
+      ? await supabase.from("profiles").select("id, display_name").eq("user_id", user.id).maybeSingle()
       : { data: null };
 
     const updates: Record<string, any> = {
@@ -206,6 +254,13 @@ export default function AdminApplicationView() {
       setDecisionBusy(false);
       return;
     }
+    await insertApplicationAudit(
+      "approval",
+      "status",
+      { status: app.status, approved_by: app.approved_by || null, rejection_reason: app.rejection_reason || null },
+      { status: decision, approved_by: profile?.display_name || profile?.id || null, rejection_reason: updates.rejection_reason },
+      { auth_user_id: user?.id ?? null, display_name: profile?.display_name || null },
+    );
 
     // Advance lead stage on approval (if this app has a lead). Reject leaves
     // stage alone — operator can move the lead manually if needed.
@@ -240,6 +295,75 @@ export default function AdminApplicationView() {
     setRejectionReason("");
     toast({ title: decision === "approved" ? "Application approved" : "Application rejected" });
     refresh();
+  };
+
+  const createLinkedLead = async () => {
+    if (!app) return;
+    if (!app.phone) {
+      toast({ title: "Cannot create lead", description: "Application has no phone number.", variant: "destructive" });
+      return;
+    }
+    setRepairingLead(true);
+    try {
+      const { data: existingLead } = await supabase
+        .from("leads")
+        .select("id")
+        .eq("application_id", app.application_id)
+        .maybeSingle();
+
+      let leadId = existingLead?.id as string | undefined;
+      const firstCourse = ((app.course_selections || [])[0] as any) || {};
+      const stage = app.status === "approved"
+        ? "application_approved"
+        : app.status === "submitted" || app.status === "under_review"
+        ? "application_submitted"
+        : app.payment_status === "paid"
+        ? "application_fee_paid"
+        : "application_in_progress";
+
+      if (!leadId) {
+        const guardianName = app.guardian?.name || app.father?.name || app.mother?.name || null;
+        const guardianPhone = app.guardian?.phone || app.father?.phone || app.father?.phone_mobile || app.mother?.phone || app.mother?.phone_mobile || null;
+        const { data: inserted, error: insertErr } = await supabase
+          .from("leads")
+          .insert({
+            name: app.full_name || "Applicant",
+            phone: app.phone,
+            email: app.email || null,
+            guardian_name: guardianName,
+            guardian_phone: guardianPhone,
+            course_id: firstCourse.course_id || null,
+            campus_id: firstCourse.campus_id || null,
+            source: "website",
+            stage,
+            person_role: "applicant",
+            application_id: app.application_id,
+          } as any)
+          .select("id")
+          .single();
+        if (insertErr) throw insertErr;
+        leadId = inserted.id;
+      }
+
+      const { error: appUpdateErr } = await supabase
+        .from("applications")
+        .update({ lead_id: leadId })
+        .eq("id", app.id);
+      if (appUpdateErr) throw appUpdateErr;
+
+      await supabase.from("lead_activities").insert({
+        lead_id: leadId,
+        type: "system",
+        description: `Lead created and linked from orphan application ${app.application_id}`,
+      } as any);
+
+      toast({ title: "Lead linked", description: `Application ${app.application_id} is associated with a lead again.` });
+      await refresh();
+    } catch (e: any) {
+      toast({ title: "Couldn't create lead", description: e?.message || "Lead repair failed", variant: "destructive" });
+    } finally {
+      setRepairingLead(false);
+    }
   };
 
   // Counts to drive the review summary chip + button-disable logic.
@@ -368,6 +492,18 @@ export default function AdminApplicationView() {
               Open Lead
             </Button>
           )}
+          {!lead?.id && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              onClick={createLinkedLead}
+              disabled={repairingLead}
+            >
+              {repairingLead ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
+              Create Linked Lead
+            </Button>
+          )}
           {role === "super_admin" && app.payment_status !== "paid" && (
             <Button
               variant="outline"
@@ -399,7 +535,7 @@ export default function AdminApplicationView() {
           appFeePaid={appFeePaid}
           hasOffer={hasOffer}
           docs={counts}
-          onApprove={app.status === "submitted" ? () => decideApplication("approved") : undefined}
+          onApprove={canApproveApplication && app.status === "submitted" ? () => decideApplication("approved") : undefined}
           onIssueOffer={app.status === "approved" && !hasOffer && lead?.id ? () => setShowOfferLetter(true) : undefined}
           feeReceiptUrl={app.fee_receipt_url || null}
           onGenerateFeeReceipt={appFeePaid > 0 ? generateFeeReceipt : undefined}
@@ -451,7 +587,7 @@ export default function AdminApplicationView() {
             )}
             {!decided && !canApproveApplication && (
               <p className="text-[11px] text-muted-foreground">
-                You can view submitted documents. Team leaders, principals, and super admins approve or reject them.
+                You can view and upload documents. Principals and super admins approve or reject applications.
               </p>
             )}
             {decided && app.status === "approved" && (() => {
@@ -515,6 +651,29 @@ export default function AdminApplicationView() {
               <span className="font-medium">Rejection reason:</span> {app.rejection_reason}
             </p>
           )}
+          {app.status === "approved" && (
+            <p className="text-[11px] text-muted-foreground">
+              <span className="font-medium">Application approved</span>
+              {applicationApproverName && <> by <span className="font-medium text-foreground">{applicationApproverName}</span></>}
+              {app.approved_at && <> on {new Date(app.approved_at).toLocaleString("en-IN")}</>}
+            </p>
+          )}
+        </div>
+      )}
+
+      {canUploadDocuments && (
+        <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <Upload className="h-4 w-4 text-primary" />
+            <h3 className="text-sm font-semibold text-foreground">Upload or Re-upload Documents</h3>
+          </div>
+          <DocumentUpload
+            data={app}
+            onChange={(partial) => setApp((prev: any) => prev ? { ...prev, ...partial } : prev)}
+            onNext={refresh}
+            saving={false}
+            nextLabel="Refresh document list"
+          />
         </div>
       )}
 
@@ -527,7 +686,7 @@ export default function AdminApplicationView() {
         onSetStatus={setDocStatus}
         readOnly={decided || !canApproveApplication}
         readOnlyReason={!canApproveApplication
-          ? "You can view this document, but only team leaders, principals, and super admins can approve or reject it."
+          ? "You can view this document, but only principals and super admins can approve or reject it."
           : undefined}
         courseInfo={lead?.course ? {
           name: lead.course.name,

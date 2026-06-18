@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { ArrowRight, ArrowLeft, Loader2, Upload, CheckCircle, FileText } from "lucide-react";
+import { ArrowRight, ArrowLeft, Loader2, Upload, CheckCircle, FileText, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
@@ -14,6 +14,7 @@ interface Props {
   onBack?: () => void;
   saving: boolean;
   readOnly?: boolean;
+  nextLabel?: string;
 }
 
 interface DocSpec {
@@ -141,22 +142,32 @@ function getRequiredDocs(
   return base;
 }
 
-function DocCard({ doc, uploading, uploaded, uploadedUrl, onUpload, disabled }: {
+function DocCard({ doc, uploading, uploaded, uploadedUrl, onUpload, disabled, reviewStatus, reviewNotes }: {
   doc: DocSpec;
   uploading: string | null;
   uploaded: Record<string, boolean>;
   uploadedUrl?: string;
   onUpload: (key: string, file: File) => void;
   disabled?: boolean;
+  reviewStatus?: string;
+  reviewNotes?: string | null;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const isUploading = uploading === doc.key;
   const isUploaded = uploaded[doc.key];
 
+  const isRejected = reviewStatus === "rejected";
+
   return (
-    <Card className={`border-border/60 shadow-none ${isUploaded ? 'border-emerald-200 bg-emerald-50/30 dark:bg-emerald-950/10' : doc.required ? '' : 'border-dashed'}`}>
+    <Card className={`border-border/60 shadow-none ${
+      isRejected
+        ? 'border-rose-300 bg-rose-50/40 dark:bg-rose-950/10'
+        : isUploaded ? 'border-emerald-200 bg-emerald-50/30 dark:bg-emerald-950/10' : doc.required ? '' : 'border-dashed'
+    }`}>
       <CardContent className="p-4 text-center">
-        {isUploaded ? (
+        {isRejected ? (
+          <AlertCircle className="h-5 w-5 text-rose-600 mx-auto mb-1.5" />
+        ) : isUploaded ? (
           <CheckCircle className="h-5 w-5 text-emerald-600 mx-auto mb-1.5" />
         ) : isUploading ? (
           <Loader2 className="h-5 w-5 text-muted-foreground animate-spin mx-auto mb-1.5" />
@@ -166,7 +177,9 @@ function DocCard({ doc, uploading, uploaded, uploadedUrl, onUpload, disabled }: 
         <h4 className="text-sm font-semibold text-foreground">
           {doc.label} {doc.required && <span className="text-destructive">*</span>}
         </h4>
-        <p className="text-[10px] text-muted-foreground mt-0.5">{isUploaded ? "Uploaded successfully" : doc.desc}</p>
+        <p className={`text-[10px] mt-0.5 ${isRejected ? "text-rose-700" : "text-muted-foreground"}`}>
+          {isRejected ? (reviewNotes || "Rejected. Please re-upload this document.") : isUploaded ? "Uploaded successfully" : doc.desc}
+        </p>
         <div className="flex items-center justify-center gap-2 mt-2">
           {isUploaded && uploadedUrl && (
             <a href={uploadedUrl} target="_blank" rel="noreferrer"
@@ -201,10 +214,18 @@ function DocCard({ doc, uploading, uploaded, uploadedUrl, onUpload, disabled }: 
   );
 }
 
-export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnly }: Props) {
+function docKeyForFile(name: string): string {
+  if (name.startsWith("passport_photo.")) return "passport_photo";
+  const dashIdx = name.indexOf("-");
+  return dashIdx > 0 ? name.substring(0, dashIdx) : name.replace(/\.[^.]+$/, "");
+}
+
+export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnly, nextLabel = "Continue to Review" }: Props) {
   const { toast } = useToast();
   const [uploaded, setUploaded] = useState<Record<string, boolean>>({});
   const [uploadedUrls, setUploadedUrls] = useState<Record<string, string>>({});
+  const [reviewStatus, setReviewStatus] = useState<Record<string, string>>({});
+  const [reviewNotes, setReviewNotes] = useState<Record<string, string | null>>({});
   const [uploading, setUploading] = useState<string | null>(null);
   const docs = getRequiredDocs(
     data.program_category,
@@ -216,27 +237,32 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
   // PhotoUpload writes data.passport_photo_path on success (webcam capture
   // or file upload). School category doesn't render PhotoUpload.
   const needsPassportPhoto = data.program_category !== 'school';
-  const passportPhotoUploaded = !!data.passport_photo_path;
+  const passportPhotoUploaded = !!data.passport_photo_path || uploaded.passport_photo;
 
   // Check for existing uploads on mount
   useEffect(() => {
     if (!data.application_id) return;
     (async () => {
-      const { data: files } = await supabase.storage.from('application-documents').list(data.application_id, { limit: 50 });
-      if (files?.length) {
+      const { data: res, error } = await supabase.functions.invoke("list-app-docs", {
+        body: { application_id: data.application_id },
+      });
+      if (!error && (res as any)?.docs?.length) {
         const found: Record<string, boolean> = {};
         const urls: Record<string, string> = {};
-        for (const f of files) {
+        const statuses: Record<string, string> = {};
+        const notes: Record<string, string | null> = {};
+        for (const f of (res as any).docs) {
           if (!f.name || f.name.startsWith('.')) continue;
-          // Extract doc key from filename: "class_10_marksheet-filename.pdf" → "class_10_marksheet"
-          const dashIdx = f.name.indexOf('-');
-          const key = dashIdx > 0 ? f.name.substring(0, dashIdx) : f.name;
+          const key = docKeyForFile(f.name);
           found[key] = true;
-          const { data: urlData } = supabase.storage.from('application-documents').getPublicUrl(`${data.application_id}/${f.name}`);
-          urls[key] = urlData.publicUrl;
+          urls[key] = f.url;
+          statuses[key] = f.review_status || "pending";
+          notes[key] = f.review_notes || null;
         }
         setUploaded(prev => ({ ...prev, ...found }));
         setUploadedUrls(prev => ({ ...prev, ...urls }));
+        setReviewStatus(prev => ({ ...prev, ...statuses }));
+        setReviewNotes(prev => ({ ...prev, ...notes }));
       }
     })();
   }, [data.application_id]);
@@ -257,6 +283,8 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
     } else {
       setUploaded(prev => ({ ...prev, [docKey]: true }));
       if (res?.url) setUploadedUrls(prev => ({ ...prev, [docKey]: res.url }));
+      setReviewStatus(prev => ({ ...prev, [docKey]: "pending" }));
+      setReviewNotes(prev => ({ ...prev, [docKey]: null }));
       toast({ title: `${docKey.replace(/_/g, ' ')} uploaded` });
     }
     setUploading(null);
@@ -265,6 +293,7 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
   const requiredDocs = docs.filter(d => d.required);
   const allRequiredUploaded = requiredDocs.every(d => uploaded[d.key])
     && (!needsPassportPhoto || passportPhotoUploaded);
+  const hasRejectedDocs = Object.values(reviewStatus).some(status => status === "rejected");
 
   return (
     <div className="space-y-5">
@@ -282,7 +311,12 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
             applicationId={data.application_id}
             phone={data.phone}
             existingUrl={data.passport_photo_path ? undefined : undefined}
-            onUploaded={(path) => onChange({ passport_photo_path: path })}
+            onUploaded={(path) => {
+              onChange({ passport_photo_path: path });
+              setUploaded(prev => ({ ...prev, passport_photo: true }));
+              setReviewStatus(prev => ({ ...prev, passport_photo: "pending" }));
+              setReviewNotes(prev => ({ ...prev, passport_photo: null }));
+            }}
           />
           {!passportPhotoUploaded && (
             <p className="text-[11px] text-destructive">
@@ -302,6 +336,8 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
             uploadedUrl={uploadedUrls[doc.key]}
             onUpload={handleUpload}
             disabled={readOnly}
+            reviewStatus={reviewStatus[doc.key]}
+            reviewNotes={reviewNotes[doc.key]}
           />
         ))}
       </div>
@@ -313,9 +349,9 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
             <ArrowLeft className="h-4 w-4" /> Back
           </Button>
         ) : <div />}
-        <Button onClick={onNext} disabled={!allRequiredUploaded} className="gap-2">
+        <Button onClick={onNext} disabled={!allRequiredUploaded || hasRejectedDocs} className="gap-2">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-          Continue to Review
+          {nextLabel}
         </Button>
       </div>
     </div>

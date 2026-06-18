@@ -7,7 +7,13 @@ import {
 import { CahetRegistrationDetails } from "@/components/leads/CahetRegistrationDetails";
 import type { CahetRegistrationDetails as CahetRegistrationDetailsType } from "@/lib/cahet";
 
-export type PreviewDoc = { name: string; url: string; path?: string };
+export type PreviewDoc = {
+  name: string;
+  url: string;
+  path?: string;
+  review_status?: "pending" | "verified" | "rejected";
+  review_notes?: string | null;
+};
 
 interface Props {
   app: any;

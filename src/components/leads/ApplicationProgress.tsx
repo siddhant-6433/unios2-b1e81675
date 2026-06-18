@@ -286,7 +286,7 @@ export function ApplicationProgress({ leadId, leadPhone, applicationId, canImper
 }
 
 // ─── Edit dialog using the actual step components ───
-function ApplicationEditDialog({ app, steps, isSchool, onClose, onSaved }: {
+function ApplicationEditDialog({ app, steps, isSchool, cahetRegistration, onClose, onSaved }: {
   app: ApplicationRow;
   steps: typeof DEFAULT_STEPS;
   isSchool: boolean;

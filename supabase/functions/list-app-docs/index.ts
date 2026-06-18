@@ -20,7 +20,7 @@ function fileTime(file: any): number {
 // Lists active files uploaded for an application using the service role so
 // admins and counsellors are not blocked by storage RLS quirks. If an applicant
 // re-uploads the same document key, only the newest replacement is returned.
-// Returns a list of { name, path, url } entries.
+// Returns a list of { name, path, url, review_status, review_notes } entries.
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -71,18 +71,24 @@ Deno.serve(async (req) => {
       .map((f: any) => {
         const path = `${usedPrefix}/${f.name}`;
         const { data: pub } = db.storage.from(bucket).getPublicUrl(path);
-        return { name: f.name, path, url: pub.publicUrl };
+        return { name: f.name, path, url: pub.publicUrl, review_status: "pending", review_notes: null };
       });
 
     const activePaths = new Set(docs.map(d => d.path));
+    const reviewByPath = new Map<string, { status: string; notes: string | null }>();
     if (activePaths.size > 0) {
       const { data: reviewRows, error: reviewFetchErr } = await db
         .from("application_doc_reviews")
-        .select("file_path")
+        .select("file_path, status, notes")
         .eq("application_id", application_id);
       if (reviewFetchErr) {
         console.error("[list-app-docs] review lookup failed:", reviewFetchErr);
       } else {
+        (reviewRows || []).forEach((r: any) => {
+          if (r.file_path && activePaths.has(r.file_path)) {
+            reviewByPath.set(r.file_path, { status: r.status || "pending", notes: r.notes || null });
+          }
+        });
         const staleReviewPaths = (reviewRows || [])
           .map((r: any) => r.file_path)
           .filter((path: string | null) => path && !activePaths.has(path));
@@ -96,6 +102,14 @@ Deno.serve(async (req) => {
         }
       }
     }
+
+    docs.forEach((doc) => {
+      const review = reviewByPath.get(doc.path);
+      if (review) {
+        doc.review_status = review.status;
+        doc.review_notes = review.notes;
+      }
+    });
 
     return new Response(JSON.stringify({ ok: true, prefix: usedPrefix, docs }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

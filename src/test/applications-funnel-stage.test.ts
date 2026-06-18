@@ -29,4 +29,13 @@ describe("Applications funnel stage", () => {
       has_token_fee_paid: true,
     }))).toBe("pre_admitted");
   });
+
+  it("treats approved paid applications as pending offer even when lead_stage is stale", () => {
+    expect(applicationFunnelStageOf(app({
+      status: "approved",
+      payment_status: "paid",
+      lead_stage: "application_submitted",
+      has_offer: false,
+    }))).toBe("approved");
+  });
 });
