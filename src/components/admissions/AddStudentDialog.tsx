@@ -35,6 +35,8 @@ type StudentForm = {
   institution_id: string;
   course_id: string;
   session_id: string;
+  joining_academic_year: string;
+  semester: string;
   section: string;
   class_roll_no: string;
   student_type: string;
@@ -72,6 +74,11 @@ function isDaottCourse(course: Course | null) {
 }
 
 const STEPS = ["Student Details", "Parent / Guardian", "Programme & Session"];
+const SCHOOL_SESSION_NAMES = ["2026-27", "2027-28"];
+const HIGHER_ED_TERMS = [
+  "Sem 1", "Sem 2", "Sem 3", "Sem 4", "Sem 5", "Sem 6", "Sem 7", "Sem 8", "Sem 9", "Sem 10",
+  "Year 1", "Year 2", "Year 3", "Year 4", "Year 5",
+];
 
 export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusId, resumeDraftId, onDraftChange }: AddStudentDialogProps) {
   const { user, role, profile } = useAuth();
@@ -95,6 +102,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
   const [form, setForm] = useState<StudentForm>({
     name: "", dob: "", gender: "", campus_id: defaultCampusId || "",
     institution_id: "", course_id: "", session_id: "",
+    joining_academic_year: "", semester: "",
     section: "", class_roll_no: "", student_type: "day_scholar",
     school_admission_no: "",                // existing no from previous system
     father_name: "", father_phone: "",
@@ -137,7 +145,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
 
     Promise.all([
       supabase.from("campuses").select("id, name, code").order("name"),
-      supabase.from("admission_sessions").select("id, name").eq("is_active", true),
+      supabase.from("admission_sessions").select("id, name").in("name", SCHOOL_SESSION_NAMES).order("start_date"),
     ]).then(([cam, ses]) => {
       if (cam.data) setAllCampuses(cam.data);
       setCampusesLoaded(true);
@@ -166,7 +174,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
       setDraftId(null);
       setForm(f => ({
         ...f, name: "", dob: "", gender: "", institution_id: "", course_id: "",
-        section: "", class_roll_no: "", school_admission_no: "",
+        joining_academic_year: "", semester: "", section: "", class_roll_no: "", school_admission_no: "",
         father_name: "", father_phone: "", mother_name: "", mother_phone: "",
         fee_version: "standard",
         campus_id: defaultCampusId || f.campus_id,
@@ -244,6 +252,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
   const selectedInstitution = institutions.find(i => i.id === form.institution_id) || null;
   const selectedCourse = courses.find(c => c.id === form.course_id) || null;
   const isSchool = isSchoolInstitution(selectedInstitution);
+  const selectedSession = sessions.find(s => s.id === form.session_id) || null;
 
   // Auto-switch to existing_parent when admission no entered (school only)
   useEffect(() => {
@@ -258,6 +267,18 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
     }
   }, [selectedCourse]);
 
+  useEffect(() => {
+    if (isSchool) {
+      setForm(f => ({
+        ...f,
+        joining_academic_year: selectedSession?.name || "",
+        semester: "",
+      }));
+    } else {
+      setForm(f => ({ ...f, joining_academic_year: "" }));
+    }
+  }, [isSchool, selectedSession?.name]);
+
   // Keep a scoped user's campus selection within what the INSERT policy allows:
   // pin to their one allowed campus, or clear it entirely if none is assigned
   // (e.g. a draft carried a campus the user can't write to).
@@ -271,7 +292,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
   }, [open, isCampusScoped, campusLocked, noCampusAssigned, allowedCampuses, form.campus_id]);
 
   const step0Valid = !!form.name && !!form.dob && !!form.gender && !!form.campus_id && !!form.institution_id && !!form.course_id;
-  const canSubmit  = step0Valid && !!form.session_id;
+  const canSubmit  = step0Valid && !!form.session_id && (isSchool ? !!form.admission_date && !!form.joining_academic_year : !!form.semester);
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -288,6 +309,8 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
       course_id:  form.course_id,
       campus_id:  form.campus_id,
       session_id: form.session_id || null,
+      joining_academic_year: isSchool ? form.joining_academic_year || selectedSession?.name || null : null,
+      semester: !isSchool ? form.semester || null : null,
       admission_date: form.admission_date || null,
       admission_no: form.school_admission_no.trim() || null,
       pre_admission_no: pan,
@@ -544,10 +567,28 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
                 </select>
               </div>
               <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Admission Date</label>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Admission Date {isSchool && <span className="text-destructive">*</span>}</label>
                 <input type="date" className={inp} value={form.admission_date} onChange={e => set("admission_date", e.target.value)} />
               </div>
             </div>
+
+            {isSchool ? (
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Admission Year <span className="text-destructive">*</span></label>
+                <select className={sel} value={form.joining_academic_year} onChange={e => set("joining_academic_year", e.target.value)}>
+                  <option value="">Select admission year</option>
+                  {SCHOOL_SESSION_NAMES.map(year => <option key={year} value={year}>{year}</option>)}
+                </select>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Current Semester / Year <span className="text-destructive">*</span></label>
+                <select className={sel} value={form.semester} onChange={e => set("semester", e.target.value)}>
+                  <option value="">Select current semester/year</option>
+                  {HIGHER_ED_TERMS.map(term => <option key={term} value={term}>{term}</option>)}
+                </select>
+              </div>
+            )}
 
             {/* Fee structure — school gets 2-option toggle, DAOTT gets Stetho Batch */}
             <div>
@@ -597,6 +638,9 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
                 {allCampuses.find(c => c.id === form.campus_id)?.name || "—"}
                 {" › "}{selectedInstitution?.name || "—"}
                 {" › "}{selectedCourse ? courseLabel(selectedCourse) : "—"}
+              </p>
+              <p className="text-muted-foreground">
+                {isSchool ? `Session: ${selectedSession?.name || "—"} · Admission year: ${form.joining_academic_year || "—"}` : `Current: ${form.semester || "—"}`}
               </p>
               {form.school_admission_no && <p className="text-muted-foreground font-mono">Admission No: {form.school_admission_no}</p>}
             </div>

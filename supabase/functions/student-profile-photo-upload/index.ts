@@ -71,10 +71,11 @@ async function processPhoto(model: string, apiKey: string, mimeType: string, bas
         parts: [
           {
             text:
-              "Edit this student profile photograph into an official ID/passport style photo. " +
-              "Replace the background with a plain pure-white (#FFFFFF) background and improve exposure, shadows, and lighting. " +
-              "Preserve the student's real facial features, skin tone, expression, hair, clothing, and identity exactly. " +
-              "Do not beautify, alter age, alter face shape, add makeup, add accessories, add text, add borders, or use a decorative background. " +
+              "Create an official student ID/passport style photo from this image. " +
+              "Remove the current background and replace it with a plain pure-white (#FFFFFF) background. " +
+              "Correct exposure, white balance, shadows, and color cast so the image looks natural and evenly lit. " +
+              "Preserve the student's real identity exactly: do not change facial features, face shape, age, skin tone, expression, hair, clothing, marks, or accessories. " +
+              "Do not beautify, retouch the face, smooth skin, add makeup, change gaze, change hairstyle, add text, add borders, or add decorative elements. " +
               "Frame the student front-facing from bust level upward, with the head centered and eyes near the upper third. " +
               "Return only the regenerated image.",
           },

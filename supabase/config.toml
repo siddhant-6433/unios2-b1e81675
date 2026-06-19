@@ -1,5 +1,8 @@
 project_id = "deylhigsisuexszsmypq"
 
+[functions.backfill-student-photos]
+verify_jwt = false
+
 [functions.invite-user]
 verify_jwt = false
 

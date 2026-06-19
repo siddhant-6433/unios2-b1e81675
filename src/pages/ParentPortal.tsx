@@ -20,7 +20,6 @@ interface StudentInfo {
   name: string;
   admission_no: string;
   course_name: string;
-  semester: string;
   campus_name: string;
   batch_name: string;
 }
@@ -64,7 +63,7 @@ export default function ParentPortal() {
     // Find student linked to this parent/user
     const { data: studentData } = await supabase
       .from("students")
-      .select("id, name, admission_no, pre_admission_no, semester, campus_id, batch_id, campuses:campus_id(name), batches:batch_id(name), courses:course_id(name)")
+      .select("id, name, admission_no, pre_admission_no, campus_id, batch_id, campuses:campus_id(name), batches:batch_id(name), courses:course_id(name)")
       .or(`user_id.eq.${user?.id},father_user_id.eq.${user?.id},mother_user_id.eq.${user?.id},guardian_user_id.eq.${user?.id}`)
       .limit(1)
       .single();
@@ -75,7 +74,6 @@ export default function ParentPortal() {
         name: studentData.name,
         admission_no: studentData.admission_no || studentData.pre_admission_no || "",
         course_name: (studentData as any).courses?.name || "",
-        semester: studentData.semester || "",
         campus_name: (studentData as any).campuses?.name || "",
         batch_name: (studentData as any).batches?.name || "",
       });
@@ -163,7 +161,6 @@ export default function ParentPortal() {
               <h2 className="text-lg font-bold text-gray-900 truncate">{student.name}</h2>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 mt-0.5">
                 {student.course_name && <span>{student.course_name}</span>}
-                {student.semester && <span>Sem {student.semester}</span>}
                 <span className="font-mono">{student.admission_no}</span>
               </div>
             </div>
