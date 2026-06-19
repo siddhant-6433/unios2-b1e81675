@@ -45,10 +45,12 @@ async function tryModel(model: string, apiKey: string, mimeType: string, base64:
       parts: [
         {
           text:
-            "Replace the background of this passport photo with a plain pure-white (#FFFFFF) background. " +
-            "Keep the person exactly as they appear — same face, same expression, same clothing, same lighting on the skin. " +
+            "Create an official student ID/passport style photo from this image. " +
+            "Remove the current background and replace it with a plain pure-white (#FFFFFF) background. " +
+            "Correct exposure, white balance, shadows, and color cast so the image looks natural and evenly lit. " +
+            "Preserve the student's real identity exactly: do not change facial features, face shape, age, skin tone, expression, hair, clothing, marks, or accessories. " +
+            "Do not beautify, retouch the face, smooth skin, add makeup, change gaze, change hairstyle, add text, add borders, or add decorative elements. " +
             "Crop / frame as a formal passport photograph: bust level up, head centered, eyes near the upper third. " +
-            "Do not add text, watermarks, borders, or any decorative elements. " +
             "Return only the regenerated image.",
         },
         {

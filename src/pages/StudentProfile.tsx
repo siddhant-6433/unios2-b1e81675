@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import type { ReactNode } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { invokeEdge } from "@/integrations/supabase/edge";
@@ -6,12 +7,13 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, User, Phone, Mail, MapPin, Calendar, Heart, GraduationCap, Check, X, Clock, BookOpen, Loader2, TrendingUp, BarChart3, Activity, Filter, Users, RefreshCw, FileText, Download, ExternalLink, ShieldCheck, AlertCircle, Clock3, Upload } from "lucide-react";
+import { ArrowLeft, User, Phone, Check, X, Clock, BookOpen, Loader2, TrendingUp, BarChart3, Activity, Users, RefreshCw, FileText, Download, ExternalLink, ShieldCheck, AlertCircle, Clock3, Upload, Camera, Edit3, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StudentFeePanel } from "@/components/finance/StudentFeePanel";
+import { findApplicationPhotoDoc, getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
 
 interface StudentDocument {
   id: string;
@@ -24,6 +26,20 @@ interface StudentDocument {
   created_at: string | null;
 }
 
+interface StudentAuditRow {
+  id: string;
+  event_type: string;
+  field_name: string | null;
+  old_value: string | null;
+  new_value: string | null;
+  reason: string | null;
+  metadata: Record<string, unknown> | null;
+  actor_user_id: string | null;
+  created_at: string;
+}
+
+type BatchLabelRecord = { id?: string; name: string | null; section?: string | null };
+
 interface StudentRecord {
   id: string;
   lead_id: string | null;
@@ -31,12 +47,16 @@ interface StudentRecord {
   status: string;
   admission_no: string | null;
   pre_admission_no: string | null;
+  course_id: string | null;
+  batch_id: string | null;
+  session_id: string | null;
   father_user_id: string | null;
   mother_user_id: string | null;
   guardian_user_id: string | null;
-  courses?: { name: string | null } | null;
+  photo_url?: string | null;
+  courses?: { name: string | null; code?: string | null; type?: string | null } | null;
   campuses?: { name: string | null } | null;
-  batches?: { name: string | null } | null;
+  batches?: { name: string | null; section?: string | null } | null;
   admission_sessions?: { name: string | null } | null;
   first_name?: string | null;
   middle_name?: string | null;
@@ -102,6 +122,7 @@ interface StudentRecord {
   previous_class?: string | null;
   previous_board?: string | null;
   joining_academic_year?: string | null;
+  semester?: string | null;
   concession_category?: string | null;
   fee_profile_type?: string | null;
   fee_remarks?: string | null;
@@ -127,6 +148,14 @@ interface StudentRecord {
   bank_account_no?: string | null;
   bank_reference_no?: string | null;
 }
+
+const clean = (value?: string | null) => {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+};
+
+const isGradeLike = (value?: string | null) =>
+  !!clean(value) && /^(grade|class|std)\s*[0-9ivx]+$|^(toddler|nursery|lkg|ukg)$/i.test(clean(value)!);
 
 interface FeeLedgerRow {
   total_amount: number | string | null;
@@ -175,10 +204,17 @@ interface LeadDocument {
 }
 
 const MAX_DOCUMENT_BYTES = 5 * 1024 * 1024;
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 const isAcceptedDocument = (file: File) =>
   file.type === "application/pdf" ||
   file.type.startsWith("image/") ||
   /\.(pdf|png|jpe?g|gif|webp)$/i.test(file.name);
+
+const isAcceptedPhoto = (file: File) =>
+  file.type === "image/jpeg" ||
+  file.type === "image/png" ||
+  file.type === "image/webp" ||
+  /\.(jpe?g|png|webp)$/i.test(file.name);
 
 const CONTACT_FIELDS = [
   { value: "phone", label: "Student Phone" },
@@ -190,11 +226,61 @@ const CONTACT_FIELDS = [
   { value: "guardian_phone", label: "Guardian Phone" },
 ] as const;
 
+const EDIT_FIELDS = [
+  { key: "name", label: "Full Name" },
+  { key: "first_name", label: "First Name" },
+  { key: "middle_name", label: "Middle Name" },
+  { key: "last_name", label: "Last Name" },
+  { key: "dob", label: "Date of Birth", type: "date" },
+  { key: "gender", label: "Gender" },
+  { key: "phone", label: "Student Phone" },
+  { key: "whatsapp_no", label: "Student WhatsApp" },
+  { key: "student_email", label: "Student Email", type: "email" },
+  { key: "email", label: "Parent Email", type: "email" },
+  { key: "father_name", label: "Father Name" },
+  { key: "father_phone", label: "Father Phone" },
+  { key: "father_email", label: "Father Email", type: "email" },
+  { key: "mother_name", label: "Mother Name" },
+  { key: "mother_phone", label: "Mother Phone" },
+  { key: "mother_email", label: "Mother Email", type: "email" },
+  { key: "guardian_name", label: "Guardian Name" },
+  { key: "guardian_phone", label: "Guardian Phone" },
+  { key: "address", label: "Address", type: "textarea" },
+  { key: "city", label: "City" },
+  { key: "state", label: "State" },
+  { key: "pincode", label: "Pincode" },
+  { key: "section", label: "Section" },
+  { key: "class_roll_no", label: "Class Roll No" },
+  { key: "admission_date", label: "Admission Date", type: "date" },
+  { key: "joining_academic_year", label: "Joining Academic Year / Session" },
+  { key: "semester", label: "Current Semester / Year" },
+] as const;
+
+type EditableStudentField = (typeof EDIT_FIELDS)[number]["key"];
+type EditFormState = Record<EditableStudentField, string>;
+
+const fieldLabel = (field: string | null) =>
+  EDIT_FIELDS.find((item) => item.key === field)?.label || field || "Record";
+
+const valueForAudit = (value: unknown) => {
+  if (value === null || value === undefined || value === "") return "";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return String(value);
+};
+
+const fileToDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Could not read image."));
+    reader.readAsDataURL(file);
+  });
+
 const StudentProfile = () => {
   const { admissionNo } = useParams<{ admissionNo: string }>();
   const { toast } = useToast();
   const { can } = usePermissions();
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const [student, setStudent] = useState<StudentRecord | null>(null);
   const [fees, setFees] = useState<FeeLedgerRow[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
@@ -202,11 +288,16 @@ const StudentProfile = () => {
   const [siblings, setSiblings] = useState<SiblingRecord[]>([]);
   const [leadDocs, setLeadDocs] = useState<LeadDocument[]>([]);
   const [appDocs, setAppDocs] = useState<{ name: string; url: string; path: string }[]>([]);
+  const [applicationPhotoUrl, setApplicationPhotoUrl] = useState<string | null>(null);
+  const [inferredBatch, setInferredBatch] = useState<BatchLabelRecord | null>(null);
   const [studentDocs, setStudentDocs] = useState<StudentDocument[]>([]);
+  const [auditRows, setAuditRows] = useState<StudentAuditRow[]>([]);
   const [documentName, setDocumentName] = useState("");
   const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [documentInputKey, setDocumentInputKey] = useState(0);
   const [uploadingDocument, setUploadingDocument] = useState(false);
+  const [photoInputKey, setPhotoInputKey] = useState(0);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
@@ -215,22 +306,52 @@ const StudentProfile = () => {
   const [contactValue, setContactValue] = useState("");
   const [contactReason, setContactReason] = useState("");
   const [contactSaving, setContactSaving] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editForm, setEditForm] = useState<EditFormState>(() => Object.fromEntries(EDIT_FIELDS.map((field) => [field.key, ""])) as EditFormState);
+  const [editReason, setEditReason] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
 
   useEffect(() => { if (admissionNo) fetchStudent(); }, [admissionNo]);
+
+  const logStudentAudit = async (rows: Array<{
+    event_type: string;
+    field_name?: string | null;
+    old_value?: string | null;
+    new_value?: string | null;
+    reason?: string | null;
+    metadata?: Record<string, unknown>;
+  }>) => {
+    if (!student || rows.length === 0) return;
+    const payload = rows.map((row) => ({
+      student_id: student.id,
+      actor_user_id: user?.id ?? null,
+      event_type: row.event_type,
+      field_name: row.field_name ?? null,
+      old_value: row.old_value ?? null,
+      new_value: row.new_value ?? null,
+      reason: row.reason ?? null,
+      metadata: row.metadata ?? {},
+    }));
+    const { error } = await supabase.from("student_audit_log" as never).insert(payload as never);
+    if (error) console.error("[student-profile] audit log insert failed", error);
+  };
 
   const fetchStudent = async () => {
     setLoading(true);
     setLeadDocs([]);
     setAppDocs([]);
+    setApplicationPhotoUrl(null);
+    setInferredBatch(null);
     setStudentDocs([]);
+    setAuditRows([]);
     let { data } = await supabase.from("students")
-      .select("*, courses:course_id(name, code), campuses:campus_id(name), batches:batch_id(name), admission_sessions:session_id(name)")
+      .select("*, courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)")
       .eq("admission_no", admissionNo)
       .maybeSingle();
 
     if (!data) {
       const res = await supabase.from("students")
-        .select("*, courses:course_id(name, code), campuses:campus_id(name), batches:batch_id(name), admission_sessions:session_id(name)")
+        .select("*, courses:course_id(name, code, type), campuses:campus_id(name), batches:batch_id(name, section), admission_sessions:session_id(name)")
         .eq("pre_admission_no", admissionNo)
         .maybeSingle();
       data = res.data;
@@ -239,7 +360,24 @@ const StudentProfile = () => {
     if (data) {
       const currentStudent = data as StudentRecord;
       setStudent(currentStudent);
-      const [feesRes, attendanceRes, examsRes, studentDocsRes] = await Promise.all([
+      const isSchoolRecord =
+        currentStudent.courses?.type === "school" ||
+        isGradeLike(currentStudent.courses?.name) ||
+        isGradeLike(currentStudent.joining_class);
+      if (!isSchoolRecord && !currentStudent.batch_id && currentStudent.course_id) {
+        let batchQuery = supabase
+          .from("batches")
+          .select("id, name, section, session_id")
+          .eq("course_id", currentStudent.course_id);
+        if (currentStudent.session_id) {
+          batchQuery = batchQuery.eq("session_id", currentStudent.session_id);
+        }
+        const { data: batchRows } = await batchQuery.limit(2);
+        if ((batchRows ?? []).length === 1) {
+          setInferredBatch(batchRows![0]);
+        }
+      }
+      const [feesRes, attendanceRes, examsRes, studentDocsRes, auditRes] = await Promise.all([
         supabase.from("fee_ledger").select("*, fee_codes:fee_code_id(code, name, category)").eq("student_id", currentStudent.id).order("due_date"),
         supabase.from("daily_attendance").select("*").eq("student_id", currentStudent.id).order("date", { ascending: false }).limit(50),
         supabase.from("exam_records").select("*").eq("student_id", currentStudent.id).order("exam_date", { ascending: false }),
@@ -248,11 +386,18 @@ const StudentProfile = () => {
           .select("id, document_name, file_url, file_name, file_size, mime_type, uploaded_at, created_at")
           .eq("student_id", currentStudent.id)
           .order("created_at", { ascending: false }),
+        supabase
+          .from("student_audit_log" as never)
+          .select("id, event_type, field_name, old_value, new_value, reason, metadata, actor_user_id, created_at")
+          .eq("student_id", currentStudent.id)
+          .order("created_at", { ascending: false })
+          .limit(200),
       ]);
       if (feesRes.data) setFees(feesRes.data as FeeLedgerRow[]);
       if (attendanceRes.data) setAttendance(attendanceRes.data as AttendanceRow[]);
       if (examsRes.data) setExams(examsRes.data as ExamRow[]);
       setStudentDocs((studentDocsRes.data ?? []) as StudentDocument[]);
+      setAuditRows((auditRes.data ?? []) as StudentAuditRow[]);
 
       // Sibling lookup
       const orParts: string[] = [];
@@ -288,15 +433,25 @@ const StudentProfile = () => {
             .from("applications")
             .select("application_id")
             .eq("lead_id", currentStudent.lead_id)
-            .maybeSingle(),
+            .order("created_at", { ascending: false })
+            .limit(1),
         ]);
         setLeadDocs((ldRes.data ?? []) as LeadDocument[]);
 
-        if (appRes.data?.application_id) {
+        const applicationId = Array.isArray(appRes.data) ? appRes.data[0]?.application_id : null;
+        if (applicationId) {
           const { data: fnData } = await supabase.functions.invoke("list-app-docs", {
-            body: { application_id: appRes.data.application_id },
+            body: { application_id: applicationId },
           }).catch(() => ({ data: null }));
-          setAppDocs((fnData?.docs ?? []) as { name: string; url: string; path: string }[]);
+          const docs = (fnData?.docs ?? []) as { name: string; url: string; path: string }[];
+          setAppDocs(docs);
+          const photoDoc = findApplicationPhotoDoc(docs);
+          if (photoDoc?.url) {
+            setApplicationPhotoUrl(photoDoc.url);
+          } else if (!currentStudent.photo_url) {
+            const photoByLead = await getApplicationPhotoUrlsByLeadId([currentStudent.lead_id]);
+            setApplicationPhotoUrl(photoByLead.get(currentStudent.lead_id) || null);
+          }
         }
       }
     }
@@ -326,6 +481,23 @@ const StudentProfile = () => {
   const displayNo = student.admission_no || student.pre_admission_no || "—";
   const avgScore = exams.length > 0 ? (exams.reduce((s, e) => s + (e.max_marks > 0 ? (e.obtained_marks / e.max_marks) * 100 : 0), 0) / exams.length).toFixed(1) : "0";
   const initials = student.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase();
+  const profilePhotoUrl = student.photo_url || applicationPhotoUrl;
+  const isSchoolStudent =
+    student.courses?.type === "school" ||
+    isGradeLike(student.courses?.name) ||
+    isGradeLike(student.joining_class);
+  const displayBatch = student.batches || inferredBatch;
+  const batchName = clean(displayBatch?.name);
+  const batchSection = clean(displayBatch?.section);
+  const batchLabel = batchName && batchSection && !batchName.toLowerCase().includes(batchSection.toLowerCase())
+    ? `${batchName} (${batchSection})`
+    : batchName || (!isGradeLike(student.section) ? clean(student.section) : null);
+  const sessionLabel = clean(student.admission_sessions?.name) || clean(student.joining_academic_year);
+  const headerAcademicItems = [
+    displayNo,
+    student.courses?.name,
+    isSchoolStudent ? sessionLabel : batchLabel,
+  ].filter(Boolean);
 
   const fmtDate = (v: string | null | undefined) => {
     if (!v) return "—";
@@ -342,6 +514,8 @@ const StudentProfile = () => {
     return "bg-warning/10 text-warning";
   };
   const canUploadDocuments = can("documents", "upload");
+  const canCorrectProfile = can("students", "update") || ["office_assistant", "office_admin", "principal", "campus_admin", "super_admin"].includes(role || "");
+  const canUploadPhoto = canCorrectProfile;
 
   const syncFromApplication = async () => {
     setSyncing(true);
@@ -406,6 +580,19 @@ const StudentProfile = () => {
       const { error: insertError } = await supabase.from("student_documents" as never).insert(studentDocumentPayload as never);
       if (insertError) throw insertError;
 
+      await logStudentAudit([{
+        event_type: "document_upload",
+        field_name: "student_documents",
+        new_value: cleanName,
+        metadata: {
+          document_name: cleanName,
+          file_name: documentFile.name,
+          file_size: documentFile.size,
+          mime_type: documentFile.type || null,
+          file_url: data.url,
+        },
+      }]);
+
       toast({ title: "Document uploaded" });
       setDocumentName("");
       setDocumentFile(null);
@@ -416,6 +603,117 @@ const StudentProfile = () => {
       toast({ title: "Upload failed", description: message, variant: "destructive" });
     } finally {
       setUploadingDocument(false);
+    }
+  };
+
+  const handlePhotoFileChange = async (file: File | null) => {
+    if (!student || !file) return;
+    if (!isAcceptedPhoto(file)) {
+      toast({ title: "Unsupported photo", description: "Upload a JPG, PNG, or WebP image.", variant: "destructive" });
+      setPhotoInputKey((key) => key + 1);
+      return;
+    }
+    if (file.size > MAX_PHOTO_BYTES) {
+      toast({ title: "Photo too large", description: "Upload a photo smaller than 5 MB.", variant: "destructive" });
+      setPhotoInputKey((key) => key + 1);
+      return;
+    }
+
+    setUploadingPhoto(true);
+    try {
+      const image = await fileToDataUrl(file);
+      const previousPhoto = student.photo_url || "";
+      const { data, error } = await invokeEdge<{ ok?: boolean; photo_url?: string; path?: string; model?: string }>("student-profile-photo-upload", {
+        body: { student_id: student.id, image },
+      });
+      if (error) throw new Error(error.message);
+      if (!data?.photo_url) throw new Error("Upload returned no photo URL.");
+
+      await logStudentAudit([{
+        event_type: "photo_upload",
+        field_name: "photo_url",
+        old_value: previousPhoto,
+        new_value: data.photo_url,
+        metadata: {
+          file_name: file.name,
+          file_size: file.size,
+          mime_type: file.type || null,
+          path: data.path || null,
+          model: data.model || null,
+        },
+      }]);
+
+      toast({ title: "Photo uploaded" });
+      setPhotoInputKey((key) => key + 1);
+      await fetchStudent();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast({ title: "Photo upload failed", description: message, variant: "destructive" });
+      setPhotoInputKey((key) => key + 1);
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const openEditDialog = () => {
+    if (!student) return;
+    setEditForm(Object.fromEntries(
+      EDIT_FIELDS.map((field) => [field.key, valueForAudit(student[field.key as keyof StudentRecord])])
+    ) as EditFormState);
+    setEditReason("");
+    setEditDialogOpen(true);
+  };
+
+  const submitProfileCorrections = async () => {
+    if (!student) return;
+    const reason = editReason.trim();
+    if (!reason) {
+      toast({ title: "Reason required", description: "Enter a correction reason for the audit trail.", variant: "destructive" });
+      return;
+    }
+
+    const changes: Partial<Record<EditableStudentField, string | null>> = {};
+    const auditEvents: Array<{
+      event_type: string;
+      field_name: string;
+      old_value: string;
+      new_value: string;
+      reason: string;
+    }> = [];
+
+    EDIT_FIELDS.forEach((field) => {
+      const previous = valueForAudit(student[field.key as keyof StudentRecord]).trim();
+      const next = editForm[field.key].trim();
+      if (previous !== next) {
+        changes[field.key] = next || null;
+        auditEvents.push({
+          event_type: "profile_update",
+          field_name: field.key,
+          old_value: previous,
+          new_value: next,
+          reason,
+        });
+      }
+    });
+
+    if (auditEvents.length === 0) {
+      toast({ title: "No changes", description: "Update at least one field before saving.", variant: "destructive" });
+      return;
+    }
+
+    setEditSaving(true);
+    try {
+      const { error } = await supabase.from("students").update(changes).eq("id", student.id);
+      if (error) throw error;
+      await logStudentAudit(auditEvents);
+      toast({ title: "Student information updated" });
+      setEditDialogOpen(false);
+      await fetchStudent();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast({ title: "Update failed", description: message, variant: "destructive" });
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -468,8 +766,34 @@ const StudentProfile = () => {
       {/* Profile Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 text-xl font-bold text-primary shrink-0">
-            {initials}
+          <div className="relative shrink-0">
+            {profilePhotoUrl ? (
+              <img src={profilePhotoUrl} alt={student.name} className="h-16 w-16 rounded-2xl border border-border object-cover" />
+            ) : (
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 text-xl font-bold text-primary">
+                {initials}
+              </div>
+            )}
+            {canUploadPhoto && (
+              <>
+                <input
+                  key={photoInputKey}
+                  id="student-profile-photo-input"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="sr-only"
+                  disabled={uploadingPhoto}
+                  onChange={(event) => handlePhotoFileChange(event.target.files?.[0] ?? null)}
+                />
+                <label
+                  htmlFor="student-profile-photo-input"
+                  className="absolute -bottom-1 -right-1 flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg border border-border bg-background text-muted-foreground shadow-sm hover:text-primary"
+                  title="Upload student photo"
+                >
+                  {uploadingPhoto ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
+                </label>
+              </>
+            )}
           </div>
           <div>
             <div className="flex items-center gap-2">
@@ -478,7 +802,14 @@ const StudentProfile = () => {
                 {student.status.replace("_", " ")}
               </span>
             </div>
-            <p className="text-sm text-muted-foreground mt-0.5">Here's a look at performance and analytics · <span className="font-mono">{displayNo}</span></p>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              {headerAcademicItems.map((item, index) => (
+                <span key={`${item}-${index}`} className={index === 0 ? "font-mono" : undefined}>
+                  {index > 0 && <span className="px-1.5">·</span>}
+                  {item}
+                </span>
+              ))}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -487,9 +818,11 @@ const StudentProfile = () => {
             {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
             Sync from Application
           </Button>
-          <Button variant="outline" size="sm" className="gap-2 rounded-lg">
-            <Filter className="h-3.5 w-3.5" /> Filter
-          </Button>
+          {canCorrectProfile && (
+            <Button variant="outline" size="sm" className="gap-2 rounded-lg" onClick={openEditDialog}>
+              <Edit3 className="h-3.5 w-3.5" /> Correct Information
+            </Button>
+          )}
         </div>
       </div>
 
@@ -568,6 +901,9 @@ const StudentProfile = () => {
           <TabsTrigger value="fees" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Fee Ledger</TabsTrigger>
           <TabsTrigger value="attendance" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Attendance</TabsTrigger>
           <TabsTrigger value="exams" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Exams</TabsTrigger>
+          <TabsTrigger value="audit" className="rounded-md text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+            Audit{auditRows.length > 0 && <span className="ml-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold">{auditRows.length}</span>}
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="details">
@@ -741,7 +1077,7 @@ const StudentProfile = () => {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-y-3 gap-x-4 text-sm">
                 <Detail label="Course" value={student.courses?.name || "—"} />
                 <Detail label="Section" value={student.section || "—"} />
-                <Detail label="Batch" value={student.batches?.name || "—"} />
+                <Detail label="Batch" value={batchLabel || "—"} />
                 <Detail label="Session" value={student.admission_sessions?.name || "—"} />
                 <Detail label="Campus" value={student.campuses?.name || "—"} />
                 <Detail label="Admission Date" value={fmtDate(student.admission_date)} />
@@ -1036,7 +1372,89 @@ const StudentProfile = () => {
             </div>
           </div>
         </TabsContent>
+
+        <TabsContent value="audit">
+          <div className="mt-4 rounded-xl bg-card card-shadow p-5">
+            <div className="mb-4 flex items-center gap-2">
+              <History className="h-4 w-4 text-muted-foreground" />
+              <h3 className="text-sm font-semibold text-foreground">Audit Trail</h3>
+            </div>
+            {auditRows.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                No profile edits, document uploads, or photo uploads have been logged for this student.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {auditRows.map((row) => (
+                  <AuditEvent key={row.id} row={row} fmtDate={fmtDate} />
+                ))}
+              </div>
+            )}
+          </div>
+        </TabsContent>
       </Tabs>
+
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Correct Student Information</DialogTitle>
+            <DialogDescription>
+              Saved corrections are written to the student audit trail with the old value, new value, and reason.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[65vh] overflow-y-auto pr-1">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {EDIT_FIELDS.map((field) => {
+                const inputType = "type" in field ? field.type : undefined;
+                return (
+                <div key={field.key} className={inputType === "textarea" ? "grid gap-1.5 md:col-span-2" : "grid gap-1.5"}>
+                  <Label htmlFor={`edit-${field.key}`} className="text-xs">{field.label}</Label>
+                  {inputType === "textarea" ? (
+                    <textarea
+                      id={`edit-${field.key}`}
+                      value={editForm[field.key]}
+                      onChange={(event) => setEditForm((current) => ({ ...current, [field.key]: event.target.value }))}
+                      rows={3}
+                      className="rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                      disabled={editSaving}
+                    />
+                  ) : (
+                    <Input
+                      id={`edit-${field.key}`}
+                      type={inputType || "text"}
+                      value={editForm[field.key]}
+                      onChange={(event) => setEditForm((current) => ({ ...current, [field.key]: event.target.value }))}
+                      disabled={editSaving}
+                    />
+                  )}
+                </div>
+              );
+              })}
+              <div className="grid gap-1.5 md:col-span-2">
+                <Label htmlFor="student-correction-reason" className="text-xs">Correction reason</Label>
+                <textarea
+                  id="student-correction-reason"
+                  value={editReason}
+                  onChange={(event) => setEditReason(event.target.value)}
+                  rows={3}
+                  className="rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                  placeholder="Why is this information being corrected?"
+                  disabled={editSaving}
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setEditDialogOpen(false)} disabled={editSaving}>Cancel</Button>
+            <Button type="button" onClick={submitProfileCorrections} disabled={editSaving}>
+              {editSaving && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+              Save Corrections
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={contactDialogOpen} onOpenChange={setContactDialogOpen}>
         <DialogContent>
@@ -1106,6 +1524,52 @@ const StudentProfile = () => {
   );
 };
 
+const AuditEvent = ({ row, fmtDate }: { row: StudentAuditRow; fmtDate: (value: string | null | undefined) => string }) => {
+  const metadata = row.metadata || {};
+  const eventLabel: Record<string, string> = {
+    profile_update: "Profile updated",
+    document_upload: "Document uploaded",
+    photo_upload: "Photo uploaded",
+  };
+  const title = eventLabel[row.event_type] || row.event_type.replace(/_/g, " ");
+  const documentName = typeof metadata.document_name === "string" ? metadata.document_name : null;
+  const fileName = typeof metadata.file_name === "string" ? metadata.file_name : null;
+
+  return (
+    <div className="rounded-lg border border-border p-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-foreground">{title}</p>
+          <p className="text-[11px] text-muted-foreground">{fmtDate(row.created_at)}</p>
+        </div>
+        {row.field_name && (
+          <span className="w-fit rounded-md bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+            {fieldLabel(row.field_name)}
+          </span>
+        )}
+      </div>
+      {row.event_type === "profile_update" && (
+        <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+          <div className="rounded-md bg-muted/40 p-2">
+            <p className="text-[10px] uppercase text-muted-foreground">Old value</p>
+            <p className="mt-1 break-words text-foreground">{row.old_value || "—"}</p>
+          </div>
+          <div className="rounded-md bg-muted/40 p-2">
+            <p className="text-[10px] uppercase text-muted-foreground">New value</p>
+            <p className="mt-1 break-words text-foreground">{row.new_value || "—"}</p>
+          </div>
+        </div>
+      )}
+      {row.event_type !== "profile_update" && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {[documentName || row.new_value, fileName].filter(Boolean).join(" · ") || "Upload recorded"}
+        </p>
+      )}
+      {row.reason && <p className="mt-2 text-xs text-muted-foreground">Reason: {row.reason}</p>}
+    </div>
+  );
+};
+
 const Detail = ({ label, value }: { label: string; value: string }) => (
   <div>
     <p className="text-[11px] text-muted-foreground">{label}</p>
@@ -1113,7 +1577,7 @@ const Detail = ({ label, value }: { label: string; value: string }) => (
   </div>
 );
 
-const StatCard = ({ label, value, icon, color }: { label: string; value: string; icon: React.ReactNode; color: string }) => (
+const StatCard = ({ label, value, icon, color }: { label: string; value: string; icon: ReactNode; color: string }) => (
   <div className="rounded-xl bg-card card-shadow p-4 flex items-center gap-3">
     <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${color}`}>
       {icon}

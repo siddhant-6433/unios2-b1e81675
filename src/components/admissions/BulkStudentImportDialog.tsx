@@ -19,6 +19,7 @@ interface ParsedRow {
   dob: string;
   gender: string;
   grade: string;         // raw grade/course string from CSV
+  current_term: string;
   section: string;
   admission_no: string;  // existing admission no from previous system
   father_name: string;
@@ -33,6 +34,12 @@ interface ParsedRow {
   valid: boolean;
   error: string;
 }
+
+const SCHOOL_SESSION_NAMES = ["2026-27", "2027-28"];
+const HIGHER_ED_TERMS = [
+  "Sem 1", "Sem 2", "Sem 3", "Sem 4", "Sem 5", "Sem 6", "Sem 7", "Sem 8", "Sem 9", "Sem 10",
+  "Year 1", "Year 2", "Year 3", "Year 4", "Year 5",
+];
 
 interface BulkStudentImportDialogProps {
   open: boolean;
@@ -141,15 +148,17 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
   const [selectedCampusId,      setSelectedCampusId]      = useState("");
   const [selectedInstitutionId, setSelectedInstitutionId] = useState("");
   const [selectedSessionId,     setSelectedSessionId]     = useState("");
+  const [selectedCurrentTerm,   setSelectedCurrentTerm]   = useState("");
+  const [selectedAdmissionDate, setSelectedAdmissionDate] = useState(new Date().toISOString().slice(0, 10));
   const [applyExistingFeeToAll, setApplyExistingFeeToAll] = useState(false);
 
   // Load campuses + sessions on open
   useEffect(() => {
     if (!open) return;
-    setParsed([]); setResult(null); setApplyExistingFeeToAll(false);
+    setParsed([]); setResult(null); setApplyExistingFeeToAll(false); setSelectedCurrentTerm(""); setSelectedAdmissionDate(new Date().toISOString().slice(0, 10));
     Promise.all([
       supabase.from("campuses").select("id, name").order("name"),
-      supabase.from("admission_sessions").select("id, name").eq("is_active", true),
+      supabase.from("admission_sessions").select("id, name").in("name", SCHOOL_SESSION_NAMES).order("start_date"),
     ]).then(([cam, ses]) => {
       if (cam.data) { setAllCampuses(cam.data); if (cam.data.length === 1) setSelectedCampusId(cam.data[0].id); }
       if (ses.data) { setSessions(ses.data); if (ses.data.length === 1) setSelectedSessionId(ses.data[0].id); }
@@ -174,6 +183,7 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
   useEffect(() => {
     if (!selectedInstitutionId) { setCourses([]); setParsed([]); return; }
     setParsed([]);
+    setSelectedCurrentTerm("");
     supabase.from("courses")
       .select("id, name, code, departments!inner(institution_id)")
       .eq("departments.institution_id", selectedInstitutionId)
@@ -183,6 +193,7 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
 
   const selectedCampus      = allCampuses.find(c => c.id === selectedCampusId) || null;
   const selectedInstitution = institutions.find(i => i.id === selectedInstitutionId) || null;
+  const selectedSession     = sessions.find(s => s.id === selectedSessionId) || null;
   const isSchool            = isSchoolInstitution(selectedInstitution);
 
   const reparse = (rows: ParsedRow[], forceExisting: boolean) =>
@@ -220,6 +231,7 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
         const dob          = get("dob");
         const gender       = get("gender");
         const grade        = get("grade") || get("class") || get("course") || get("programme");
+        const current_term = get("current_term") || get("current_semester") || get("semester") || get("year");
         const section      = get("section");
         const admission_no = get("admission_no") || get("admissionno") || get("admission_number");
         const father_name  = get("father_name") || get("father");
@@ -248,7 +260,7 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
           : isDaottCourse(resolvedCourse) ? "stetho_batch" : "standard";
 
         return {
-          name, dob, gender, grade, section, admission_no,
+          name, dob, gender, grade, current_term, section, admission_no,
           father_name, father_phone, mother_name, mother_phone, fee_type,
           course_id, fee_version, valid, error,
         };
@@ -279,6 +291,9 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
         course_id: r.course_id,
         campus_id: selectedCampusId,
         session_id: selectedSessionId || null,
+        joining_academic_year: isSchool ? selectedSession?.name || null : null,
+        semester: !isSchool ? (selectedCurrentTerm || r.current_term || null) : null,
+        admission_date: selectedAdmissionDate || null,
         admission_no: (isSchool && r.admission_no) ? r.admission_no : null,
         school_admission_no: (isSchool && r.admission_no) ? r.admission_no : null,
         pre_admission_no: (isSchool && r.admission_no)
@@ -308,14 +323,14 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
 
   const downloadTemplate = () => {
     const schoolHeader = "name,dob,gender,grade,section,admission_no,father_name,father_phone,mother_name,mother_phone,fee_type";
-    const collegeHeader = "name,dob,gender,course,section,father_name,father_phone,mother_name,mother_phone";
+    const collegeHeader = "name,dob,gender,course,current_term,section,father_name,father_phone,mother_name,mother_phone";
     const header = isSchool ? schoolHeader : collegeHeader;
     const ex1 = isSchool
       ? "Rohan Sharma,2016-06-12,Male,Grade III,A,1803188,Rajesh Sharma,9876543210,Priya Sharma,9876543211,existing"
-      : "Rohan Sharma,2004-06-12,Male,BCA,A,Rajesh Sharma,9876543210,Priya Sharma,9876543211";
+      : "Rohan Sharma,2004-06-12,Male,BCA,Sem 1,A,Rajesh Sharma,9876543210,Priya Sharma,9876543211";
     const ex2 = isSchool
       ? "Ananya Singh,2017-09-01,Female,Grade II,B,,Amit Singh,9876543212,Sunita Singh,9876543213,new"
-      : "Ananya Singh,2005-09-01,Female,B.Sc Computer Science,,Amit Singh,9876543212,Sunita Singh,9876543213";
+      : "Ananya Singh,2005-09-01,Female,B.Sc Computer Science,Year 1,,Amit Singh,9876543212,Sunita Singh,9876543213";
     const csv = [header, ex1, ex2].join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url  = URL.createObjectURL(blob);
@@ -331,7 +346,9 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
   const existingCount = parsed.filter(r => r.valid && r.fee_version === "existing_parent").length;
   const newCount      = parsed.filter(r => r.valid && r.fee_version === "new_admission").length;
 
-  const canImport = validCount > 0 && !!selectedCampusId && !!selectedInstitutionId && !!selectedSessionId;
+  const canImport = validCount > 0 && !!selectedCampusId && !!selectedInstitutionId && !!selectedSessionId && !!selectedAdmissionDate && (
+    isSchool || !!selectedCurrentTerm || parsed.filter(r => r.valid).every(r => !!r.current_term)
+  );
 
   const handleClose = (o: boolean) => {
     if (!importing) { onOpenChange(o); setParsed([]); setResult(null); }
@@ -382,6 +399,21 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
                   {sessions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </div>
+              <div className="col-span-2">
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Admission Date <span className="text-destructive">*</span></label>
+                <input type="date" value={selectedAdmissionDate} onChange={e => setSelectedAdmissionDate(e.target.value)}
+                  className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20" />
+              </div>
+              {!isSchool && selectedInstitutionId && (
+                <div className="col-span-2">
+                  <label className="block text-[11px] font-medium text-muted-foreground mb-1">Current Semester / Year <span className="text-destructive">*</span></label>
+                  <select value={selectedCurrentTerm} onChange={e => setSelectedCurrentTerm(e.target.value)}
+                    className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20">
+                    <option value="">Use CSV current_term column or select for all rows</option>
+                    {HIGHER_ED_TERMS.map(term => <option key={term} value={term}>{term}</option>)}
+                  </select>
+                </div>
+              )}
             </div>
 
             {/* Fee override toggle — school institutions only */}
@@ -408,7 +440,7 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
                   <p className="text-xs text-muted-foreground mb-1">
                     {isSchool
                       ? <>Required: <code className="bg-muted px-1 rounded">name</code>. Optional: dob, gender, grade, section, admission_no, father_name, father_phone, mother_name, mother_phone, fee_type</>
-                      : <>Required: <code className="bg-muted px-1 rounded">name</code>. Optional: dob, gender, course, section, father_name, father_phone, mother_name, mother_phone</>
+                      : <>Required: <code className="bg-muted px-1 rounded">name</code>. Optional: dob, gender, course, current_term, section, father_name, father_phone, mother_name, mother_phone</>
                     }
                   </p>
                 ) : (
@@ -457,6 +489,7 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
                         <th className="px-3 py-2 text-left font-semibold text-muted-foreground">
                           {isSchool ? "Grade" : "Course"}
                         </th>
+                        {!isSchool && <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Current</th>}
                         {isSchool && <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Admission No.</th>}
                         {isSchool && <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Fee Structure</th>}
                         <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Father</th>
@@ -477,6 +510,9 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
                               ? courseLabel(courses.find(c => c.id === r.course_id)!)
                               : r.grade || "—"}
                           </td>
+                          {!isSchool && (
+                            <td className="px-3 py-2 text-muted-foreground">{selectedCurrentTerm || r.current_term || "—"}</td>
+                          )}
                           {isSchool && (
                             <td className="px-3 py-2 font-mono text-muted-foreground">{r.admission_no || "—"}</td>
                           )}

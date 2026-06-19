@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, UserCheck, ArrowRight } from "lucide-react";
+import { getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
 
 interface ConvertToStudentDialogProps {
   open: boolean;
@@ -27,23 +28,57 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
   const [saving, setSaving] = useState(false);
   const [sessions, setSessions] = useState<{ id: string; name: string }[]>([]);
   const [batches, setBatches] = useState<{ id: string; name: string }[]>([]);
+  const [isSchoolCourse, setIsSchoolCourse] = useState(false);
   const [conversionType, setConversionType] = useState<"pre_admit" | "admit">("pre_admit");
-  const [form, setForm] = useState({ session_id: "", batch_id: "", admission_date: new Date().toISOString().slice(0, 10) });
+  const [form, setForm] = useState({
+    session_id: "",
+    batch_id: "",
+    admission_date: new Date().toISOString().slice(0, 10),
+    joining_academic_year: "",
+    semester: "",
+  });
+
+  const schoolSessionNames = ["2026-27", "2027-28"];
+  const higherEdTerms = [
+    "Sem 1", "Sem 2", "Sem 3", "Sem 4", "Sem 5", "Sem 6", "Sem 7", "Sem 8", "Sem 9", "Sem 10",
+    "Year 1", "Year 2", "Year 3", "Year 4", "Year 5",
+  ];
 
   useEffect(() => {
     if (!open) return;
     Promise.all([
-      supabase.from("admission_sessions").select("id, name").eq("is_active", true),
+      supabase.from("admission_sessions").select("id, name").in("name", schoolSessionNames).order("start_date"),
       supabase.from("batches").select("id, name").eq("course_id", lead.course_id || ""),
-    ]).then(([s, b]) => {
+      lead.course_id
+        ? supabase.from("courses").select("id, departments!inner(institutions!inner(type))").eq("id", lead.course_id).maybeSingle()
+        : Promise.resolve({ data: null } as any),
+    ]).then(([s, b, c]) => {
       if (s.data) setSessions(s.data);
-      if (b.data) setBatches(b.data);
+      const batchRows = b.data ?? [];
+      setBatches(batchRows);
+      setForm((previous) => {
+        const currentBatchStillValid = batchRows.some((batch) => batch.id === previous.batch_id);
+        return {
+          ...previous,
+          batch_id: currentBatchStillValid ? previous.batch_id : batchRows.length === 1 ? batchRows[0].id : "",
+        };
+      });
+      const departments = (c.data as any)?.departments;
+      const instType = Array.isArray(departments)
+        ? departments[0]?.institutions?.type
+        : departments?.institutions?.type;
+      setIsSchoolCourse(instType === "school");
     });
     // Pre-select type based on lead stage
     if (["token_paid", "pre_admitted"].includes(lead.stage) && !lead.admission_no) {
       setConversionType(lead.pre_admission_no ? "admit" : "pre_admit");
     }
   }, [open, lead]);
+
+  useEffect(() => {
+    const sessionName = sessions.find(s => s.id === form.session_id)?.name || "";
+    setForm(p => isSchoolCourse ? { ...p, joining_academic_year: sessionName, semester: "" } : { ...p, joining_academic_year: "" });
+  }, [isSchoolCourse, form.session_id, sessions]);
 
   const generatePAN = () => `PAN-${Date.now().toString(36).toUpperCase()}`;
   const generateAN = () => `AN-${Date.now().toString(36).toUpperCase()}`;
@@ -53,12 +88,14 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
     const isPreadmit = conversionType === "pre_admit";
     const pan = isPreadmit ? generatePAN() : (lead.pre_admission_no || generatePAN());
     const an = isPreadmit ? null : generateAN();
+    const applicationPhotoUrl = (await getApplicationPhotoUrlsByLeadId([lead.id])).get(lead.id) || null;
 
     // Create student record
     const { data: student, error: studentErr } = await supabase.from("students").insert({
       name: lead.name,
       phone: lead.phone,
       email: lead.email,
+      photo_url: applicationPhotoUrl,
       guardian_name: lead.guardian_name,
       guardian_phone: lead.guardian_phone,
       course_id: lead.course_id,
@@ -66,6 +103,8 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
       lead_id: lead.id,
       session_id: form.session_id || null,
       batch_id: form.batch_id || null,
+      joining_academic_year: isSchoolCourse ? form.joining_academic_year || null : null,
+      semester: !isSchoolCourse ? form.semester || null : null,
       admission_date: form.admission_date || null,
       pre_admission_no: pan,
       admission_no: an,
@@ -168,9 +207,27 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
             <input type="date" value={form.admission_date} onChange={e => setForm(p => ({ ...p, admission_date: e.target.value }))} className={inputCls} />
           </div>
 
+          {isSchoolCourse ? (
+            <div>
+              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Admission Year</label>
+              <select value={form.joining_academic_year} onChange={e => setForm(p => ({ ...p, joining_academic_year: e.target.value }))} className={inputCls}>
+                <option value="">Select admission year</option>
+                {schoolSessionNames.map(year => <option key={year} value={year}>{year}</option>)}
+              </select>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Current Semester / Year</label>
+              <select value={form.semester} onChange={e => setForm(p => ({ ...p, semester: e.target.value }))} className={inputCls}>
+                <option value="">Select current semester/year</option>
+                {higherEdTerms.map(term => <option key={term} value={term}>{term}</option>)}
+              </select>
+            </div>
+          )}
+
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button onClick={handleConvert} disabled={saving} className="gap-1.5">
+            <Button onClick={handleConvert} disabled={saving || !form.session_id || (isSchoolCourse ? !form.admission_date || !form.joining_academic_year : !form.batch_id || !form.semester)} className="gap-1.5">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
               {conversionType === "pre_admit" ? "Pre-Admit" : "Admit"} Student
             </Button>

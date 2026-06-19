@@ -7619,6 +7619,7 @@ export type Database = {
           school_email: string | null
           second_language: string | null
           section: string | null
+          semester: string | null
           session_id: string | null
           sports: string | null
           sr_number: string | null
@@ -7733,6 +7734,7 @@ export type Database = {
           school_email?: string | null
           second_language?: string | null
           section?: string | null
+          semester?: string | null
           session_id?: string | null
           sports?: string | null
           sr_number?: string | null
@@ -7847,6 +7849,7 @@ export type Database = {
           school_email?: string | null
           second_language?: string | null
           section?: string | null
+          semester?: string | null
           session_id?: string | null
           sports?: string | null
           sr_number?: string | null
