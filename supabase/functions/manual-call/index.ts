@@ -118,25 +118,7 @@ Deno.serve(async (req) => {
       return json({ error: "Could not start call tracking. Try again." }, 500);
     }
 
-    // Set bridge context on voice agent server
-    const ctxRes = await fetch(`${VOICE_AGENT_URL}/bridge-context/${callId}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        leadId: lead_id,
-        leadName: lead.name,
-        courseName: (lead.courses as any)?.name || null,
-        campusName: (lead.campuses as any)?.name || null,
-        counsellorPhone,
-        studentPhone,
-        counsellorName: profile.display_name,
-        counsellorUserId: userId,
-      }),
-    });
-
-    if (!ctxRes.ok) {
-      const ctxText = await ctxRes.text().catch(() => "");
-      console.error("Bridge context setup failed:", ctxRes.status, ctxText);
+    const failCallSetup = async (summary: string, error: string, status = 502) => {
       await db
         .from("ai_call_records")
         .update({
@@ -144,10 +126,44 @@ Deno.serve(async (req) => {
           disposition: "call_setup_failed",
           duration_seconds: 0,
           completed_at: new Date().toISOString(),
-          summary: "Cloud Call failed before provider dial: bridge context setup failed",
+          summary,
         } as any)
         .eq("call_uuid", callId);
-      return json({ error: "Call setup failed before dialing your phone. Try again." }, 502);
+      return json({ error }, status);
+    };
+
+    // Set bridge context on voice agent server
+    let ctxRes: Response;
+    try {
+      ctxRes = await fetch(`${VOICE_AGENT_URL}/bridge-context/${callId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leadId: lead_id,
+          leadName: lead.name,
+          courseName: (lead.courses as any)?.name || null,
+          campusName: (lead.campuses as any)?.name || null,
+          counsellorPhone,
+          studentPhone,
+          counsellorName: profile.display_name,
+          counsellorUserId: userId,
+        }),
+      });
+    } catch (err: any) {
+      console.error("Bridge context request failed:", err);
+      return await failCallSetup(
+        `Cloud Call failed before provider dial: bridge context request failed: ${err?.message || "network error"}`,
+        "Call setup failed before dialing your phone. Try again.",
+      );
+    }
+
+    if (!ctxRes.ok) {
+      const ctxText = await ctxRes.text().catch(() => "");
+      console.error("Bridge context setup failed:", ctxRes.status, ctxText);
+      return await failCallSetup(
+        "Cloud Call failed before provider dial: bridge context setup failed",
+        "Call setup failed before dialing your phone. Try again.",
+      );
     }
 
     // Plivo: call the counsellor first
@@ -174,18 +190,30 @@ Deno.serve(async (req) => {
       caller_name: `NIMT CRM: ${lead.name || "Lead"}`,
     };
 
-    const plivoRes = await fetch(plivoUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Basic " + btoa(`${PLIVO_AUTH_ID}:${PLIVO_AUTH_TOKEN}`),
-      },
-      body: JSON.stringify(plivoPayload),
-    });
+    let plivoRes: Response;
+    try {
+      plivoRes = await fetch(plivoUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Basic " + btoa(`${PLIVO_AUTH_ID}:${PLIVO_AUTH_TOKEN}`),
+        },
+        body: JSON.stringify(plivoPayload),
+      });
+    } catch (err: any) {
+      console.error("Plivo call request failed before provider accepted call:", err);
+      return await failCallSetup(
+        `Cloud Call failed before ringing counsellor: Plivo request failed: ${err?.message || "network error"}`,
+        "Call failed before reaching Plivo. Try again.",
+        500,
+      );
+    }
 
     const plivoText = await plivoRes.text();
     let plivoData: any = {};
     try { plivoData = JSON.parse(plivoText); } catch { plivoData = { raw: plivoText }; }
+    const rawRequestUuid = plivoData.request_uuid;
+    const requestUuid = Array.isArray(rawRequestUuid) ? rawRequestUuid[0] : rawRequestUuid;
 
     console.log("Plivo response:", plivoRes.status, plivoText);
     console.log("Plivo payload sent:", JSON.stringify({
@@ -209,13 +237,22 @@ Deno.serve(async (req) => {
       return json({ error: `Call failed: ${plivoData?.error || plivoData?.message || plivoText || "Unknown error"}` }, 500);
     }
 
-    // Patch any provider identifier Call.create returned. Some Plivo accounts
-    // return only "async api spawned"; bridge-call-status will persist the real
-    // CallUUID on the first callback in that case.
+    if (!requestUuid) {
+      console.error("Plivo call accepted without request_uuid:", plivoText);
+      return await failCallSetup(
+        `Cloud Call failed before ringing counsellor: Plivo accepted request without request_uuid: ${plivoData?.message || plivoText || "missing request_uuid"}`,
+        "Call failed before ringing your phone. Plivo did not return a call request id.",
+        502,
+      );
+    }
+
+    // Patch the provider request identifier returned by Call.create. Without
+    // this id we cannot correlate callbacks or verify that Plivo accepted a
+    // real outbound call request, so missing ids are failed above.
     await db
       .from("ai_call_records")
       .update({
-        plivo_call_uuid: plivoData.request_uuid || null,
+        plivo_call_uuid: requestUuid,
         summary: `Cloud Call: connecting by ${profile.display_name}`,
       } as any)
       .eq("call_uuid", callId);
@@ -237,7 +274,7 @@ Deno.serve(async (req) => {
     return json({
       success: true,
       call_id: callId,
-      plivo_request_uuid: plivoData.request_uuid,
+      plivo_request_uuid: requestUuid,
       message: `Calling your phone (${profile.phone})... Pick up to connect to ${lead.name || "the student"}.`,
     });
   } catch (err: any) {
