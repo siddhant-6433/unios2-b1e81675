@@ -268,9 +268,9 @@ export default function CloudDialer() {
   const currentLead = queue[currentIdx] || null;
   const asksCnetAppeared = !!currentLead && isBscNursingCourse(currentLead.course_name);
   const asksCahetRegistered = !!currentLead && isBptOrBmritCourseName(currentLead.course_name);
-  const qualifierRequiredUnanswered =
-    (asksCnetAppeared && !cnetAppeared) ||
-    (asksCahetRegistered && !cahetRegistered);
+  const callWasAnswered = callState.status === "connected" || callState.status === "ended";
+  const showCnetQualifier = callWasAnswered && asksCnetAppeared;
+  const showCahetQualifier = callWasAnswered && asksCahetRegistered;
 
   useEffect(() => {
     setCnetAppeared(null);
@@ -795,14 +795,6 @@ export default function CloudDialer() {
   // ── Pre-select disposition during connected call ─────────────────────────
 
   const preSelectDisposition = (disposition: string) => {
-    if (asksCnetAppeared && !cnetAppeared) {
-      toast({ title: "CNET required", description: "Mark whether the B.Sc Nursing lead appeared for CNET first.", variant: "destructive" });
-      return;
-    }
-    if (asksCahetRegistered && !cahetRegistered) {
-      toast({ title: "CAHET required", description: "Mark whether the BPT/BMRIT lead registered for CAHET first.", variant: "destructive" });
-      return;
-    }
     preDispositionRef.current = disposition;
     setCallState(prev => ({ ...prev, disposition }));
     toast({ title: "Disposition saved", description: `Marked as "${disposition.replace("_", " ")}". Will finalize when call ends.` });
@@ -835,16 +827,6 @@ export default function CloudDialer() {
 
   const finalizeDisposition = async (disposition: string, duration: number) => {
     if (!currentLead) return;
-    if (asksCnetAppeared && !cnetAppeared) {
-      toast({ title: "CNET required", description: "Mark whether the B.Sc Nursing lead appeared for CNET first.", variant: "destructive" });
-      setCallState(prev => ({ ...prev, status: "ended" }));
-      return;
-    }
-    if (asksCahetRegistered && !cahetRegistered) {
-      toast({ title: "CAHET required", description: "Mark whether the BPT/BMRIT lead registered for CAHET first.", variant: "destructive" });
-      setCallState(prev => ({ ...prev, status: "ended" }));
-      return;
-    }
 
     // Route through the merge RPC keyed on cloud_call_uuid so this manual
     // save lands on the same row as the voice-agent's bridge-hangup webhook
@@ -913,14 +895,6 @@ export default function CloudDialer() {
 
   const markDisposition = async (disposition: string) => {
     if (!currentLead) return;
-    if (asksCnetAppeared && !cnetAppeared) {
-      toast({ title: "CNET required", description: "Mark whether the B.Sc Nursing lead appeared for CNET first.", variant: "destructive" });
-      return;
-    }
-    if (asksCahetRegistered && !cahetRegistered) {
-      toast({ title: "CAHET required", description: "Mark whether the BPT/BMRIT lead registered for CAHET first.", variant: "destructive" });
-      return;
-    }
 
     // Log to call_logs via the merge RPC — see finalizeDisposition for why.
     const callUuid = callIdRef.current;
@@ -1429,10 +1403,10 @@ export default function CloudDialer() {
                   <p className="text-xs font-semibold text-primary uppercase tracking-wide">
                     {callState.status === "connected" ? "Mark during call" : "Mark outcome"}
                   </p>
-                  {asksCnetAppeared && (
+                  {showCnetQualifier && (
                     <div className="rounded-lg border border-blue-200 bg-blue-50/70 p-2 dark:border-blue-900/50 dark:bg-blue-950/20">
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-800 dark:text-blue-200 mb-1.5">
-                        CNET appeared? <span className="text-destructive">*</span>
+                        CNET appeared? <span className="text-muted-foreground normal-case">(optional)</span>
                       </p>
                       <div className="grid grid-cols-2 gap-1.5">
                         {(["yes", "no"] as const).map(value => (
@@ -1452,10 +1426,10 @@ export default function CloudDialer() {
                       </div>
                     </div>
                   )}
-                  {asksCahetRegistered && (
+                  {showCahetQualifier && (
                     <div className="rounded-lg border border-rose-200 bg-rose-50/70 p-2 dark:border-rose-900/50 dark:bg-rose-950/20">
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-rose-800 dark:text-rose-200 mb-1.5">
-                        Registered for CAHET? <span className="text-destructive">*</span>
+                        Registered for CAHET? <span className="text-muted-foreground normal-case">(optional)</span>
                       </p>
                       <div className="grid grid-cols-2 gap-1.5">
                         {(["yes", "no"] as const).map(value => (
@@ -1478,11 +1452,9 @@ export default function CloudDialer() {
                   <div className="grid grid-cols-2 gap-2">
                     {CONNECTED_DISPOSITIONS.map(d => (
                       <button key={d.value} onClick={() => dispoOnClick(d.value)}
-                        disabled={qualifierRequiredUnanswered}
                         className={`flex items-center justify-center gap-1.5 min-h-[48px] px-3 rounded-xl border text-sm font-medium transition-colors ${
                           callState.status === "connected" && callState.disposition === d.value
                             ? "ring-2 ring-primary bg-primary/10 border-primary" : d.color
-                        } ${qualifierRequiredUnanswered ? "opacity-50 cursor-not-allowed" : ""
                         }`}>
                         <d.icon className="h-4 w-4 shrink-0" />{d.label}
                       </button>
@@ -2005,10 +1977,10 @@ export default function CloudDialer() {
                           </div>
                         )}
                       </div>
-                      {asksCnetAppeared && (
+                      {showCnetQualifier && (
                         <div className="mb-2 rounded-lg border border-blue-200 bg-blue-50/70 p-2 dark:border-blue-900/50 dark:bg-blue-950/20">
                           <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-800 dark:text-blue-200 mb-1.5">
-                            CNET appeared? <span className="text-destructive">*</span>
+                            CNET appeared? <span className="text-muted-foreground normal-case">(optional)</span>
                           </p>
                           <div className="grid grid-cols-2 gap-1.5">
                             {(["yes", "no"] as const).map(value => (
@@ -2028,10 +2000,10 @@ export default function CloudDialer() {
                           </div>
                         </div>
                       )}
-                      {asksCahetRegistered && (
+                      {showCahetQualifier && (
                         <div className="mb-2 rounded-lg border border-rose-200 bg-rose-50/70 p-2 dark:border-rose-900/50 dark:bg-rose-950/20">
                           <p className="text-[10px] font-semibold uppercase tracking-wide text-rose-800 dark:text-rose-200 mb-1.5">
-                            Registered for CAHET? <span className="text-destructive">*</span>
+                            Registered for CAHET? <span className="text-muted-foreground normal-case">(optional)</span>
                           </p>
                           <div className="grid grid-cols-2 gap-1.5">
                             {(["yes", "no"] as const).map(value => (
@@ -2055,12 +2027,10 @@ export default function CloudDialer() {
                         {CONNECTED_DISPOSITIONS.map(d => (
                           <button key={d.value}
                             onClick={() => callState.status === "connected" ? preSelectDisposition(d.value) : markDisposition(d.value)}
-                            disabled={qualifierRequiredUnanswered}
                             className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${
                               callState.status === "connected" && callState.disposition === d.value
                                 ? "ring-2 ring-primary bg-primary/10 border-primary"
                                 : d.color
-                            } ${qualifierRequiredUnanswered ? "opacity-50 cursor-not-allowed" : ""
                             }`}>
                             <d.icon className="h-3 w-3" />{d.label}
                           </button>
