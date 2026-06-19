@@ -349,6 +349,35 @@ Deno.serve(async (req) => {
     const commandUrl  = `${baseUrl}/command`;
     const selfUrl     = resolveReturnUrl(req, `${supabaseUrl}/functions/v1/icici-payment`);
 
+    // ── /command endpoint helpers (status check + refund) ───────────────
+    // Per spec, /command takes form-encoded body (not JSON) and discriminates
+    // between operations via `transactionType` (STATUS, REFUND, AUTH, VOID...).
+    const commandRequest = async (
+      payload: Record<string, string>,
+    ): Promise<{ ok: boolean; data: any; raw: string }> => {
+      const signed = await signPayload(payload, apiKey);
+      const form = new URLSearchParams();
+      for (const [k, v] of Object.entries(signed)) {
+        if (v !== "" && v !== null && v !== undefined) form.append(k, String(v));
+      }
+      const redactedForm = new URLSearchParams(form);
+      if (redactedForm.has("secureHash")) redactedForm.set("secureHash", "[redacted]");
+      console.log(`[${FN_NAME}] /command(${payload.transactionType}) form:`, redactedForm.toString());
+      const res = await fetch(commandUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+        body: form.toString(),
+      });
+      const text = await res.text();
+      let data: any = {};
+      try { data = JSON.parse(text); } catch { /* leave as raw */ }
+      const redactedResponse = data && typeof data === "object" && !Array.isArray(data)
+        ? JSON.stringify(redactSecureHash(data))
+        : redactRawSecureHash(text);
+      console.log(`[${FN_NAME}] /command(${payload.transactionType}) response:`, redactedResponse);
+      return { ok: res.ok, data, raw: text };
+    };
+
     const rawBody = await req.text();
     const contentType = req.headers.get("content-type") || "";
 
@@ -374,20 +403,47 @@ Deno.serve(async (req) => {
       const redactedFields = redactSecureHash(fields);
       console.log(`[${FN_NAME}] callback fields:`, JSON.stringify(redactedFields));
 
+      const merchantTxnNo = fields.merchantTxnNo || "";
       const sigCheck = await verifySignature(fields, apiKey);
       console.log(`[${FN_NAME}] callback signature valid:`, sigCheck.valid);
       if (!sigCheck.valid && env === "production") {
-        console.error(`[${FN_NAME}] rejected callback with invalid signature`);
-        return returnPage(
-          "Payment Verification Failed",
-          "We could not verify the payment response. Please contact support if money was deducted.",
-          false,
-        );
+        if (!merchantTxnNo) {
+          console.error(`[${FN_NAME}] rejected callback with invalid signature and no merchantTxnNo`);
+          return returnPage(
+            "Payment Verification Failed",
+            "We could not verify the payment response. Please contact support if money was deducted.",
+            false,
+          );
+        }
+
+        const { data: statusData } = await commandRequest({
+          merchantId:      mid,
+          aggregatorID:    aggId,
+          merchantTxnNo,
+          originalTxnNo:   merchantTxnNo,
+          transactionType: "STATUS",
+        });
+        const statusCode = statusData?.responseCode || "";
+        const statusTxnStatus = (statusData?.txnStatus || "").toUpperCase();
+        const statusSettled = statusCode === "000" || statusCode === "0000" || statusTxnStatus === "SUC";
+        if (!statusSettled) {
+          console.error(`[${FN_NAME}] rejected callback with invalid signature; status not settled`);
+          return returnPage(
+            "Payment Verification Failed",
+            "We could not verify the payment response. Please contact support if money was deducted.",
+            false,
+          );
+        }
+
+        fields.responseCode ||= statusData?.responseCode || "";
+        fields.txnStatus ||= statusData?.txnStatus || "";
+        fields.txnID ||= statusData?.txnID || "";
+        fields.amount ||= statusData?.amount || "";
+        console.warn(`[${FN_NAME}] accepted invalid callback signature after STATUS verification`);
       } else if (!sigCheck.valid) {
         console.warn(`[${FN_NAME}] accepting UAT callback with invalid signature for gateway testing`);
       }
 
-      const merchantTxnNo = fields.merchantTxnNo || "";
       const responseCode  = fields.responseCode || "";
       const respDesc      = bestDescription(fields);
       // ICICI's bank reference: `txnID` on payment response, `paymentID` on
@@ -823,35 +879,6 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ txnid, pay_url: payUrl, tranCtx: data.tranCtx }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
-
-    // ── /command endpoint helpers (status check + refund) ───────────────
-    // Per spec, /command takes form-encoded body (not JSON) and discriminates
-    // between operations via `transactionType` (STATUS, REFUND, AUTH, VOID...).
-    const commandRequest = async (
-      payload: Record<string, string>,
-    ): Promise<{ ok: boolean; data: any; raw: string }> => {
-      const signed = await signPayload(payload, apiKey);
-      const form = new URLSearchParams();
-      for (const [k, v] of Object.entries(signed)) {
-        if (v !== "" && v !== null && v !== undefined) form.append(k, String(v));
-      }
-      const redactedForm = new URLSearchParams(form);
-      if (redactedForm.has("secureHash")) redactedForm.set("secureHash", "[redacted]");
-      console.log(`[${FN_NAME}] /command(${payload.transactionType}) form:`, redactedForm.toString());
-      const res = await fetch(commandUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-        body: form.toString(),
-      });
-      const text = await res.text();
-      let data: any = {};
-      try { data = JSON.parse(text); } catch { /* leave as raw */ }
-      const redactedResponse = data && typeof data === "object" && !Array.isArray(data)
-        ? JSON.stringify(redactSecureHash(data))
-        : redactRawSecureHash(text);
-      console.log(`[${FN_NAME}] /command(${payload.transactionType}) response:`, redactedResponse);
-      return { ok: res.ok, data, raw: text };
-    };
 
     // ── Status check (post-payment verify) ───────────────────────────────
     if (action === "verify-payment") {
