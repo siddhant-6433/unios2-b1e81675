@@ -52,6 +52,8 @@ export interface CallDispositionData {
  *    state; we auto-select the matching disposition and skip straight to the
  *    follow-up editor so the counsellor only needs to confirm the next
  *    callback time.
+ *  - "cancelled": counsellor explicitly cancelled the Cloud Call before a
+ *    lead outcome existed; no lead disposition or follow-up should be saved.
  *  - undefined: legacy "manual log" mode used when the counsellor opens the
  *    dialog from outside an active call. Shows the full picker as before.
  */
@@ -61,6 +63,7 @@ export type DialogCallStatus =
   | "no_answer"
   | "busy"
   | "failed"
+  | "cancelled"
   /** Counsellor's A-leg phone rang out / busy / failed before they picked up.
    *  Student was never dialed — dialog shows a "you didn't pick up — retry?"
    *  prompt with a one-tap Redial button. No disposition picker, no metrics. */
@@ -550,6 +553,56 @@ export function CallDispositionDialog({
               </p>
               <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-1.5">
                 This attempt won't count in your call metrics. Hit Redial to try again.
+              </p>
+            </div>
+            <div className="rounded-xl bg-muted/40 px-3 py-2">
+              <p className="text-xs text-muted-foreground">Calling</p>
+              <p className="text-sm font-semibold text-foreground truncate">{leadName}</p>
+              <p className="text-[11px] text-muted-foreground font-mono">{leadPhone}</p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                className="flex-1 bg-cyan-600 hover:bg-cyan-700 text-xs"
+                disabled={retrying || !onRetryCall}
+                onClick={async () => {
+                  if (!onRetryCall) { handleClose(false); return; }
+                  setRetrying(true);
+                  try { await onRetryCall(); }
+                  finally { setRetrying(false); }
+                }}
+              >
+                {retrying ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Phone className="h-3.5 w-3.5 mr-1.5" />}
+                Redial
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs"
+                disabled={retrying}
+                onClick={() => handleClose(false)}
+              >
+                Close
+              </Button>
+            </div>
+          </div>,
+      "max-w-md"
+    );
+  }
+
+  if (callStatus === "cancelled") {
+    return renderShell(
+      <>
+        <PhoneOff className="h-4 w-4 text-slate-600" />
+        Call cancelled
+      </>,
+      <div className="space-y-3 pt-1">
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/30 px-3 py-3">
+              <p className="text-sm text-slate-900 dark:text-slate-200">
+                The Cloud Call was cancelled by the counsellor before a lead outcome was recorded.
+              </p>
+              <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1.5">
+                This is not counted as the lead not picking up.
               </p>
             </div>
             <div className="rounded-xl bg-muted/40 px-3 py-2">

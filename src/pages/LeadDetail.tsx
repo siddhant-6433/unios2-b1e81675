@@ -141,7 +141,7 @@ const LeadDetail = () => {
   // calling → connected / no_answer / busy / failed. `undefined` means the
   // dialog was opened outside an active call (legacy "log past call" mode).
   const [dispositionCallStatus, setDispositionCallStatus] = useState<
-    "calling" | "connected" | "no_answer" | "busy" | "failed" | "counsellor_no_answer" | undefined
+    "calling" | "connected" | "no_answer" | "busy" | "failed" | "cancelled" | "counsellor_no_answer" | undefined
   >(undefined);
   // True once Plivo reports the bridge has hung up. The dialog stays on the
   // "connected" UI (disposition picker) but the elapsed timer freezes —
@@ -215,7 +215,7 @@ const LeadDetail = () => {
       if (cancelled) return;
       const { data } = await (supabase as any)
         .from("ai_call_records")
-        .select("status, duration_seconds, student_connected_at")
+        .select("status, disposition, duration_seconds, student_connected_at")
         .eq("call_uuid", activeCallUuid)
         .order("created_at", { ascending: false })
         .limit(1)
@@ -223,7 +223,13 @@ const LeadDetail = () => {
       if (cancelled) return;
       if (!data) return;
       const s = String(data.status || "").toLowerCase();
+      const disp = String(data.disposition || "").toLowerCase();
       const dur = data.duration_seconds || 0;
+      if (disp === "cancelled_by_counsellor" || s === "cancelled_by_counsellor" || s === "cancel") {
+        setDispositionCallStatus("cancelled");
+        setDispositionCallEnded(true);
+        return;
+      }
       // Bridge state machine:
       //  - status=completed with talk-time OR student_connected_at set →
       //    "connected" (dialog stays on disposition picker)
@@ -247,7 +253,7 @@ const LeadDetail = () => {
         // Counsellor never picked up A-leg → student never dialed. UI shows
         // a "you didn't pick up — retry?" prompt instead of a disposition picker.
         setDispositionCallStatus("counsellor_no_answer");
-      } else if (s === "no_answer" || s === "no-answer" || s === "cancel") {
+      } else if (s === "no_answer" || s === "no-answer") {
         setDispositionCallStatus("no_answer");
       } else if (s === "busy") {
         setDispositionCallStatus("busy");
@@ -1288,6 +1294,8 @@ const LeadDetail = () => {
                 toast({ title: "Cancel failed", description: error.message, variant: "destructive" });
               } else {
                 toast({ title: "Call cancelled", description: "Both legs dropped." });
+                setDispositionCallStatus("cancelled");
+                setDispositionCallEnded(true);
                 fetchAll(true);
               }
             } catch (e: any) {

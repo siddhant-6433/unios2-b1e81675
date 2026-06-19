@@ -334,14 +334,20 @@ export default function MissedCalls() {
     const tick = async () => {
       const { data } = await (supabase as any)
         .from("ai_call_records")
-        .select("status, duration_seconds, student_connected_at")
+        .select("status, disposition, duration_seconds, student_connected_at")
         .eq("call_uuid", activeCallUuid)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
       if (cancelled || !data) return;
       const s = String(data.status || "").toLowerCase();
+      const disp = String(data.disposition || "").toLowerCase();
       const dur = data.duration_seconds || 0;
+      if (disp === "cancelled_by_counsellor" || s === "cancelled_by_counsellor" || s === "cancel") {
+        setDispositionStatus("cancelled");
+        setDispositionEnded(true);
+        return;
+      }
       const wasAnswered = !!data.student_connected_at
         || s === "in-progress" || s === "in_progress" || s === "answered"
         || (s === "completed" && dur > 5);
@@ -351,7 +357,7 @@ export default function MissedCalls() {
         return;
       }
       if (wasAnswered) { setDispositionStatus("connected"); return; }
-      if (s === "no_answer" || s === "no-answer" || s === "cancel") setDispositionStatus("no_answer");
+      if (s === "no_answer" || s === "no-answer") setDispositionStatus("no_answer");
       else if (s === "busy") setDispositionStatus("busy");
       else if (s === "failed") setDispositionStatus("failed");
       else if (s === "completed") setDispositionStatus("no_answer");
@@ -649,6 +655,8 @@ export default function MissedCalls() {
                   toast({ title: "Cancel failed", description: error.message, variant: "destructive" });
                 } else {
                   toast({ title: "Call cancelled", description: "Both legs dropped." });
+                  setDispositionStatus("cancelled");
+                  setDispositionEnded(true);
                 }
               } catch (e: any) {
                 toast({ title: "Cancel failed", description: e?.message || "Try again", variant: "destructive" });
