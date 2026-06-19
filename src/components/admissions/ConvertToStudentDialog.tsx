@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, UserCheck, ArrowRight } from "lucide-react";
 import { getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
+import { SCHOOL_SESSION_YEARS, isSchoolSessionYear, sessionYearLabel } from "@/lib/sessionYears";
 
 interface ConvertToStudentDialogProps {
   open: boolean;
@@ -38,7 +39,6 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
     semester: "",
   });
 
-  const schoolSessionNames = ["2026-27", "2027-28"];
   const higherEdTerms = [
     "Sem 1", "Sem 2", "Sem 3", "Sem 4", "Sem 5", "Sem 6", "Sem 7", "Sem 8", "Sem 9", "Sem 10",
     "Year 1", "Year 2", "Year 3", "Year 4", "Year 5",
@@ -47,13 +47,13 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
   useEffect(() => {
     if (!open) return;
     Promise.all([
-      supabase.from("admission_sessions").select("id, name").in("name", schoolSessionNames).order("start_date"),
+      supabase.from("admission_sessions").select("id, name").eq("is_active", true).order("start_date"),
       supabase.from("batches").select("id, name").eq("course_id", lead.course_id || ""),
       lead.course_id
         ? supabase.from("courses").select("id, departments!inner(institutions!inner(type))").eq("id", lead.course_id).maybeSingle()
         : Promise.resolve({ data: null } as any),
     ]).then(([s, b, c]) => {
-      if (s.data) setSessions(s.data);
+      if (s.data) setSessions(s.data.filter((session) => isSchoolSessionYear(session.name)));
       const batchRows = b.data ?? [];
       setBatches(batchRows);
       setForm((previous) => {
@@ -76,7 +76,7 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
   }, [open, lead]);
 
   useEffect(() => {
-    const sessionName = sessions.find(s => s.id === form.session_id)?.name || "";
+    const sessionName = sessionYearLabel(sessions.find(s => s.id === form.session_id)?.name);
     setForm(p => isSchoolCourse ? { ...p, joining_academic_year: sessionName, semester: "" } : { ...p, joining_academic_year: "" });
   }, [isSchoolCourse, form.session_id, sessions]);
 
@@ -190,7 +190,7 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Session</label>
               <select value={form.session_id} onChange={e => setForm(p => ({ ...p, session_id: e.target.value }))} className={inputCls}>
                 <option value="">Select session</option>
-                {sessions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {sessions.map(s => <option key={s.id} value={s.id}>{sessionYearLabel(s.name)}</option>)}
               </select>
             </div>
             <div>
@@ -212,7 +212,7 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Admission Year</label>
               <select value={form.joining_academic_year} onChange={e => setForm(p => ({ ...p, joining_academic_year: e.target.value }))} className={inputCls}>
                 <option value="">Select admission year</option>
-                {schoolSessionNames.map(year => <option key={year} value={year}>{year}</option>)}
+                {SCHOOL_SESSION_YEARS.map(year => <option key={year} value={year}>{year}</option>)}
               </select>
             </div>
           ) : (

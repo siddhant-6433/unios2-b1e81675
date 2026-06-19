@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { isSchoolSessionYear, sessionYearLabel } from "@/lib/sessionYears";
 import {
   Upload, FileText, Loader2, CheckCircle, XCircle, Download, AlertTriangle, Users,
 } from "lucide-react";
@@ -35,7 +36,6 @@ interface ParsedRow {
   error: string;
 }
 
-const SCHOOL_SESSION_NAMES = ["2026-27", "2027-28"];
 const HIGHER_ED_TERMS = [
   "Sem 1", "Sem 2", "Sem 3", "Sem 4", "Sem 5", "Sem 6", "Sem 7", "Sem 8", "Sem 9", "Sem 10",
   "Year 1", "Year 2", "Year 3", "Year 4", "Year 5",
@@ -158,10 +158,14 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
     setParsed([]); setResult(null); setApplyExistingFeeToAll(false); setSelectedCurrentTerm(""); setSelectedAdmissionDate(new Date().toISOString().slice(0, 10));
     Promise.all([
       supabase.from("campuses").select("id, name").order("name"),
-      supabase.from("admission_sessions").select("id, name").in("name", SCHOOL_SESSION_NAMES).order("start_date"),
+      supabase.from("admission_sessions").select("id, name").eq("is_active", true).order("start_date"),
     ]).then(([cam, ses]) => {
       if (cam.data) { setAllCampuses(cam.data); if (cam.data.length === 1) setSelectedCampusId(cam.data[0].id); }
-      if (ses.data) { setSessions(ses.data); if (ses.data.length === 1) setSelectedSessionId(ses.data[0].id); }
+      if (ses.data) {
+        const schoolSessions = ses.data.filter((session) => isSchoolSessionYear(session.name));
+        setSessions(schoolSessions);
+        if (schoolSessions.length === 1) setSelectedSessionId(schoolSessions[0].id);
+      }
     });
   }, [open]);
 
@@ -291,7 +295,7 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
         course_id: r.course_id,
         campus_id: selectedCampusId,
         session_id: selectedSessionId || null,
-        joining_academic_year: isSchool ? selectedSession?.name || null : null,
+        joining_academic_year: isSchool ? sessionYearLabel(selectedSession?.name) || null : null,
         semester: !isSchool ? (selectedCurrentTerm || r.current_term || null) : null,
         admission_date: selectedAdmissionDate || null,
         admission_no: (isSchool && r.admission_no) ? r.admission_no : null,
@@ -396,7 +400,7 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
                 <select value={selectedSessionId} onChange={e => setSelectedSessionId(e.target.value)}
                   className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20">
                   <option value="">Select session</option>
-                  {sessions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  {sessions.map(s => <option key={s.id} value={s.id}>{sessionYearLabel(s.name)}</option>)}
                 </select>
               </div>
               <div className="col-span-2">
