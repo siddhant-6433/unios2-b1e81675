@@ -19,6 +19,7 @@ interface AppTransaction {
   payment_ref: string | null;
   pending_txnid?: string | null;
   fee_receipt_url?: string | null;
+  gateway?: string | null;
   updated_at: string;
   created_at: string;
   flags: string[];
@@ -37,6 +38,7 @@ interface StudentPayment {
   id: string;
   amount: number;
   payment_mode: string;
+  gateway: string | null;
   transaction_ref: string | null;
   receipt_no: string | null;
   paid_at: string;
@@ -88,11 +90,41 @@ const STATUS_COLORS: Record<string, string> = {
 
 const MODE_COLORS: Record<string, string> = {
   online:        "bg-blue-100  text-blue-700",
+  gateway:       "bg-blue-100  text-blue-700",
   cash:          "bg-green-100 text-green-700",
   cheque:        "bg-purple-100 text-purple-700",
   upi:           "bg-orange-100 text-orange-700",
   bank_transfer: "bg-cyan-100  text-cyan-700",
 };
+
+const GATEWAY_LABELS: Record<string, string> = {
+  easebuzz: "Easebuzz",
+  icici: "ICICI",
+  cashfree: "Cashfree",
+  offline: "Marked Offline",
+  manual: "Marked Offline",
+};
+
+function appIdFromNotes(notes?: unknown): string | null {
+  const match = String(notes || "").match(/APP-\d{2}-[A-Z0-9]+/i);
+  return match?.[0]?.toUpperCase() || null;
+}
+
+function inferGatewayLabel(txn: {
+  gateway?: string | null;
+  payment_ref?: string | null;
+  transaction_ref?: string | null;
+  pending_txnid?: string | null;
+  payment_mode?: string | null;
+}) {
+  if (txn.gateway) return GATEWAY_LABELS[txn.gateway] || txn.gateway;
+  const ref = `${txn.payment_ref || ""} ${txn.transaction_ref || ""} ${txn.pending_txnid || ""}`.toLowerCase();
+  if (ref.includes("manual_")) return GATEWAY_LABELS.offline;
+  if (ref.includes("icici")) return GATEWAY_LABELS.icici;
+  if (ref.startsWith("eb") || ref.includes("easepay")) return GATEWAY_LABELS.easebuzz;
+  if (txn.payment_mode === "gateway" || txn.payment_mode === "online" || txn.pending_txnid) return "Unknown gateway";
+  return "—";
+}
 
 // ── Summary card ─────────────────────────────────────────────────────────────
 
@@ -144,7 +176,7 @@ export default function TransactionHistoryPanel() {
   const fetchAppTxns = async () => {
     setLoadingApp(true);
     setErrorApp(null);
-    const [appsRes, lpRes] = await Promise.all([
+    const [appsRes, appPaymentsRes, lpRes] = await Promise.all([
       (supabase as any)
         .from("applications")
         .select(`
@@ -158,8 +190,15 @@ export default function TransactionHistoryPanel() {
         .limit(1000),
       (supabase as any)
         .from("lead_payments")
+        .select("id, application_id, notes, gateway, transaction_ref, receipt_url, payment_date, created_at")
+        .eq("type", "application_fee")
+        .eq("status", "confirmed")
+        .order("created_at", { ascending: false })
+        .limit(2000),
+      (supabase as any)
+        .from("lead_payments")
         .select(`
-          id, lead_id, type, amount, status, transaction_ref, receipt_no,
+          id, lead_id, type, amount, status, gateway, transaction_ref, receipt_no,
           payment_mode, payment_date, created_at, notes, receipt_url,
           leads ( name, phone, email, admission_no, pre_admission_no, campus_id )
         `)
@@ -169,12 +208,28 @@ export default function TransactionHistoryPanel() {
     ]);
 
     if (appsRes.error) { setErrorApp(appsRes.error.message); setLoadingApp(false); return; }
+    if (appPaymentsRes.error) { setErrorApp(appPaymentsRes.error.message); setLoadingApp(false); return; }
     if (lpRes.error)   { setErrorApp(lpRes.error.message);   setLoadingApp(false); return; }
+
+    const appPaymentByAppId = new Map<string, any>();
+    (appPaymentsRes.data || []).forEach((p: any) => {
+      const appId = p.application_id || appIdFromNotes(p.notes);
+      if (appId && !appPaymentByAppId.has(appId)) appPaymentByAppId.set(appId, p);
+    });
 
     // Filter applications: only keep pre-admission (no admission_no on lead).
     const apps: AppTransaction[] = (appsRes.data || [])
       .filter((a: any) => !a.leads?.admission_no)
-      .map((a: any) => ({ ...a, fee_type: "application_fee" as const, source: "application" as const }));
+      .map((a: any) => {
+        const payment = appPaymentByAppId.get(a.application_id);
+        return {
+          ...a,
+          gateway: payment?.gateway || null,
+          fee_receipt_url: a.fee_receipt_url || payment?.receipt_url || null,
+          fee_type: "application_fee" as const,
+          source: "application" as const,
+        };
+      });
 
     // Filter lead_payments: only pre-admission, normalise to AppTransaction shape.
     const lps: AppTransaction[] = (lpRes.data || [])
@@ -187,6 +242,7 @@ export default function TransactionHistoryPanel() {
         fee_amount:     Number(lp.amount || 0),
         payment_status: lp.status === "confirmed" ? "paid" : (lp.status || "pending"),
         payment_ref:    lp.transaction_ref,
+        gateway:        lp.gateway || null,
         // Pre-generated receipt PDF for the lead_payment, populated by
         // generate-payment-receipt when the payment confirmed. Shown by the
         // Receipt action.
@@ -234,7 +290,7 @@ export default function TransactionHistoryPanel() {
       (supabase as any)
         .from("lead_payments")
         .select(`
-          id, lead_id, type, amount, payment_mode, transaction_ref, receipt_no,
+          id, lead_id, type, amount, payment_mode, gateway, transaction_ref, receipt_no,
           payment_date, created_at, notes, status,
           leads ( name, admission_no, pre_admission_no, phone, email, campus_id )
         `)
@@ -247,7 +303,10 @@ export default function TransactionHistoryPanel() {
     if (lpRes.error)       { setErrorStudent(lpRes.error.message);       setLoadingStudent(false); return; }
 
     // Native student-fee payments. Always shown.
-    const native: StudentPayment[] = (paymentsRes.data || []) as any;
+    const native: StudentPayment[] = (paymentsRes.data || []).map((p: any) => ({
+      ...p,
+      gateway: null,
+    }));
 
     // lead_payments graduate into student-fee view once the lead has an
     // admission_no. Tag with type so the row label distinguishes them from
@@ -258,6 +317,7 @@ export default function TransactionHistoryPanel() {
         id: `lp-${lp.id}`,
         amount: Number(lp.amount || 0),
         payment_mode: lp.payment_mode || "gateway",
+        gateway: lp.gateway || null,
         transaction_ref: lp.transaction_ref,
         receipt_no: lp.receipt_no,
         paid_at: lp.payment_date || lp.created_at,
@@ -499,6 +559,7 @@ export default function TransactionHistoryPanel() {
           t.full_name.toLowerCase().includes(q) ||
           (t.phone || "").toLowerCase().includes(q) ||
           (t.payment_ref || "").toLowerCase().includes(q) ||
+          inferGatewayLabel(t).toLowerCase().includes(q) ||
           admNo.includes(q) ||
           preAdmNo.includes(q)
         );
@@ -525,7 +586,8 @@ export default function TransactionHistoryPanel() {
           pre.includes(q) ||
           phone.includes(q) ||
           (p.receipt_no || "").toLowerCase().includes(q) ||
-          (p.transaction_ref || "").toLowerCase().includes(q)
+          (p.transaction_ref || "").toLowerCase().includes(q) ||
+          inferGatewayLabel(p).toLowerCase().includes(q)
         );
       }
       return true;
@@ -556,7 +618,7 @@ export default function TransactionHistoryPanel() {
 
   const exportAppCSV = () => {
     const headers = ["Date", "Application ID", "Applicant Name", "Phone", "Email",
-      "Amount", "Status", "Payment Ref", "Admission No", "Pre-Admission No"];
+      "Amount", "Status", "Payment Gateway", "Payment Ref", "Admission No", "Pre-Admission No"];
     const rows = filteredApps.map((t) => [
       fmtDate(t.updated_at),
       t.application_id,
@@ -565,6 +627,7 @@ export default function TransactionHistoryPanel() {
       t.email || "",
       t.fee_amount?.toFixed(2) || "0.00",
       t.payment_status,
+      inferGatewayLabel(t),
       t.payment_ref || "",
       t.leads?.admission_no || "",
       t.leads?.pre_admission_no || "",
@@ -574,7 +637,7 @@ export default function TransactionHistoryPanel() {
 
   const exportStudentCSV = () => {
     const headers = ["Date", "Receipt No", "Student Name", "Phone", "Amount",
-      "Mode", "Transaction Ref", "Admission No", "Pre-Admission No", "Recorded By", "Notes"];
+      "Mode", "Payment Gateway", "Transaction Ref", "Admission No", "Pre-Admission No", "Recorded By", "Notes"];
     const rows = filteredStudents.map((p) => [
       fmtDate(p.paid_at),
       p.receipt_no || "",
@@ -582,6 +645,7 @@ export default function TransactionHistoryPanel() {
       p.students?.phone || "",
       p.amount?.toFixed(2) || "0.00",
       p.payment_mode,
+      inferGatewayLabel(p),
       p.transaction_ref || "",
       p.students?.admission_no || "",
       p.students?.pre_admission_no || "",
@@ -803,6 +867,7 @@ export default function TransactionHistoryPanel() {
                     <th className="px-4 py-3 font-medium text-muted-foreground">Phone</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground text-right whitespace-nowrap">Amount</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground">Status</th>
+                    <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Payment Gateway</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Payment Ref</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Pre-Admission No</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Student Type</th>
@@ -844,6 +909,9 @@ export default function TransactionHistoryPanel() {
                           {t.payment_status === "pending" && <Clock className="h-3 w-3" />}
                           {t.payment_status}
                         </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                        {inferGatewayLabel(t)}
                       </td>
                       <td className="px-4 py-3">
                         {t.payment_ref
@@ -901,7 +969,9 @@ export default function TransactionHistoryPanel() {
                                 phone: t.phone,
                                 email: t.email || undefined,
                                 amount: t.fee_amount,
+                                payment_mode: "online",
                                 payment_ref: t.payment_ref,
+                                payment_gateway: t.gateway || inferGatewayLabel(t),
                                 payment_date: t.updated_at,
                                 receipt_url: t.fee_receipt_url || null,
                               })}
@@ -984,6 +1054,7 @@ export default function TransactionHistoryPanel() {
                     <th className="px-4 py-3 font-medium text-muted-foreground">Phone</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground text-right">Amount</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground">Mode</th>
+                    <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Payment Gateway</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Transaction Ref</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Admission No</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Recorded By</th>
@@ -1014,6 +1085,9 @@ export default function TransactionHistoryPanel() {
                           {p.payment_mode.replace("_", " ")}
                         </span>
                       </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                        {inferGatewayLabel(p)}
+                      </td>
                       <td className="px-4 py-3">
                         {p.transaction_ref
                           ? <span className="font-mono text-xs text-muted-foreground">{p.transaction_ref}</span>
@@ -1037,6 +1111,7 @@ export default function TransactionHistoryPanel() {
                             student_name: p.students?.name || undefined,
                             admission_no: p.students?.admission_no || p.students?.pre_admission_no || undefined,
                             payment_mode: p.payment_mode,
+                            payment_gateway: p.gateway,
                             recorded_by: p.profiles?.display_name || undefined,
                             amount: p.amount,
                             payment_ref: p.transaction_ref,
