@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, UserPlus, School, Users, Banknote, ChevronRight, ChevronLeft, Save } from "lucide-react";
+import { SCHOOL_SESSION_YEARS, isSchoolSessionYear, sessionYearLabel } from "@/lib/sessionYears";
 
 interface Campus      { id: string; name: string; code: string; }
 interface Institution { id: string; name: string; code: string; type: string; }
@@ -74,7 +75,6 @@ function isDaottCourse(course: Course | null) {
 }
 
 const STEPS = ["Student Details", "Parent / Guardian", "Programme & Session"];
-const SCHOOL_SESSION_NAMES = ["2026-27", "2027-28"];
 const HIGHER_ED_TERMS = [
   "Sem 1", "Sem 2", "Sem 3", "Sem 4", "Sem 5", "Sem 6", "Sem 7", "Sem 8", "Sem 9", "Sem 10",
   "Year 1", "Year 2", "Year 3", "Year 4", "Year 5",
@@ -145,11 +145,15 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
 
     Promise.all([
       supabase.from("campuses").select("id, name, code").order("name"),
-      supabase.from("admission_sessions").select("id, name").in("name", SCHOOL_SESSION_NAMES).order("start_date"),
+      supabase.from("admission_sessions").select("id, name").eq("is_active", true).order("start_date"),
     ]).then(([cam, ses]) => {
       if (cam.data) setAllCampuses(cam.data);
       setCampusesLoaded(true);
-      if (ses.data) { setSessions(ses.data); if (ses.data.length === 1 && !resumeDraftId) set("session_id", ses.data[0].id); }
+      if (ses.data) {
+        const schoolSessions = ses.data.filter((session) => isSchoolSessionYear(session.name));
+        setSessions(schoolSessions);
+        if (schoolSessions.length === 1 && !resumeDraftId) set("session_id", schoolSessions[0].id);
+      }
     });
 
     if (resumeDraftId) {
@@ -271,7 +275,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
     if (isSchool) {
       setForm(f => ({
         ...f,
-        joining_academic_year: selectedSession?.name || "",
+        joining_academic_year: sessionYearLabel(selectedSession?.name),
         semester: "",
       }));
     } else {
@@ -563,7 +567,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">Session <span className="text-destructive">*</span></label>
                 <select className={sel} value={form.session_id} onChange={e => set("session_id", e.target.value)}>
                   <option value="">Select session</option>
-                  {sessions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  {sessions.map(s => <option key={s.id} value={s.id}>{sessionYearLabel(s.name)}</option>)}
                 </select>
               </div>
               <div>
@@ -577,7 +581,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">Admission Year <span className="text-destructive">*</span></label>
                 <select className={sel} value={form.joining_academic_year} onChange={e => set("joining_academic_year", e.target.value)}>
                   <option value="">Select admission year</option>
-                  {SCHOOL_SESSION_NAMES.map(year => <option key={year} value={year}>{year}</option>)}
+                  {SCHOOL_SESSION_YEARS.map(year => <option key={year} value={year}>{year}</option>)}
                 </select>
               </div>
             ) : (
@@ -640,7 +644,7 @@ export function AddStudentDialog({ open, onOpenChange, onSuccess, defaultCampusI
                 {" › "}{selectedCourse ? courseLabel(selectedCourse) : "—"}
               </p>
               <p className="text-muted-foreground">
-                {isSchool ? `Session: ${selectedSession?.name || "—"} · Admission year: ${form.joining_academic_year || "—"}` : `Current: ${form.semester || "—"}`}
+                {isSchool ? `Session: ${sessionYearLabel(selectedSession?.name) || "—"} · Admission year: ${form.joining_academic_year || "—"}` : `Current: ${form.semester || "—"}`}
               </p>
               {form.school_admission_no && <p className="text-muted-foreground font-mono">Admission No: {form.school_admission_no}</p>}
             </div>
