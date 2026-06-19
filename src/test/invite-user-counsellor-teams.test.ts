@@ -5,6 +5,7 @@ const inviteDialog = readFileSync("src/components/admin/InviteUserDialog.tsx", "
 const inviteFunction = readFileSync("supabase/functions/invite-user/index.ts", "utf8");
 const teamManagement = readFileSync("src/components/admin/TeamManagement.tsx", "utf8");
 const aiPriorityMigration = readFileSync("supabase/migrations/20260620119000_ai_priority_assignment_history.sql", "utf8");
+const teamMemberInviteGrant = readFileSync("supabase/migrations/20260620122000_grant_service_role_team_member_invites.sql", "utf8");
 
 describe("invite user counsellor teams", () => {
   it("lets admins select multiple teams only when inviting counsellors", () => {
@@ -21,6 +22,11 @@ describe("invite user counsellor teams", () => {
     expect(inviteFunction).toContain('.from("team_members")');
     expect(inviteFunction).toContain('onConflict: "team_id,user_id"');
     expect(inviteFunction).toContain("Failed to add counsellor to teams");
+  });
+
+  it("grants the invite-user service role permission to add counsellors to teams", () => {
+    expect(teamMemberInviteGrant).toContain("GRANT INSERT ON public.team_members TO service_role");
+    expect(teamMemberInviteGrant).toContain("permission denied for table team_members");
   });
 
   it("runs a one-time backfill for unassigned priority-interested leads", () => {
