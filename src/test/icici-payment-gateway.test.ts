@@ -14,16 +14,22 @@ describe("ICICI payment gateway wiring", () => {
     expect(supabaseConfig).toMatch(/\[functions\.icici-payment\]\s+verify_jwt = false/s);
   });
 
-  it("rejects production callbacks with invalid signatures before mutating payment records", () => {
+  it("verifies production callbacks with bad signatures against ICICI status before mutating records", () => {
     const signatureCheck = iciciSource.indexOf("const sigCheck = await verifySignature(fields, apiKey)");
     const invalidGuard = iciciSource.indexOf('if (!sigCheck.valid && env === "production")');
+    const statusCheck = iciciSource.indexOf('transactionType: "STATUS"', invalidGuard);
+    const statusSettled = iciciSource.indexOf("const statusSettled =", statusCheck);
+    const acceptedAfterStatus = iciciSource.indexOf("accepted invalid callback signature after STATUS verification", statusSettled);
     const leadMutation = iciciSource.indexOf('.from("lead_payments")', invalidGuard);
     const applicationMutation = iciciSource.indexOf('.from("applications")', invalidGuard);
 
     expect(signatureCheck).toBeGreaterThan(-1);
     expect(invalidGuard).toBeGreaterThan(signatureCheck);
-    expect(leadMutation).toBeGreaterThan(invalidGuard);
-    expect(applicationMutation).toBeGreaterThan(invalidGuard);
+    expect(statusCheck).toBeGreaterThan(invalidGuard);
+    expect(statusSettled).toBeGreaterThan(statusCheck);
+    expect(acceptedAfterStatus).toBeGreaterThan(statusSettled);
+    expect(leadMutation).toBeGreaterThan(acceptedAfterStatus);
+    expect(applicationMutation).toBeGreaterThan(acceptedAfterStatus);
   });
 
   it("supports ICICI student-fee and alumni-service initiation without lead payment coupling", () => {
