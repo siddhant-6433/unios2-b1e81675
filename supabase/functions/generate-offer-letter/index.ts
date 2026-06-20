@@ -64,6 +64,66 @@ const fmtDeadline = (d?: string | null) => {
   return `${weekday}, ${ordinal(dt.getDate())} ${month}`;
 };
 
+const DEFAULT_INSTITUTION_NAME = "NIMT Educational Institutions";
+
+function sentenceCaseName(value?: string | null): string {
+  const cleaned = String(value || "").trim().replace(/\s+/g, " ");
+  if (!cleaned) return "Applicant";
+  return cleaned
+    .toLocaleLowerCase("en-IN")
+    .replace(/(^|[\s.'-])([a-z])/g, (_match, prefix: string, letter: string) => `${prefix}${letter.toLocaleUpperCase("en-IN")}`);
+}
+
+function institutionNameForOffer(brandingName?: string | null, campusName?: string | null): string {
+  const raw = String(brandingName || DEFAULT_INSTITUTION_NAME).trim() || DEFAULT_INSTITUTION_NAME;
+  const base = raw
+    .replace(/\s+-\s+Application Form$/i, "")
+    .replace(/\s+-\s+.*Campus.*$/i, "")
+    .trim() || DEFAULT_INSTITUTION_NAME;
+  const campus = String(campusName || "").trim();
+  return campus ? `${base} - ${campus}` : base;
+}
+
+function isBptOrBmritCourseName(courseName: string | null | undefined): boolean {
+  if (!courseName) return false;
+  const c = courseName.toLowerCase();
+  return (
+    c.includes("bpt") ||
+    c.includes("physiotherapy") ||
+    c.includes("bmrit") ||
+    (c.includes("radiology") && c.includes("b.sc")) ||
+    (c.includes("radiology") && c.includes("imaging"))
+  );
+}
+
+interface ApplicationEntranceExam {
+  exam_name?: string | null;
+  registration_no?: string | null;
+  registered_name?: string | null;
+}
+
+interface ApplicationCahetSource {
+  application_id?: string | null;
+  academic_details?: {
+    entrance_exams?: ApplicationEntranceExam[] | null;
+  } | null;
+}
+
+function cahetRegistrationFromApplication(app: ApplicationCahetSource | null): { registration_no: string; document_url: string | null; notes: string | null; registered_at: string | null } | null {
+  const exams = app?.academic_details?.entrance_exams;
+  if (!Array.isArray(exams)) return null;
+  const exam = exams.find((entry) => /cahet/i.test(String(entry?.exam_name || "")));
+  const registrationNo = String(exam?.registration_no || "").trim();
+  if (!registrationNo) return null;
+  const registeredName = String(exam?.registered_name || "").trim();
+  return {
+    registration_no: registrationNo,
+    document_url: null,
+    notes: registeredName ? `Name on CAHET form: ${registeredName}` : "Entered in application form",
+    registered_at: null,
+  };
+}
+
 const COLORS = {
   border:    rgb(0.55, 0.55, 0.6),
   light:     rgb(0.85, 0.85, 0.88),
@@ -451,6 +511,8 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
   await newPage(ctx);
   const isDaott = isDaottCourse(opts.course);
   const isCahetRoute = String(opts.offer.entrance_exam_name || "").toLowerCase().includes("cahet");
+  const applicantName = sentenceCaseName(opts.lead.name);
+  const institutionName = institutionNameForOffer(opts.branding?.name, opts.campus?.name);
 
   // ── Date + greeting (compact — single line each) ────────────────────────
   ctx.page.drawText(`Date: ${fmtDate(opts.offer.created_at)}`, {
@@ -458,14 +520,14 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
   });
   ctx.y -= 18;
 
-  ctx.page.drawText(`Dear ${opts.lead.name || "Applicant"},`, {
+  ctx.page.drawText(`Dear ${applicantName},`, {
     x: ctx.margin, y: ctx.y - 11, size: 11, font: ctx.bold, color: COLORS.text,
   });
   ctx.y -= 22;
 
   // One-paragraph congratulations — short enough to never spill.
   drawParagraph(ctx,
-    "Congratulations! On behalf of " + (opts.branding?.name || "NIMT Educational Institutions") +
+    "Congratulations! On behalf of " + institutionName +
     ", we are pleased to offer you provisional admission to the programme detailed below. " +
     "Pay the token fee before the acceptance deadline to confirm your seat.",
     { size: 9.5, gapAfter: 8 });
@@ -477,7 +539,7 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
     { label: "Duration",          value: isDaott ? "2.5 years (5 semesters)" : opts.course?.duration_years ? `${opts.course.duration_years} year${opts.course.duration_years > 1 ? "s" : ""}` : "-" },
     { label: "Campus",            value: opts.campus?.name || "-" },
     { label: "Academic Session",  value: opts.sessionName || "-" },
-    { label: "Applicant Name",    value: opts.lead.name || "-" },
+    { label: "Applicant Name",    value: applicantName },
     { label: "Phone",             value: opts.lead.phone || "-" },
     { label: "Email",             value: opts.lead.email || "-" },
     { label: "Application ID",    value: opts.applicationId || opts.lead.application_id || "-" },
@@ -746,15 +808,25 @@ Deno.serve(async (req) => {
     // the trigger that mirrors it). Pull the latest application linked to
     // this lead — that's the authoritative source for the top-right badge.
     let applicationId: string | null = lead?.application_id || null;
+    let applicationRow: ApplicationCahetSource | null = null;
     if (!applicationId && offer.lead_id) {
       const { data: appRow } = await admin
         .from("applications")
-        .select("application_id")
+        .select("application_id, academic_details")
         .eq("lead_id", offer.lead_id)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
+      applicationRow = appRow || null;
       applicationId = appRow?.application_id || null;
+    }
+    if (!applicationRow && applicationId) {
+      const { data: appRow } = await admin
+        .from("applications")
+        .select("application_id, academic_details")
+        .eq("application_id", applicationId)
+        .maybeSingle();
+      applicationRow = appRow || null;
     }
 
     // Branding (doc-type-aware: prefers a template tagged 'offer_letter',
@@ -776,11 +848,20 @@ Deno.serve(async (req) => {
       amount: Number(w.amount || 0),
     }));
 
-    const { data: cahetRegistration } = await admin
+    const { data: cahetRegistrationRow } = await admin
       .from("cahet_registrations")
       .select("registration_no, document_url, notes, registered_at")
       .eq("lead_id", offer.lead_id)
       .maybeSingle();
+    const cahetRegistration = cahetRegistrationRow || cahetRegistrationFromApplication(applicationRow);
+    if (isBptOrBmritCourseName(course?.name) && !cahetRegistration) {
+      return new Response(JSON.stringify({
+        error: "CAHET registration details are required before issuing an offer letter for BPT and BMRIT.",
+      }), {
+        status: 409,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // Token fee on the PDF: this is the amount the candidate must pay before
     // downloading the education-loan support letter — i.e. 25% of the

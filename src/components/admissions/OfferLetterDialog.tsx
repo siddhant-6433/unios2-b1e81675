@@ -6,9 +6,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, FileText, Plus, Gift, CheckCircle, XCircle, ShieldCheck, RefreshCw, ExternalLink, Pencil, Coins, Trash2 } from "lucide-react";
+import { Loader2, FileText, Plus, Gift, CheckCircle, XCircle, ShieldCheck, RefreshCw, ExternalLink, Pencil, Coins, Trash2, AlertCircle } from "lucide-react";
 import { CahetRegistrationDetails } from "@/components/leads/CahetRegistrationDetails";
-import { fetchCahetRegistration, type CahetRegistrationDetails as CahetRegistrationDetailsType } from "@/lib/cahet";
+import {
+  cahetRegistrationFromApplication,
+  fetchCahetRegistration,
+  isBptOrBmritCourseName,
+  type ApplicationCahetSource,
+  type CahetRegistrationDetails as CahetRegistrationDetailsType,
+} from "@/lib/cahet";
 
 interface OfferLetterDialogProps {
   open: boolean;
@@ -16,6 +22,7 @@ interface OfferLetterDialogProps {
   leadId: string;
   leadName: string;
   courseId: string | null;
+  courseName?: string | null;
   campusId: string | null;
   cahetRegistration?: CahetRegistrationDetailsType | null;
   onSuccess: () => void;
@@ -88,7 +95,7 @@ const ENTRANCE_OPTIONS = [
   "Other",
 ];
 
-export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, courseId, campusId, cahetRegistration: cahetRegistrationProp, onSuccess }: OfferLetterDialogProps) {
+export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, courseId, courseName, campusId, cahetRegistration: cahetRegistrationProp, onSuccess }: OfferLetterDialogProps) {
   const { user, role } = useAuth();
   const { toast } = useToast();
   const [offers, setOffers] = useState<OfferLetter[]>([]);
@@ -152,6 +159,9 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   const [pdfBust, setPdfBust] = useState<number>(() => Date.now());
   const [fetchedCahetRegistration, setFetchedCahetRegistration] = useState<CahetRegistrationDetailsType | null>(null);
   const cahetRegistration = cahetRegistrationProp ?? fetchedCahetRegistration;
+  const requiresCahetRegistration = isBptOrBmritCourseName(courseName);
+  const cahetOfferBlocked = requiresCahetRegistration && !cahetRegistration;
+  const cahetOfferBlockMessage = "CAHET registration details are required before issuing an offer letter for BPT and BMRIT.";
 
   const fetchOffers = async () => {
     setLoading(true);
@@ -231,9 +241,22 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   useEffect(() => {
     if (!open || cahetRegistrationProp !== undefined) return;
     let cancelled = false;
-    fetchCahetRegistration(supabase, leadId).then((row) => {
-      if (!cancelled) setFetchedCahetRegistration(row);
-    });
+    (async () => {
+      const row = await fetchCahetRegistration(supabase, leadId);
+      if (row) {
+        if (!cancelled) setFetchedCahetRegistration(row);
+        return;
+      }
+
+      const { data: appRow } = await supabase
+        .from("applications")
+        .select("id, application_id, lead_id, academic_details")
+        .eq("lead_id", leadId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!cancelled) setFetchedCahetRegistration(cahetRegistrationFromApplication(appRow as ApplicationCahetSource | null, leadId));
+    })();
     return () => { cancelled = true; };
   }, [open, leadId, cahetRegistrationProp]);
 
@@ -356,6 +379,14 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     const entranceName = form.entrance_exam_name === "Other"
       ? form.entrance_exam_other.trim()
       : form.entrance_exam_name.trim();
+    if (cahetOfferBlocked) {
+      toast({
+        title: "CAHET registration required",
+        description: cahetOfferBlockMessage,
+        variant: "destructive",
+      });
+      return;
+    }
     if (form.admission_mode === "entrance" && !entranceName) {
       toast({ title: "Entrance details required", description: "Select the entrance/counselling route or type it under Other.", variant: "destructive" });
       return;
@@ -471,6 +502,14 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
 
   const decideOffer = async (offerId: string, decision: "approved" | "rejected", reason?: string) => {
     if (!isApprover) return;
+    if (decision === "approved" && cahetOfferBlocked) {
+      toast({
+        title: "CAHET registration required",
+        description: cahetOfferBlockMessage,
+        variant: "destructive",
+      });
+      return;
+    }
     const updates: any = {
       approval_status: decision,
       approved_by: user?.id || null,
@@ -756,6 +795,12 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
           {showForm && (
             <Card className="border-border/60">
               <CardContent className="p-4 space-y-3">
+                {cahetOfferBlocked && (
+                  <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+                    <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <p>{cahetOfferBlockMessage}</p>
+                  </div>
+                )}
                 {/* Programme fee summary — read-only, sourced directly from the
                     published fee_structure for the selected course + session.
                     The offer's total_fee is stamped from this on submit; the
@@ -1072,8 +1117,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                   <p className="mt-1 text-[10px] text-muted-foreground/70">Date by which the candidate must accept and pay the token fee.</p>
                 </div>
                 <div className="flex gap-2">
-                  <Button onClick={handleCreate} disabled={saving || programmeTotal <= 0} size="sm" className="gap-1.5"
-                    title={programmeTotal <= 0 ? "Publish a fee structure for this course + session first" : undefined}>
+                  <Button onClick={handleCreate} disabled={saving || programmeTotal <= 0 || cahetOfferBlocked} size="sm" className="gap-1.5"
+                    title={cahetOfferBlocked ? cahetOfferBlockMessage : programmeTotal <= 0 ? "Publish a fee structure for this course + session first" : undefined}>
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Issue Offer
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => {
@@ -1308,7 +1353,13 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                       {/* Principal / Super admin approve/reject buttons */}
                       {isPending && isApprover && (
                         <div className="flex gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
-                          <Button size="sm" className="text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700" onClick={() => decideOffer(offer.id, "approved")}>
+                          <Button
+                            size="sm"
+                            className="text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700"
+                            onClick={() => decideOffer(offer.id, "approved")}
+                            disabled={cahetOfferBlocked}
+                            title={cahetOfferBlocked ? cahetOfferBlockMessage : undefined}
+                          >
                             <CheckCircle className="h-3 w-3" /> Approve Offer
                           </Button>
                           <Button size="sm" variant="outline" className="text-xs gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => {
