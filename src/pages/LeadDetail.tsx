@@ -148,6 +148,7 @@ const LeadDetail = () => {
   // counsellor sees the final talk duration alongside the picker.
   const [dispositionCallEnded, setDispositionCallEnded] = useState(false);
   const [activeCallUuid, setActiveCallUuid] = useState<string | null>(null);
+  const [activeDispositionSource, setActiveDispositionSource] = useState<"cloud_dialer" | "inbound" | null>(null);
   const [dispositionWaSent, setDispositionWaSent] = useState(false);
   const [showRecordPayment, setShowRecordPayment] = useState(false);
   const [showTokenOverride, setShowTokenOverride] = useState(false);
@@ -274,6 +275,7 @@ const LeadDetail = () => {
       setDispositionCallStatus(undefined);
       setDispositionCallEnded(false);
       setActiveCallUuid(null);
+      setActiveDispositionSource(null);
     }
   }, [showCallDisposition]);
 
@@ -290,6 +292,7 @@ const LeadDetail = () => {
   // once the counsellor actually submits a disposition (per the rule:
   // missed-call closes on disposition, not on call placement).
   const pendingMissedCallIdRef = useRef<string | null>(null);
+  const promptedInboundCallIdsRef = useRef<Set<string>>(new Set());
 
   // Auto-trigger Cloud Call when navigated with ?action=call.
   // Previously this opened the disposition dialog directly, which let
@@ -307,6 +310,47 @@ const LeadDetail = () => {
     // re-fire after every render and cause the call to repeat.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, lead, searchParams]);
+
+  // Inbound calls are already completed by the time the counsellor opens the
+  // lead. If the inbound call has no admissions disposition yet, ask for it
+  // immediately instead of leaving the lead as a bare "answered" call.
+  useEffect(() => {
+    if (!id || !lead || !user?.id) return;
+    if (showCallDisposition || manualCalling) return;
+
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await (supabase as any)
+        .from("ai_call_records")
+        .select("id, call_uuid, duration_seconds, created_at")
+        .eq("lead_id", id)
+        .eq("call_type", "inbound")
+        .eq("status", "completed")
+        .eq("caller_user_id", user.id)
+        .is("disposition", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (cancelled || error || !data) return;
+      const callKey = String(data.id || data.call_uuid || "");
+      if (!callKey || promptedInboundCallIdsRef.current.has(callKey)) return;
+
+      promptedInboundCallIdsRef.current.add(callKey);
+      void loadCallDispositionDialog();
+      setActiveCallUuid(data.call_uuid || data.id);
+      setActiveDispositionSource("inbound");
+      setDispositionCallStatus("connected");
+      setDispositionCallEnded(true);
+      setShowCallDisposition(true);
+      toast({
+        title: "Log inbound call outcome",
+        description: "This lead came from a completed inbound call. Add the disposition now.",
+      });
+    })();
+
+    return () => { cancelled = true; };
+  }, [id, lead, user?.id, showCallDisposition, manualCalling, toast]);
 
   // Single lead_detail RPC replaces the 6-parallel per-lead query block.
   // Cached → navigating to a child route and back doesn't refetch (10s stale).
@@ -419,7 +463,11 @@ const LeadDetail = () => {
       // are keyed on — pass it so this disposition row merges with the
       // recording instead of creating an orphan with a fresh random UUID.
       callUuid: activeCallUuid,
-      callSource: activeCallUuid ? "cloud_dialer" : "manual_log",
+      callSource: activeDispositionSource === "inbound"
+        ? "inbound"
+        : activeCallUuid
+          ? "cloud_dialer"
+          : "manual_log",
     });
 
     const label = ({
@@ -805,6 +853,7 @@ const LeadDetail = () => {
     void loadCallDispositionDialog();
     setManualCalling(true);
     setActiveCallUuid(null);
+    setActiveDispositionSource("cloud_dialer");
     setDispositionCallEnded(false);
     setDispositionCallStatus("calling");
     setShowCallDisposition(true);
@@ -1264,9 +1313,9 @@ const LeadDetail = () => {
           onSubmit={logCallDisposition}
           callStatus={dispositionCallStatus}
           callEnded={dispositionCallEnded}
-          callStarting={manualCalling && !activeCallUuid && dispositionCallStatus === "calling"}
-          onManualConnect={activeCallUuid ? () => setDispositionCallStatus("connected") : undefined}
-          onRetryCall={async () => {
+          callStarting={activeDispositionSource === "cloud_dialer" && manualCalling && !activeCallUuid && dispositionCallStatus === "calling"}
+          onManualConnect={activeDispositionSource === "cloud_dialer" && activeCallUuid ? () => setDispositionCallStatus("connected") : undefined}
+          onRetryCall={activeDispositionSource === "cloud_dialer" ? async () => {
             // Counsellor missed A-leg → reset dialog state and place a fresh call.
             // The poll effect will re-arm on the new activeCallUuid.
             setShowCallDisposition(false);
@@ -1274,8 +1323,8 @@ const LeadDetail = () => {
             setDispositionCallEnded(false);
             setActiveCallUuid(null);
             await placeManualCall();
-          }}
-          onCancelCall={activeCallUuid ? async () => {
+          } : undefined}
+          onCancelCall={activeDispositionSource === "cloud_dialer" && activeCallUuid ? async () => {
             // Cancel the in-flight Cloud Call: hangs up both Plivo legs and
             // records the call as cancelled_by_counsellor in call_logs +
             // ai_call_records. Failures surface as a toast — the panel still

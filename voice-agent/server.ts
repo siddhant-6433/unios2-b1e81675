@@ -2298,14 +2298,21 @@ Deno.serve({ port: PORT }, async (req) => {
           }),
         }).catch(() => {});
 
-        // Log in call_logs + activity
-        await fetch(`${SUPABASE_URL}/rest/v1/call_logs`, {
+        // Log the completed inbound call without a final admissions
+        // disposition. LeadDetail will prompt the counsellor to classify the
+        // already-completed call and merge that outcome onto this call UUID.
+        await fetch(`${SUPABASE_URL}/rest/v1/rpc/record_cloud_call_log`, {
           method: "POST", headers: { ...dbH, Prefer: "return=minimal" },
           body: JSON.stringify({
-            lead_id: leadId, direction: "inbound", disposition: "answered",
-            notes: `Inbound call from ${callCtx?.leadName || "student"} — answered by ${counsellorName}`,
-            user_id: callCtx?.toolCallsMade?.[0]?.args?.counsellorUserId || null,
-            called_at: new Date().toISOString(),
+            p_call_uuid: callId,
+            p_lead_id: leadId,
+            p_user_id: callCtx?.toolCallsMade?.[0]?.args?.counsellorUserId || null,
+            p_disposition: null,
+            p_duration: 0,
+            p_notes: `Inbound call from ${callCtx?.leadName || "student"} — answered by ${counsellorName}; disposition pending`,
+            p_source: "auto",
+            p_recording_url: null,
+            p_call_source: "inbound",
           }),
         }).catch(() => {});
         await fetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {

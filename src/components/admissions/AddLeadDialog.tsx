@@ -30,7 +30,7 @@ const EMPTY_FORM = {
 };
 
 export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, onDraftChange }: AddLeadDialogProps) {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [counsellors, setCounsellors] = useState<{ id: string; display_name: string }[]>([]);
@@ -183,10 +183,11 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
     }
     const leadId = newId as string;
     if (leadId) {
+      const creatorName = profile?.display_name || user?.email || "Unknown user";
       await supabase.from("lead_activities").insert({
         lead_id: leadId,
         type: "lead_created",
-        description: `Lead created via manual entry`,
+        description: `Lead created using Add Lead option by ${creatorName}`,
         user_id: user?.id || null,
       });
     }
