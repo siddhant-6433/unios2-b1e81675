@@ -311,6 +311,21 @@ const LeadDetail = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, lead, searchParams]);
 
+  // Manual Add Lead with source "Inbound Call" means the counsellor has
+  // already spoken to the caller, but there is no ai_call_records row to
+  // detect. Open the same disposition panel explicitly from the URL action.
+  useEffect(() => {
+    if (searchParams.get("action") !== "log_inbound_disposition") return;
+    if (loading || !lead) return;
+    void loadCallDispositionDialog();
+    setActiveCallUuid(null);
+    setActiveDispositionSource("inbound");
+    setDispositionCallStatus("connected");
+    setDispositionCallEnded(true);
+    setShowCallDisposition(true);
+    setSearchParams({}, { replace: true });
+  }, [loading, lead, searchParams, setSearchParams]);
+
   // Inbound calls are already completed by the time the counsellor opens the
   // lead. If the inbound call has no admissions disposition yet, ask for it
   // immediately instead of leaving the lead as a bare "answered" call.

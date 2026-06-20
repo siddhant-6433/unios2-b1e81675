@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -32,6 +33,7 @@ const EMPTY_FORM = {
 export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, onDraftChange }: AddLeadDialogProps) {
   const { user, profile } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [saving, setSaving] = useState(false);
   const [counsellors, setCounsellors] = useState<{ id: string; display_name: string }[]>([]);
   const [consultants, setConsultants] = useState<{ id: string; name: string; organization: string | null }[]>([]);
@@ -182,6 +184,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
       return;
     }
     const leadId = newId as string;
+    const shouldPromptInboundDisposition = form.source === "inbound_call";
     if (leadId) {
       const creatorName = profile?.display_name || user?.email || "Unknown user";
       await supabase.from("lead_activities").insert({
@@ -203,6 +206,9 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
     setForm(EMPTY_FORM);
     onOpenChange(false);
     onSuccess();
+    if (leadId && shouldPromptInboundDisposition) {
+      navigate(`/admissions/${leadId}?action=log_inbound_disposition`);
+    }
   };
 
   const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
