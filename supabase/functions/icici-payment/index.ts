@@ -210,26 +210,54 @@ async function settleStudentFee(
   studentId: string,
   paidAmount: number,
   paymentRef: string | null,
+  selection = "due",
+  waiverAmount = 0,
 ): Promise<{ ok: boolean; message?: string }> {
-  const { data: rows, error: feeErr } = await admin
+  let query = admin
     .from("fee_ledger")
-    .select("id, total_amount, balance")
+    .select("id, total_amount, concession, balance, due_date")
     .eq("student_id", studentId)
-    .in("status", ["due", "overdue"]);
+    .in("status", ["due", "overdue"])
+    .gt("balance", 0);
+
+  const cleanedSelection = normalizeFeeSelection(selection);
+  if (cleanedSelection === "due") {
+    query = query.lte("due_date", todayInIndia());
+  } else if (cleanedSelection !== "all") {
+    query = query.in("id", cleanedSelection.split(","));
+  }
+
+  const { data: rows, error: feeErr } = await query.order("due_date", { ascending: true });
   if (feeErr) return { ok: false, message: feeErr.message };
   if (!rows?.length) return { ok: true };
 
-  const expectedTotal = rows.reduce((sum: number, row: any) => sum + Number(row.balance ?? row.total_amount), 0);
-  if (Math.abs(paidAmount - expectedTotal) > 1) {
-    return { ok: false, message: `Amount mismatch: received ${paidAmount}, expected ${expectedTotal}` };
+  const grossTotal = rows.reduce((sum: number, row: any) => sum + Number(row.balance ?? 0), 0);
+  const waiver = Math.max(0, Math.min(Number(waiverAmount || 0), grossTotal));
+  const expectedPaid = grossTotal - waiver;
+  if (Math.abs(paidAmount - expectedPaid) > 1) {
+    return { ok: false, message: `Amount mismatch: received ${paidAmount}, expected ${expectedPaid}` };
   }
 
-  for (const row of rows) {
+  let remainingWaiver = Math.round(waiver * 100) / 100;
+  const ledgerSplits: Array<{ id: string; amount: number; concession: number }> = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const balance = Number(row.balance ?? 0);
+    const concessionPart = i === rows.length - 1
+      ? remainingWaiver
+      : Math.min(balance, Math.round((waiver * (balance / grossTotal)) * 100) / 100);
+    remainingWaiver = Math.round((remainingWaiver - concessionPart) * 100) / 100;
+    const paidPart = Math.max(0, Math.round((balance - concessionPart) * 100) / 100);
+    const newConcession = Number(row.concession || 0) + concessionPart;
+    const newPaid = Math.max(0, Number(row.total_amount) - newConcession);
+
     const { error: updateErr } = await admin
       .from("fee_ledger")
-      .update({ paid_amount: row.total_amount, status: "paid" })
+      .update({ concession: newConcession, paid_amount: newPaid, status: "paid" })
       .eq("id", row.id);
     if (updateErr) return { ok: false, message: updateErr.message };
+
+    ledgerSplits.push({ id: row.id, amount: paidPart, concession: concessionPart });
   }
 
   const { data: student } = await admin
@@ -257,12 +285,13 @@ async function settleStudentFee(
           lead_id: student.lead_id,
           type: "other",
           amount: paidAmount,
+          concession_amount: waiver,
           payment_mode: "gateway",
           gateway: "icici",
           transaction_ref: paymentRef,
           status: "confirmed",
           applied_to_ledger: true,
-          notes: "Course-fee instalment via ICICI",
+          notes: waiver > 0 ? "Course-fee payment with 5% annual Pay All waiver" : "Course-fee instalment via ICICI",
         } as any)
         .select("id")
         .maybeSingle();
@@ -270,6 +299,15 @@ async function settleStudentFee(
       lp = inserted;
     }
     if (lp?.id) {
+      await admin.from("fee_ledger_payments").insert(
+        ledgerSplits.map((split) => ({
+          fee_ledger_id: split.id,
+          lead_payment_id: lp.id,
+          amount: split.amount,
+          concession_amount: split.concession,
+          notes: "Student portal gateway payment",
+        })),
+      );
       fetch(`${supabaseUrl}/functions/v1/notify-event`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
@@ -283,6 +321,34 @@ async function settleStudentFee(
   }
 
   return { ok: true };
+}
+
+function todayInIndia(): string {
+  return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function normalizeFeeSelection(selection?: string | null): string {
+  const cleaned = String(selection || "due").trim();
+  if (cleaned === "all" || cleaned === "due") return cleaned;
+  const ids = cleaned
+    .split(",")
+    .map((id) => id.trim())
+    .filter((id) => /^[0-9a-f-]{36}$/i.test(id));
+  return ids.length ? ids.join(",") : "due";
+}
+
+function feeSelectionFromBody(scope: unknown, feeIds: unknown): string {
+  const ids = Array.isArray(feeIds)
+    ? feeIds.map((id) => String(id)).filter((id) => /^[0-9a-f-]{36}$/i.test(id))
+    : [];
+  if (ids.length > 0) return ids.join(",");
+  return normalizeFeeSelection(scope === "all" ? "all" : "due");
+}
+
+function compactMerchantTxnNo(prefix = "F"): string {
+  const timePart = Date.now().toString(36).toUpperCase();
+  const randomPart = crypto.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase();
+  return `${prefix}${timePart}${randomPart}`.slice(0, 20);
 }
 
 async function settleAlumniService(
@@ -461,6 +527,8 @@ Deno.serve(async (req) => {
       // flip.
       const addl1 = fields.addlParam1 || "";
       const addl2 = fields.addlParam2 || "";
+      const addl3 = fields.addlParam3 || "";
+      const addl4 = fields.addlParam4 || "";
 
       const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
       const paymentRef = pgTxnNo || merchantTxnNo || null;
@@ -509,7 +577,20 @@ Deno.serve(async (req) => {
           return returnPage("Payment Failed", failureMessage(fields), false, redactedFields);
         }
         const amount = parseFloat(fields.amount || "0");
-        const settled = await settleStudentFee(admin, supabaseUrl, serviceKey, addl2, amount, paymentRef);
+        let feeSelection = addl3;
+        let waiverAmount = Number(addl4 || 0);
+        if (!feeSelection && merchantTxnNo) {
+          const { data: txnRow } = await admin
+            .from("pg_transactions")
+            .select("raw_response")
+            .eq("txn_id", merchantTxnNo)
+            .eq("context", "student_fee")
+            .maybeSingle();
+          const raw = txnRow?.raw_response || {};
+          feeSelection = String(raw.fee_selection || "");
+          waiverAmount = Number(raw.waiver_amount || 0);
+        }
+        const settled = await settleStudentFee(admin, supabaseUrl, serviceKey, addl2, amount, paymentRef, feeSelection, waiverAmount);
         if (!settled.ok) {
           console.error(`[${FN_NAME}] student fee settlement error:`, settled.message);
           return returnPage("Payment Received", `Payment confirmed but fee records could not be updated. Contact support. Txn: ${paymentRef}`, false);
@@ -737,29 +818,57 @@ Deno.serve(async (req) => {
 
     // ── Initiate STUDENT fee-ledger payment ─────────────────────────────
     if (action === "initiate-fee-payment") {
-      const { student_id, txnid, productinfo: _pi, firstname, email, phone } = body;
+      const { student_id, txnid, productinfo: _pi, firstname, email, phone, payment_scope, fee_ids, waiver_amount } = body;
       if (!student_id || !txnid || !firstname || !phone) {
         return new Response(JSON.stringify({ error: "Missing required fields (student_id, txnid, firstname, phone)" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
       const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
-      const { data: dueRows, error: dueErr } = await admin
+      const feeSelection = feeSelectionFromBody(payment_scope, fee_ids);
+      const waiver = Math.max(0, Number(waiver_amount || 0));
+      let feeQuery = admin
         .from("fee_ledger")
-        .select("balance")
+        .select("balance, due_date")
         .eq("student_id", student_id)
-        .in("status", ["due", "overdue"]);
+        .in("status", ["due", "overdue"])
+        .gt("balance", 0);
+      if (feeSelection === "due") {
+        feeQuery = feeQuery.lte("due_date", todayInIndia());
+      } else if (feeSelection !== "all") {
+        feeQuery = feeQuery.in("id", feeSelection.split(","));
+      }
+      const { data: dueRows, error: dueErr } = await feeQuery;
       if (dueErr || !dueRows?.length) {
         return new Response(JSON.stringify({ error: "No outstanding fees found for this student" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
       const totalDue = dueRows.reduce((sum: number, row: any) => sum + Number(row.balance || 0), 0);
+      const payableDue = Math.max(totalDue - Math.min(waiver, totalDue), 0);
+      const waiverStr = String(Math.min(waiver, totalDue).toFixed(2));
+      const merchantTxnNo = compactMerchantTxnNo("F");
+      await admin.from("pg_transactions").insert({
+        txn_id: merchantTxnNo,
+        context: "student_fee",
+        context_id: student_id,
+        amount: payableDue,
+        status: "initiated",
+        gateway: "icici",
+        payer_name: firstname,
+        payer_email: email || "noreply@nimteducation.com",
+        payer_phone: phone,
+        product_info: "Fee Payment",
+        raw_response: {
+          fee_selection: feeSelection,
+          waiver_amount: Number(waiverStr),
+        },
+      });
       const payload: Record<string, string> = {
         merchantId:       mid,
         aggregatorID:     aggId,
-        merchantTxnNo:    String(txnid).replace(/[^a-zA-Z0-9]/g, "").slice(0, 20),
-        amount:           totalDue.toFixed(2),
+        merchantTxnNo,
+        amount:           payableDue.toFixed(2),
         currencyCode:     "356",
         payType:          "0",
         customerEmailID:  email || "noreply@nimteducation.com",
@@ -909,6 +1018,8 @@ Deno.serve(async (req) => {
         const paymentRef = data?.txnID || data?.merchantTxnNo || txnid;
         const addl1 = data?.addlParam1 || (lead_payment_id ? String(lead_payment_id) : student_id ? "student_fee" : alumni_request_id ? "alumni_service" : "");
         const addl2 = data?.addlParam2 || String(student_id || alumni_request_id || application_id || "");
+        const addl3 = data?.addlParam3 || feeSelectionFromBody(body.payment_scope, body.fee_ids);
+        const addl4 = data?.addlParam4 || String(Number(body.waiver_amount || 0));
         if (addl1 && /^[0-9a-f-]{36}$/i.test(addl1)) {
           await admin.from("lead_payments").update({ status: "confirmed", transaction_ref: paymentRef }).eq("id", addl1);
           const { data: lpRow } = await admin
@@ -925,7 +1036,7 @@ Deno.serve(async (req) => {
             }).catch((e) => console.error(`[${FN_NAME}] verify notify-event failed:`, e));
           }
         } else if (addl1 === "student_fee" && addl2 && /^[0-9a-f-]{36}$/i.test(addl2)) {
-          await settleStudentFee(admin, supabaseUrl, serviceKey, addl2, Number(data?.amount || 0), paymentRef);
+          await settleStudentFee(admin, supabaseUrl, serviceKey, addl2, Number(data?.amount || 0), paymentRef, addl3, Number(addl4 || 0));
         } else if (addl1 === "alumni_service" && addl2 && /^[0-9a-f-]{36}$/i.test(addl2)) {
           await settleAlumniService(admin, addl2, Number(data?.amount || 0), paymentRef, data);
         } else if (addl2) {

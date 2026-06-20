@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
 import { useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
+import { brandForStudentOwner, NIMT_EDU_BRAND, type StudentBrand } from "@/lib/studentBranding";
+import { useAuth } from "@/contexts/AuthContext";
 import uniosLogo from "@/assets/unios-logo.png";
 import {
   Loader2, AlertCircle, CheckCircle, CreditCard, ShieldCheck,
@@ -30,18 +32,46 @@ interface StudentInfo {
   semester: string;
   campus_name: string;
   parent_phone: string;
+  brand: StudentBrand;
 }
 
+interface StudentPortalPaymentHandoff {
+  fromStudentPortal?: boolean;
+  student?: StudentInfo;
+  fees?: StudentFee[];
+}
+
+const readFunctionErrorMessage = async (error: unknown) => {
+  const fallback = error instanceof Error ? error.message : "Something went wrong. Please try again.";
+  const context = error && typeof error === "object" && "context" in error
+    ? (error as { context?: { text?: () => Promise<string> } }).context
+    : undefined;
+  const text = await context?.text?.().catch(() => "");
+  if (!text) return fallback;
+
+  try {
+    const parsed = JSON.parse(text) as { error?: string };
+    return parsed.error || fallback;
+  } catch {
+    return text.slice(0, 200) || fallback;
+  }
+};
+
 export default function PaymentPortal() {
+  const { user: authUser, loading: authLoading } = useAuth();
+  const location = useLocation();
   const [params] = useSearchParams();
   const studentParam = params.get("student");
   const tokenParam   = params.get("token");
+  const feeParam     = params.get("fee");
+  const scopeParam   = params.get("scope");
+  const paymentScope = feeParam ? "fee" : scopeParam === "all" ? "all" : "due";
 
   const [step, setStep]         = useState<Step>("verify");
   const [phone, setPhone]       = useState("");
   const [otp, setOtp]           = useState("");
   const [otpSent, setOtpSent]   = useState(false);
-  const [loading, setLoading]   = useState(false);
+  const [loading, setLoading]   = useState(!!studentParam);
   const [error, setError]       = useState<string | null>(null);
   const [student, setStudent]   = useState<StudentInfo | null>(null);
   const [fees, setFees]         = useState<StudentFee[]>([]);
@@ -58,6 +88,9 @@ export default function PaymentPortal() {
     campusId: student?.campus_id,
     enabled: !!student,
   });
+  const brand = student?.brand || NIMT_EDU_BRAND;
+  const isStudentPortalHandoff = tokenParam === "student_portal";
+  const paymentHandoff = location.state as StudentPortalPaymentHandoff | null;
 
   // Cleanup poll on unmount
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
@@ -83,10 +116,57 @@ export default function PaymentPortal() {
     return () => window.removeEventListener("message", handler);
   }, [student?.id]);
 
-  // Direct link via token (skip OTP)
+  // Student portal handoff: use the active logged-in student session instead
+  // of asking for phone verification again. Public token links keep the
+  // existing direct-link behavior.
   useEffect(() => {
-    if (tokenParam && studentParam) verifyToken();
-  }, [tokenParam, studentParam]);
+    if (!studentParam) {
+      setLoading(false);
+      return;
+    }
+
+    if (tokenParam && tokenParam !== "student_portal") {
+      verifyToken();
+      return;
+    }
+
+    if (
+      isStudentPortalHandoff &&
+      paymentHandoff?.fromStudentPortal &&
+      paymentHandoff.student?.id === studentParam &&
+      Array.isArray(paymentHandoff.fees)
+    ) {
+      setStudent(paymentHandoff.student);
+      setFees(paymentHandoff.fees);
+      setStep("fees");
+      setLoading(false);
+      return;
+    }
+
+    if (authLoading) {
+      setLoading(true);
+      return;
+    }
+
+    let cancelled = false;
+    const loadFromActiveSession = async () => {
+      setLoading(true);
+      setError(null);
+
+      if (!authUser?.id) {
+        if (tokenParam === "student_portal") {
+          setError("Open this payment from the student portal after signing in.");
+        }
+        setLoading(false);
+        return;
+      }
+
+      await loadStudentFromSession(authUser.id, () => cancelled);
+    };
+
+    loadFromActiveSession();
+    return () => { cancelled = true; };
+  }, [studentParam, tokenParam, scopeParam, feeParam, authLoading, authUser?.id, isStudentPortalHandoff, paymentHandoff]);
 
   function stopPolling() {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
@@ -95,9 +175,9 @@ export default function PaymentPortal() {
   const verifyToken = async () => {
     setLoading(true);
     setError(null);
-    const { data, error: err } = await supabase
+    const { data, error: err } = await (supabase as any)
       .from("students")
-      .select("id, name, admission_no, pre_admission_no, semester, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, campuses:campus_id(name), courses:course_id(name)")
+      .select("id, name, admission_no, pre_admission_no, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, user_id, campuses:campus_id(name), courses:course_id(name, code, departments(institutions(name, type)))")
       .eq("id", studentParam!)
       .single();
     if (err || !data) { setError("Invalid link. Contact the institution."); setLoading(false); return; }
@@ -107,17 +187,55 @@ export default function PaymentPortal() {
     setLoading(false);
   };
 
+  const loadStudentFromSession = async (userId: string, isCancelled: () => boolean = () => false) => {
+    setError(null);
+    const { data, error: err } = await (supabase as any)
+      .from("students")
+      .select("id, name, admission_no, pre_admission_no, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, user_id, campuses:campus_id(name), courses:course_id(name, code, departments(institutions(name, type)))")
+      .eq("id", studentParam!)
+      .maybeSingle();
+
+    if (isCancelled()) return;
+
+    if (err || !data) {
+      setError(`Could not open this student's payment page for the signed-in account (${userId.slice(0, 8)}). Please go back to the student portal and click Pay Now again.`);
+      setLoading(false);
+      return;
+    }
+
+    if (data.user_id && data.user_id !== userId) {
+      setError(`This payment link belongs to a different student login. Please sign out and log in as the student linked to this record.`);
+      setLoading(false);
+      return;
+    }
+
+    setStudent(toInfo(data));
+    await fetchFees(data.id);
+    if (isCancelled()) return;
+    setStep("fees");
+    setLoading(false);
+  };
+
   function toInfo(data: any): StudentInfo {
+    const course = data.courses;
+    const institution = course?.departments?.institutions;
     return {
       id: data.id,
       name: data.name,
       admission_no: data.admission_no || data.pre_admission_no || "",
       course_id: data.course_id || null,
       campus_id: data.campus_id || null,
-      course_name: data.courses?.name || "",
-      semester: data.semester || "",
+      course_name: course?.name || "",
+      semester: "",
       campus_name: data.campuses?.name || "",
       parent_phone: data.father_phone || data.mother_phone || data.guardian_phone || data.phone || "",
+      brand: brandForStudentOwner({
+        campusName: data.campuses?.name,
+        courseName: course?.name,
+        courseCode: course?.code,
+        institutionName: institution?.name,
+        institutionType: institution?.type,
+      }),
     };
   }
 
@@ -126,9 +244,9 @@ export default function PaymentPortal() {
     setLoading(true);
     setError(null);
 
-    const { data: studentData } = await supabase
+    const { data: studentData } = await (supabase as any)
       .from("students")
-      .select("id, name, admission_no, pre_admission_no, semester, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, campuses:campus_id(name), courses:course_id(name)")
+      .select("id, name, admission_no, pre_admission_no, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, campuses:campus_id(name), courses:course_id(name, code, departments(institutions(name, type)))")
       .or([
         `phone.eq.${phone}`, `phone.eq.+91${phone}`,
         `father_phone.eq.${phone}`, `father_phone.eq.+91${phone}`,
@@ -187,14 +305,22 @@ export default function PaymentPortal() {
       .in("status", ["due", "overdue"])
       .order("due_date", { ascending: true });
 
-    setFees((data || []).map((f: any) => ({
+    const todayKey = new Date().toLocaleDateString("en-CA");
+    const mapped = (data || []).map((f: any) => ({
       id: f.id,
       fee_head: f.fee_codes?.name || "Fee",
       amount: Number(f.total_amount),
       balance: Number(f.balance || 0),
       status: f.status,
       due_date: f.due_date,
-    })));
+    })).filter((fee: StudentFee) => {
+      if (fee.balance <= 0) return false;
+      if (feeParam) return fee.id === feeParam;
+      if (paymentScope === "all") return true;
+      return fee.due_date <= todayKey;
+    });
+
+    setFees(mapped);
   };
 
   const checkFeesPaid = async (): Promise<boolean> => {
@@ -203,7 +329,8 @@ export default function PaymentPortal() {
       .from("fee_ledger")
       .select("id")
       .eq("student_id", student.id)
-      .in("status", ["due", "overdue"]);
+      .in("status", ["due", "overdue"])
+      .in("id", fees.map((fee) => fee.id));
 
     if (!data || data.length === 0) {
       setStep("receipt");
@@ -214,6 +341,17 @@ export default function PaymentPortal() {
   };
 
   const totalDue = fees.reduce((s, f) => s + f.balance, 0);
+  const waiverAmount = paymentScope === "all" ? Math.round(totalDue * 0.05) : 0;
+  const payableAmount = Math.max(totalDue - waiverAmount, 0);
+  const paymentTitle = paymentScope === "all"
+    ? "Annual Fee Payment"
+    : paymentScope === "fee"
+      ? "Future Fee Payment"
+      : "Due Fee Payment";
+  const activeGateway = selectedGateway || feeGateways[0]?.gateway || "easebuzz";
+  const activeGatewayName =
+    feeGateways.find((gateway) => gateway.gateway === activeGateway)?.display_name ||
+    (activeGateway === "icici" ? "ICICI Bank PG" : "EaseBuzz");
 
   const handlePay = async () => {
     if (!student) return;
@@ -223,8 +361,7 @@ export default function PaymentPortal() {
     try {
       const nameParts = student.name.trim().split(" ");
       const txnid = `FEE${student.id.replace(/[^a-zA-Z0-9]/g, "").slice(0, 10)}${Date.now()}`.slice(0, 50);
-      const gateway = selectedGateway || feeGateways[0]?.gateway || "easebuzz";
-      const functionName = gateway === "icici" ? "icici-payment" : "easebuzz-payment";
+      const functionName = activeGateway === "icici" ? "icici-payment" : "easebuzz-payment";
 
       const { data: fnData, error: fnError } = await supabase.functions.invoke(functionName, {
         body: {
@@ -232,6 +369,9 @@ export default function PaymentPortal() {
           student_id: student.id,
           txnid,
           amount: totalDue,
+          payment_scope: paymentScope,
+          fee_ids: paymentScope === "all" ? [] : fees.map((fee) => fee.id),
+          waiver_amount: waiverAmount,
           productinfo: "Fee Payment",
           firstname: nameParts[0],
           email: undefined,
@@ -239,11 +379,12 @@ export default function PaymentPortal() {
         },
       });
 
-      if (fnError) throw new Error(fnError.message);
+      if (fnError) throw new Error(await readFunctionErrorMessage(fnError));
       if (fnData?.error) throw new Error(fnData.error);
 
       const { pay_url } = fnData;
-      setPaidTxnId(txnid);
+      const gatewayTxnId = fnData?.txnid || txnid;
+      setPaidTxnId(gatewayTxnId);
 
       popupRef.current = window.open(
         pay_url,
@@ -266,7 +407,15 @@ export default function PaymentPortal() {
           if (!alreadyPaid) {
             // DB not yet updated — ask the gateway server to confirm, then re-check DB
             const { data: verifyData } = await supabase.functions.invoke(functionName, {
-              body: { action: "verify-payment", txnid, application_id: "" },
+              body: {
+                action: "verify-payment",
+                txnid: gatewayTxnId,
+                application_id: "",
+                student_id: student.id,
+                fee_ids: paymentScope === "all" ? [] : fees.map((fee) => fee.id),
+                payment_scope: paymentScope,
+                waiver_amount: waiverAmount,
+              },
             });
             const verified = verifyData?.status?.toLowerCase() === "success" ||
               verifyData?.status === "SUC" ||
@@ -300,8 +449,8 @@ export default function PaymentPortal() {
       <div className="min-h-screen bg-gray-50 flex flex-col">
         <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
           <div className="max-w-lg mx-auto px-4 py-3 flex items-center gap-3">
-            <img src={uniosLogo} alt="UniOs" className="h-8 w-8 object-contain" />
-            <span className="text-sm font-semibold text-gray-900">NIMT University — Fee Payment</span>
+            <img src={student ? brand.logo : uniosLogo} alt={student ? brand.logoAlt : "UniOs"} className="h-8 max-w-[150px] object-contain" />
+            <span className="text-sm font-semibold text-gray-900 truncate">{brand.name} - Fee Payment</span>
           </div>
         </header>
 
@@ -312,8 +461,27 @@ export default function PaymentPortal() {
             </div>
           )}
 
+          {step === "verify" && !loading && isStudentPortalHandoff && (
+            <div className="space-y-6">
+              <div className="text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 mx-auto mb-4">
+                  <ShieldCheck className="h-7 w-7 text-primary" />
+                </div>
+                <h1 className="text-xl font-bold text-gray-900">Checking Student Session</h1>
+                <p className="text-sm text-gray-500 mt-1">Open fee payment from the signed-in student portal.</p>
+              </div>
+
+              {error && (
+                <div className="flex items-start gap-3 rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">
+                  <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+                  <span>{error}</span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Step 1: OTP */}
-          {step === "verify" && !loading && (
+          {step === "verify" && !loading && !isStudentPortalHandoff && (
             <div className="space-y-6">
               <div className="text-center">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 mx-auto mb-4">
@@ -417,10 +585,22 @@ export default function PaymentPortal() {
                         <p className="text-sm font-semibold text-gray-900">₹{fee.balance.toLocaleString("en-IN")}</p>
                       </div>
                     ))}
-                    <div className="flex items-center justify-between p-4 bg-gray-50">
-                      <p className="text-sm font-bold text-gray-900">Total Due</p>
+                  <div className="flex items-center justify-between p-4 bg-gray-50">
+                      <p className="text-sm font-bold text-gray-900">{paymentTitle}</p>
                       <p className="text-lg font-bold text-gray-900">₹{totalDue.toLocaleString("en-IN")}</p>
                     </div>
+                    {waiverAmount > 0 && (
+                      <>
+                        <div className="flex items-center justify-between p-4 bg-green-50">
+                          <p className="text-sm font-semibold text-green-700">Pay All Waiver (5%)</p>
+                          <p className="text-sm font-bold text-green-700">-₹{waiverAmount.toLocaleString("en-IN")}</p>
+                        </div>
+                        <div className="flex items-center justify-between p-4 bg-gray-50">
+                          <p className="text-sm font-bold text-gray-900">Payable Now</p>
+                          <p className="text-lg font-bold text-gray-900">₹{payableAmount.toLocaleString("en-IN")}</p>
+                        </div>
+                      </>
+                    )}
                   </div>
 
                   {!gatewaysLoading && feeGateways.length > 1 && (
@@ -446,9 +626,11 @@ export default function PaymentPortal() {
 
                   <button onClick={handlePay} className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-semibold text-white hover:bg-primary/90 transition-colors">
                     <CreditCard className="h-4 w-4" />
-                    Pay ₹{totalDue.toLocaleString("en-IN")}
+                    Pay ₹{payableAmount.toLocaleString("en-IN")}
                   </button>
-                  <p className="text-[11px] text-gray-400 text-center">Secure payment powered by EaseBuzz. Your data is encrypted.</p>
+                  <p className="text-[11px] text-gray-400 text-center">
+                    Secure payment powered by {activeGatewayName}. Your data is encrypted.
+                  </p>
                 </>
               )}
             </div>
@@ -481,7 +663,7 @@ export default function PaymentPortal() {
                 </div>
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-sm text-gray-500">Amount Paid</span>
-                  <span className="text-lg font-bold text-green-600">₹{totalDue.toLocaleString("en-IN")}</span>
+                  <span className="text-lg font-bold text-green-600">₹{payableAmount.toLocaleString("en-IN")}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-500">Date</span>
@@ -500,6 +682,7 @@ export default function PaymentPortal() {
                   semester: student.semester,
                   campus_name: student.campus_name,
                   amount: totalDue,
+                  concession_amount: waiverAmount,
                   payment_date: new Date().toISOString(),
                   payment_mode: "online",
                   line_items: fees.map(f => ({ fee_head: f.fee_head, amount: f.balance })),

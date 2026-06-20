@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   GraduationCap, CheckCircle, Loader2, LogOut, MapPin, Pencil, ChevronDown, ChevronUp,
-  FileText, Receipt, Award, Clock, Plus, Wallet, ArrowLeft,
+  FileText, Receipt, Award, Clock, Plus, Wallet, ArrowLeft, KeyRound,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -51,9 +51,11 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
   const [applicationId, setApplicationId] = useState("");
-  const [loginMode, setLoginMode] = useState<"phone" | "appid" | "google_phone">("phone");
+  const [loginMode, setLoginMode] = useState<"phone" | "appid" | "google_phone" | "password">("phone");
   const [googleName, setGoogleName] = useState("");
   const [checkingSession, setCheckingSession] = useState(true);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
 
   // Check for ?token= magic link first; if present, redeem it and sign the user in.
   // Falls through to the normal session/OTP flow on any failure.
@@ -258,6 +260,47 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
     }
   };
 
+  const portal = usePortal();
+  const passwordLoginEnabled = portal.id === "nimt";
+
+  const handlePasswordLogin = async () => {
+    if (!passwordLoginEnabled) return;
+    if (!username.trim() || !password) {
+      toast({ title: "Enter username and password", variant: "destructive" });
+      return;
+    }
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("apply-portal-password-login", {
+        body: {
+          portal: portal.id,
+          username: username.trim(),
+          password,
+        },
+      });
+      if (error) {
+        const ctx = (error as any)?.context;
+        if (ctx && typeof ctx.json === "function") {
+          try {
+            const body = await ctx.json();
+            throw new Error(body?.error || error.message);
+          } catch (e: any) {
+            if (e.message) throw e;
+          }
+        }
+        throw error;
+      }
+      if (data?.error) throw new Error(data.error);
+      if (!data?.phone) throw new Error("Invalid login response");
+
+      onAuthenticated(data.phone, data.name || "Applicant");
+    } catch (err: any) {
+      toast({ title: "Login failed", description: err.message, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const [googleLoading, setGoogleLoading] = useState(false);
 
   const handleGoogleSignIn = async () => {
@@ -274,8 +317,6 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
       setGoogleLoading(false);
     }
   };
-
-  const portal = usePortal();
 
   if (checkingSession) {
     return (
@@ -373,13 +414,19 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
 
           <div className="mb-8">
             <h2 className="text-2xl font-bold text-foreground">
-              {loginMode === "appid" ? "Find your application" : "Start your application"}
+              {loginMode === "appid"
+                ? "Find your application"
+                : loginMode === "password"
+                ? "Sign in to application"
+                : "Start your application"}
             </h2>
             <p className="text-sm text-muted-foreground mt-1.5">
               {loginMode === "google_phone"
                 ? "Verify your WhatsApp number to continue"
                 : loginMode === "appid"
                 ? "Enter your application ID to resume"
+                : loginMode === "password"
+                ? "Enter the temporary username and password"
                 : otpSent
                 ? `OTP sent to ${phone}`
                 : "Enter your WhatsApp number to get started"}
@@ -454,16 +501,27 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
                 {otpSent ? "Verify & Continue" : "Get OTP on WhatsApp"}
               </Button>
               {!otpSent && (
-                <button
-                  type="button"
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-center"
-                  onClick={() => setLoginMode("appid")}
-                >
-                  Have an Application ID? Login instead
-                </button>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-center"
+                    onClick={() => setLoginMode("appid")}
+                  >
+                    Have an Application ID? Login instead
+                  </button>
+                  {passwordLoginEnabled && (
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-center"
+                      onClick={() => setLoginMode("password")}
+                    >
+                      Use username and password
+                    </button>
+                  )}
+                </div>
               )}
             </div>
-          ) : (
+          ) : loginMode === "appid" ? (
             <div className="space-y-4">
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Application ID</label>
@@ -486,9 +544,48 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
                 ← Back to phone login
               </button>
             </div>
+          ) : (
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                handlePasswordLogin();
+              }}
+            >
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Username</label>
+                <input
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  autoComplete="username"
+                  className="w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  className="w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                />
+              </div>
+              <Button type="submit" className="w-full gap-2 h-11" disabled={loading}>
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                Sign in
+              </Button>
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-center"
+                onClick={() => setLoginMode("phone")}
+              >
+                ← Back to phone login
+              </button>
+            </form>
           )}
 
-          {loginMode !== "google_phone" && !otpSent && (
+          {loginMode !== "google_phone" && loginMode !== "password" && !otpSent && (
             <>
               <div className="flex items-center gap-3 my-5">
                 <div className="flex-1 h-px bg-border" />

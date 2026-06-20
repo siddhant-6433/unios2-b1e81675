@@ -13,6 +13,8 @@ interface Tab {
 interface PortalLayoutProps {
   children: ReactNode;
   institutionName?: string;
+  institutionLogo?: string;
+  institutionLogoAlt?: string;
   tabs?: Tab[];
   activeTab?: string;
   onTabChange?: (id: string) => void;
@@ -22,6 +24,8 @@ interface PortalLayoutProps {
 export function PortalLayout({
   children,
   institutionName = "NIMT University",
+  institutionLogo = uniosLogo,
+  institutionLogoAlt,
   tabs,
   activeTab,
   onTabChange,
@@ -42,8 +46,8 @@ export function PortalLayout({
       <header className="bg-white border-b border-gray-200 sticky top-0 z-30">
         <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src={uniosLogo} alt="UniOs" className="h-8 w-8 object-contain" />
-            <span className="text-sm font-semibold text-gray-900">{institutionName}</span>
+            <img src={institutionLogo} alt={institutionLogoAlt || institutionName} className="h-8 max-w-[150px] object-contain" />
+            <span className="text-sm font-semibold text-gray-900 truncate">{institutionName}</span>
           </div>
           <div className="flex items-center gap-2">
             {showNotifications && (

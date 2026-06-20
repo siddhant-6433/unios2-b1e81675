@@ -79,6 +79,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } catch { return null; }
   });
   const fetchedUserDataForRef = useRef<string | null>(null);
+  const lastRealUserIdRef = useRef<string | null>(null);
 
   const fetchUserData = async (userId: string, authUser?: User) => {
     if (fetchedUserDataForRef.current === userId) return;
@@ -112,6 +113,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
 
       if (roleRes.data) setRole(roleRes.data as AppRole);
+      if (roleRes.data !== "super_admin") {
+        setImpersonation(null);
+        sessionStorage.removeItem(IMPERSONATION_KEY);
+      }
 
       // Fetch permissions — non-critical, errors are safe to ignore
       supabase.rpc("get_user_permissions" as any, { _user_id: userId })
@@ -129,6 +134,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (event === "INITIAL_SESSION") return;
+        const nextUserId = session?.user?.id ?? null;
+        if (lastRealUserIdRef.current && lastRealUserIdRef.current !== nextUserId) {
+          setImpersonation(null);
+          sessionStorage.removeItem(IMPERSONATION_KEY);
+        }
+        lastRealUserIdRef.current = nextUserId;
         setSession(session);
         if (session?.user) {
           // Use setTimeout to avoid Supabase client deadlock
@@ -144,6 +155,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     );
 
     supabase.auth.getSession().then(({ data: { session } }) => {
+      const nextUserId = session?.user?.id ?? null;
+      if (lastRealUserIdRef.current && lastRealUserIdRef.current !== nextUserId) {
+        setImpersonation(null);
+        sessionStorage.removeItem(IMPERSONATION_KEY);
+      }
+      lastRealUserIdRef.current = nextUserId;
       setSession(session);
       if (session?.user) {
         fetchUserData(session.user.id, session.user);

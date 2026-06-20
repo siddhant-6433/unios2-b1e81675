@@ -42,6 +42,144 @@ async function sha512(input: string): Promise<string> {
     .join("");
 }
 
+type FeeRow = {
+  id: string;
+  total_amount: number | string;
+  concession?: number | string;
+  balance?: number | string;
+};
+
+function todayInIndia(): string {
+  return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function normalizeFeeSelection(selection?: string | null): string {
+  const cleaned = String(selection || "due").trim();
+  if (cleaned === "all" || cleaned === "due") return cleaned;
+  const ids = cleaned
+    .split(",")
+    .map((id) => id.trim())
+    .filter((id) => /^[0-9a-f-]{36}$/i.test(id));
+  return ids.length ? ids.join(",") : "due";
+}
+
+async function fetchStudentFeeRows(admin: any, studentId: string, selection: string): Promise<{ rows: FeeRow[]; error?: string }> {
+  let query = admin
+    .from("fee_ledger")
+    .select("id, total_amount, concession, balance, due_date")
+    .eq("student_id", studentId)
+    .in("status", ["due", "overdue"])
+    .gt("balance", 0);
+
+  const normalized = normalizeFeeSelection(selection);
+  if (normalized === "due") {
+    query = query.lte("due_date", todayInIndia());
+  } else if (normalized !== "all") {
+    query = query.in("id", normalized.split(","));
+  }
+
+  const { data, error } = await query.order("due_date", { ascending: true });
+  if (error) return { rows: [], error: error.message };
+  return { rows: data || [] };
+}
+
+async function settleStudentFeePayment(
+  admin: any,
+  supabaseUrl: string,
+  serviceKey: string,
+  studentId: string,
+  paidAmount: number,
+  paymentRef: string | null,
+  selection: string,
+  waiverAmount: number,
+): Promise<{ ok: boolean; message?: string }> {
+  const { rows, error } = await fetchStudentFeeRows(admin, studentId, selection);
+  if (error) return { ok: false, message: error };
+  if (!rows.length) return { ok: true };
+
+  const grossTotal = rows.reduce((sum, row) => sum + Number(row.balance ?? 0), 0);
+  const waiver = Math.max(0, Math.min(Number(waiverAmount || 0), grossTotal));
+  const expectedPaid = grossTotal - waiver;
+  if (Math.abs(paidAmount - expectedPaid) > 1) {
+    return { ok: false, message: `Amount mismatch: received ${paidAmount}, expected ${expectedPaid}` };
+  }
+
+  let remainingWaiver = Math.round(waiver * 100) / 100;
+  const ledgerSplits: Array<{ id: string; amount: number; concession: number }> = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const balance = Number(row.balance ?? 0);
+    const concessionPart = i === rows.length - 1
+      ? remainingWaiver
+      : Math.min(balance, Math.round((waiver * (balance / grossTotal)) * 100) / 100);
+    remainingWaiver = Math.round((remainingWaiver - concessionPart) * 100) / 100;
+    const paidPart = Math.max(0, Math.round((balance - concessionPart) * 100) / 100);
+    const newConcession = Number(row.concession || 0) + concessionPart;
+    const newPaid = Math.max(0, Number(row.total_amount) - newConcession);
+
+    const { error: updErr } = await admin
+      .from("fee_ledger")
+      .update({ concession: newConcession, paid_amount: newPaid, status: "paid" })
+      .eq("id", row.id);
+    if (updErr) return { ok: false, message: updErr.message };
+
+    ledgerSplits.push({ id: row.id, amount: paidPart, concession: concessionPart });
+  }
+
+  const { data: stu } = await admin
+    .from("students")
+    .select("lead_id")
+    .eq("id", studentId)
+    .maybeSingle();
+  if (stu?.lead_id) {
+    const { data: existingPayment } = await admin
+      .from("lead_payments")
+      .select("id")
+      .eq("transaction_ref", paymentRef)
+      .maybeSingle();
+    let paymentId = existingPayment?.id || null;
+    if (!paymentId) {
+      const { data: lpIns, error: lpInsErr } = await admin
+        .from("lead_payments")
+        .insert({
+          lead_id: stu.lead_id,
+          type: "other",
+          amount: paidAmount,
+          concession_amount: waiver,
+          payment_mode: "gateway",
+          gateway: "easebuzz",
+          transaction_ref: paymentRef,
+          status: "confirmed",
+          applied_to_ledger: true,
+          notes: waiver > 0 ? "Course-fee payment with 5% annual Pay All waiver" : "Course-fee instalment via Easebuzz",
+        })
+        .select("id")
+        .maybeSingle();
+      if (lpInsErr) return { ok: false, message: lpInsErr.message };
+      paymentId = lpIns?.id || null;
+    }
+
+    if (paymentId) {
+      await admin.from("fee_ledger_payments").insert(
+        ledgerSplits.map((split) => ({
+          fee_ledger_id: split.id,
+          lead_payment_id: paymentId,
+          amount: split.amount,
+          concession_amount: split.concession,
+          notes: "Student portal gateway payment",
+        })),
+      );
+      fetch(`${supabaseUrl}/functions/v1/notify-event`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+        body: JSON.stringify({ event: "payment_received", lead_id: stu.lead_id, context: { payment_id: paymentId } }),
+      }).catch((e) => console.error("[easebuzz-webhook] notify-event invoke failed:", e));
+    }
+  }
+
+  return { ok: true };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -118,79 +256,10 @@ Deno.serve(async (req) => {
     if (udf3 === "fee_payment" && udf4 && /^[0-9a-f-]{36}$/i.test(udf4)) {
       const paidAmount = parseFloat(amount || "0");
 
-      const { data: ledgerRows, error: ledgerErr } = await admin
-        .from("fee_ledger")
-        .select("id, total_amount, balance")
-        .eq("student_id", udf4)
-        .in("status", ["due", "overdue"]);
-      if (ledgerErr) {
-        console.error("[easebuzz-webhook] fee_payment ledger lookup failed:", ledgerErr.message);
-        return new Response(JSON.stringify({ error: ledgerErr.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-
-      const expectedTotal = (ledgerRows || []).reduce((s: number, r: any) => s + Number(r.balance ?? r.total_amount), 0);
-      if (Math.abs(paidAmount - expectedTotal) > 1) {
-        console.error("[easebuzz-webhook] fee_payment amount mismatch: paid", paidAmount, "expected", expectedTotal, "student", udf4);
-        return new Response(JSON.stringify({ ok: true, ignored: "amount_mismatch", paid: paidAmount, expected: expectedTotal }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-
-      for (const row of ledgerRows || []) {
-        const { error: updErr } = await admin
-          .from("fee_ledger")
-          .update({ paid_amount: row.total_amount, balance: 0, status: "paid" })
-          .eq("id", row.id);
-        if (updErr) {
-          console.error("[easebuzz-webhook] fee_payment ledger update failed:", updErr.message);
-          return new Response(JSON.stringify({ error: updErr.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        }
-      }
-
-      const { data: stu } = await admin
-        .from("students")
-        .select("lead_id")
-        .eq("id", udf4)
-        .maybeSingle();
-      if (stu?.lead_id) {
-        const { data: existingPayment } = await admin
-          .from("lead_payments")
-          .select("id")
-          .eq("transaction_ref", paymentRef)
-          .maybeSingle();
-        let paymentId = existingPayment?.id;
-        if (!paymentId) {
-          const { data: lpIns, error: lpInsErr } = await admin
-            .from("lead_payments")
-            .insert({
-              lead_id: stu.lead_id,
-              type: "other",
-              amount: paidAmount,
-              payment_mode: "gateway",
-              gateway: "easebuzz",
-              transaction_ref: paymentRef,
-              status: "confirmed",
-              applied_to_ledger: true,
-              notes: "Course-fee instalment via Easebuzz",
-            })
-            .select("id")
-            .maybeSingle();
-          if (lpInsErr) {
-            console.error("[easebuzz-webhook] fee_payment lead_payments insert failed:", lpInsErr.message);
-            return new Response(JSON.stringify({ error: lpInsErr.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-          }
-          paymentId = lpIns?.id;
-        }
-
-        if (paymentId) {
-          fetch(`${supabaseUrl}/functions/v1/notify-event`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
-            body: JSON.stringify({
-              event: "payment_received",
-              lead_id: stu.lead_id,
-              context: { payment_id: paymentId },
-            }),
-          }).catch((e) => console.error("[easebuzz-webhook] notify-event invoke failed:", e));
-        }
+      const settled = await settleStudentFeePayment(admin, supabaseUrl, serviceKey, udf4, paidAmount, paymentRef, udf5, Number(udf6 || 0));
+      if (!settled.ok) {
+        console.error("[easebuzz-webhook] fee_payment settlement failed:", settled.message);
+        return new Response(JSON.stringify({ ok: true, ignored: "settlement_failed", message: settled.message }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
       console.log(`[easebuzz-webhook] ✓ fee_payment student ${udf4} marked paid via S2S webhook (ref ${paymentRef})`);
