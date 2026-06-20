@@ -272,7 +272,7 @@ export default function Inbox() {
       isSuperAdmin
         ? supabase
             .from("offer_waivers")
-            .select("id", { count: "planned", head: true })
+            .select("id")
             .eq("status", "pending")
         : Promise.resolve({ count: 0 }),
 
@@ -340,7 +340,7 @@ export default function Inbox() {
 
     const get = (i: number) => {
       const r = results[i];
-      if (r.status === "fulfilled") return (r.value as any).count || 0;
+      if (r.status === "fulfilled") return (r.value as any).count ?? (r.value as any).data?.length ?? 0;
       return 0;
     };
 
@@ -1383,7 +1383,14 @@ export default function Inbox() {
           {visibleCategories.map((cat) => (
             <button
               key={cat.id}
-              onClick={() => { setItems([]); setSelected(cat.id); }}
+              onClick={() => {
+                if (selected === cat.id) {
+                  loadItems(cat.id);
+                  return;
+                }
+                setItems([]);
+                setSelected(cat.id);
+              }}
               className={cn(
                 "w-full flex items-center gap-2.5 px-4 py-2.5 text-[13px] font-medium transition-colors text-left",
                 selected === cat.id
