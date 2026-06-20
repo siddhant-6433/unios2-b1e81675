@@ -33,9 +33,18 @@ const categoryBadge: Record<string, string> = {
   transport: "bg-pastel-yellow text-foreground/70", other: "bg-muted text-foreground/70",
 };
 const modeBadge: Record<string, string> = {
-  online: "bg-pastel-blue", cash: "bg-pastel-green", cheque: "bg-pastel-yellow",
+  online: "bg-pastel-blue", gateway: "bg-pastel-blue", cash: "bg-pastel-green", cheque: "bg-pastel-yellow",
   upi: "bg-pastel-purple", bank_transfer: "bg-pastel-mint",
 };
+const gatewayLabels: Record<string, string> = {
+  easebuzz: "Easebuzz",
+  icici: "ICICI",
+  cashfree: "Cashfree",
+  offline: "Marked Offline",
+  manual: "Marked Offline",
+};
+const gatewayLabel = (gateway?: string | null) =>
+  gateway ? (gatewayLabels[gateway] || gateway) : "—";
 
 const Finance = () => {
   const [tab, setTab] = useState<"ledger" | "receipts" | "online-transactions" | "structures" | "concessions" | "waivers" | "late-fees" | "reports" | "audit">("ledger");
@@ -253,6 +262,7 @@ const Finance = () => {
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Fee Head</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">Amount</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Mode</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Gateway</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Transaction Ref</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Recorded By</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Date</th>
@@ -261,7 +271,7 @@ const Finance = () => {
               </thead>
               <tbody>
                 {filteredPayments.length === 0 ? (
-                  <tr><td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">No receipts recorded</td></tr>
+                  <tr><td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">No receipts recorded</td></tr>
                 ) : filteredPayments.map((p: any) => (
                   <tr key={p.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
                     <td className="px-4 py-3 font-mono text-xs text-primary font-semibold">{p.receipt_no || "—"}</td>
@@ -274,6 +284,7 @@ const Finance = () => {
                     <td className="px-4 py-3">
                       <Badge className={`text-[10px] font-medium border-0 capitalize ${modeBadge[p.payment_mode] || "bg-muted"}`}>{p.payment_mode.replace("_", " ")}</Badge>
                     </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">{gatewayLabel(p.gateway)}</td>
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{p.transaction_ref || "—"}</td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">{p.profiles?.display_name || "—"}</td>
                     <td className="px-4 py-3 text-muted-foreground text-xs">{new Date(p.paid_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td>
@@ -289,6 +300,7 @@ const Finance = () => {
                           recorded_by: p.profiles?.display_name || undefined,
                           amount: Number(p.amount),
                           payment_ref: p.transaction_ref,
+                          payment_gateway: p.gateway || null,
                           payment_date: p.paid_at,
                           receipt_url: p.receipt_url || null,
                           payment_id: p.id || null,

@@ -124,6 +124,16 @@ function wrapText(text: string, font: any, size: number, maxWidth: number, maxLi
   return lines.length ? lines : [""];
 }
 
+function fitText(text: string, font: any, size: number, maxWidth: number): string {
+  if (!text) return "—";
+  if (font.widthOfTextAtSize(text, size) <= maxWidth) return text;
+  let out = text;
+  while (out.length > 1 && font.widthOfTextAtSize(`${out}...`, size) > maxWidth) {
+    out = out.slice(0, -1);
+  }
+  return `${out}...`;
+}
+
 // Symbol-safe rupee marker — Helvetica doesn't ship the ₹ glyph and pdf-lib
 // throws on missing glyphs, so use "Rs." in the body and the band.
 const RUP = "Rs. ";
@@ -148,6 +158,7 @@ interface BuildOpts {
   rows: [string, string][];      // payer detail rows
   amount: number;
   paymentMode: string;
+  paymentGateway?: string | null;
   paymentRef: string;
   paymentDate: string;
   campusName: string | null;
@@ -284,26 +295,23 @@ async function buildPdf(opts: BuildOpts): Promise<Uint8Array> {
   });
   y -= bandH + 16;
 
-  // ── Payment-method + transaction-ref cards ─────────────────────────
-  const halfW = (width - margin * 2 - 12) / 2;
+  // ── Payment-method + gateway + transaction-ref cards ───────────────
+  const paymentCards: [string, string][] = [["PAYMENT METHOD", opts.paymentMode.toUpperCase()]];
+  if (opts.paymentGateway) paymentCards.push(["PAYMENT GATEWAY", opts.paymentGateway]);
+  paymentCards.push(["TRANSACTION REF", opts.paymentRef || "—"]);
+  const gap = 12;
+  const boxW = (width - margin * 2 - gap * (paymentCards.length - 1)) / paymentCards.length;
   const boxH = 52;
-  // left
-  page.drawRectangle({
-    x: margin, y: y - boxH, width: halfW, height: boxH,
-    color: rgb(1, 1, 1), borderColor: border, borderWidth: 0.5,
-  });
-  page.drawText("PAYMENT METHOD", { x: margin + 12, y: y - 16, size: 8, font: bold, color: muted });
-  page.drawText(opts.paymentMode.toUpperCase(), {
-    x: margin + 12, y: y - 36, size: 11, font: bold, color: text,
-  });
-  // right
-  page.drawRectangle({
-    x: margin + halfW + 12, y: y - boxH, width: halfW, height: boxH,
-    color: rgb(1, 1, 1), borderColor: border, borderWidth: 0.5,
-  });
-  page.drawText("TRANSACTION REF", { x: margin + halfW + 24, y: y - 16, size: 8, font: bold, color: muted });
-  page.drawText(opts.paymentRef || "—", {
-    x: margin + halfW + 24, y: y - 36, size: 11, font: bold, color: text,
+  paymentCards.forEach(([label, value], index) => {
+    const x = margin + index * (boxW + gap);
+    page.drawRectangle({
+      x, y: y - boxH, width: boxW, height: boxH,
+      color: rgb(1, 1, 1), borderColor: border, borderWidth: 0.5,
+    });
+    page.drawText(label, { x: x + 12, y: y - 16, size: 8, font: bold, color: muted });
+    page.drawText(fitText(value, bold, 11, boxW - 24), {
+      x: x + 12, y: y - 36, size: 11, font: bold, color: text,
+    });
   });
   y -= boxH + 26;
 
@@ -401,11 +409,13 @@ Deno.serve(async (req) => {
     const logoUrl  = (brandingResolved.slug && LOGO_BY_SLUG[brandingResolved.slug]) || LOGO_BY_SLUG.nimt;
 
     let paymentMode: string;
+    let paymentGateway: string | null = null;
     if (lp.payment_mode === "gateway" || lp.payment_mode === "online") {
-      const gw = lp.gateway ? (GATEWAY_LABELS[lp.gateway] || lp.gateway) : "";
-      paymentMode = gw ? `Online · ${gw}` : "Online";
+      paymentMode = "Online";
+      paymentGateway = lp.gateway ? (GATEWAY_LABELS[lp.gateway] || lp.gateway) : null;
     } else {
       paymentMode = MODE_LABELS[lp.payment_mode] || lp.payment_mode || "—";
+      paymentGateway = lp.gateway ? (GATEWAY_LABELS[lp.gateway] || lp.gateway) : null;
     }
 
     const rows: [string, string][] = [
@@ -446,6 +456,7 @@ Deno.serve(async (req) => {
       rows,
       amount:        Number(lp.amount),
       paymentMode,
+      paymentGateway,
       paymentRef:    lp.transaction_ref || "—",
       paymentDate:   lp.payment_date || lp.created_at,
       campusName,

@@ -12,9 +12,18 @@ import { Button } from "@/components/ui/button";
 import { usePermissions } from "@/contexts/PermissionContext";
 
 const modeBadge: Record<string, string> = {
-  online: "bg-pastel-blue", cash: "bg-pastel-green", cheque: "bg-pastel-yellow",
+  online: "bg-pastel-blue", gateway: "bg-pastel-blue", cash: "bg-pastel-green", cheque: "bg-pastel-yellow",
   upi: "bg-pastel-purple", bank_transfer: "bg-pastel-mint",
 };
+const gatewayLabels: Record<string, string> = {
+  easebuzz: "Easebuzz",
+  icici: "ICICI",
+  cashfree: "Cashfree",
+  offline: "Marked Offline",
+  manual: "Marked Offline",
+};
+const gatewayLabel = (gateway?: string | null) =>
+  gateway ? (gatewayLabels[gateway] || gateway) : "—";
 
 const FeeCollections = () => {
   const [search, setSearch] = useState("");
@@ -188,6 +197,7 @@ const FeeCollections = () => {
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Fee Head</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">Amount</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Mode</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Gateway</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Receipt</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Time</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Action</th>
@@ -196,7 +206,7 @@ const FeeCollections = () => {
                 <tbody>
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
+                      <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
                         {isToday ? "No collections recorded today yet" : "No collections on this date"}
                       </td>
                     </tr>
@@ -213,6 +223,7 @@ const FeeCollections = () => {
                           {(p.payment_mode || "").replace("_", " ")}
                         </Badge>
                       </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{gatewayLabel(p.gateway)}</td>
                       <td className="px-4 py-3 font-mono text-xs text-primary font-semibold">{p.receipt_no || "—"}</td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">
                         {new Date(p.paid_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}
@@ -229,6 +240,7 @@ const FeeCollections = () => {
                             recorded_by: p.profiles?.display_name || undefined,
                             amount: Number(p.amount),
                             payment_ref: p.transaction_ref,
+                            payment_gateway: p.gateway || null,
                             payment_date: p.paid_at,
                           })}
                           className="flex items-center gap-1.5 rounded-lg border border-primary/30 px-2.5 py-1 text-[11px] font-medium text-primary hover:bg-primary/5 transition-colors"

@@ -31,6 +31,7 @@ export interface ReceiptData {
   course_name?: string;
   semester?: string;
   payment_mode?: string;
+  payment_gateway?: string | null;
   fee_description?: string;
   recorded_by?: string;
   line_items?: FeeLineItem[];
@@ -54,6 +55,19 @@ export interface ReceiptData {
   payment_id?: string | null;
 }
 
+const GATEWAY_LABELS: Record<string, string> = {
+  easebuzz: "Easebuzz",
+  icici: "ICICI",
+  cashfree: "Cashfree",
+  offline: "Marked Offline",
+  manual: "Marked Offline",
+};
+
+function formatGateway(gateway?: string | null) {
+  if (!gateway) return null;
+  return GATEWAY_LABELS[gateway] || gateway;
+}
+
 // ── Printable receipt content ─────────────────────────────────────────────────
 
 function ReceiptContent({ d }: { d: ReceiptData }) {
@@ -64,6 +78,7 @@ function ReceiptContent({ d }: { d: ReceiptData }) {
   const fmt = (n: number) =>
     n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const hasLineItems = d.line_items && d.line_items.length > 0;
+  const paymentGateway = formatGateway(d.payment_gateway);
 
   return (
     <div
@@ -190,6 +205,12 @@ function ReceiptContent({ d }: { d: ReceiptData }) {
           <div style={{ flex: 1, padding: "12px 16px", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
             <span style={{ fontSize: "11px", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px", display: "block" }}>Payment Method</span>
             <span style={{ fontSize: "12px", fontWeight: 600, color: "#334155", marginTop: "2px", display: "block" }}>{d.payment_mode.replace("_", " ").toUpperCase()}</span>
+          </div>
+        )}
+        {paymentGateway && (
+          <div style={{ flex: 1, padding: "12px 16px", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
+            <span style={{ fontSize: "11px", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px", display: "block" }}>Payment Gateway</span>
+            <span style={{ fontSize: "12px", fontWeight: 600, color: "#334155", marginTop: "2px", display: "block" }}>{paymentGateway}</span>
           </div>
         )}
         {d.payment_ref && (

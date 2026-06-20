@@ -96,6 +96,16 @@ const appIdFromNotes = (notes?: unknown): string | null => {
   return match?.[0]?.toUpperCase() || null;
 };
 
+function fitText(text: string, font: any, size: number, maxWidth: number): string {
+  if (!text) return "—";
+  if (font.widthOfTextAtSize(text, size) <= maxWidth) return text;
+  let out = text;
+  while (out.length > 1 && font.widthOfTextAtSize(`${out}...`, size) > maxWidth) {
+    out = out.slice(0, -1);
+  }
+  return `${out}...`;
+}
+
 interface Branding {
   slug?: string | null;
   name: string;
@@ -111,6 +121,7 @@ interface BuildOpts {
   rows: [string, string][];
   amount: number;
   paymentMode: string;
+  paymentGateway?: string | null;
   paymentRef: string;
   paymentDate: string;
   campusName: string | null;
@@ -235,23 +246,22 @@ async function buildPdf(opts: BuildOpts): Promise<Uint8Array> {
   });
   y -= bandH + 16;
 
-  const halfW = (width - margin * 2 - 12) / 2;
+  const paymentCards: [string, string][] = [["PAYMENT METHOD", opts.paymentMode.toUpperCase()]];
+  if (opts.paymentGateway) paymentCards.push(["PAYMENT GATEWAY", opts.paymentGateway]);
+  paymentCards.push(["TRANSACTION REF", opts.paymentRef || "—"]);
+  const gap = 12;
+  const boxW = (width - margin * 2 - gap * (paymentCards.length - 1)) / paymentCards.length;
   const boxH = 52;
-  page.drawRectangle({
-    x: margin, y: y - boxH, width: halfW, height: boxH,
-    color: rgb(1, 1, 1), borderColor: border, borderWidth: 0.5,
-  });
-  page.drawText("PAYMENT METHOD", { x: margin + 12, y: y - 16, size: 8, font: bold, color: muted });
-  page.drawText(opts.paymentMode.toUpperCase(), {
-    x: margin + 12, y: y - 36, size: 11, font: bold, color: text,
-  });
-  page.drawRectangle({
-    x: margin + halfW + 12, y: y - boxH, width: halfW, height: boxH,
-    color: rgb(1, 1, 1), borderColor: border, borderWidth: 0.5,
-  });
-  page.drawText("TRANSACTION REF", { x: margin + halfW + 24, y: y - 16, size: 8, font: bold, color: muted });
-  page.drawText(opts.paymentRef || "—", {
-    x: margin + halfW + 24, y: y - 36, size: 11, font: bold, color: text,
+  paymentCards.forEach(([label, value], index) => {
+    const x = margin + index * (boxW + gap);
+    page.drawRectangle({
+      x, y: y - boxH, width: boxW, height: boxH,
+      color: rgb(1, 1, 1), borderColor: border, borderWidth: 0.5,
+    });
+    page.drawText(label, { x: x + 12, y: y - 16, size: 8, font: bold, color: muted });
+    page.drawText(fitText(value, bold, 11, boxW - 24), {
+      x: x + 12, y: y - 36, size: 11, font: bold, color: text,
+    });
   });
   y -= boxH + 26;
 
@@ -368,11 +378,13 @@ Deno.serve(async (req) => {
     const logoUrl  = (brandingResolved.slug && LOGO_BY_SLUG[brandingResolved.slug]) || LOGO_BY_SLUG.nimt;
 
     let paymentMode: string;
+    let paymentGateway: string | null = null;
     if (payment.payment_mode === "gateway" || payment.payment_mode === "online") {
-      const gw = payment.gateway ? (GATEWAY_LABELS[payment.gateway] || payment.gateway) : "";
-      paymentMode = gw ? `Online · ${gw}` : "Online";
+      paymentMode = "Online";
+      paymentGateway = payment.gateway ? (GATEWAY_LABELS[payment.gateway] || payment.gateway) : null;
     } else {
       paymentMode = MODE_LABELS[payment.payment_mode] || payment.payment_mode || "—";
+      paymentGateway = payment.gateway ? (GATEWAY_LABELS[payment.gateway] || payment.gateway) : null;
     }
 
     const firstChoice = (app.course_selections || [])[0] || {};
@@ -398,6 +410,7 @@ Deno.serve(async (req) => {
       rows,
       amount:        Number(payment.amount || app.fee_amount || 0),
       paymentMode,
+      paymentGateway,
       paymentRef:    payment.transaction_ref || "—",
       paymentDate:   payment.payment_date || payment.created_at || app.submitted_at || app.updated_at,
       campusName,
