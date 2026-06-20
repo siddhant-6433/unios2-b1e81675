@@ -263,10 +263,18 @@ export function CallDispositionDialog({
   const asksCahetRegistered = isBptOrBmritCourseName(courseName);
   const dispositionReachedStudent =
     !!disposition && !["not_answered", "busy", "voicemail"].includes(disposition);
+  const showCnetAppeared = asksCnetAppeared && dispositionReachedStudent;
+  const showCahetRegistered = asksCahetRegistered && dispositionReachedStudent;
   const needsCnetAppeared =
     asksCnetAppeared && existingCnetAppeared == null && dispositionReachedStudent;
   const needsCahetRegistered =
     asksCahetRegistered && existingCahetRegistered == null && dispositionReachedStudent;
+
+  useEffect(() => {
+    if (!open) return;
+    setCnetAppeared(existingCnetAppeared == null ? null : existingCnetAppeared ? "yes" : "no");
+    setCahetRegistered(existingCahetRegistered == null ? null : existingCahetRegistered ? "yes" : "no");
+  }, [open, existingCnetAppeared, existingCahetRegistered]);
 
   // Plivo-driven auto-disposition: when the caller signals busy / no_answer /
   // failed via callStatus, pre-select the matching disposition pill so the
@@ -331,8 +339,8 @@ export function CallDispositionDialog({
         future_eligible_session: disposition === "ineligible" ? futureSession : null,
         suppress_auto_whatsapp: suppressAutoWa,
         send_course_info: sendCourseInfo,
-        cnet_appeared: needsCnetAppeared ? cnetAppeared === "yes" : null,
-        cahet_registered: needsCahetRegistered ? cahetRegistered === "yes" : null,
+        cnet_appeared: showCnetAppeared && cnetAppeared ? cnetAppeared === "yes" : null,
+        cahet_registered: showCahetRegistered && cahetRegistered ? cahetRegistered === "yes" : null,
       });
       resetState();
       onOpenChange(false);
@@ -888,10 +896,10 @@ export function CallDispositionDialog({
             );
           })()}
 
-          {needsCnetAppeared && (
+          {showCnetAppeared && (
             <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3 dark:border-blue-900/50 dark:bg-blue-950/20">
               <label className="block text-xs font-semibold text-blue-900 dark:text-blue-200 mb-2">
-                CNET appeared? <span className="text-destructive">*</span>
+                CNET appeared? {needsCnetAppeared ? <span className="text-destructive">*</span> : <span className="font-normal text-blue-700/70 dark:text-blue-300/70">(edit if needed)</span>}
               </label>
               <div className="grid grid-cols-2 gap-2">
                 {(["yes", "no"] as const).map(value => (
@@ -912,10 +920,10 @@ export function CallDispositionDialog({
             </div>
           )}
 
-          {needsCahetRegistered && (
+          {showCahetRegistered && (
             <div className="rounded-xl border border-rose-200 bg-rose-50/60 p-3 dark:border-rose-900/50 dark:bg-rose-950/20">
               <label className="block text-xs font-semibold text-rose-900 dark:text-rose-200 mb-2">
-                Registered for CAHET? <span className="text-destructive">*</span>
+                Registered for CAHET? {needsCahetRegistered ? <span className="text-destructive">*</span> : <span className="font-normal text-rose-700/70 dark:text-rose-300/70">(edit if needed)</span>}
               </label>
               <div className="grid grid-cols-2 gap-2">
                 {(["yes", "no"] as const).map(value => (
