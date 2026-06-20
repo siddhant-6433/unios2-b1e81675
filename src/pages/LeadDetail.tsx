@@ -1364,6 +1364,8 @@ const LeadDetail = () => {
           latestNote={notes[0]?.content || null}
           aiCallSummary={(lead as any).ai_notes || null}
           leadSource={lead.source || null}
+          existingCnetAppeared={(lead as any).cnet_appeared ?? null}
+          existingCahetRegistered={(lead as any).cahet_registered ?? null}
           jdKeyword={(lead as any).jd_category || null}
         />
       </Suspense>

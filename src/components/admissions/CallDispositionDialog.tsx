@@ -108,6 +108,8 @@ interface CallDispositionDialogProps {
   /** Lead source (e.g. "justdial", "meta_ads") — shown as a badge so the
    *  counsellor knows which channel produced this lead before picking up. */
   leadSource?: string | null;
+  existingCnetAppeared?: boolean | null;
+  existingCahetRegistered?: boolean | null;
   /** JustDial search keyword that produced the lead. Only rendered when
    *  leadSource === "justdial" — for every other source it's irrelevant. */
   jdKeyword?: string | null;
@@ -199,7 +201,8 @@ export function CallDispositionDialog({
   onSubmit, onCallNow, callStatus, callEnded, onManualConnect, onCancelCall,
   callStarting = false, onRetryCall,
   courseName, leadStage, personRole, latestNote, aiCallSummary,
-  leadSource, jdKeyword, inline = false,
+  leadSource, existingCnetAppeared = null, existingCahetRegistered = null,
+  jdKeyword, inline = false,
 }: CallDispositionDialogProps) {
   const isMobile = useIsMobile();
   const { toast } = useToast();
@@ -258,6 +261,12 @@ export function CallDispositionDialog({
   const selectedDisp = DISPOSITIONS.find(d => d.value === disposition);
   const asksCnetAppeared = isBscNursingCourse(courseName || null);
   const asksCahetRegistered = isBptOrBmritCourseName(courseName);
+  const dispositionReachedStudent =
+    !!disposition && !["not_answered", "busy", "voicemail"].includes(disposition);
+  const needsCnetAppeared =
+    asksCnetAppeared && existingCnetAppeared == null && dispositionReachedStudent;
+  const needsCahetRegistered =
+    asksCahetRegistered && existingCahetRegistered == null && dispositionReachedStudent;
 
   // Plivo-driven auto-disposition: when the caller signals busy / no_answer /
   // failed via callStatus, pre-select the matching disposition pill so the
@@ -302,8 +311,8 @@ export function CallDispositionDialog({
 
   const handleSubmit = async (opts: { scheduleFollowup?: boolean; scheduleVisit?: boolean } = {}) => {
     if (!disposition) return;
-    if (asksCnetAppeared && !cnetAppeared) return;
-    if (asksCahetRegistered && !cahetRegistered) return;
+    if (needsCnetAppeared && !cnetAppeared) return;
+    if (needsCahetRegistered && !cahetRegistered) return;
     setSaving(true);
     try {
       const visit = opts.scheduleVisit && visitDate && visitTime
@@ -322,8 +331,8 @@ export function CallDispositionDialog({
         future_eligible_session: disposition === "ineligible" ? futureSession : null,
         suppress_auto_whatsapp: suppressAutoWa,
         send_course_info: sendCourseInfo,
-        cnet_appeared: asksCnetAppeared ? cnetAppeared === "yes" : null,
-        cahet_registered: asksCahetRegistered ? cahetRegistered === "yes" : null,
+        cnet_appeared: needsCnetAppeared ? cnetAppeared === "yes" : null,
+        cahet_registered: needsCahetRegistered ? cahetRegistered === "yes" : null,
       });
       resetState();
       onOpenChange(false);
@@ -879,7 +888,7 @@ export function CallDispositionDialog({
             );
           })()}
 
-          {asksCnetAppeared && disposition && (
+          {needsCnetAppeared && (
             <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3 dark:border-blue-900/50 dark:bg-blue-950/20">
               <label className="block text-xs font-semibold text-blue-900 dark:text-blue-200 mb-2">
                 CNET appeared? <span className="text-destructive">*</span>
@@ -903,7 +912,7 @@ export function CallDispositionDialog({
             </div>
           )}
 
-          {asksCahetRegistered && disposition && (
+          {needsCahetRegistered && (
             <div className="rounded-xl border border-rose-200 bg-rose-50/60 p-3 dark:border-rose-900/50 dark:bg-rose-950/20">
               <label className="block text-xs font-semibold text-rose-900 dark:text-rose-200 mb-2">
                 Registered for CAHET? <span className="text-destructive">*</span>
@@ -1012,8 +1021,8 @@ export function CallDispositionDialog({
             const noFollowupRequired = ["not_interested", "ineligible", "wrong_number", "do_not_contact"];
             const requiresAction = disposition && !noFollowupRequired.includes(disposition);
             const qualifierRequiredUnanswered =
-              (asksCnetAppeared && !cnetAppeared) ||
-              (asksCahetRegistered && !cahetRegistered);
+              (needsCnetAppeared && !cnetAppeared) ||
+              (needsCahetRegistered && !cahetRegistered);
 
             return (
               <div className="flex flex-col gap-2 pt-1">

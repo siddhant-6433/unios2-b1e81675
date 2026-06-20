@@ -153,14 +153,6 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
       toast({ title: "Required", description: "Name, phone and source are required", variant: "destructive" });
       return;
     }
-    if (asksCnetAppeared && !form.cnet_appeared) {
-      toast({ title: "Required", description: "Please mark whether the B.Sc Nursing lead appeared for CNET", variant: "destructive" });
-      return;
-    }
-    if (asksCahetRegistered && !form.cahet_registered) {
-      toast({ title: "Required", description: "Please mark whether the BPT/BMRIT lead registered for CAHET", variant: "destructive" });
-      return;
-    }
     setSaving(true);
     // Use RPC to bypass RLS on RETURNING (counsellor may not have SELECT on the new row)
     const { data: newId, error } = await supabase.rpc("insert_lead" as any, {
@@ -175,8 +167,8 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
       _counsellor_id: form.counsellor_id || null,
       _notes: form.notes.trim() || null,
       _consultant_id: form.source === "consultant" ? (form.consultant_id || null) : null,
-      _cnet_appeared: asksCnetAppeared ? form.cnet_appeared === "yes" : null,
-      _cahet_registered: asksCahetRegistered ? form.cahet_registered === "yes" : null,
+      _cnet_appeared: asksCnetAppeared && form.cnet_appeared ? form.cnet_appeared === "yes" : null,
+      _cahet_registered: asksCahetRegistered && form.cahet_registered ? form.cahet_registered === "yes" : null,
     });
     setSaving(false);
     if (error) {
@@ -288,7 +280,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
           {asksCnetAppeared && (
             <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3 dark:border-blue-900/50 dark:bg-blue-950/20">
               <label className="block text-[11px] font-medium text-blue-900 dark:text-blue-200 mb-2">
-                CNET appeared? <span className="text-destructive">*</span>
+                CNET appeared? <span className="font-normal text-blue-700/70 dark:text-blue-300/70">(optional)</span>
               </label>
               <div className="grid grid-cols-2 gap-2">
                 {(["yes", "no"] as const).map(value => (
@@ -311,7 +303,7 @@ export function AddLeadDialog({ open, onOpenChange, onSuccess, resumeDraftId, on
           {asksCahetRegistered && (
             <div className="rounded-xl border border-rose-200 bg-rose-50/60 p-3 dark:border-rose-900/50 dark:bg-rose-950/20">
               <label className="block text-[11px] font-medium text-rose-900 dark:text-rose-200 mb-2">
-                Registered for CAHET? <span className="text-destructive">*</span>
+                Registered for CAHET? <span className="font-normal text-rose-700/70 dark:text-rose-300/70">(optional)</span>
               </label>
               <div className="grid grid-cols-2 gap-2">
                 {(["yes", "no"] as const).map(value => (
