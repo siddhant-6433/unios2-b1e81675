@@ -5,21 +5,20 @@
  * was still in flight. We need to:
  *   1. Hang up the live Plivo call so both legs (counsellor + student) drop.
  *      Hanging up the parent A-leg automatically tears down the bridged B-leg.
- *   2. Record the disposition as `cancelled_by_counsellor` so the timeline
- *      distinguishes "counsellor abandoned the call" from "student never
- *      answered" (the latter is what bridge-hangup writes as `cancelled`).
+ *   2. Mark the ai_call_records row as counsellor-cancelled so polling stops.
+ *      Cancellation is NOT a lead disposition and must not create call_logs or
+ *      complete/reschedule lead_followups.
  *
  * Request: { call_id: string, caller_user_id?: string, hangup_only?: boolean }
  *   call_id      — the internal call_uuid created by manual-call
  *   hangup_only  — when true (counsellor pressed "End Call" on a CONNECTED
  *                  call), only drop the live Plivo legs and skip the
- *                  cancelled_by_counsellor disposition/timeline writes. The
- *                  call was answered, so a real disposition follows from the
- *                  UI and bridge-hangup will reconcile ai_call_records.
+ *                  ai_call_records update. The call was answered, so a real
+ *                  disposition follows from the UI and bridge-hangup will
+ *                  reconcile ai_call_records.
  *
  * Idempotent: safe to call multiple times. Plivo returns 404 if the call
- * already ended; we treat that as success. record_cloud_call_log dedupes on
- * cloud_call_uuid + first-write-wins for the manual disposition.
+ * already ended; we treat that as success.
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -173,44 +172,21 @@ Deno.serve(async (req) => {
     // hangup_only: the call was connected and the counsellor pressed "End Call".
     // We've dropped the Plivo legs above — but the disposition is owned by the
     // UI (a real outcome follows) and bridge-hangup will reconcile the
-    // ai_call_records row, so skip all the cancelled_by_counsellor bookkeeping.
+    // ai_call_records row, so skip the local cancellation marker.
     if (hangup_only) {
       return json({ success: true, hangup_only: true });
     }
 
-    // Record cancelled_by_counsellor as a manual disposition. p_source='manual'
-    // means the later bridge-hangup auto callback won't overwrite it (the RPC
-    // applies first-write-wins via COALESCE on the existing disposition).
-    await db.rpc("record_cloud_call_log", {
-      p_call_uuid:     call_id,
-      p_lead_id:       record.lead_id,
-      p_user_id:       caller_user_id || record.caller_user_id,
-      p_disposition:   "cancelled_by_counsellor",
-      p_duration:      0,
-      p_notes:         "Cloud Call cancelled by counsellor from disposition screen",
-      p_source:        "manual",
-      p_recording_url: null,
-      p_call_source:   "manual_log",
-    });
-
     // Terminate the ai_call_records row so the lead-page poll stops spinning
-    // on "calling". bridge-hangup may still fire and overwrite some fields,
-    // but the lead-page UI keys off this row's status to close the dialog.
+    // on "calling". This is deliberately not a call_logs disposition because
+    // the counsellor did not mark an outcome.
     await db
       .from("ai_call_records")
       .update({
-        status: "failed",
-        disposition: "cancelled_by_counsellor",
+        status: "cancelled_by_counsellor",
         completed_at: new Date().toISOString(),
       } as any)
       .eq("id", record.id);
-
-    // Timeline entry so the cancel is visible alongside other call activity.
-    await db.from("lead_activities").insert({
-      lead_id: record.lead_id,
-      type: "call",
-      description: "Cloud Call cancelled by counsellor",
-    } as any);
 
     return json({ success: true });
   } catch (err: any) {

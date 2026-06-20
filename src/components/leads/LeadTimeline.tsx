@@ -21,7 +21,6 @@ interface LeadTimelineProps {
   savingNote: boolean;
   followups?: any[];
   visits?: any[];
-  onCompleteFollowup?: (id: string) => void;
   onAddFollowup?: (data: { scheduled_at: string; type: string; notes: string }) => void;
   onScheduleVisit?: (data: { visit_date: string; campus_id: string }) => void;
   onUpdateVisitStatus?: (id: string, status: string, newDate?: string) => void;
@@ -33,7 +32,7 @@ interface LeadTimelineProps {
 export function LeadTimeline({
   activities, notes, followups, visits, callLogs,
   newNote, setNewNote, onAddNote, savingNote,
-  onCompleteFollowup, onAddFollowup, onScheduleVisit, onUpdateVisitStatus, campuses,
+  onAddFollowup, onScheduleVisit, onUpdateVisitStatus, campuses,
   leadId, courseId,
 }: LeadTimelineProps) {
   return (

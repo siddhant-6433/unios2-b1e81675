@@ -31,7 +31,6 @@ const DISPOSITIONS: { value: string; label: string; tone: string; icon: any; pri
   { value: "not_answered",   label: "Not Answered",   icon: PhoneMissed,  tone: "bg-amber-100 hover:bg-amber-200 text-amber-800 border-amber-300" },
   { value: "not_interested", label: "Not Interested", icon: XCircle,      tone: "bg-red-100 hover:bg-red-200 text-red-800 border-red-300" },
   { value: "ineligible",     label: "Ineligible",     icon: AlertTriangle,tone: "bg-purple-100 hover:bg-purple-200 text-purple-800 border-purple-300" },
-  { value: "cancelled",      label: "Cancelled",      icon: PhoneOff,     tone: "bg-gray-100 hover:bg-gray-200 text-gray-700 border-gray-300" },
 ];
 
 type CallStatus = "idle" | "calling" | "connected" | "ended" | "saving";
@@ -94,7 +93,6 @@ const CALLED_BADGE: Record<string, { label: string; tone: string; icon: any }> =
   not_answered:   { label: "No answer",      icon: PhoneMissed,  tone: "bg-amber-100 text-amber-800 border-amber-300" },
   not_interested: { label: "Not interested", icon: XCircle,      tone: "bg-red-100 text-red-800 border-red-300" },
   ineligible:     { label: "Ineligible",     icon: AlertTriangle,tone: "bg-purple-100 text-purple-800 border-purple-300" },
-  cancelled:      { label: "Cancelled",      icon: PhoneOff,     tone: "bg-gray-100 text-gray-700 border-gray-300" },
   busy:           { label: "Busy",           icon: PhoneOff,     tone: "bg-orange-100 text-orange-800 border-orange-300" },
   voicemail:      { label: "Voicemail",      icon: PhoneMissed,  tone: "bg-amber-100 text-amber-800 border-amber-300" },
 };
@@ -253,11 +251,8 @@ const CahetSprint = () => {
     pollStartedAtRef.current = null;
   };
 
-  // Persist disposition + side-effects to DB. Mirrors CloudDialer's finalize
-  // path: writes to call_logs via record_cloud_call_log, completes pending
-  // followups, logs activity, bumps first_contact_at, updates stage on
-  // interested/not_interested. After save: auto-open Register modal if
-  // "interested", otherwise advance to next row.
+  // Persist actual call dispositions + side-effects to DB. Cancellation is not
+  // a disposition and must never come through this path.
   const persistDisposition = useCallback(async (lead: QueueRow, disposition: string, durationSeconds: number, callUuid: string | null) => {
     const finalUuid = callUuid || (typeof crypto !== "undefined" && (crypto as any).randomUUID ? (crypto as any).randomUUID() : `manual-${Date.now()}`);
     const durStr = durationSeconds > 0 ? ` (${Math.floor(durationSeconds / 60)}m${durationSeconds % 60 ? ` ${durationSeconds % 60}s` : ""})` : "";
@@ -537,15 +532,23 @@ const CahetSprint = () => {
   const cancelCall = useCallback(async () => {
     if (!activeCall) return;
     stopPolling();
-    // Mirror CloudDialer's cancel: log it as a "cancelled" disposition so call
-    // history stays consistent, then reset.
-    try {
-      await persistDisposition(activeCall.lead, "cancelled", 0, activeCall.callUuid);
-    } catch {}
-    markCalled(activeCall.lead.lead_id, "cancelled");
+    if (activeCall.callUuid) {
+      try {
+        const { error } = await supabase.functions.invoke("manual-call-cancel", {
+          body: { call_id: activeCall.callUuid, caller_user_id: user?.id },
+        });
+        if (error) {
+          toast({ title: "Cancel failed", description: error.message, variant: "destructive" });
+        } else {
+          toast({ title: "Call cancelled", description: "No disposition recorded and no call metrics changed." });
+        }
+      } catch (e: any) {
+        toast({ title: "Cancel failed", description: e?.message || "Try again", variant: "destructive" });
+      }
+    }
     setActiveCall(null);
     setCallElapsed(0);
-  }, [activeCall, persistDisposition, markCalled]);
+  }, [activeCall, toast, user?.id]);
 
   const skipRow = useCallback((leadId: string) => {
     setSkipped(prev => {

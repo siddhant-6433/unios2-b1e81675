@@ -90,9 +90,8 @@ interface CallDispositionDialogProps {
   /** Called when counsellor clicks "Call connected" — flips parent state */
   onManualConnect?: () => void;
   /** Called when counsellor clicks "Cancel" during the calling phase. Should
-   *  hang up both Plivo legs and record the call as cancelled_by_counsellor.
-   *  Awaited so the dialog stays open (with a busy state) until the hangup
-   *  RPC returns — closes the dialog automatically once it resolves. */
+   *  hang up both Plivo legs without recording a call disposition. Awaited so
+   *  the dialog stays open (with a busy state) until the hangup RPC returns. */
   onCancelCall?: () => Promise<void> | void;
   /** Called when counsellor clicks "Redial" after they missed their own A-leg
    *  (callStatus="counsellor_no_answer"). Should close this dialog and place
@@ -173,12 +172,39 @@ const DURATION_OPTIONS = [
   { value: 900, label: "10m+" },
 ];
 
-const VISIT_TIME_SLOTS = ["09:00", "10:00", "11:00", "12:00", "14:00", "15:00", "16:00", "17:00"];
-const todayStr = () => new Date().toISOString().split("T")[0];
+const VISIT_TIME_SLOTS = ["09:00", "10:00", "11:00", "12:00", "14:00", "15:00", "16:00", "17:00", "18:00"];
+const dateInputValue = (d: Date) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+const todayStr = () => dateInputValue(new Date());
 const tomorrowStr = () => {
   const d = new Date();
   d.setDate(d.getDate() + 1);
-  return d.toISOString().split("T")[0];
+  return dateInputValue(d);
+};
+const nextNoAnswerFollowupSlot = () => {
+  const target = new Date(Date.now() + 2 * 60 * 60 * 1000);
+  const targetMinutes = target.getHours() * 60 + target.getMinutes();
+  const businessStart = 9 * 60;
+  const businessEnd = 18 * 60;
+  const slot = VISIT_TIME_SLOTS.find((s) => {
+    const [h, m] = s.split(":").map(Number);
+    return h * 60 + m >= Math.max(targetMinutes, businessStart);
+  });
+
+  if (targetMinutes >= businessStart && targetMinutes <= businessEnd && slot) {
+    return { date: dateInputValue(target), time: slot };
+  }
+  if (targetMinutes < businessStart) {
+    return { date: dateInputValue(target), time: "09:00" };
+  }
+
+  const tomorrow = new Date(target);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return { date: dateInputValue(tomorrow), time: "09:00" };
 };
 const slotLabel = (t: string) => {
   const [h, m] = t.split(":").map(Number);
@@ -270,6 +296,14 @@ export function CallDispositionDialog({
     else if (callStatus === "busy") setDisposition("busy");
     else if (callStatus === "failed") setDisposition("not_answered");
   }, [callStatus, open, disposition]);
+
+  useEffect(() => {
+    if (disposition !== "not_answered") return;
+    const next = nextNoAnswerFollowupSlot();
+    setShowVisitForm(false);
+    setFollowupDate(next.date);
+    setFollowupTime(next.time);
+  }, [disposition]);
 
   // Default-on the course-info follow-up for positive dispositions so the
   // counsellor doesn't have to remember to tick it after every connected

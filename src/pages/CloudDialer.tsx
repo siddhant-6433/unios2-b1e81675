@@ -79,7 +79,6 @@ const CONNECTED_DISPOSITIONS = [
   { value: "not_interested", label: "Not Interested", icon: XCircle, color: "bg-red-100 text-red-700 border-red-300 hover:bg-red-50" },
   { value: "call_back", label: "Call Back", icon: Clock, color: "bg-blue-100 text-blue-700 border-blue-300 hover:bg-blue-50" },
   { value: "ineligible", label: "Ineligible", icon: AlertCircle, color: "bg-purple-100 text-purple-700 border-purple-300 hover:bg-purple-50" },
-  { value: "cancelled", label: "Cancelled", icon: PhoneOff, color: "bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-50" },
   { value: "not_answered", label: "Not Answered", icon: PhoneMissed, color: "bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-50" },
 ];
 
@@ -110,6 +109,21 @@ const formatSlotLabel = (slot: string) => {
   const [h] = slot.split(":");
   const hr = parseInt(h);
   return hr >= 12 ? `${hr === 12 ? 12 : hr - 12} PM` : `${hr} AM`;
+};
+
+const indiaDayBoundsUtc = (date = new Date()) => {
+  const indiaOffsetMs = 330 * 60 * 1000;
+  const indiaDate = new Date(date.getTime() + indiaOffsetMs);
+  const startOfIndiaDayAsUtc = Date.UTC(
+    indiaDate.getUTCFullYear(),
+    indiaDate.getUTCMonth(),
+    indiaDate.getUTCDate(),
+  );
+
+  return {
+    start: new Date(startOfIndiaDayAsUtc - indiaOffsetMs).toISOString(),
+    end: new Date(startOfIndiaDayAsUtc + 86400000 - indiaOffsetMs).toISOString(),
+  };
 };
 
 // ── Course-specific script helpers ──────────────────────────────────────────
@@ -232,6 +246,7 @@ export default function CloudDialer() {
   const [notIntCategory, setNotIntCategory] = useState<"lead" | "job_applicant" | "vendor" | "other">("lead");
   const [cnetAppeared, setCnetAppeared] = useState<"yes" | "no" | null>(null);
   const [cahetRegistered, setCahetRegistered] = useState<"yes" | "no" | null>(null);
+  const [allowPostDispositionFollowup, setAllowPostDispositionFollowup] = useState(true);
   const [stats, setStats] = useState<DialerStats>({ connected: 0, busy: 0, noAnswer: 0, voicemail: 0, interested: 0, totalTalkTime: 0 });
 
   // Call history for current lead
@@ -546,10 +561,14 @@ export default function CloudDialer() {
             : prev
           );
         } else if (data.disposition) {
-          // Auto-disposed during ringing (busy/not_answered/cancelled)
-          // Student never connected — stop polling, show auto-followup with 15s timer
+          // Auto-disposed during ringing (busy/not_answered/voicemail).
+          // Cancelled is not a disposition and must not count as a call.
           if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-          handleAutoDisposition(data.disposition);
+          if (data.disposition === "cancelled" || data.disposition === "cancelled_by_counsellor") {
+            handleCancelledCall();
+          } else {
+            handleAutoDisposition(data.disposition);
+          }
         } else {
           // Still ringing — but if we've been polling > 8 min, the call is stuck
           // (voice-agent context was lost, bridge-hangup never updated the record).
@@ -581,11 +600,16 @@ export default function CloudDialer() {
         }
         setStats(prev => ({ ...prev, connected: prev.connected + 1, totalTalkTime: prev.totalTalkTime + serverDur }));
       } else if (serverDisp) {
-        // Auto-disposed (busy/not_answered/voicemail/cancelled)
-        handleAutoDisposition(serverDisp);
+        // Auto-disposed (busy/not_answered/voicemail). Cancelled is not a
+        // disposition and must not count as a call.
+        if (serverDisp === "cancelled" || serverDisp === "cancelled_by_counsellor") {
+          handleCancelledCall();
+        } else {
+          handleAutoDisposition(serverDisp);
+        }
       } else {
-        // No student connection, no disposition — treat as cancelled
-        handleAutoDisposition("cancelled");
+        // No student connection and no disposition. Do not count this as a call.
+        handleCancelledCall();
       }
     };
     // Poll every 3 seconds
@@ -808,11 +832,38 @@ export default function CloudDialer() {
     toast({ title: "Disposition saved", description: `Marked as "${disposition.replace("_", " ")}". Will finalize when call ends.` });
   };
 
-  const completePendingFollowupsForCurrentLead = async () => {
-    if (!currentLead) return;
+  const canClearPendingFollowupsForCurrentLead = async (disposition: string) => {
+    if (!currentLead) return false;
+    if (disposition === "cancelled") return false;
+    if (disposition !== "not_answered") return true;
+
+    const { start, end } = indiaDayBoundsUtc();
+    const { count, error } = await supabase
+      .from("call_logs")
+      .select("id", { count: "exact", head: true })
+      .eq("lead_id", currentLead.id)
+      .eq("disposition", "not_answered")
+      .gte("called_at", start)
+      .lt("called_at", end);
+
+    if (error) {
+      console.error("Failed to count same-day unanswered attempts:", error);
+      return false;
+    }
+
+    return (count || 0) >= 2;
+  };
+
+  const completePendingFollowupsForCurrentLead = async (disposition: string) => {
+    if (!currentLead) return false;
+    const canClear = await canClearPendingFollowupsForCurrentLead(disposition);
+    setAllowPostDispositionFollowup(canClear);
+    if (!canClear) return false;
+
     await supabase.from("lead_followups")
       .update({ status: "completed", completed_at: new Date().toISOString() } as any)
       .eq("lead_id", currentLead.id).eq("status", "pending");
+    return true;
   };
 
   const persistCnetAppearedForCurrentLead = async () => {
@@ -880,8 +931,9 @@ export default function CloudDialer() {
     await persistCnetAppearedForCurrentLead();
     await persistCahetRegisteredForCurrentLead();
 
-    // Mark pending followups as completed (clears overdue status)
-    await completePendingFollowupsForCurrentLead();
+    // Mark pending followups as completed only when this disposition is
+    // allowed to clear the queue. First same-day not_answered stays pending.
+    const followupCleared = await completePendingFollowupsForCurrentLead(disposition);
 
     // Log activity
     const durStr = duration > 0 ? ` (${Math.floor(duration / 60)}m${duration % 60 ? ` ${duration % 60}s` : ""})` : "";
@@ -906,7 +958,7 @@ export default function CloudDialer() {
     }));
 
     setCallState(prev => ({ ...prev, status: "auto-disposed", disposition, autoDisposition: false }));
-    showFollowupAndAutoNext(disposition, true);
+    showFollowupAndAutoNext(disposition, true, followupCleared);
   };
 
   // ── Handle call end (counsellor marks disposition) ────────────────────────
@@ -953,8 +1005,9 @@ export default function CloudDialer() {
     await persistCnetAppearedForCurrentLead();
     await persistCahetRegisteredForCurrentLead();
 
-    // Mark pending followups as completed (clears overdue status)
-    await completePendingFollowupsForCurrentLead();
+    // Mark pending followups as completed only when this disposition is
+    // allowed to clear the queue. First same-day not_answered stays pending.
+    const followupCleared = await completePendingFollowupsForCurrentLead(disposition);
 
     // Log activity
     const durStr = callState.elapsed > 0 ? ` (${Math.floor(callState.elapsed / 60)}m${callState.elapsed % 60 ? ` ${callState.elapsed % 60}s` : ""})` : "";
@@ -982,7 +1035,7 @@ export default function CloudDialer() {
     }));
 
     setCallState(prev => ({ ...prev, status: "auto-disposed", disposition, autoDisposition: false }));
-    showFollowupAndAutoNext(disposition, false);
+    showFollowupAndAutoNext(disposition, false, followupCleared);
   };
 
   // ── Auto-disposition (unanswered/busy/voicemail from Plivo) ───────────────
@@ -992,8 +1045,8 @@ export default function CloudDialer() {
   // plain local disposition, this must hang up the live Plivo call so both legs
   // (counsellor + student) drop — otherwise the call stays orphaned on Plivo.
   // Mirrors LeadDetail's onCancelCall: invoke manual-call-cancel, then drive the
-  // UI. The edge function records cancelled_by_counsellor, so we skip the local
-  // call-log write on success to avoid a conflicting row.
+  // UI. Cancellation is not a disposition and must not write call_logs or local
+  // metrics.
   const cancelCall = async () => {
     if (cancellingRef.current) return;
     cancellingRef.current = true;
@@ -1015,7 +1068,7 @@ export default function CloudDialer() {
         toast({ title: "Cancel failed", description: e?.message || "Try again", variant: "destructive" });
       }
     }
-    handleAutoDisposition("cancelled", hungUp);
+    handleCancelledCall(hungUp ? "Call cancelled" : "Call cancelled locally");
   };
 
   // ── End a connected Cloud Call ───────────────────────────────────────────
@@ -1044,19 +1097,20 @@ export default function CloudDialer() {
   };
 
   const handleAutoDisposition = async (disposition: string, skipLog = false) => {
+    if (disposition === "cancelled" || disposition === "cancelled_by_counsellor") {
+      handleCancelledCall();
+      return;
+    }
+
     const statsKey = disposition === "busy" ? "busy" : disposition === "voicemail" ? "voicemail" : "noAnswer";
     setStats(prev => ({ ...prev, [statsKey]: prev[statsKey] + 1 }));
     setCallState(prev => ({ ...prev, status: "auto-disposed", disposition, autoDisposition: true }));
-    await completePendingFollowupsForCurrentLead();
     // Write call log via dedupe RPC so this row merges with the auto path from
-    // bridge-hangup (if it already wrote one). Without this, cancels + stuck-call
-    // timeouts produce no call log at all.
-    // skipLog: when manual-call-cancel already recorded cancelled_by_counsellor,
-    // skip this write so we don't race a conflicting "cancelled" row (RPC is
-    // first-write-wins on cloud_call_uuid).
+    // bridge-hangup (if it already wrote one). Cancelled states are filtered
+    // before this point because they are not call outcomes.
     const callUuid = callIdRef.current;
     if (currentLead && !skipLog) {
-      (supabase as any).rpc("record_cloud_call_log", {
+      await (supabase as any).rpc("record_cloud_call_log", {
         p_call_uuid:     callUuid ?? crypto.randomUUID(),
         p_lead_id:       currentLead.id,
         p_user_id:       user?.id || null,
@@ -1068,15 +1122,37 @@ export default function CloudDialer() {
         p_call_source:   "cloud_dialer",
       });
     }
-    showFollowupAndAutoNext(disposition);
+    const followupCleared = await completePendingFollowupsForCurrentLead(disposition);
+    showFollowupAndAutoNext(disposition, false, followupCleared);
+  };
+
+  const handleCancelledCall = (title = "Call cancelled") => {
+    setCallState({ status: "idle", startTime: null, elapsed: 0, disposition: null, autoDisposition: false });
+    setAutoNextTimer(0);
+    preDispositionRef.current = null;
+    cancellingRef.current = false;
+    toast({ title, description: "No disposition recorded and no call metrics changed." });
   };
 
   // ── Show followup and start auto-next timer ───────────────────────────────
 
-  const showFollowupAndAutoNext = (disposition: string, wasConnected = false) => {
+  const showFollowupAndAutoNext = (disposition: string, wasConnected = false, followupCanBeRescheduled = true) => {
     if (!currentLead) return;
     const attempt = currentLead.attempt_count + 1;
     const isAutoDisp = ["busy", "not_answered", "voicemail", "cancelled"].includes(disposition);
+
+    if (!followupCanBeRescheduled) {
+      setFollowupDate("");
+      setFollowupTime("");
+      setAutoNextTimer(10);
+      toast({
+        title: "Attempt logged",
+        description: disposition === "not_answered"
+          ? "First not answered attempt today. Existing pending follow-up remains open."
+          : "This disposition does not clear the pending follow-up.",
+      });
+      return;
+    }
 
     // After MAX_AUTO_ATTEMPTS unanswered attempts → mark inactive, no followup
     if (isAutoDisp && attempt >= MAX_AUTO_ATTEMPTS) {
@@ -1149,7 +1225,7 @@ export default function CloudDialer() {
 
   const moveToNext = async () => {
     // Save followup if there's a date (skip for not_interested and inactive)
-    if (currentLead && followupDate && callState.disposition !== "not_interested") {
+    if (currentLead && followupDate && allowPostDispositionFollowup && callState.disposition !== "not_interested") {
       const scheduledAt = new Date(`${followupDate}T${followupTime || "10:00"}:00`);
       await supabase.from("lead_followups").insert({
         lead_id: currentLead.id,
@@ -1183,6 +1259,7 @@ export default function CloudDialer() {
 
     setAutoNextTimer(0);
     preDispositionRef.current = null;
+    setAllowPostDispositionFollowup(true);
     setCallState({ status: "idle", startTime: null, elapsed: 0, disposition: null, autoDisposition: false });
 
     if (currentIdx < queue.length - 1) {
@@ -1200,6 +1277,7 @@ export default function CloudDialer() {
   const skipLead = () => {
     setCallState({ status: "idle", startTime: null, elapsed: 0, disposition: null, autoDisposition: false });
     setAutoNextTimer(0);
+    setAllowPostDispositionFollowup(true);
     if (currentIdx < queue.length - 1) {
       setCurrentIdx(prev => prev + 1);
     }
