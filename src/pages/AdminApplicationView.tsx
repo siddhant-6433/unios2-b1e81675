@@ -13,7 +13,7 @@ import { DocReviewPanel } from "@/components/admissions/DocReviewPanel";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { deleteApplication as deleteApplicationRequest } from "@/lib/deleteApplication";
-import { fetchCahetRegistration, isBptOrBmritCourseName, type CahetRegistrationDetails } from "@/lib/cahet";
+import { cahetRegistrationFromApplication, fetchCahetRegistration, isBptOrBmritCourseName, type CahetRegistrationDetails } from "@/lib/cahet";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -138,7 +138,8 @@ export default function AdminApplicationView() {
         setHasOffer(!!(offerRows && offerRows.length));
         setAppFeePaid((pmtRows || []).reduce((sum, p: any) => sum + Number(p.amount || 0), 0));
         const courseName = (leadRow as any)?.course?.name || ((appRow.course_selections || [])[0] as any)?.course_name || null;
-        setCahetRegistration(isBptOrBmritCourseName(courseName) ? cahetRow : null);
+        const applicationCahet = cahetRegistrationFromApplication(appRow, appRow.lead_id);
+        setCahetRegistration(isBptOrBmritCourseName(courseName) ? (cahetRow || applicationCahet) : null);
       } else {
         setLead(null);
         setEligibilityRule(null);
@@ -732,6 +733,7 @@ export default function AdminApplicationView() {
           leadId={lead.id}
           leadName={lead.name || app.full_name}
           courseId={lead.course_id}
+          courseName={lead.course?.name}
           campusId={lead.campus_id}
           cahetRegistration={cahetRegistration}
           onSuccess={() => { setShowOfferLetter(false); refresh(); }}

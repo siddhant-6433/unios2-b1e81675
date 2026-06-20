@@ -1547,7 +1547,7 @@ const LeadDetail = () => {
       <InterviewScoringDialog open={showInterview} onOpenChange={setShowInterview}
         leadId={lead.id} leadName={lead.name} currentScore={lead.interview_score} currentResult={lead.interview_result} onSuccess={() => fetchAll(true)} />
       <OfferLetterDialog open={showOfferLetter} onOpenChange={setShowOfferLetter}
-        leadId={lead.id} leadName={lead.name} courseId={lead.course_id} campusId={lead.campus_id} onSuccess={() => fetchAll(true)} />
+        leadId={lead.id} leadName={lead.name} courseId={lead.course_id} courseName={courseName} campusId={lead.campus_id} onSuccess={() => fetchAll(true)} />
       <ConvertToStudentDialog open={showConvert} onOpenChange={setShowConvert} lead={lead} courseName={courseName} campusName={campusName} onSuccess={() => fetchAll(true)} />
       <SendWhatsAppDialog
         open={showWhatsApp}
