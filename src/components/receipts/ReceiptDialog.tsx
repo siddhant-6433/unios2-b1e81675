@@ -37,6 +37,7 @@ export interface ReceiptData {
   line_items?: FeeLineItem[];
   // Common
   amount: number;
+  concession_amount?: number;
   payment_ref?: string | null;
   payment_date: string;
   institution_name?: string;

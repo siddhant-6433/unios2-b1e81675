@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { getStudentClaimToken } from "@/lib/studentClaim";
+import { brandForStudentOwner, type StudentBrand } from "@/lib/studentBranding";
 import {
   IndianRupee, ClipboardCheck, Megaphone, Loader2,
   AlertCircle, CheckCircle, Clock, CreditCard,
@@ -19,8 +20,13 @@ interface StudentInfo {
   id: string;
   name: string;
   admission_no: string;
+  course_id: string | null;
+  campus_id: string | null;
   course_name: string;
   campus_name: string;
+  semester: string;
+  parent_phone: string;
+  brand: StudentBrand;
 }
 
 interface FeeItem {
@@ -52,6 +58,14 @@ export default function StudentPortal() {
   const [attendance, setAttendance] = useState<AttendanceSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [claimError, setClaimError] = useState<string | null>(null);
+
+  const studentLayoutProps = student
+    ? {
+        institutionName: student.brand.name,
+        institutionLogo: student.brand.logo,
+        institutionLogoAlt: student.brand.logoAlt,
+      }
+    : {};
 
   useEffect(() => {
     if (!claimToken) return;
@@ -96,26 +110,43 @@ export default function StudentPortal() {
 
   useEffect(() => {
     if (claimToken) return;
+    if (!user?.id) {
+      setLoading(true);
+      return;
+    }
     fetchStudentData();
   }, [claimToken, user?.id]);
 
   const fetchStudentData = async () => {
     setLoading(true);
 
-    const { data: studentData } = await supabase
+    const { data: studentData } = await (supabase as any)
       .from("students")
-      .select("id, name, admission_no, pre_admission_no, campus_id, campuses:campus_id(name), courses:course_id(name)")
+      .select("id, name, admission_no, pre_admission_no, phone, father_phone, mother_phone, guardian_phone, campus_id, course_id, campuses:campus_id(name), courses:course_id(name, code, departments(institutions(name, type)))")
       .eq("user_id", user?.id)
       .limit(1)
       .single();
 
     if (studentData) {
+      const course = (studentData as any).courses;
+      const institution = course?.departments?.institutions;
       setStudent({
         id: studentData.id,
         name: studentData.name,
         admission_no: studentData.admission_no || studentData.pre_admission_no || "",
-        course_name: (studentData as any).courses?.name || "",
+        course_id: studentData.course_id || null,
+        campus_id: studentData.campus_id || null,
+        course_name: course?.name || "",
         campus_name: (studentData as any).campuses?.name || "",
+        semester: "",
+        parent_phone: studentData.father_phone || studentData.mother_phone || studentData.guardian_phone || studentData.phone || "",
+        brand: brandForStudentOwner({
+          campusName: (studentData as any).campuses?.name,
+          courseName: course?.name,
+          courseCode: course?.code,
+          institutionName: institution?.name,
+          institutionType: institution?.type,
+        }),
       });
 
       const [feeRes, attRes] = await Promise.all([
@@ -150,16 +181,58 @@ export default function StudentPortal() {
           percentage: total > 0 ? Math.round((present / total) * 100) : 0,
         });
       }
+    } else {
+      sessionStorage.removeItem("unios_impersonation");
+      await supabase.auth.signOut();
+      navigate("/login?student=1", { replace: true });
+      return;
     }
 
     setLoading(false);
   };
 
-  const totalDue = fees.reduce((s, f) => s + f.balance, 0);
+  const openPayment = (scope: "due" | "all" | "fee", feeId?: string) => {
+    if (!student) return;
+    const todayKey = new Date().toLocaleDateString("en-CA");
+    const selectedFees = fees
+      .filter((fee) => fee.balance > 0)
+      .filter((fee) => {
+        if (scope === "all") return true;
+        if (scope === "fee") return fee.id === feeId;
+        return fee.due_date <= todayKey;
+      })
+      .map((fee) => ({
+        id: fee.id,
+        fee_head: fee.fee_code_name,
+        amount: fee.total_amount,
+        balance: fee.balance,
+        status: fee.status,
+        due_date: fee.due_date,
+      }));
+
+    navigate(`/pay?student=${student.id}&scope=${scope}${feeId ? `&fee=${feeId}` : ""}&token=student_portal`, {
+      state: {
+        fromStudentPortal: true,
+        student,
+        fees: selectedFees,
+      },
+    });
+  };
+
+  const todayKey = new Date().toLocaleDateString("en-CA");
+  const isOutstanding = (fee: FeeItem) => fee.balance > 0 && fee.status !== "paid";
+  const isDueNow = (fee: FeeItem) => isOutstanding(fee) && fee.due_date <= todayKey;
+  const isFutureDue = (fee: FeeItem) => isOutstanding(fee) && fee.due_date > todayKey;
+  const dueNowFees = fees.filter(isDueNow);
+  const futureFees = fees.filter(isFutureDue);
+  const totalDueNow = dueNowFees.reduce((s, f) => s + f.balance, 0);
+  const totalOutstanding = fees.filter(isOutstanding).reduce((s, f) => s + f.balance, 0);
+  const payAllWaiver = Math.round(totalOutstanding * 0.05);
+  const payAllAmount = Math.max(totalOutstanding - payAllWaiver, 0);
 
   if (loading) {
     return (
-      <PortalLayout>
+      <PortalLayout {...studentLayoutProps}>
         <div className="flex items-center justify-center py-20">
           <div className="flex flex-col items-center gap-3 text-center">
             <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
@@ -172,7 +245,7 @@ export default function StudentPortal() {
 
   if (claimError) {
     return (
-      <PortalLayout>
+      <PortalLayout {...studentLayoutProps}>
         <div className="rounded-2xl bg-white border border-gray-200 p-12 text-center">
           <AlertCircle className="h-10 w-10 text-red-400 mx-auto mb-3" />
           <h2 className="text-lg font-semibold text-gray-900 mb-1">Claim link could not be used</h2>
@@ -190,18 +263,28 @@ export default function StudentPortal() {
 
   if (!student) {
     return (
-      <PortalLayout>
+      <PortalLayout {...studentLayoutProps}>
         <div className="rounded-2xl bg-white border border-gray-200 p-12 text-center">
           <AlertCircle className="h-10 w-10 text-gray-300 mx-auto mb-3" />
           <h2 className="text-lg font-semibold text-gray-900 mb-1">Profile not found</h2>
           <p className="text-sm text-gray-500">Contact the institution to link your account.</p>
+          <button
+            onClick={async () => {
+              sessionStorage.removeItem("unios_impersonation");
+              await supabase.auth.signOut();
+              navigate("/login?student=1", { replace: true });
+            }}
+            className="mt-5 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary/90 transition-colors"
+          >
+            Sign in as student
+          </button>
         </div>
       </PortalLayout>
     );
   }
 
   return (
-    <PortalLayout tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab}>
+    <PortalLayout tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} {...studentLayoutProps}>
       {/* Student Info Card */}
       <div className="rounded-2xl bg-white border border-gray-200 p-5 mb-6">
         <div className="flex items-center gap-4">
@@ -237,17 +320,37 @@ export default function StudentPortal() {
       {/* Fees Tab */}
       {activeTab === "fees" && (
         <div className="space-y-4">
-          {totalDue > 0 && (
+          {totalDueNow > 0 && (
             <div className="rounded-xl bg-primary/5 border border-primary/20 p-4 flex items-center justify-between">
               <div>
-                <p className="text-xs text-primary/70">Amount Due</p>
-                <p className="text-xl font-bold text-primary">₹{totalDue.toLocaleString("en-IN")}</p>
+                <p className="text-xs text-primary/70">Amount Due Till Today</p>
+                <p className="text-xl font-bold text-primary">₹{totalDueNow.toLocaleString("en-IN")}</p>
               </div>
               <button
-                onClick={() => navigate(`/pay?student=${student.id}`)}
+                onClick={() => openPayment("due")}
                 className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary/90 transition-colors"
               >
                 <CreditCard className="h-4 w-4" /> Pay Now
+              </button>
+            </div>
+          )}
+
+          {futureFees.length > 0 && totalOutstanding > totalDueNow && (
+            <div className="rounded-xl bg-white border border-gray-200 p-4 flex items-center justify-between gap-4">
+              <div>
+                <p className="text-xs text-gray-500">Annual Pay All</p>
+                <p className="text-sm font-semibold text-gray-900">
+                  ₹{payAllAmount.toLocaleString("en-IN")}
+                  <span className="ml-2 text-xs font-medium text-green-600">
+                    5% waiver saves ₹{payAllWaiver.toLocaleString("en-IN")}
+                  </span>
+                </p>
+              </div>
+              <button
+                onClick={() => openPayment("all")}
+                className="flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm font-semibold text-primary hover:bg-primary/10 transition-colors"
+              >
+                <CreditCard className="h-4 w-4" /> Pay All
               </button>
             </div>
           )}
@@ -256,31 +359,43 @@ export default function StudentPortal() {
             {fees.length === 0 ? (
               <div className="p-8 text-center text-sm text-gray-400">No fees due right now</div>
             ) : (
-              fees.map((fee) => (
+              fees.map((fee) => {
+                const futureDue = isFutureDue(fee);
+                const paid = fee.status === "paid";
+                const overdue = fee.status === "overdue" && !futureDue;
+                return (
                 <div key={fee.id} className="flex items-center gap-3 p-4">
                   <div className={`flex h-9 w-9 items-center justify-center rounded-lg shrink-0 ${
-                    fee.status === "paid" ? "bg-green-100" : fee.status === "overdue" ? "bg-red-100" : "bg-yellow-100"
+                    paid ? "bg-green-100" : overdue ? "bg-red-100" : futureDue ? "bg-blue-100" : "bg-yellow-100"
                   }`}>
-                    {fee.status === "paid" ? <CheckCircle className="h-4 w-4 text-green-600" /> :
-                     fee.status === "overdue" ? <AlertCircle className="h-4 w-4 text-red-600" /> :
-                     <Clock className="h-4 w-4 text-yellow-600" />}
+                    {paid ? <CheckCircle className="h-4 w-4 text-green-600" /> :
+                     overdue ? <AlertCircle className="h-4 w-4 text-red-600" /> :
+                     <Clock className={`h-4 w-4 ${futureDue ? "text-blue-600" : "text-yellow-600"}`} />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">{fee.fee_code_name}</p>
                     <p className="text-xs text-gray-400">
-                      Due {new Date(fee.due_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+                      {futureDue ? "Upcoming" : "Due"} {new Date(fee.due_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
                     </p>
                   </div>
-                  <div className="text-right">
-                    <p className={`text-sm font-semibold ${fee.status === "paid" ? "text-green-600" : "text-gray-900"}`}>
-                      ₹{(fee.status === "paid" ? fee.paid_amount : fee.balance).toLocaleString("en-IN")}
+                  <div className="text-right shrink-0">
+                    <p className={`text-sm font-semibold ${paid ? "text-green-600" : "text-gray-900"}`}>
+                      ₹{(paid ? fee.paid_amount : fee.balance).toLocaleString("en-IN")}
                     </p>
                     <p className={`text-[10px] font-medium capitalize ${
-                      fee.status === "paid" ? "text-green-600" : fee.status === "overdue" ? "text-red-500" : "text-yellow-600"
-                    }`}>{fee.status}</p>
+                      paid ? "text-green-600" : overdue ? "text-red-500" : futureDue ? "text-blue-600" : "text-yellow-600"
+                    }`}>{futureDue ? "upcoming" : fee.status}</p>
+                    {futureDue && (
+                      <button
+                        onClick={() => openPayment("fee", fee.id)}
+                        className="mt-2 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:border-primary/40 hover:text-primary"
+                      >
+                        Pay
+                      </button>
+                    )}
                   </div>
                 </div>
-              ))
+              )})
             )}
           </div>
         </div>

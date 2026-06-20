@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Mail, MessageCircle, Loader2, ShieldCheck, ArrowLeft, KeyRound } from "lucide-react";
@@ -9,7 +9,7 @@ import { COUNTRIES } from "@/components/apply/countries";
 import uniosLogo from "@/assets/unios-logo.png";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 
-type LoginMethod = "google" | "email_otp" | "whatsapp_sign_in" | "whatsapp_otp" | "dev_password";
+type LoginMethod = "google" | "email_otp" | "whatsapp_sign_in" | "whatsapp_otp" | "dev_password" | "student_password";
 type WhatsAppSignInState = "idle" | "waiting" | "verified" | "expired" | "failed" | "no_account";
 
 const NO_ACCOUNT_PATTERN = /no.+account.+linked/i;
@@ -46,20 +46,31 @@ const readFunctionErrorMessage = async (error: unknown) => {
 const Login = () => {
   const { session, loading, role, roleLoaded } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { toast } = useToast();
+  const forceStudentLogin = searchParams.get("student") === "1";
+  const clearedForcedSessionRef = useRef(false);
 
   useEffect(() => {
+    if (forceStudentLogin && session && !clearedForcedSessionRef.current) {
+      clearedForcedSessionRef.current = true;
+      sessionStorage.removeItem("unios_impersonation");
+      supabase.auth.signOut();
+      return;
+    }
     if (loading || !session || !roleLoaded) return;
     if (role === "student") navigate("/student", { replace: true });
     else if (role === "parent") navigate("/parent", { replace: true });
     else if (role === null) navigate("/my-applications", { replace: true });
     else if (role === "counsellor") navigate("/cloud-dialer", { replace: true });
     else navigate("/", { replace: true });
-  }, [session, loading, role, roleLoaded, navigate]);
+  }, [session, loading, role, roleLoaded, navigate, forceStudentLogin]);
 
   const [method, setMethod] = useState<LoginMethod>("whatsapp_sign_in");
   const [devEmail, setDevEmail] = useState("");
   const [devPassword, setDevPassword] = useState("");
+  const [studentUsername, setStudentUsername] = useState("");
+  const [studentPassword, setStudentPassword] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
@@ -72,6 +83,13 @@ const Login = () => {
   const [waDeepLink, setWaDeepLink] = useState<string | null>(null);
   const [waSignInState, setWaSignInState] = useState<WhatsAppSignInState>("idle");
   const [waExpiresAt, setWaExpiresAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (forceStudentLogin) {
+      sessionStorage.removeItem("unios_impersonation");
+      setMethod("student_password");
+    }
+  }, [forceStudentLogin]);
 
   useEffect(() => {
     if (!otpSent || !otpSentAt) return;
@@ -353,11 +371,47 @@ const Login = () => {
     }
   };
 
+  const handleStudentPasswordLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!studentUsername.trim() || !studentPassword) {
+      toast({ title: "Enter username and password", variant: "destructive" });
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("student-password-login", {
+        body: {
+          username: studentUsername.trim(),
+          password: studentPassword,
+        },
+      });
+      if (error) throw new Error(await readFunctionErrorMessage(error));
+      if (data?.error) throw new Error(data.error);
+      if (!data?.session?.access_token || !data?.session?.refresh_token) {
+        throw new Error("Invalid login response");
+      }
+
+      sessionStorage.removeItem("unios_impersonation");
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      });
+      if (sessionError) throw sessionError;
+      window.location.assign("/student");
+    } catch (error: unknown) {
+      toast({ title: "Login failed", description: getErrorMessage(error), variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const resetState = () => {
     setOtpSent(false);
     setOtp("");
     setEmail("");
     setPhone("");
+    setStudentUsername("");
+    setStudentPassword("");
     setOtpSentAt(null);
     resetWhatsAppSignIn();
   };
@@ -502,6 +556,14 @@ const Login = () => {
                 Use WhatsApp OTP instead
               </button>
 
+              <button
+                type="button"
+                onClick={() => { resetState(); setMethod("student_password"); }}
+                className="w-full rounded-xl border border-input bg-card py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                Sign in with username and password
+              </button>
+
               {waSignInState === "waiting" && waDeepLink && (
                 <a
                   href={waDeepLink}
@@ -570,6 +632,49 @@ const Login = () => {
                 )}
               </button>
             </div>
+          )}
+
+          {/* Temporary student username/password login */}
+          {method === "student_password" && (
+            <form onSubmit={handleStudentPasswordLogin} className="space-y-4">
+              <button
+                type="button"
+                onClick={() => { resetState(); setMethod("whatsapp_sign_in"); }}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Back to WhatsApp sign-in
+              </button>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Username</label>
+                <input
+                  value={studentUsername}
+                  onChange={(e) => setStudentUsername(e.target.value)}
+                  autoComplete="username"
+                  className="w-full rounded-xl border border-input bg-card px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Password</label>
+                <input
+                  type="password"
+                  value={studentPassword}
+                  onChange={(e) => setStudentPassword(e.target.value)}
+                  autoComplete="current-password"
+                  className="w-full rounded-xl border border-input bg-card px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                  required
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={submitting || !studentUsername.trim() || !studentPassword}
+                className="w-full rounded-xl bg-primary py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                Sign in
+              </button>
+            </form>
           )}
 
           {/* Google */}
