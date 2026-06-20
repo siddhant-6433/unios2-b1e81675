@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useAdmissionsOverview, useAdmissionsStats } from "@/hooks/useAdmissionsData";
+import { useAdmissionsFollowupCounts, useAdmissionsOverview } from "@/hooks/useAdmissionsData";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -996,7 +996,8 @@ const Admissions = () => {
       debounceTimer = setTimeout(() => {
         lastRefetchAt = Date.now();
         fetchLeadsRef.current();
-        queryClient.invalidateQueries({ queryKey: ["admissions-stats"] });
+        queryClient.invalidateQueries({ queryKey: ["admissions-followup-counts"] });
+        queryClient.invalidateQueries({ queryKey: ["admissions-overview"] });
       }, wait);
     };
 
@@ -1556,7 +1557,9 @@ const Admissions = () => {
   // /admissions without a refetch as long as data is < 30s stale.
   const statsCounsellorId = role === "counsellor" && profile?.id ? profile.id : null;
   const statsCampusId = statsCounsellorId ? null : (selectedCampusId !== "all" ? selectedCampusId : null);
-  const { data: statsData } = useAdmissionsStats({ counsellorId: statsCounsellorId, campusId: statsCampusId });
+  const { data: dashboardFollowups } = useAdmissionsFollowupCounts({
+    counsellorId: statsCounsellorId,
+  });
   const { data: admissionsOverview } = useAdmissionsOverview({
     counsellorId: statsCounsellorId,
     campusId: statsCampusId,
@@ -1600,28 +1603,29 @@ const Admissions = () => {
   };
   const visitFunnelLeakage = admissionsOverview?.visit_funnel_leakage ?? 0;
   const visitFunnelBoxIds = admissionsOverview?.visit_funnel_box_ids ?? {};
+  const stageCount = (stage: string) => stageCounts[stage] || 0;
+  const sumStageCounts = (stages: string[]) => stages.reduce((total, stage) => total + stageCount(stage), 0);
 
-  const newLeads        = stageCounts.new_lead ?? statsData?.new_leads ?? 0;
+  const newLeads        = stageCount("new_lead");
   const assignedNewLeads = newLeadAssignmentCounts.assigned ?? 0;
   const bucketNewLeads = newLeadAssignmentCounts.unassigned ?? 0;
   const bucketAiCalledNewLeads = newLeadAssignmentCounts.unassigned_ai_called ?? 0;
   const bucketNotAiCalledNewLeads = newLeadAssignmentCounts.unassigned_not_ai_called ?? 0;
-  const todayLeads      = statsData?.today_leads       ?? 0;
-  const appStarted      = statsData?.app_started       ?? 0;
-  const feePaid         = statsData?.fee_paid          ?? 0;
-  const appSubmitted    = statsData?.app_submitted     ?? 0;
-  const admitted        = statsData?.admitted          ?? 0;
-  const offerSent       = statsData?.offer_sent        ?? 0;
-  const tokenPaid       = statsData?.token_paid        ?? 0;
-  const preAdmitted     = statsData?.pre_admitted      ?? 0;
-  const pendingFollowups = statsData?.pending_followups ?? 0;
-  const todayFollowups  = statsData?.today_followups   ?? 0;
-  const overdueFollowups = statsData?.overdue_followups ?? 0;
-  const upcomingVisits  = statsData?.upcoming_visits   ?? 0;
-  const completedVisits = statsData?.completed_visits  ?? 0;
+  const appStarted      = sumStageCounts(["application_in_progress", "application_fee_paid", "application_submitted", "offer_sent", "token_paid", "pre_admitted"]);
+  const feePaid         = sumStageCounts(["application_fee_paid", "application_submitted", "offer_sent", "token_paid", "pre_admitted", "admitted"]);
+  const appSubmitted    = sumStageCounts(["application_submitted", "offer_sent", "token_paid", "pre_admitted"]);
+  const admitted        = stageCount("admitted");
+  const offerSent       = stageCount("offer_sent");
+  const tokenPaid       = stageCount("token_paid");
+  const preAdmitted     = stageCount("pre_admitted");
+  const pendingFollowups = dashboardFollowups?.pending ?? 0;
+  const todayFollowups  = dashboardFollowups?.today ?? 0;
+  const overdueFollowups = dashboardFollowups?.overdue ?? 0;
+  const upcomingVisits  = visitActionCounts.scheduled ?? 0;
+  const completedVisits = visitActionCounts.visitsCompleted ?? 0;
   const postVisitPendingIds = useMemo(
-    () => new Set<string>(statsData?.post_visit_pending_lead_ids ?? []),
-    [statsData?.post_visit_pending_lead_ids],
+    () => new Set<string>(visitFunnelBoxIds.visit_followup ?? []),
+    [visitFunnelBoxIds.visit_followup],
   );
 
   // Row 1: Lead data

@@ -638,9 +638,9 @@ export default function MissedCalls() {
             callEnded={dispositionEnded}
             onManualConnect={() => setDispositionStatus("connected")}
             onCancelCall={activeCallUuid ? async () => {
-              // Hang up the live Plivo bridge (counsellor + student legs) and
-              // mark the call cancelled_by_counsellor. The dialog closes
-              // either way so the counsellor isn't trapped on a broken state.
+              // Hang up the live Plivo bridge without recording a call
+              // disposition or call metric. The dialog closes either way so
+              // the counsellor isn't trapped on a broken state.
               try {
                 const { error } = await supabase.functions.invoke("manual-call-cancel", {
                   body: { call_id: activeCallUuid, caller_user_id: user?.id },

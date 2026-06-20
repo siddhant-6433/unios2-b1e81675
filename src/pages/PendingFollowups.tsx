@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -13,6 +14,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
+import {
+  CallDispositionDialog,
+  type CallDispositionData,
+  type DialogCallStatus,
+} from "@/components/admissions/CallDispositionDialog";
+import { recordCallDisposition } from "@/lib/callDisposition";
+import { useCampuses } from "@/hooks/useAdmissionsData";
 
 type Tab = "overdue" | "today" | "upcoming" | "visit_confirm" | "unclosed_visits" | "post_visit";
 
@@ -42,10 +50,20 @@ interface FollowupItem {
   urgency?: string;
 }
 
+interface InlineCallState {
+  item: FollowupItem;
+  rowIndex: number;
+  courseName: string | null;
+  leadSource: string | null;
+  personRole: string | null;
+  jdKeyword: string | null;
+}
+
 const PAGE_SIZE = 50;
 
 const PendingFollowups = () => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const { role, user, profile } = useAuth();
   const isCounsellor = role === "counsellor";
@@ -78,7 +96,19 @@ const PendingFollowups = () => {
   const [rescheduleDate, setRescheduleDate] = useState("");
   const [saving, setSaving] = useState(false);
   const [cloudCallingId, setCloudCallingId] = useState<string | null>(null);
+  const [inlineCall, setInlineCall] = useState<InlineCallState | null>(null);
+  const [inlineCallUuid, setInlineCallUuid] = useState<string | null>(null);
+  const [inlineCallStatus, setInlineCallStatus] = useState<DialogCallStatus | undefined>(undefined);
+  const [inlineCallEnded, setInlineCallEnded] = useState(false);
+  const [inlineCallStarting, setInlineCallStarting] = useState(false);
+  const [lastInlineCall, setLastInlineCall] = useState<{ label: string; nextItem: FollowupItem | null } | null>(null);
+  const { data: campuses = [] } = useCampuses();
   const { toast } = useToast();
+
+  const invalidateAdmissionsFollowupSurfaces = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["admissions-followup-counts"] });
+    queryClient.invalidateQueries({ queryKey: ["admissions-overview"] });
+  }, [queryClient]);
 
   // Fetch counsellor options for reassignment (admins only)
   useEffect(() => {
@@ -141,10 +171,169 @@ const PendingFollowups = () => {
       })
     : items;
 
-  const handleMarkComplete = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    await supabase.from("lead_followups" as any).update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", id);
-    fetchPayload();
+  useEffect(() => {
+    if (!inlineCallUuid || !inlineCall || inlineCallEnded) return;
+    if (inlineCallStatus && inlineCallStatus !== "calling" && inlineCallStatus !== "connected") return;
+
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      const { data } = await (supabase as any)
+        .from("ai_call_records")
+        .select("status, duration_seconds, student_connected_at")
+        .eq("call_uuid", inlineCallUuid)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (cancelled || !data) return;
+
+      const status = String(data.status || "").toLowerCase();
+      const duration = data.duration_seconds || 0;
+      const wasAnswered = !!data.student_connected_at
+        || status === "in-progress"
+        || status === "in_progress"
+        || status === "answered"
+        || (status === "completed" && duration > 5);
+
+      if (status === "completed" && wasAnswered) {
+        setInlineCallStatus("connected");
+        setInlineCallEnded(true);
+      } else if (wasAnswered) {
+        setInlineCallStatus("connected");
+      } else if (status === "counsellor_no_answer") {
+        setInlineCallStatus("counsellor_no_answer");
+      } else if (status === "no_answer" || status === "no-answer" || status === "cancel") {
+        setInlineCallStatus("no_answer");
+      } else if (status === "busy") {
+        setInlineCallStatus("busy");
+      } else if (status === "failed") {
+        setInlineCallStatus("failed");
+      } else if (status === "completed") {
+        setInlineCallStatus("no_answer");
+      }
+    };
+
+    tick();
+    const timer = window.setInterval(tick, 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [inlineCallUuid, inlineCall, inlineCallStatus, inlineCallEnded]);
+
+  const resetInlineCall = () => {
+    setInlineCall(null);
+    setInlineCallUuid(null);
+    setInlineCallStatus(undefined);
+    setInlineCallEnded(false);
+    setInlineCallStarting(false);
+  };
+
+  const startInlineCall = async (item: FollowupItem, rowIndex: number) => {
+    setLastInlineCall(null);
+    setInlineCall({ item, rowIndex, courseName: null, leadSource: null, personRole: null, jdKeyword: null });
+    setInlineCallUuid(null);
+    setInlineCallEnded(false);
+    setInlineCallStatus("calling");
+    setInlineCallStarting(true);
+
+    try {
+      void (async () => {
+        const { data: leadContext } = await (supabase as any)
+          .from("leads")
+          .select("source, person_role, jd_category, course_id")
+          .eq("id", item.lead_id)
+          .maybeSingle();
+        let courseName: string | null = null;
+        if (leadContext?.course_id) {
+          const { data: course } = await supabase
+            .from("courses")
+            .select("name")
+            .eq("id", leadContext.course_id)
+            .maybeSingle();
+          courseName = course?.name || null;
+        }
+        setInlineCall(prev => {
+          if (!prev || prev.item.lead_id !== item.lead_id) return prev;
+          return {
+            ...prev,
+            courseName,
+            leadSource: leadContext?.source || null,
+            personRole: leadContext?.person_role || null,
+            jdKeyword: leadContext?.jd_category || null,
+          };
+        });
+      })();
+
+      const { data, error } = await supabase.functions.invoke("manual-call", {
+        body: { lead_id: item.lead_id, caller_user_id: user?.id },
+      });
+      if (error) {
+        let detail = error.message;
+        try {
+          const ctx = (error as any).context as Response | undefined;
+          if (ctx) {
+            const raw = await ctx.text().catch(() => "");
+            try { detail = JSON.parse(raw)?.error || raw; } catch { detail = raw || error.message; }
+          }
+        } catch {}
+        toast({ title: "Call Failed", description: detail, variant: "destructive" });
+        resetInlineCall();
+      } else if (data?.error) {
+        toast({ title: "Call Failed", description: data.error, variant: "destructive" });
+        resetInlineCall();
+      } else {
+        toast({ title: "Calling You", description: data?.message || "Pick up your phone to connect to the student." });
+        setInlineCallUuid(data?.call_id || null);
+      }
+    } catch (e: any) {
+      toast({ title: "Call Failed", description: e.message, variant: "destructive" });
+      resetInlineCall();
+    } finally {
+      setInlineCallStarting(false);
+    }
+  };
+
+  const cancelInlineCall = async () => {
+    if (!inlineCallUuid) return;
+    try {
+      const { error } = await supabase.functions.invoke("manual-call-cancel", {
+        body: { call_id: inlineCallUuid, caller_user_id: user?.id },
+      });
+      if (error) {
+        toast({ title: "Cancel failed", description: error.message, variant: "destructive" });
+      } else {
+        toast({ title: "Call cancelled", description: "Both legs dropped." });
+      }
+    } catch (e: any) {
+      toast({ title: "Cancel failed", description: e?.message || "Try again", variant: "destructive" });
+    }
+  };
+
+  const submitInlineDisposition = async (data: CallDispositionData) => {
+    if (!inlineCall) return;
+    const item = inlineCall.item;
+    const nextItem = filtered[inlineCall.rowIndex + 1] || null;
+
+    await recordCallDisposition({
+      supabase,
+      leadId: item.lead_id,
+      lead: { name: item.lead_name, phone: item.lead_phone, stage: item.lead_stage },
+      userId: user?.id || null,
+      profileId,
+      courseName: inlineCall.courseName,
+      data,
+      loggedFromLabel: "pending follow-ups",
+      callUuid: inlineCallUuid,
+      callSource: inlineCallUuid ? "cloud_dialer" : "manual_log",
+    });
+
+    const label = data.disposition.replace(/_/g, " ");
+    toast({ title: "Call logged", description: label });
+    setLastInlineCall({ label, nextItem });
+    resetInlineCall();
+    invalidateAdmissionsFollowupSurfaces();
+    await fetchPayload();
   };
 
   const openCompleteDialog = (visitId: string, leadId: string, leadName: string, e: React.MouseEvent) => {
@@ -178,6 +367,7 @@ const PendingFollowups = () => {
     toast({ title: "Visit completed", description: `Follow-up scheduled for ${new Date(followupDate).toLocaleDateString("en-IN")}` });
     setSaving(false);
     setCompleteDialog(null);
+    invalidateAdmissionsFollowupSurfaces();
     fetchPayload();
   };
 
@@ -219,6 +409,7 @@ const PendingFollowups = () => {
     }
     setSaving(false);
     setNoShowDialog(null);
+    invalidateAdmissionsFollowupSurfaces();
     fetchPayload();
   };
 
@@ -246,6 +437,7 @@ const PendingFollowups = () => {
     toast({ title: "Visit rescheduled", description: `New date: ${new Date(newDateIso).toLocaleDateString("en-IN")}` });
     setSaving(false);
     setRescheduleVisitDialog(null);
+    invalidateAdmissionsFollowupSurfaces();
     fetchPayload();
   };
 
@@ -323,6 +515,19 @@ const PendingFollowups = () => {
     const d = new Date(s);
     return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " +
       d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+  };
+
+  const openLeadFromQueue = (leadId: string, rowIndex: number, startCall = false) => {
+    navigate(`/admissions/${leadId}${startCall ? "?action=call" : ""}`, {
+      state: {
+        followupQueue: {
+          ids: filtered.map(f => f.lead_id),
+          index: rowIndex,
+          tab,
+          returnUrl: `/pending-followups?tab=${tab}`,
+        },
+      },
+    });
   };
 
   return (
@@ -403,6 +608,63 @@ const PendingFollowups = () => {
         </div>
       )}
 
+      {inlineCall && (
+        <CallDispositionDialog
+          inline
+          open={!!inlineCall}
+          onOpenChange={(open) => { if (!open) resetInlineCall(); }}
+          leadName={inlineCall.item.lead_name}
+          leadPhone={inlineCall.item.lead_phone}
+          campuses={campuses}
+          onSubmit={submitInlineDisposition}
+          callStatus={inlineCallStatus}
+          callEnded={inlineCallEnded}
+          callStarting={inlineCallStarting && !inlineCallUuid && inlineCallStatus === "calling"}
+          onManualConnect={inlineCallUuid ? () => setInlineCallStatus("connected") : undefined}
+          onCancelCall={inlineCallUuid ? cancelInlineCall : undefined}
+          onRetryCall={async () => {
+            const current = inlineCall;
+            resetInlineCall();
+            if (current) await startInlineCall(current.item, current.rowIndex);
+          }}
+          leadStage={inlineCall.item.lead_stage}
+          courseName={inlineCall.courseName}
+          leadSource={inlineCall.leadSource}
+          personRole={inlineCall.personRole}
+          jdKeyword={inlineCall.jdKeyword}
+          latestNote={inlineCall.item.notes}
+        />
+      )}
+
+      {lastInlineCall && !inlineCall && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          <Check className="h-4 w-4 shrink-0" />
+          <span className="font-medium">Call logged: {lastInlineCall.label}</span>
+          {lastInlineCall.nextItem ? (
+            <Button
+              size="sm"
+              className="ml-auto h-8 gap-1.5"
+              onClick={() => {
+                const nextIndex = Math.max(0, filtered.findIndex(f => f.lead_id === lastInlineCall.nextItem?.lead_id));
+                startInlineCall(lastInlineCall.nextItem!, nextIndex);
+              }}
+            >
+              <Phone className="h-3.5 w-3.5" />
+              Call next follow-up
+            </Button>
+          ) : (
+            <span className="ml-auto text-xs text-emerald-700">No more leads visible in this tab.</span>
+          )}
+          <button
+            onClick={() => setLastInlineCall(null)}
+            className="rounded-md p-1 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-950 transition-colors"
+            aria-label="Dismiss call logged message"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       <Card className="border-border/60 shadow-none overflow-x-auto">
         <CardContent className="p-0">
@@ -434,16 +696,7 @@ const PendingFollowups = () => {
               <tbody>
                 {filtered.map((r, rowIndex) => (
                   <tr key={r.id} className={`border-b border-border/40 hover:bg-muted/20 cursor-pointer ${selected.has(r.lead_id) ? "bg-primary/5" : ""}`}
-                    onClick={() => navigate(`/admissions/${r.lead_id}`, {
-                      state: {
-                        followupQueue: {
-                          ids: filtered.map(f => f.lead_id),
-                          index: rowIndex,
-                          tab,
-                          returnUrl: `/pending-followups?tab=${tab}`,
-                        },
-                      },
-                    })}>
+                    onClick={() => openLeadFromQueue(r.lead_id, rowIndex)}>
                     {!isCounsellor && (
                       <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
                         <input type="checkbox" checked={selected.has(r.lead_id)}
@@ -517,13 +770,15 @@ const PendingFollowups = () => {
                           </>
                         )}
                         {(tab === "overdue" || tab === "today" || tab === "upcoming") && (
-                          <button onClick={(e) => handleMarkComplete(r.id, e)}
-                            className="rounded-lg bg-emerald-100 px-2.5 py-1 text-[10px] font-medium text-emerald-700 hover:bg-emerald-200 transition-colors"
-                            title="Mark as completed">Done</button>
+                          <button onClick={(e) => { e.stopPropagation(); startInlineCall(r, rowIndex); }}
+                            className="rounded-lg bg-cyan-100 px-2.5 py-1 text-[10px] font-medium text-cyan-700 hover:bg-cyan-200 transition-colors"
+                            title="Call and mark disposition inline">
+                            Call
+                          </button>
                         )}
-                        <button onClick={(e) => { e.stopPropagation(); navigate(`/admissions/${r.lead_id}`); }}
+                        <button onClick={(e) => { e.stopPropagation(); openLeadFromQueue(r.lead_id, rowIndex); }}
                           className="rounded-lg bg-muted p-1.5 text-muted-foreground hover:text-foreground transition-colors"
-                          title="Open lead">
+                          title="Open lead with queue navigation">
                           <ExternalLink className="h-3.5 w-3.5" />
                         </button>
                       </div>

@@ -21,7 +21,6 @@ const DISPOSITION_COLORS: Record<string, string> = {
   call_back: "bg-blue-100 text-blue-700",
   callback: "bg-blue-100 text-blue-700",
   busy: "bg-orange-100 text-orange-700",
-  cancelled: "bg-slate-100 text-slate-600",
   timeout: "bg-amber-100 text-amber-600",
   failed: "bg-red-100 text-red-600",
   completed: "bg-green-100 text-green-700",
@@ -191,6 +190,7 @@ const CallLog = () => {
       `)
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
+      .not("disposition", "in", '("cancelled","cancelled_by_counsellor")')
       .limit(PAGE_SIZE + 1);
 
     if (from) query = query.gte("created_at", `${from}T00:00:00`);
@@ -342,6 +342,7 @@ const CallLog = () => {
 
   // Client-side filters (disposition + search — counsellor is now server-side)
   const filtered = records.filter(r => {
+    if (["cancelled", "cancelled_by_counsellor"].includes(r.disposition || "")) return false;
     if (dispositionFilter !== "all" && r.disposition !== dispositionFilter) return false;
     if (search) {
       const q = search.toLowerCase();
@@ -484,7 +485,6 @@ const CallLog = () => {
           <option value="wrong_number">Wrong Number</option>
           <option value="do_not_contact">DNC</option>
           <option value="ineligible">Ineligible</option>
-          <option value="cancelled">Cancelled</option>
           <option value="timeout">Timeout</option>
         </select>
 

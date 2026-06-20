@@ -177,6 +177,18 @@ const LeadDetail = () => {
   // just the assignee's display name — no contact info, no stage.
   const [assignmentInfo, setAssignmentInfo] = useState<{ exists: boolean; lead_name: string | null; counsellor_name: string | null } | null>(null);
   const { buckets, nextLead, refetch: refetchQueue } = useCallQueue(id, lead?.counsellor_id);
+  const nextFollowupQueueId = followupQueue && followupQueue.index < followupQueue.ids.length - 1
+    ? followupQueue.ids[followupQueue.index + 1]
+    : null;
+
+  const navigateWithinFollowupQueue = (nextIndex: number, startCall = false) => {
+    if (!followupQueue) return;
+    const nextId = followupQueue.ids[nextIndex];
+    if (!nextId) return;
+    navigate(`/admissions/${nextId}${startCall ? "?action=call" : ""}`, {
+      state: { followupQueue: { ...followupQueue, index: nextIndex } },
+    });
+  };
 
   // useLeadDetail handles initial fetch + refetch on id change automatically.
   // Reset local state when navigating between leads so the old data doesn't
@@ -481,14 +493,6 @@ const LeadDetail = () => {
 
   const addFollowup = async (data: { scheduled_at: string; type: string; notes: string }) => {
     if (!data.scheduled_at || !id) return;
-    // Mark all existing pending follow-ups for this lead as completed
-    // (creating a new follow-up implies the previous ones have been acted on)
-    await supabase
-      .from("lead_followups")
-      .update({ status: "completed", completed_at: new Date().toISOString() } as any)
-      .eq("lead_id", id)
-      .eq("status", "pending");
-
     const { error } = await supabase.from("lead_followups").insert({
       lead_id: id, user_id: user?.id,
       scheduled_at: data.scheduled_at, type: data.type, notes: data.notes || null,
@@ -520,15 +524,6 @@ const LeadDetail = () => {
       setDispositionWaSent(false); // reset flag
       await fetchAll(true);
     }
-  };
-
-  const completeFollowup = async (fid: string) => {
-    await supabase.from("lead_followups").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", fid);
-    await supabase.from("lead_activities").insert({
-      lead_id: id!, user_id: profileId, type: "followup",
-      description: "Follow-up marked as completed",
-    });
-    await fetchAll(true);
   };
 
   const scheduleVisit = async (data: { visit_date: string; campus_id: string }) => {
@@ -1062,10 +1057,7 @@ const LeadDetail = () => {
             <button
               disabled={followupQueue.index === 0}
               className="flex h-7 w-7 items-center justify-center rounded-lg border border-amber-400/40 bg-white/60 dark:bg-white/10 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              onClick={() => {
-                const prevId = followupQueue.ids[followupQueue.index - 1];
-                if (prevId) navigate(`/admissions/${prevId}`, { state: { followupQueue: { ...followupQueue, index: followupQueue.index - 1 } } });
-              }}
+              onClick={() => navigateWithinFollowupQueue(followupQueue.index - 1)}
               title="Previous lead"
             >
               <ChevronRight className="h-3.5 w-3.5 rotate-180" />
@@ -1073,10 +1065,7 @@ const LeadDetail = () => {
             <button
               disabled={followupQueue.index >= followupQueue.ids.length - 1}
               className="flex h-7 w-7 items-center justify-center rounded-lg border border-amber-400/40 bg-white/60 dark:bg-white/10 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              onClick={() => {
-                const nextId = followupQueue.ids[followupQueue.index + 1];
-                if (nextId) navigate(`/admissions/${nextId}`, { state: { followupQueue: { ...followupQueue, index: followupQueue.index + 1 } } });
-              }}
+              onClick={() => navigateWithinFollowupQueue(followupQueue.index + 1)}
               title="Next lead"
             >
               <ChevronRight className="h-3.5 w-3.5" />
@@ -1276,10 +1265,9 @@ const LeadDetail = () => {
             await placeManualCall();
           }}
           onCancelCall={activeCallUuid ? async () => {
-            // Cancel the in-flight Cloud Call: hangs up both Plivo legs and
-            // records the call as cancelled_by_counsellor in call_logs +
-            // ai_call_records. Failures surface as a toast — the panel still
-            // closes so the counsellor isn't stuck on a broken state.
+            // Cancel the in-flight Cloud Call: hangs up both Plivo legs without
+            // recording a call disposition or call metric. Failures surface as
+            // a toast — the panel still closes so the counsellor isn't stuck.
             try {
               const { error } = await supabase.functions.invoke("manual-call-cancel", {
                 body: { call_id: activeCallUuid, caller_user_id: user?.id },
@@ -1534,7 +1522,6 @@ const LeadDetail = () => {
             setNewNote={setNewNote}
             onAddNote={addNote}
             savingNote={savingNote}
-            onCompleteFollowup={completeFollowup}
             onAddFollowup={addFollowup}
             onScheduleVisit={scheduleVisit}
             onUpdateVisitStatus={async (vid, status, newDate) => {
@@ -1664,7 +1651,11 @@ const LeadDetail = () => {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-foreground">Call logged: {lastDisposition}</p>
-                {nextLead ? (
+                {nextFollowupQueueId ? (
+                  <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                    Next pending follow-up in this tab
+                  </p>
+                ) : nextLead ? (
                   <p className="text-xs text-muted-foreground mt-0.5 truncate">
                     Next: <span className="font-medium text-foreground">{nextLead.name}</span> — {nextLead.bucketName}
                   </p>
@@ -1673,7 +1664,19 @@ const LeadDetail = () => {
                 )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                {nextLead && (
+                {nextFollowupQueueId ? (
+                  <Button
+                    size="sm"
+                    className="gap-1.5 text-xs"
+                    onClick={() => {
+                      setShowNextLeadPrompt(false);
+                      navigateWithinFollowupQueue(followupQueue!.index + 1, true);
+                    }}
+                  >
+                    <Phone className="h-3.5 w-3.5" />
+                    Call Next
+                  </Button>
+                ) : nextLead && (
                   <Button
                     size="sm"
                     className="gap-1.5 text-xs"

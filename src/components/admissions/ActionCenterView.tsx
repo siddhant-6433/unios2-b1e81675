@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useActionCenter, type ActionLead } from "@/hooks/useActionCenter";
 import { ActionBucketSection } from "./ActionBucketSection";
 import { CallDispositionDialog } from "./CallDispositionDialog";
+import { recordCallDisposition } from "@/lib/callDisposition";
 
 // Compact leaderboard widget for Action Center
 function LeaderboardWidget() {
@@ -160,51 +161,18 @@ export function ActionCenterView({
   const handleCallSubmit = async (dispositionData: any) => {
     if (!callLead || !profile?.id) return;
 
-    // Insert call log via Cloud Dialer dedupe RPC (consistent with Cloud Dialer calls)
     const { data: { user: authUser } } = await supabase.auth.getUser();
-    await (supabase as any).rpc("record_cloud_call_log", {
-      p_call_uuid:     crypto.randomUUID(),
-      p_lead_id:       callLead.lead_id,
-      p_user_id:       authUser?.id || null,
-      p_disposition:   dispositionData.disposition,
-      p_duration:      dispositionData.duration_seconds || 0,
-      p_notes:         dispositionData.notes || `${dispositionData.disposition.replace(/_/g, " ")} (logged from action center)`,
-      p_source:        "manual",
-      p_recording_url: null,
-      p_call_source:   "manual_log",
+    await recordCallDisposition({
+      supabase,
+      leadId: callLead.lead_id,
+      lead: { name: callLead.name, phone: callLead.phone, stage: callLead.stage },
+      userId: authUser?.id || null,
+      profileId: profile.id,
+      courseName: callLead.course_name,
+      data: dispositionData,
+      loggedFromLabel: "action center",
+      callSource: "manual_log",
     });
-
-    // Mark pending followups as completed
-    await supabase
-      .from("lead_followups")
-      .update({ status: "completed", completed_at: new Date().toISOString() })
-      .eq("lead_id", callLead.lead_id)
-      .eq("status", "pending");
-
-    // Set first_contact_at if not set
-    await supabase
-      .from("leads")
-      .update({ first_contact_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-      .eq("id", callLead.lead_id)
-      .is("first_contact_at", null);
-
-    // Update lead stage based on disposition
-    if (["interested", "call_back", "not_answered", "voicemail", "busy"].includes(dispositionData.disposition)) {
-      await supabase.from("leads").update({ stage: "counsellor_call", updated_at: new Date().toISOString() }).eq("id", callLead.lead_id).eq("stage", "new_lead");
-    } else if (["not_interested", "do_not_contact"].includes(dispositionData.disposition)) {
-      await supabase.from("leads").update({ stage: "not_interested", updated_at: new Date().toISOString() }).eq("id", callLead.lead_id);
-    }
-
-    // Schedule followup if requested
-    if (dispositionData.schedule_followup && dispositionData.followup_date) {
-      await supabase.from("lead_followups").insert({
-        lead_id: callLead.lead_id,
-        user_id: (await supabase.auth.getUser()).data.user?.id,
-        scheduled_at: dispositionData.followup_date,
-        type: "call",
-        status: "pending",
-      });
-    }
 
     // Schedule visit if requested
     if (dispositionData.visit?.visit_date) {
