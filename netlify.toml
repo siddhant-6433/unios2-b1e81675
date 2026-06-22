@@ -9,6 +9,18 @@
   force = true
 
 [[redirects]]
+  from = "/api/create-order"
+  to = "https://deylhigsisuexszsmypq.supabase.co/functions/v1/razorpay-payment?action=create-order"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/verify-payment"
+  to = "https://deylhigsisuexszsmypq.supabase.co/functions/v1/razorpay-payment?action=verify-payment"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

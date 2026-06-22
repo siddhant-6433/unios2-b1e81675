@@ -7,6 +7,7 @@ import {
   INITIAL_APPLICATION_DEADLINE,
 } from "@/lib/deadlineRollover";
 import { useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
+import { buildRazorpayReceipt, openRazorpayCheckout } from "@/lib/razorpayCheckout";
 
 // Fallbacks if the get_applicant_deadlines RPC is unreachable.
 // The single source of truth is _app_config — these are last-resort
@@ -327,6 +328,36 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     if (!lead || !applicantPhone) return;
     if (amount <= 0) { setError("Enter a valid amount"); return; }
 
+    const gateway = selectedGateway || tokenGateways[0]?.gateway || "easebuzz";
+    if (gateway === "razorpay") {
+      setPaying(true);
+      setError(null);
+      try {
+        await openRazorpayCheckout({
+          amountPaise: Math.round(amount * 100),
+          receipt: buildRazorpayReceipt("lead", lead.id),
+          context: "token_fee",
+          description: opts.productinfo || "Token Fee",
+          leadId: lead.id,
+          paymentType: opts.paymentType || "token_fee",
+          customerName: applicantName,
+          customerEmail: applicantEmail || undefined,
+          customerPhone: applicantPhone,
+          productInfo: opts.productinfo || "Token Fee",
+          concessionAmount: opts.concession || 0,
+          waiverReason: opts.reason || null,
+          concessionBreakdown: opts.concessionBreakdown || null,
+        });
+        await load();
+        onPayment?.();
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Payment was cancelled.");
+      } finally {
+        setPaying(false);
+      }
+      return;
+    }
+
     // Open blank window synchronously — browsers block window.open() called
     // after an await because the user-gesture chain is broken in async context.
     const payWin = window.open("about:blank", "_blank");
@@ -334,7 +365,6 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     setPaying(true);
     setError(null);
     try {
-      const gateway = selectedGateway || tokenGateways[0]?.gateway || "easebuzz";
       const functionName = gateway === "icici" ? "icici-payment" : "easebuzz-payment";
       const { data, error: invErr } = await supabase.functions.invoke(functionName, {
         body: {
