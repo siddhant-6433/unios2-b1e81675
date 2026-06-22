@@ -39,6 +39,16 @@ const TYPE_OPTIONS: Option[] = [
 
 const DEFAULT_GATEWAYS = [
   {
+    gateway: "razorpay",
+    display_name: "Razorpay",
+    is_enabled_fee_collection: true,
+    is_enabled_portal_payment: true,
+    supports_application_fee: true,
+    supports_token_fee: true,
+    supports_student_fee: true,
+    supports_alumni_service: true,
+  },
+  {
     gateway: "cashfree",
     display_name: "Cashfree Payments",
     is_enabled_fee_collection: true,
@@ -69,6 +79,13 @@ const DEFAULT_GATEWAYS = [
     supports_alumni_service: true,
   },
 ];
+
+const DEFAULT_GATEWAY_PRIORITY: Record<string, number> = {
+  razorpay: 10,
+  icici: 20,
+  easebuzz: 30,
+  cashfree: 40,
+};
 
 export default function PaymentGatewaysPanel() {
   const [context, setContext] = useState<PaymentContext>("application_fee");
@@ -118,7 +135,10 @@ export default function PaymentGatewaysPanel() {
       ]);
       if (gwRes.error) throw gwRes.error;
       if (ruleRes.error) throw ruleRes.error;
-      setGateways((gwRes.data || []) as PaymentGateway[]);
+      setGateways([...(gwRes.data || [])].sort((a: PaymentGateway, b: PaymentGateway) => {
+        return (DEFAULT_GATEWAY_PRIORITY[a.gateway] ?? 100) - (DEFAULT_GATEWAY_PRIORITY[b.gateway] ?? 100) ||
+          a.display_name.localeCompare(b.display_name);
+      }) as PaymentGateway[]);
       setRules((ruleRes.data || []) as Rule[]);
       setGroups((groupRes.data || []).map((g: any) => ({ id: g.id, label: `${g.name} (${g.code})` })));
       setCampuses((campusRes.data || []).map((c: any) => ({ id: c.id, label: `${c.name} (${c.code})` })));
@@ -165,8 +185,8 @@ export default function PaymentGatewaysPanel() {
         scope_id: normalizedScopeId,
         gateway,
         is_enabled: false,
-        is_staff_pilot_only: gateway === "icici",
-        priority: gateway === "easebuzz" ? 10 : gateway === "cashfree" ? 20 : 30,
+        is_staff_pilot_only: false,
+        priority: DEFAULT_GATEWAY_PRIORITY[gateway] ?? 100,
       })
       .select("id, payment_context, scope_type, scope_id, gateway, is_enabled, is_staff_pilot_only, priority")
       .single();
@@ -277,7 +297,7 @@ export default function PaymentGatewaysPanel() {
         {gateways.map((gw) => {
           const rule = visibleRules.find((r) => r.gateway === gw.gateway);
           const enabled = rule?.is_enabled ?? false;
-          const pilotOnly = rule?.is_staff_pilot_only ?? gw.gateway === "icici";
+          const pilotOnly = rule?.is_staff_pilot_only ?? false;
           return (
             <div key={gw.gateway} className="grid grid-cols-[1fr_140px_150px] gap-4 items-center rounded-xl border border-border bg-card px-4 py-4">
               <div className="flex items-center gap-3">

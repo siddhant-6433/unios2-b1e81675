@@ -5,6 +5,7 @@ import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDi
 import { useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
 import { brandForStudentOwner, NIMT_EDU_BRAND, type StudentBrand } from "@/lib/studentBranding";
 import { useAuth } from "@/contexts/AuthContext";
+import { openRazorpayCheckout, type RazorpayOrder } from "@/lib/razorpayCheckout";
 import uniosLogo from "@/assets/unios-logo.png";
 import {
   Loader2, AlertCircle, CheckCircle, CreditCard, ShieldCheck,
@@ -97,10 +98,8 @@ export default function PaymentPortal() {
 
   useEffect(() => {
     if (gatewaysLoading) return;
-    if (feeGateways.length === 1) {
+    if (feeGateways.length > 0 && (!selectedGateway || !feeGateways.some((g) => g.gateway === selectedGateway))) {
       setSelectedGateway(feeGateways[0].gateway);
-    } else if (selectedGateway && !feeGateways.some((g) => g.gateway === selectedGateway)) {
-      setSelectedGateway(null);
     }
   }, [gatewaysLoading, feeGateways, selectedGateway]);
 
@@ -351,7 +350,7 @@ export default function PaymentPortal() {
   const activeGateway = selectedGateway || feeGateways[0]?.gateway || "easebuzz";
   const activeGatewayName =
     feeGateways.find((gateway) => gateway.gateway === activeGateway)?.display_name ||
-    (activeGateway === "icici" ? "ICICI Bank PG" : "EaseBuzz");
+    (activeGateway === "razorpay" ? "Razorpay" : activeGateway === "icici" ? "ICICI Bank PG" : "EaseBuzz");
 
   const handlePay = async () => {
     if (!student) return;
@@ -360,6 +359,56 @@ export default function PaymentPortal() {
 
     try {
       const nameParts = student.name.trim().split(" ");
+      if (activeGateway === "razorpay") {
+        const { data: order, error: orderError } = await supabase.functions.invoke("razorpay-payment", {
+          body: {
+            action: "create-order",
+            context: "student_fee",
+            student_id: student.id,
+            amount: Math.round(payableAmount * 100),
+            currency: "INR",
+            receipt: `fee_${student.id}`,
+            payment_scope: paymentScope,
+            fee_ids: paymentScope === "all" ? [] : fees.map((fee) => fee.id),
+            waiver_amount: waiverAmount,
+            customer_name: student.name,
+            customer_phone: student.parent_phone,
+            productinfo: paymentTitle,
+          },
+        });
+        if (orderError) throw new Error(await readFunctionErrorMessage(orderError));
+        if (order?.error) throw new Error(order.error);
+
+        const checkoutResponse = await openRazorpayCheckout({
+          order: order as RazorpayOrder,
+          name: brand.name,
+          description: paymentTitle,
+          customerName: student.name,
+          customerPhone: student.parent_phone,
+        });
+
+        const { data: verifyData, error: verifyError } = await supabase.functions.invoke("razorpay-payment", {
+          body: {
+            action: "verify-payment",
+            context: "student_fee",
+            order_id: order.order_id,
+            student_id: student.id,
+            payment_scope: paymentScope,
+            fee_ids: paymentScope === "all" ? [] : fees.map((fee) => fee.id),
+            waiver_amount: waiverAmount,
+            ...checkoutResponse,
+          },
+        });
+        if (verifyError) throw new Error(await readFunctionErrorMessage(verifyError));
+        if (verifyData?.error) throw new Error(verifyData.error);
+
+        setPaidTxnId(verifyData?.payment_id || checkoutResponse.razorpay_payment_id);
+        const alreadyPaid = await checkFeesPaid();
+        if (!alreadyPaid) setStep("receipt");
+        setLoading(false);
+        return;
+      }
+
       const txnid = `FEE${student.id.replace(/[^a-zA-Z0-9]/g, "").slice(0, 10)}${Date.now()}`.slice(0, 50);
       const functionName = activeGateway === "icici" ? "icici-payment" : "easebuzz-payment";
 

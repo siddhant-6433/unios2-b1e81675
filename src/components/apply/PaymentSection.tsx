@@ -7,6 +7,7 @@ import { ApplicationData } from "./types";
 import { usePortal } from "./PortalContext";
 import { ReceiptDialog, ReceiptData } from "@/components/receipts/ReceiptDialog";
 import { trackPixelCompleteRegistration } from "@/lib/analytics";
+import { openRazorpayCheckout, type RazorpayOrder } from "@/lib/razorpayCheckout";
 
 interface Props {
   data: ApplicationData;
@@ -84,10 +85,8 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
   // Auto-select single gateway
   useEffect(() => {
     if (gwLoading) return;
-    if (portalGateways.length === 1) {
+    if (portalGateways.length > 0 && (!selectedGateway || !portalGateways.some((g) => g.gateway === selectedGateway))) {
       setSelectedGateway(portalGateways[0].gateway);
-    } else if (selectedGateway && !portalGateways.some((g) => g.gateway === selectedGateway)) {
-      setSelectedGateway(null);
     }
   }, [gwLoading, portalGateways, selectedGateway]);
 
@@ -106,6 +105,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
   useEffect(() => {
     setSdkReady(false);
     if (selectedGateway === "cashfree" && document.getElementById("cashfree-sdk")) setSdkReady(true);
+    if (selectedGateway === "razorpay") setSdkReady(true);
     if (selectedGateway === "easebuzz") setSdkReady(true); // No SDK needed for popup approach
     if (selectedGateway === "icici")    setSdkReady(true); // No SDK needed for popup approach
   }, [selectedGateway]);
@@ -220,6 +220,53 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
   };
 
   // ── EaseBuzz (popup + polling) ──────────────────────────────────
+  const handlePayRazorpay = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      const { data: order, error: orderError } = await supabase.functions.invoke("razorpay-payment", {
+        body: {
+          action: "create-order",
+          context: "application_fee",
+          application_id: data.application_id,
+          amount: Math.round(Number(data.fee_amount || 0) * 100),
+          currency: "INR",
+          receipt: `app_${data.application_id}`,
+          customer_name: data.full_name || "Applicant",
+          customer_phone: data.phone,
+          productinfo: "Application Fee",
+        },
+      });
+      if (orderError) throw new Error(orderError.message);
+      if (order?.error) throw new Error(order.error);
+
+      const checkoutResponse = await openRazorpayCheckout({
+        order: order as RazorpayOrder,
+        name: portal.name,
+        description: "Application Fee",
+        customerName: data.full_name || undefined,
+        customerEmail: data.email || undefined,
+        customerPhone: data.phone || undefined,
+      });
+
+      const { data: verifyData, error: verifyError } = await supabase.functions.invoke("razorpay-payment", {
+        body: {
+          action: "verify-payment",
+          context: "application_fee",
+          order_id: order.order_id,
+          ...checkoutResponse,
+        },
+      });
+      if (verifyError) throw new Error(verifyError.message);
+      if (verifyData?.error) throw new Error(verifyData.error);
+      onChange({ payment_status: "paid", payment_ref: verifyData?.payment_id || checkoutResponse.razorpay_payment_id });
+    } catch (err: any) {
+      setError(err.message || "Something went wrong. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handlePayEasebuzz = async () => {
     setError(null);
     setLoading(true);
@@ -377,6 +424,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
   };
 
   const handlePay = () => {
+    if (selectedGateway === "razorpay") return handlePayRazorpay();
     if (selectedGateway === "easebuzz") return handlePayEasebuzz();
     if (selectedGateway === "icici")    return handlePayIcici();
     return handlePayCashfree();

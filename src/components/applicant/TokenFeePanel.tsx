@@ -7,6 +7,7 @@ import {
   INITIAL_APPLICATION_DEADLINE,
 } from "@/lib/deadlineRollover";
 import { useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
+import { openRazorpayCheckout, type RazorpayOrder } from "@/lib/razorpayCheckout";
 
 // Fallbacks if the get_applicant_deadlines RPC is unreachable.
 // The single source of truth is _app_config — these are last-resort
@@ -176,10 +177,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
 
   useEffect(() => {
     if (tokenGatewayLoading) return;
-    if (tokenGateways.length === 1) {
+    if (tokenGateways.length > 0 && (!selectedGateway || !tokenGateways.some((g) => g.gateway === selectedGateway))) {
       setSelectedGateway(tokenGateways[0].gateway);
-    } else if (selectedGateway && !tokenGateways.some((g) => g.gateway === selectedGateway)) {
-      setSelectedGateway(null);
     }
   }, [tokenGatewayLoading, tokenGateways, selectedGateway]);
 
@@ -327,14 +326,57 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     if (!lead || !applicantPhone) return;
     if (amount <= 0) { setError("Enter a valid amount"); return; }
 
-    // Open blank window synchronously — browsers block window.open() called
-    // after an await because the user-gesture chain is broken in async context.
-    const payWin = window.open("about:blank", "_blank");
+    const gateway = selectedGateway || tokenGateways[0]?.gateway || "easebuzz";
+    // Hosted gateways need a synchronous blank popup; Razorpay uses Checkout.
+    const payWin = gateway === "razorpay" ? null : window.open("about:blank", "_blank");
 
     setPaying(true);
     setError(null);
     try {
-      const gateway = selectedGateway || tokenGateways[0]?.gateway || "easebuzz";
+      if (gateway === "razorpay") {
+        const { data: order, error: orderError } = await supabase.functions.invoke("razorpay-payment", {
+          body: {
+            action: "create-order",
+            context: "token_fee",
+            lead_id: lead.id,
+            payment_type: opts.paymentType || "token_fee",
+            amount: Math.round(amount * 100),
+            currency: "INR",
+            receipt: `lead_${lead.id}`,
+            customer_name: applicantName,
+            customer_phone: applicantPhone,
+            productinfo: opts.productinfo || "Token Fee",
+            concession_amount: opts.concession || 0,
+            waiver_reason: opts.reason || null,
+            concession_breakdown: opts.concessionBreakdown || null,
+          },
+        });
+        if (orderError) throw new Error(orderError.message);
+        if (order?.error) throw new Error(order.error);
+
+        const checkoutResponse = await openRazorpayCheckout({
+          order: order as RazorpayOrder,
+          name: "NIMT Educational Institutions",
+          description: opts.productinfo || "Token Fee",
+          customerName: applicantName,
+          customerEmail: applicantEmail || undefined,
+          customerPhone: applicantPhone || undefined,
+        });
+
+        const { data: verifyData, error: verifyError } = await supabase.functions.invoke("razorpay-payment", {
+          body: {
+            action: "verify-payment",
+            context: "token_fee",
+            order_id: order.order_id,
+            ...checkoutResponse,
+          },
+        });
+        if (verifyError) throw new Error(verifyError.message);
+        if (verifyData?.error) throw new Error(verifyData.error);
+        await load();
+        onPayment?.();
+        return;
+      }
       const functionName = gateway === "icici" ? "icici-payment" : "easebuzz-payment";
       const { data, error: invErr } = await supabase.functions.invoke(functionName, {
         body: {

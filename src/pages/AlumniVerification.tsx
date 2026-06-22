@@ -4,6 +4,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
+import { openRazorpayCheckout, type RazorpayOrder } from "@/lib/razorpayCheckout";
 import {
   Loader2, Phone, Upload, FileText, CheckCircle, Shield, Building2, GraduationCap, Mail, X, Users,
   ScrollText, Award, BookOpen,
@@ -375,16 +376,65 @@ export default function AlumniVerification() {
 
   useEffect(() => {
     if (alumniGatewaysLoading) return;
-    if (alumniGateways.length === 1) {
+    if (alumniGateways.length > 0 && (!selectedGateway || !alumniGateways.some((g) => g.gateway === selectedGateway))) {
       setSelectedGateway(alumniGateways[0].gateway);
-    } else if (selectedGateway && !alumniGateways.some((g) => g.gateway === selectedGateway)) {
-      setSelectedGateway(null);
     }
   }, [alumniGatewaysLoading, alumniGateways, selectedGateway]);
 
   const handlePayNow = async () => {
     if (!requestId) return;
     setPaymentLoading(true);
+    const gateway = selectedGateway || alumniGateways[0]?.gateway || "easebuzz";
+
+    if (gateway === "razorpay") {
+      try {
+        const productinfo = `${currentService.label} - ${requestNumber}`;
+        const { data: order, error: orderError } = await supabase.functions.invoke("razorpay-payment", {
+          body: {
+            action: "create-order",
+            context: "alumni_service",
+            request_id: requestId,
+            amount: Math.round(currentService.fee * 100),
+            currency: "INR",
+            receipt: `alumni_${requestId}`,
+            customer_name: requestType === "verification" ? contactName : alumniName,
+            customer_phone: verifiedPhone,
+            productinfo,
+          },
+        });
+        if (orderError) throw orderError;
+        if (order?.error) throw new Error(order.error);
+
+        const checkoutResponse = await openRazorpayCheckout({
+          order: order as RazorpayOrder,
+          name: "NIMT Educational Institutions",
+          description: productinfo,
+          customerName: requestType === "verification" ? contactName : alumniName,
+          customerEmail: contactEmail || undefined,
+          customerPhone: verifiedPhone || undefined,
+        });
+
+        const { data: verifyData, error: verifyError } = await supabase.functions.invoke("razorpay-payment", {
+          body: {
+            action: "verify-payment",
+            context: "alumni_service",
+            order_id: order.order_id,
+            ...checkoutResponse,
+          },
+        });
+        if (verifyError) throw verifyError;
+        if (verifyData?.error) throw new Error(verifyData.error);
+
+        if (verifiedPhone) fetchExistingRequests(verifiedPhone);
+        setStep("dashboard");
+        toast({ title: "Payment successful!", description: `Request ${requestNumber} is now under review.` });
+      } catch (error: any) {
+        toast({ title: "Payment initiation failed", description: error?.message || "Could not start Razorpay payment", variant: "destructive" });
+      } finally {
+        setPaymentLoading(false);
+      }
+      return;
+    }
 
     // Open a blank popup SYNCHRONOUSLY inside the click handler. Mobile browsers
     // (iOS Safari, Android Chrome) only allow popups that originate from a fresh
@@ -394,7 +444,6 @@ export default function AlumniVerification() {
     // fall back to a same-tab redirect.
     const popup = window.open("about:blank", "alumni_payment", "width=600,height=720,scrollbars=yes");
 
-    const gateway = selectedGateway || alumniGateways[0]?.gateway || "easebuzz";
     const functionName = gateway === "icici" ? "icici-payment" : "alumni-payment";
     const { data, error } = await supabase.functions.invoke(functionName, {
       body: {

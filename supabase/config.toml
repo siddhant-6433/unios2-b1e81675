@@ -54,6 +54,9 @@ verify_jwt = false
 [functions.icici-payment]
 verify_jwt = false
 
+[functions.razorpay-payment]
+verify_jwt = false
+
 [functions.generate-payment-receipt]
 verify_jwt = false
 

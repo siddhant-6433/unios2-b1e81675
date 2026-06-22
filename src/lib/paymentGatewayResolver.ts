@@ -62,6 +62,12 @@ const SUPPORT_FIELD: Record<PaymentContext, keyof PaymentGateway> = {
 };
 
 const PILOT_ROLES = new Set(["super_admin", "admission_head", "campus_admin", "accountant"]);
+const DEFAULT_GATEWAY_ORDER: Record<string, number> = {
+  razorpay: 10,
+  icici: 20,
+  easebuzz: 30,
+  cashfree: 40,
+};
 
 function ruleMatchesOwner(rule: GatewayRule, owner: GatewayOwnerScope): boolean {
   if (rule.scope_type === "global") return rule.scope_id == null;
@@ -106,7 +112,13 @@ export function resolveGatewayRules(
 
   return visibleMatches
     .filter((gateway) => SPECIFICITY[gateway.scope_type] === bestSpecificity)
-    .sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100) || a.display_name.localeCompare(b.display_name));
+    .sort((a, b) => {
+      const aPriority = a.priority ?? DEFAULT_GATEWAY_ORDER[a.gateway] ?? 100;
+      const bPriority = b.priority ?? DEFAULT_GATEWAY_ORDER[b.gateway] ?? 100;
+      return aPriority - bPriority ||
+        (DEFAULT_GATEWAY_ORDER[a.gateway] ?? 100) - (DEFAULT_GATEWAY_ORDER[b.gateway] ?? 100) ||
+        a.display_name.localeCompare(b.display_name);
+    });
 }
 
 async function resolveCourseOwner(courseId?: string | null): Promise<GatewayOwnerScope> {
@@ -266,10 +278,20 @@ export function useScopedPaymentGateways(args: UseScopedGatewaysArgs) {
   const fallbackGateways = useMemo<PaymentGateway[]>(() => {
     if (gateways.length > 0 || loading) return gateways;
     return [{
+      gateway: "razorpay",
+      display_name: "Razorpay",
+      is_staff_pilot_only: false,
+      priority: DEFAULT_GATEWAY_ORDER.razorpay,
+    }, {
+      gateway: "icici",
+      display_name: "ICICI Bank PG",
+      is_staff_pilot_only: false,
+      priority: DEFAULT_GATEWAY_ORDER.icici,
+    }, {
       gateway: "easebuzz",
       display_name: "EaseBuzz",
       is_staff_pilot_only: false,
-      priority: 999,
+      priority: DEFAULT_GATEWAY_ORDER.easebuzz,
     }];
   }, [gateways, loading, error]);
 
