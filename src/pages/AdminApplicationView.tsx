@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ArrowLeft, FileText, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Gift, User, Trash2, Upload, UserPlus } from "lucide-react";
 import { ApplicationPreview, type PreviewDoc } from "@/components/applicant/ApplicationPreview";
@@ -12,7 +13,10 @@ import { AdmissionLifecycleStepper } from "@/components/admissions/AdmissionLife
 import { DocReviewPanel } from "@/components/admissions/DocReviewPanel";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { deleteApplication as deleteApplicationRequest } from "@/lib/deleteApplication";
+import {
+  deleteApplication as deleteApplicationRequest,
+  PAID_APPLICATION_DELETE_CONFIRMATION,
+} from "@/lib/deleteApplication";
 import { cahetRegistrationFromApplication, fetchCahetRegistration, isBptOrBmritCourseName, type CahetRegistrationDetails } from "@/lib/cahet";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -59,6 +63,7 @@ export default function AdminApplicationView() {
   const [rejectionReason, setRejectionReason] = useState("");
   const [showRejectionInput, setShowRejectionInput] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [showOfferLetter, setShowOfferLetter] = useState(false);
   const [generatingReceipt, setGeneratingReceipt] = useState(false);
@@ -381,12 +386,16 @@ export default function AdminApplicationView() {
   }, [docs, reviews]);
 
   const deleteApplication = async () => {
-    if (!app || app.payment_status === "paid") return;
+    if (!app || role !== "super_admin") return;
+    const paidDeleteConfirmation = app.payment_status === "paid"
+      ? deleteConfirmText.trim().toUpperCase()
+      : undefined;
     setDeleting(true);
     const { data, error } = await deleteApplicationRequest({
       id: app.id,
       applicationId: app.application_id,
       paymentStatus: app.payment_status,
+      paidDeleteConfirmation,
     });
     setDeleting(false);
     if (error) {
@@ -505,12 +514,15 @@ export default function AdminApplicationView() {
               Create Linked Lead
             </Button>
           )}
-          {role === "super_admin" && app.payment_status !== "paid" && (
+          {role === "super_admin" && (
             <Button
               variant="outline"
               size="sm"
               className="h-8 gap-1.5 text-xs text-destructive border-destructive/30 hover:bg-destructive/5"
-              onClick={() => setShowDeleteConfirm(true)}
+              onClick={() => {
+                setShowDeleteConfirm(true);
+                setDeleteConfirmText("");
+              }}
             >
               <Trash2 className="h-3.5 w-3.5" />
               Delete
@@ -702,7 +714,10 @@ export default function AdminApplicationView() {
 
       <ApplicationPreview app={app} docs={docs} cahetRegistration={cahetRegistration} />
 
-      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+      <AlertDialog open={showDeleteConfirm} onOpenChange={(open) => {
+        setShowDeleteConfirm(open);
+        if (!open) setDeleteConfirmText("");
+      }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete application?</AlertDialogTitle>
@@ -711,12 +726,33 @@ export default function AdminApplicationView() {
               This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {app.payment_status === "paid" && (
+            <div className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+              <p className="text-sm font-medium text-destructive">Paid application deletion requires confirmation.</p>
+              <p className="text-xs text-muted-foreground">
+                Type <span className="font-mono font-semibold text-foreground">{PAID_APPLICATION_DELETE_CONFIRMATION}</span> to confirm deleting this paid application.
+              </p>
+              <Input
+                value={deleteConfirmText}
+                onChange={(event) => setDeleteConfirmText(event.target.value)}
+                placeholder={PAID_APPLICATION_DELETE_CONFIRMATION}
+                disabled={deleting}
+                autoComplete="off"
+              />
+            </div>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              disabled={deleting}
-              onClick={deleteApplication}
+              disabled={deleting || (
+                app.payment_status === "paid" &&
+                deleteConfirmText.trim().toUpperCase() !== PAID_APPLICATION_DELETE_CONFIRMATION
+              )}
+              onClick={(event) => {
+                event.preventDefault();
+                void deleteApplication();
+              }}
             >
               {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Trash2 className="h-4 w-4 mr-1.5" />}
               Delete permanently
