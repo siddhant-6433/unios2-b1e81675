@@ -9,6 +9,7 @@ import { OfflinePaymentDialog } from "@/components/finance/OfflinePaymentDialog"
 import { NudgePaymentDialog } from "@/components/admissions/NudgePaymentDialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   FileText, Download, Eye, Loader2, Search, Filter, ExternalLink,
   CheckCircle, Clock, CreditCard, Upload, AlertCircle, ChevronDown, ChevronUp, ChevronRight, X,
@@ -25,7 +26,10 @@ import {
   applicationFunnelStageOf,
   type ApplicationFunnelStage,
 } from "@/lib/applicationFunnel";
-import { deleteApplication as deleteApplicationRequest } from "@/lib/deleteApplication";
+import {
+  deleteApplication as deleteApplicationRequest,
+  PAID_APPLICATION_DELETE_CONFIRMATION,
+} from "@/lib/deleteApplication";
 import { exportRowsXlsx, formatExportDateTime } from "@/lib/xlsxExport";
 import { useToast } from "@/hooks/use-toast";
 
@@ -168,6 +172,7 @@ export default function Applications() {
   const [bulkRegen, setBulkRegen] = useState<{ done: number; total: number } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<AppRow | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [nudgeTarget, setNudgeTarget] = useState<AppRow | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -526,12 +531,16 @@ export default function Applications() {
   const paidNoOffer = apps.filter(a => a.payment_status === "paid" && !a.has_offer).length;
 
   const handleDelete = async () => {
-    if (!deleteTarget || deleteTarget.payment_status === "paid") return;
+    if (!deleteTarget || !isSuperAdmin) return;
+    const paidDeleteConfirmation = deleteTarget.payment_status === "paid"
+      ? deleteConfirmText.trim().toUpperCase()
+      : undefined;
     setDeleting(true);
     const { data, error } = await deleteApplicationRequest({
       id: deleteTarget.id,
       applicationId: deleteTarget.application_id,
       paymentStatus: deleteTarget.payment_status,
+      paidDeleteConfirmation,
     });
     setDeleting(false);
     if (error) {
@@ -540,6 +549,7 @@ export default function Applications() {
     }
     setApps(prev => prev.filter(a => a.id !== deleteTarget.id));
     setDeleteTarget(null);
+    setDeleteConfirmText("");
     toast({
       title: "Application deleted",
       description: data
@@ -959,11 +969,14 @@ export default function Applications() {
                             Nudge
                           </button>
                         )}
-                        {role === "super_admin" && app.payment_status !== "paid" && (
+                        {isSuperAdmin && (
                           <button
-                            onClick={() => setDeleteTarget(app)}
+                            onClick={() => {
+                              setDeleteTarget(app);
+                              setDeleteConfirmText("");
+                            }}
                             className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/5 transition-colors"
-                            title="Delete application"
+                            title={app.payment_status === "paid" ? "Delete paid application" : "Delete application"}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
@@ -1203,7 +1216,12 @@ export default function Applications() {
         } : null}
       />
 
-      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
+      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => {
+        if (!o) {
+          setDeleteTarget(null);
+          setDeleteConfirmText("");
+        }
+      }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete application?</AlertDialogTitle>
@@ -1212,12 +1230,33 @@ export default function Applications() {
               This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {deleteTarget?.payment_status === "paid" && (
+            <div className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+              <p className="text-sm font-medium text-destructive">Paid application deletion requires confirmation.</p>
+              <p className="text-xs text-muted-foreground">
+                Type <span className="font-mono font-semibold text-foreground">{PAID_APPLICATION_DELETE_CONFIRMATION}</span> to confirm deleting this paid application.
+              </p>
+              <Input
+                value={deleteConfirmText}
+                onChange={(event) => setDeleteConfirmText(event.target.value)}
+                placeholder={PAID_APPLICATION_DELETE_CONFIRMATION}
+                disabled={deleting}
+                autoComplete="off"
+              />
+            </div>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              disabled={deleting}
-              onClick={handleDelete}
+              disabled={deleting || (
+                deleteTarget?.payment_status === "paid" &&
+                deleteConfirmText.trim().toUpperCase() !== PAID_APPLICATION_DELETE_CONFIRMATION
+              )}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleDelete();
+              }}
             >
               {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Trash2 className="h-4 w-4 mr-1.5" />}
               Delete permanently

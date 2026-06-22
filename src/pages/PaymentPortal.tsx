@@ -121,8 +121,8 @@ export default function PaymentPortal() {
   useEffect(() => {
     const handler = (e: MessageEvent) => {
       if (e.data?.eb_payment === "success" || e.data?.icici_payment === "success") {
-        stopPolling();
-        checkFeesPaid();
+        void checkFeesPaid();
+        if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
       }
     };
     window.addEventListener("message", handler);

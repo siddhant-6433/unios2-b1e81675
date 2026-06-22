@@ -6,6 +6,8 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const PAID_DELETE_CONFIRMATION = "CONFIRM";
+
 function decodeJwt(token: string): Record<string, any> | null {
   try {
     const parts = token.split(".");
@@ -80,7 +82,7 @@ Deno.serve(async (req) => {
       return json({ error: "Forbidden: super_admin only" }, 403);
     }
 
-    const { application_row_id } = await req.json();
+    const { application_row_id, paid_delete_confirmation } = await req.json();
     if (!application_row_id || typeof application_row_id !== "string") {
       return json({ error: "application_row_id is required" }, 400);
     }
@@ -93,8 +95,8 @@ Deno.serve(async (req) => {
 
     if (appError) return json({ error: appError.message }, 500);
     if (!app) return json({ error: "Application not found" }, 404);
-    if (app.payment_status === "paid") {
-      return json({ error: "Paid applications cannot be deleted." }, 403);
+    if (app.payment_status === "paid" && paid_delete_confirmation !== PAID_DELETE_CONFIRMATION) {
+      return json({ error: `Type ${PAID_DELETE_CONFIRMATION} to delete a paid application.` }, 403);
     }
 
     const bucket = "application-documents";
