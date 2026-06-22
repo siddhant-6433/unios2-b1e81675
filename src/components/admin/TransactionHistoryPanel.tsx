@@ -101,6 +101,7 @@ const GATEWAY_LABELS: Record<string, string> = {
   easebuzz: "Easebuzz",
   icici: "ICICI",
   cashfree: "Cashfree",
+  razorpay: "Razorpay",
   offline: "Marked Offline",
   manual: "Marked Offline",
 };
@@ -120,6 +121,7 @@ function inferGatewayLabel(txn: {
   if (txn.gateway) return GATEWAY_LABELS[txn.gateway] || txn.gateway;
   const ref = `${txn.payment_ref || ""} ${txn.transaction_ref || ""} ${txn.pending_txnid || ""}`.toLowerCase();
   if (ref.includes("manual_")) return GATEWAY_LABELS.offline;
+  if (ref.includes("pay_") || ref.includes("order_")) return GATEWAY_LABELS.razorpay;
   if (ref.includes("icici")) return GATEWAY_LABELS.icici;
   if (ref.startsWith("eb") || ref.includes("easepay")) return GATEWAY_LABELS.easebuzz;
   if (txn.payment_mode === "gateway" || txn.payment_mode === "online" || txn.pending_txnid) return "Unknown gateway";
@@ -1111,7 +1113,7 @@ export default function TransactionHistoryPanel() {
                             student_name: p.students?.name || undefined,
                             admission_no: p.students?.admission_no || p.students?.pre_admission_no || undefined,
                             payment_mode: p.payment_mode,
-                            payment_gateway: p.gateway,
+                            payment_gateway: p.gateway || inferGatewayLabel(p),
                             recorded_by: p.profiles?.display_name || undefined,
                             amount: p.amount,
                             payment_ref: p.transaction_ref,

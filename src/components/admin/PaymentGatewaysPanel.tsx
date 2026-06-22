@@ -68,6 +68,16 @@ const DEFAULT_GATEWAYS = [
     supports_student_fee: true,
     supports_alumni_service: true,
   },
+  {
+    gateway: "razorpay",
+    display_name: "Razorpay",
+    is_enabled_fee_collection: true,
+    is_enabled_portal_payment: true,
+    supports_application_fee: true,
+    supports_token_fee: true,
+    supports_student_fee: true,
+    supports_alumni_service: false,
+  },
 ];
 
 export default function PaymentGatewaysPanel() {
@@ -166,7 +176,7 @@ export default function PaymentGatewaysPanel() {
         gateway,
         is_enabled: false,
         is_staff_pilot_only: gateway === "icici",
-        priority: gateway === "easebuzz" ? 10 : gateway === "cashfree" ? 20 : 30,
+        priority: gateway === "easebuzz" ? 10 : gateway === "cashfree" ? 20 : gateway === "icici" ? 30 : 40,
       })
       .select("id, payment_context, scope_type, scope_id, gateway, is_enabled, is_staff_pilot_only, priority")
       .single();

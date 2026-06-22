@@ -30,6 +30,7 @@ const GATEWAY_LABELS: Record<string, string> = {
   easebuzz: "Easebuzz",
   icici:    "ICICI",
   cashfree: "Cashfree",
+  razorpay: "Razorpay",
   // Manually-recorded payments where the accountant entered an UTR / cheque
   // ref through the admin UI rather than going through a gateway. Render
   // as "Marked Offline" instead of the raw value.
@@ -45,6 +46,26 @@ const MODE_LABELS: Record<string, string> = {
   online:        "Online",
   gateway:       "Online",
 };
+
+function inferGatewayFromPaymentRef(paymentRef?: string | null) {
+  const ref = (paymentRef || "").trim().toLowerCase();
+  if (!ref) return null;
+  if (ref.startsWith("pay_") || ref.startsWith("order_")) return "razorpay";
+  if (ref.startsWith("manual_")) return "manual";
+  if (ref.startsWith("cf_") || ref.includes("cashfree")) return "cashfree";
+  if (ref.startsWith("icici") || ref.startsWith("ic_") || ref.startsWith("lp-")) return "icici";
+  if (ref.startsWith("eb") || ref.includes("easepay")) return "easebuzz";
+  return null;
+}
+
+function gatewayLabel(gateway?: string | null, paymentMode?: string | null, paymentRef?: string | null) {
+  if (gateway) return GATEWAY_LABELS[gateway] || gateway;
+  const inferred = inferGatewayFromPaymentRef(paymentRef);
+  if (inferred) return GATEWAY_LABELS[inferred] || inferred;
+  if (paymentMode === "gateway" || paymentMode === "online") return "Online Gateway";
+  if (paymentMode) return GATEWAY_LABELS.manual;
+  return "Not Recorded";
+}
 
 async function fetchLogoPng(pdf: PDFDocument, url: string | null) {
   if (!url) return null;
@@ -381,10 +402,10 @@ Deno.serve(async (req) => {
     let paymentGateway: string | null = null;
     if (payment.payment_mode === "gateway" || payment.payment_mode === "online") {
       paymentMode = "Online";
-      paymentGateway = payment.gateway ? (GATEWAY_LABELS[payment.gateway] || payment.gateway) : null;
+      paymentGateway = gatewayLabel(payment.gateway, payment.payment_mode, payment.transaction_ref);
     } else {
       paymentMode = MODE_LABELS[payment.payment_mode] || payment.payment_mode || "—";
-      paymentGateway = payment.gateway ? (GATEWAY_LABELS[payment.gateway] || payment.gateway) : null;
+      paymentGateway = gatewayLabel(payment.gateway, payment.payment_mode, payment.transaction_ref);
     }
 
     const firstChoice = (app.course_selections || [])[0] || {};
