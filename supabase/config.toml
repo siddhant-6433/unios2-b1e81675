@@ -123,6 +123,9 @@ verify_jwt = false
 [functions.whatsapp-templates]
 verify_jwt = false
 
+[functions.whatsapp-template-media-upload]
+verify_jwt = false
+
 [functions.test-dispositions]
 verify_jwt = false
 
