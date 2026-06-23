@@ -422,6 +422,7 @@ const Dashboard = () => {
 
   // Redirect consultant to their portal
   if (role === "consultant") return <Navigate to="/consultant-portal" replace />;
+  if (role === "academic_partner") return <Navigate to="/academic-partner-portal" replace />;
   // Video editors land on their portal — they have no access to the staff dashboard.
   if (role === "video_editor") return <Navigate to="/video-editor" replace />;
   // Counsellors land on the cloud dialer — their prioritized queue is the day's work

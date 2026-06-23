@@ -7,7 +7,7 @@ import { PhoneInput } from "@/components/ui/phone-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   BookOpen,
@@ -480,32 +480,35 @@ export default function AcademicPartnerPortal() {
 
       <Dialog open={showAddLead} onOpenChange={setShowAddLead}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Add Lead</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Add Lead</DialogTitle>
+            <DialogDescription>Capture a lead for one of your assigned courses.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Name *</label>
-                <input value={leadForm.name} onChange={(e) => setLeadForm((p) => ({ ...p, name: e.target.value }))} className={inputCls} />
+                <label htmlFor="academic-partner-lead-name" className="block text-[11px] font-medium text-muted-foreground mb-1">Name *</label>
+                <input id="academic-partner-lead-name" value={leadForm.name} onChange={(e) => setLeadForm((p) => ({ ...p, name: e.target.value }))} className={inputCls} />
               </div>
               <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Phone *</label>
-                <PhoneInput value={leadForm.phone} onChange={(phone) => setLeadForm((p) => ({ ...p, phone }))} required />
+                <label htmlFor="academic-partner-lead-phone" className="block text-[11px] font-medium text-muted-foreground mb-1">Phone *</label>
+                <PhoneInput id="academic-partner-lead-phone" aria-label="Phone" value={leadForm.phone} onChange={(phone) => setLeadForm((p) => ({ ...p, phone }))} required />
               </div>
             </div>
             <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Email</label>
-              <input type="email" value={leadForm.email} onChange={(e) => setLeadForm((p) => ({ ...p, email: e.target.value }))} className={inputCls} />
+              <label htmlFor="academic-partner-lead-email" className="block text-[11px] font-medium text-muted-foreground mb-1">Email</label>
+              <input id="academic-partner-lead-email" type="email" value={leadForm.email} onChange={(e) => setLeadForm((p) => ({ ...p, email: e.target.value }))} className={inputCls} />
             </div>
             <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Course *</label>
-              <select value={leadForm.course_id} onChange={(e) => setLeadForm((p) => ({ ...p, course_id: e.target.value }))} className={inputCls}>
+              <label htmlFor="academic-partner-lead-course" className="block text-[11px] font-medium text-muted-foreground mb-1">Course *</label>
+              <select id="academic-partner-lead-course" value={leadForm.course_id} onChange={(e) => setLeadForm((p) => ({ ...p, course_id: e.target.value }))} className={inputCls}>
                 <option value="">Select course</option>
                 {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Notes</label>
-              <textarea rows={2} value={leadForm.notes} onChange={(e) => setLeadForm((p) => ({ ...p, notes: e.target.value }))} className={inputCls} />
+              <label htmlFor="academic-partner-lead-notes" className="block text-[11px] font-medium text-muted-foreground mb-1">Notes</label>
+              <textarea id="academic-partner-lead-notes" rows={2} value={leadForm.notes} onChange={(e) => setLeadForm((p) => ({ ...p, notes: e.target.value }))} className={inputCls} />
             </div>
           </div>
           <DialogFooter>

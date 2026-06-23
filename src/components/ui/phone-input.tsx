@@ -7,7 +7,7 @@ export const COUNTRY_CODES = COUNTRIES;
 
 export const parsePhone = (phone: string | null) => {
   if (!phone) return { countryCode: "+91", number: "" };
-  const trimmed = phone.replace(/[\s\-]/g, "");
+  const trimmed = phone.replace(/[\s-]/g, "");
   // Try longest codes first (e.g. +971 before +97)
   const sorted = [...COUNTRIES].sort((a, b) => b.code.length - a.code.length);
   const match = sorted.find((c) => trimmed.startsWith(c.code));
@@ -22,15 +22,17 @@ export const formatFullPhone = (countryCode: string, number: string) => {
 };
 
 interface PhoneInputProps {
+  id?: string;
   value: string;
   onChange: (fullPhone: string) => void;
   placeholder?: string;
   required?: boolean;
   className?: string;
   disabled?: boolean;
+  "aria-label"?: string;
 }
 
-export function PhoneInput({ value, onChange, placeholder, required, className, disabled }: PhoneInputProps) {
+export function PhoneInput({ id, value, onChange, placeholder, required, className, disabled, "aria-label": ariaLabel }: PhoneInputProps) {
   const parsed = parsePhone(value);
   const [countryCode, setCountryCode] = useState(parsed.countryCode);
   const [number, setNumber] = useState(parsed.number);
@@ -181,9 +183,11 @@ export function PhoneInput({ value, onChange, placeholder, required, className, 
 
       {/* Number input */}
       <input
+        id={id}
         type="tel"
         required={required}
         disabled={disabled}
+        aria-label={ariaLabel}
         value={number}
         onChange={(e) => handleNumberChange(e.target.value)}
         placeholder={placeholder || "0".repeat(selectedCountry.digits)}
