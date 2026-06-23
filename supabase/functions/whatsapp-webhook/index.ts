@@ -82,6 +82,86 @@ function extractWhatsAppLoginCode(content: string | null | undefined): string | 
   return match?.[1]?.toUpperCase() || null;
 }
 
+// Handle Meta template lifecycle webhooks (status / quality / category).
+// Updates the whatsapp_templates mirror row and notifies the creator plus
+// every super-admin via the in-app notifications table (realtime → toast).
+async function handleTemplateStatusEvent(
+  admin: ReturnType<typeof createClient>,
+  field: string,
+  value: any,
+): Promise<void> {
+  try {
+    const metaId = value?.message_template_id ? String(value.message_template_id) : null;
+    const name = value?.message_template_name || null;
+    const language = value?.message_template_language || null;
+
+    const patch: Record<string, unknown> = { status_updated_at: new Date().toISOString() };
+    let title = "";
+    let notifyBody = "";
+
+    if (field === "message_template_status_update") {
+      const event = String(value?.event || "").toUpperCase(); // APPROVED / REJECTED / PAUSED / …
+      const reason = value?.reason && String(value.reason).toUpperCase() !== "NONE" ? String(value.reason) : null;
+      if (event) patch.status = event;
+      patch.reject_reason = event === "REJECTED" ? (reason || "Rejected by Meta") : null;
+      const label = event === "APPROVED" ? "approved" : event === "REJECTED" ? "rejected" : event.toLowerCase();
+      title = `Template ${label}: ${name || ""}`.trim();
+      notifyBody = event === "REJECTED" && reason ? `Reason: ${reason}` : `Status is now ${event}.`;
+    } else if (field === "message_template_quality_update") {
+      const q = String(value?.new_quality_score || "").toUpperCase();
+      if (q) patch.quality_score = q;
+      title = `Template quality changed: ${name || ""}`.trim();
+      notifyBody = `Quality score is now ${q || "unknown"}.`;
+    } else if (field === "template_category_update") {
+      const cat = String(value?.new_category || value?.correct_category || "").toUpperCase();
+      if (cat) patch.category = cat;
+      title = `Template category changed: ${name || ""}`.trim();
+      notifyBody = `Category is now ${cat || "unknown"}.`;
+    }
+
+    // Update the mirror row, matching by Meta id first, else name+language.
+    let row: { id: string; created_by: string | null; name: string } | null = null;
+    if (metaId) {
+      const { data } = await admin
+        .from("whatsapp_templates")
+        .update(patch)
+        .eq("meta_template_id", metaId)
+        .select("id, created_by, name")
+        .maybeSingle();
+      row = data as any;
+    }
+    if (!row && name) {
+      let q = admin.from("whatsapp_templates").update(patch).eq("name", name);
+      if (language) q = q.eq("language", language);
+      const { data } = await q.select("id, created_by, name").maybeSingle();
+      row = data as any;
+    }
+    if (!row) {
+      console.warn("template status event: no matching row", { metaId, name, language });
+      return;
+    }
+
+    // Notify creator + all super-admins (deduped).
+    const recipients = new Set<string>();
+    if (row.created_by) recipients.add(row.created_by);
+    const { data: admins } = await admin.from("user_roles").select("user_id").eq("role", "super_admin");
+    for (const a of admins || []) if (a?.user_id) recipients.add(a.user_id);
+
+    if (recipients.size > 0 && title) {
+      const notifRows = Array.from(recipients).map((uid) => ({
+        user_id: uid,
+        type: "template_status_update",
+        title,
+        body: notifyBody,
+        link: "/template-manager",
+      }));
+      await admin.from("notifications").insert(notifRows);
+    }
+  } catch (err) {
+    console.error("handleTemplateStatusEvent error:", err);
+  }
+}
+
 Deno.serve(async (req) => {
   // Meta webhook verification (GET)
   if (req.method === "GET") {
@@ -119,6 +199,20 @@ Deno.serve(async (req) => {
         // be filtered per-number (multiple WABAs / BSPs can fan out here).
         const businessPnId   = value?.metadata?.phone_number_id || null;
         const businessNumber = value?.metadata?.display_phone_number || null;
+
+        // ── Template status / quality / category updates ─────────────────
+        // Meta sends these when a submitted template is approved, rejected,
+        // paused, or its quality/category changes. They carry no `messages`
+        // array, so handle them here and `continue`. Mirrors the row in
+        // whatsapp_templates and notifies the creator + super-admins.
+        if (
+          change?.field === "message_template_status_update" ||
+          change?.field === "message_template_quality_update" ||
+          change?.field === "template_category_update"
+        ) {
+          await handleTemplateStatusEvent(admin, change.field, value);
+          continue;
+        }
 
         // Handle inbound messages
         const messages = value?.messages || [];
