@@ -126,5 +126,8 @@ jobs:
       - name: Apply pending migrations
         run: supabase db push
 
+      - name: Deploy application deletion function
+        run: supabase functions deploy delete-application --no-verify-jwt
+
       - name: Verify production has no pending migrations
         run: npm run db:migrations:clean
