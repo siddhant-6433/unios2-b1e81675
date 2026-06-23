@@ -7,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeft, Loader2, Trash2, ArrowRightLeft, Phone, MessageSquare,
   Calendar, CalendarDays, Clock, FileText, Bot, UserCheck, Mail, IndianRupee, MapPin, ThumbsDown, CheckCircle, Footprints,
-  ChevronRight, Ban, Sparkles,
+  ChevronRight, Ban, Sparkles, Handshake, School,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -16,6 +16,8 @@ import { Badge } from "@/components/ui/badge";
 // Dialogs are lazy — they only need to download when the user actually opens them.
 const TransferLeadDialog = lazy(() =>
   import("@/components/admissions/TransferLeadDialog").then(m => ({ default: m.TransferLeadDialog })));
+const ExternalOwnerDialog = lazy(() =>
+  import("@/components/admissions/ExternalOwnerDialog").then(m => ({ default: m.ExternalOwnerDialog })));
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -115,6 +117,7 @@ const LeadDetail = () => {
   const [showSecondaryCounsellor, setShowSecondaryCounsellor] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
+  const [showExternalOwner, setShowExternalOwner] = useState(false);
   const [showScheduleVisit, setShowScheduleVisit] = useState(false);
   const [showFollowup, setShowFollowup] = useState(false);
   const [showCallDisposition, setShowCallDisposition] = useState(false);
@@ -1002,6 +1005,24 @@ const LeadDetail = () => {
       <Loader2 className="h-4 w-4 animate-spin" />
     </div>
   );
+  const currentExternalOwner = lead.consultant_id
+    ? {
+        type: "consultant" as const,
+        id: lead.consultant_id as string,
+        label: `Consultant: ${lead.lead_consultant?.name || "Assigned"}`,
+      }
+    : lead.academic_partner_id
+      ? {
+          type: "academic_partner" as const,
+          id: lead.academic_partner_id as string,
+          label: `Academic Partner: ${lead.lead_academic_partner?.name || "Assigned"}`,
+        }
+      : {
+          type: "none" as const,
+          id: null,
+          label: "No external owner",
+        };
+  const ExternalOwnerIcon = currentExternalOwner.type === "academic_partner" ? School : Handshake;
 
   return (
     <Suspense fallback={lazyFallback}>
@@ -1086,9 +1107,27 @@ const LeadDetail = () => {
             <UserCheck className="h-3 w-3" />
             {counsellorName || "Unassigned"}
           </span>
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${
+              currentExternalOwner.type === "consultant"
+                ? "bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400"
+                : currentExternalOwner.type === "academic_partner"
+                  ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                  : "bg-muted text-muted-foreground"
+            }`}
+            title="External owner"
+          >
+            <ExternalOwnerIcon className="h-3 w-3" />
+            {currentExternalOwner.label}
+          </span>
           {canTransfer && (
             <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => setShowTransfer(true)}>
               <ArrowRightLeft className="h-3.5 w-3.5" /> Transfer
+            </Button>
+          )}
+          {isSuperAdmin && (
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => setShowExternalOwner(true)}>
+              <Handshake className="h-3.5 w-3.5" /> Assign Owner
             </Button>
           )}
           {lead.stage !== "dnc" && (
@@ -1690,6 +1729,14 @@ const LeadDetail = () => {
         onOpenChange={setShowTransfer}
         leadIds={id ? [id] : []}
         leadNames={[lead.name]}
+        onSuccess={() => fetchAll(true)}
+      />
+      <ExternalOwnerDialog
+        open={showExternalOwner}
+        onOpenChange={setShowExternalOwner}
+        leadId={lead.id}
+        leadName={lead.name}
+        currentOwner={currentExternalOwner}
         onSuccess={() => fetchAll(true)}
       />
 
