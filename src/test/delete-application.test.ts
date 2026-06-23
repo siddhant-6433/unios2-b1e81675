@@ -10,6 +10,8 @@ vi.mock("@/integrations/supabase/edge", () => ({
 const { deleteApplication, PAID_APPLICATION_DELETE_CONFIRMATION } = await import("@/lib/deleteApplication");
 const restrictLeadDeleteMigration = readFileSync("supabase/migrations/20260620113500_restrict_application_lead_delete.sql", "utf8");
 const deleteApplicationEdge = readFileSync("supabase/functions/delete-application/index.ts", "utf8");
+const supabaseConfig = readFileSync("supabase/config.toml", "utf8");
+const dbPushWorkflow = readFileSync(".github/workflows/db-push.yml", "utf8");
 
 describe("deleteApplication", () => {
   beforeEach(() => {
@@ -89,5 +91,10 @@ describe("deleteApplication", () => {
   it("requires typed confirmation for paid application deletion in the edge function", () => {
     expect(deleteApplicationEdge).toContain('const PAID_DELETE_CONFIRMATION = "CONFIRM"');
     expect(deleteApplicationEdge).toContain('app.payment_status === "paid" && paid_delete_confirmation !== PAID_DELETE_CONFIRMATION');
+  });
+
+  it("deploys the delete-application edge function with function-level auth handling", () => {
+    expect(supabaseConfig).toMatch(/\[functions\.delete-application\]\s+verify_jwt = false/s);
+    expect(dbPushWorkflow).toContain("supabase functions deploy delete-application --no-verify-jwt");
   });
 });

@@ -120,6 +120,9 @@ verify_jwt = false
 [functions.delete-user]
 verify_jwt = false
 
+[functions.delete-application]
+verify_jwt = false
+
 [functions.whatsapp-templates]
 verify_jwt = false
 
