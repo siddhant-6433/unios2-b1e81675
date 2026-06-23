@@ -6,6 +6,7 @@ import {
   LEAD_FUNNEL_ORDER,
   TERMINAL_LEAD_STAGES,
   leadStagesForBucket,
+  STAGE_ORDER,
   shouldAutoAdvance,
 } from "./leadStages";
 
@@ -71,5 +72,13 @@ describe("shouldAutoAdvance — forward-only, terminal-safe", () => {
   it("never leaves a terminal stage", () => {
     expect(shouldAutoAdvance("not_interested", "counsellor_call")).toBe(false);
     expect(shouldAutoAdvance("deferred", "admitted")).toBe(false);
+  });
+});
+
+describe("STAGE_ORDER — lead-detail offer eligibility", () => {
+  it("treats application_fee_paid as at-or-after application_submitted", () => {
+    expect(STAGE_ORDER.indexOf("application_fee_paid")).toBeGreaterThan(
+      STAGE_ORDER.indexOf("application_submitted"),
+    );
   });
 });
