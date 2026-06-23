@@ -9,6 +9,7 @@ import { OfflinePaymentDialog } from "@/components/finance/OfflinePaymentDialog"
 import { NudgePaymentDialog } from "@/components/admissions/NudgePaymentDialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   FileText, Download, Eye, Loader2, Search, Filter, ExternalLink,
   CheckCircle, Clock, CreditCard, Upload, AlertCircle, ChevronDown, ChevronUp, ChevronRight, X,
@@ -25,7 +26,10 @@ import {
   applicationFunnelStageOf,
   type ApplicationFunnelStage,
 } from "@/lib/applicationFunnel";
-import { deleteApplication as deleteApplicationRequest } from "@/lib/deleteApplication";
+import {
+  deleteApplication as deleteApplicationRequest,
+  PAID_APPLICATION_DELETE_CONFIRMATION,
+} from "@/lib/deleteApplication";
 import { exportRowsXlsx, formatExportDateTime } from "@/lib/xlsxExport";
 import { useToast } from "@/hooks/use-toast";
 
@@ -168,6 +172,7 @@ export default function Applications() {
   const [bulkRegen, setBulkRegen] = useState<{ done: number; total: number } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<AppRow | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [nudgeTarget, setNudgeTarget] = useState<AppRow | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -526,12 +531,16 @@ export default function Applications() {
   const paidNoOffer = apps.filter(a => a.payment_status === "paid" && !a.has_offer).length;
 
   const handleDelete = async () => {
-    if (!deleteTarget || deleteTarget.payment_status === "paid") return;
+    if (!deleteTarget || !isSuperAdmin) return;
+    const paidDeleteConfirmation = deleteTarget.payment_status === "paid"
+      ? deleteConfirmText.trim().toUpperCase()
+      : undefined;
     setDeleting(true);
     const { data, error } = await deleteApplicationRequest({
       id: deleteTarget.id,
       applicationId: deleteTarget.application_id,
       paymentStatus: deleteTarget.payment_status,
+      paidDeleteConfirmation,
     });
     setDeleting(false);
     if (error) {
@@ -540,6 +549,7 @@ export default function Applications() {
     }
     setApps(prev => prev.filter(a => a.id !== deleteTarget.id));
     setDeleteTarget(null);
+    setDeleteConfirmText("");
     toast({
       title: "Application deleted",
       description: data
@@ -693,8 +703,8 @@ export default function Applications() {
               // Proportional width gives the true funnel-narrowing shape;
               // floor at min-width so single-digit stages stay legible.
               const widthBasis = totalApps > 0
-                ? Math.max(96, (reached / totalApps) * 220)
-                : 96;
+                ? Math.max(124, (reached / totalApps) * 220)
+                : 124;
               const reachPct = totalApps > 0 ? (reached / totalApps) * 100 : 0;
 
               return (
@@ -709,25 +719,25 @@ export default function Applications() {
                   )}
                   <button
                     onClick={() => { setStageFilter(isActive ? null : stage); setPaymentFilter("all"); setStatusFilter("all"); }}
-                    className={`group relative rounded-xl border transition-all text-left p-3 shrink-0 ${
+                    className={`group relative rounded-xl border transition-all text-left p-3 shrink-0 overflow-hidden ${
                       isActive
                         ? `${meta.tint} ring-2 ${meta.ring} border-transparent`
                         : "border-border/50 bg-card hover:bg-muted/30 hover:border-border"
                     }`}
-                    style={{ flex: `1 1 ${widthBasis}px`, minWidth: 96 }}
+                    style={{ flex: `0 0 ${widthBasis}px`, width: widthBasis }}
                     title={`${stuck} currently at ${meta.label} · ${reached} reached this stage or beyond`}
                   >
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <div className={`w-7 h-7 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
-                        <Icon className={`h-3.5 w-3.5 ${meta.iconColor}`} />
+                    <div className="flex items-center gap-1.5 mb-1.5 min-w-0">
+                      <div className={`w-6 h-6 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
+                        <Icon className={`h-3 w-3 ${meta.iconColor}`} />
                       </div>
-                      <p className="text-2xl font-bold text-foreground leading-none tracking-tight">{stuck}</p>
+                      <p className="whitespace-nowrap text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">{stuck}</p>
                     </div>
                     <p className="text-[11px] font-medium text-foreground/80 truncate">{meta.label}</p>
                     <div className="mt-2 h-1 rounded-full bg-muted/60 overflow-hidden">
                       <div className={`h-full ${meta.bar} transition-all`} style={{ width: `${reachPct}%` }} />
                     </div>
-                    <p className="mt-1.5 text-[10px] text-muted-foreground">
+                    <p className="mt-1.5 truncate text-[10px] text-muted-foreground">
                       <span className="font-semibold text-foreground/70">{reached}</span> reached
                     </p>
                   </button>
@@ -959,11 +969,14 @@ export default function Applications() {
                             Nudge
                           </button>
                         )}
-                        {role === "super_admin" && app.payment_status !== "paid" && (
+                        {isSuperAdmin && (
                           <button
-                            onClick={() => setDeleteTarget(app)}
+                            onClick={() => {
+                              setDeleteTarget(app);
+                              setDeleteConfirmText("");
+                            }}
                             className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/5 transition-colors"
-                            title="Delete application"
+                            title={app.payment_status === "paid" ? "Delete paid application" : "Delete application"}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
@@ -1203,7 +1216,12 @@ export default function Applications() {
         } : null}
       />
 
-      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
+      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => {
+        if (!o) {
+          setDeleteTarget(null);
+          setDeleteConfirmText("");
+        }
+      }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete application?</AlertDialogTitle>
@@ -1212,12 +1230,33 @@ export default function Applications() {
               This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {deleteTarget?.payment_status === "paid" && (
+            <div className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+              <p className="text-sm font-medium text-destructive">Paid application deletion requires confirmation.</p>
+              <p className="text-xs text-muted-foreground">
+                Type <span className="font-mono font-semibold text-foreground">{PAID_APPLICATION_DELETE_CONFIRMATION}</span> to confirm deleting this paid application.
+              </p>
+              <Input
+                value={deleteConfirmText}
+                onChange={(event) => setDeleteConfirmText(event.target.value)}
+                placeholder={PAID_APPLICATION_DELETE_CONFIRMATION}
+                disabled={deleting}
+                autoComplete="off"
+              />
+            </div>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              disabled={deleting}
-              onClick={handleDelete}
+              disabled={deleting || (
+                deleteTarget?.payment_status === "paid" &&
+                deleteConfirmText.trim().toUpperCase() !== PAID_APPLICATION_DELETE_CONFIRMATION
+              )}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleDelete();
+              }}
             >
               {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Trash2 className="h-4 w-4 mr-1.5" />}
               Delete permanently

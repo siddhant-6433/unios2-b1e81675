@@ -54,6 +54,9 @@ verify_jwt = false
 [functions.icici-payment]
 verify_jwt = false
 
+[functions.razorpay-payment]
+verify_jwt = false
+
 [functions.generate-payment-receipt]
 verify_jwt = false
 
@@ -118,6 +121,9 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.whatsapp-templates]
+verify_jwt = false
+
+[functions.whatsapp-template-media-upload]
 verify_jwt = false
 
 [functions.test-dispositions]

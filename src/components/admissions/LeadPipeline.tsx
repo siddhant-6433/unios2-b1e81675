@@ -185,7 +185,8 @@ export function LeadPipeline({
             const prev = i > 0 ? reached[LEAD_FUNNEL_ORDER[i - 1]] : null;
             const conv = prev != null && prev > 0 ? Math.round((r / prev) * 100) : null;
             const isActive = activeStage === stage;
-            const widthBasis = total > 0 ? Math.max(96, (r / total) * 220) : 96;
+            const widthBasis = total > 0 ? Math.max(124, (r / total) * 220) : 124;
+            const untouchedWidth = Math.max(widthBasis + 112, 246);
             const reachPct = total > 0 ? (r / total) * 100 : 0;
 
             return (
@@ -201,7 +202,7 @@ export function LeadPipeline({
                 {stage === "untouched" ? (
                   <div
                     className="grid grid-cols-2 gap-1.5 shrink-0"
-                    style={{ flex: `1 1 ${Math.max(widthBasis + 92, 210)}px`, minWidth: 210 }}
+                    style={{ flex: `0 0 ${untouchedWidth}px`, width: untouchedWidth }}
                   >
                     {([
                       {
@@ -224,18 +225,18 @@ export function LeadPipeline({
                         <button
                           key={part.key}
                           onClick={() => onNewLeadAssignmentClick?.(partActive ? null : part.key)}
-                          className={`group relative rounded-xl border transition-all text-left p-3 min-w-0 ${
+                          className={`group relative rounded-xl border transition-all text-left p-3 min-w-0 overflow-hidden ${
                             partActive
                               ? `${meta.tint} ring-2 ${meta.ring} border-transparent`
                               : "border-border/50 bg-card hover:bg-muted/30 hover:border-border"
                           }`}
                           title={`${part.count.toLocaleString("en-IN")} ${part.title}`}
                         >
-                          <div className="flex items-center gap-2 mb-1.5">
-                            <div className={`w-7 h-7 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
-                              <Icon className={`h-3.5 w-3.5 ${meta.iconColor}`} />
+                          <div className="flex items-center gap-1.5 mb-1.5 min-w-0">
+                            <div className={`w-6 h-6 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
+                              <Icon className={`h-3 w-3 ${meta.iconColor}`} />
                             </div>
-                            <p className="text-2xl font-bold text-foreground leading-none tracking-tight">
+                            <p className="whitespace-nowrap text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">
                               {part.count.toLocaleString("en-IN")}
                             </p>
                           </div>
@@ -251,25 +252,25 @@ export function LeadPipeline({
                 ) : (
                   <button
                     onClick={() => onStageClick(isActive ? null : stage)}
-                    className={`group relative rounded-xl border transition-all text-left p-3 shrink-0 ${
+                    className={`group relative rounded-xl border transition-all text-left p-3 shrink-0 overflow-hidden ${
                       isActive
                         ? `${meta.tint} ring-2 ${meta.ring} border-transparent`
                         : "border-border/50 bg-card hover:bg-muted/30 hover:border-border"
                     }`}
-                    style={{ flex: `1 1 ${widthBasis}px`, minWidth: 96 }}
+                    style={{ flex: `0 0 ${widthBasis}px`, width: widthBasis }}
                     title={`${stuck.toLocaleString("en-IN")} currently at ${meta.label} · ${r.toLocaleString("en-IN")} reached this stage or beyond`}
                   >
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <div className={`w-7 h-7 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
-                        <Icon className={`h-3.5 w-3.5 ${meta.iconColor}`} />
+                    <div className="flex items-center gap-1.5 mb-1.5 min-w-0">
+                      <div className={`w-6 h-6 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
+                        <Icon className={`h-3 w-3 ${meta.iconColor}`} />
                       </div>
-                      <p className="text-2xl font-bold text-foreground leading-none tracking-tight">{stuck.toLocaleString("en-IN")}</p>
+                      <p className="whitespace-nowrap text-xl font-bold text-foreground leading-none tracking-tight tabular-nums">{stuck.toLocaleString("en-IN")}</p>
                     </div>
                     <p className="text-[11px] font-medium text-foreground/80 truncate">{meta.label}</p>
                     <div className="mt-2 h-1 rounded-full bg-muted/60 overflow-hidden">
                       <div className={`h-full ${meta.bar} transition-all`} style={{ width: `${reachPct}%` }} />
                     </div>
-                    <p className="mt-1.5 text-[10px] text-muted-foreground">
+                    <p className="mt-1.5 truncate text-[10px] text-muted-foreground">
                       <span className="font-semibold text-foreground/70">{r.toLocaleString("en-IN")}</span> reached
                     </p>
                   </button>

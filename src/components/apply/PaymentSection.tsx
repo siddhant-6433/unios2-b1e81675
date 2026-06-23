@@ -7,6 +7,7 @@ import { ApplicationData } from "./types";
 import { usePortal } from "./PortalContext";
 import { ReceiptDialog, ReceiptData } from "@/components/receipts/ReceiptDialog";
 import { trackPixelCompleteRegistration } from "@/lib/analytics";
+import { buildRazorpayReceipt, openRazorpayCheckout } from "@/lib/razorpayCheckout";
 
 interface Props {
   data: ApplicationData;
@@ -134,8 +135,8 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
   useEffect(() => {
     const handler = (e: MessageEvent) => {
       if (e.data?.eb_payment === "success" || e.data?.icici_payment === "success") {
-        stopPolling();
-        checkAndUpdatePayment();
+        void checkAndUpdatePayment();
+        if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
       }
     };
     window.addEventListener("message", handler);
@@ -376,9 +377,33 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
     }
   };
 
+  // ── Razorpay Standard Checkout (modal + server signature verification) ───
+  const handlePayRazorpay = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      const result = await openRazorpayCheckout({
+        amountPaise: Math.round(Number(data.fee_amount || 0) * 100),
+        receipt: buildRazorpayReceipt("app", data.application_id),
+        context: "application_fee",
+        description: "Application Processing Fee",
+        applicationId: data.application_id,
+        customerName: data.full_name,
+        customerEmail: data.email || undefined,
+        customerPhone: data.phone,
+      });
+      onChange({ payment_status: "paid", payment_ref: result.paymentId });
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Payment was cancelled.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handlePay = () => {
     if (selectedGateway === "easebuzz") return handlePayEasebuzz();
     if (selectedGateway === "icici")    return handlePayIcici();
+    if (selectedGateway === "razorpay") return handlePayRazorpay();
     return handlePayCashfree();
   };
 

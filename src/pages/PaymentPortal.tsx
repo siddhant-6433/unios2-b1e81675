@@ -1,14 +1,15 @@
 import { useState, useEffect, useRef } from "react";
-import { useLocation, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
+import { ReceiptDialog, type FeeLineItem, type ReceiptData } from "@/components/receipts/ReceiptDialog";
 import { useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
 import { brandForStudentOwner, NIMT_EDU_BRAND, type StudentBrand } from "@/lib/studentBranding";
 import { useAuth } from "@/contexts/AuthContext";
+import { buildRazorpayReceipt, openRazorpayCheckout } from "@/lib/razorpayCheckout";
 import uniosLogo from "@/assets/unios-logo.png";
 import {
   Loader2, AlertCircle, CheckCircle, CreditCard, ShieldCheck,
-  ArrowRight, Download,
+  ArrowRight, Download, Home,
 } from "lucide-react";
 
 type Step = "verify" | "fees" | "paying" | "receipt";
@@ -41,6 +42,16 @@ interface StudentPortalPaymentHandoff {
   fees?: StudentFee[];
 }
 
+interface StudentFeeReceiptSnapshot {
+  amountPaid: number;
+  grossAmount: number;
+  concessionAmount: number;
+  paymentRef: string | null;
+  paymentGateway: string;
+  paidAt: string;
+  lineItems: FeeLineItem[];
+}
+
 const readFunctionErrorMessage = async (error: unknown) => {
   const fallback = error instanceof Error ? error.message : "Something went wrong. Please try again.";
   const context = error && typeof error === "object" && "context" in error
@@ -60,6 +71,7 @@ const readFunctionErrorMessage = async (error: unknown) => {
 export default function PaymentPortal() {
   const { user: authUser, loading: authLoading } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [params] = useSearchParams();
   const studentParam = params.get("student");
   const tokenParam   = params.get("token");
@@ -77,6 +89,7 @@ export default function PaymentPortal() {
   const [fees, setFees]         = useState<StudentFee[]>([]);
   const [receipt, setReceipt]   = useState<ReceiptData | null>(null);
   const [paidTxnId, setPaidTxnId] = useState<string | null>(null);
+  const [receiptSnapshot, setReceiptSnapshot] = useState<StudentFeeReceiptSnapshot | null>(null);
   const [selectedGateway, setSelectedGateway] = useState<string | null>(null);
 
   const popupRef = useRef<Window | null>(null);
@@ -108,8 +121,8 @@ export default function PaymentPortal() {
   useEffect(() => {
     const handler = (e: MessageEvent) => {
       if (e.data?.eb_payment === "success" || e.data?.icici_payment === "success") {
-        stopPolling();
-        checkFeesPaid();
+        void checkFeesPaid();
+        if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
       }
     };
     window.addEventListener("message", handler);
@@ -333,6 +346,7 @@ export default function PaymentPortal() {
       .in("id", fees.map((fee) => fee.id));
 
     if (!data || data.length === 0) {
+      setReceiptSnapshot((current) => current ?? buildReceiptSnapshot(paidTxnId, activeGateway));
       setStep("receipt");
       if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
       return true;
@@ -351,7 +365,20 @@ export default function PaymentPortal() {
   const activeGateway = selectedGateway || feeGateways[0]?.gateway || "easebuzz";
   const activeGatewayName =
     feeGateways.find((gateway) => gateway.gateway === activeGateway)?.display_name ||
-    (activeGateway === "icici" ? "ICICI Bank PG" : "EaseBuzz");
+    (activeGateway === "icici" ? "ICICI Bank PG" : activeGateway === "razorpay" ? "Razorpay" : "EaseBuzz");
+  const buildReceiptSnapshot = (
+    paymentRef: string | null = paidTxnId,
+    paymentGateway = activeGateway,
+  ): StudentFeeReceiptSnapshot => ({
+    amountPaid: payableAmount,
+    grossAmount: totalDue,
+    concessionAmount: waiverAmount,
+    paymentRef,
+    paymentGateway,
+    paidAt: new Date().toISOString(),
+    lineItems: fees.map((fee) => ({ fee_head: fee.fee_head, amount: fee.balance })),
+  });
+  const receiptAmountPaid = receiptSnapshot?.amountPaid ?? payableAmount;
 
   const handlePay = async () => {
     if (!student) return;
@@ -359,6 +386,29 @@ export default function PaymentPortal() {
     setLoading(true);
 
     try {
+      if (activeGateway === "razorpay") {
+        const result = await openRazorpayCheckout({
+          amountPaise: Math.round(payableAmount * 100),
+          receipt: buildRazorpayReceipt("fee", student.id),
+          context: "student_fee",
+          description: paymentTitle,
+          studentId: student.id,
+          paymentScope,
+          feeIds: paymentScope === "all" ? [] : fees.map((fee) => fee.id),
+          waiverAmount,
+          customerName: student.name,
+          customerPhone: student.parent_phone || phone || "9999999999",
+          productInfo: "Fee Payment",
+        });
+        const snapshot = buildReceiptSnapshot(result.paymentId, "razorpay");
+        setPaidTxnId(result.paymentId);
+        setReceiptSnapshot(snapshot);
+        await fetchFees(student.id);
+        setStep("receipt");
+        setLoading(false);
+        return;
+      }
+
       const nameParts = student.name.trim().split(" ");
       const txnid = `FEE${student.id.replace(/[^a-zA-Z0-9]/g, "").slice(0, 10)}${Date.now()}`.slice(0, 50);
       const functionName = activeGateway === "icici" ? "icici-payment" : "easebuzz-payment";
@@ -437,8 +487,8 @@ export default function PaymentPortal() {
           await checkFeesPaid();
         }
       }, 2000);
-    } catch (err: any) {
-      setError(err.message || "Something went wrong. Please try again.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
       setLoading(false);
     }
   };
@@ -663,7 +713,7 @@ export default function PaymentPortal() {
                 </div>
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-sm text-gray-500">Amount Paid</span>
-                  <span className="text-lg font-bold text-green-600">₹{payableAmount.toLocaleString("en-IN")}</span>
+                  <span className="text-lg font-bold text-green-600">₹{receiptAmountPaid.toLocaleString("en-IN")}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-500">Date</span>
@@ -673,24 +723,35 @@ export default function PaymentPortal() {
                 </div>
               </div>
 
-              <button
-                onClick={() => setReceipt({
-                  type: "student_fee",
-                  student_name: student.name,
-                  admission_no: student.admission_no,
-                  course_name: student.course_name,
-                  semester: student.semester,
-                  campus_name: student.campus_name,
-                  amount: totalDue,
-                  concession_amount: waiverAmount,
-                  payment_date: new Date().toISOString(),
-                  payment_mode: "online",
-                  line_items: fees.map(f => ({ fee_head: f.fee_head, amount: f.balance })),
-                })}
-                className="w-full flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 py-3 text-sm font-semibold text-primary hover:bg-primary/10 transition-colors"
-              >
-                <Download className="h-4 w-4" /> Download Receipt
-              </button>
+              <div className="space-y-3">
+                <button
+                  onClick={() => navigate("/student", { replace: true })}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-white hover:bg-primary/90 transition-colors"
+                >
+                  <Home className="h-4 w-4" /> Back to Dashboard
+                </button>
+
+                <button
+                  onClick={() => setReceipt({
+                    type: "student_fee",
+                    student_name: student.name,
+                    admission_no: student.admission_no,
+                    course_name: student.course_name,
+                    semester: student.semester,
+                    campus_name: student.campus_name,
+                    amount: receiptSnapshot?.grossAmount ?? totalDue,
+                    concession_amount: receiptSnapshot?.concessionAmount ?? waiverAmount,
+                    payment_ref: receiptSnapshot?.paymentRef ?? paidTxnId,
+                    payment_gateway: receiptSnapshot?.paymentGateway ?? activeGateway,
+                    payment_date: receiptSnapshot?.paidAt ?? new Date().toISOString(),
+                    payment_mode: "online",
+                    line_items: receiptSnapshot?.lineItems ?? fees.map(f => ({ fee_head: f.fee_head, amount: f.balance })),
+                  })}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 py-3 text-sm font-semibold text-primary hover:bg-primary/10 transition-colors"
+                >
+                  <Download className="h-4 w-4" /> Download Receipt
+                </button>
+              </div>
             </div>
           )}
         </main>

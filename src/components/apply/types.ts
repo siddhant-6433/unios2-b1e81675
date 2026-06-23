@@ -175,5 +175,5 @@ export function determineProgramCategory(courseCode: string, courseName: string)
 }
 
 export function calculateFee(selections: CourseSelection[]): number {
-  return selections.reduce((total, s) => total + (FEE_MAP[s.program_category] || 1000), 0);
+  return selections.reduce((total, s) => total + (FEE_MAP[s.program_category] ?? 1000), 0);
 }

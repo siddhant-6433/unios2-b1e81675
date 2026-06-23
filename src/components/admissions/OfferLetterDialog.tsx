@@ -15,6 +15,7 @@ import {
   type ApplicationCahetSource,
   type CahetRegistrationDetails as CahetRegistrationDetailsType,
 } from "@/lib/cahet";
+import { chooseOfferSessionId, feeBackedSessionIds, type OfferSessionOption } from "@/lib/offerSessions";
 
 interface OfferLetterDialogProps {
   open: boolean;
@@ -48,7 +49,7 @@ interface OfferLetter {
   entrance_exam_name?: string | null;
 }
 
-interface SessionOption { id: string; name: string; is_active: boolean }
+type SessionOption = OfferSessionOption;
 
 interface OfferWaiver {
   id: string;
@@ -260,18 +261,39 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     return () => { cancelled = true; };
   }, [open, leadId, cahetRegistrationProp]);
 
-  // Pull sessions whenever the form opens so the select has data + the active
-  // session is preselected as default for the offer.
+  // Pull sessions whenever the form opens so the select has data. Prefer a
+  // session that actually has active year-wise fees for this course; multiple
+  // sessions can be active, and principals cannot change this dropdown.
   useEffect(() => {
     if (!showForm) return;
-    supabase.from("admission_sessions").select("id, name, is_active").order("name", { ascending: false })
-      .then(({ data }) => {
-        const list = (data ?? []) as SessionOption[];
-        setSessions(list);
-        const active = list.find(s => s.is_active);
-        setForm(p => ({ ...p, session_id: p.session_id || active?.id || (list[0]?.id ?? "") }));
-      });
-  }, [showForm]);
+    let cancelled = false;
+    (async () => {
+      const [{ data: sessionRows }, { data: feeRows }] = await Promise.all([
+        supabase.from("admission_sessions").select("id, name, is_active").order("name", { ascending: false }),
+        courseId
+          ? supabase
+              .from("fee_structures")
+              .select("session_id, fee_structure_items ( term, amount )")
+              .eq("course_id", courseId)
+              .eq("is_active", true)
+          : Promise.resolve({ data: [] }),
+      ]);
+      if (cancelled) return;
+
+      const feeSessionIds = new Set(feeBackedSessionIds((feeRows || []) as any[]));
+      const list = ((sessionRows ?? []) as SessionOption[]).map((session) => ({
+        ...session,
+        has_fee_structure: !courseId || feeSessionIds.has(session.id),
+      }));
+
+      setSessions(list);
+      setForm((previous) => ({
+        ...previous,
+        session_id: chooseOfferSessionId(list, previous.session_id),
+      }));
+    })();
+    return () => { cancelled = true; };
+  }, [showForm, courseId]);
 
   // Resolve the first-year fee + the list of available year terms for the
   // picked course+session pair. firstYearFee drives token-fee defaults;
