@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 const admissions = readFileSync("src/pages/Admissions.tsx", "utf8");
 const admissionsData = readFileSync("src/hooks/useAdmissionsData.ts", "utf8");
 const overviewMigration = readFileSync("supabase/migrations/20260618160000_admissions_overview_and_enrichment.sql", "utf8");
+const institutionTypeMigration = readFileSync("supabase/migrations/20260623100000_lead_institution_type_classifier.sql", "utf8");
 
 describe("Admissions CRM loading performance guardrails", () => {
   it("hydrates application progress through the admissions overview payload instead of client lead_id fanout", () => {
@@ -35,5 +36,16 @@ describe("Admissions CRM loading performance guardrails", () => {
     expect(overviewMigration).not.toMatch(/\bSECURITY\s+DEFINER\b/i);
     expect(admissions).not.toMatch(/\bSECURITY\s+DEFINER\b/i);
     expect(admissions).not.toMatch(/\bGRANT\b/i);
+  });
+
+  it("filters school and college leads through the persisted lead classifier", () => {
+    expect(institutionTypeMigration).toContain("lead_institution_type");
+    expect(institutionTypeMigration).toContain("compute_lead_institution_type");
+    expect(institutionTypeMigration).toContain("cam_inst.type = 'school'");
+    expect(institutionTypeMigration).toContain("jdm.is_school = true");
+    expect(admissions).toContain('query = query.eq("lead_institution_type", leadInstitutionType)');
+    expect(admissions).toContain('.eq("is_mirror", false)');
+    expect(admissions).toContain('if (next !== "all") setRoleFilter("lead")');
+    expect(admissions).not.toContain("const includeIds = scopedSelectedCourseFilterIds.length > 0");
   });
 });
