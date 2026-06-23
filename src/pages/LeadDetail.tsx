@@ -57,6 +57,7 @@ import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
 import { useCallQueue } from "@/hooks/useCallQueue";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLeadDetail, useCampuses, useCourses, useMyProfileId } from "@/hooks/useAdmissionsData";
+import { STAGE_LABELS, STAGE_ORDER, shouldAutoAdvance } from "@/lib/leadStages";
 
 // Score points for each disposition (mirrors DB trigger)
 const DISPOSITION_POINTS: Record<string, { points: number; label: string }> = {
@@ -70,29 +71,9 @@ const DISPOSITION_POINTS: Record<string, { points: number; label: string }> = {
   wrong_number: { points: -2, label: "Wrong number" },
 };
 
-const STAGE_LABELS: Record<string, string> = {
-  new_lead: "New Lead", application_in_progress: "Application In Progress", application_submitted: "Application Submitted",
-  ai_called: "AI Called", counsellor_call: "In Follow Up",
-  visit_scheduled: "Visit Scheduled", interview: "Interview", offer_sent: "Offer Sent",
-  token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted",
-  not_interested: "Not Interested", ineligible: "Ineligible", dnc: "Do Not Contact", deferred: "Deferred (Next Session)", cold: "Cold", rejected: "Rejected",
-};
-
-const STAGE_ORDER = [
-  "new_lead", "application_in_progress", "application_submitted",
-  "ai_called", "counsellor_call", "visit_scheduled", "interview",
-  "offer_sent", "token_paid", "pre_admitted", "admitted",
-];
-
 const stageIndex = (stage: string) => {
   const idx = STAGE_ORDER.indexOf(stage);
   return idx === -1 ? -1 : idx;
-};
-
-/** Auto-advance lead stage only if newStage is ahead of current stage (forward-only). */
-const shouldAutoAdvance = (currentStage: string, newStage: string) => {
-  if (["rejected", "not_interested", "ineligible", "dnc", "deferred"].includes(currentStage)) return false;
-  return stageIndex(newStage) > stageIndex(currentStage);
 };
 
 type FollowupQueueState = {
