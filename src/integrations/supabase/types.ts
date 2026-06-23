@@ -6325,6 +6325,7 @@ export type Database = {
           is_nri: boolean | null
           jd_category: string | null
           lead_score: number | null
+          lead_institution_type: string
           lead_temperature: string | null
           mirror_lead_id: string | null
           name: string
@@ -6386,6 +6387,7 @@ export type Database = {
           is_nri?: boolean | null
           jd_category?: string | null
           lead_score?: number | null
+          lead_institution_type?: string
           lead_temperature?: string | null
           mirror_lead_id?: string | null
           name: string
@@ -6447,6 +6449,7 @@ export type Database = {
           is_nri?: boolean | null
           jd_category?: string | null
           lead_score?: number | null
+          lead_institution_type?: string
           lead_temperature?: string | null
           mirror_lead_id?: string | null
           name?: string

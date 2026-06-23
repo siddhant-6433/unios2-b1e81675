@@ -184,8 +184,10 @@ interface Lead {
   course_id: string | null;
   campus_id: string | null;
   counsellor_id: string | null;
+  is_mirror: boolean;
   lead_score: number;
   lead_temperature: "hot" | "warm" | "cold";
+  lead_institution_type: "school" | "college" | null;
   ai_called?: boolean;
   course_name?: string;
   campus_name?: string;
@@ -432,7 +434,6 @@ const Admissions = () => {
   const effectiveCourseFilterIds = useMemo(() => {
     if (leadInstitutionType === "all") return debouncedCourseFilter;
     const categorySet = new Set(categoryCourseIds);
-    if (debouncedCourseFilter.length === 0) return categoryCourseIds;
     return debouncedCourseFilter.filter((id) => categorySet.has(id));
   }, [categoryCourseIds, debouncedCourseFilter, leadInstitutionType]);
 
@@ -597,15 +598,18 @@ const Admissions = () => {
     }
 
     if (leadInstitutionType !== "all") {
+      query = query.eq("lead_institution_type", leadInstitutionType).eq("is_mirror", false);
       if (courseFilterMode === "include") {
-        const includeIds = scopedSelectedCourseFilterIds.length > 0
-          ? scopedSelectedCourseFilterIds
-          : categoryCourseIds;
-        if (includeIds.length > 0) query = query.in("course_id", includeIds);
+        if (scopedSelectedCourseFilterIds.length > 0) {
+          query = query.in("course_id", scopedSelectedCourseFilterIds);
+        } else if (debouncedCourseFilter.length > 0) {
+          return { query, empty: true };
+        }
       } else {
-        if (categoryCourseIds.length > 0) query = query.in("course_id", categoryCourseIds);
         if (scopedSelectedCourseFilterIds.length > 0) {
           query = query.not("course_id", "in", postgrestList(scopedSelectedCourseFilterIds));
+        } else if (debouncedCourseFilter.length > 0) {
+          return { query, empty: true };
         }
       }
     } else if (debouncedCourseFilter.length > 0) {
@@ -821,7 +825,7 @@ const Admissions = () => {
         .from("leads")
         .select(
           `id, name, phone, email, stage, source, person_role, created_at,
-           application_id, pre_admission_no, admission_no, course_id, campus_id,
+           application_id, pre_admission_no, admission_no, course_id, campus_id, lead_institution_type, is_mirror,
            counsellor_id, lead_score, lead_temperature, ai_called,
            courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`,
           page === 1 ? { count: hasActiveListFilters ? "exact" : "planned" } : undefined
@@ -829,15 +833,6 @@ const Admissions = () => {
         .order("created_at", { ascending: leadSortOrder === "oldest" })
         .order("id", { ascending: leadSortOrder === "oldest" })
         .limit(PAGE_SIZE + 1);
-
-      if (
-        leadInstitutionType !== "all" &&
-        (categoryCourseIds.length === 0 || (courseFilterMode === "include" && effectiveCourseFilterIds.length === 0))
-      ) {
-        setLeads([]); setTotalCount(0); setSelectedIds(new Set()); setHasLoadedOnce(true);
-        setHasNextLeadPage(false); setLeadPageCursors({});
-        return;
-      }
 
       const scoped = applyListQueryFilters(query);
       if (scoped.empty) {
@@ -1232,7 +1227,8 @@ const Admissions = () => {
   const fetchFilteredLeadsForExport = async () => {
     if (
       leadInstitutionType !== "all" &&
-      (categoryCourseIds.length === 0 || (courseFilterMode === "include" && effectiveCourseFilterIds.length === 0))
+      debouncedCourseFilter.length > 0 &&
+      scopedSelectedCourseFilterIds.length === 0
     ) {
       return [];
     }
@@ -1246,7 +1242,7 @@ const Admissions = () => {
         .from("leads")
         .select(
           `id, name, phone, email, stage, source, person_role, created_at,
-           application_id, pre_admission_no, admission_no, course_id, campus_id,
+           application_id, pre_admission_no, admission_no, course_id, campus_id, lead_institution_type, is_mirror,
            counsellor_id, lead_score, lead_temperature, ai_called,
            courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`
         )
@@ -1343,8 +1339,8 @@ const Admissions = () => {
       || (sourceFilterMode === "exclude" ? l.source !== sourceFilter : l.source === sourceFilter);
     const matchesCourse = (() => {
       if (leadInstitutionType !== "all") {
-        const inCategory = l.course_id != null && categoryCourseIds.includes(l.course_id);
-        if (!inCategory) return false;
+        if (l.lead_institution_type !== leadInstitutionType) return false;
+        if (l.is_mirror) return false;
         if (courseFilterMode === "exclude") {
           return l.course_id == null || !scopedSelectedCourseFilterIds.includes(l.course_id);
         }
@@ -2266,7 +2262,11 @@ const Admissions = () => {
             <option value="all">All Sources</option>
             {LEAD_SOURCES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
-          <select value={leadInstitutionType} onChange={(e) => setLeadInstitutionType(e.target.value as LeadInstitutionType)}
+          <select value={leadInstitutionType} onChange={(e) => {
+            const next = e.target.value as LeadInstitutionType;
+            setLeadInstitutionType(next);
+            if (next !== "all") setRoleFilter("lead");
+          }}
             className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
             <option value="all">School & College</option>
             <option value="school">School Leads</option>
