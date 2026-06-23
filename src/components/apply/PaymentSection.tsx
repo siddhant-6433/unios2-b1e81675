@@ -59,6 +59,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
   });
 
   const [selectedGateway, setSelectedGateway] = useState<string | null>(null);
+  const userSelectedGatewayRef = useRef(false);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
   const [sdkReady, setSdkReady] = useState(false);
@@ -85,10 +86,15 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
   // Auto-select single gateway
   useEffect(() => {
     if (gwLoading) return;
-    if (portalGateways.length > 0 && (!selectedGateway || !portalGateways.some((g) => g.gateway === selectedGateway))) {
+    if (portalGateways.length > 0 && (!userSelectedGatewayRef.current || !selectedGateway || !portalGateways.some((g) => g.gateway === selectedGateway))) {
       setSelectedGateway(portalGateways[0].gateway);
     }
   }, [gwLoading, portalGateways, selectedGateway]);
+
+  const selectGateway = (gateway: string) => {
+    userSelectedGatewayRef.current = true;
+    setSelectedGateway(gateway);
+  };
 
   // Load Cashfree JS SDK only when cashfree is selected
   useEffect(() => {
@@ -483,7 +489,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
               {portalGateways.map((gw) => (
                 <button
                   key={gw.gateway}
-                  onClick={() => setSelectedGateway(gw.gateway)}
+                  onClick={() => selectGateway(gw.gateway)}
                   className={`rounded-xl border px-4 py-2 text-xs font-medium transition-colors ${
                     selectedGateway === gw.gateway
                       ? "border-primary bg-primary/10 text-primary"

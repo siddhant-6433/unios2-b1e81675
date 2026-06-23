@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2, CreditCard, FileText, IndianRupee, Clock, Check, GraduationCap, Sparkles, ChevronRight, CalendarDays } from "lucide-react";
 import { buildApplicantFeeBreakdownRows, buildApplicantOneTimePaymentOptions } from "./feeBreakdown";
@@ -164,6 +164,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   const [customAmt, setCustomAmt] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [selectedGateway, setSelectedGateway] = useState<string | null>(null);
+  const userSelectedGatewayRef = useRef(false);
   const [deadlines, setDeadlines] = useState<{ fee_submission_deadline: string; full_course_payment_deadline: string }>({
     fee_submission_deadline:      DEFAULT_FEE_SUBMISSION_DEADLINE,
     full_course_payment_deadline: DEFAULT_FULL_COURSE_PAYMENT_DEADLINE,
@@ -177,10 +178,15 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
 
   useEffect(() => {
     if (tokenGatewayLoading) return;
-    if (tokenGateways.length > 0 && (!selectedGateway || !tokenGateways.some((g) => g.gateway === selectedGateway))) {
+    if (tokenGateways.length > 0 && (!userSelectedGatewayRef.current || !selectedGateway || !tokenGateways.some((g) => g.gateway === selectedGateway))) {
       setSelectedGateway(tokenGateways[0].gateway);
     }
   }, [tokenGatewayLoading, tokenGateways, selectedGateway]);
+
+  const selectGateway = (gateway: string) => {
+    userSelectedGatewayRef.current = true;
+    setSelectedGateway(gateway);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -1311,7 +1317,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
             {tokenGateways.map((gateway) => (
               <button
                 key={gateway.gateway}
-                onClick={() => setSelectedGateway(gateway.gateway)}
+                onClick={() => selectGateway(gateway.gateway)}
                 className={`rounded-xl border px-3 py-2 text-xs font-semibold transition-all ${
                   selectedGateway === gateway.gateway
                     ? "border-blue-500 bg-blue-50 text-blue-700"

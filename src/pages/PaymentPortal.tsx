@@ -82,6 +82,7 @@ export default function PaymentPortal() {
 
   const popupRef = useRef<Window | null>(null);
   const pollRef  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const userSelectedGatewayRef = useRef(false);
   const { gateways: feeGateways, loading: gatewaysLoading } = useScopedPaymentGateways({
     context: "student_fee",
     studentId: student?.id,
@@ -98,10 +99,15 @@ export default function PaymentPortal() {
 
   useEffect(() => {
     if (gatewaysLoading) return;
-    if (feeGateways.length > 0 && (!selectedGateway || !feeGateways.some((g) => g.gateway === selectedGateway))) {
+    if (feeGateways.length > 0 && (!userSelectedGatewayRef.current || !selectedGateway || !feeGateways.some((g) => g.gateway === selectedGateway))) {
       setSelectedGateway(feeGateways[0].gateway);
     }
   }, [gatewaysLoading, feeGateways, selectedGateway]);
+
+  const selectGateway = (gateway: string) => {
+    userSelectedGatewayRef.current = true;
+    setSelectedGateway(gateway);
+  };
 
   // Listen for postMessage from popup gateways
   useEffect(() => {
@@ -659,7 +665,7 @@ export default function PaymentPortal() {
                         {feeGateways.map((gateway) => (
                           <button
                             key={gateway.gateway}
-                            onClick={() => setSelectedGateway(gateway.gateway)}
+                            onClick={() => selectGateway(gateway.gateway)}
                             className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
                               selectedGateway === gateway.gateway
                                 ? "border-primary bg-primary/10 text-primary"

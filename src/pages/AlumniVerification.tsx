@@ -370,16 +370,22 @@ export default function AlumniVerification() {
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [selectedGateway, setSelectedGateway] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const userSelectedGatewayRef = useRef(false);
   const { gateways: alumniGateways, loading: alumniGatewaysLoading } = useScopedPaymentGateways({
     context: "alumni_service",
   });
 
   useEffect(() => {
     if (alumniGatewaysLoading) return;
-    if (alumniGateways.length > 0 && (!selectedGateway || !alumniGateways.some((g) => g.gateway === selectedGateway))) {
+    if (alumniGateways.length > 0 && (!userSelectedGatewayRef.current || !selectedGateway || !alumniGateways.some((g) => g.gateway === selectedGateway))) {
       setSelectedGateway(alumniGateways[0].gateway);
     }
   }, [alumniGatewaysLoading, alumniGateways, selectedGateway]);
+
+  const selectGateway = (gateway: string) => {
+    userSelectedGatewayRef.current = true;
+    setSelectedGateway(gateway);
+  };
 
   const handlePayNow = async () => {
     if (!requestId) return;
@@ -953,7 +959,7 @@ export default function AlumniVerification() {
                         {alumniGateways.map((gateway) => (
                           <button
                             key={gateway.gateway}
-                            onClick={() => setSelectedGateway(gateway.gateway)}
+                            onClick={() => selectGateway(gateway.gateway)}
                             className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
                               selectedGateway === gateway.gateway
                                 ? "border-primary bg-primary/10 text-primary"
