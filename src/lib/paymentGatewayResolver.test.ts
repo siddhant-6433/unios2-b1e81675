@@ -56,11 +56,11 @@ describe("resolveGatewayRules", () => {
   it("orders public gateways by configured priority", () => {
     const gateways = resolveGatewayRules([
       rule({ payment_context: "student_fee", gateway: "easebuzz", scope_type: "global", is_enabled: true, priority: 30 }),
-      rule({ payment_context: "student_fee", gateway: "razorpay", scope_type: "global", is_enabled: true, priority: 10 }),
-      rule({ payment_context: "student_fee", gateway: "icici", scope_type: "global", is_enabled: true, priority: 20 }),
+      rule({ payment_context: "student_fee", gateway: "razorpay", scope_type: "global", is_enabled: true, priority: 20 }),
+      rule({ payment_context: "student_fee", gateway: "icici", scope_type: "global", is_enabled: true, priority: 10 }),
     ], {}, "student_fee", false);
 
-    expect(gateways.map((g) => g.gateway)).toEqual(["razorpay", "icici", "easebuzz"]);
+    expect(gateways.map((g) => g.gateway)).toEqual(["icici", "razorpay", "easebuzz"]);
   });
 
   it("matches institution group rules between campus and institution type specificity", () => {

@@ -1,4 +1,4 @@
--- Make Razorpay the default online gateway, followed by ICICI and EaseBuzz.
+-- Make ICICI the default online gateway, followed by Razorpay and EaseBuzz.
 
 INSERT INTO public.payment_gateway_config (
   gateway,
@@ -31,7 +31,7 @@ INSERT INTO public.payment_gateway_rules (
   is_staff_pilot_only,
   priority
 )
-SELECT ctx, 'global', NULL, 'razorpay', true, false, 10
+SELECT ctx, 'global', NULL, 'razorpay', true, false, 20
 FROM unnest(ARRAY['application_fee', 'token_fee', 'student_fee', 'alumni_service']) AS ctx
 WHERE NOT EXISTS (
   SELECT 1
@@ -51,7 +51,7 @@ INSERT INTO public.payment_gateway_rules (
   is_staff_pilot_only,
   priority
 )
-SELECT DISTINCT r.payment_context, r.scope_type, r.scope_id, 'razorpay', true, false, 10
+SELECT DISTINCT r.payment_context, r.scope_type, r.scope_id, 'razorpay', true, false, 20
 FROM public.payment_gateway_rules r
 WHERE r.gateway IN ('icici', 'easebuzz', 'cashfree')
   AND NOT EXISTS (
@@ -64,14 +64,14 @@ WHERE r.gateway IN ('icici', 'easebuzz', 'cashfree')
   );
 
 UPDATE public.payment_gateway_rules
-SET priority = 10,
+SET priority = 20,
     is_enabled = true,
     is_staff_pilot_only = false
 WHERE gateway = 'razorpay'
   AND payment_context IN ('application_fee', 'token_fee', 'student_fee', 'alumni_service');
 
 UPDATE public.payment_gateway_rules
-SET priority = 20,
+SET priority = 10,
     is_enabled = true,
     is_staff_pilot_only = false
 WHERE gateway = 'icici'

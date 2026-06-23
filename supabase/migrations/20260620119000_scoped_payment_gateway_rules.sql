@@ -109,11 +109,11 @@ CREATE TRIGGER trg_payment_gateway_rules_updated_at
   BEFORE UPDATE ON public.payment_gateway_rules
   FOR EACH ROW EXECUTE FUNCTION public.set_payment_gateway_rules_updated_at();
 
--- Global defaults: Razorpay is first, ICICI second, EaseBuzz third.
+-- Global defaults: ICICI is first, Razorpay second, EaseBuzz third.
 INSERT INTO public.payment_gateway_rules (
   payment_context, scope_type, scope_id, gateway, is_enabled, is_staff_pilot_only, priority
 )
-SELECT ctx, 'global', NULL, 'razorpay', true, false, 10
+SELECT ctx, 'global', NULL, 'razorpay', true, false, 20
 FROM unnest(ARRAY['application_fee', 'token_fee', 'student_fee', 'alumni_service']) AS ctx
 WHERE NOT EXISTS (
   SELECT 1 FROM public.payment_gateway_rules r
@@ -153,7 +153,7 @@ WHERE NOT EXISTS (
 INSERT INTO public.payment_gateway_rules (
   payment_context, scope_type, scope_id, gateway, is_enabled, is_staff_pilot_only, priority
 )
-SELECT ctx, 'global', NULL, 'icici', true, false, 20
+SELECT ctx, 'global', NULL, 'icici', true, false, 10
 FROM unnest(ARRAY['application_fee', 'token_fee', 'student_fee', 'alumni_service']) AS ctx
 WHERE NOT EXISTS (
   SELECT 1 FROM public.payment_gateway_rules r

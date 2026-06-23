@@ -81,8 +81,8 @@ const DEFAULT_GATEWAYS = [
 ];
 
 const DEFAULT_GATEWAY_PRIORITY: Record<string, number> = {
-  razorpay: 10,
-  icici: 20,
+  icici: 10,
+  razorpay: 20,
   easebuzz: 30,
   cashfree: 40,
 };

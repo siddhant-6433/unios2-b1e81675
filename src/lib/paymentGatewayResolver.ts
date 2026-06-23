@@ -63,8 +63,8 @@ const SUPPORT_FIELD: Record<PaymentContext, keyof PaymentGateway> = {
 
 const PILOT_ROLES = new Set(["super_admin", "admission_head", "campus_admin", "accountant"]);
 const DEFAULT_GATEWAY_ORDER: Record<string, number> = {
-  razorpay: 10,
-  icici: 20,
+  icici: 10,
+  razorpay: 20,
   easebuzz: 30,
   cashfree: 40,
 };
@@ -278,15 +278,15 @@ export function useScopedPaymentGateways(args: UseScopedGatewaysArgs) {
   const fallbackGateways = useMemo<PaymentGateway[]>(() => {
     if (gateways.length > 0 || loading) return gateways;
     return [{
-      gateway: "razorpay",
-      display_name: "Razorpay",
-      is_staff_pilot_only: false,
-      priority: DEFAULT_GATEWAY_ORDER.razorpay,
-    }, {
       gateway: "icici",
       display_name: "ICICI Bank PG",
       is_staff_pilot_only: false,
       priority: DEFAULT_GATEWAY_ORDER.icici,
+    }, {
+      gateway: "razorpay",
+      display_name: "Razorpay",
+      is_staff_pilot_only: false,
+      priority: DEFAULT_GATEWAY_ORDER.razorpay,
     }, {
       gateway: "easebuzz",
       display_name: "EaseBuzz",
