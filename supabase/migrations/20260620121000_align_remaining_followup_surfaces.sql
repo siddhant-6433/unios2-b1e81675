@@ -88,6 +88,7 @@ LEFT JOIN sla_breaches sb ON sb.profile_id = c.profile_id
 LEFT JOIN overdue_fups ofu ON ofu.profile_id = c.profile_id
 LEFT JOIN app_checkins ac ON ac.profile_id = c.profile_id;
 
+-- lint-allow: this dashboard view intentionally respects caller RLS; privileged summaries go through my_tat_defaults().
 ALTER VIEW public.counsellor_tat_defaults SET (security_invoker = true);
 GRANT SELECT ON public.counsellor_tat_defaults TO authenticated;
 
