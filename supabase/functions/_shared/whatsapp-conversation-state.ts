@@ -40,7 +40,7 @@ interface SupabaseLike {
     upsert: (
       values: Record<string, unknown>,
       options?: { onConflict?: string },
-    ) => Promise<{ error: { message?: string } | null }>;
+    ) => PromiseLike<{ error: { message?: string } | null }>;
   };
 }
 

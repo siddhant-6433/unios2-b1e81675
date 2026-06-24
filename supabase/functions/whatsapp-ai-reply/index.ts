@@ -1,6 +1,12 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { digits, sendWhatsAppText } from "../_shared/whatsapp-channel.ts";
+import {
+  digits,
+  sendWhatsAppText as rawSendWhatsAppText,
+  type WhatsAppChannelHint,
+  type WhatsAppSendResult,
+} from "../_shared/whatsapp-channel.ts";
 import { logWhatsAppAutomationEvent } from "../_shared/whatsapp-automation-events.ts";
+import { createWhatsAppAgUiTrace } from "../_shared/copilotkit-agui.ts";
 import {
   conversationBusinessKey,
   upsertConversationState,
@@ -177,7 +183,13 @@ FACILITIES:
 - Wi-Fi campus, transport facility
 	`;
 
-type SupabaseAdminClient = ReturnType<typeof createClient>;
+type SupabaseAdminClient = ReturnType<typeof createClient<Record<string, unknown>>>;
+const sendWhatsAppText = rawSendWhatsAppText as unknown as (
+  admin: SupabaseAdminClient,
+  hint: WhatsAppChannelHint,
+  to: string,
+  text: string,
+) => Promise<WhatsAppSendResult>;
 
 interface AdmissionCourseOption {
   number: string;
@@ -364,7 +376,11 @@ async function loadReplyExamplesContext(
 ): Promise<string> {
   if (!query || query.trim().length < 3) return "";
   try {
-    const { data, error } = await admin.rpc("match_admissions_ai_reply_examples", {
+    const rpc = admin.rpc as (
+      fn: string,
+      args: Record<string, unknown>,
+    ) => PromiseLike<{ data: unknown; error: { message?: string } | null }>;
+    const { data, error } = await rpc("match_admissions_ai_reply_examples", {
       p_query: query,
       p_course_id: courseId,
       p_target_channel: "whatsapp",
@@ -837,6 +853,18 @@ Deno.serve(async (req) => {
       });
     }
 
+    const agUiTrace = createWhatsAppAgUiTrace({
+      phone,
+      businessNumber: sendResult.businessNumber || sendResult.businessPhoneNumberId || channelKey,
+      provider: sendResult.provider,
+      leadId,
+      userMessage: message,
+      assistantMessage: aiReply,
+      queryType,
+      confidence,
+      action: botAction,
+    });
+
     // Log outbound AI reply
     await admin.from("whatsapp_messages").insert({
       lead_id: leadId,
@@ -862,7 +890,10 @@ Deno.serve(async (req) => {
       decision: botAction,
       reason: queryType,
       confidence,
-      metadata: { message_id: sendResult.messageId },
+      metadata: {
+        message_id: sendResult.messageId,
+        copilotkit: agUiTrace,
+      },
     });
 
     await upsertConversationState(admin, {
@@ -884,9 +915,10 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ success: true, reply: aiReply, query_type: queryType, action: botAction }), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("AI reply error:", err);
-    return new Response(JSON.stringify({ error: err.message }), {
+    const message = err instanceof Error ? err.message : "AI reply failed";
+    return new Response(JSON.stringify({ error: message }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }

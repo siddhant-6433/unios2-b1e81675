@@ -49,7 +49,7 @@ interface SupabaseLike {
   from: (table: string) => {
     select: (columns: string) => {
       eq: (column: string, value: unknown) => {
-        order: (column: string, options?: { ascending?: boolean }) => Promise<{
+        order: (column: string, options?: { ascending?: boolean }) => PromiseLike<{
           data: unknown[] | null;
           error: { message?: string } | null;
         }>;
