@@ -301,6 +301,11 @@ async function ruleD(violations) {
       if (isAllowed(lines, idx)) continue;
 
       const prefixWindow = text.slice(Math.max(0, m.index - 1600), m.index);
+      const hasDrop =
+        /drop\s+constraint\s+if\s+exists/i.test(prefixWindow) &&
+        new RegExp(`\\b${escapeRegex(constraintName)}\\b`, "i").test(prefixWindow);
+      if (hasDrop) continue;
+
       const hasGuard =
         /\bpg_constraint\b/i.test(prefixWindow) &&
         new RegExp(`\\b${escapeRegex(constraintName)}\\b`, "i").test(prefixWindow);

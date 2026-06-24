@@ -48,6 +48,7 @@ interface Conversation {
   lead_name: string | null;
   lead_stage: string | null;
   lead_person_role: string | null;
+  lead_source: string | null;
   course_name: string | null;
   last_message: string | null;
   last_direction: string;
@@ -433,7 +434,7 @@ const conversationBusinessKey = (conv?: Conversation | null) =>
     : (conv?.business_phone_number_id || conv?.business_phone_number || null);
 
 const CONVERSATION_SELECT_RICH = `
-  phone, lead_id, lead_name, lead_stage, lead_person_role, course_name,
+  phone, lead_id, lead_name, lead_stage, lead_person_role, lead_source, course_name,
   last_message, last_direction, last_message_at, unread_count,
   counsellor_id, counsellor_name, has_inbound,
   provider, business_phone_number_id, business_phone_number,
@@ -461,6 +462,7 @@ const withConversationDefaults = (row: any): Conversation => ({
   provider: row.provider || null,
   conversation_mode: row.conversation_mode || null,
   conversation_state: row.conversation_state || null,
+  lead_source: row.lead_source || null,
   owner_user_id: row.owner_user_id || null,
   escalation_role: row.escalation_role || null,
   handoff_reason: row.handoff_reason || null,
@@ -829,7 +831,7 @@ const WhatsAppInbox = () => {
     if (leadIds.length > 0) {
       const { data: leadsData, error: leadsError } = await supabase
         .from("leads" as any)
-        .select("id, name, stage, person_role, counsellor_id, course_id")
+        .select("id, name, stage, person_role, source, counsellor_id, course_id")
         .in("id", leadIds);
       if (leadsError) throw leadsError;
 
@@ -915,6 +917,7 @@ const WhatsAppInbox = () => {
           lead_name: lead?.name || null,
           lead_stage: lead?.stage || null,
           lead_person_role: lead?.person_role || null,
+          lead_source: lead?.source || null,
           course_name: lead?.course_id ? courseById.get(lead.course_id) || null : null,
           last_message: latest.content,
           last_direction: latest.direction || "inbound",
@@ -1719,6 +1722,9 @@ const WhatsAppInbox = () => {
     return name.split(/\s+/).filter(w => w.length > 2 && w[0] === w[0].toUpperCase()).map(w => w[0]).join("").slice(0, 4) || name.slice(0, 6);
   };
 
+  const sourceLabel = (source: string | null) =>
+    source ? source.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : null;
+
   // Format phone: strip 91 prefix for Indian numbers, keep ISD for others
   const formatPhone = (phone: string) => {
     const digits = phone.replace(/\D/g, "");
@@ -2099,6 +2105,7 @@ const WhatsAppInbox = () => {
                               <p className="text-[10px] text-muted-foreground flex items-center gap-1">
                                 {formatPhone(c.phone)}
                                 {c.course_name && <span className="px-1 rounded bg-blue-50 text-blue-600 text-[8px] font-medium">{courseAcronym(c.course_name)}</span>}
+                                {c.lead_source && <span className="px-1 rounded bg-emerald-50 text-emerald-700 text-[8px] font-medium capitalize">{sourceLabel(c.lead_source)}</span>}
                                 {c.counsellor_name && !isStaffConv(c) && (
                                   <span className="text-[9px] text-muted-foreground/70">· {c.counsellor_name.split(" ")[0]}</span>
                                 )}
@@ -2153,7 +2160,7 @@ const WhatsAppInbox = () => {
             ) : (
               <>
                 {/* Thread header */}
-                <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
+                <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-wrap lg:flex-nowrap">
                   <Button variant="ghost" size="icon" className="sm:hidden h-8 w-8" onClick={() => setSelectedPhone(null)}>
                     <ArrowLeft className="h-4 w-4" />
                   </Button>
@@ -2163,114 +2170,127 @@ const WhatsAppInbox = () => {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <p className="text-sm font-semibold text-foreground truncate">{selectedConv?.lead_name || (selectedPhone ? formatPhone(selectedPhone) : "")}</p>
-	                      {selectedConv?.counsellor_name && (
-	                        <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 dark:bg-violet-900/30 border border-violet-200 dark:border-violet-700 px-2 py-0.5 text-[10px] font-medium text-violet-700 dark:text-violet-300 whitespace-nowrap">
-	                          <User className="h-2.5 w-2.5" />
-	                          {selectedConv.counsellor_name}
-	                        </span>
-	                      )}
                       {selectedConv?.conversation_state && (
                         <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-700 whitespace-nowrap">
                           {stateLabel(selectedConv.conversation_state)}
                         </span>
                       )}
                     </div>
-                    <p className="text-[10px] text-muted-foreground flex items-center gap-1.5 mt-0.5">
+                    <p className="text-[10px] text-muted-foreground flex items-center gap-1.5 mt-0.5 flex-wrap">
                       {selectedPhone ? formatPhone(selectedPhone) : ""}
                       {selectedConv?.course_name && (
                         <span
-                          className="px-1.5 py-0 rounded bg-blue-100 text-blue-700 text-[9px] font-semibold cursor-pointer hover:bg-blue-200 transition-colors"
+                          className="inline-block max-w-[32rem] px-1.5 py-0 rounded bg-blue-100 text-blue-700 text-[9px] font-semibold cursor-pointer hover:bg-blue-200 transition-colors truncate"
                           title={`${selectedConv.course_name} — click to copy`}
                           onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(selectedConv.course_name!); toast({ title: "Copied", description: selectedConv.course_name }); }}
-                        >{courseAcronym(selectedConv.course_name)}</span>
+                        >Course: {selectedConv.course_name}</span>
+                      )}
+                      {selectedConv?.lead_source && (
+                        <span
+                          className="px-1.5 py-0 rounded bg-emerald-50 text-emerald-700 text-[9px] font-semibold capitalize"
+                          title={`Lead source: ${sourceLabel(selectedConv.lead_source)}`}
+                        >Source: {sourceLabel(selectedConv.lead_source)}</span>
                       )}
                     </p>
                   </div>
-                  {conversationBusinessKey(selectedConv) && aiMode && (
+                  <div className="ml-auto flex shrink-0 items-center justify-end gap-2 flex-wrap">
+                    {selectedConv?.counsellor_name && (
+                      <button
+                        type="button"
+                        title={`${selectedConv.counsellor_name} — click to copy`}
+                        onClick={() => { navigator.clipboard.writeText(selectedConv.counsellor_name!); toast({ title: "Copied", description: selectedConv.counsellor_name }); }}
+                        className="inline-flex items-center gap-1 rounded-lg bg-violet-100 dark:bg-violet-900/30 border border-violet-200 dark:border-violet-700 px-2.5 py-1.5 text-xs font-medium text-violet-700 dark:text-violet-300 whitespace-nowrap hover:bg-violet-200 dark:hover:bg-violet-900/50 transition-colors"
+                      >
+                        <User className="h-3 w-3" />
+                        {selectedConv.counsellor_name}
+                      </button>
+                    )}
+                    {conversationBusinessKey(selectedConv) && aiMode && (
+                      <button
+                        onClick={toggleAiMode}
+                        disabled={aiModeSaving}
+                        title={aiMode === "human"
+                          ? "AI is paused — humans handle this chat. Click to re-enable AI auto-reply."
+                          : "AI auto-reply is on. Click to pause and handle this chat manually."}
+                        className={`flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap disabled:opacity-50 ${aiMode === "human"
+                          ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                          : "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"}`}
+                      >
+                        {aiMode === "human" ? "🧑 Human" : "🤖 AI"}
+                      </button>
+                    )}
                     <button
-                      onClick={toggleAiMode}
-                      disabled={aiModeSaving}
-                      title={aiMode === "human"
-                        ? "AI is paused — humans handle this chat. Click to re-enable AI auto-reply."
-                        : "AI auto-reply is on. Click to pause and handle this chat manually."}
-                      className={`flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap disabled:opacity-50 ${aiMode === "human"
-                        ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
-                        : "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"}`}
-                    >
-                      {aiMode === "human" ? "🧑 Human" : "🤖 AI"}
-                    </button>
-                  )}
-                  <button
-                    onClick={() => {
-                      if (copilotResult || copilotError) {
-                        setShowCopilotPanel(v => !v);
-                      } else {
-                        void runCopilotAssist();
-                      }
-                    }}
-                    disabled={copilotLoading}
-                    className={`flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap disabled:opacity-50 ${
-                      showCopilotPanel
-                        ? "border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
-                        : "border-input bg-background text-muted-foreground hover:bg-muted/50"
-                    }`}
-                  >
-                    {copilotLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Bot className="h-3 w-3" />}
-                    Copilot
-                  </button>
-                  {selectedConv?.lead_id && (
-                    <button
-                      onClick={() => navigate(`/admissions/${selectedConv.lead_id}`)}
-                      className="flex items-center gap-1 rounded-lg border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 transition-colors whitespace-nowrap"
-                    >
-                      View Lead <ExternalLink className="h-3 w-3" />
-                    </button>
-                  )}
-                  {selectedConv?.lead_id && selectedConv?.lead_stage !== "dnc" && (
-                    <Button
-                      variant="ghost" size="sm"
-                      className="gap-1 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
-                      onClick={async () => {
-                        if (!selectedConv?.lead_id) return;
-                        // Mark DNC first; then send the farewell with bypass_dnc
-                        // so the edge function's own DNC guard doesn't swallow it.
-                        const dncLeadId = selectedConv.lead_id;
-                        await supabase.from("leads").update({ stage: "dnc" as any }).eq("id", dncLeadId);
-                        const { error: replyErr } = await invokeEdge("whatsapp-reply", {
-                          body: {
-                            phone: selectedPhone,
-                            message: "You have been added to our Do Not Contact list. We will not reach out to you via call or WhatsApp going forward. If this was a mistake, please reply START or call us at +91 9555192192.",
-                            lead_id: dncLeadId,
-                            bypass_dnc: true,
-                            ...replyChannelPayload(selectedConv),
-                          },
-                        });
-                        // Reflect new DNC status locally so composer disables immediately
-                        // without waiting for a view refetch.
-                        setConversations(prev => prev.map(c =>
-                          c.lead_id === dncLeadId ? { ...c, lead_stage: "dnc" } : c
-                        ));
-                        if (replyErr) {
-                          toast({
-                            title: "Lead marked DNC",
-                            description: replyErr.sessionExpired
-                              ? "Marked, but session expired — sign in again to send the farewell."
-                              : `Marked, but farewell send failed: ${replyErr.message || "unknown error"}`,
-                            variant: "destructive",
-                          });
+                      onClick={() => {
+                        if (copilotResult || copilotError) {
+                          setShowCopilotPanel(v => !v);
                         } else {
-                          toast({ title: "Lead marked DNC", description: "DNC notification sent via WhatsApp." });
+                          void runCopilotAssist();
                         }
                       }}
+                      disabled={copilotLoading}
+                      className={`flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap disabled:opacity-50 ${
+                        showCopilotPanel
+                          ? "border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                          : "border-input bg-background text-muted-foreground hover:bg-muted/50"
+                      }`}
                     >
-                      <Ban className="h-3 w-3" /> Mark DNC
-                    </Button>
-                  )}
-                  {selectedConv?.lead_id && selectedConv?.lead_stage === "dnc" && (
-                    <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 px-2 py-1 rounded-md">
-                      <Ban className="h-3 w-3" /> DNC
-                    </span>
-                  )}
+                      {copilotLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Bot className="h-3 w-3" />}
+                      Copilot
+                    </button>
+                    {selectedConv?.lead_id && (
+                      <button
+                        onClick={() => navigate(`/admissions/${selectedConv.lead_id}`)}
+                        className="flex items-center gap-1 rounded-lg border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 transition-colors whitespace-nowrap"
+                      >
+                        View Lead <ExternalLink className="h-3 w-3" />
+                      </button>
+                    )}
+                    {selectedConv?.lead_id && selectedConv?.lead_stage !== "dnc" && (
+                      <Button
+                        variant="ghost" size="sm"
+                        className="gap-1 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                        onClick={async () => {
+                          if (!selectedConv?.lead_id) return;
+                          // Mark DNC first; then send the farewell with bypass_dnc
+                          // so the edge function's own DNC guard doesn't swallow it.
+                          const dncLeadId = selectedConv.lead_id;
+                          await supabase.from("leads").update({ stage: "dnc" }).eq("id", dncLeadId);
+                          const { error: replyErr } = await invokeEdge("whatsapp-reply", {
+                            body: {
+                              phone: selectedPhone,
+                              message: "You have been added to our Do Not Contact list. We will not reach out to you via call or WhatsApp going forward. If this was a mistake, please reply START or call us at +91 9555192192.",
+                              lead_id: dncLeadId,
+                              bypass_dnc: true,
+                              ...replyChannelPayload(selectedConv),
+                            },
+                          });
+                          // Reflect new DNC status locally so composer disables immediately
+                          // without waiting for a view refetch.
+                          setConversations(prev => prev.map(c =>
+                            c.lead_id === dncLeadId ? { ...c, lead_stage: "dnc" } : c
+                          ));
+                          if (replyErr) {
+                            toast({
+                              title: "Lead marked DNC",
+                              description: replyErr.sessionExpired
+                                ? "Marked, but session expired — sign in again to send the farewell."
+                                : `Marked, but farewell send failed: ${replyErr.message || "unknown error"}`,
+                              variant: "destructive",
+                            });
+                          } else {
+                            toast({ title: "Lead marked DNC", description: "DNC notification sent via WhatsApp." });
+                          }
+                        }}
+                      >
+                        <Ban className="h-3 w-3" /> Mark DNC
+                      </Button>
+                    )}
+                    {selectedConv?.lead_id && selectedConv?.lead_stage === "dnc" && (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 px-2 py-1 rounded-md">
+                        <Ban className="h-3 w-3" /> DNC
+                      </span>
+                    )}
+                  </div>
                 </div>
                 {/* Quick lead actions — only for lead conversations */}
                 {selectedConv?.lead_id && selectedConv?.lead_person_role !== "job_applicant" && selectedConv?.lead_person_role !== "vendor" && (

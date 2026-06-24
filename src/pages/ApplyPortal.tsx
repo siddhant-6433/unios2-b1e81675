@@ -262,6 +262,43 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
 
   const portal = usePortal();
   const passwordLoginEnabled = portal.id === "nimt";
+  const renderLoginLogo = (placement: "desktop" | "mobile") => {
+    const compact = placement === "mobile";
+
+    if (portal.id === "beacon") {
+      return (
+        <div className={`inline-flex items-center rounded-2xl bg-white/10 shadow-sm ring-1 ring-white/20 ${compact ? "p-2.5" : "p-4 xl:p-5"}`}>
+          <img
+            src={portal.logo}
+            alt={portal.name}
+            className={`${compact ? "h-16 max-w-[180px]" : "h-28 xl:h-32 max-w-[340px]"} w-auto object-contain brightness-0 invert`}
+          />
+        </div>
+      );
+    }
+
+    if (portal.id === "mirai") {
+      return (
+        <div className={`overflow-hidden rounded-2xl bg-[#77966d] shadow-sm ring-1 ring-white/15 ${compact ? "h-16 w-16" : "h-28 w-28 xl:h-32 xl:w-32"}`}>
+          <img
+            src={portal.logo}
+            alt={portal.name}
+            className="h-full w-full scale-[1.2] object-cover object-center"
+          />
+        </div>
+      );
+    }
+
+    const src = placement === "desktop" && portal.logoWhite ? portal.logoWhite : portal.logo;
+    const shouldInvert = placement === "desktop" && !portal.logoWhite;
+    return (
+      <img
+        src={src}
+        alt={portal.name}
+        className={`${compact ? "h-9" : "h-12 max-w-[200px]"} w-auto object-contain ${shouldInvert ? "brightness-0 invert" : ""}`}
+      />
+    );
+  };
 
   const handlePasswordLogin = async () => {
     if (!passwordLoginEnabled) return;
@@ -354,11 +391,7 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
 
         {/* Logo */}
         <div className="relative z-10">
-          {portal.logoWhite ? (
-            <img src={portal.logoWhite} alt={portal.name} className="h-12 w-auto object-contain max-w-[200px]" />
-          ) : (
-            <img src={portal.logo} alt={portal.name} className="h-12 w-auto object-contain max-w-[200px] brightness-0 invert" />
-          )}
+          {renderLoginLogo("desktop")}
         </div>
 
         {/* Headline */}
@@ -408,7 +441,7 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
         <div className="w-full max-w-sm">
           {/* Mobile logo */}
           <div className="mb-8 lg:hidden">
-            <img src={portal.logo} alt={portal.name} className="h-9 w-auto object-contain" />
+            {renderLoginLogo("mobile")}
             <p className="text-xs text-muted-foreground mt-1">{portal.tagline}</p>
           </div>
 
@@ -1032,7 +1065,7 @@ function ApplicationDashboardView({
       <header className="bg-white border-b border-gray-100 sticky top-0 z-10">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
           {portal.logo ? (
-            <img src={portal.logo} alt={portal.name} className="h-8 w-auto object-contain" />
+            <ApplicationHeaderLogo />
           ) : (
             <div className="flex items-center gap-2">
               <GraduationCap className="h-5 w-5 text-blue-600" />
@@ -2296,13 +2329,27 @@ const ApplyPortal = () => {
 };
 
 // ─── Header ───
-function Header({ appId, completedCount, totalSteps, onLogout }: { appId: string | null; completedCount: number; totalSteps: number; onLogout: () => void }) {
+function ApplicationHeaderLogo() {
   const portal = usePortal();
+  const sizeClass = portal.id === "nimt"
+    ? "h-12 sm:h-14 max-w-[260px]"
+    : "h-16 sm:h-[72px] max-w-[180px]";
+
+  return (
+    <img
+      src={portal.logo}
+      alt={portal.name}
+      className={`${sizeClass} w-auto object-contain`}
+    />
+  );
+}
+
+function Header({ appId, completedCount, totalSteps, onLogout }: { appId: string | null; completedCount: number; totalSteps: number; onLogout: () => void }) {
   return (
     <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-30">
       <div className="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
         <div className="flex items-center">
-          <img src={portal.logo} alt={portal.name} className="h-8 w-auto object-contain" />
+          <ApplicationHeaderLogo />
         </div>
         <div className="flex items-center gap-3">
           {appId && (

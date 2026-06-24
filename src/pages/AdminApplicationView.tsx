@@ -34,6 +34,72 @@ interface DocReview {
   reviewed_by_name?: string | null;
 }
 
+type ApplicationCourseSelection = {
+  course_id?: string | null;
+  campus_id?: string | null;
+  course_name?: string | null;
+  campus_name?: string | null;
+};
+
+type LeadCourse = {
+  name: string;
+  code: string | null;
+  duration_years: number | null;
+  eligibility: string | null;
+  entrance_exam: string | null;
+  entrance_mandatory: boolean | null;
+};
+
+const COURSE_SELECT = "name,code,duration_years,eligibility,entrance_exam,entrance_mandatory";
+
+async function fetchCourseDetails(courseId: string): Promise<LeadCourse | null> {
+  const { data } = await supabase
+    .from("courses")
+    .select(COURSE_SELECT)
+    .eq("id", courseId)
+    .maybeSingle();
+  return (data as LeadCourse | null) || null;
+}
+
+async function resolvePrimaryCourseSelection(selection: ApplicationCourseSelection | null | undefined) {
+  if (!selection) return null;
+  if (selection.course_id) {
+    return {
+      course_id: selection.course_id,
+      campus_id: selection.campus_id || null,
+    };
+  }
+  if (!selection.course_name) return null;
+
+  const { data } = await supabase
+    .from("courses")
+    .select(`
+      id, name,
+      departments (
+        institutions (
+          campus_id,
+          campuses ( name )
+        )
+      )
+    `)
+    .ilike("name", selection.course_name)
+    .limit(10);
+
+  const courseRows = (data || []) as any[];
+  const campusNeedle = (selection.campus_name || "").trim().toLowerCase();
+  const match = courseRows.find((course) => {
+    if (!campusNeedle) return true;
+    const campusName = course.departments?.institutions?.campuses?.name || "";
+    return campusName.trim().toLowerCase() === campusNeedle;
+  }) || courseRows[0];
+
+  if (!match?.id) return null;
+  return {
+    course_id: match.id as string,
+    campus_id: (match.departments?.institutions?.campus_id as string | null | undefined) || null,
+  };
+}
+
 export default function AdminApplicationView() {
   const { applicationId } = useParams<{ applicationId: string }>();
   const navigate = useNavigate();
@@ -117,6 +183,7 @@ export default function AdminApplicationView() {
       // on the application only has names, so we read them from the linked lead.
       // Also pulls PAN/AN for the lifecycle stepper.
       if (appRow?.lead_id) {
+        const primarySelection = ((appRow.course_selections || [])[0] as ApplicationCourseSelection | undefined) || null;
         const [{ data: leadRow }, { data: offerRows }, { data: pmtRows }, cahetRow] = await Promise.all([
           supabase.from("leads")
             .select("id, name, course_id, campus_id, pre_admission_no, admission_no, course:course_id(name,code,duration_years,eligibility,entrance_exam,entrance_mandatory)")
@@ -129,20 +196,44 @@ export default function AdminApplicationView() {
             .eq("status", "confirmed"),
           fetchCahetRegistration(supabase, appRow.lead_id),
         ]);
+        const resolvedSelection = await resolvePrimaryCourseSelection(primarySelection);
+        let effectiveLeadRow = leadRow as any;
+        if (leadRow && resolvedSelection?.course_id) {
+          const shouldRepairLeadCourse =
+            leadRow.course_id !== resolvedSelection.course_id ||
+            (!!resolvedSelection.campus_id && leadRow.campus_id !== resolvedSelection.campus_id);
+
+          if (shouldRepairLeadCourse) {
+            const repairPayload: Record<string, string> = { course_id: resolvedSelection.course_id };
+            if (resolvedSelection.campus_id) repairPayload.campus_id = resolvedSelection.campus_id;
+            const { error: repairError } = await supabase
+              .from("leads")
+              .update(repairPayload as any)
+              .eq("id", appRow.lead_id);
+            if (repairError) console.warn("[AdminApplicationView] lead course repair failed:", repairError);
+
+            effectiveLeadRow = {
+              ...leadRow,
+              course_id: resolvedSelection.course_id,
+              campus_id: resolvedSelection.campus_id || leadRow.campus_id,
+              course: await fetchCourseDetails(resolvedSelection.course_id),
+            };
+          }
+        }
         let ruleRow = null;
-        if (leadRow?.course_id) {
+        if (effectiveLeadRow?.course_id) {
           const { data } = await supabase
             .from("eligibility_rules")
             .select("notes, entrance_exam_name, entrance_exam_required")
-            .eq("course_id", leadRow.course_id)
+            .eq("course_id", effectiveLeadRow.course_id)
             .maybeSingle();
           ruleRow = data;
         }
-        setLead(leadRow as any);
+        setLead(effectiveLeadRow as any);
         setEligibilityRule(ruleRow);
         setHasOffer(!!(offerRows && offerRows.length));
         setAppFeePaid((pmtRows || []).reduce((sum, p: any) => sum + Number(p.amount || 0), 0));
-        const courseName = (leadRow as any)?.course?.name || ((appRow.course_selections || [])[0] as any)?.course_name || null;
+        const courseName = effectiveLeadRow?.course?.name || primarySelection?.course_name || null;
         const applicationCahet = cahetRegistrationFromApplication(appRow, appRow.lead_id);
         setCahetRegistration(isBptOrBmritCourseName(courseName) ? (cahetRow || applicationCahet) : null);
       } else {
@@ -311,14 +402,15 @@ export default function AdminApplicationView() {
     }
     setRepairingLead(true);
     try {
+      const firstCourse = ((app.course_selections || [])[0] as ApplicationCourseSelection) || {};
+      const resolvedSelection = await resolvePrimaryCourseSelection(firstCourse);
       const { data: existingLead } = await supabase
         .from("leads")
-        .select("id")
+        .select("id, course_id, campus_id")
         .eq("application_id", app.application_id)
         .maybeSingle();
 
       let leadId = existingLead?.id as string | undefined;
-      const firstCourse = ((app.course_selections || [])[0] as any) || {};
       const stage = app.status === "approved"
         ? "application_approved"
         : app.status === "submitted" || app.status === "under_review"
@@ -338,8 +430,8 @@ export default function AdminApplicationView() {
             email: app.email || null,
             guardian_name: guardianName,
             guardian_phone: guardianPhone,
-            course_id: firstCourse.course_id || null,
-            campus_id: firstCourse.campus_id || null,
+            course_id: resolvedSelection?.course_id || null,
+            campus_id: resolvedSelection?.campus_id || null,
             source: "website",
             stage,
             person_role: "applicant",
@@ -349,6 +441,18 @@ export default function AdminApplicationView() {
           .single();
         if (insertErr) throw insertErr;
         leadId = inserted.id;
+      } else if (
+        resolvedSelection?.course_id &&
+        (existingLead.course_id !== resolvedSelection.course_id ||
+          (!!resolvedSelection.campus_id && existingLead.campus_id !== resolvedSelection.campus_id))
+      ) {
+        const repairPayload: Record<string, string> = { course_id: resolvedSelection.course_id };
+        if (resolvedSelection.campus_id) repairPayload.campus_id = resolvedSelection.campus_id;
+        const { error: leadUpdateErr } = await supabase
+          .from("leads")
+          .update(repairPayload as any)
+          .eq("id", leadId);
+        if (leadUpdateErr) throw leadUpdateErr;
       }
 
       const { error: appUpdateErr } = await supabase
@@ -607,9 +711,11 @@ export default function AdminApplicationView() {
               const canIssueOffer = !!lead?.id && (
                 role === "super_admin" || role === "principal" || role === "counsellor" ||
                 role === "admission_head" || role === "campus_admin"
-              );
+              ) && !!lead.course_id;
               const reason = !lead?.id
                 ? "No lead linked to this application"
+                : !lead.course_id
+                ? "No course/class is linked to this application yet"
                 : !canIssueOffer
                 ? "You do not have permission to issue offers"
                 : undefined;

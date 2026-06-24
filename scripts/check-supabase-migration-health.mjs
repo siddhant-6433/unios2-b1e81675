@@ -1,13 +1,16 @@
 #!/usr/bin/env node
+import { readdir } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const args = new Set(process.argv.slice(2));
 const modeArg = [...args].find((arg) => arg.startsWith("--mode="));
 const mode = modeArg ? modeArg.slice("--mode=".length) : "validate";
-const validModes = new Set(["validate", "clean"]);
+const validModes = new Set(["validate", "clean", "apply"]);
 
 if (!validModes.has(mode)) {
-  console.error(`Unknown mode "${mode}". Use --mode=validate or --mode=clean.`);
+  console.error(`Unknown mode "${mode}". Use --mode=validate, --mode=clean, or --mode=apply.`);
   process.exit(2);
 }
 
@@ -41,6 +44,36 @@ function printResult(result) {
   if (result.stderr) process.stderr.write(result.stderr);
 }
 
+async function checkUniqueMigrationVersions() {
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const migrationsDir = join(repoRoot, "supabase", "migrations");
+  const files = (await readdir(migrationsDir)).filter((file) => file.endsWith(".sql")).sort();
+  const byVersion = new Map();
+
+  for (const file of files) {
+    const match = file.match(/^(\d{14})_/);
+    if (!match) continue;
+    const version = match[1];
+    const rows = byVersion.get(version) || [];
+    rows.push(file);
+    byVersion.set(version, rows);
+  }
+
+  const duplicates = [...byVersion.entries()].filter(([, rows]) => rows.length > 1);
+  if (duplicates.length === 0) return;
+
+  console.error("Duplicate Supabase migration version prefixes found.");
+  console.error("Supabase records only the numeric timestamp as the migration version, so duplicates can be skipped or fail recording after their SQL runs.");
+  for (const [version, rows] of duplicates) {
+    console.error(`- ${version}:`);
+    for (const row of rows) console.error(`  - supabase/migrations/${row}`);
+  }
+  console.error("Rename each duplicate to a unique timestamp before validating or applying migrations.");
+  process.exit(1);
+}
+
+await checkUniqueMigrationVersions();
+
 const versionCheck = run("supabase", ["--version"]);
 if (versionCheck.status !== 0) {
   printResult(versionCheck);
@@ -63,6 +96,18 @@ if (process.env.SUPABASE_PROJECT_REF && process.env.SUPABASE_DB_PASSWORD) {
   }
 }
 
+if (mode === "apply") {
+  const push = run("supabase", ["db", "push", "--include-all", "--yes"]);
+  printResult(push);
+
+  if (push.status !== 0) {
+    console.error("Supabase migration apply failed. Production may still have pending migrations.");
+    process.exit(push.status || 1);
+  }
+
+  console.log("Supabase migration apply completed. Verifying production is clean...");
+}
+
 const dryRun = run("supabase", ["db", "push", "--dry-run"]);
 printResult(dryRun);
 
@@ -74,13 +119,15 @@ if (dryRun.status !== 0) {
 const output = `${dryRun.stdout || ""}\n${dryRun.stderr || ""}`;
 const isClean = output.includes("Remote database is up to date.");
 
-if (mode === "clean" && !isClean) {
-  console.error("Supabase migrations are valid but not fully applied. Run `supabase db push` on main.");
+if ((mode === "clean" || mode === "apply") && !isClean) {
+  console.error("Supabase migrations are valid but not fully applied. Run `npm run db:migrations:apply` on main.");
   process.exit(1);
 }
 
 if (mode === "clean") {
   console.log("Supabase migration health: remote is up to date.");
+} else if (mode === "apply") {
+  console.log("Supabase migration apply verified: remote is up to date.");
 } else {
   console.log("Supabase migration health: dry-run completed successfully.");
 }
