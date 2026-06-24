@@ -15,6 +15,9 @@ const outboundContextHelper = readFileSync("supabase/functions/_shared/whatsapp-
 const inboundEventsHelper = readFileSync("supabase/functions/_shared/whatsapp-inbound-events.ts", "utf8");
 const orchestrator = readFileSync("supabase/functions/whatsapp-conversation-orchestrator/index.ts", "utf8");
 const routeHealth = readFileSync("supabase/functions/whatsapp-route-health/index.ts", "utf8");
+const copilotAssist = readFileSync("supabase/functions/whatsapp-copilot-assist/index.ts", "utf8");
+const copilotEvents = readFileSync("supabase/functions/whatsapp-copilot-events/index.ts", "utf8");
+const copilotAgui = readFileSync("supabase/functions/_shared/copilotkit-agui.ts", "utf8");
 const replyLearning = readFileSync("supabase/functions/whatsapp-reply-learning/index.ts", "utf8");
 const voiceCall = readFileSync("supabase/functions/voice-call/index.ts", "utf8");
 const voiceScripts = readFileSync("voice-agent/scripts.ts", "utf8");
@@ -244,6 +247,19 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(routeHealth).toContain("whatsapp_channels");
     expect(supabaseConfig).toMatch(/\[functions\.whatsapp-conversation-orchestrator\]\s+verify_jwt = false/);
     expect(supabaseConfig).toMatch(/\[functions\.whatsapp-route-health\]\s+verify_jwt = false/);
+  });
+
+  it("adds a counsellor Copilot bridge without sending WhatsApp messages", () => {
+    expect(aiReply).toContain("createWhatsAppAgUiTrace");
+    expect(aiReply).toContain("copilotkit: agUiTrace");
+    expect(copilotAgui).toContain('protocol: "ag-ui"');
+    expect(copilotEvents).toContain("text/event-stream");
+    expect(copilotAssist).toContain("draft_reply");
+    expect(copilotAssist).toContain("should_pause_ai");
+    expect(copilotAssist).not.toContain("sendWhatsAppText");
+    expect(inbox).toContain('invokeEdge<CopilotAssistResult>("whatsapp-copilot-assist"');
+    expect(inbox).toContain("Draft added to composer");
+    expect(supabaseConfig).toMatch(/\[functions\.whatsapp-copilot-assist\]\s+verify_jwt = false/);
   });
 
   it("adds the course-brief knowledge base bridge without seeding USP copy", () => {
