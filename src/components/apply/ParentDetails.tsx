@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { ArrowRight, ArrowLeft, Loader2, AlertTriangle, User, Users, UserPlus } from "lucide-react";
+import { ArrowRight, ArrowLeft, Loader2, AlertTriangle, User, Users, UserPlus, CalendarIcon, ChevronLeft, ChevronRight, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { PhoneInput } from "@/components/ui/phone-input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ApplicationData } from "./types";
 import { usePortal } from "./PortalContext";
 import { getNationalityOptions, isIndianNationality } from "./countries";
@@ -61,6 +62,8 @@ interface Props {
 }
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
+const invalidCls = "border-destructive ring-1 ring-destructive/30 focus:ring-destructive/30";
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const NATIONALITIES = getNationalityOptions();
 
@@ -76,43 +79,217 @@ const INCOME_OPTIONS = [
 
 const MARITAL_OPTIONS = ["Married", "Single", "Divorced", "Widowed", "Separated"];
 
-const POSITION_OPTIONS = [
+const EMPLOYMENT_STATUS_OPTIONS = [
   "Employed", "Self-Employed", "Business Owner", "Professional",
   "Government Employee", "Homemaker", "Retired", "Other",
 ];
 
-/* ── DOB text input helper ── */
-function DobTextInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function toIsoDate(date: Date) {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function sameDate(a?: Date, b?: Date) {
+  return !!a && !!b
+    && a.getFullYear() === b.getFullYear()
+    && a.getMonth() === b.getMonth()
+    && a.getDate() === b.getDate();
+}
+
+function clampMonth(date: Date, minDate: Date, maxDate: Date) {
+  const month = new Date(date.getFullYear(), date.getMonth(), 1);
+  const minMonth = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+  const maxMonth = new Date(maxDate.getFullYear(), maxDate.getMonth(), 1);
+  if (month < minMonth) return minMonth;
+  if (month > maxMonth) return maxMonth;
+  return month;
+}
+
+/* ── DOB calendar picker helper ── */
+function ParentDobPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+
+  const selected: Date | undefined = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T00:00:00`)
+    : undefined;
+
+  const today = new Date();
+  const minDate = new Date(today.getFullYear() - 100, 0, 1);
+  const maxDate = new Date(today.getFullYear() - 15, today.getMonth(), today.getDate());
+  const initialView = clampMonth(selected ?? maxDate, minDate, maxDate);
+  const [viewMonth, setViewMonth] = useState(initialView);
+  const [draftDate, setDraftDate] = useState<Date | undefined>(selected);
+  const [choosingYear, setChoosingYear] = useState(false);
+
+  const displayValue = selected
+    ? selected.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+    : "";
+
+  const openPicker = (nextOpen: boolean) => {
+    if (nextOpen) {
+      const month = clampMonth(selected ?? maxDate, minDate, maxDate);
+      setViewMonth(month);
+      setDraftDate(selected);
+      setChoosingYear(false);
+    }
+    setOpen(nextOpen);
+  };
+
+  const firstDay = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), 1);
+  const startOffset = firstDay.getDay();
+  const gridStart = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), 1 - startOffset);
+  const days = Array.from({ length: 42 }, (_, i) => {
+    const date = new Date(gridStart);
+    date.setDate(gridStart.getDate() + i);
+    return date;
+  });
+  const years = Array.from(
+    { length: maxDate.getFullYear() - minDate.getFullYear() + 1 },
+    (_, i) => maxDate.getFullYear() - i,
+  );
+  const canGoPrev = new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1) >= new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+  const canGoNext = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1) <= new Date(maxDate.getFullYear(), maxDate.getMonth(), 1);
+
   return (
-    <input
-      type="text"
-      placeholder="dd/mm/yy"
-      value={value ? (() => {
-        const d = new Date(value);
-        if (isNaN(d.getTime())) return value;
-        const dd = String(d.getDate()).padStart(2, '0');
-        const mm = String(d.getMonth() + 1).padStart(2, '0');
-        const yy = String(d.getFullYear()).slice(-2);
-        return `${dd}/${mm}/${yy}`;
-      })() : ''}
-      onChange={e => {
-        let val = e.target.value.replace(/[^\d/]/g, '');
-        const digits = val.replace(/\//g, '');
-        if (digits.length <= 2) val = digits;
-        else if (digits.length <= 4) val = digits.slice(0, 2) + '/' + digits.slice(2);
-        else val = digits.slice(0, 2) + '/' + digits.slice(2, 4) + '/' + digits.slice(4, 6);
-        const parts = val.split('/');
-        if (parts.length === 3 && parts[0].length === 2 && parts[1].length === 2 && parts[2].length === 2) {
-          const year = parseInt(parts[2], 10);
-          const fullYear = year <= 50 ? 2000 + year : 1900 + year;
-          onChange(`${fullYear}-${parts[1]}-${parts[0]}`);
-        } else {
-          onChange(val);
-        }
-      }}
-      maxLength={8}
-      className={inputCls}
-    />
+    <Popover open={open} onOpenChange={openPicker}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={`${inputCls} flex items-center justify-between text-left ${!displayValue ? "text-muted-foreground" : ""}`}
+        >
+          <span>{displayValue || "Select date of birth"}</span>
+          <CalendarIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="z-[80] w-[312px] rounded-3xl border-border bg-popover p-0 shadow-xl"
+        align="start"
+        side="bottom"
+        sideOffset={8}
+        collisionPadding={16}
+      >
+        <div className="space-y-3 p-4">
+          <div className="flex items-center justify-between">
+            <h4 className="text-base font-semibold text-foreground">Set date</h4>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label="Close date picker"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => canGoPrev && setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1))}
+              disabled={!canGoPrev}
+              className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
+              aria-label="Previous month"
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setChoosingYear(!choosingYear)}
+              className="rounded-full px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted"
+            >
+              {MONTHS[viewMonth.getMonth()]} {viewMonth.getFullYear()}
+            </button>
+            <button
+              type="button"
+              onClick={() => canGoNext && setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1))}
+              disabled={!canGoNext}
+              className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
+              aria-label="Next month"
+            >
+              <ChevronRight className="h-5 w-5" />
+            </button>
+          </div>
+
+          {choosingYear ? (
+            <div className="max-h-56 overflow-y-auto pr-1">
+              <div className="grid grid-cols-3 gap-2">
+                {years.map(year => {
+                  const active = year === viewMonth.getFullYear();
+                  return (
+                    <button
+                      key={year}
+                      type="button"
+                      onClick={() => {
+                        setViewMonth(clampMonth(new Date(year, viewMonth.getMonth(), 1), minDate, maxDate));
+                        setChoosingYear(false);
+                      }}
+                      className={`rounded-full px-3 py-2 text-sm font-medium transition-colors ${
+                        active ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-muted"
+                      }`}
+                    >
+                      {year}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-7 gap-y-2">
+                {WEEKDAYS.map(day => (
+                  <div key={day} className="py-1 text-center text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {day}
+                  </div>
+                ))}
+                {days.map(date => {
+                  const inMonth = date.getMonth() === viewMonth.getMonth();
+                  const disabled = date < minDate || date > maxDate;
+                  const active = sameDate(date, draftDate);
+                  return (
+                    <button
+                      key={date.toISOString()}
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => setDraftDate(new Date(date))}
+                      className={`mx-auto flex h-8 w-8 items-center justify-center rounded-full text-sm transition-colors ${
+                        active
+                          ? "bg-primary text-primary-foreground shadow-sm"
+                          : inMonth
+                            ? "text-foreground hover:bg-muted"
+                            : "text-muted-foreground/35"
+                      } disabled:cursor-not-allowed disabled:text-muted-foreground/25 disabled:hover:bg-transparent`}
+                    >
+                      {date.getDate()}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <Button
+                type="button"
+                disabled={!draftDate}
+                onClick={() => {
+                  if (!draftDate) return;
+                  onChange(toIsoDate(draftDate));
+                  setOpen(false);
+                }}
+                className="h-10 w-full rounded-full gap-2"
+              >
+                Set Date
+                <Check className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -121,13 +298,34 @@ function SchoolParentBlock({
   title,
   value,
   onChange,
+  showErrors,
 }: {
   title: string;
   value: Record<string, string>;
   onChange: (v: Record<string, string>) => void;
+  showErrors?: boolean;
 }) {
-  const isIndian = isIndianNationality(value.nationality);
+  const nationality = value.nationality || "Indian";
+  const isIndian = isIndianNationality(nationality);
   const set = (field: string, val: string) => onChange({ ...value, [field]: val });
+  const legacyStatus = EMPLOYMENT_STATUS_OPTIONS.includes(value.current_position || "")
+    ? value.current_position || ""
+    : "";
+  const employmentStatus = value.employment_status || legacyStatus;
+  const positionValue = value.position || (legacyStatus ? "" : value.current_position || "");
+  const isHomemaker = employmentStatus === "Homemaker";
+  const missing = {
+    first_name: !value.first_name?.trim(),
+    last_name: !value.last_name?.trim(),
+    nationality: !nationality.trim(),
+    education: !value.education?.trim(),
+    employment_status: !employmentStatus,
+    employer_name: !isHomemaker && !value.employer_name?.trim(),
+    current_position: !isHomemaker && !positionValue.trim(),
+    marital_status: !value.marital_status?.trim(),
+    email: !value.email?.trim() || !EMAIL_RE.test(value.email),
+    phone_mobile: !PHONE_DIGITS_RE.test((value.phone_mobile || value.phone || '').replace(/\D/g, '')),
+  };
 
   return (
     <div className="space-y-4">
@@ -136,22 +334,22 @@ function SchoolParentBlock({
         {/* Row 1: First Name, Last Name, DOB */}
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">First Name *</label>
-          <input value={value.first_name || ''} onChange={e => set('first_name', e.target.value)} className={inputCls} />
+          <input value={value.first_name || ''} onChange={e => set('first_name', e.target.value)} className={`${inputCls} ${showErrors && missing.first_name ? invalidCls : ''}`} />
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Last Name *</label>
-          <input value={value.last_name || ''} onChange={e => set('last_name', e.target.value)} className={inputCls} />
+          <input value={value.last_name || ''} onChange={e => set('last_name', e.target.value)} className={`${inputCls} ${showErrors && missing.last_name ? invalidCls : ''}`} />
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Date of Birth</label>
-          <DobTextInput value={value.dob || ''} onChange={v => set('dob', v)} />
+          <ParentDobPicker value={value.dob || ''} onChange={v => set('dob', v)} />
         </div>
 
         {/* Row 2: Nationality, ID Type + Number */}
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nationality *</label>
           <select
-            value={value.nationality || 'Indian'}
+            value={nationality}
             onChange={e => {
               const nat = e.target.value;
               onChange({
@@ -161,7 +359,7 @@ function SchoolParentBlock({
                 id_number: '', // reset on nationality change
               });
             }}
-            className={inputCls}
+            className={`${inputCls} ${showErrors && missing.nationality ? invalidCls : ''}`}
           >
             {NATIONALITIES.map(n => (
               <option key={n.value} value={n.value}>{n.label}</option>
@@ -185,50 +383,80 @@ function SchoolParentBlock({
           />
         </div>
 
-        {/* Row 3: Education, Annual Income, Employer Name */}
+        {/* Row 3: Education, Marital Status, Email */}
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Education *</label>
-          <select value={value.education || ''} onChange={e => set('education', e.target.value)} className={inputCls}>
+          <select value={value.education || ''} onChange={e => set('education', e.target.value)} className={`${inputCls} ${showErrors && missing.education ? invalidCls : ''}`}>
             <option value="">Select Education</option>
             {EDUCATION_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
           </select>
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Annual Income</label>
-          <select value={value.annual_income || ''} onChange={e => set('annual_income', e.target.value)} className={inputCls}>
-            <option value="">Select Annual Income</option>
-            {INCOME_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Employer Name *</label>
-          <input value={value.employer_name || ''} onChange={e => set('employer_name', e.target.value)} placeholder="Employer Name" className={inputCls} />
-        </div>
-
-        {/* Row 4: Current Position, Marital Status, Email */}
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Current Position *</label>
-          <select value={value.current_position || ''} onChange={e => set('current_position', e.target.value)} className={inputCls}>
-            <option value="">Select Current Position</option>
-            {POSITION_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-          </select>
-        </div>
-        <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Marital Status *</label>
-          <select value={value.marital_status || ''} onChange={e => set('marital_status', e.target.value)} className={inputCls}>
+          <select value={value.marital_status || ''} onChange={e => set('marital_status', e.target.value)} className={`${inputCls} ${showErrors && missing.marital_status ? invalidCls : ''}`}>
             <option value="">Select Marital Status</option>
             {MARITAL_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
           </select>
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email Address *</label>
-          <input type="email" value={value.email || ''} onChange={e => set('email', e.target.value)} placeholder="Email Address" className={inputCls} />
+          <input type="email" value={value.email || ''} onChange={e => set('email', e.target.value)} placeholder="Email Address" className={`${inputCls} ${showErrors && missing.email ? invalidCls : ''}`} />
+        </div>
+
+        <div className="sm:col-span-3 space-y-3 border-t border-border pt-4">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-foreground">Employment Details</h4>
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Employment Status *</label>
+              <select
+                value={employmentStatus}
+                onChange={e => {
+                  const status = e.target.value;
+                  onChange({
+                    ...value,
+                    employment_status: status,
+                    employer_name: status === "Homemaker" ? "" : value.employer_name,
+                    position: status === "Homemaker" ? "" : value.position,
+                    current_position: status === "Homemaker" || legacyStatus ? "" : value.current_position,
+                  });
+                }}
+                className={`${inputCls} ${showErrors && missing.employment_status ? invalidCls : ''}`}
+              >
+                <option value="">Select Status</option>
+                {EMPLOYMENT_STATUS_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+            {!isHomemaker && (
+              <>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Employer Name *</label>
+                  <input value={value.employer_name || ''} onChange={e => set('employer_name', e.target.value)} placeholder="Employer Name" className={`${inputCls} ${showErrors && missing.employer_name ? invalidCls : ''}`} />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Position *</label>
+                  <input
+                    value={positionValue}
+                    onChange={e => onChange({ ...value, position: e.target.value, current_position: e.target.value })}
+                    placeholder="Position"
+                    className={`${inputCls} ${showErrors && missing.current_position ? invalidCls : ''}`}
+                  />
+                </div>
+              </>
+            )}
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Annual Income</label>
+              <select value={value.annual_income || ''} onChange={e => set('annual_income', e.target.value)} className={inputCls}>
+                <option value="">Select Annual Income</option>
+                {INCOME_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+          </div>
         </div>
 
         {/* Row 5: Phone (Mobile), Phone (Home) */}
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Phone Number (Mobile) *</label>
-          <PhoneInput value={value.phone_mobile || value.phone || ''} onChange={v => set('phone_mobile', v)} />
+          <PhoneInput value={value.phone_mobile || value.phone || ''} onChange={v => set('phone_mobile', v)} invalid={showErrors && missing.phone_mobile} />
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Phone Number (Home)</label>
@@ -275,6 +503,7 @@ function SimpleParentBlock({
         <PhoneInput
           value={value.phone || ''}
           onChange={(phone) => onChange({ ...value, phone })}
+          invalid={showErrors && phoneMissing}
         />
         {showErrors && phoneMissing && (
           <p className="mt-1 text-[11px] text-destructive">A valid 10-digit mobile number is required.</p>
@@ -355,7 +584,7 @@ function GuardianBlock({
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
             Mobile <span className="text-destructive">*</span>
           </label>
-          <PhoneInput value={value.phone || ''} onChange={(phone) => set({ phone })} />
+          <PhoneInput value={value.phone || ''} onChange={(phone) => set({ phone })} invalid={showErrors && phoneMissing} />
           {showErrors && phoneMissing && (
             <p className="mt-1 text-[11px] text-destructive">A valid 10-digit mobile number is required.</p>
           )}
@@ -466,9 +695,31 @@ export function ParentDetails({ data, onChange, onNext, onBack, saving, readOnly
   const [guardianOn, setGuardianOn] = useState(guardianHasData);
 
   const validPhone = (p?: string) => PHONE_DIGITS_RE.test((p || '').replace(/\D/g, ''));
+  const schoolParentOk = (p: Record<string, string>) => {
+    const legacyStatus = EMPLOYMENT_STATUS_OPTIONS.includes(p.current_position || "")
+      ? p.current_position || ""
+      : "";
+    const employmentStatus = p.employment_status || legacyStatus;
+    const isHomemaker = employmentStatus === "Homemaker";
+    const positionValue = p.position || (legacyStatus ? "" : p.current_position || "");
+    const nationality = p.nationality || "Indian";
+
+    return !!(
+      p.first_name?.trim()
+      && p.last_name?.trim()
+      && nationality.trim()
+      && p.education?.trim()
+      && employmentStatus
+      && (isHomemaker || p.employer_name?.trim())
+      && (isHomemaker || positionValue.trim())
+      && p.marital_status?.trim()
+      && p.email?.trim()
+      && EMAIL_RE.test(p.email)
+      && validPhone(p.phone_mobile || p.phone)
+    );
+  };
   const parentsOk = isSchool
-    ? !!(father.first_name && father.last_name && validPhone(father.phone_mobile)
-        && mother.first_name && mother.last_name && validPhone(mother.phone_mobile))
+    ? schoolParentOk(father) && schoolParentOk(mother)
     : !!(father.name?.trim() && validPhone(father.phone)
         && mother.name?.trim() && validPhone(mother.phone));
   const guardianOk = !guardianOn || (
@@ -503,7 +754,7 @@ export function ParentDetails({ data, onChange, onNext, onBack, saving, readOnly
           <SectionCard title="Father" icon={User}
             accent="border-blue-500" iconColor="text-blue-600" bg="bg-blue-50/60">
             {isSchool ? (
-              <SchoolParentBlock title="" value={data.father as any} onChange={v => onChange({ father: v })} />
+              <SchoolParentBlock title="" value={data.father as any} onChange={v => onChange({ father: v })} showErrors={showErrors} />
             ) : (
               <SimpleParentBlock value={data.father as any} onChange={v => onChange({ father: v })} required showErrors={showErrors} />
             )}
@@ -512,7 +763,7 @@ export function ParentDetails({ data, onChange, onNext, onBack, saving, readOnly
           <SectionCard title="Mother" icon={User}
             accent="border-pink-500" iconColor="text-pink-600" bg="bg-pink-50/60">
             {isSchool ? (
-              <SchoolParentBlock title="" value={data.mother as any} onChange={v => onChange({ mother: v })} />
+              <SchoolParentBlock title="" value={data.mother as any} onChange={v => onChange({ mother: v })} showErrors={showErrors} />
             ) : (
               <SimpleParentBlock value={data.mother as any} onChange={v => onChange({ mother: v })} required showErrors={showErrors} />
             )}
@@ -543,7 +794,7 @@ export function ParentDetails({ data, onChange, onNext, onBack, saving, readOnly
           <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
           <p className="text-xs text-destructive font-medium">
             {!parentsOk
-              ? "Please fill in the Father's and Mother's name and mobile to continue."
+              ? "Please complete all required Father and Mother fields to continue."
               : "Please complete the Guardian's name, mobile, relationship and address — or toggle the Guardian section off."}
           </p>
         </div>

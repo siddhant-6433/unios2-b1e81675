@@ -142,7 +142,7 @@ function getRequiredDocs(
   return base;
 }
 
-function DocCard({ doc, uploading, uploaded, uploadedUrl, onUpload, disabled, reviewStatus, reviewNotes }: {
+function DocCard({ doc, uploading, uploaded, uploadedUrl, onUpload, disabled, reviewStatus, reviewNotes, invalid }: {
   doc: DocSpec;
   uploading: string | null;
   uploaded: Record<string, boolean>;
@@ -151,6 +151,7 @@ function DocCard({ doc, uploading, uploaded, uploadedUrl, onUpload, disabled, re
   disabled?: boolean;
   reviewStatus?: string;
   reviewNotes?: string | null;
+  invalid?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const isUploading = uploading === doc.key;
@@ -162,6 +163,7 @@ function DocCard({ doc, uploading, uploaded, uploadedUrl, onUpload, disabled, re
     <Card className={`border-border/60 shadow-none ${
       isRejected
         ? 'border-rose-300 bg-rose-50/40 dark:bg-rose-950/10'
+        : invalid ? 'border-destructive ring-1 ring-destructive/30 bg-destructive/5'
         : isUploaded ? 'border-emerald-200 bg-emerald-50/30 dark:bg-emerald-950/10' : doc.required ? '' : 'border-dashed'
     }`}>
       <CardContent className="p-4 text-center">
@@ -227,6 +229,7 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
   const [reviewStatus, setReviewStatus] = useState<Record<string, string>>({});
   const [reviewNotes, setReviewNotes] = useState<Record<string, string | null>>({});
   const [uploading, setUploading] = useState<string | null>(null);
+  const [showErrors, setShowErrors] = useState(false);
   const docs = getRequiredDocs(
     data.program_category,
     data.academic_details as Record<string, any>,
@@ -294,6 +297,13 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
   const allRequiredUploaded = requiredDocs.every(d => uploaded[d.key])
     && (!needsPassportPhoto || passportPhotoUploaded);
   const hasRejectedDocs = Object.values(reviewStatus).some(status => status === "rejected");
+  const handleContinue = () => {
+    if (!allRequiredUploaded || hasRejectedDocs) {
+      setShowErrors(true);
+      return;
+    }
+    onNext();
+  };
 
   return (
     <div className="space-y-5">
@@ -306,7 +316,7 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
       {/* Passport Photo — mandatory for higher-ed applicants. PhotoUpload
           supports both webcam capture and file upload internally. */}
       {needsPassportPhoto && (
-        <div className="space-y-1">
+        <div className={`space-y-1 rounded-2xl ${showErrors && !passportPhotoUploaded ? 'ring-1 ring-destructive/30 border border-destructive bg-destructive/5 p-3' : ''}`}>
           <PhotoUpload
             applicationId={data.application_id}
             phone={data.phone}
@@ -338,6 +348,7 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
             disabled={readOnly}
             reviewStatus={reviewStatus[doc.key]}
             reviewNotes={reviewNotes[doc.key]}
+            invalid={showErrors && doc.required && !uploaded[doc.key]}
           />
         ))}
       </div>
@@ -349,7 +360,7 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
             <ArrowLeft className="h-4 w-4" /> Back
           </Button>
         ) : <div />}
-        <Button onClick={onNext} disabled={!allRequiredUploaded || hasRejectedDocs} className="gap-2">
+        <Button onClick={handleContinue} disabled={saving} className="gap-2">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
           {nextLabel}
         </Button>

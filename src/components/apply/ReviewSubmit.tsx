@@ -36,6 +36,7 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
   const [agreed, setAgreed] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [showErrors, setShowErrors] = useState(false);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
   const addr = data.address || {};
@@ -52,6 +53,10 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
   }, [data.passport_photo_path]);
 
   const handleSubmit = async () => {
+    if (!agreed) {
+      setShowErrors(true);
+      return;
+    }
     await onSubmit();
     setSubmitted(true);
   };
@@ -298,7 +303,7 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
 
       {!submitted && (
         <>
-          <div className="flex items-start gap-3 p-4 rounded-xl border border-border bg-card">
+          <div className={`flex items-start gap-3 p-4 rounded-xl border bg-card ${showErrors && !agreed ? 'border-destructive ring-1 ring-destructive/30 bg-destructive/5' : 'border-border'}`}>
             <Checkbox id="declaration" checked={agreed} onCheckedChange={v => setAgreed(v === true)} />
             <label htmlFor="declaration" className="text-xs text-muted-foreground leading-relaxed cursor-pointer">
               I hereby declare that all information provided in this application is true and correct to the best of my knowledge. 
@@ -312,7 +317,7 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
                 <ArrowLeft className="h-4 w-4" /> Back
               </Button>
             ) : <div />}
-            <Button onClick={handleSubmit} disabled={!agreed || saving} className="gap-2">
+            <Button onClick={handleSubmit} disabled={saving} className="gap-2">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Submit Application
             </Button>

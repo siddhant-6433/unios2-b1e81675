@@ -45,6 +45,7 @@ interface Props {
 }
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
+const invalidCls = "border-destructive ring-1 ring-destructive/30 focus:ring-destructive/30";
 
 const SESSION_YEAR = 2026; // TODO: derive from active session
 
@@ -154,19 +155,20 @@ function StatusBadge({ type, label }: { type: 'error' | 'warning' | 'info' | 'pa
 }
 
 /* ── Year Select Dropdown ─────────────────────────── */
-function YearSelect({ value, onChange, dobYear, maxYear, minYear, yearError }: {
+function YearSelect({ value, onChange, dobYear, maxYear, minYear, yearError, invalid }: {
   value: string;
   onChange: (v: string) => void;
   dobYear?: number;
   maxYear?: number;
   minYear?: number;
   yearError?: string;
+  invalid?: boolean;
 }) {
   const years = useMemo(() => getYearOptions(dobYear, maxYear, minYear), [dobYear, maxYear, minYear]);
   return (
     <div>
       <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Year</label>
-      <select value={value || ''} onChange={e => onChange(e.target.value)} className={inputCls}>
+      <select value={value || ''} onChange={e => onChange(e.target.value)} className={`${inputCls} ${invalid || yearError ? invalidCls : ''}`}>
         <option value="">Select year</option>
         {years.map(y => (
           <option key={y} value={y.toString()}>{y}</option>
@@ -198,6 +200,8 @@ function AcademicBlock({
   removable,
   onRemove,
   dobYear,
+  showErrors,
+  invalidFields,
 }: {
   title: string;
   prefix: string;
@@ -213,6 +217,8 @@ function AcademicBlock({
   removable?: boolean;
   onRemove?: () => void;
   dobYear?: number;
+  showErrors?: boolean;
+  invalidFields?: Set<string>;
 }) {
   const data = academic[prefix] || {};
   const update = (field: string, val: string) => {
@@ -223,6 +229,7 @@ function AcademicBlock({
   const isGradBlock = prefix.startsWith('graduation') || prefix.startsWith('additional_');
 
   const fieldError = validationErrors?.find(e => e.field === prefix || e.field === 'class_12');
+  const invalid = (field: string) => !!showErrors && !!invalidFields?.has(field);
 
   // Board change — handles explicit "Other (not in list)" selection
   const handleBoardChange = (vals: string[]) => {
@@ -282,12 +289,13 @@ function AcademicBlock({
                   onChange={(vals) => update('degree', vals[vals.length - 1] || '')}
                   placeholder="Select or type degree…"
                   allowCustom
+                  invalid={invalid('degree')}
                 />
               </div>
             ) : (
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Degree</label>
-                <input value={data.degree || ''} onChange={e => update('degree', e.target.value)} className={inputCls} />
+                <input value={data.degree || ''} onChange={e => update('degree', e.target.value)} className={`${inputCls} ${invalid('degree') ? invalidCls : ''}`} />
               </div>
             )}
             <div>
@@ -298,6 +306,7 @@ function AcademicBlock({
                 onChange={handleUniversityChange}
                 placeholder="Search university…"
                 allowCustom={false}
+                invalid={invalid('university')}
               />
               {data.university === 'Other' && (
                 <div className="mt-2">
@@ -308,7 +317,7 @@ function AcademicBlock({
                     value={data.university_other || ''}
                     onChange={e => onChange({ ...academic, [prefix]: { ...data, university_other: e.target.value } })}
                     placeholder="Enter full university name"
-                    className={inputCls}
+                    className={`${inputCls} ${invalid('university_other') ? invalidCls : ''}`}
                   />
                 </div>
               )}
@@ -328,6 +337,7 @@ function AcademicBlock({
                 onChange={handleBoardChange}
                 placeholder="Search board…"
                 allowCustom={false}
+                invalid={invalid('board')}
               />
               {data.board === 'Other' && (
                 <div className="mt-2">
@@ -338,7 +348,7 @@ function AcademicBlock({
                     value={data.board_other || ''}
                     onChange={e => onChange({ ...academic, [prefix]: { ...data, board_other: e.target.value } })}
                     placeholder="Enter full board name"
-                    className={inputCls}
+                    className={`${inputCls} ${invalid('board_other') ? invalidCls : ''}`}
                   />
                 </div>
               )}
@@ -356,10 +366,11 @@ function AcademicBlock({
           maxYear={maxYear}
           minYear={minYear}
           yearError={yearError}
+          invalid={invalid('year')}
         />
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Marks / Percentage / CGPA</label>
-          <input value={data.marks || ''} onChange={e => update('marks', e.target.value)} placeholder="e.g. 85% or 8.5" className={inputCls} />
+          <input value={data.marks || ''} onChange={e => update('marks', e.target.value)} placeholder="e.g. 85% or 8.5" className={`${inputCls} ${invalid('marks') || (showErrors && fieldError?.type === 'error' && fieldError.field !== 'class_12') ? invalidCls : ''}`} />
           {fieldError && fieldError.type === 'error' && fieldError.field !== 'class_12' && (
             <div className="mt-1.5 flex items-start gap-1.5 text-destructive">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
@@ -382,6 +393,7 @@ function AcademicBlock({
               onChange={(vals) => update('subjects', vals.join(', '))}
               placeholder="Select your 12th subjects…"
               allowCustom
+              invalid={invalid('subjects') || !!(showErrors && validationErrors?.some(e => e.field === 'class_12' && e.type === 'error'))}
             />
             {validationErrors?.filter(e => e.field === 'class_12' && e.type === 'error').map((e, i) => (
               <div key={i} className="mt-1.5 flex items-start gap-1.5 text-destructive">
@@ -789,6 +801,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
   const [courseRules, setCourseRules] = useState<Record<string, EligibilityRule>>({});
   const [rulesLoaded, setRulesLoaded] = useState(false);
   const [showOptionalGrad, setShowOptionalGrad] = useState(false);
+  const [showErrors, setShowErrors] = useState(false);
 
   useEffect(() => {
     const courseIds = (data.course_selections || []).map(s => s.course_id);
@@ -893,6 +906,39 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
   const showGraduation = needsGraduation || Object.values(courseRules).some(r => r.requiresGraduation);
 
   const firstCourseResults = perCourseResults[0]?.results || [];
+  const class10InvalidFields = new Set<string>();
+  const class12InvalidFields = new Set<string>();
+  const graduationInvalidFields = new Set<string>();
+
+  const addRequiredAcademicFields = (set: Set<string>, block: Record<string, any>, fields: string[]) => {
+    fields.forEach((field) => {
+      if (!String(block[field] || '').trim()) set.add(field);
+    });
+  };
+
+  if (missingClass10) addRequiredAcademicFields(class10InvalidFields, class10, ['board', 'year', 'marks']);
+  if (missingClass12) addRequiredAcademicFields(class12InvalidFields, class12, ['board', 'year', 'marks']);
+  if (missingGraduation) addRequiredAcademicFields(graduationInvalidFields, graduation, ['degree', 'university', 'year', 'marks']);
+  if (class10.board === 'Other' && !class10.board_other?.trim()) class10InvalidFields.add('board_other');
+  if (class12.board === 'Other' && !class12.board_other?.trim()) class12InvalidFields.add('board_other');
+  if (graduation.university === 'Other' && !graduation.university_other?.trim()) graduationInvalidFields.add('university_other');
+  if (yearErrorMap['class_10_year']) class10InvalidFields.add('year');
+  if (yearErrorMap['class_12_year']) class12InvalidFields.add('year');
+  if (yearErrorMap['graduation_year']) graduationInvalidFields.add('year');
+  firstCourseResults.forEach((result) => {
+    if (result.type !== 'error') return;
+    if (result.field === 'class_12') class12InvalidFields.add('subjects');
+    if (result.field === 'subject_marks') class12InvalidFields.add('subject_marks');
+    if (result.field === 'graduation') graduationInvalidFields.add('marks');
+  });
+
+  const handleContinue = () => {
+    if (hasBlockingErrors) {
+      setShowErrors(true);
+      return;
+    }
+    onNext();
+  };
 
   const updateAcademic = (v: Record<string, any>) => {
     // Check for custom boards/universities and flag
@@ -973,6 +1019,8 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
                 ? parseInt(academic.class_12.year, 10) - 2
                 : undefined
             }
+            showErrors={showErrors}
+            invalidFields={class10InvalidFields}
           />
           {missingClass12 && (
             <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20 flex items-start gap-2">
@@ -996,6 +1044,8 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
                 ? parseInt(academic.class_10.year, 10) + 2
                 : undefined
             }
+            showErrors={showErrors}
+            invalidFields={class12InvalidFields}
           />
 
           {/* Subject-wise marks inputs (e.g., English for GNM) */}
@@ -1020,7 +1070,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
                           updateAcademic({ ...academic, class_12: { ...(academic as any)?.class_12, subject_marks: newMarks } });
                         }}
                         placeholder={`e.g. 45 or 4.5 CGPA`}
-                        className={inputCls}
+                        className={`${inputCls} ${showErrors && subjectError?.type === 'error' ? invalidCls : ''}`}
                       />
                       {subjectError && subjectError.type === 'error' && (
                         <div className="mt-1.5 flex items-start gap-1.5 text-destructive">
@@ -1055,6 +1105,8 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
               yearError={yearErrorMap['graduation_year']}
               maxYear={SESSION_YEAR + 1}
               dobYear={dobYear}
+              showErrors={showErrors}
+              invalidFields={graduationInvalidFields}
             />
             {parseInt(graduation.year) === SESSION_YEAR + 1 && (
               <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 text-blue-700 text-xs">
@@ -1147,7 +1199,7 @@ export function AcademicDetails({ data, onChange, onNext, onBack, saving, readOn
             <ArrowLeft className="h-4 w-4" /> Back
           </Button>
         ) : <div />}
-        <Button onClick={onNext} disabled={saving || hasBlockingErrors} className="gap-2">
+        <Button onClick={handleContinue} disabled={saving} className="gap-2">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
           Save & Continue
         </Button>

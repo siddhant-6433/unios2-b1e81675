@@ -8,6 +8,7 @@ interface SubjectTagInputProps {
   onChange: (selected: string[]) => void;
   placeholder?: string;
   allowCustom?: boolean;
+  invalid?: boolean;
 }
 
 export function SubjectTagInput({
@@ -17,6 +18,7 @@ export function SubjectTagInput({
   onChange,
   placeholder = "Type to search or add…",
   allowCustom = true,
+  invalid = false,
 }: SubjectTagInputProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -78,7 +80,9 @@ export function SubjectTagInput({
         {label}
       </label>
       <div
-        className="min-h-[42px] w-full rounded-xl border border-input bg-card py-1.5 px-2 flex flex-wrap gap-1.5 items-center cursor-text focus-within:ring-2 focus-within:ring-ring/20"
+        className={`min-h-[42px] w-full rounded-xl border bg-card py-1.5 px-2 flex flex-wrap gap-1.5 items-center cursor-text focus-within:ring-2 ${
+          invalid ? "border-destructive ring-1 ring-destructive/30 focus-within:ring-destructive/30" : "border-input focus-within:ring-ring/20"
+        }`}
         onClick={() => setOpen(true)}
       >
         {selected.map((tag, i) => (
