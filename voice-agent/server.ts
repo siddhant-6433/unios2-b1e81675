@@ -3353,6 +3353,19 @@ const VOICE_SETTINGS_DEFAULT: VoiceSettings = {
   elevenLabsSimilarity: 0.75,
   elevenLabsModel: "eleven_turbo_v2_5",
 };
+const SAFE_GEMINI_AUDIO_MODELS = new Set([
+  "gemini-2.5-flash-native-audio-latest",
+  "gemini-2.5-flash-native-audio-preview-09-2025",
+  "gemini-2.5-flash-native-audio-preview-12-2025",
+]);
+function normalizeGeminiAudioModel(raw: unknown): string {
+  const model = String(raw || "").trim();
+  if (SAFE_GEMINI_AUDIO_MODELS.has(model)) return model;
+  if (model) {
+    console.warn(`[voice-settings] refusing unsupported Gemini audio model "${model}", using safe default`);
+  }
+  return VOICE_SETTINGS_DEFAULT.geminiModel;
+}
 let voiceSettingsCache: VoiceSettings = { ...VOICE_SETTINGS_DEFAULT };
 async function refreshVoiceSettingsCache() {
   try {
@@ -3371,7 +3384,7 @@ async function refreshVoiceSettingsCache() {
       sarvamSpeaker:             String(parsed.sarvam_speaker             ?? VOICE_SETTINGS_DEFAULT.sarvamSpeaker),
       sarvamBulbulModel:         String(parsed.sarvam_bulbul_model        ?? VOICE_SETTINGS_DEFAULT.sarvamBulbulModel),
       geminiVoice:               String(parsed.gemini_voice               ?? VOICE_SETTINGS_DEFAULT.geminiVoice),
-      geminiModel:               String(parsed.gemini_model               ?? VOICE_SETTINGS_DEFAULT.geminiModel),
+      geminiModel:               normalizeGeminiAudioModel(parsed.gemini_model),
       geminiPrefixPaddingMs:     Number(parsed.gemini_prefix_padding_ms   ?? VOICE_SETTINGS_DEFAULT.geminiPrefixPaddingMs),
       cascadeMaxTokens:          Number(parsed.cascade_max_tokens         ?? VOICE_SETTINGS_DEFAULT.cascadeMaxTokens),
       cascadeTemperature:        Number(parsed.cascade_temperature        ?? VOICE_SETTINGS_DEFAULT.cascadeTemperature),
