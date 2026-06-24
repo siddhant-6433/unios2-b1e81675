@@ -1333,15 +1333,17 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
 
       {/* ── Payment CTAs ──────────────────────────────── */}
       {!feeStatus.twenty_five_complete && towardsAdmission > 0 && (() => {
-        // Installment presets for the token fee alternative
+        // Installment presets for the token-fee alternative. Build these from
+        // the actual outstanding balance so partially-paid offers still show
+        // useful ₹5,000-step choices.
         const presets: number[] = [];
         let p = minInstalment;
-        while (p < feeStatus.token_required && presets.length < 4) { presets.push(p); p += minInstalment; }
-        if (!presets.includes(feeStatus.token_required) && feeStatus.token_required > 0) presets.push(feeStatus.token_required);
+        while (p < tokenOutstanding && presets.length < 6) { presets.push(p); p += minInstalment; }
+        if (!presets.includes(tokenOutstanding) && tokenOutstanding > 0) presets.push(tokenOutstanding);
 
-        const selectedAmt = instalmentPreset !== null
-          ? instalmentPreset
-          : (customAmt && parseFloat(customAmt) > 0 ? parseFloat(customAmt) : null);
+        const typedAmt = customAmt && parseFloat(customAmt) > 0 ? parseFloat(customAmt) : null;
+        const selectedAmt = typedAmt ?? instalmentPreset;
+        const minPayableInstalment = Math.min(minInstalment, tokenOutstanding);
 
         return (
           <div className="space-y-3">
@@ -1419,8 +1421,11 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                     {/* Pay in parts toggle */}
                     <button
                       onClick={() => {
-                        setInstalmentPreset(v => v === tokenOutstanding ? minInstalment : tokenOutstanding);
-                        setCustomAmt("");
+                        setInstalmentPreset(v => {
+                          const next = v === tokenOutstanding ? Math.min(minInstalment, tokenOutstanding) : tokenOutstanding;
+                          setCustomAmt(next === tokenOutstanding ? "" : String(next));
+                          return next;
+                        });
                       }}
                       className="text-xs text-blue-600 hover:text-blue-700 font-medium underline underline-offset-2"
                     >
@@ -1436,9 +1441,9 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                           {presets.filter(p => p <= tokenOutstanding).map(amt => (
                             <button
                               key={amt}
-                              onClick={() => { setInstalmentPreset(amt); setCustomAmt(""); }}
+                              onClick={() => { setInstalmentPreset(amt); setCustomAmt(String(amt)); }}
                               className={`rounded-xl px-3.5 py-2 text-sm font-semibold border transition-all active:scale-95 ${
-                                instalmentPreset === amt
+                                selectedAmt === amt
                                   ? "bg-blue-600 border-blue-600 text-white shadow-sm"
                                   : "border-gray-200 text-gray-700 hover:border-blue-300 hover:bg-blue-50"
                               }`}
@@ -1446,37 +1451,28 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                               ₹{amt.toLocaleString("en-IN")}
                             </button>
                           ))}
-                          <button
-                            onClick={() => { setInstalmentPreset(null); setCustomAmt(""); }}
-                            className={`rounded-xl px-3.5 py-2 text-sm font-semibold border transition-all active:scale-95 ${
-                              instalmentPreset === null
-                                ? "bg-blue-600 border-blue-600 text-white shadow-sm"
-                                : "border-gray-200 text-gray-700 hover:border-blue-300 hover:bg-blue-50"
-                            }`}
-                          >
-                            Custom
-                          </button>
                         </div>
 
-                        {instalmentPreset === null && (
-                          <div className="relative">
-                            <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                            <input
-                              type="number" step="500" min={minInstalment} max={tokenOutstanding}
-                              value={customAmt}
-                              onChange={e => setCustomAmt(e.target.value)}
-                              placeholder={`Min ₹${minInstalment.toLocaleString("en-IN")}`}
-                              className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-9 pr-3 py-3 text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-300/40 focus:border-blue-300"
-                            />
-                          </div>
-                        )}
+                        <div className="relative">
+                          <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                          <input
+                            type="number"
+                            step={minInstalment}
+                            min={minPayableInstalment}
+                            max={tokenOutstanding}
+                            value={customAmt}
+                            onChange={e => { setInstalmentPreset(null); setCustomAmt(e.target.value); }}
+                            placeholder={`Enter amount, min ₹${minInstalment.toLocaleString("en-IN")}`}
+                            className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-9 pr-3 py-3 text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-300/40 focus:border-blue-300"
+                          />
+                        </div>
 
                         <p className="text-[11px] text-gray-400">
-                          Min ₹{minInstalment.toLocaleString("en-IN")} per payment · pay multiple times to reach the token fee target
+                          Min ₹{minPayableInstalment.toLocaleString("en-IN")} per payment · choose a preset or edit the amount directly
                         </p>
 
                         <button
-                          disabled={paying || !applicantPhone || selectedAmt === null || selectedAmt < minInstalment}
+                          disabled={paying || !applicantPhone || selectedAmt === null || selectedAmt < minPayableInstalment || selectedAmt > tokenOutstanding}
                           onClick={() => selectedAmt && startPayment(selectedAmt)}
                           className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 py-3 text-sm font-bold text-white hover:bg-blue-700 active:scale-[0.99] transition-all disabled:opacity-50 shadow-sm"
                         >
