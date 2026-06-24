@@ -29,10 +29,11 @@ interface PhoneInputProps {
   required?: boolean;
   className?: string;
   disabled?: boolean;
+  invalid?: boolean;
   "aria-label"?: string;
 }
 
-export function PhoneInput({ id, value, onChange, placeholder, required, className, disabled, "aria-label": ariaLabel }: PhoneInputProps) {
+export function PhoneInput({ id, value, onChange, placeholder, required, className, disabled, invalid, "aria-label": ariaLabel }: PhoneInputProps) {
   const parsed = parsePhone(value);
   const [countryCode, setCountryCode] = useState(parsed.countryCode);
   const [number, setNumber] = useState(parsed.number);
@@ -134,7 +135,9 @@ export function PhoneInput({ id, value, onChange, placeholder, required, classNa
           type="button"
           onClick={() => !disabled && setDropdownOpen(!dropdownOpen)}
           disabled={disabled}
-          className="flex items-center gap-1 rounded-xl border border-input bg-background px-2 py-2.5 text-sm text-foreground hover:bg-muted transition-colors h-full"
+          className={`flex items-center gap-1 rounded-xl border bg-background px-2 py-2.5 text-sm text-foreground hover:bg-muted transition-colors h-full ${
+            invalid ? "border-destructive ring-1 ring-destructive/30" : "border-input"
+          }`}
         >
           <span className="text-base leading-none">{selectedCountry.flag}</span>
           <span className="font-medium text-xs">{selectedCountry.code}</span>
@@ -194,7 +197,9 @@ export function PhoneInput({ id, value, onChange, placeholder, required, classNa
         maxLength={selectedCountry.digits}
         inputMode="numeric"
         pattern={`\\d{${selectedCountry.digits}}`}
-        className="flex-1 min-w-0 rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:cursor-not-allowed"
+        className={`flex-1 min-w-0 rounded-xl border bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 disabled:cursor-not-allowed ${
+          invalid ? "border-destructive ring-1 ring-destructive/30 focus:ring-destructive/30" : "border-input focus:ring-ring/20"
+        }`}
       />
     </div>
   );

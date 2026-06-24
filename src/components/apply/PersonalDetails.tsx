@@ -18,10 +18,11 @@ interface Props {
 }
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
+const invalidCls = "border-destructive ring-1 ring-destructive/30 focus:ring-destructive/30";
 
 const NATIONALITIES = getNationalityOptions();
 
-function DobPicker({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
+function DobPicker({ value, onChange, disabled, invalid }: { value: string; onChange: (v: string) => void; disabled?: boolean; invalid?: boolean }) {
   const [open, setOpen] = useState(false);
 
   // Parse ISO date string to Date object
@@ -43,7 +44,7 @@ function DobPicker({ value, onChange, disabled }: { value: string; onChange: (v:
         <button
           type="button"
           disabled={disabled}
-          className={`${inputCls} flex items-center justify-between text-left ${!displayValue ? 'text-muted-foreground' : ''}`}
+          className={`${inputCls} flex items-center justify-between text-left ${!displayValue ? 'text-muted-foreground' : ''} ${invalid ? invalidCls : ''}`}
         >
           <span>{displayValue || 'Select date of birth'}</span>
           <CalendarIcon className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -182,7 +183,7 @@ export function PersonalDetails({ data, onChange, onNext, saving, readOnly }: Pr
           <label className={`text-xs font-medium mb-1.5 block ${showErrors && missing.dob ? 'text-destructive' : 'text-muted-foreground'}`}>
             Date of Birth <span className="text-destructive">*</span>
           </label>
-          <DobPicker value={data.dob} onChange={v => onChange({ dob: v })} disabled={readOnly} />
+          <DobPicker value={data.dob} onChange={v => onChange({ dob: v })} disabled={readOnly} invalid={showErrors && missing.dob} />
           {showErrors && missing.dob && (
             <p className="mt-1 text-[11px] text-destructive">Date of birth is required.</p>
           )}
