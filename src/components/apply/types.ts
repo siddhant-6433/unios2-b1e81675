@@ -36,7 +36,7 @@ export interface ApplicationData {
     name?: string; first_name?: string; last_name?: string; dob?: string;
     nationality?: string; id_type?: string; id_number?: string;
     education?: string; annual_income?: string; employer_name?: string;
-    current_position?: string; marital_status?: string;
+    employment_status?: string; current_position?: string; position?: string; marital_status?: string;
     phone?: string; phone_mobile?: string; phone_home?: string; email?: string;
     occupation?: string; occupation_other?: string;
   };
@@ -44,7 +44,7 @@ export interface ApplicationData {
     name?: string; first_name?: string; last_name?: string; dob?: string;
     nationality?: string; id_type?: string; id_number?: string;
     education?: string; annual_income?: string; employer_name?: string;
-    current_position?: string; marital_status?: string;
+    employment_status?: string; current_position?: string; position?: string; marital_status?: string;
     phone?: string; phone_mobile?: string; phone_home?: string; email?: string;
     occupation?: string; occupation_other?: string;
   };

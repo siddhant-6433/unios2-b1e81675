@@ -23,6 +23,7 @@ interface Props {
 }
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
+const invalidCls = "border-destructive ring-1 ring-destructive/30 focus:ring-destructive/30";
 
 // ── DOB Calendar Picker ──────────────────────────────────────────
 function DobPicker({ value, onChange, inputCls }: { value: string; onChange: (iso: string) => void; inputCls: string }) {
@@ -124,6 +125,7 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
   const [addingCourse, setAddingCourse] = useState('');
   const [saving, setSaving] = useState(false);
   const [selectedSchool, setSelectedSchool] = useState('');
+  const [showErrors, setShowErrors] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -270,11 +272,13 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
   });
 
   const handleContinue = async () => {
-    if (!selectedSession || selections.length === 0) {
+    if (!selectedSession || selections.length === 0 || (isSchoolPortal && !childDob) || (isSchoolPortal && schoolOptions.length > 1 && !selectedSchool)) {
+      setShowErrors(true);
       toast({ title: 'Select session and at least one course', variant: 'destructive' });
       return;
     }
     if (hasStrictBlock) {
+      setShowErrors(true);
       toast({ title: 'Age requirement not met', description: 'Remove ineligible grades to continue.', variant: 'destructive' });
       return;
     }
@@ -313,7 +317,7 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
           <DobPicker
             value={childDob}
             onChange={onDobChange}
-            inputCls={inputCls}
+            inputCls={`${inputCls} ${showErrors && !childDob ? invalidCls : ''}`}
           />
           {childDob && (
             <p className="text-xs text-muted-foreground mt-1">
@@ -328,7 +332,7 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
         <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
           <Calendar className="h-3.5 w-3.5 inline mr-1" /> Admission Session *
         </label>
-        <select value={selectedSession} onChange={e => setSelectedSession(e.target.value)} className={inputCls}>
+        <select value={selectedSession} onChange={e => setSelectedSession(e.target.value)} className={`${inputCls} ${showErrors && !selectedSession ? invalidCls : ''}`}>
           <option value="">Select intake cycle</option>
           {sessions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
@@ -340,7 +344,7 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
             <MapPin className="h-3.5 w-3.5 inline mr-1" /> Select Campus *
           </label>
-          <select value={selectedSchool} onChange={e => { setSelectedSchool(e.target.value); setAddingCourse(''); }} className={inputCls}>
+          <select value={selectedSchool} onChange={e => { setSelectedSchool(e.target.value); setAddingCourse(''); }} className={`${inputCls} ${showErrors && !selectedSchool ? invalidCls : ''}`}>
             <option value="">Select campus</option>
             {schoolOptions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
@@ -355,7 +359,7 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
           <select
             value={addingCourse}
             onChange={e => setAddingCourse(e.target.value)}
-            className={`${inputCls} flex-1`}
+            className={`${inputCls} flex-1 ${showErrors && selections.length === 0 ? invalidCls : ''}`}
             disabled={isSchoolPortal && schoolOptions.length > 1 && !selectedSchool}
           >
             <option value="">{isSchoolPortal ? "Select grade to add" : selections.length === 0 ? "Select course to add" : "Add another course preference..."}</option>
@@ -461,11 +465,20 @@ export function CourseSelector({ phone, leadName, childDob, onDobChange, onCompl
         </div>
       )}
 
+      {showErrors && (!selectedSession || selections.length === 0 || (isSchoolPortal && !childDob) || (isSchoolPortal && schoolOptions.length > 1 && !selectedSchool) || hasStrictBlock) && (
+        <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20 flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+          <p className="text-xs text-destructive font-medium">
+            Please complete the highlighted admission selection fields before continuing.
+          </p>
+        </div>
+      )}
+
       <div className="flex justify-end gap-2">
         {onCancel && (
           <Button variant="outline" onClick={onCancel}>Cancel</Button>
         )}
-        <Button onClick={handleContinue} disabled={saving || !selectedSession || selections.length === 0 || hasStrictBlock} className="gap-2">
+        <Button onClick={handleContinue} disabled={saving} className="gap-2">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
           {isEditing ? "Update Selections" : "Continue to Application"}
         </Button>
