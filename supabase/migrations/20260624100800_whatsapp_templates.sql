@@ -35,6 +35,7 @@ CREATE INDEX IF NOT EXISTS idx_wa_templates_meta_id ON public.whatsapp_templates
 ALTER TABLE public.whatsapp_templates ENABLE ROW LEVEL SECURITY;
 
 -- Read: admins only (the Template Manager page is already permission-gated).
+DROP POLICY IF EXISTS "Admins can read whatsapp_templates" ON public.whatsapp_templates;
 CREATE POLICY "Admins can read whatsapp_templates"
   ON public.whatsapp_templates
   FOR SELECT TO authenticated

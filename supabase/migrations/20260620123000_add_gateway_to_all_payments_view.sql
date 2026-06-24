@@ -2,6 +2,7 @@
 -- Native post-admission payments do not currently store gateway metadata, so
 -- they expose NULL; lead_payments rows carry the gateway slug.
 
+-- lint-allow: finance payment reads intentionally respect caller RLS through the underlying lead/student/payment policies.
 CREATE OR REPLACE VIEW public.v_all_payments WITH (security_invoker=true) AS
   SELECT
     'student'::text                      AS source,
@@ -55,4 +56,3 @@ CREATE OR REPLACE VIEW public.v_all_payments WITH (security_invoker=true) AS
 
 GRANT SELECT ON public.v_all_payments TO authenticated;
 GRANT SELECT ON public.v_all_payments TO service_role;
-

@@ -27,6 +27,7 @@ name: Supabase DB push
 on:
   pull_request:
     branches: [main]
+  merge_group:
   push:
     branches: [main]
   workflow_dispatch:
@@ -39,11 +40,11 @@ concurrency:
 jobs:
   dry-run:
     name: Dry-run migration diff
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     env:
-      # Hoist secrets to job level so every step (including the link CLI
-      # call) sees them without per-step duplication.
+      # Hoist secrets to job level so the migration health script can link to
+      # Supabase without per-step duplication.
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_REF:  ${{ secrets.SUPABASE_PROJECT_REF }}
       SUPABASE_DB_PASSWORD:  ${{ secrets.SUPABASE_DB_PASSWORD }}
@@ -120,11 +121,11 @@ jobs:
         with:
           version: latest
 
-      - name: Link to Supabase project
-        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
-
       - name: Apply pending migrations
-        run: supabase db push
+        # The script first rejects duplicate local migration versions, then
+        # uses --include-all so a PR that was valid when reviewed still applies
+        # if another migration reached main first.
+        run: npm run db:migrations:apply
 
       - name: Deploy application deletion function
         run: supabase functions deploy delete-application --no-verify-jwt

@@ -99,14 +99,26 @@ them in the correct order.
 
 ## How the CI guards this going forward
 
+Create migrations through the repo helper instead of hand-writing timestamps:
+
+```bash
+npm run db:migration:new -- add_student_status_index
+```
+
+The helper writes `supabase/migrations/<unique_version>_<name>.sql`, choosing a
+version greater than both the current UTC timestamp and the highest local
+migration version.
+
 `scripts/check-supabase-migration-health.mjs`:
 - `npm run db:migrations:check` → validates `supabase db push --dry-run`; pending branch migrations are allowed if Supabase can apply them cleanly.
+- `npm run db:migrations:apply` → rejects duplicate local migration versions, runs `supabase db push --include-all --yes`, then verifies production is clean. This is the main-branch merge path.
 - `npm run db:migrations:clean` → validates `supabase db push --dry-run` and additionally requires `Remote database is up to date.`
 - In CI, missing Supabase secrets are a hard failure. A green check must mean CI actually reached the linked project.
 
 `.github/workflows/db-push.yml`:
-- **Every PR to `main`** → runs `npm run db:migrations:check` so broken migration ordering, remote drift, and duplicate-object failures block merge.
-- **Every push to `main`** → runs `supabase db push`, then `npm run db:migrations:clean`. It is safe and usually a no-op when no migration files changed, but it prevents pending migrations from accumulating silently.
+- **Every PR to `main`** → runs `npm run db:migrations:check` so broken migration ordering, duplicate migration versions, remote drift, and duplicate-object failures block merge.
+- **Every merge queue group** → runs the same dry-run check against the exact integrated merge candidate when GitHub merge queue is enabled.
+- **Every push to `main`** → runs `npm run db:migrations:apply`, deploys the deletion function, then runs `npm run db:migrations:clean`. It is safe and usually a no-op when no migration files changed, but it prevents pending migrations from accumulating silently.
 - **`workflow_dispatch` from `main`** → manual one-click apply for ad-hoc cases.
 
 `.github/workflows/db-drift-check.yml`:
@@ -122,3 +134,4 @@ Required repo secrets:
 1. **Dual-track is the bug.** Authoring in Studio without round-tripping through git leaves the team blind to drift. Either always go via files + `db push`, or always go via Studio and accept that git isn't authoritative.
 2. **Enum-typed columns need typed literals in policies.** The `token_fee_reminders_cron` file referenced `'admin'` / `'team_leader'` which silently work in unconstrained text contexts but error when compared to `app_role`. CI dry-run would have caught this on the original PR.
 3. **`apply_migration` (MCP / direct) bypasses the file→remote audit trail.** If you apply ad-hoc, also commit the matching file with `IF NOT EXISTS` guards so a later `db push` is a no-op rather than a duplicate-error.
+4. **Migration timestamps are identities, not labels.** If two PRs create the same timestamp prefix, rename one before merge. The migration health script fails fast on duplicates because Supabase records only the numeric version.
