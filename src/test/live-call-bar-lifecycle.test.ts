@@ -34,7 +34,10 @@ describe("LiveCallBar lifecycle guards", () => {
       voiceAgentSource.indexOf('// POST /bridge-status/{callId}'),
     );
 
-    expect(voiceAgentSource).toContain("student connection is owned by /bridge-b-status");
+    expect(voiceAgentSource).toMatch(/student connection is owned by\s+\/bridge-b-status/i);
+    expect(parentStatusHandler).toContain("Keep status='initiated'");
+    expect(parentStatusHandler).toContain("Cloud Call: ringing counsellor");
+    expect(parentStatusHandler).toContain("Cloud Call: counsellor answered, dialing lead");
     expect(parentStatusHandler).not.toContain("student_connected_at");
     expect(parentStatusHandler).not.toContain('status: "in_progress"');
   });

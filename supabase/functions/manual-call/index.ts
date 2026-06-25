@@ -178,14 +178,10 @@ Deno.serve(async (req) => {
       to: counsellorPhone,
       answer_url: answerUrl,
       answer_method: "GET",
+      ring_url: stateCallbackUrl,
+      ring_method: "POST",
       hangup_url: hangupUrl,
       hangup_method: "POST",
-      // Per-state callback. Plivo POSTs this URL on every CallStatus change
-      // (initiated / ringing / in-progress / completed) for the parent
-      // counsellor leg. Student connection is detected by the bridged B-leg
-      // callback in voice-agent.
-      callback_url: stateCallbackUrl,
-      callback_method: "POST",
       ring_timeout: 30,
       caller_name: `NIMT CRM: ${lead.name || "Lead"}`,
     };
@@ -237,24 +233,18 @@ Deno.serve(async (req) => {
       return json({ error: `Call failed: ${plivoData?.error || plivoData?.message || plivoText || "Unknown error"}` }, 500);
     }
 
-    if (!requestUuid) {
-      console.error("Plivo call accepted without request_uuid:", plivoText);
-      return await failCallSetup(
-        `Cloud Call failed before ringing counsellor: Plivo accepted request without request_uuid: ${plivoData?.message || plivoText || "missing request_uuid"}`,
-        "Call failed before ringing your phone. Plivo did not return a call request id.",
-        502,
-      );
-    }
-
-    // Patch the provider request identifier returned by Call.create. Without
-    // this id we cannot correlate callbacks or verify that Plivo accepted a
-    // real outbound call request, so missing ids are failed above.
+    // Patch the provider request identifier returned by Call.create when
+    // present. Some Plivo accounts return only "async api spawned"; in that
+    // case the ring/answer/hangup webhooks below persist the real CallUUID.
+    const callRecordPatch: Record<string, unknown> = {
+      summary: requestUuid
+        ? `Cloud Call: connecting by ${profile.display_name}`
+        : `Cloud Call: accepted by Plivo; waiting for counsellor leg callback for ${profile.display_name}`,
+    };
+    if (requestUuid) callRecordPatch.plivo_call_uuid = requestUuid;
     await db
       .from("ai_call_records")
-      .update({
-        plivo_call_uuid: requestUuid,
-        summary: `Cloud Call: connecting by ${profile.display_name}`,
-      } as any)
+      .update(callRecordPatch as any)
       .eq("call_uuid", callId);
 
     // Log activity
@@ -274,7 +264,7 @@ Deno.serve(async (req) => {
     return json({
       success: true,
       call_id: callId,
-      plivo_request_uuid: requestUuid,
+      plivo_request_uuid: requestUuid || null,
       message: `Calling your phone (${profile.phone})... Pick up to connect to ${lead.name || "the student"}.`,
     });
   } catch (err: any) {

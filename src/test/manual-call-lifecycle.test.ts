@@ -47,7 +47,7 @@ describe("manual-call lifecycle ordering", () => {
   it("terminally closes the live-call row when Plivo rejects the call", () => {
     const plivoFailureBlock = manualCallSource.slice(
       manualCallSource.indexOf("if (!plivoRes.ok)"),
-      manualCallSource.indexOf("// Patch any provider identifier"),
+      manualCallSource.indexOf("// Patch the provider request identifier"),
     );
 
     expect(plivoFailureBlock).toContain('status: "failed"');
@@ -55,15 +55,32 @@ describe("manual-call lifecycle ordering", () => {
     expect(plivoFailureBlock).toContain("completed_at: new Date().toISOString()");
   });
 
-  it("terminally closes the live-call row when Plivo accepts without a request id", () => {
-    const missingRequestUuidBlock = manualCallSource.slice(
-      manualCallSource.indexOf("if (!requestUuid)"),
-      manualCallSource.indexOf("// Patch the provider request identifier"),
+  it("uses Plivo ring_url for counsellor-leg callbacks", () => {
+    const plivoPayloadBlock = manualCallSource.slice(
+      manualCallSource.indexOf("const plivoPayload = {"),
+      manualCallSource.indexOf("let plivoRes: Response"),
     );
 
-    expect(missingRequestUuidBlock).toContain("return await failCallSetup");
-    expect(missingRequestUuidBlock).toContain("accepted request without request_uuid");
-    expect(missingRequestUuidBlock).toContain("did not return a call request id");
+    expect(plivoPayloadBlock).toContain("ring_url: stateCallbackUrl");
+    expect(plivoPayloadBlock).toContain('ring_method: "POST"');
+    expect(plivoPayloadBlock).not.toContain("callback_url");
+  });
+
+  it("continues when Plivo accepts without a request id", () => {
+    const acceptedPatchBlock = manualCallSource.slice(
+      manualCallSource.indexOf("// Patch the provider request identifier"),
+      manualCallSource.indexOf("return json({", manualCallSource.indexOf("// Patch the provider request identifier")),
+    );
+
+    expect(acceptedPatchBlock).toContain('return only "async api spawned"');
+    expect(acceptedPatchBlock).toContain("if (requestUuid) callRecordPatch.plivo_call_uuid = requestUuid");
+    expect(acceptedPatchBlock).not.toContain("return await failCallSetup");
+
+    const successResponseBlock = manualCallSource.slice(
+      manualCallSource.indexOf("return json({", manualCallSource.indexOf("// Log activity")),
+      manualCallSource.indexOf("} catch (err: any)", manualCallSource.indexOf("// Log activity")),
+    );
+    expect(successResponseBlock).toContain("plivo_request_uuid: requestUuid || null");
   });
 
   it("terminally closes the live-call row when Plivo fetch throws", () => {
