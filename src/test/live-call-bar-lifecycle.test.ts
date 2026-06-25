@@ -41,4 +41,22 @@ describe("LiveCallBar lifecycle guards", () => {
     expect(parentStatusHandler).not.toContain("student_connected_at");
     expect(parentStatusHandler).not.toContain('status: "in_progress"');
   });
+
+  it("uses the selected cloud-dialer caller ID for the bridged student leg", () => {
+    const bridgeContextHandler = voiceAgentSource.slice(
+      voiceAgentSource.indexOf('if (path.startsWith("/bridge-context/")'),
+      voiceAgentSource.indexOf('// GET /bridge-answer/{callId}?student={phone}'),
+    );
+    const bridgeAnswerHandler = voiceAgentSource.slice(
+      voiceAgentSource.indexOf('if (path.startsWith("/bridge-answer/"))'),
+      voiceAgentSource.indexOf('// POST /bridge-call-status/{callId}'),
+    );
+
+    expect(voiceAgentSource).toContain("function firstPlivoCallerIdFromEnv()");
+    expect(voiceAgentSource).toContain('Deno.env.get("PLIVO_DIALER_PHONE_NUMBERS")');
+    expect(bridgeContextHandler).toContain("bridgeCallerId");
+    expect(bridgeContextHandler).toContain("ctx.dialerFrom");
+    expect(bridgeAnswerHandler).toContain('url.searchParams.get("caller")');
+    expect(bridgeAnswerHandler).toContain('callerId="${PLIVO_PHONE_NUMBER}"');
+  });
 });
