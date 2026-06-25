@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { combineIndiaDateTimeInput, splitToIndiaDateTimeInput } from "@/lib/indiaDateTime";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -47,6 +48,7 @@ export function PaymentEditDialog({ open, onOpenChange, payment, onSaved }: Prop
   const [mode,    setMode]    = useState("cash");
   const [txnRef,  setTxnRef]  = useState("");
   const [date,    setDate]    = useState("");
+  const [time,    setTime]    = useState("");
   const [notes,   setNotes]   = useState("");
   const [reason,  setReason]  = useState("");
   const [notifyCorrection, setNotifyCorrection] = useState(true);
@@ -58,7 +60,9 @@ export function PaymentEditDialog({ open, onOpenChange, payment, onSaved }: Prop
     setAmount(String(payment.amount));
     setMode(payment.payment_mode || "cash");
     setTxnRef(payment.transaction_ref || "");
-    setDate((payment.payment_date || "").slice(0, 10));
+    const paymentDateTime = splitToIndiaDateTimeInput(payment.payment_date);
+    setDate(paymentDateTime.date);
+    setTime(paymentDateTime.time);
     setNotes(payment.notes || "");
     setReason("");
     setNotifyCorrection(true);
@@ -88,7 +92,7 @@ export function PaymentEditDialog({ open, onOpenChange, payment, onSaved }: Prop
       _amount:          amt,
       _payment_mode:    mode,
       _transaction_ref: txnRef.trim() || null,
-      _payment_date:    date ? `${date}T00:00:00+05:30` : payment.payment_date,
+      _payment_date:    combineIndiaDateTimeInput(date, time) || payment.payment_date,
       _notes:           notes.trim() || null,
       _reason:          reason.trim(),
     });
@@ -176,21 +180,26 @@ export function PaymentEditDialog({ open, onOpenChange, payment, onSaved }: Prop
 
           <div className="grid grid-cols-2 gap-3">
             <div>
+              <label className="text-xs font-medium text-muted-foreground">Payment Time</label>
+              <input className={inputCls} type="time" value={time} onChange={e => setTime(e.target.value)} />
+            </div>
+            <div>
               <label className="text-xs font-medium text-muted-foreground">Payment Mode</label>
               <select className={inputCls} value={mode} onChange={e => setMode(e.target.value)}>
                 {MODE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Transaction Ref</label>
-              <input
-                className={inputCls}
-                type="text"
-                value={txnRef}
-                onChange={e => setTxnRef(e.target.value)}
-                placeholder="UTR, UPI ref, cheque #…"
-              />
-            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Transaction Ref</label>
+            <input
+              className={inputCls}
+              type="text"
+              value={txnRef}
+              onChange={e => setTxnRef(e.target.value)}
+              placeholder="UTR, UPI ref, cheque #..."
+            />
           </div>
 
           <div>
