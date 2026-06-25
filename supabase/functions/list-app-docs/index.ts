@@ -37,6 +37,29 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
+    const docsByKey = new Map<string, any>();
+
+    const { data: metadataRows, error: metadataErr } = await db
+      .from("application_documents")
+      .select("doc_key, file_path, file_url, file_name, uploaded_at, storage_provider")
+      .eq("application_id", application_id);
+    if (metadataErr) {
+      console.error("[list-app-docs] metadata lookup failed:", metadataErr);
+    } else {
+      (metadataRows || []).forEach((row: any) => {
+        if (!row?.doc_key || !row?.file_path || !row?.file_url) return;
+        docsByKey.set(row.doc_key, {
+          name: row.file_name || row.file_path.split("/").pop() || row.doc_key,
+          path: row.file_path,
+          url: row.file_url,
+          review_status: "pending",
+          review_notes: null,
+          storage_provider: row.storage_provider || "r2",
+          _time: row.uploaded_at ? new Date(row.uploaded_at).getTime() : 0,
+        });
+      });
+    }
+
     const bucket = "application-documents";
     const tryPrefixes = [
       application_id,
@@ -66,13 +89,27 @@ Deno.serve(async (req) => {
         if (!existing || fileTime(f) >= fileTime(existing)) latestByDocKey.set(key, f);
       });
 
-    const docs = Array.from(latestByDocKey.values())
+    Array.from(latestByDocKey.values())
       .sort((a: any, b: any) => a.name.localeCompare(b.name))
-      .map((f: any) => {
+      .forEach((f: any) => {
+        const key = docKeyForFile(f.name);
+        if (docsByKey.has(key)) return;
         const path = `${usedPrefix}/${f.name}`;
         const { data: pub } = db.storage.from(bucket).getPublicUrl(path);
-        return { name: f.name, path, url: pub.publicUrl, review_status: "pending", review_notes: null };
+        docsByKey.set(key, {
+          name: f.name,
+          path,
+          url: pub.publicUrl,
+          review_status: "pending",
+          review_notes: null,
+          storage_provider: "supabase",
+          _time: fileTime(f),
+        });
       });
+
+    const docs = Array.from(docsByKey.values())
+      .sort((a: any, b: any) => a.name.localeCompare(b.name))
+      .map(({ _time, ...doc }: any) => doc);
 
     const activePaths = new Set(docs.map(d => d.path));
     const reviewByPath = new Map<string, { status: string; notes: string | null }>();

@@ -8,6 +8,7 @@
 // drops the open anon INSERT/SELECT/UPDATE policies on application-documents.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { deleteFromR2, uploadToR2 } from "../_shared/r2.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -132,6 +133,18 @@ async function processPhoto(apiKey: string, mimeType: string, bytes: Uint8Array)
   throw new Error(last ? `Photo processing failed (${last.model}, ${last.status}): ${last.body}` : "Photo processing failed");
 }
 
+async function canUseSupabaseStorageTarget(req: Request, admin: any): Promise<boolean> {
+  const authHeader = req.headers.get("authorization") || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
+  if (!token) return false;
+
+  const { data, error } = await admin.auth.getUser(token);
+  if (error || !data?.user?.id) return false;
+
+  const { data: role } = await admin.rpc("get_user_role", { _user_id: data.user.id });
+  return ["super_admin", "principal", "counsellor"].includes(String(role || ""));
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") {
@@ -147,6 +160,8 @@ Deno.serve(async (req) => {
     const docKey = String(form.get("doc_key") || "").trim();
     const file = form.get("file") as File | null;
     const photoAlreadyProcessed = String(form.get("photo_processed") || "").toLowerCase() === "true";
+    const requestedStorageTarget = String(form.get("storage_target") || "r2").toLowerCase();
+    const storageTarget = requestedStorageTarget === "supabase" ? "supabase" : "r2";
 
     if (!applicationId || !phone || !docKey || !file) {
       return new Response(JSON.stringify({ error: "application_id, phone, doc_key, file required" }), {
@@ -193,6 +208,11 @@ Deno.serve(async (req) => {
         status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    if (storageTarget === "supabase" && !(await canUseSupabaseStorageTarget(req, admin))) {
+      return new Response(JSON.stringify({ error: "Supabase storage uploads are restricted to staff" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     let contentType = file.type || "application/octet-stream";
     let buf = new Uint8Array(await file.arrayBuffer());
@@ -218,9 +238,12 @@ Deno.serve(async (req) => {
     const extension = PHOTO_DOC_KEYS.has(docKey)
       ? extForMime(contentType)
       : safeName.split(".").pop() || "bin";
-    const path = docKey === "passport_photo"
+    const fileName = docKey === "passport_photo"
+      ? `passport_photo.${extension}`
+      : `${docKey}-${PHOTO_DOC_KEYS.has(docKey) ? `processed.${extension}` : safeName}`;
+    const legacyPath = docKey === "passport_photo"
       ? `${applicationId}/passport_photo.${extension}`
-      : `${applicationId}/${docKey}-${PHOTO_DOC_KEYS.has(docKey) ? `processed.${extension}` : safeName}`;
+      : `${applicationId}/${fileName}`;
     const { data: existingFiles } = await admin.storage
       .from("application-documents")
       .list(applicationId, { limit: 100 });
@@ -232,25 +255,85 @@ Deno.serve(async (req) => {
       })
       .map((f: any) => `${applicationId}/${f.name}`);
 
-    const { error: upErr } = await admin.storage
-      .from("application-documents")
-      .upload(path, buf, { contentType, upsert: true });
-    if (upErr) {
-      console.error("[apply-portal-upload-doc] upload error:", upErr);
-      return new Response(JSON.stringify({ error: upErr.message }), {
+    const { data: existingDocRows, error: existingDocErr } = await admin
+      .from("application_documents")
+      .select("file_path, storage_provider")
+      .eq("application_id", applicationId)
+      .eq("doc_key", docKey);
+    if (existingDocErr) {
+      console.error("[apply-portal-upload-doc] metadata lookup error:", existingDocErr);
+      return new Response(JSON.stringify({ error: "Document metadata lookup failed" }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const staleObjectPaths = oldPaths.filter((oldPath: string) => oldPath !== path);
+    let uploadedPath: string;
+    let uploadedUrl: string;
+    let storageProvider: "r2" | "supabase";
+
+    if (storageTarget === "supabase") {
+      const { error: upErr } = await admin.storage
+        .from("application-documents")
+        .upload(legacyPath, buf, { contentType, upsert: true });
+      if (upErr) {
+        console.error("[apply-portal-upload-doc] supabase upload error:", upErr);
+        return new Response(JSON.stringify({ error: upErr.message }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const { data: pub } = admin.storage.from("application-documents").getPublicUrl(legacyPath);
+      uploadedPath = legacyPath;
+      uploadedUrl = pub?.publicUrl || legacyPath;
+      storageProvider = "supabase";
+    } else {
+      const r2Key = `application-portal/${legacyPath}`;
+      const uploaded = await uploadToR2({ key: r2Key, body: buf, contentType });
+      uploadedPath = uploaded.key;
+      uploadedUrl = uploaded.url;
+      storageProvider = "r2";
+    }
+
+    const { error: metaErr } = await admin
+      .from("application_documents")
+      .upsert({
+        application_id: applicationId,
+        doc_key: docKey,
+        file_path: uploadedPath,
+        file_url: uploadedUrl,
+        file_name: fileName,
+        original_file_name: file.name,
+        mime_type: contentType,
+        file_size: buf.byteLength,
+        storage_provider: storageProvider,
+        uploaded_source: storageProvider === "supabase" ? "admin" : "apply_portal",
+        uploaded_at: new Date().toISOString(),
+      }, { onConflict: "application_id,doc_key" });
+    if (metaErr) {
+      console.error("[apply-portal-upload-doc] metadata upsert error:", metaErr);
+      return new Response(JSON.stringify({ error: metaErr.message }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const staleObjectPaths = storageProvider === "supabase"
+      ? oldPaths.filter((oldPath: string) => oldPath !== legacyPath)
+      : oldPaths;
     if (staleObjectPaths.length > 0) {
       const { error: rmErr } = await admin.storage
         .from("application-documents")
         .remove(staleObjectPaths);
       if (rmErr) console.error("[apply-portal-upload-doc] stale file cleanup error:", rmErr);
     }
+    await deleteFromR2((existingDocRows || [])
+      .filter((row: any) => row.storage_provider === "r2" && row.file_path !== uploadedPath)
+      .map((row: any) => row.file_path))
+      .catch((err: Error) => console.error("[apply-portal-upload-doc] stale R2 cleanup error:", err.message));
 
-    const reviewPathsToReset = Array.from(new Set([...oldPaths, path]));
+    const reviewPathsToReset = Array.from(new Set([
+      ...oldPaths,
+      ...(existingDocRows || []).map((row: any) => row.file_path),
+      uploadedPath,
+    ]));
     if (reviewPathsToReset.length > 0) {
       const { error: reviewErr } = await admin
         .from("application_doc_reviews")
@@ -260,8 +343,7 @@ Deno.serve(async (req) => {
       if (reviewErr) console.error("[apply-portal-upload-doc] review reset error:", reviewErr);
     }
 
-    const { data: pub } = admin.storage.from("application-documents").getPublicUrl(path);
-    return new Response(JSON.stringify({ ok: true, path, url: pub?.publicUrl || null }), {
+    return new Response(JSON.stringify({ ok: true, path: uploadedPath, url: uploadedUrl, storage_provider: storageProvider }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {

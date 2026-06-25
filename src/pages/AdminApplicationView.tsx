@@ -792,6 +792,7 @@ export default function AdminApplicationView() {
             onNext={refresh}
             saving={false}
             nextLabel="Refresh document list"
+            storageTarget="supabase"
           />
         </div>
       )}

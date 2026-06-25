@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   PDFDocument, PDFImage, PDFName, PDFArray, PDFString, rgb, StandardFonts,
 } from "https://esm.sh/pdf-lib@1.17.1";
+import { uploadToR2 } from "../_shared/r2.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -77,6 +78,12 @@ function docLabel(docKey: string): string {
   }
   // Fallback: title-case the key.
   return docKey.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function docKeyForFileName(name: string): string {
+  if (name.startsWith("passport_photo.")) return "passport_photo";
+  const dashIdx = name.indexOf("-");
+  return dashIdx > 0 ? name.substring(0, dashIdx) : name.replace(/\.[^.]+$/, "");
 }
 
 // ── Eligibility mismatch detection ────────────────────────────────────────
@@ -662,19 +669,47 @@ Deno.serve(async (req) => {
     }
     const mismatches = computeMismatches(appForPdf, eligibilityRules, sessionName);
 
-    // List uploaded files for this application from storage.
+    // List uploaded files for this application. New applicant uploads live in
+    // R2 with metadata in application_documents; older/internal files may still
+    // live in Supabase Storage, so keep a fallback for those.
     const documents: { name: string; url: string }[] = [];
     let photoUrl: string | null = null;
     try {
+      const seenDocKeys = new Set<string>();
+      const photoPattern = /^(passport_photo|student_photo|applicant_photo)/i;
+      const { data: metadataRows, error: metadataErr } = await admin
+        .from("application_documents")
+        .select("doc_key, file_name, file_url, uploaded_at")
+        .eq("application_id", appForPdf.application_id)
+        .order("uploaded_at", { ascending: true });
+      if (metadataErr) {
+        console.error("[application-form] metadata document list failed:", metadataErr.message);
+      } else {
+        for (const row of (metadataRows ?? []) as any[]) {
+          const docKey = row.doc_key || docKeyForFileName(row.file_name || "");
+          if (!docKey || seenDocKeys.has(docKey)) continue;
+          seenDocKeys.add(docKey);
+          const name = row.file_name || docKey;
+          if (!photoUrl && photoPattern.test(name)) {
+            photoUrl = row.file_url;
+          } else if (!photoPattern.test(name)) {
+            documents.push({ name: docLabel(docKey), url: row.file_url });
+          }
+        }
+      }
+
       const { data: files } = await admin.storage.from("application-documents").list(appForPdf.application_id, {
         limit: 200, sortBy: { column: "name", order: "asc" },
       });
       // Photo conventions vary - PhotoUpload uses passport_photo.png; school
       // form uses student_photo-*.png; admins might upload applicant_photo*.
       // Pick the first file matching any of these patterns.
-      const photoPattern = /^(passport_photo|student_photo|applicant_photo)/i;
       for (const f of (files ?? [])) {
         if (!f.name) continue;
+        const dashIdx = f.name.indexOf("-");
+        const docKey = dashIdx > 0 ? f.name.substring(0, dashIdx) : f.name.replace(/\.[^.]+$/, "");
+        if (seenDocKeys.has(docKey)) continue;
+        seenDocKeys.add(docKey);
         const path = `${appForPdf.application_id}/${f.name}`;
         const { data: pub } = admin.storage.from("application-documents").getPublicUrl(path);
         const url = pub?.publicUrl || path;
@@ -685,8 +720,6 @@ Deno.serve(async (req) => {
         } else {
           // File names are uploaded as `${docKey}-${original_filename}`. Pull
           // the docKey out of the prefix and resolve to the friendly label.
-          const dashIdx = f.name.indexOf("-");
-          const docKey = dashIdx > 0 ? f.name.substring(0, dashIdx) : f.name.replace(/\.[^.]+$/, "");
           documents.push({ name: docLabel(docKey), url });
         }
       }
@@ -733,17 +766,9 @@ Deno.serve(async (req) => {
     const sig   = await fetchImage(p, branding?.signature_url ?? null);
     const out = await buildApplicationPdfInline(p, f, b, appForPdf, branding, lh, ftr, photo, sig, documents, appFeePayment, sessionName, mismatches);
 
-    const path = `applications/${app.application_id}.pdf`;
-    const { error: upErr } = await admin.storage
-      .from("application-documents")
-      .upload(path, out, { contentType: "application/pdf", upsert: true, cacheControl: "no-cache, max-age=0" });
-    if (upErr) {
-      return new Response(JSON.stringify({ error: upErr.message }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const { data: pub } = admin.storage.from("application-documents").getPublicUrl(path);
-    const baseUrl = pub?.publicUrl || path;
+    const path = `application-pdfs/${app.application_id}.pdf`;
+    const uploaded = await uploadToR2({ key: path, body: out, contentType: "application/pdf" });
+    const baseUrl = uploaded.url;
     const formUrl = `${baseUrl}?v=${Date.now()}`;
     await admin.from("applications").update({ form_pdf_url: formUrl }).eq("id", app.id);
 

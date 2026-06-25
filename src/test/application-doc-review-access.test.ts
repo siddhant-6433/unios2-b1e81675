@@ -4,6 +4,9 @@ import { describe, expect, it } from "vitest";
 const adminApplicationView = readFileSync("src/pages/AdminApplicationView.tsx", "utf8");
 const docReviewPanel = readFileSync("src/components/admissions/DocReviewPanel.tsx", "utf8");
 const listAppDocs = readFileSync("supabase/functions/list-app-docs/index.ts", "utf8");
+const applyPortalUploadDoc = readFileSync("supabase/functions/apply-portal-upload-doc/index.ts", "utf8");
+const generateApplicationForm = readFileSync("supabase/functions/generate-application-form/index.ts", "utf8");
+const generateOfferLetter = readFileSync("supabase/functions/generate-offer-letter/index.ts", "utf8");
 const migration = readFileSync("supabase/migrations/20260619120700_restrict_application_doc_review_approvals.sql", "utf8");
 const principalOnlyMigration = readFileSync("supabase/migrations/20260620117000_principal_superadmin_document_review_only.sql", "utf8");
 const applicationDecisionGuard = readFileSync("supabase/migrations/20260620118000_guard_application_decision_roles.sql", "utf8");
@@ -33,6 +36,7 @@ describe("application document review access", () => {
     expect(adminApplicationView).toContain('const canUploadDocuments = role === "super_admin" || role === "principal" || role === "counsellor"');
     expect(adminApplicationView).toContain("<DocumentUpload");
     expect(adminApplicationView).toContain('nextLabel="Refresh document list"');
+    expect(adminApplicationView).toContain('storageTarget="supabase"');
   });
 
   it("blocks counsellors from application approval at the database layer", () => {
@@ -64,11 +68,22 @@ describe("application document review access", () => {
   });
 
   it("treats a replacement upload as the active document for review", () => {
+    expect(listAppDocs).toContain("application_documents");
     expect(listAppDocs).toContain("latestByDocKey");
     expect(listAppDocs).toContain("staleReviewPaths");
     expect(listAppDocs).toContain("review_status");
     expect(listAppDocs).toContain("review_notes");
     expect(adminApplicationView).toContain("activeDocPaths");
     expect(adminApplicationView).toContain("if (activeDocPaths.has(r.file_path))");
+  });
+
+  it("routes applicant uploads and generated admission PDFs through R2", () => {
+    expect(applyPortalUploadDoc).toContain("uploadToR2");
+    expect(applyPortalUploadDoc).toContain("application-portal/");
+    expect(applyPortalUploadDoc).toContain("application_documents");
+    expect(generateApplicationForm).toContain("uploadToR2");
+    expect(generateApplicationForm).toContain("application-pdfs/");
+    expect(generateOfferLetter).toContain("uploadToR2");
+    expect(generateOfferLetter).toContain("offer-letters/");
   });
 });
