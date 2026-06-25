@@ -23,7 +23,9 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  APPLICATION_FUNNEL_ORDER,
   applicationFunnelStageOf,
+  isPaidBeforeOfferStage,
   type ApplicationFunnelStage,
 } from "@/lib/applicationFunnel";
 import {
@@ -88,8 +90,7 @@ type FunnelStage = ApplicationFunnelStage;
 // funnel order is In Progress → Paid → Submitted (= paid + declaration
 // submitted) → Approved → … rather than Submitted → Paid.
 const FUNNEL_ORDER: FunnelStage[] = [
-  "in_progress", "paid", "submitted", "approved",
-  "offer_sent", "token_paid", "pre_admitted", "admitted",
+  ...APPLICATION_FUNNEL_ORDER,
 ];
 
 const funnelStageOf = applicationFunnelStageOf;
@@ -477,7 +478,7 @@ export default function Applications() {
     // includes everyone who paid token fee, not just those currently AT the
     // token_paid stage. Other stage tiles still match on the lead's stage.
     if (stageFilter === "paid_no_offer") {
-      if (a.payment_status !== "paid" || a.has_offer) return false;
+      if (!isPaidBeforeOfferStage(a)) return false;
     } else if (stageFilter && (FUNNEL_ORDER as string[]).includes(stageFilter)) {
       // Funnel filter → show only apps currently STUCK at that stage
       // (the leakage cohort — didn't progress beyond).
@@ -569,7 +570,7 @@ export default function Applications() {
     }
   }
   const totalApps = apps.length;
-  const paidNoOffer = apps.filter(a => a.payment_status === "paid" && !a.has_offer).length;
+  const paidNoOffer = apps.filter(isPaidBeforeOfferStage).length;
 
   const handleDelete = async () => {
     if (!deleteTarget || !isSuperAdmin) return;

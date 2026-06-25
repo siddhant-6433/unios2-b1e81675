@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applicationFunnelStageOf } from "@/lib/applicationFunnel";
+import { applicationFunnelStageOf, isPaidBeforeOfferStage } from "@/lib/applicationFunnel";
 
 const app = (overrides: Record<string, unknown> = {}) => ({
   status: "draft",
@@ -45,5 +45,18 @@ describe("Applications funnel stage", () => {
       lead_stage: "counsellor_call",
       has_offer: true,
     }))).toBe("offer_sent");
+  });
+
+  it("counts the paid no-offer badge from stages before offer sent", () => {
+    const apps = [
+      app({ payment_status: "paid" }),
+      app({ status: "submitted", payment_status: "paid" }),
+      app({ status: "approved", payment_status: "paid" }),
+      app({ payment_status: "paid", has_offer: true }),
+      app({ payment_status: "paid", has_token_fee_paid: true }),
+      app({ payment_status: "pending", status: "approved" }),
+    ];
+
+    expect(apps.filter(isPaidBeforeOfferStage)).toHaveLength(3);
   });
 });
