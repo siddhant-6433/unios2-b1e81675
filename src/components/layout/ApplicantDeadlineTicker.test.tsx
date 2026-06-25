@@ -33,10 +33,11 @@ describe("ApplicantDeadlineTicker", () => {
     );
 
     expect(screen.getByText("Admissions 2026-27")).toBeInTheDocument();
-    expect(screen.getByText("Round 2 Application Deadline: apply by 14th June 2026")).toBeInTheDocument();
-    expect(screen.getByText("BPT & BMRIT")).toBeInTheDocument();
-    expect(screen.getByText(/CAHET registration on ABVMU due/)).toHaveTextContent("14th June 2026, 11:59 PM");
-    expect(screen.getByText("2d 23h 59m 59s")).toBeInTheDocument();
+    expect(screen.getByText("UP-DELED Deadline: apply by 9th July 2026")).toBeInTheDocument();
+    expect(screen.getByText("UP-DELED")).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent === "Deadline 9th July 2026, 11:59 PM")).toBeInTheDocument();
+    expect(screen.getByText("27d 23h 59m 59s")).toBeInTheDocument();
+    expect(screen.queryByText(/CAHET/)).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Apply Now/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Edit" })).not.toBeInTheDocument();
   });
@@ -54,10 +55,11 @@ describe("ApplicantDeadlineTicker", () => {
     );
 
     expect(screen.getByText("Admissions 2026-27")).toBeInTheDocument();
-    expect(screen.getByText("Round 2 Application Deadline: apply by 14th June 2026")).toBeInTheDocument();
-    expect(screen.getByText("BPT & BMRIT")).toBeInTheDocument();
-    expect(screen.getByText(/CAHET registration on ABVMU due/)).toHaveTextContent("14th June 2026, 11:59 PM");
-    expect(screen.getByText("2d 23h 59m 59s")).toBeInTheDocument();
+    expect(screen.getByText("UP-DELED Deadline: apply by 9th July 2026")).toBeInTheDocument();
+    expect(screen.getByText("UP-DELED")).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent === "Deadline 9th July 2026, 11:59 PM")).toBeInTheDocument();
+    expect(screen.getByText("27d 23h 59m 59s")).toBeInTheDocument();
+    expect(screen.queryByText(/CAHET/)).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Apply Now/i })).toHaveAttribute("href", "/apply/nimt");
     expect(screen.queryByRole("link", { name: "Edit" })).not.toBeInTheDocument();
   });
@@ -78,6 +80,7 @@ describe("ApplicantDeadlineTicker", () => {
     expect(screen.getByText("Round 2 Application Deadline for Admission: apply by 14th June 2026")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Apply Now/i })).toHaveAttribute("href", "/apply/mirai");
     expect(screen.queryByText("BPT & BMRIT")).not.toBeInTheDocument();
+    expect(screen.queryByText("UP-DELED")).not.toBeInTheDocument();
     expect(screen.queryByText(/CAHET/)).not.toBeInTheDocument();
   });
 
@@ -97,6 +100,7 @@ describe("ApplicantDeadlineTicker", () => {
     expect(screen.getByText("Round 2 Application Deadline for Admission: apply by 19th June 2026")).toBeInTheDocument();
     expect(screen.queryByText(/^Application deadline/)).not.toBeInTheDocument();
     expect(screen.queryByText("BPT & BMRIT")).not.toBeInTheDocument();
+    expect(screen.queryByText("UP-DELED")).not.toBeInTheDocument();
     expect(screen.queryByText(/CAHET/)).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Apply Now/i })).toHaveAttribute("href", "/apply/beacon");
     expect(screen.getByText("4d 23h 59m 59s")).toBeInTheDocument();
