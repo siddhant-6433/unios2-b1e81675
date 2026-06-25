@@ -13,6 +13,35 @@
 (function () {
   var FORM_URL = window.location.origin + "/enquiry?embed=true";
 
+  function appendAttribution(url) {
+    try {
+      var formUrl = new URL(url);
+      var current = new URL(window.location.href);
+      var paramsToForward = [
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_term",
+        "utm_content",
+        "gclid",
+        "fbclid",
+      ];
+
+      paramsToForward.forEach(function (key) {
+        var value = current.searchParams.get(key);
+        if (value) formUrl.searchParams.set(key, value);
+      });
+
+      formUrl.searchParams.set("parent_url", window.location.href);
+      if (document.referrer) formUrl.searchParams.set("parent_referrer", document.referrer);
+      formUrl.searchParams.set("origin_domain", window.location.hostname);
+
+      return formUrl.toString();
+    } catch (e) {
+      return url;
+    }
+  }
+
   // Allow overriding the base URL for production
   var script = document.currentScript;
   if (script && script.src) {
@@ -35,7 +64,7 @@
   var width = container.getAttribute("data-width") || "100%";
 
   var iframe = document.createElement("iframe");
-  iframe.src = FORM_URL;
+  iframe.src = appendAttribution(FORM_URL);
   iframe.style.width = width;
   iframe.style.height = height + "px";
   iframe.style.border = "none";

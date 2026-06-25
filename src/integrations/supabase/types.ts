@@ -6313,9 +6313,14 @@ export type Database = {
           created_at: string
           email: string | null
           entrance_scores: Json | null
+          fbc: string | null
+          fbp: string | null
           first_contact_at: string | null
           future_eligible_session: string | null
           gap_years: number | null
+          ga_client_id: string | null
+          ga_session_id: string | null
+          gclid: string | null
           guardian_name: string | null
           guardian_phone: string | null
           id: string
@@ -6324,6 +6329,7 @@ export type Database = {
           is_mirror: boolean
           is_nri: boolean | null
           jd_category: string | null
+          landing_page: string | null
           lead_score: number | null
           lead_institution_type: string
           lead_temperature: string | null
@@ -6331,10 +6337,13 @@ export type Database = {
           name: string
           notes: string | null
           offer_amount: number | null
+          origin_domain: string | null
           person_role: string
           phone: string
+          portal_brand: string | null
           pre_admission_no: string | null
           qualifying_percent: number | null
+          referrer: string | null
           secondary_source: string | null
           skip_ai_call: boolean | null
           source: Database["public"]["Enums"]["lead_source"]
@@ -6346,6 +6355,11 @@ export type Database = {
           tertiary_source: string | null
           token_amount: number | null
           updated_at: string
+          utm_campaign: string | null
+          utm_content: string | null
+          utm_medium: string | null
+          utm_source: string | null
+          utm_term: string | null
           visit_date: string | null
         }
         Insert: {
@@ -6375,9 +6389,14 @@ export type Database = {
           created_at?: string
           email?: string | null
           entrance_scores?: Json | null
+          fbc?: string | null
+          fbp?: string | null
           first_contact_at?: string | null
           future_eligible_session?: string | null
           gap_years?: number | null
+          ga_client_id?: string | null
+          ga_session_id?: string | null
+          gclid?: string | null
           guardian_name?: string | null
           guardian_phone?: string | null
           id?: string
@@ -6386,6 +6405,7 @@ export type Database = {
           is_mirror?: boolean
           is_nri?: boolean | null
           jd_category?: string | null
+          landing_page?: string | null
           lead_score?: number | null
           lead_institution_type?: string
           lead_temperature?: string | null
@@ -6393,10 +6413,13 @@ export type Database = {
           name: string
           notes?: string | null
           offer_amount?: number | null
+          origin_domain?: string | null
           person_role?: string
           phone: string
+          portal_brand?: string | null
           pre_admission_no?: string | null
           qualifying_percent?: number | null
+          referrer?: string | null
           secondary_source?: string | null
           skip_ai_call?: boolean | null
           source?: Database["public"]["Enums"]["lead_source"]
@@ -6408,6 +6431,11 @@ export type Database = {
           tertiary_source?: string | null
           token_amount?: number | null
           updated_at?: string
+          utm_campaign?: string | null
+          utm_content?: string | null
+          utm_medium?: string | null
+          utm_source?: string | null
+          utm_term?: string | null
           visit_date?: string | null
         }
         Update: {
@@ -6437,9 +6465,14 @@ export type Database = {
           created_at?: string
           email?: string | null
           entrance_scores?: Json | null
+          fbc?: string | null
+          fbp?: string | null
           first_contact_at?: string | null
           future_eligible_session?: string | null
           gap_years?: number | null
+          ga_client_id?: string | null
+          ga_session_id?: string | null
+          gclid?: string | null
           guardian_name?: string | null
           guardian_phone?: string | null
           id?: string
@@ -6448,6 +6481,7 @@ export type Database = {
           is_mirror?: boolean
           is_nri?: boolean | null
           jd_category?: string | null
+          landing_page?: string | null
           lead_score?: number | null
           lead_institution_type?: string
           lead_temperature?: string | null
@@ -6455,10 +6489,13 @@ export type Database = {
           name?: string
           notes?: string | null
           offer_amount?: number | null
+          origin_domain?: string | null
           person_role?: string
           phone?: string
+          portal_brand?: string | null
           pre_admission_no?: string | null
           qualifying_percent?: number | null
+          referrer?: string | null
           secondary_source?: string | null
           skip_ai_call?: boolean | null
           source?: Database["public"]["Enums"]["lead_source"]
@@ -6470,6 +6507,11 @@ export type Database = {
           tertiary_source?: string | null
           token_amount?: number | null
           updated_at?: string
+          utm_campaign?: string | null
+          utm_content?: string | null
+          utm_medium?: string | null
+          utm_source?: string | null
+          utm_term?: string | null
           visit_date?: string | null
         }
         Relationships: [
@@ -10470,10 +10512,24 @@ export type Database = {
           _application_id?: string
           _campus_id?: string
           _course_id?: string
+          _fbc?: string
+          _fbp?: string
           _email?: string
+          _ga_client_id?: string
+          _ga_session_id?: string
+          _gclid?: string
+          _landing_page?: string
           _name: string
+          _origin_domain?: string
           _phone: string
+          _portal_brand?: string
+          _referrer?: string
           _source?: string
+          _utm_campaign?: string
+          _utm_content?: string
+          _utm_medium?: string
+          _utm_source?: string
+          _utm_term?: string
         }
         Returns: string
       }
