@@ -369,6 +369,26 @@ Deno.serve(async (req) => {
         .limit(10);
       payment = (rows || []).find((row: any) => appIdFromNotes(row.notes) === app.application_id) || null;
     }
+    if (!payment && app.lead_id) {
+      const { data: rows } = await admin
+        .from("lead_payments")
+        .select("id, receipt_no, amount, payment_mode, gateway, transaction_ref, payment_date, created_at, status, application_id, notes")
+        .eq("lead_id", app.lead_id)
+        .eq("type", "application_fee")
+        .eq("status", "confirmed")
+        .eq("amount", app.fee_amount)
+        .is("application_id", null)
+        .order("created_at", { ascending: false })
+        .limit(2);
+      if ((rows || []).length === 1 && !appIdFromNotes(rows[0].notes)) {
+        payment = rows[0];
+        await admin
+          .from("lead_payments")
+          .update({ application_id: app.application_id } as any)
+          .eq("id", payment.id)
+          .is("application_id", null);
+      }
+    }
     if (!payment && app.payment_status === "paid") {
       payment = {
         id: null,

@@ -23,6 +23,15 @@ describe("Razorpay payment gateway wiring", () => {
     expect(razorpayFunction).toContain('return json({ error: "Invalid payment signature" }, 400)');
   });
 
+  it("can reconcile paid Razorpay orders when the checkout callback was missed", () => {
+    expect(razorpayFunction).toContain('action === "reconcile-order"');
+    expect(razorpayFunction).toContain('`/orders/${encodeURIComponent(orderId)}`');
+    expect(razorpayFunction).toContain('`/orders/${encodeURIComponent(orderId)}/payments`');
+    expect(razorpayFunction).toContain('firstSettledRazorpayPayment');
+    expect(razorpayFunction).toContain('update({ payment_status: "paid", payment_ref: paymentId, pending_txnid: orderId })');
+    expect(razorpayFunction).toContain("Razorpay order belongs to a different application");
+  });
+
   it("loads Standard Checkout and posts successful payments for verification", () => {
     expect(checkoutHelper).toContain("https://checkout.razorpay.com/v1/checkout.js");
     expect(checkoutHelper).toContain('postRazorpay("create-order"');

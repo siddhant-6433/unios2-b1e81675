@@ -104,6 +104,15 @@ async function razorpayRequest(path: string, init: RequestInit, keyId: string, k
   return { res, data };
 }
 
+function firstSettledRazorpayPayment(payments: unknown): Record<string, unknown> | null {
+  const rows = Array.isArray(payments) ? payments : [];
+  return (
+    rows.find((payment: any) => payment?.status === "captured") ||
+    rows.find((payment: any) => payment?.status === "authorized") ||
+    null
+  );
+}
+
 async function getStudentFeeRows(admin: any, studentId: string, selection: string) {
   let query = admin
     .from("fee_ledger")
@@ -422,6 +431,140 @@ Deno.serve(async (req) => {
         order_id: serverOrderId,
         payment_id: paymentId,
         context,
+      });
+    }
+
+    if (action === "reconcile-order") {
+      const requestedOrderId = String(parsed.order_id || parsed.razorpay_order_id || "");
+      const requestedApplicationId = String(parsed.application_id || "");
+      let orderId = requestedOrderId;
+
+      if (!orderId && requestedApplicationId) {
+        const { data: appRow, error: appErr } = await admin
+          .from("applications")
+          .select("pending_txnid")
+          .eq("application_id", requestedApplicationId)
+          .maybeSingle();
+        if (appErr) return json({ error: appErr.message }, 500);
+        orderId = String(appRow?.pending_txnid || "");
+      }
+
+      if (!orderId || !orderId.startsWith("order_")) {
+        return json({ error: "A Razorpay order_id is required" }, 400);
+      }
+
+      const { res: orderRes, data: order } = await razorpayRequest(`/orders/${encodeURIComponent(orderId)}`, {
+        method: "GET",
+      }, keyId, keySecret);
+      if (!orderRes.ok) return json({ error: order?.error?.description || "Failed to fetch Razorpay order" }, orderRes.status);
+
+      const notes = (order.notes && typeof order.notes === "object" && !Array.isArray(order.notes))
+        ? order.notes as Record<string, string>
+        : {};
+      const context = notes.context || String(parsed.context || "generic");
+      const applicationId = requestedApplicationId || notes.application_id || "";
+
+      if (requestedApplicationId && notes.application_id && requestedApplicationId !== notes.application_id) {
+        return json({
+          error: "Razorpay order belongs to a different application",
+          order_id: orderId,
+          order_application_id: notes.application_id,
+          requested_application_id: requestedApplicationId,
+        }, 409);
+      }
+
+      const amount = Number(order.amount || 0);
+      const amountPaid = Number(order.amount_paid || 0);
+      const orderPaid = String(order.status || "").toLowerCase() === "paid" || (amount > 0 && amountPaid >= amount);
+      if (!orderPaid) {
+        return json({
+          success: false,
+          order_id: orderId,
+          status: order.status || null,
+          amount,
+          amount_paid: amountPaid,
+          context,
+        });
+      }
+
+      const { res: paymentsRes, data: paymentData } = await razorpayRequest(`/orders/${encodeURIComponent(orderId)}/payments`, {
+        method: "GET",
+      }, keyId, keySecret);
+      if (!paymentsRes.ok) {
+        return json({ error: paymentData?.error?.description || "Failed to fetch Razorpay payments" }, paymentsRes.status);
+      }
+
+      const payment = firstSettledRazorpayPayment(paymentData?.items);
+      const paymentId = String(payment?.id || "");
+      if (!paymentId) {
+        return json({
+          error: "Razorpay order is paid but no captured/authorized payment was returned",
+          order_id: orderId,
+          status: order.status || null,
+          amount,
+          amount_paid: amountPaid,
+        }, 409);
+      }
+
+      if (context === "application_fee" && applicationId) {
+        const { data: existingPaid, error: existingErr } = await admin
+          .from("applications")
+          .select("application_id, full_name, phone, email")
+          .eq("payment_status", "paid")
+          .eq("payment_ref", paymentId)
+          .neq("application_id", applicationId)
+          .limit(1)
+          .maybeSingle();
+        if (existingErr) return json({ error: existingErr.message }, 500);
+        if (existingPaid?.application_id) {
+          return json({
+            error: "Razorpay payment is already attached to a different paid application",
+            order_id: orderId,
+            payment_id: paymentId,
+            requested_application_id: applicationId,
+            existing_application_id: existingPaid.application_id,
+            existing_candidate: existingPaid.full_name || null,
+          }, 409);
+        }
+
+        const { error } = await admin
+          .from("applications")
+          .update({ payment_status: "paid", payment_ref: paymentId, pending_txnid: orderId })
+          .eq("application_id", applicationId);
+        if (error) {
+          const { data: conflicts } = await admin
+            .from("applications")
+            .select("application_id, full_name, phone, email, payment_status, payment_ref, pending_txnid")
+            .ilike("payment_ref", `%${paymentId}%`)
+            .limit(5);
+          return json({
+            error: error.message,
+            code: error.code || null,
+            details: error.details || null,
+            hint: error.hint || null,
+            order_id: orderId,
+            payment_id: paymentId,
+            application_id: applicationId,
+            conflicts: conflicts || [],
+          }, 500);
+        }
+
+        fetch(`${supabaseUrl}/functions/v1/generate-application-fee-receipt`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceKey}` },
+          body: JSON.stringify({ application_id: applicationId }),
+        }).catch((error) => console.error("[razorpay] reconcile-order receipt invoke failed:", error));
+      }
+
+      return json({
+        success: true,
+        order_id: orderId,
+        payment_id: paymentId,
+        context,
+        application_id: applicationId || null,
+        status: order.status || null,
+        amount,
+        amount_paid: amountPaid,
       });
     }
 
