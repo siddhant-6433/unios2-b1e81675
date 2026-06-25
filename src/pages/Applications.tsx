@@ -298,6 +298,7 @@ export default function Applications() {
       const leadOfferMap: Record<string, boolean> = {};
       const appFeePaidMap: Record<string, number> = {};
       const leadTokenFeePaidSet: Set<string> = new Set();
+      const leadTokenCompleteMap: Record<string, boolean> = {};
       const appDocCountsMap: Record<string, { total: number; verified: number; rejected: number; pending: number }> = {};
       if (leadIds.length > 0) {
         // Offer-letter existence — one row per lead is enough to flag.
@@ -307,11 +308,10 @@ export default function Applications() {
         (offers || []).forEach((o: any) => { leadOfferMap[o.lead_id] = true; });
 
         // Confirmed application_fee + token_fee payments — track per lead.
-        // We need TOKEN-fee separately so the "Token Paid" stat reflects
-        // anyone who actually paid the token fee, not just leads whose
-        // current `stage` happens to equal 'token_paid' (which gets
-        // overwritten as soon as they progress to offer_sent / pre_admitted
-        // / admitted, leaving most real payers uncounted).
+        // `leadTokenFeePaidSet` is a cheap early flag for explicit token_fee
+        // receipts. Course-fee lump-sum payments are recorded as `other`, so
+        // the authoritative token-complete flag comes from lead_fee_status
+        // below once the offer/threshold is known.
         const { data: pmts } = await supabase.from("lead_payments")
           .select("lead_id, amount, type")
           .in("lead_id", leadIds)
@@ -386,7 +386,6 @@ export default function Applications() {
           const { data: fs } = await (supabase as any).rpc("lead_fee_status", { _lead_id: lid });
           if (!fs) return;
           const tokenReq = Number(fs.token_required || 0);
-          const tokenPaid = Number(fs.token_paid || 0);
           const anThr = Number(fs.an_threshold || 0);
           const postSchY1 = Number(fs.post_scholarship_year_1 || fs.first_year_fee || 0);
           // `paid_toward_course` excludes application_fee + registration_fee
@@ -394,9 +393,17 @@ export default function Applications() {
           // is the right field for both the AN-gate balance and the year-1
           // remaining. `total_paid` would double-count the app/reg fee and
           // wrongly shrink the displayed dues.
-          const paidTowardCourse = Number(fs.paid_toward_course || 0);
+          const paidTowardCourse = Number(
+            fs.paid_toward_course ?? Math.max(
+              0,
+              Number(fs.total_paid || 0) -
+                Number(fs.application_paid || 0) -
+                Number(fs.registration_paid || 0)
+            )
+          );
           const hasPan = !!leadPanMap[lid];
-          panDueMap[lid] = hasPan ? null : Math.max(0, tokenReq - tokenPaid);
+          leadTokenCompleteMap[lid] = !!fs.token_complete;
+          panDueMap[lid] = hasPan ? null : Math.max(0, tokenReq - paidTowardCourse);
           anDueMap[lid] = Math.max(0, anThr - paidTowardCourse);
           year1DueMap[lid] = Math.max(0, postSchY1 - paidTowardCourse);
         }));
@@ -412,7 +419,7 @@ export default function Applications() {
         lead_admission_no: leadAnMap[a.lead_id] || null,
         has_offer: !!leadOfferMap[a.lead_id],
         app_fee_paid: appFeePaidMap[a.lead_id] || 0,
-        has_token_fee_paid: leadTokenFeePaidSet.has(a.lead_id),
+        has_token_fee_paid: leadTokenFeePaidSet.has(a.lead_id) || !!leadTokenCompleteMap[a.lead_id],
         doc_counts: appDocCountsMap[a.application_id] || { total: 0, verified: 0, rejected: 0, pending: 0 },
         pan_due: panDueMap[a.lead_id] ?? null,
         an_due: anDueMap[a.lead_id] ?? null,

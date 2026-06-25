@@ -96,6 +96,9 @@ const ENTRANCE_OPTIONS = [
   "Other",
 ];
 
+const isDaottCourseName = (name: string | null | undefined) =>
+  !!name && (/\bD\.?\s*A?OTT\b/i.test(name) || /ana?esthesia.*operation theatre/i.test(name));
+
 export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, courseId, courseName, campusId, cahetRegistration: cahetRegistrationProp, onSuccess }: OfferLetterDialogProps) {
   const { user, role } = useAuth();
   const { toast } = useToast();
@@ -366,8 +369,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   const netFirstYearFee = Math.max(0, firstYearFee - preWaiverTotalForTerm("year_1"));
 
   // Token fee defaults to 25% of net Year-1. Admissions can lower it while
-  // issuing the offer, but never below ₹5,000.
-  const tokenFloor = 5000;
+  // issuing the offer, but never below the course-specific seat-block floor.
+  const tokenFloor = isDaottCourseName(courseName) ? 4000 : 5000;
   const tokenDefault = netFirstYearFee > 0
     ? Math.max(Math.round(netFirstYearFee * 0.25), tokenFloor)
     : 0;
@@ -1057,7 +1060,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                 )}
 
                 {/* Token fee — defaults to 25% of Year-1, editable but floored at
-                    ₹5,000. The pencil icon flips edit mode;
+                    the course-specific seat-block amount. The pencil icon flips edit mode;
                     the field is read-only otherwise to discourage casual changes. */}
                 <div>
                   <label className="flex items-center justify-between text-[11px] font-medium text-muted-foreground mb-1">
