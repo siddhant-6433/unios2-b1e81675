@@ -2,6 +2,11 @@ export type ApplicationFunnelStage =
   | "in_progress" | "paid" | "submitted" | "approved"
   | "offer_sent" | "token_paid" | "pre_admitted" | "admitted";
 
+export const APPLICATION_FUNNEL_ORDER: ApplicationFunnelStage[] = [
+  "in_progress", "paid", "submitted", "approved",
+  "offer_sent", "token_paid", "pre_admitted", "admitted",
+];
+
 export type ApplicationFunnelInput = {
   status?: string | null;
   payment_status?: string | null;
@@ -35,4 +40,11 @@ export function applicationFunnelStageOf(a: ApplicationFunnelInput): Application
   // as Submitted so the anomaly surfaces instead of hiding in In Progress.
   if (a.status && a.status !== "draft") return "submitted";
   return "in_progress";
+}
+
+export function isPaidBeforeOfferStage(a: ApplicationFunnelInput): boolean {
+  if (a.payment_status !== "paid") return false;
+
+  const stage = applicationFunnelStageOf(a);
+  return APPLICATION_FUNNEL_ORDER.indexOf(stage) < APPLICATION_FUNNEL_ORDER.indexOf("offer_sent");
 }
