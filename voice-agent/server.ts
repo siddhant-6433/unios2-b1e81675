@@ -52,10 +52,38 @@ const PLACEHOLDER_NAMES = new Set([
 
 const GEMINI_WS_URL = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${GOOGLE_AI_API_KEY}`;
 
+function normalizePlivoCallerId(value: string | null | undefined, defaultCountryCode = "91"): string | null {
+  let digits = String(value || "").replace(/\D/g, "");
+  const countryCode = defaultCountryCode.replace(/\D/g, "") || "91";
+  if (!digits) return null;
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (countryCode === "91") {
+    if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+    if (digits.length === 10) digits = `${countryCode}${digits}`;
+    if (digits.length === 13 && digits.startsWith("910")) digits = `91${digits.slice(3)}`;
+  } else if (digits.length === 10) {
+    digits = `${countryCode}${digits}`;
+  }
+  return /^[1-9]\d{10,14}$/.test(digits) ? digits : null;
+}
+
+function firstPlivoCallerIdFromEnv(): string {
+  const raw = Deno.env.get("PLIVO_DIALER_PHONE_NUMBERS")
+    || Deno.env.get("PLIVO_DIALER_PHONE_NUMBER")
+    || Deno.env.get("PLIVO_PHONE_NUMBER")
+    || "";
+  for (const part of raw.split(/[,;\n]+/)) {
+    const callerId = normalizePlivoCallerId(part);
+    if (callerId) return callerId;
+  }
+  return "";
+}
+
 // In-memory store for active call contexts (call_id → context)
 interface ActiveCall extends CallContext {
   leadId?: string;
   callLogId?: string;
+  bridgeCallerId?: string;
   callerTranscript: string[];
   aiTranscript: string[];
   toolCallsMade: { name: string; args: any; result: any }[];
@@ -2816,9 +2844,7 @@ Deno.serve({ port: PORT }, async (req) => {
       );
     }
     console.log(`[transfer-bridge ${key}] Dialing ${bridge.name} at ${bridge.phone}`);
-    const callerId = Deno.env.get("PLIVO_DIALER_PHONE_NUMBER")
-      || Deno.env.get("PLIVO_PHONE_NUMBER")
-      || "";
+    const callerId = firstPlivoCallerIdFromEnv();
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Speak voice="Polly.Kajal" language="en-IN">Connecting you to ${xmlEsc(bridge.name)} now. Please hold.</Speak>
@@ -2840,10 +2866,11 @@ Deno.serve({ port: PORT }, async (req) => {
       leadName: ctx.leadName,
       courseName: ctx.courseName,
       campusName: ctx.campusName,
+      bridgeCallerId: normalizePlivoCallerId(ctx.dialerFrom) || firstPlivoCallerIdFromEnv(),
       callerTranscript: [],
       aiTranscript: [],
       // Store counsellor info for call_logs attribution
-      toolCallsMade: [{ name: "bridge_meta", args: { counsellorUserId: ctx.counsellorUserId, counsellorName: ctx.counsellorName }, result: null }],
+      toolCallsMade: [{ name: "bridge_meta", args: { counsellorUserId: ctx.counsellorUserId, counsellorName: ctx.counsellorName, dialerFrom: ctx.dialerFrom }, result: null }],
     });
     console.log(`[BRIDGE ${callId}] Context set: counsellor=${ctx.counsellorPhone} → student=${ctx.studentPhone}`);
     return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } });
@@ -2854,10 +2881,13 @@ Deno.serve({ port: PORT }, async (req) => {
   if (path.startsWith("/bridge-answer/")) {
     const callId = path.split("/bridge-answer/")[1];
     const studentPhone = url.searchParams.get("student") || "";
+    const callCtx = activeCallContexts.get(callId);
     // Cloud dialer number — what the student sees as caller-id when the
     // counsellor's leg bridges them in. Kept distinct from the AI agent's
     // number so inbound returns route to the right answer flow.
-    const PLIVO_PHONE_NUMBER = Deno.env.get("PLIVO_DIALER_PHONE_NUMBER") || "";
+    const PLIVO_PHONE_NUMBER = normalizePlivoCallerId(url.searchParams.get("caller"))
+      || callCtx?.bridgeCallerId
+      || firstPlivoCallerIdFromEnv();
     const recordingCallbackUrl = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/voice-call-callback` : "";
     const host = req.headers.get("host") || url.host;
     const statusUrl = `https://${host}/bridge-status/${callId}`;

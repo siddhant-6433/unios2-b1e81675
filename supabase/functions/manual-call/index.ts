@@ -15,7 +15,7 @@
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { maskPhoneForLog, normalizePlivoVoiceNumber } from "../_shared/phone.ts";
+import { maskPhoneForLog, normalizePlivoVoiceNumber, normalizePlivoVoiceNumbers } from "../_shared/phone.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -39,17 +39,20 @@ Deno.serve(async (req) => {
     // Cloud-dialer caller-id — separate from the AI agent's number so leads
     // can tell whether they're being called by an AI vs a human counsellor.
     const PLIVO_DIALER_PHONE_NUMBER = Deno.env.get("PLIVO_DIALER_PHONE_NUMBER");
+    const PLIVO_DIALER_PHONE_NUMBERS = Deno.env.get("PLIVO_DIALER_PHONE_NUMBERS");
     const VOICE_AGENT_URL = Deno.env.get("VOICE_AGENT_URL");
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    if (!PLIVO_AUTH_ID || !PLIVO_AUTH_TOKEN || !PLIVO_DIALER_PHONE_NUMBER || !VOICE_AGENT_URL) {
+    const dialerNumberSecret = PLIVO_DIALER_PHONE_NUMBERS || PLIVO_DIALER_PHONE_NUMBER;
+
+    if (!PLIVO_AUTH_ID || !PLIVO_AUTH_TOKEN || !dialerNumberSecret || !VOICE_AGENT_URL) {
       return json({ error: "Calling not configured. Contact admin." }, 503);
     }
 
-    const dialerFrom = normalizePlivoVoiceNumber(PLIVO_DIALER_PHONE_NUMBER);
-    if (!dialerFrom) {
-      console.error("Invalid PLIVO_DIALER_PHONE_NUMBER for voice calls:", maskPhoneForLog(PLIVO_DIALER_PHONE_NUMBER));
+    const dialerNumbers = normalizePlivoVoiceNumbers(dialerNumberSecret);
+    if (dialerNumbers.length === 0) {
+      console.error("Invalid PLIVO_DIALER_PHONE_NUMBER(S) for voice calls:", maskPhoneForLog(dialerNumberSecret));
       return json({ error: "Calling number is not configured correctly. Contact admin." }, 503);
     }
 
@@ -63,6 +66,18 @@ Deno.serve(async (req) => {
     if (!lead_id) return json({ error: "lead_id required" }, 400);
 
     const userId = caller_user_id || null;
+
+    const { count: manualCallCount, error: manualCallCountErr } = await db
+      .from("ai_call_records")
+      .select("id", { count: "exact", head: true })
+      .eq("call_type", "manual");
+    if (manualCallCountErr) {
+      console.warn("Could not read manual call count for Plivo caller ID rotation:", manualCallCountErr);
+    }
+    const dialerRotationIndex = manualCallCountErr
+      ? Math.floor(Date.now() / 1000)
+      : manualCallCount || 0;
+    const dialerFrom = dialerNumbers[dialerRotationIndex % dialerNumbers.length];
 
     // Fetch lead
     const { data: lead, error: leadErr } = await db
@@ -145,6 +160,7 @@ Deno.serve(async (req) => {
           campusName: (lead.campuses as any)?.name || null,
           counsellorPhone,
           studentPhone,
+          dialerFrom,
           counsellorName: profile.display_name,
           counsellorUserId: userId,
         }),
@@ -167,7 +183,7 @@ Deno.serve(async (req) => {
     }
 
     // Plivo: call the counsellor first
-    const answerUrl = `${VOICE_AGENT_URL}/bridge-answer/${callId}?student=${studentPhone}`;
+    const answerUrl = `${VOICE_AGENT_URL}/bridge-answer/${callId}?student=${encodeURIComponent(studentPhone)}&caller=${encodeURIComponent(dialerFrom)}`;
     const plivoUrl = `https://api.plivo.com/v1/Account/${PLIVO_AUTH_ID}/Call/`;
 
     const hangupUrl = `${VOICE_AGENT_URL}/bridge-hangup/${callId}`;
@@ -216,6 +232,8 @@ Deno.serve(async (req) => {
       ...plivoPayload,
       from: maskPhoneForLog(dialerFrom),
       to: maskPhoneForLog(counsellorPhone),
+      dialer_rotation_index: dialerRotationIndex,
+      dialer_pool_size: dialerNumbers.length,
     }));
 
     if (!plivoRes.ok) {
