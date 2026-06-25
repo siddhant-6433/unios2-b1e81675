@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const adminPanel = readFileSync("src/pages/AdminPanel.tsx", "utf8");
 const deleteUserFunction = readFileSync("supabase/functions/delete-user/index.ts", "utf8");
-const softDeleteMigration = readFileSync("supabase/migrations/20260619111000_soft_deleted_profiles.sql", "utf8");
+const softDeleteMigration = readFileSync("supabase/migrations/20260619111600_soft_deleted_profiles.sql", "utf8");
 const archiveMigration = readFileSync("supabase/migrations/20260619112000_archive_user_profiles.sql", "utf8");
 
 describe("admin user deletion", () => {

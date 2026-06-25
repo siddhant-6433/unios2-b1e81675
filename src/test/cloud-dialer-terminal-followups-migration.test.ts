@@ -7,7 +7,7 @@ const migration = readFileSync(
 );
 
 const idempotentMigration = readFileSync(
-  "supabase/migrations/20260619104000_dialer_filter_terminal_stages.sql",
+  "supabase/migrations/20260619120900_dialer_filter_terminal_stages.sql",
   "utf8",
 );
 
@@ -35,7 +35,7 @@ describe("Cloud Dialer terminal follow-up migration", () => {
   });
 });
 
-describe("Cloud Dialer idempotent terminal-stage filter (20260619104000)", () => {
+describe("Cloud Dialer idempotent terminal-stage filter (20260619120900)", () => {
   const terminalStages = "'not_interested', 'dnc', 'rejected', 'ineligible', 'admitted', 'cold'";
 
   it("re-applies terminal stage guard to cloud_dialer_queue", () => {

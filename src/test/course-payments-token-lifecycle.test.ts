@@ -29,6 +29,7 @@ describe("course payments unlock token lifecycle", () => {
     expect(migration).toContain("SET amount = lp.amount");
     expect(migration).toContain("lp.type IN ('token_fee','other')");
     expect(migration).toContain("l.stage IN ('offer_sent','counsellor_call','visit_scheduled','interview','token_paid','pre_admitted')");
+    expect(migration).toContain("OR NOT public.student_course_is_school(l.course_id)");
   });
 
   it("uses authoritative token_complete on the applications dashboard", () => {
