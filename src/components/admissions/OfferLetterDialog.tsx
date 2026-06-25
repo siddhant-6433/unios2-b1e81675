@@ -34,6 +34,7 @@ interface OfferLetter {
   total_fee: number;
   scholarship_amount: number | null;
   net_fee: number;
+  token_fee_amount?: number | null;
   status: string;
   approval_status?: string;
   approved_by?: string | null;
@@ -70,7 +71,7 @@ interface OfferLetterEditRequest {
   offer_letter_id: string;
   requested_by_name: string | null;
   requested_by_role: string | null;
-  proposed_changes: { acceptance_deadline?: string };
+  proposed_changes: { acceptance_deadline?: string; token_fee_amount?: number };
   reason: string | null;
   status: "pending" | "approved" | "rejected";
   reviewed_at: string | null;
@@ -98,6 +99,14 @@ const ENTRANCE_OPTIONS = [
 
 const isDaottCourseName = (name: string | null | undefined) =>
   !!name && (/\bD\.?\s*A?OTT\b/i.test(name) || /ana?esthesia.*operation theatre/i.test(name));
+
+function parseTokenFeeFromEditReason(reason: string | null | undefined): number | null {
+  if (!reason || !/\btoken\b/i.test(reason)) return null;
+  const match = reason.match(/(?:rs\.?|₹|inr)?\s*([0-9][0-9,\s]{2,})/i);
+  if (!match) return null;
+  const amount = Number(match[1].replace(/[,\s]/g, ""));
+  return Number.isFinite(amount) && amount > 0 ? amount : null;
+}
 
 export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, courseId, courseName, campusId, cahetRegistration: cahetRegistrationProp, onSuccess }: OfferLetterDialogProps) {
   const { user, role } = useAuth();
@@ -149,7 +158,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   // Edit requests
   const [editRequestsByOffer, setEditRequestsByOffer] = useState<Record<string, OfferLetterEditRequest[]>>({});
   const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ acceptance_deadline: "", reason: "" });
+  const [editForm, setEditForm] = useState({ acceptance_deadline: "", token_fee_amount: "", reason: "" });
   const [editSaving, setEditSaving] = useState(false);
   const [editDecidingId, setEditDecidingId] = useState<string | null>(null);
   // Which offer's PDF is showing in the right-hand preview pane.
@@ -700,8 +709,23 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   };
 
   const handleSubmitEditRequest = async (offerId: string) => {
-    if (!editForm.acceptance_deadline) {
-      toast({ title: "Enter a new acceptance deadline", variant: "destructive" });
+    const offer = offers.find(o => o.id === offerId);
+    const proposedChanges: { acceptance_deadline?: string; token_fee_amount?: number } = {};
+    if (editForm.acceptance_deadline && editForm.acceptance_deadline !== offer?.acceptance_deadline?.slice(0, 10)) {
+      proposedChanges.acceptance_deadline = editForm.acceptance_deadline;
+    }
+    if (editForm.token_fee_amount.trim()) {
+      const tokenFeeAmount = Number(editForm.token_fee_amount);
+      if (!Number.isFinite(tokenFeeAmount) || tokenFeeAmount <= 0) {
+        toast({ title: "Enter a valid token fee", variant: "destructive" });
+        return;
+      }
+      if (tokenFeeAmount !== Number(offer?.token_fee_amount || 0)) {
+        proposedChanges.token_fee_amount = tokenFeeAmount;
+      }
+    }
+    if (Object.keys(proposedChanges).length === 0) {
+      toast({ title: "No changes to submit", variant: "destructive" });
       return;
     }
     setEditSaving(true);
@@ -710,12 +734,15 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
         // Super admin edits directly — no approval needed
         const { error } = await supabase
           .from("offer_letters")
-          .update({ acceptance_deadline: editForm.acceptance_deadline })
+          .update({
+            ...proposedChanges,
+            ...(proposedChanges.token_fee_amount != null ? { token_fee_user_edited: true } : {}),
+          })
           .eq("id", offerId);
         if (error) throw error;
         toast({ title: "Offer letter updated" });
         setEditingOfferId(null);
-        setEditForm({ acceptance_deadline: "", reason: "" });
+        setEditForm({ acceptance_deadline: "", token_fee_amount: "", reason: "" });
         await fetchOffers();
         await regeneratePdf(offerId);
       } else {
@@ -724,7 +751,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
           .from("offer_letter_edit_requests" as any)
           .insert({
             offer_letter_id: offerId,
-            proposed_changes: { acceptance_deadline: editForm.acceptance_deadline },
+            proposed_changes: proposedChanges,
             reason: editForm.reason || null,
           });
         if (error) throw error;
@@ -733,7 +760,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
           description: "Super admin will be notified to review and approve.",
         });
         setEditingOfferId(null);
-        setEditForm({ acceptance_deadline: "", reason: "" });
+        setEditForm({ acceptance_deadline: "", token_fee_amount: "", reason: "" });
         await fetchOffers();
       }
     } catch (e: any) {
@@ -757,6 +784,15 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
         reviewed_by: user?.id,
         reviewed_at: new Date().toISOString(),
       };
+      if (decision === "approved" && req.proposed_changes.token_fee_amount == null) {
+        const tokenFeeAmount = parseTokenFeeFromEditReason(req.reason);
+        if (tokenFeeAmount != null) {
+          updates.proposed_changes = {
+            ...req.proposed_changes,
+            token_fee_amount: tokenFeeAmount,
+          };
+        }
+      }
       if (rejectionReason) updates.rejection_reason = rejectionReason;
       const { error } = await supabase
         .from("offer_letter_edit_requests" as any)
@@ -1411,6 +1447,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                     setEditingOfferId(offer.id);
                                     setEditForm({
                                       acceptance_deadline: offer.acceptance_deadline?.slice(0, 10) || "",
+                                      token_fee_amount: offer.token_fee_amount ? String(Number(offer.token_fee_amount)) : "",
                                       reason: "",
                                     });
                                   }}
@@ -1433,6 +1470,11 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                     {req.proposed_changes.acceptance_deadline && (
                                       <p className="text-amber-700 dark:text-amber-300">
                                         New deadline: {new Date(req.proposed_changes.acceptance_deadline).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                                      </p>
+                                    )}
+                                    {(req.proposed_changes.token_fee_amount != null || parseTokenFeeFromEditReason(req.reason) != null) && (
+                                      <p className="text-amber-700 dark:text-amber-300">
+                                        New token fee: ₹{Number(req.proposed_changes.token_fee_amount ?? parseTokenFeeFromEditReason(req.reason)).toLocaleString("en-IN")}
                                       </p>
                                     )}
                                     {req.reason && <p className="text-amber-600 dark:text-amber-400">Reason: {req.reason}</p>}
@@ -1477,6 +1519,19 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                     className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
                                   />
                                 </div>
+                                <div>
+                                  <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">
+                                    Token Fee Payable
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    value={editForm.token_fee_amount}
+                                    onChange={(e) => setEditForm((p) => ({ ...p, token_fee_amount: e.target.value }))}
+                                    className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+                                    placeholder="Amount shown on the offer PDF"
+                                  />
+                                </div>
                                 {!isSuperAdmin && (
                                   <div>
                                     <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">
@@ -1505,7 +1560,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                   </Button>
                                   <Button
                                     size="sm" variant="outline" className="text-xs h-7"
-                                    onClick={() => { setEditingOfferId(null); setEditForm({ acceptance_deadline: "", reason: "" }); }}
+                                    onClick={() => { setEditingOfferId(null); setEditForm({ acceptance_deadline: "", token_fee_amount: "", reason: "" }); }}
                                   >
                                     Cancel
                                   </Button>
