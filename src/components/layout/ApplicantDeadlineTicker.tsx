@@ -7,14 +7,13 @@ import { usePortal } from "@/components/apply/PortalContext";
 import {
   applicationDeadlineHeadline,
   effectiveApplicationDeadline,
-  effectiveCahetDeadline,
   INITIAL_APPLICATION_DEADLINE,
-  INITIAL_CAHET_DEADLINE_ISO,
 } from "@/lib/deadlineRollover";
 import type { PortalId } from "@/components/apply/portalConfig";
 
 const DEFAULT_FEE_SUBMISSION_DEADLINE = INITIAL_APPLICATION_DEADLINE;
 const PUBLIC_APPLICATION_DEADLINE = INITIAL_APPLICATION_DEADLINE;
+const UP_DELED_DEADLINE = "2026-07-09";
 
 const STAFF_ROLES = new Set([
   "super_admin",
@@ -81,6 +80,10 @@ function formatLongDate(dateString: string): string {
   return `${ordinal(day)} ${month} ${year}`;
 }
 
+function usesUpDeledDeadline(audience: "staff" | "public", portalId: PortalId): boolean {
+  return audience === "staff" || portalId === "nimt";
+}
+
 interface ApplicantDeadlineTickerProps {
   audience?: "staff" | "public";
 }
@@ -104,17 +107,19 @@ function PublicApplicationDeadlineHeader({
 }) {
   const [now, setNow] = useState(Date.now());
   const effectiveDeadline = effectiveApplicationDeadline(deadline, now);
-  const cahetDeadline = effectiveCahetDeadline(INITIAL_CAHET_DEADLINE_ISO, now).slice(0, 10);
   const deadlineLabel = formatLongDate(effectiveDeadline);
-  const cahetDeadlineLabel = formatLongDate(cahetDeadline);
-  const usesCahetUrgency = audience === "staff" || portalId === "nimt";
-  const countdown = countdownRemaining(usesCahetUrgency ? cahetDeadline : effectiveDeadline, now);
+  const upDeledDeadlineLabel = formatLongDate(UP_DELED_DEADLINE);
+  const showUpDeledDeadline = usesUpDeledDeadline(audience, portalId);
+  const countdownDeadline = showUpDeledDeadline ? UP_DELED_DEADLINE : effectiveDeadline;
+  const countdown = countdownRemaining(countdownDeadline, now);
   const headline = applicationDeadlineHeadline(portalId, now);
-  const scopeLabel = usesCahetUrgency ? "BPT & BMRIT" : portalName;
-  const capsuleText = usesCahetUrgency ? "CAHET registration on ABVMU due" : "Application deadline";
-  const capsuleDeadlineLabel = usesCahetUrgency ? cahetDeadlineLabel : deadlineLabel;
+  const scopeLabel = showUpDeledDeadline ? "UP-DELED" : portalName;
+  const capsuleText = showUpDeledDeadline ? "Deadline" : "Application deadline";
+  const capsuleDeadlineLabel = showUpDeledDeadline ? upDeledDeadlineLabel : deadlineLabel;
   const backgroundColor = audience === "staff" ? "#0b1f4d" : portalPrimaryColor;
-  const headlineText = `${headline}: apply by ${deadlineLabel}`;
+  const headlineText = showUpDeledDeadline
+    ? `UP-DELED Deadline: apply by ${upDeledDeadlineLabel}`
+    : `${headline}: apply by ${deadlineLabel}`;
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 1_000);
@@ -138,7 +143,7 @@ function PublicApplicationDeadlineHeader({
           <span className="shrink-0 whitespace-nowrap text-[10px] font-black uppercase tracking-[0.14em] text-[#fffc4d] sm:text-xs">
             {scopeLabel}
           </span>
-          {usesCahetUrgency && (
+          {showUpDeledDeadline && (
             <span className="hidden whitespace-nowrap sm:inline">
               {capsuleText} <strong className="text-white">{capsuleDeadlineLabel}, 11:59 PM</strong>
             </span>
@@ -189,7 +194,10 @@ export function ApplicantDeadlineTicker({ audience = "staff" }: ApplicantDeadlin
 
   if (!eligible) return null;
 
-  const days = daysRemaining(effectiveApplicationDeadline(deadline));
+  const displayDeadline = usesUpDeledDeadline(audience, portal.id)
+    ? UP_DELED_DEADLINE
+    : effectiveApplicationDeadline(deadline);
+  const days = daysRemaining(displayDeadline);
   if (days === 0) return null;
 
   return (
