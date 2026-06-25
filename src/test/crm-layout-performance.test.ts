@@ -9,6 +9,7 @@ const headerResponseTime = readFileSync("src/components/layout/HeaderResponseTim
 const useTatDefaults = readFileSync("src/hooks/useTatDefaults.ts", "utf8");
 const migration = readFileSync("supabase/migrations/20260618150000_crm_layout_perf_indexes.sql", "utf8");
 const actionBadgeCounts = readFileSync("supabase/migrations/20260618183000_action_badge_counts.sql", "utf8");
+const fastActionBadgeCounts = readFileSync("supabase/migrations/20260625130000_fast_action_badge_counts.sql", "utf8");
 const myTatDefaults = readFileSync("supabase/migrations/20260618195000_my_tat_defaults.sql", "utf8");
 const pgStatSnapshots = readFileSync("supabase/migrations/20260618200000_snapshot_and_reset_pg_stat_statements.sql", "utf8");
 
@@ -48,6 +49,19 @@ describe("CRM layout performance guardrails", () => {
     expect(migration).not.toMatch(/\bDROP\s+POLICY\b/i);
     expect(migration).not.toMatch(/\bSECURITY\s+DEFINER\b/i);
     expect(migration).not.toMatch(/\bGRANT\b/i);
+  });
+
+  it("keeps action_badge_counts fast without changing the RLS boundary", () => {
+    expect(fastActionBadgeCounts).toMatch(/CREATE OR REPLACE FUNCTION public\.action_badge_counts/i);
+    expect(fastActionBadgeCounts).toMatch(/\bSECURITY\s+INVOKER\b/i);
+    expect(fastActionBadgeCounts).toContain("GRANT EXECUTE ON FUNCTION public.action_badge_counts(uuid, boolean) TO authenticated");
+    expect(fastActionBadgeCounts).not.toMatch(/\bCREATE\s+POLICY\b/i);
+    expect(fastActionBadgeCounts).not.toMatch(/\bALTER\s+POLICY\b/i);
+    expect(fastActionBadgeCounts).not.toMatch(/\bDROP\s+POLICY\b/i);
+    expect(fastActionBadgeCounts).not.toContain("action_badge_counts_base");
+    expect(fastActionBadgeCounts).not.toContain("whatsapp_unreplied_message_count");
+    expect(fastActionBadgeCounts).toContain("idx_whatsapp_messages_unread_phone_conversation_created");
+    expect(fastActionBadgeCounts).toContain("idx_whatsapp_messages_outbound_phone_conversation_created");
   });
 
   it("archives pg_stat_statements before the nightly reset", () => {
