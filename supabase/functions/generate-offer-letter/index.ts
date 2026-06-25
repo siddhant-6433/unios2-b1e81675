@@ -11,6 +11,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { PDFDocument, PDFImage, PDFFont, PDFPage, rgb, StandardFonts } from "https://esm.sh/pdf-lib@1.17.1";
+import { uploadToR2 } from "../_shared/r2.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -905,16 +906,8 @@ Deno.serve(async (req) => {
     });
 
     const path = `offer-letters/${offer.lead_id}/${offer.id}.pdf`;
-    const { error: upErr } = await admin.storage
-      .from("application-documents")
-      .upload(path, pdfBytes, { contentType: "application/pdf", upsert: true, cacheControl: "no-cache, max-age=0" });
-    if (upErr) {
-      return new Response(JSON.stringify({ error: upErr.message }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const { data: pub } = admin.storage.from("application-documents").getPublicUrl(path);
-    const letterUrl = pub?.publicUrl || path;
+    const uploaded = await uploadToR2({ key: path, body: pdfBytes, contentType: "application/pdf" });
+    const letterUrl = uploaded.url;
 
     await admin.from("offer_letters").update({ letter_url: letterUrl }).eq("id", offer.id);
 

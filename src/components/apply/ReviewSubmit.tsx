@@ -45,6 +45,10 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
 
   useEffect(() => {
     if (data.passport_photo_path) {
+      if (/^https?:\/\//i.test(data.passport_photo_path)) {
+        setPhotoUrl(data.passport_photo_path);
+        return;
+      }
       const { data: urlData } = supabase.storage
         .from('application-documents')
         .getPublicUrl(data.passport_photo_path);

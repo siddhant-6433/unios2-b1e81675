@@ -15,6 +15,7 @@ interface Props {
   saving: boolean;
   readOnly?: boolean;
   nextLabel?: string;
+  storageTarget?: "r2" | "supabase";
 }
 
 interface DocSpec {
@@ -222,7 +223,16 @@ function docKeyForFile(name: string): string {
   return dashIdx > 0 ? name.substring(0, dashIdx) : name.replace(/\.[^.]+$/, "");
 }
 
-export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnly, nextLabel = "Continue to Review" }: Props) {
+export function DocumentUpload({
+  data,
+  onChange,
+  onNext,
+  onBack,
+  saving,
+  readOnly,
+  nextLabel = "Continue to Review",
+  storageTarget = "r2",
+}: Props) {
   const { toast } = useToast();
   const [uploaded, setUploaded] = useState<Record<string, boolean>>({});
   const [uploadedUrls, setUploadedUrls] = useState<Record<string, string>>({});
@@ -276,6 +286,7 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
     form.append('application_id', data.application_id);
     form.append('phone', data.phone);
     form.append('doc_key', docKey);
+    form.append('storage_target', storageTarget);
     form.append('file', file);
 
     const { data: res, error } = await supabase.functions.invoke('apply-portal-upload-doc', { body: form });
@@ -320,6 +331,7 @@ export function DocumentUpload({ data, onChange, onNext, onBack, saving, readOnl
           <PhotoUpload
             applicationId={data.application_id}
             phone={data.phone}
+            storageTarget={storageTarget}
             existingUrl={data.passport_photo_path ? undefined : undefined}
             onUploaded={(path) => {
               onChange({ passport_photo_path: path });
