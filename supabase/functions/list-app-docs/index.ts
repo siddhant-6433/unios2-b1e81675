@@ -17,10 +17,17 @@ function fileTime(file: any): number {
   return Number.isFinite(t) ? t : 0;
 }
 
+function shouldReplaceFile(candidate: any, existing: any): boolean {
+  const candidateTime = fileTime(candidate);
+  const existingTime = fileTime(existing);
+  if (candidateTime !== existingTime) return candidateTime > existingTime;
+  return String(candidate?.name || "").localeCompare(String(existing?.name || "")) >= 0;
+}
+
 // Lists active files uploaded for an application using the service role so
 // admins and counsellors are not blocked by storage RLS quirks. If an applicant
 // re-uploads the same document key, only the newest replacement is returned.
-// Returns a list of { name, path, url, review_status, review_notes } entries.
+// Returns a list of { name, path, url, doc_key, uploaded_at, review_status, review_notes } entries.
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -63,15 +70,24 @@ Deno.serve(async (req) => {
       .forEach((f: any) => {
         const key = docKeyForFile(f.name);
         const existing = latestByDocKey.get(key);
-        if (!existing || fileTime(f) >= fileTime(existing)) latestByDocKey.set(key, f);
+        if (!existing || shouldReplaceFile(f, existing)) latestByDocKey.set(key, f);
       });
 
     const docs = Array.from(latestByDocKey.values())
       .sort((a: any, b: any) => a.name.localeCompare(b.name))
       .map((f: any) => {
+        const docKey = docKeyForFile(f.name);
         const path = `${usedPrefix}/${f.name}`;
         const { data: pub } = db.storage.from(bucket).getPublicUrl(path);
-        return { name: f.name, path, url: pub.publicUrl, review_status: "pending", review_notes: null };
+        return {
+          name: f.name,
+          path,
+          url: pub.publicUrl,
+          doc_key: docKey,
+          uploaded_at: f.updated_at || f.created_at || f.last_accessed_at || null,
+          review_status: "pending",
+          review_notes: null,
+        };
       });
 
     const activePaths = new Set(docs.map(d => d.path));
@@ -79,7 +95,7 @@ Deno.serve(async (req) => {
     if (activePaths.size > 0) {
       const { data: reviewRows, error: reviewFetchErr } = await db
         .from("application_doc_reviews")
-        .select("file_path, status, notes")
+        .select("file_path, status, notes, reviewed_at, created_at, updated_at")
         .eq("application_id", application_id);
       if (reviewFetchErr) {
         console.error("[list-app-docs] review lookup failed:", reviewFetchErr);

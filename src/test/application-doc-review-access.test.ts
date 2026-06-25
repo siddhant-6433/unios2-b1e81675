@@ -7,6 +7,7 @@ const listAppDocs = readFileSync("supabase/functions/list-app-docs/index.ts", "u
 const migration = readFileSync("supabase/migrations/20260619120700_restrict_application_doc_review_approvals.sql", "utf8");
 const principalOnlyMigration = readFileSync("supabase/migrations/20260620117000_principal_superadmin_document_review_only.sql", "utf8");
 const applicationDecisionGuard = readFileSync("supabase/migrations/20260620118000_guard_application_decision_roles.sql", "utf8");
+const activeDocGateMigration = readFileSync("supabase/migrations/20260624151000_active_doc_review_status_for_an_gate.sql", "utf8");
 
 describe("application document review access", () => {
   it("keeps document approval controls read-only for non-approvers", () => {
@@ -55,6 +56,10 @@ describe("application document review access", () => {
     expect(adminApplicationView).toContain("createLinkedLead");
     expect(adminApplicationView).toContain("Create Linked Lead");
     expect(adminApplicationView).toContain("Lead created and linked from orphan application");
+    expect(adminApplicationView).toContain("issueOfferOrRepairLead");
+    expect(adminApplicationView).toContain("Create Lead & Issue Offer");
+    expect(docReviewPanel).toContain("Waiting for the applicant to re-upload this document");
+    expect(readFileSync("src/components/admissions/AdmissionLifecycleStepper.tsx", "utf8")).toContain("Create Lead & Issue Offer");
   });
 
   it("does not allow staff to verify or re-reject an already rejected document", () => {
@@ -65,10 +70,22 @@ describe("application document review access", () => {
 
   it("treats a replacement upload as the active document for review", () => {
     expect(listAppDocs).toContain("latestByDocKey");
+    expect(listAppDocs).toContain("doc_key");
+    expect(listAppDocs).toContain("uploaded_at");
     expect(listAppDocs).toContain("staleReviewPaths");
     expect(listAppDocs).toContain("review_status");
     expect(listAppDocs).toContain("review_notes");
     expect(adminApplicationView).toContain("activeDocPaths");
+    expect(adminApplicationView).toContain("activeDocsByLogicalKey");
+    expect(adminApplicationView).toContain("docStatusRank");
     expect(adminApplicationView).toContain("if (activeDocPaths.has(r.file_path))");
+  });
+
+  it("blocks AN only when the latest review for a logical document is rejected", () => {
+    expect(activeDocGateMigration).toContain("CREATE OR REPLACE FUNCTION public.application_doc_key");
+    expect(activeDocGateMigration).toContain("PARTITION BY a.application_id, public.application_doc_key(r.file_path)");
+    expect(activeDocGateMigration).toContain("row_number() OVER");
+    expect(activeDocGateMigration).toContain("WHERE review_rank = 1");
+    expect(activeDocGateMigration).toContain("AND status = 'rejected'");
   });
 });
