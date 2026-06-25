@@ -4,6 +4,9 @@
 -- limited to the Stetho Batch DAOTT/DOTT structures; application and
 -- registration fees remain separate from course-fee progress.
 
+ALTER TABLE public.offer_letters
+  DROP CONSTRAINT IF EXISTS chk_offer_letters_token_fee_min;
+
 DO $$
 DECLARE
   v_seat_code_id uuid;
@@ -70,9 +73,6 @@ ALTER TABLE public.lead_payments
 
 ALTER TABLE public.lead_payments
   VALIDATE CONSTRAINT chk_lead_payments_token_fee_min;
-
-ALTER TABLE public.offer_letters
-  DROP CONSTRAINT IF EXISTS chk_offer_letters_token_fee_min;
 
 ALTER TABLE public.offer_letters
   ADD CONSTRAINT chk_offer_letters_token_fee_min

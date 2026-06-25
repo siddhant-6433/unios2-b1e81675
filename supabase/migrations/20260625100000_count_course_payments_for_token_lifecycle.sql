@@ -138,6 +138,10 @@ GRANT EXECUTE ON FUNCTION public.lead_fee_status(uuid) TO authenticated, service
 -- Re-run the existing lead_payments advancement trigger for stale confirmed
 -- course payments. Mentioning amount in SET fires the UPDATE OF amount trigger
 -- without changing the stored value.
+-- Skip school leads without an existing student row: the PAN trigger's insert
+-- path does not populate the academic-session fields that school students
+-- require, so those legacy rows need a separate data cleanup instead of
+-- blocking this course-payment token fix for everyone else.
 UPDATE public.lead_payments lp
    SET amount = lp.amount
   FROM public.leads l
@@ -145,4 +149,8 @@ UPDATE public.lead_payments lp
    AND lp.status = 'confirmed'
    AND lp.type IN ('token_fee','other')
    AND l.stage IN ('offer_sent','counsellor_call','visit_scheduled','interview','token_paid','pre_admitted')
-   AND (l.pre_admission_no IS NULL OR l.admission_no IS NULL);
+   AND (l.pre_admission_no IS NULL OR l.admission_no IS NULL)
+   AND (
+     EXISTS (SELECT 1 FROM public.students s WHERE s.lead_id = l.id)
+     OR NOT public.student_course_is_school(l.course_id)
+   );
