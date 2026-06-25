@@ -5,7 +5,7 @@ const supabaseConfig = readFileSync("supabase/config.toml", "utf8");
 const iciciSource = readFileSync("supabase/functions/icici-payment/index.ts", "utf8");
 const transactionHistoryPanel = readFileSync("src/components/admin/TransactionHistoryPanel.tsx", "utf8");
 const scopedGatewayMigration = readFileSync(
-  "supabase/migrations/20260620119000_scoped_payment_gateway_rules.sql",
+  "supabase/migrations/20260624100200_scoped_payment_gateway_rules.sql",
   "utf8",
 );
 

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const migration = readFileSync(
-  "supabase/migrations/20260621100000_manual_external_owner_assignment.sql",
+  "supabase/migrations/20260624100600_manual_external_owner_assignment.sql",
   "utf8",
 );
 const leadDetail = readFileSync("src/pages/LeadDetail.tsx", "utf8");
