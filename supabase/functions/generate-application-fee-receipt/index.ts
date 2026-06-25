@@ -107,7 +107,10 @@ const fmtDateShort = (d?: string | null) => {
   if (!d) return "—";
   const dt = new Date(d);
   if (isNaN(dt.getTime())) return d;
-  return dt.toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" });
+  return dt.toLocaleDateString("en-IN", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    timeZone: "Asia/Kolkata",
+  });
 };
 
 const RUP = "Rs. ";
