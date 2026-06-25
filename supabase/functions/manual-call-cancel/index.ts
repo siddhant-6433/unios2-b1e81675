@@ -59,12 +59,11 @@ Deno.serve(async (req) => {
     const db = createClient(supabaseUrl, serviceRoleKey);
 
     // Resolve the Plivo CallUUID + lead context from the ai_call_records row
-    // that manual-call inserted at call placement time. The plivo_call_uuid
-    // is NOT populated by manual-call (Plivo returns "async api spawned" with
-    // no request_uuid for our account) — instead voice-agent's bridge-call-status
-    // webhook persists it on the first Plivo state callback (~200ms after
-    // placement). If the user clicks Cancel faster than that, the value is
-    // still null on first read, so we retry briefly before giving up.
+    // that manual-call inserted at call placement time. plivo_call_uuid may be
+    // populated from Call.create when Plivo returns request_uuid, or by
+    // voice-agent's bridge-call-status webhook when this account returns only
+    // "async api spawned". If the user clicks Cancel before either arrives,
+    // retry briefly before falling back to Live Calls lookup below.
     const fetchRecord = async () =>
       await db
         .from("ai_call_records")
@@ -88,10 +87,10 @@ Deno.serve(async (req) => {
 
     // Hang up the parent Plivo call. Two complications:
     //
-    //   1. Plivo's "Make Call" API returns "async api spawned" with NO
-    //      request_uuid for our account — so manual-call has nothing to
-    //      store as plivo_call_uuid at placement time. We must look up the
-    //      live call ourselves via Plivo's Live Calls API.
+    //   1. Plivo's "Make Call" API can return "async api spawned" with NO
+    //      request_uuid for our account — so manual-call may have nothing to
+    //      store as plivo_call_uuid at placement time. We must be able to look
+    //      up the live call ourselves via Plivo's Live Calls API.
     //   2. Plivo splits hangup into two endpoints depending on state:
     //        - DELETE /Request/{request_uuid}/  → queued/ringing
     //        - DELETE /Call/{call_uuid}/        → in-progress
@@ -104,8 +103,8 @@ Deno.serve(async (req) => {
     if (record.plivo_call_uuid) uuidsToHangup.add(record.plivo_call_uuid);
 
     // Discover live CallUUIDs for THIS counsellor's leg. Plivo's Make Call API
-    // doesn't return a request_uuid for our account (returns "async api spawned"
-    // instead), so we have no identifier from placement time. Workaround:
+    // may not return a request_uuid for our account (returns "async api spawned"
+    // instead), so we might have no identifier from placement time. Workaround:
     //   1. Look up the counsellor's phone via caller_user_id → profiles
     //   2. Query Plivo's Live Calls API (?status=live) filtered by to_number
     //      so we only get THIS counsellor's currently-ringing/connected leg

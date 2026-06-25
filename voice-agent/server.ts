@@ -2906,15 +2906,24 @@ Deno.serve({ port: PORT }, async (req) => {
     const dbH = { "Content-Type": "application/json", apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` };
 
     // CRITICAL: Persist the Plivo CallUUID on the FIRST webhook so manual-call-cancel
-    // has something to hang up with. Plivo's Make Call API returns "async api
-    // spawned" without request_uuid for our account, so this webhook is the
-    // earliest opportunity to capture the real CallUUID. Only patch if the row
-    // currently has no value to avoid overwriting an already-correct one.
-    if (plivoCallUUID && SUPABASE_URL) {
-      await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}&plivo_call_uuid=is.null`, {
+    // has something to hang up with. Some Plivo accounts return only
+    // "async api spawned" from Call.create, so this webhook may be the earliest
+    // opportunity to capture the real CallUUID. Do not mark status=in_progress
+    // here: this is only the counsellor A-leg. Student connection is owned by
+    // /bridge-b-status. Keep status='initiated' so LiveCallBar and stale
+    // reconciliation continue to treat the row as active until final outcome.
+    if (SUPABASE_URL) {
+      const patch: Record<string, unknown> = {};
+      if (plivoCallUUID) patch.plivo_call_uuid = plivoCallUUID;
+      if (callStatus === "ringing" || event === "ring") {
+        patch.summary = "Cloud Call: ringing counsellor";
+      } else if (callStatus === "in-progress" || callStatus === "in_progress" || callStatus === "answered" || event === "startapp") {
+        patch.summary = "Cloud Call: counsellor answered, dialing lead";
+      }
+      if (Object.keys(patch).length > 0) await fetch(`${SUPABASE_URL}/rest/v1/ai_call_records?call_uuid=eq.${callId}`, {
         method: "PATCH",
         headers: { ...dbH, Prefer: "return=minimal" },
-        body: JSON.stringify({ plivo_call_uuid: plivoCallUUID }),
+        body: JSON.stringify(patch),
       }).catch(e => console.error(`[BRIDGE-CALL-STATUS ${callId}] plivo_call_uuid persist failed:`, e.message));
     }
 
@@ -3353,6 +3362,19 @@ const VOICE_SETTINGS_DEFAULT: VoiceSettings = {
   elevenLabsSimilarity: 0.75,
   elevenLabsModel: "eleven_turbo_v2_5",
 };
+const SAFE_GEMINI_AUDIO_MODELS = new Set([
+  "gemini-2.5-flash-native-audio-latest",
+  "gemini-2.5-flash-native-audio-preview-09-2025",
+  "gemini-2.5-flash-native-audio-preview-12-2025",
+]);
+function normalizeGeminiAudioModel(raw: unknown): string {
+  const model = String(raw || "").trim();
+  if (SAFE_GEMINI_AUDIO_MODELS.has(model)) return model;
+  if (model) {
+    console.warn(`[voice-settings] refusing unsupported Gemini audio model "${model}", using safe default`);
+  }
+  return VOICE_SETTINGS_DEFAULT.geminiModel;
+}
 let voiceSettingsCache: VoiceSettings = { ...VOICE_SETTINGS_DEFAULT };
 async function refreshVoiceSettingsCache() {
   try {
@@ -3371,7 +3393,7 @@ async function refreshVoiceSettingsCache() {
       sarvamSpeaker:             String(parsed.sarvam_speaker             ?? VOICE_SETTINGS_DEFAULT.sarvamSpeaker),
       sarvamBulbulModel:         String(parsed.sarvam_bulbul_model        ?? VOICE_SETTINGS_DEFAULT.sarvamBulbulModel),
       geminiVoice:               String(parsed.gemini_voice               ?? VOICE_SETTINGS_DEFAULT.geminiVoice),
-      geminiModel:               String(parsed.gemini_model               ?? VOICE_SETTINGS_DEFAULT.geminiModel),
+      geminiModel:               normalizeGeminiAudioModel(parsed.gemini_model),
       geminiPrefixPaddingMs:     Number(parsed.gemini_prefix_padding_ms   ?? VOICE_SETTINGS_DEFAULT.geminiPrefixPaddingMs),
       cascadeMaxTokens:          Number(parsed.cascade_max_tokens         ?? VOICE_SETTINGS_DEFAULT.cascadeMaxTokens),
       cascadeTemperature:        Number(parsed.cascade_temperature        ?? VOICE_SETTINGS_DEFAULT.cascadeTemperature),
