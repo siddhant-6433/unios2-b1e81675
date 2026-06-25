@@ -11,6 +11,8 @@ export type PreviewDoc = {
   name: string;
   url: string;
   path?: string;
+  doc_key?: string;
+  uploaded_at?: string | null;
   review_status?: "pending" | "verified" | "rejected";
   review_notes?: string | null;
 };
