@@ -42,6 +42,24 @@ describe("ApplicantDeadlineTicker", () => {
     expect(screen.queryByRole("link", { name: "Edit" })).not.toBeInTheDocument();
   });
 
+  it("replaces the old BPT/BMRIT CAHET staff strip after the June deadline rollover", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-25T18:56:17+05:30"));
+
+    render(
+      <MemoryRouter initialEntries={["/applications"]}>
+        <ApplicantDeadlineTicker />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("UP-DELED Deadline: apply by 9th July 2026")).toBeInTheDocument();
+    expect(screen.getByText("UP-DELED")).toBeInTheDocument();
+    expect(screen.getByText(/\d+d \d{2}h \d{2}m \d{2}s/)).toBeInTheDocument();
+    expect(screen.queryByText(/Round 3 Application Deadline/)).not.toBeInTheDocument();
+    expect(screen.queryByText("BPT & BMRIT")).not.toBeInTheDocument();
+    expect(screen.queryByText(/CAHET registration/)).not.toBeInTheDocument();
+  });
+
   it("renders the public application deadline like the NIMT website announcement header", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-12T00:00:00+05:30"));
