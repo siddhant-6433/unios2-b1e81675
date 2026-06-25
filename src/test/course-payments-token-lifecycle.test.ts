@@ -37,6 +37,13 @@ describe("course payments unlock token lifecycle", () => {
     expect(applicationsPage).toContain("has_token_fee_paid: leadTokenFeePaidSet.has(a.lead_id) || !!leadTokenCompleteMap[a.lead_id]");
   });
 
+  it("batches applications dashboard lead-side lifecycle lookups", () => {
+    expect(applicationsPage).toContain("const RELATED_QUERY_BATCH_SIZE = 50;");
+    expect(applicationsPage).toContain("const batch = leadIds.slice(i, i + RELATED_QUERY_BATCH_SIZE);");
+    expect(applicationsPage).toContain(".in(\"lead_id\", batch)");
+    expect(applicationsPage).toContain("OFFER_OR_PAYMENT_STAGES.has(leadStageMap[lid])");
+  });
+
   it("shows applicant token progress from course-eligible paid amount", () => {
     expect(tokenFeePanel).toContain("feeStatus.total_paid - feeStatus.application_paid - (feeStatus.registration_paid || 0)");
     expect(tokenFeePanel).toContain("const tokenOutstanding = Math.max(0, feeStatus.token_required - paidTowardCourse);");
