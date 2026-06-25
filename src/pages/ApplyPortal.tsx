@@ -840,6 +840,10 @@ function captureUtmSource(): string {
   try {
     const existing = sessionStorage.getItem("unios_utm_source");
     const params = new URLSearchParams(window.location.search);
+    if (params.get("gclid")) {
+      sessionStorage.setItem("unios_utm_source", "google_ads");
+      return "google_ads";
+    }
     const utmSource = (params.get("utm_source") || "").toLowerCase().trim();
     if (utmSource && VALID_LEAD_SOURCES.has(utmSource)) {
       sessionStorage.setItem("unios_utm_source", utmSource);

@@ -5,10 +5,11 @@
 // (PAN/AN issuance), and fire notify-event to send WA + finance@ email +
 // receipt PDF.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { combineIndiaDateTimeInput, getCurrentIndiaDateTimeInput } from "@/lib/indiaDateTime";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Loader2, IndianRupee, Upload, X as XIcon, FileText } from "lucide-react";
@@ -57,7 +58,9 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
 
   const [type,   setType]   = useState<string>(defaultType || "application_fee");
   const [amount, setAmount] = useState<string>("");
-  const [date,   setDate]   = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const initialDateTime = getCurrentIndiaDateTimeInput();
+  const [date,   setDate]   = useState<string>(initialDateTime.date);
+  const [time,   setTime]   = useState<string>(initialDateTime.time);
   const [mode,   setMode]   = useState<string>("cash");
   const [txnRef, setTxnRef] = useState<string>("");
   const [bank,   setBank]   = useState<string>("");
@@ -65,15 +68,36 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
   const [remarks,setRemarks]= useState<string>("");
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [tokenFloor, setTokenFloor] = useState(5000);
 
   const allowedRole = ["super_admin", "campus_admin", "accountant"].includes(role || "");
+
+  useEffect(() => {
+    if (!allowedRole || !open || !leadId) return;
+    let active = true;
+    (async () => {
+      const { data } = await supabase
+        .from("leads")
+        .select("courses:course_id(code, name)")
+        .eq("id", leadId)
+        .maybeSingle();
+      const course = (data as any)?.courses;
+      const code = String(course?.code || "").toUpperCase();
+      const name = String(course?.name || "").toLowerCase();
+      const isDaott = code.includes("DAOTT") || code.includes("DOTT") || /ana?esthesia.*operation theatre/.test(name);
+      if (active) setTokenFloor(isDaott ? 4000 : 5000);
+    })();
+    return () => { active = false; };
+  }, [allowedRole, open, leadId]);
 
   if (!allowedRole) return null;
 
   const reset = () => {
+    const now = getCurrentIndiaDateTimeInput();
     setType(defaultType || "application_fee");
     setAmount("");
-    setDate(new Date().toISOString().slice(0, 10));
+    setDate(now.date);
+    setTime(now.time);
     setMode("cash");
     setTxnRef("");
     setBank("");
@@ -88,9 +112,8 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
       toast({ title: "Enter a valid amount", variant: "destructive" });
       return;
     }
-    // DB enforces token_fee >= ₹5,000 via chk_lead_payments_token_fee_min
-    if (type === "token_fee" && amt < 5000) {
-      toast({ title: "Token fee must be at least ₹5,000", variant: "destructive" });
+    if (type === "token_fee" && amt < tokenFloor) {
+      toast({ title: `Token fee must be at least ₹${tokenFloor.toLocaleString("en-IN")}`, variant: "destructive" });
       return;
     }
     if (mode === "cheque" && !txnRef.trim()) {
@@ -139,7 +162,7 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
       amount:          amt,
       payment_mode:    mode,
       transaction_ref: txnRef.trim() || null,
-      payment_date:    `${date}T00:00:00+05:30`,
+      payment_date:    combineIndiaDateTimeInput(date, time),
       status:          "confirmed",
       recorded_by:     profile?.id || null,
       gateway:         "offline",
@@ -191,7 +214,7 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
         </DialogHeader>
 
         <div className="space-y-3 py-2">
-          {/* Type + Amount + Date row */}
+          {/* Type + amount row */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-medium text-muted-foreground">Fee Type</label>
@@ -218,11 +241,16 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
               <input className={inputCls} type="date" value={date} onChange={e => setDate(e.target.value)} />
             </div>
             <div>
-              <label className="text-xs font-medium text-muted-foreground">Payment Mode</label>
-              <select className={inputCls} value={mode} onChange={e => { setMode(e.target.value); setTxnRef(""); setBank(""); setWallet(""); }}>
-                {MODE_OPTIONS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-              </select>
+              <label className="text-xs font-medium text-muted-foreground">Transaction Time</label>
+              <input className={inputCls} type="time" value={time} onChange={e => setTime(e.target.value)} />
             </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Payment Mode</label>
+            <select className={inputCls} value={mode} onChange={e => { setMode(e.target.value); setTxnRef(""); setBank(""); setWallet(""); }}>
+              {MODE_OPTIONS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
           </div>
 
           {/* Mode-specific fields */}

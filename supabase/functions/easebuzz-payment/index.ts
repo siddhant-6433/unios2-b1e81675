@@ -13,6 +13,10 @@ async function sha512(message: string): Promise<string> {
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+function easebuzzAmount(txn: any): number {
+  return Number(txn?.amount ?? txn?.total_debit_amount ?? txn?.net_debit_amount ?? 0);
+}
+
 function returnPage(title: string, message: string, isSuccess: boolean): Response {
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -687,7 +691,7 @@ Deno.serve(async (req) => {
             supabaseUrl,
             serviceKey,
             feeStudentId,
-            Number(txn?.amount || 0),
+            easebuzzAmount(txn),
             paymentRef,
             feeSelection,
             feeWaiver,
@@ -710,7 +714,7 @@ Deno.serve(async (req) => {
       }
 
       return new Response(
-        JSON.stringify({ txnid: txn?.txnid, status: txn?.status, amount: txn?.amount, easepayid: txn?.easepayid }),
+        JSON.stringify({ txnid: txn?.txnid, status: txn?.status, amount: easebuzzAmount(txn), easepayid: txn?.easepayid }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -955,7 +959,7 @@ Deno.serve(async (req) => {
         const match = byUdf1.get(String(app.application_id));
         if (!match) { skipped.push({ application_id: app.application_id, reason: "no_match" }); continue; }
         const expected = Number(app.fee_amount || 0);
-        const got      = Number(match?.amount || 0);
+        const got      = easebuzzAmount(match);
         // 0.01 tolerance for paise rounding drift.
         if (expected > 0 && Math.abs(expected - got) > 0.01) {
           skipped.push({ application_id: app.application_id, reason: "amount_mismatch", expected, got });
@@ -1064,7 +1068,7 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        const got       = Number(txn.amount || 0);
+        const got       = easebuzzAmount(txn);
         const expected  = Number(app.fee_amount || 0);
         if (expected > 0 && Math.abs(expected - got) > 0.01) {
           skipped.push({ application_id: app.application_id, reason: "amount_mismatch_fallback", expected, got });
@@ -1120,7 +1124,7 @@ Deno.serve(async (req) => {
         udf1,
         txnid: t?.txnid,
         easepayid: t?.easepayid || t?.mihpayid,
-        amount: Number(t?.amount ?? 0),
+        amount: easebuzzAmount(t),
         status: t?.status,
         firstname: t?.firstname,
         email: t?.email,

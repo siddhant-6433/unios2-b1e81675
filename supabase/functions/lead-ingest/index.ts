@@ -521,55 +521,69 @@ Deno.serve(async (req) => {
     }
 
     // ── Duplicate detection by phone ──
+    const attributionKeys = Object.keys(attribution) as (keyof typeof attribution)[];
+
     const { data: existing } = await supabase
       .from("leads")
-      .select("id, name, stage, source, secondary_source, tertiary_source, source_history")
+      .select(`id, name, stage, source, secondary_source, tertiary_source, source_history, ${attributionKeys.join(", ")}`)
       .eq("phone", normPhone)
       .eq("is_mirror", false)
       .limit(1)
       .maybeSingle();
 
     if (existing) {
+      const existingLead = existing as any;
       const newSource = leadSource;
-      const currentSource = existing.source;
-      const currentSecondary = existing.secondary_source;
+      const currentSource = existingLead.source;
+      const currentSecondary = existingLead.secondary_source;
+      const updates: Record<string, any> = {};
+
+      for (const key of attributionKeys) {
+        if (!existingLead[key] && attribution[key]) {
+          updates[key] = attribution[key];
+        }
+      }
 
       // Only update if the new source is different from existing sources
-      if (newSource !== currentSource && newSource !== currentSecondary && newSource !== existing.tertiary_source) {
-        const updates: Record<string, any> = {};
-
+      if (newSource !== currentSource && newSource !== currentSecondary && newSource !== existingLead.tertiary_source) {
         // Add to source_history
-        const history = Array.isArray(existing.source_history) ? existing.source_history : [];
-        history.push({ source: newSource, timestamp: new Date().toISOString(), data: parsed.notes || null });
+        const history = Array.isArray(existingLead.source_history) ? existingLead.source_history : [];
+        history.push({
+          source: newSource,
+          timestamp: new Date().toISOString(),
+          data: attribution.landing_page || parsed.notes || null,
+        });
         updates.source_history = history;
 
         // Fill secondary, then tertiary
         if (!currentSecondary) {
           updates.secondary_source = newSource;
-        } else if (!existing.tertiary_source) {
+        } else if (!existingLead.tertiary_source) {
           updates.tertiary_source = newSource;
         }
         // else: already has 3 sources, just log to history
 
-        await supabase.from("leads").update(updates).eq("id", existing.id);
-
         // Log activity
         await supabase.from("lead_activities").insert({
-          lead_id: existing.id,
+          lead_id: existingLead.id,
           type: "system",
-          description: `Lead re-inquired from ${newSource}. Primary: ${currentSource}, Secondary: ${currentSecondary || newSource}${existing.tertiary_source || updates.tertiary_source ? ', Tertiary: ' + (existing.tertiary_source || updates.tertiary_source) : ''}`,
+          description: `Lead re-inquired from ${newSource}. Primary: ${currentSource}, Secondary: ${currentSecondary || newSource}${existingLead.tertiary_source || updates.tertiary_source ? ', Tertiary: ' + (existingLead.tertiary_source || updates.tertiary_source) : ''}`,
         });
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await supabase.from("leads").update(updates).eq("id", existingLead.id);
       }
 
       return new Response(
         JSON.stringify({
           status: "duplicate",
-          message: `Lead already exists: ${existing.name} (${existing.stage}). Source ${newSource} tracked.`,
-          lead_id: existing.id,
+          message: `Lead already exists: ${existingLead.name} (${existingLead.stage}). Source ${newSource} tracked.`,
+          lead_id: existingLead.id,
           sources: {
             primary: currentSource,
             secondary: currentSecondary || (newSource !== currentSource ? newSource : null),
-            tertiary: existing.tertiary_source,
+            tertiary: existingLead.tertiary_source,
           },
         }),
         {
@@ -711,7 +725,7 @@ Deno.serve(async (req) => {
         lead_id: lead.id,
         status: "pending",
         scheduled_at: scheduledAt,
-      }).catch(() => {}); // non-blocking
+      });
     }
 
     return new Response(

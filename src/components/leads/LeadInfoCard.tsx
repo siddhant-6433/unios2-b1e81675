@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Phone, Mail, MapPin, FileText, Building2, User, Globe, UserCheck, Sparkles, Pencil, Check, X, GraduationCap,
+  Phone, Mail, MapPin, FileText, Building2, User, Globe, UserCheck, Sparkles, Pencil, Check, X, GraduationCap, ExternalLink, Megaphone,
 } from "lucide-react";
 import type { CourseOption, CampusOption } from "@/hooks/useCourseCampusLink";
 import { jdCategoryHint } from "@/lib/jdCategoryHint";
@@ -29,6 +29,36 @@ const AUTO_ONLY_STAGES = new Set([
   "application_fee_paid",
   "application_submitted",
 ]);
+
+function absoluteLandingUrl(lead: any): string | null {
+  const landingPage = typeof lead.landing_page === "string" ? lead.landing_page.trim() : "";
+  const originDomain = typeof lead.origin_domain === "string" ? lead.origin_domain.trim() : "";
+  if (!landingPage && !originDomain) return null;
+  if (/^https?:\/\//i.test(landingPage)) return landingPage;
+  if (originDomain && landingPage.startsWith("/")) return `https://${originDomain}${landingPage}`;
+  if (originDomain && landingPage) return `https://${originDomain}/${landingPage.replace(/^\/+/, "")}`;
+  return landingPage || `https://${originDomain}`;
+}
+
+function compactUrlLabel(url: string) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.hostname}${parsed.pathname}${parsed.search}`;
+  } catch {
+    return url;
+  }
+}
+
+function attributionChips(lead: any) {
+  const chips: string[] = [];
+  if (lead.gclid) chips.push("Google Ads");
+  if (lead.utm_source) chips.push(`utm_source: ${lead.utm_source}`);
+  if (lead.utm_medium) chips.push(`utm_medium: ${lead.utm_medium}`);
+  if (lead.utm_campaign) chips.push(`campaign: ${lead.utm_campaign}`);
+  if (lead.utm_term) chips.push(`term: ${lead.utm_term}`);
+  if (lead.utm_content) chips.push(`content: ${lead.utm_content}`);
+  return chips;
+}
 
 interface LeadInfoCardProps {
   lead: any;
@@ -216,6 +246,10 @@ export function LeadInfoCard({
             ].filter(Boolean).map((s: string) => s.replace(/_/g, " ")).join(" → ")}
             className="capitalize"
           />
+
+          {(lead.landing_page || lead.origin_domain || lead.referrer || lead.gclid || lead.utm_source) && (
+            <AttributionInfoRow lead={lead} />
+          )}
 
           {lead.jd_category && (
             <InfoRow
@@ -495,6 +529,51 @@ function InfoRow({ icon, iconColor, label, value, className }: { icon: React.Rea
       <div className="min-w-0">
         <p className="text-[11px] text-muted-foreground">{label}</p>
         <p className={`text-sm font-medium text-foreground mt-0.5 ${className || ""}`}>{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function AttributionInfoRow({ lead }: { lead: any }) {
+  const landingUrl = absoluteLandingUrl(lead);
+  const chips = attributionChips(lead);
+  const referrer = typeof lead.referrer === "string" && lead.referrer.trim() ? lead.referrer.trim() : null;
+
+  return (
+    <div className="px-5 py-3 flex items-start gap-3">
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg shrink-0 mt-0.5 bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300">
+        <Megaphone className="h-4 w-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] text-muted-foreground">Lead capture URL</p>
+        {landingUrl ? (
+          <a
+            href={landingUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-0.5 inline-flex max-w-full items-center gap-1 text-sm font-medium text-foreground hover:text-primary"
+            title={landingUrl}
+          >
+            <span className="truncate">{compactUrlLabel(landingUrl)}</span>
+            <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+          </a>
+        ) : (
+          <p className="text-sm font-medium text-foreground mt-0.5">Not captured</p>
+        )}
+        {chips.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {chips.map((chip) => (
+              <span key={chip} className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                {chip}
+              </span>
+            ))}
+          </div>
+        )}
+        {referrer && (
+          <p className="mt-1.5 truncate text-[11px] text-muted-foreground" title={referrer}>
+            Referrer: {compactUrlLabel(referrer)}
+          </p>
+        )}
       </div>
     </div>
   );

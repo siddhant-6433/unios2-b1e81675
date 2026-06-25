@@ -176,6 +176,7 @@ function computeNextAction(p: LifecycleProps, currentKey: string | undefined, al
       tone: "border-rose-200 bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/20",
       iconCls: "text-rose-600",
       titleCls: "text-rose-900 dark:text-rose-200",
+      cta: p.onIssueOffer ? { label: "Create Lead & Issue Offer", onClick: p.onIssueOffer, cls: "bg-teal-600 hover:bg-teal-700" } : undefined,
     };
   }
 

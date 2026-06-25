@@ -41,6 +41,7 @@ type FeeStatus = {
   token_required: number;
   token_paid: number;
   application_paid: number;
+  registration_paid?: number;
   total_paid: number;
   /** Sum of token_fee + 'other' lead_payments — i.e. money applied
    *  toward the course balance. Excludes application_fee and
@@ -102,6 +103,9 @@ interface Props {
 
 const isMbaCourse = (name: string | null | undefined) =>
   !!name && /\bMBA\b/i.test(name);
+
+const isDaottCourseName = (name: string | null | undefined) =>
+  !!name && (/\bD\.?\s*A?OTT\b/i.test(name) || /ana?esthesia.*operation theatre/i.test(name));
 
 const LOAN_LETTER_UNLOCK_TOKEN_FEE = 5000;
 const DEFAULT_NIMT_LETTERHEAD_URL = "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/application-documents/branding/nimt_he/letterhead.png";
@@ -292,7 +296,11 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   useEffect(() => {
     if (!feeStatus) return;
 
-    const nextOutstanding = Math.max(0, feeStatus.token_required - feeStatus.token_paid);
+    const paidTowardCourse = feeStatus.paid_toward_course ?? Math.max(
+      0,
+      (feeStatus.total_paid || 0) - (feeStatus.application_paid || 0) - (feeStatus.registration_paid || 0)
+    );
+    const nextOutstanding = Math.max(0, feeStatus.token_required - paidTowardCourse);
 
     setInstalmentPreset((current) => {
       if (current === null || current <= nextOutstanding) return current;
@@ -571,7 +579,10 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     });
     const totalCourseFee = feeRows.reduce((sum, r) => sum + r.net, 0) || offer.net_fee || offer.total_fee || 0;
     const programmeName = courseName || "the selected programme";
-    const paidTowardCourse = feeStatus.paid_toward_course ?? Math.max(0, (feeStatus.total_paid || 0) - (feeStatus.application_paid || 0));
+    const paidTowardCourse = feeStatus.paid_toward_course ?? Math.max(
+      0,
+      (feeStatus.total_paid || 0) - (feeStatus.application_paid || 0) - (feeStatus.registration_paid || 0)
+    );
     const firstYearNet = feeRows.find(r => r.term === "year_1")?.net || feeStatus.post_scholarship_year_1 || 0;
     const firstYearAmountDue = Math.max(0, firstYearNet - paidTowardCourse);
     const loanReferenceNo = buildLoanReferenceNo(offer.id, applicationId);
@@ -619,7 +630,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
 
     write("To Whom It May Concern,", 8, 2);
     write(`This is to certify that ${lead.name || applicantName || "the applicant"} has been offered provisional admission to ${programmeName} at NIMT Educational Institutions.`);
-    write(`The applicant has paid at least ${fmt(LOAN_LETTER_UNLOCK_TOKEN_FEE)} as token fee against the admission offer. This letter is issued to support the applicant's education loan application with a bank or financial institution. Please quote Loan Reference Letter No. ${loanReferenceNo} for verification.`);
+    write(`The applicant has paid at least ${fmt(loanLetterUnlockAmount)} as token fee against the admission offer. This letter is issued to support the applicant's education loan application with a bank or financial institution. Please quote Loan Reference Letter No. ${loanReferenceNo} for verification.`);
 
     heading("APPLICANT AND PROGRAMME DETAILS");
     kvGrid([
@@ -666,7 +677,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     y += 3;
     kvGrid([
       { label: "Token Fee Required", value: fmt(feeStatus.token_required || offer.token_fee_amount || 0) },
-      { label: "Token Fee Paid", value: fmt(feeStatus.token_paid) },
+      { label: "Token Fee Paid", value: fmt(paidTowardCourse) },
       { label: "First-Year Amount Due", value: fmt(firstYearAmountDue) },
     ], 3);
 
@@ -786,12 +797,18 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     );
   }
 
-  const tokenOutstanding = Math.max(0, feeStatus.token_required - feeStatus.token_paid);
-  // Application fee is a separate charge — exclude it from course fee progress tracking.
-  const coursePaid = feeStatus.total_paid - feeStatus.application_paid;
+  // Application fee is a separate charge. Course-fee progress includes
+  // token_fee plus lump-sum/course payments recorded as `other`.
+  const paidTowardCourse = feeStatus.paid_toward_course ?? Math.max(
+    0,
+    feeStatus.total_paid - feeStatus.application_paid - (feeStatus.registration_paid || 0)
+  );
+  const tokenOutstanding = Math.max(0, feeStatus.token_required - paidTowardCourse);
+  const coursePaid = paidTowardCourse;
   const towardsAdmission = Math.max(0, feeStatus.twenty_five_pct - coursePaid);
   const minInstalment = feeStatus.min_token_instalment ?? 5000;
-  const loanLetterUnlocked = feeStatus.token_paid >= LOAN_LETTER_UNLOCK_TOKEN_FEE;
+  const loanLetterUnlockAmount = isDaottCourseName(courseName) ? 4000 : LOAN_LETTER_UNLOCK_TOKEN_FEE;
+  const loanLetterUnlocked = coursePaid >= loanLetterUnlockAmount;
   const isAdmitted = !!lead.admission_no;
   const isPreAdmitted = !!lead.pre_admission_no;
   const useLocalLoanLetterPreview = shouldUseLocalLoanLetterPreview();
@@ -900,7 +917,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                 Education Loan Letter
               </p>
               <p className="text-xs mt-0.5 leading-snug text-indigo-700">
-                You have paid at least ₹{LOAN_LETTER_UNLOCK_TOKEN_FEE.toLocaleString("en-IN")} token fee. Download the loan support letter for bank processing.
+                You have paid at least ₹{loanLetterUnlockAmount.toLocaleString("en-IN")} token fee. Download the loan support letter for bank processing.
               </p>
             </div>
             <div className="shrink-0 flex items-center gap-2">
@@ -955,11 +972,11 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                     <div className="mt-2.5 h-2 rounded-full bg-gray-200 overflow-hidden">
                       <div
                         className={`h-full rounded-full transition-all duration-700 ${done ? "bg-green-500" : "bg-blue-500"}`}
-                        style={{ width: `${Math.min(100, (feeStatus.token_paid / Math.max(1, feeStatus.token_required)) * 100)}%` }}
+                        style={{ width: `${Math.min(100, (paidTowardCourse / Math.max(1, feeStatus.token_required)) * 100)}%` }}
                       />
                     </div>
                     <div className="flex justify-between mt-1 text-[11px] text-gray-500">
-                      <span>Paid: ₹{feeStatus.token_paid.toLocaleString("en-IN")}</span>
+                      <span>Paid: ₹{paidTowardCourse.toLocaleString("en-IN")}</span>
                       <span>Target: ₹{feeStatus.token_required.toLocaleString("en-IN")}</span>
                     </div>
                     {isPreAdmitted && lead.pre_admission_no && (

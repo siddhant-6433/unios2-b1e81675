@@ -100,6 +100,47 @@ async function resolvePrimaryCourseSelection(selection: ApplicationCourseSelecti
   };
 }
 
+function docKeyForFileName(name: string): string {
+  if (name.startsWith("passport_photo.")) return "passport_photo";
+  const dashIdx = name.indexOf("-");
+  return dashIdx > 0 ? name.substring(0, dashIdx) : name.replace(/\.[^.]+$/, "");
+}
+
+function docKeyForDoc(doc: PreviewDoc): string {
+  if (doc.doc_key) return doc.doc_key;
+  const name = doc.name || doc.path?.split("/").pop() || "";
+  return docKeyForFileName(name);
+}
+
+function docUploadedTime(doc: PreviewDoc): number {
+  const raw = doc.uploaded_at || "";
+  const t = raw ? new Date(raw).getTime() : 0;
+  return Number.isFinite(t) ? t : 0;
+}
+
+function docStatusRank(doc: PreviewDoc): number {
+  if (doc.review_status === "rejected") return 0;
+  if (doc.review_status === "verified") return 2;
+  return 1;
+}
+
+function activeDocsByLogicalKey(rawDocs: PreviewDoc[]): PreviewDoc[] {
+  const latest = new Map<string, PreviewDoc>();
+  rawDocs.forEach((doc) => {
+    const key = docKeyForDoc(doc);
+    const existing = latest.get(key);
+    const docTime = docUploadedTime(doc);
+    const existingTime = existing ? docUploadedTime(existing) : -1;
+    const shouldReplace = !existing
+      || docTime > existingTime
+      || (docTime === existingTime && docStatusRank(doc) >= docStatusRank(existing));
+    if (shouldReplace) {
+      latest.set(key, { ...doc, doc_key: key });
+    }
+  });
+  return Array.from(latest.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export default function AdminApplicationView() {
   const { applicationId } = useParams<{ applicationId: string }>();
   const navigate = useNavigate();
@@ -155,7 +196,7 @@ export default function AdminApplicationView() {
       ]);
       if (appErr) throw appErr;
       setApp(appRow);
-      const activeDocs = (((fnRes?.data as any)?.docs || []) as PreviewDoc[]);
+      const activeDocs = activeDocsByLogicalKey((((fnRes?.data as any)?.docs || []) as PreviewDoc[]));
       const activeDocPaths = new Set(activeDocs.map(d => d.path).filter(Boolean));
       setDocs(activeDocs);
       const profileIds = [
@@ -394,11 +435,11 @@ export default function AdminApplicationView() {
     refresh();
   };
 
-  const createLinkedLead = async () => {
-    if (!app) return;
+  const createLinkedLead = async (options?: { openOffer?: boolean }) => {
+    if (!app) return null;
     if (!app.phone) {
       toast({ title: "Cannot create lead", description: "Application has no phone number.", variant: "destructive" });
-      return;
+      return null;
     }
     setRepairingLead(true);
     try {
@@ -455,6 +496,10 @@ export default function AdminApplicationView() {
         if (leadUpdateErr) throw leadUpdateErr;
       }
 
+      const linkedCourse = resolvedSelection?.course_id || existingLead?.course_id || null;
+      const linkedCampus = resolvedSelection?.campus_id || existingLead?.campus_id || null;
+      const linkedCourseDetails = linkedCourse ? await fetchCourseDetails(linkedCourse) : null;
+
       const { error: appUpdateErr } = await supabase
         .from("applications")
         .update({ lead_id: leadId })
@@ -468,9 +513,32 @@ export default function AdminApplicationView() {
       } as any);
 
       toast({ title: "Lead linked", description: `Application ${app.application_id} is associated with a lead again.` });
+      setApp((prev: any) => prev ? { ...prev, lead_id: leadId } : prev);
+      setLead({
+        id: leadId,
+        name: app.full_name || "Applicant",
+        course_id: linkedCourse,
+        campus_id: linkedCampus,
+        pre_admission_no: null,
+        admission_no: null,
+        course: linkedCourseDetails,
+      });
       await refresh();
+      if (options?.openOffer) {
+        if (!linkedCourse) {
+          toast({
+            title: "Course missing",
+            description: "Lead was linked, but no course/class is available for offer generation.",
+            variant: "destructive",
+          });
+        } else {
+          setShowOfferLetter(true);
+        }
+      }
+      return leadId;
     } catch (e: any) {
       toast({ title: "Couldn't create lead", description: e?.message || "Lead repair failed", variant: "destructive" });
+      return null;
     } finally {
       setRepairingLead(false);
     }
@@ -571,6 +639,29 @@ export default function AdminApplicationView() {
     }
   };
 
+  const canManageOffer = role === "super_admin" || role === "principal" || role === "counsellor" ||
+    role === "admission_head" || role === "campus_admin";
+
+  const issueOfferOrRepairLead = async () => {
+    if (!canManageOffer) {
+      toast({ title: "Offer restricted", description: "You do not have permission to issue offers.", variant: "destructive" });
+      return;
+    }
+    if (lead?.id) {
+      if (!lead.course_id) {
+        toast({
+          title: "Course missing",
+          description: "No course/class is linked to this application yet.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setShowOfferLetter(true);
+      return;
+    }
+    await createLinkedLead({ openOffer: true });
+  };
+
   return (
     <div className="p-5 space-y-5 animate-fade-in max-w-5xl mx-auto">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -611,7 +702,7 @@ export default function AdminApplicationView() {
               variant="outline"
               size="sm"
               className="h-8 gap-1.5 text-xs"
-              onClick={createLinkedLead}
+              onClick={() => createLinkedLead()}
               disabled={repairingLead}
             >
               {repairingLead ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
@@ -653,7 +744,7 @@ export default function AdminApplicationView() {
           hasOffer={hasOffer}
           docs={counts}
           onApprove={canApproveApplication && app.status === "submitted" ? () => decideApplication("approved") : undefined}
-          onIssueOffer={app.status === "approved" && !hasOffer && lead?.id ? () => setShowOfferLetter(true) : undefined}
+          onIssueOffer={app.status === "approved" && !hasOffer && canManageOffer ? issueOfferOrRepairLead : undefined}
           feeReceiptUrl={app.fee_receipt_url || null}
           onGenerateFeeReceipt={appFeePaid > 0 ? generateFeeReceipt : undefined}
         />
@@ -708,16 +799,13 @@ export default function AdminApplicationView() {
               </p>
             )}
             {decided && app.status === "approved" && (() => {
-              const canIssueOffer = !!lead?.id && (
-                role === "super_admin" || role === "principal" || role === "counsellor" ||
-                role === "admission_head" || role === "campus_admin"
-              ) && !!lead.course_id;
-              const reason = !lead?.id
-                ? "No lead linked to this application"
+              const canIssueOffer = canManageOffer && (!!hasOffer || !lead?.id || !!lead.course_id);
+              const reason = !canManageOffer
+                ? "You do not have permission to issue offers"
+                : !lead?.id
+                ? "Create a linked lead, then issue the offer"
                 : !lead.course_id
                 ? "No course/class is linked to this application yet"
-                : !canIssueOffer
-                ? "You do not have permission to issue offers"
                 : undefined;
               // Once an offer exists, this button switches to "View Offer Letter"
               // — same dialog, but framed as a viewer (and lets the user manage
@@ -725,13 +813,13 @@ export default function AdminApplicationView() {
               return (
                 <Button
                   size="sm"
-                  onClick={() => setShowOfferLetter(true)}
-                  disabled={!canIssueOffer && !hasOffer}
+                  onClick={issueOfferOrRepairLead}
+                  disabled={repairingLead || (!canIssueOffer && !hasOffer)}
                   title={hasOffer ? undefined : reason}
                   className={hasOffer ? "bg-blue-600 hover:bg-blue-700 text-white" : "bg-teal-600 hover:bg-teal-700 text-white"}
                 >
-                  {hasOffer ? <FileText className="h-3.5 w-3.5 mr-1.5" /> : <Gift className="h-3.5 w-3.5 mr-1.5" />}
-                  {hasOffer ? "View Offer Letter" : "Issue Offer Letter"}
+                  {repairingLead ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : hasOffer ? <FileText className="h-3.5 w-3.5 mr-1.5" /> : <Gift className="h-3.5 w-3.5 mr-1.5" />}
+                  {hasOffer ? "View Offer Letter" : lead?.id ? "Issue Offer Letter" : "Create Lead & Issue Offer"}
                 </Button>
               );
             })()}
