@@ -865,7 +865,8 @@ Deno.serve(async (req) => {
 
     // Token fee on the PDF: this is the amount the candidate must pay before
     // downloading the education-loan support letter — i.e. 25% of the
-    // post-scholarship + post-waiver Year-1 fee, floored at ₹5,000.
+    // post-scholarship + post-waiver Year-1 fee, floored at the
+    // course-specific seat-block amount.
     //
     //   1. If the offer carries an explicit token_fee_amount (set when the
     //      counsellor used the new offer-letter form), use that verbatim.
@@ -882,8 +883,9 @@ Deno.serve(async (req) => {
         .filter(w => w.term === "year_1")
         .reduce((s, w) => s + Number(w.amount || 0), 0);
       const postY1 = Math.max(0, y1Total - scholarship - y1Waivers);
+      const tokenFloor = isDaottCourse(course) ? 4000 : 5000;
       tokenAmount = postY1 > 0
-        ? Math.max(Math.round(postY1 * 0.25), 5000)
+        ? Math.max(Math.round(postY1 * 0.25), tokenFloor)
         : Number(lead?.token_amount || 0);
     }
 

@@ -79,7 +79,7 @@ const COLORS = {
 type LoanLetterOpts = {
   offer: any;
   lead: any;
-  course: { name?: string | null; duration_years?: number | null } | null;
+  course: { name?: string | null; code?: string | null; duration_years?: number | null } | null;
   campus: any;
   applicationId: string | null;
   bankDetails: {
@@ -100,6 +100,12 @@ type LoanLetterOpts = {
   loanLetterUnlockAmount: number;
   yearItems: { term: string; total: number; waiver: number; applicable: number; dueDate?: string | null }[];
 };
+
+function isDaottCourse(course: LoanLetterOpts["course"]) {
+  const code = String(course?.code || "").toUpperCase();
+  const name = String(course?.name || "").toLowerCase();
+  return code.includes("DAOTT") || code.includes("DOTT") || /ana?esthesia.*operation theatre/.test(name);
+}
 
 type LoanLetterCtx = {
   pdf: PDFDocument;
@@ -479,7 +485,7 @@ Deno.serve(async (req) => {
         admission_mode, entrance_exam_name,
         course_id, campus_id, session_id, created_at,
         leads:lead_id ( id, name, phone, email, application_id ),
-        courses:course_id ( name, duration_years ),
+        courses:course_id ( name, code, duration_years ),
         campuses:campus_id ( name )
       `)
       .eq("id", offer_letter_id)
@@ -520,12 +526,18 @@ Deno.serve(async (req) => {
     const tokenPaid = Number((feeStatus as any).token_paid || 0);
     const paidTowardCourse = Number(
       (feeStatus as any).paid_toward_course
-      ?? Math.max(0, Number((feeStatus as any).total_paid || 0) - Number((feeStatus as any).application_paid || 0))
+      ?? Math.max(
+        0,
+        Number((feeStatus as any).total_paid || 0) -
+          Number((feeStatus as any).application_paid || 0) -
+          Number((feeStatus as any).registration_paid || 0)
+      )
       ?? tokenPaid
     );
-    if (tokenPaid < LOAN_LETTER_UNLOCK_TOKEN_FEE) {
+    const loanLetterUnlockAmount = isDaottCourse((offer as any).courses) ? 4000 : LOAN_LETTER_UNLOCK_TOKEN_FEE;
+    if (paidTowardCourse < loanLetterUnlockAmount) {
       return new Response(JSON.stringify({
-        error: `Loan letter unlocks after token fee payment of at least ${fmtINR(LOAN_LETTER_UNLOCK_TOKEN_FEE)}.`,
+        error: `Loan letter unlocks after token fee payment of at least ${fmtINR(loanLetterUnlockAmount)}.`,
       }), {
         status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -634,9 +646,9 @@ Deno.serve(async (req) => {
       firstYearFee,
       totalCourseFee,
       tokenRequired,
-      tokenPaid,
+      tokenPaid: paidTowardCourse,
       firstYearAmountDue,
-      loanLetterUnlockAmount: LOAN_LETTER_UNLOCK_TOKEN_FEE,
+      loanLetterUnlockAmount,
       yearItems,
     });
 

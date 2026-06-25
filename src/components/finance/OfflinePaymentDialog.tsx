@@ -5,7 +5,7 @@
 // (PAN/AN issuance), and fire notify-event to send WA + finance@ email +
 // receipt PDF.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -65,8 +65,27 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
   const [remarks,setRemarks]= useState<string>("");
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [tokenFloor, setTokenFloor] = useState(5000);
 
   const allowedRole = ["super_admin", "campus_admin", "accountant"].includes(role || "");
+
+  useEffect(() => {
+    if (!allowedRole || !open || !leadId) return;
+    let active = true;
+    (async () => {
+      const { data } = await supabase
+        .from("leads")
+        .select("courses:course_id(code, name)")
+        .eq("id", leadId)
+        .maybeSingle();
+      const course = (data as any)?.courses;
+      const code = String(course?.code || "").toUpperCase();
+      const name = String(course?.name || "").toLowerCase();
+      const isDaott = code.includes("DAOTT") || code.includes("DOTT") || /ana?esthesia.*operation theatre/.test(name);
+      if (active) setTokenFloor(isDaott ? 4000 : 5000);
+    })();
+    return () => { active = false; };
+  }, [allowedRole, open, leadId]);
 
   if (!allowedRole) return null;
 
@@ -88,9 +107,8 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
       toast({ title: "Enter a valid amount", variant: "destructive" });
       return;
     }
-    // DB enforces token_fee >= ₹5,000 via chk_lead_payments_token_fee_min
-    if (type === "token_fee" && amt < 5000) {
-      toast({ title: "Token fee must be at least ₹5,000", variant: "destructive" });
+    if (type === "token_fee" && amt < tokenFloor) {
+      toast({ title: `Token fee must be at least ₹${tokenFloor.toLocaleString("en-IN")}`, variant: "destructive" });
       return;
     }
     if (mode === "cheque" && !txnRef.trim()) {
