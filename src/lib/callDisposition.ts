@@ -50,6 +50,19 @@ type SupabaseRpcError = {
   code?: string;
   message?: string;
   details?: string;
+  hint?: string;
+};
+
+type SupabaseWriteResult = {
+  data: unknown;
+  error: SupabaseRpcError | null;
+};
+
+type SupabaseTableBuilder = PromiseLike<SupabaseWriteResult> & {
+  update: (payload: Record<string, unknown>) => SupabaseTableBuilder;
+  insert: (payload: Record<string, unknown> | Record<string, unknown>[]) => PromiseLike<SupabaseWriteResult>;
+  eq: (column: string, value: unknown) => SupabaseTableBuilder;
+  select: (columns: string) => PromiseLike<SupabaseWriteResult>;
 };
 
 type DispositionSupabaseClient = {
@@ -57,6 +70,7 @@ type DispositionSupabaseClient = {
     fn: string,
     params: Record<string, unknown>,
   ) => PromiseLike<{ data: unknown; error: SupabaseRpcError | null }>;
+  from?: (table: string) => SupabaseTableBuilder;
   auth: {
     getSession: () => PromiseLike<{
       data: { session: { access_token?: string } | null };
@@ -76,6 +90,42 @@ const isLegacyDispositionRpcSignatureError = (error: unknown) => {
        message.includes("p_cnet_appeared") ||
        message.includes("p_cahet_registered")))
   );
+};
+
+const isMissingRpcError = (error: unknown, functionName: string) => {
+  if (!error || typeof error !== "object") return false;
+  const rpcError = error as SupabaseRpcError;
+  const code = String(rpcError.code || "");
+  const message = String([rpcError.message, rpcError.details, rpcError.hint].filter(Boolean).join(" "));
+  return code === "PGRST202" && message.includes(functionName);
+};
+
+const isMissingDispositionRpcError = (error: unknown) => isMissingRpcError(error, "record_disposition_writes");
+
+const formatSupabaseErrorMessage = (error: unknown, fallback = "Please try again.") => {
+  if (error instanceof Error) return error.message || fallback;
+  if (!error || typeof error !== "object") return fallback;
+  const rpcError = error as SupabaseRpcError;
+  return (
+    rpcError.message ||
+    rpcError.details ||
+    rpcError.hint ||
+    rpcError.code ||
+    fallback
+  );
+};
+
+const throwSupabaseError = (error: unknown, context: string): never => {
+  const message = formatSupabaseErrorMessage(error, context);
+  const err = new Error(message);
+  if (error && typeof error === "object") {
+    (err as Error & { cause?: unknown }).cause = error;
+  }
+  throw err;
+};
+
+const assertNoError = (error: unknown, context: string) => {
+  if (error) throwSupabaseError(error, context);
 };
 
 export interface RecordCallDispositionArgs {
@@ -106,6 +156,140 @@ export interface RecordCallDispositionArgs {
    * via the manual-call edge function.
    */
   callSource?: "cloud_dialer" | "manual_log" | "inbound";
+}
+
+interface ResolvedDispositionWrites {
+  label: string;
+  callActivityDesc: string;
+  callNotes: string;
+  newStage: string | null;
+  stageActivityDesc: string | null;
+  futureEligibleSession: string | null;
+  followupAt: string | null;
+  followupNotes: string | null;
+  followupActivityDesc: string | null;
+  callUuid: string;
+  callSource: "cloud_dialer" | "manual_log" | "inbound";
+}
+
+async function legacyRecordCloudCallLog(args: RecordCallDispositionArgs, resolved: ResolvedDispositionWrites) {
+  const params: Record<string, unknown> = {
+    p_call_uuid: resolved.callUuid,
+    p_lead_id: args.leadId,
+    p_user_id: args.userId,
+    p_disposition: args.data.disposition,
+    p_duration: args.data.duration_seconds || 0,
+    p_notes: resolved.callNotes,
+    p_source: "manual",
+    p_recording_url: null,
+    p_call_source: resolved.callSource,
+  };
+  let { error } = await args.supabase.rpc("record_cloud_call_log", params);
+  if (error && isMissingRpcError(error, "record_cloud_call_log")) {
+    const legacyParams = { ...params };
+    delete legacyParams.p_call_source;
+    const retry = await args.supabase.rpc("record_cloud_call_log", legacyParams);
+    error = retry.error;
+  }
+  assertNoError(error, "Could not record call log");
+}
+
+async function runLegacyDispositionWrites(args: RecordCallDispositionArgs, resolved: ResolvedDispositionWrites) {
+  const db = args.supabase.from;
+  if (!db) {
+    throw new Error("Disposition save RPC is unavailable and this client cannot run fallback writes.");
+  }
+
+  await legacyRecordCloudCallLog(args, resolved);
+
+  const shouldClearFollowups = args.data.disposition !== "not_answered";
+  if (shouldClearFollowups) {
+    const { error } = await db("lead_followups")
+      .update({ status: "completed", completed_at: new Date().toISOString() })
+      .eq("lead_id", args.leadId)
+      .eq("status", "pending");
+    assertNoError(error, "Could not complete pending follow-ups");
+  }
+
+  let result = await db("lead_activities").insert({
+    lead_id: args.leadId,
+    user_id: args.profileId,
+    type: "call",
+    description: resolved.callActivityDesc,
+  });
+  assertNoError(result.error, "Could not record call activity");
+
+  if (args.data.cnet_appeared !== null && args.data.cnet_appeared !== undefined) {
+    result = await db("leads")
+      .update({ cnet_appeared: args.data.cnet_appeared, updated_at: new Date().toISOString() })
+      .eq("id", args.leadId);
+    assertNoError(result.error, "Could not save CNET answer");
+  }
+
+  if (args.data.cahet_registered !== null && args.data.cahet_registered !== undefined) {
+    result = await db("leads")
+      .update({ cahet_registered: args.data.cahet_registered, updated_at: new Date().toISOString() })
+      .eq("id", args.leadId);
+    assertNoError(result.error, "Could not save CAHET answer");
+  }
+
+  if (resolved.newStage) {
+    const leadPatch: Record<string, unknown> = { stage: resolved.newStage };
+    if (resolved.futureEligibleSession) leadPatch.future_eligible_session = resolved.futureEligibleSession;
+    result = await db("leads").update(leadPatch).eq("id", args.leadId);
+    assertNoError(result.error, "Could not update lead stage");
+
+    result = await db("lead_activities").insert({
+      lead_id: args.leadId,
+      user_id: args.profileId,
+      type: "stage_change",
+      description: resolved.stageActivityDesc,
+      old_stage: args.lead.stage,
+      new_stage: resolved.newStage,
+    });
+    assertNoError(result.error, "Could not record stage activity");
+  }
+
+  if (resolved.followupAt) {
+    if (shouldClearFollowups) {
+      result = await db("lead_followups").insert({
+        lead_id: args.leadId,
+        user_id: args.userId,
+        scheduled_at: resolved.followupAt,
+        type: "call",
+        notes: resolved.followupNotes,
+        status: "pending",
+      });
+      assertNoError(result.error, "Could not schedule follow-up");
+    } else {
+      result = await db("lead_followups")
+        .update({ scheduled_at: resolved.followupAt, notes: resolved.followupNotes })
+        .eq("lead_id", args.leadId)
+        .eq("status", "pending")
+        .select("id");
+      assertNoError(result.error, "Could not reschedule follow-up");
+
+      if (!Array.isArray(result.data) || result.data.length === 0) {
+        result = await db("lead_followups").insert({
+          lead_id: args.leadId,
+          user_id: args.userId,
+          scheduled_at: resolved.followupAt,
+          type: "call",
+          notes: resolved.followupNotes,
+          status: "pending",
+        });
+        assertNoError(result.error, "Could not schedule follow-up");
+      }
+    }
+
+    result = await db("lead_activities").insert({
+      lead_id: args.leadId,
+      user_id: args.profileId,
+      type: "followup",
+      description: resolved.followupActivityDesc || "Follow-up rescheduled after not answered",
+    });
+    assertNoError(result.error, "Could not record follow-up activity");
+  }
 }
 
 /**
@@ -173,17 +357,31 @@ export async function recordCallDisposition(args: RecordCallDispositionArgs): Pr
     followupActivityDesc = `Follow-up scheduled for ${new Date(data.followup_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`;
   }
 
+  const resolved: ResolvedDispositionWrites = {
+    label,
+    callActivityDesc,
+    callNotes,
+    newStage,
+    stageActivityDesc,
+    futureEligibleSession,
+    followupAt,
+    followupNotes,
+    followupActivityDesc,
+    callUuid: callUuid || crypto.randomUUID(),
+    callSource: callSource || "manual_log",
+  };
+
   // Single round-trip. The RPC reuses record_cloud_call_log internally, so the
   // Cloud Call dedup/merge (recording_url, bridge-hangup webhook row) is intact.
   const rpcParams: Record<string, unknown> = {
-    p_call_uuid:               callUuid || crypto.randomUUID(),
+    p_call_uuid:               resolved.callUuid,
     p_lead_id:                 leadId,
     p_user_id:                 userId,
     p_profile_id:              profileId,
     p_disposition:             data.disposition,
     p_duration:                data.duration_seconds || 0,
     p_call_notes:              callNotes,
-    p_call_source:             callSource || "manual_log",
+    p_call_source:             resolved.callSource,
     p_call_activity_desc:      callActivityDesc,
     p_old_stage:               lead.stage,
     p_new_stage:               newStage,
@@ -209,9 +407,19 @@ export async function recordCallDisposition(args: RecordCallDispositionArgs): Pr
     error = retry.error;
   }
 
+  // If PostgREST's schema cache or the deployed database signature is behind
+  // the frontend, keep counsellors moving by replaying the previous direct
+  // write path. Restrict this to missing-function/signature errors so real
+  // authorization or constraint failures still surface.
+  if (error && isMissingDispositionRpcError(error)) {
+    console.warn("record_disposition_writes unavailable; falling back to direct disposition writes.", error);
+    await runLegacyDispositionWrites(args, resolved);
+    error = null;
+  }
+
   // Writes are atomic now (all-or-nothing); surface a hard failure rather than
   // letting the caller report a save that didn't happen.
-  if (error) throw error;
+  if (error) throwSupabaseError(error, "Could not save call disposition");
 
   // WhatsApp sends fire only after the writes are confirmed — a failed save no
   // longer triggers a "thanks for your interest" message. Dispatched fully

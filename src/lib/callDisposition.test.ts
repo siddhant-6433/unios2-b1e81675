@@ -23,8 +23,47 @@ interface RpcCall {
   params: Record<string, unknown>;
 }
 
-function makeMockSupabase(opts?: { getSession?: () => Promise<unknown>; rpcError?: unknown; rpcErrors?: unknown[] }) {
+interface TableCall {
+  table: string;
+  op: "insert" | "update";
+  payload: unknown;
+  filters: Array<{ column: string; value: unknown }>;
+  select?: string;
+}
+
+function makeMockFrom() {
+  const tableCalls: TableCall[] = [];
+  const from = (table: string) => {
+    const builder = {
+      update(payload: unknown) {
+        const call: TableCall = { table, op: "update", payload, filters: [] };
+        tableCalls.push(call);
+        return builder;
+      },
+      insert(payload: unknown) {
+        tableCalls.push({ table, op: "insert", payload, filters: [] });
+        return Promise.resolve({ data: null, error: null });
+      },
+      eq(column: string, value: unknown) {
+        tableCalls[tableCalls.length - 1]?.filters.push({ column, value });
+        return builder;
+      },
+      select(columns: string) {
+        tableCalls[tableCalls.length - 1].select = columns;
+        return Promise.resolve({ data: [], error: null });
+      },
+      then(onFulfilled: (value: { data: unknown[]; error: null }) => unknown, onRejected?: (reason: unknown) => unknown) {
+        return Promise.resolve({ data: [], error: null }).then(onFulfilled, onRejected);
+      },
+    };
+    return builder;
+  };
+  return { from, tableCalls };
+}
+
+function makeMockSupabase(opts?: { getSession?: () => Promise<unknown>; rpcError?: unknown; rpcErrors?: unknown[]; withFrom?: boolean }) {
   const rpcCalls: RpcCall[] = [];
+  const { from, tableCalls } = makeMockFrom();
 
   const client = {
     rpc: (name: string, params: Record<string, unknown>) => {
@@ -32,6 +71,7 @@ function makeMockSupabase(opts?: { getSession?: () => Promise<unknown>; rpcError
       const error = opts?.rpcErrors ? opts.rpcErrors[rpcCalls.length - 1] ?? null : opts?.rpcError ?? null;
       return Promise.resolve({ data: "call-log-1", error });
     },
+    ...(opts?.withFrom ? { from } : {}),
     auth: {
       getSession:
         opts?.getSession ??
@@ -39,7 +79,7 @@ function makeMockSupabase(opts?: { getSession?: () => Promise<unknown>; rpcError
     },
   };
 
-  return { client: client as unknown as RecordCallDispositionArgs["supabase"], rpcCalls };
+  return { client: client as unknown as RecordCallDispositionArgs["supabase"], rpcCalls, tableCalls };
 }
 
 const baseArgs = (
@@ -165,6 +205,48 @@ describe("recordCallDisposition — single consolidated RPC", () => {
     expect(rpcCalls[1].params.p_followup_at).toBeNull();
   });
 
+  it("falls back to direct writes when the disposition RPC is missing from PostgREST schema cache", async () => {
+    const missingRpc = {
+      code: "PGRST202",
+      message: "Could not find the function public.record_disposition_writes in the schema cache",
+    };
+    const { client, rpcCalls, tableCalls } = makeMockSupabase({
+      withFrom: true,
+      rpcErrors: [missingRpc, missingRpc, null],
+    });
+
+    await recordCallDisposition(baseArgs({
+      disposition: "not_interested",
+      duration_seconds: 38,
+      notes: "Not Interested",
+      schedule_followup: false,
+      suppress_auto_whatsapp: true,
+      send_course_info: false,
+    }, client));
+
+    expect(rpcCalls.map(c => c.name)).toEqual([
+      "record_disposition_writes",
+      "record_disposition_writes",
+      "record_cloud_call_log",
+    ]);
+    expect(tableCalls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ table: "lead_followups", op: "update" }),
+        expect.objectContaining({ table: "lead_activities", op: "insert" }),
+        expect.objectContaining({
+          table: "leads",
+          op: "update",
+          payload: expect.objectContaining({ stage: "not_interested" }),
+        }),
+        expect.objectContaining({
+          table: "lead_activities",
+          op: "insert",
+          payload: expect.objectContaining({ type: "stage_change", new_stage: "not_interested" }),
+        }),
+      ]),
+    );
+  });
+
   it("resolves the deferred stage + future session for an ineligible-but-future lead", async () => {
     // Arrange
     const { client, rpcCalls } = makeMockSupabase();
@@ -212,7 +294,7 @@ describe("recordCallDisposition — hard failures surface", () => {
     const { client } = makeMockSupabase({ rpcError: { message: "boom" } });
 
     // Act + Assert
-    await expect(recordCallDisposition(baseArgs(interestedNoFollowup, client))).rejects.toBeTruthy();
+    await expect(recordCallDisposition(baseArgs(interestedNoFollowup, client))).rejects.toThrow("boom");
   });
 });
 
