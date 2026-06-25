@@ -93,6 +93,8 @@ const FUNNEL_ORDER: FunnelStage[] = [
 ];
 
 const funnelStageOf = applicationFunnelStageOf;
+const RELATED_QUERY_BATCH_SIZE = 50;
+const OFFER_OR_PAYMENT_STAGES = new Set(["offer_sent", "token_paid", "pre_admitted"]);
 
 const FUNNEL_META: Record<FunnelStage, {
   label: string; icon: any;
@@ -301,36 +303,57 @@ export default function Applications() {
       const leadTokenCompleteMap: Record<string, boolean> = {};
       const appDocCountsMap: Record<string, { total: number; verified: number; rejected: number; pending: number }> = {};
       if (leadIds.length > 0) {
-        // Offer-letter existence — one row per lead is enough to flag.
-        const { data: offers } = await supabase.from("offer_letters")
-          .select("lead_id")
-          .in("lead_id", leadIds);
-        (offers || []).forEach((o: any) => { leadOfferMap[o.lead_id] = true; });
+        for (let i = 0; i < leadIds.length; i += RELATED_QUERY_BATCH_SIZE) {
+          const batch = leadIds.slice(i, i + RELATED_QUERY_BATCH_SIZE);
 
-        // Confirmed application_fee + token_fee payments — track per lead.
-        // `leadTokenFeePaidSet` is a cheap early flag for explicit token_fee
-        // receipts. Course-fee lump-sum payments are recorded as `other`, so
-        // the authoritative token-complete flag comes from lead_fee_status
-        // below once the offer/threshold is known.
-        const { data: pmts } = await supabase.from("lead_payments")
-          .select("lead_id, amount, type")
-          .in("lead_id", leadIds)
-          .in("type", ["application_fee", "token_fee"])
-          .eq("status", "confirmed");
-        (pmts || []).forEach((p: any) => {
-          if (p.type === "application_fee") {
-            appFeePaidMap[p.lead_id] = (appFeePaidMap[p.lead_id] || 0) + Number(p.amount || 0);
-          } else if (p.type === "token_fee") {
-            leadTokenFeePaidSet.add(p.lead_id);
+          // Offer-letter existence — one row per lead is enough to flag.
+          // Keep this batched; admins can have 700+ applications, and a single
+          // huge `.in(...)` URL silently starves downstream token/PAN status.
+          const { data: offers, error: offersError } = await supabase.from("offer_letters")
+            .select("lead_id")
+            .in("lead_id", batch);
+          if (offersError) {
+            console.error("offer_letters batch failed:", offersError);
           }
-        });
+          (offers || []).forEach((o: { lead_id: string }) => { leadOfferMap[o.lead_id] = true; });
 
-        for (let i = 0; i < leadIds.length; i += 50) {
-          const batch = leadIds.slice(i, i + 50);
-          const { data: leads } = await supabase.from("leads")
+          // Confirmed application_fee + token_fee payments — track per lead.
+          // `leadTokenFeePaidSet` is a cheap early flag for explicit token_fee
+          // receipts. Course-fee lump-sum payments are recorded as `other`, so
+          // the authoritative token-complete flag comes from lead_fee_status
+          // below once the offer/threshold is known.
+          const { data: pmts, error: pmtsError } = await supabase.from("lead_payments")
+            .select("lead_id, amount, type")
+            .in("lead_id", batch)
+            .in("type", ["application_fee", "token_fee"])
+            .eq("status", "confirmed");
+          if (pmtsError) {
+            console.error("lead_payments batch failed:", pmtsError);
+          }
+          (pmts || []).forEach((p: { lead_id: string; amount: number | string | null; type: string }) => {
+            if (p.type === "application_fee") {
+              appFeePaidMap[p.lead_id] = (appFeePaidMap[p.lead_id] || 0) + Number(p.amount || 0);
+            } else if (p.type === "token_fee") {
+              leadTokenFeePaidSet.add(p.lead_id);
+            }
+          });
+        }
+
+        for (let i = 0; i < leadIds.length; i += RELATED_QUERY_BATCH_SIZE) {
+          const batch = leadIds.slice(i, i + RELATED_QUERY_BATCH_SIZE);
+          const { data: leads, error: leadsError } = await supabase.from("leads")
             .select("id, counsellor_id, stage, pre_admission_no, admission_no")
             .in("id", batch);
-          (leads || []).forEach((l: any) => {
+          if (leadsError) {
+            console.error("leads batch failed:", leadsError);
+          }
+          (leads || []).forEach((l: {
+            id: string;
+            counsellor_id: string | null;
+            stage: string;
+            pre_admission_no: string | null;
+            admission_no: string | null;
+          }) => {
             leadStageMap[l.id] = l.stage;
             leadCounsellorIdMap[l.id] = l.counsellor_id;
             leadPanMap[l.id] = l.pre_admission_no;
@@ -353,33 +376,44 @@ export default function Applications() {
       }
 
       // Document review counts per application — used by the mini lifecycle
-      // stepper. One round-trip; harmless if zero rows.
+      // stepper. Keep this batched for the same reason as lead-side lookups.
       if (appIdsForReview.length > 0) {
-        const { data: reviews } = await supabase.from("application_doc_reviews" as any)
-          .select("application_id, status")
-          .in("application_id", appIdsForReview);
-        (reviews || []).forEach((r: any) => {
-          if (!appDocCountsMap[r.application_id]) {
-            appDocCountsMap[r.application_id] = { total: 0, verified: 0, rejected: 0, pending: 0 };
+        for (let i = 0; i < appIdsForReview.length; i += RELATED_QUERY_BATCH_SIZE) {
+          const batch = appIdsForReview.slice(i, i + RELATED_QUERY_BATCH_SIZE);
+          const { data: reviews, error: reviewsError } = await supabase.from("application_doc_reviews" as any)
+            .select("application_id, status")
+            .in("application_id", batch);
+          if (reviewsError) {
+            console.error("application_doc_reviews batch failed:", reviewsError);
           }
-          const c = appDocCountsMap[r.application_id];
-          c.total++;
-          if (r.status === "verified") c.verified++;
-          else if (r.status === "rejected") c.rejected++;
-          else c.pending++;
-        });
+          (reviews || []).forEach((r: { application_id: string; status: string }) => {
+            if (!appDocCountsMap[r.application_id]) {
+              appDocCountsMap[r.application_id] = { total: 0, verified: 0, rejected: 0, pending: 0 };
+            }
+            const c = appDocCountsMap[r.application_id];
+            c.total++;
+            if (r.status === "verified") c.verified++;
+            else if (r.status === "rejected") c.rejected++;
+            else c.pending++;
+          });
+        }
       }
 
       // Pull PAN/AN amounts due from the server-side `lead_fee_status` RPC
       // — same source of truth the candidate's portal uses (TokenFeePanel).
       // Only fetch for leads who can still progress toward PAN or AN:
-      // they have an offer letter AND don't already have admission_no. This
-      // narrows ~200 leads → ~40 RPC calls in parallel.
+      // they have an offer letter or are already in the offer/payment lifecycle,
+      // AND don't already have admission_no. The lead-stage fallback matters
+      // when legacy/stale rows have stage='offer_sent' but no preloaded offer row.
       const panDueMap: Record<string, number | null> = {};
       const anDueMap: Record<string, number | null> = {};
       const year1DueMap: Record<string, number | null> = {};
       const feeStatusLeadIds = leadIds.filter((lid: string) =>
-        leadOfferMap[lid] && !leadAnMap[lid]
+        !leadAnMap[lid] && (
+          leadOfferMap[lid] ||
+          OFFER_OR_PAYMENT_STAGES.has(leadStageMap[lid]) ||
+          !!leadPanMap[lid]
+        )
       );
       if (feeStatusLeadIds.length > 0) {
         await Promise.all(feeStatusLeadIds.map(async (lid: string) => {
