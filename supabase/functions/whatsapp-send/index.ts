@@ -130,8 +130,9 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
 
   // 1. Application submitted — confirms receipt, attaches form PDF as button URL.
   application_submitted:  { name: "application_submitted",  params: ["student_name", "application_id"] },
-  // 2. Application fee paid — receipt + form PDF link.
+  // 2. Application fee paid — receipt PDF as document-header template.
   app_fee_receipt:        { name: "app_fee_receipt",        params: ["student_name", "amount", "application_id"] },
+  app_fee_receipt_pdf:    { name: "app_fee_receipt_pdf",    params: ["student_name", "amount", "application_id"] },
   // 3. Offer letter issued — offer PDF + magic-link to accept & pay token.
   // button_urls = [offer_pdf_url, magic_pay_url]
   offer_letter_issued:    { name: "offer_letter_issued",    params: ["student_name", "course_name", "net_fee", "deadline"] },
@@ -175,6 +176,7 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   // here because the template is already approved and we don't want to
   // submit a divergent variant.
   payment_receipt:        { name: "payment_receipt",        params: ["student_name", "payment_type", "amount", "receipt_no", "download_url"] },
+  payment_receipt_pdf:    { name: "payment_receipt_pdf",    params: ["student_name", "payment_type", "amount", "receipt_no"] },
 
   // ── Course info (data-driven) ─────────────────────────────────────────
   // Body params + both button URLs are resolved per-lead via the
@@ -308,7 +310,14 @@ Deno.serve(async (req) => {
 
     const requestBody = await req.json();
     let { template_key, params, button_urls } = requestBody;
-    const { phone, lead_id, header_video_url, clear_unread_after_send } = requestBody;
+    const {
+      phone,
+      lead_id,
+      header_video_url,
+      header_document_url,
+      header_document_filename,
+      clear_unread_after_send,
+    } = requestBody;
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
 
@@ -539,8 +548,20 @@ Deno.serve(async (req) => {
 
     const components: any[] = [];
 
-    // Header component (video or image)
-    if (header_video_url) {
+    // Header component (media templates). Document headers are used for PDF
+    // receipts; video is retained for existing callers.
+    if (header_document_url) {
+      components.push({
+        type: "header",
+        parameters: [{
+          type: "document",
+          document: {
+            link: header_document_url,
+            ...(header_document_filename ? { filename: header_document_filename } : {}),
+          },
+        }],
+      });
+    } else if (header_video_url) {
       components.push({
         type: "header",
         parameters: [{ type: "video", video: { link: header_video_url } }],
@@ -564,9 +585,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    const sendResult = await sendWhatsAppTemplate(admin, {
+    const sendResult = await sendWhatsAppTemplate(admin as any, {
       route: channelRoute,
-      requireBulk: channelRoute === "bulk",
     }, waPhone, {
       name: templateDef.name,
       language: "en",
@@ -574,7 +594,6 @@ Deno.serve(async (req) => {
     });
     const waResult = sendResult.raw as { error?: { message?: string }; messages?: { id?: string }[] } | null;
     const phoneNumberId = sendResult.businessPhoneNumberId;
-    const waResultText = "";
 
     // Log to whatsapp_messages + lead_activities (even if Meta rejected it)
     const adminClient = admin;
@@ -608,9 +627,11 @@ Deno.serve(async (req) => {
       student_portal_invite: "Welcome {{1}}! Your admission (AN: {{2}}) is confirmed. Tap the button below to access the Student Portal — fees, attendance, notices, and more.",
       application_submitted: "Hi {{1}}, your application ({{2}}) has been received. Please pay the application fee to begin processing. The completed form PDF is attached for your records.",
       app_fee_receipt: "Hi {{1}}, we've received your application fee of ₹{{2}}. Application: {{3}}. Receipt PDF is attached. Our admissions team will reach out for the next steps.",
+      app_fee_receipt_pdf: "Hi {{1}}, we've received your application fee of ₹{{2}}. Application: {{3}}. Receipt PDF is attached. Our admissions team will reach out for the next steps.",
       offer_letter_issued: "Congratulations {{1}}! You have been offered admission to {{2}}. Net fee: ₹{{3}}. Please accept by {{4}}. Tap below to view the offer letter and pay your token fee online.",
       pan_nudge_balance: "Hi {{1}}, your pre-admission number is {{2}}. Pay the balance of ₹{{3}} to confirm enrollment and receive your Admission Number. Tap below to pay online.",
       payment_receipt: "Dear {{1}}, payment of ₹{{2}} received. Receipt no: {{3}}. The receipt PDF is attached for your records.",
+      payment_receipt_pdf: "Dear {{1}}, payment of ₹{{3}} received towards {{2}}. Receipt no: {{4}}. The receipt PDF is attached for your records.",
       doc_rejected: "Hi {{1}}, your uploaded document \"{{2}}\" needs attention. Reason: {{3}}. Please re-upload a corrected version in the apply portal so your admission can proceed.",
       application_rejected: "Dear {{1}}, after review we are unable to proceed with your application {{2}}. Reason: {{3}}. Please contact our admissions office if you'd like to discuss alternatives.",
       application_approved: "Congratulations {{1}}! Your application {{2}} for {{3}} has been approved. Our admissions team will be in touch with your offer letter shortly. Tap below to track your application in the apply portal.",
@@ -644,7 +665,6 @@ Deno.serve(async (req) => {
           http_status: sendResult.status,
           ...(waResult?.error ? { error: waResult.error } : {}),
           ...(waResult && !waResult.error ? { body: waResult } : {}),
-          ...(!waResult && waResultText ? { raw: waResultText.slice(0, 1000) } : {}),
         }
       : null;
 

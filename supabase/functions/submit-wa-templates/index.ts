@@ -65,11 +65,11 @@ Last date: *14th June 2026*.
 Help: 7428499849, 9667691872, 9555192192`;
 }
 
-// Each template has BODY (parameterised) + optionally BUTTONS.
-// Button URLs follow Meta's rules: full URL prefix + {{1}} suffix.
-// For PDF receipts (no fixed prefix possible) we use a static button to
-// the apply portal — applicant authenticates via OTP/magic link to
-// retrieve the actual PDF in-portal.
+// Each template has BODY (parameterised) + optionally HEADER / BUTTONS.
+// Button URLs follow Meta's rules: full URL prefix + {{1}} suffix. Receipt
+// PDFs use DOCUMENT headers, which require a sample media handle at submission.
+const DOCUMENT_HEADER_HANDLE_PLACEHOLDER = "__DOCUMENT_HEADER_HANDLE__";
+
 const TEMPLATES = [
   {
     name: "student_portal_invite",
@@ -121,6 +121,23 @@ const TEMPLATES = [
       {
         type: "BUTTONS",
         buttons: [{ type: "URL", text: "View Receipt", url: "https://uni.nimt.ac.in/apply" }],
+      },
+    ],
+  },
+  {
+    name: "app_fee_receipt_pdf",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "HEADER",
+        format: "DOCUMENT",
+        example: { header_handle: [DOCUMENT_HEADER_HANDLE_PLACEHOLDER] },
+      },
+      {
+        type: "BODY",
+        text: "Hi {{1}}, we've received your application fee of Rs.{{2}} for application {{3}}. Your receipt PDF is attached for your records.",
+        example: { body_text: [["Rahul Sharma", "750", "APP-26-AB12"]] },
       },
     ],
   },
@@ -260,6 +277,23 @@ const TEMPLATES = [
       {
         type: "BUTTONS",
         buttons: [{ type: "URL", text: "Open Apply Portal", url: "https://uni.nimt.ac.in/apply" }],
+      },
+    ],
+  },
+  {
+    name: "payment_receipt_pdf",
+    category: "UTILITY",
+    language: "en",
+    components: [
+      {
+        type: "HEADER",
+        format: "DOCUMENT",
+        example: { header_handle: [DOCUMENT_HEADER_HANDLE_PLACEHOLDER] },
+      },
+      {
+        type: "BODY",
+        text: "Hi {{1}}, we've received your payment of Rs.{{3}} towards {{2}}. Receipt No: {{4}}. Your receipt PDF is attached for your records.",
+        example: { body_text: [["Rahul Sharma", "Token Fee", "30000", "N00123"]] },
       },
     ],
   },
@@ -571,6 +605,10 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const action = body?.action || "submit";
+    const documentHeaderHandle =
+      typeof body?.document_header_handle === "string" && body.document_header_handle.trim()
+        ? body.document_header_handle.trim()
+        : Deno.env.get("WHATSAPP_TEMPLATE_DOCUMENT_HEADER_HANDLE") || "";
 
     // ── status: list current state (name → status) for all templates ──
     if (action === "status") {
@@ -603,21 +641,43 @@ Deno.serve(async (req) => {
     const queueBase = filterNames
       ? TEMPLATES.filter(t => filterNames.includes(t.name))
       : TEMPLATES;
-    const queue = queueBase.map((tpl) => (
-      tpl.name === "bpt_bmrit_cahet_deadline"
-        ? {
-            ...tpl,
-            components: tpl.components.map((component: any) => (
-              component.type === "BODY"
-                ? { ...component, text: cahetDeadlineMessage() }
-                : component
-            )),
-          }
-        : tpl
-    ));
+    const queue = queueBase.map((tpl) => ({
+      ...tpl,
+      components: tpl.components.map((component: any) => {
+        if (tpl.name === "bpt_bmrit_cahet_deadline" && component.type === "BODY") {
+          return { ...component, text: cahetDeadlineMessage() };
+        }
+        if (
+          component.type === "HEADER" &&
+          component.format === "DOCUMENT" &&
+          component.example?.header_handle?.[0] === DOCUMENT_HEADER_HANDLE_PLACEHOLDER
+        ) {
+          return {
+            ...component,
+            example: { header_handle: [documentHeaderHandle || DOCUMENT_HEADER_HANDLE_PLACEHOLDER] },
+          };
+        }
+        return component;
+      }),
+    }));
 
     for (const tpl of queue) {
       try {
+        const missingDocumentHandle = tpl.components.some((component: any) =>
+          component.type === "HEADER" &&
+          component.format === "DOCUMENT" &&
+          component.example?.header_handle?.[0] === DOCUMENT_HEADER_HANDLE_PLACEHOLDER
+        );
+        if (missingDocumentHandle) {
+          results[tpl.name] = {
+            ok: false,
+            status: 400,
+            body: {
+              error: "document_header_handle is required for DOCUMENT header templates. Upload a sample PDF with whatsapp-template-media-upload first.",
+            },
+          };
+          continue;
+        }
         const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },

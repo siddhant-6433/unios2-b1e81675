@@ -54,6 +54,19 @@ function errorMessage(err: unknown) {
   return err instanceof Error ? err.message : "Unexpected error";
 }
 
+function jwtRole(jwt: string): string | null {
+  try {
+    const payload = jwt.split(".")[1];
+    if (!payload) return null;
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const decoded = atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "="));
+    const parsed = JSON.parse(decoded);
+    return typeof parsed?.role === "string" ? parsed.role : null;
+  } catch {
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -75,19 +88,24 @@ Deno.serve(async (req) => {
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
     // ── Auth: verify JWT with Supabase Auth, then verify super_admin ──
+    // Service-role automation is allowed for deployment scripts that need to
+    // upload Meta sample media before submitting templates.
     const authHeader = req.headers.get("Authorization") || req.headers.get("authorization");
     if (!authHeader) return json({ error: "Unauthorized: no auth header" }, 401);
 
     const jwt = authHeader.replace(/^Bearer\s+/i, "");
-    const { data: authData, error: authError } = await adminClient.auth.getUser(jwt);
-    const userId = authData.user?.id;
-    if (authError || !userId) {
-      return json({ error: "Unauthorized: invalid token" }, 401);
-    }
+    const isServiceRole = jwt === serviceRoleKey || jwtRole(jwt) === "service_role";
+    if (!isServiceRole) {
+      const { data: authData, error: authError } = await adminClient.auth.getUser(jwt);
+      const userId = authData.user?.id;
+      if (authError || !userId) {
+        return json({ error: "Unauthorized: invalid token" }, 401);
+      }
 
-    const { data: role } = await adminClient.rpc("get_user_role", { _user_id: userId });
-    if (role !== "super_admin") {
-      return json({ error: "Forbidden: super_admin only" }, 403);
+      const { data: role } = await adminClient.rpc("get_user_role", { _user_id: userId });
+      if (role !== "super_admin") {
+        return json({ error: "Forbidden: super_admin only" }, 403);
+      }
     }
 
     // ── Parse the uploaded file ──
