@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { resolveGatewayRules, type GatewayRule } from "./paymentGatewayResolver";
+import { preferredGateway, resolveGatewayRules, type GatewayRule } from "./paymentGatewayResolver";
 
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => ({ role: null }) }));
@@ -40,17 +40,20 @@ describe("resolveGatewayRules", () => {
 
   it("hides staff-pilot gateways from public users", () => {
     const publicGateways = resolveGatewayRules([
-      rule({ gateway: "easebuzz", scope_type: "global", is_enabled: true, priority: 10 }),
+      rule({ gateway: "razorpay", scope_type: "global", is_enabled: true, priority: 10 }),
       rule({ gateway: "icici", scope_type: "global", is_enabled: true, is_staff_pilot_only: true, priority: 20 }),
+      rule({ gateway: "easebuzz", scope_type: "global", is_enabled: true, priority: 30 }),
     ], {}, "application_fee", false);
 
     const staffGateways = resolveGatewayRules([
-      rule({ gateway: "easebuzz", scope_type: "global", is_enabled: true, priority: 10 }),
+      rule({ gateway: "razorpay", scope_type: "global", is_enabled: true, priority: 10 }),
       rule({ gateway: "icici", scope_type: "global", is_enabled: true, is_staff_pilot_only: true, priority: 20 }),
+      rule({ gateway: "easebuzz", scope_type: "global", is_enabled: true, priority: 30 }),
     ], {}, "application_fee", true);
 
-    expect(publicGateways.map((g) => g.gateway)).toEqual(["easebuzz"]);
-    expect(staffGateways.map((g) => g.gateway)).toEqual(["easebuzz", "icici"]);
+    expect(publicGateways.map((g) => g.gateway)).toEqual(["razorpay", "easebuzz"]);
+    expect(staffGateways.map((g) => g.gateway)).toEqual(["razorpay", "icici", "easebuzz"]);
+    expect(preferredGateway(staffGateways)).toBe("razorpay");
   });
 
   it("matches institution group rules between campus and institution type specificity", () => {

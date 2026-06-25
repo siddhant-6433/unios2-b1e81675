@@ -71,8 +71,8 @@ describe("ICICI payment gateway wiring", () => {
   });
 
   it("seeds scoped defaults with Easebuzz public and ICICI staff-pilot-only", () => {
-    expect(scopedGatewayMigration).toContain("'easebuzz', true, false, 10");
-    expect(scopedGatewayMigration).toContain("'icici', true, true, 30");
+    expect(scopedGatewayMigration).toContain("'easebuzz', true, false, 30");
+    expect(scopedGatewayMigration).toContain("'icici', true, true, 20");
     expect(scopedGatewayMigration).toContain("payment_context IN ('application_fee', 'token_fee', 'student_fee', 'alumni_service')");
     expect(scopedGatewayMigration).toContain("scope_type IN ('global', 'institution_group', 'campus', 'institution', 'institution_type')");
   });

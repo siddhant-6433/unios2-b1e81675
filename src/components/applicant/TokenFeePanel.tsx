@@ -6,7 +6,7 @@ import {
   effectiveApplicationDeadline,
   INITIAL_APPLICATION_DEADLINE,
 } from "@/lib/deadlineRollover";
-import { useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
+import { preferredGateway, useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
 import { buildRazorpayReceipt, openRazorpayCheckout } from "@/lib/razorpayCheckout";
 
 // Fallbacks if the get_applicant_deadlines RPC is unreachable.
@@ -181,10 +181,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
 
   useEffect(() => {
     if (tokenGatewayLoading) return;
-    if (tokenGateways.length === 1) {
-      setSelectedGateway(tokenGateways[0].gateway);
-    } else if (selectedGateway && !tokenGateways.some((g) => g.gateway === selectedGateway)) {
-      setSelectedGateway(null);
+    if (!selectedGateway || !tokenGateways.some((g) => g.gateway === selectedGateway)) {
+      setSelectedGateway(preferredGateway(tokenGateways));
     }
   }, [tokenGatewayLoading, tokenGateways, selectedGateway]);
 
