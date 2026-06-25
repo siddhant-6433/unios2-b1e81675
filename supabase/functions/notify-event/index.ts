@@ -177,22 +177,44 @@ Deno.serve(async (req) => {
     params: string[],
     button_urls?: string[],
     phoneOverride?: string,
-  ) => {
+    options?: {
+      header_document_url?: string;
+      header_document_filename?: string;
+    },
+  ): Promise<boolean> => {
     const phone = phoneOverride ?? lead.phone;
-    if (!phone) return;
+    if (!phone) return false;
     try {
-      await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}` },
         body: JSON.stringify({
           template_key, phone, lead_id: lead.id, params,
           ...(button_urls?.length ? { button_urls } : {}),
+          ...(options?.header_document_url ? { header_document_url: options.header_document_url } : {}),
+          ...(options?.header_document_filename ? { header_document_filename: options.header_document_filename } : {}),
         }),
       });
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => "");
+        console.error(`[notify-event] whatsapp ${template_key}→${phone} failed ${res.status}:`, errBody.slice(0, 1000));
+        return false;
+      }
+      return true;
     } catch (e) {
       console.error(`[notify-event] whatsapp ${template_key}→${phone} failed:`, e);
+      return false;
     }
   };
+
+  const receiptPdfOptions = (receiptUrl: string, receiptNo: string, paymentId: string) => (
+    receiptUrl
+      ? {
+          header_document_url: receiptUrl,
+          header_document_filename: `Receipt-${receiptNo || paymentId}.pdf`,
+        }
+      : undefined
+  );
 
   // Mirror image of resolveEmails — pulls phone numbers for the same
   // counsellor / team-leader / super-admin set. Used when a payment
@@ -394,9 +416,19 @@ Deno.serve(async (req) => {
       const receiptNo  = ensured.receipt_no  || pmt?.receipt_no  || "";
       const haveReceipt = !!ensured.receipt_url || !!pmt?.receipt_url || !!app?.fee_receipt_url;
 
-      await sendWhatsApp("app_fee_receipt",
-        [lead.name || "Student", String(pmt?.amount ?? ""), app?.application_id || ""],
-      );
+      const appFeeWaParams = [lead.name || "Student", String(pmt?.amount ?? ""), app?.application_id || ""];
+      const appFeePdfSent = haveReceipt
+        ? await sendWhatsApp(
+            "app_fee_receipt_pdf",
+            appFeeWaParams,
+            undefined,
+            undefined,
+            receiptPdfOptions(receiptUrl, receiptNo, payment_id),
+          )
+        : false;
+      if (!appFeePdfSent) {
+        await sendWhatsApp("app_fee_receipt", appFeeWaParams);
+      }
 
       // Admission-aware staff list — post-admission drops counsellor/leader.
       const recipients = await resolveEmails(paymentStaffSet);
@@ -630,7 +662,14 @@ Deno.serve(async (req) => {
         receiptUrl,
       ];
       // Applicant — primary recipient.
-      await sendWhatsApp("payment_receipt", waParams);
+      const waPdfParams = waParams.slice(0, 4);
+      const pdfOptions = receiptPdfOptions(receiptUrl, receiptNo, payment_id);
+      const applicantPdfSent = haveReceipt
+        ? await sendWhatsApp("payment_receipt_pdf", waPdfParams, undefined, undefined, pdfOptions)
+        : false;
+      if (!applicantPdfSent) {
+        await sendWhatsApp("payment_receipt", waParams);
+      }
 
       // Mirror to staff phones — post-admission drops counsellor/leader so
       // a student's course-fee receipt doesn't ping the counsellor who
@@ -640,7 +679,12 @@ Deno.serve(async (req) => {
       for (const p of staffPhones) {
         // Skip duplicate sends if a staff member shares the lead's phone.
         if (lead.phone && p.replace(/\D/g, "") === lead.phone.replace(/\D/g, "")) continue;
-        await sendWhatsApp("payment_receipt", waParams, undefined, p);
+        const staffPdfSent = haveReceipt
+          ? await sendWhatsApp("payment_receipt_pdf", waPdfParams, undefined, p, pdfOptions)
+          : false;
+        if (!staffPdfSent) {
+          await sendWhatsApp("payment_receipt", waParams, undefined, p);
+        }
         await new Promise(r => setTimeout(r, 300));
       }
 
