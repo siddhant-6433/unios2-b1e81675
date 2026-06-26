@@ -8,6 +8,7 @@ export type R2UploadInput = {
   key: string;
   body: Uint8Array;
   contentType: string;
+  cacheControl?: string;
 };
 
 type R2Config = {
@@ -43,7 +44,7 @@ export function publicR2Url(key: string): string {
   return `${publicBase}/${key.replace(/^\/+/, "")}`;
 }
 
-export async function uploadToR2({ key, body, contentType }: R2UploadInput): Promise<{ key: string; url: string }> {
+export async function uploadToR2({ key, body, contentType, cacheControl }: R2UploadInput): Promise<{ key: string; url: string }> {
   const cfg = r2Config();
   const normalizedKey = key.replace(/^\/+/, "");
   await cfg.client.send(new PutObjectCommand({
@@ -51,6 +52,7 @@ export async function uploadToR2({ key, body, contentType }: R2UploadInput): Pro
     Key: normalizedKey,
     Body: body,
     ContentType: contentType || "application/octet-stream",
+    ...(cacheControl ? { CacheControl: cacheControl } : {}),
   }));
   return { key: normalizedKey, url: `${cfg.publicBase}/${normalizedKey}` };
 }
