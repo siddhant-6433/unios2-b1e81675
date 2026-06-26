@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { maskPhoneForLog, normalizePlivoVoiceNumber, normalizePlivoVoiceNumbers } from "../../supabase/functions/_shared/phone";
+import {
+  maskPhoneForLog,
+  normalizePlivoVoiceNumber,
+  normalizePlivoVoiceNumberPool,
+  normalizePlivoVoiceNumbers,
+} from "../../supabase/functions/_shared/phone";
 
 describe("manual-call phone normalization", () => {
   it("normalizes Indian counsellor and lead numbers to Plivo voice E.164 digits", () => {
@@ -21,6 +26,20 @@ describe("manual-call phone normalization", () => {
 
   it("parses comma or newline separated Plivo dialer caller IDs without splitting formatted numbers", () => {
     expect(normalizePlivoVoiceNumbers("+91 95551 92192, 9599682428\n+91 95551 92192")).toEqual([
+      "919555192192",
+      "919599682428",
+    ]);
+  });
+
+  it("normalizes the Bengaluru Plivo dialer landline DIDs", () => {
+    expect(normalizePlivoVoiceNumbers("+91 80 6595 2008, +91 80 3538 3731")).toEqual([
+      "918065952008",
+      "918035383731",
+    ]);
+  });
+
+  it("combines singular and plural Plivo dialer secrets into one de-duplicated pool", () => {
+    expect(normalizePlivoVoiceNumberPool(["+91 95551 92192", "+91 95551 92192, +91 95996 82428"])).toEqual([
       "919555192192",
       "919599682428",
     ]);

@@ -54,6 +54,7 @@ describe("LiveCallBar lifecycle guards", () => {
 
     expect(voiceAgentSource).toContain("function firstPlivoCallerIdFromEnv()");
     expect(voiceAgentSource).toContain('Deno.env.get("PLIVO_DIALER_PHONE_NUMBERS")');
+    expect(voiceAgentSource).toContain('Deno.env.get("PLIVO_DIALER_PHONE_NUMBER")');
     expect(bridgeContextHandler).toContain("bridgeCallerId");
     expect(bridgeContextHandler).toContain("ctx.dialerFrom");
     expect(bridgeAnswerHandler).toContain('url.searchParams.get("caller")');

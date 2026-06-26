@@ -68,13 +68,16 @@ function normalizePlivoCallerId(value: string | null | undefined, defaultCountry
 }
 
 function firstPlivoCallerIdFromEnv(): string {
-  const raw = Deno.env.get("PLIVO_DIALER_PHONE_NUMBERS")
-    || Deno.env.get("PLIVO_DIALER_PHONE_NUMBER")
-    || Deno.env.get("PLIVO_PHONE_NUMBER")
-    || "";
-  for (const part of raw.split(/[,;\n]+/)) {
-    const callerId = normalizePlivoCallerId(part);
-    if (callerId) return callerId;
+  const raws = [
+    Deno.env.get("PLIVO_DIALER_PHONE_NUMBERS"),
+    Deno.env.get("PLIVO_DIALER_PHONE_NUMBER"),
+    Deno.env.get("PLIVO_PHONE_NUMBER"),
+  ];
+  for (const raw of raws) {
+    for (const part of String(raw || "").split(/[,;\n]+/)) {
+      const callerId = normalizePlivoCallerId(part);
+      if (callerId) return callerId;
+    }
   }
   return "";
 }

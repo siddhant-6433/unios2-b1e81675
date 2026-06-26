@@ -12,11 +12,16 @@ describe("manual-call lifecycle ordering", () => {
   });
 
   it("supports multiple cloud-dialer caller IDs and chooses them round-robin", () => {
-    expect(manualCallSource).toContain("normalizePlivoVoiceNumbers(dialerNumberSecret)");
+    expect(manualCallSource).toContain("normalizePlivoVoiceNumberPool(dialerNumberSecrets)");
     expect(manualCallSource).toContain('Deno.env.get("PLIVO_DIALER_PHONE_NUMBERS")');
+    expect(manualCallSource).toContain('Deno.env.get("PLIVO_DIALER_PHONE_NUMBER")');
+    expect(manualCallSource).toContain("dialerNumbers.length < 2");
+    expect(manualCallSource).toContain("At least two unique PLIVO_DIALER_PHONE_NUMBER(S)");
     expect(manualCallSource).toContain('.from("ai_call_records")');
     expect(manualCallSource).toContain('.eq("call_type", "manual")');
-    expect(manualCallSource).toContain("dialerNumbers[dialerRotationIndex % dialerNumbers.length]");
+    expect(manualCallSource).toContain('select("from_number")');
+    expect(manualCallSource).toContain("chooseNextDialerNumber(dialerNumbers");
+    expect(manualCallSource).toContain("from_number: dialerFrom");
   });
 
   it("passes the selected dialer caller ID into the bridge context and answer URL", () => {
