@@ -6,6 +6,7 @@ const migration = readFileSync(
   "utf8",
 );
 const applicationsPage = readFileSync("src/pages/Applications.tsx", "utf8");
+const applicationDossier = readFileSync("src/lib/applicationDossier.ts", "utf8");
 const tokenFeePanel = readFileSync("src/components/applicant/TokenFeePanel.tsx", "utf8");
 
 describe("course payments unlock token lifecycle", () => {
@@ -35,7 +36,8 @@ describe("course payments unlock token lifecycle", () => {
   it("uses authoritative token_complete on the applications dashboard", () => {
     expect(applicationsPage).toContain("const leadTokenCompleteMap: Record<string, boolean> = {};");
     expect(applicationsPage).toContain("leadTokenCompleteMap[lid] = !!fs.token_complete;");
-    expect(applicationsPage).toContain("has_token_fee_paid: leadTokenFeePaidSet.has(a.lead_id) || !!leadTokenCompleteMap[a.lead_id]");
+    expect(applicationsPage).toContain("hasTokenFeePaid: leadTokenFeePaidSet.has(leadId) || !!leadTokenCompleteMap[leadId]");
+    expect(applicationDossier).toContain("has_token_fee_paid: facts.hasTokenFeePaid");
   });
 
   it("batches applications dashboard lead-side lifecycle lookups", () => {
