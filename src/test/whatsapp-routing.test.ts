@@ -10,6 +10,7 @@ const templateSend = readFileSync("supabase/functions/whatsapp-send/index.ts", "
 const campaignSend = readFileSync("supabase/functions/whatsapp-campaign-send/index.ts", "utf8");
 const channelAdapter = readFileSync("supabase/functions/_shared/whatsapp-channel.ts", "utf8");
 const conversationStateHelper = readFileSync("supabase/functions/_shared/whatsapp-conversation-state.ts", "utf8");
+const conversationActionHelper = readFileSync("supabase/functions/_shared/whatsapp-conversation-action.ts", "utf8");
 const automationEventsHelper = readFileSync("supabase/functions/_shared/whatsapp-automation-events.ts", "utf8");
 const outboundContextHelper = readFileSync("supabase/functions/_shared/whatsapp-outbound-context.ts", "utf8");
 const inboundEventsHelper = readFileSync("supabase/functions/_shared/whatsapp-inbound-events.ts", "utf8");
@@ -182,7 +183,8 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(aiReply).toContain('from("whatsapp_conversation_state")');
     expect(aiReply).toContain('reason: `conversation_${stateRow.mode}`');
     expect(aiReply).toContain('state: confidence < 0.6 ? "knowledge_gap" : "answered_by_ai"');
-    expect(manualReply).toContain('state: "human_active"');
+    expect(manualReply).toContain("recordManualReplyConversationAction");
+    expect(conversationActionHelper).toContain('state: "human_active"');
     expect(inbox).toContain("conversation_mode, conversation_state");
     expect(inbox).toContain("lastError = null");
     expect(inbox).toContain('from("whatsapp_conversation_state")');
@@ -217,7 +219,8 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(automationEventsHelper).toContain("whatsapp_automation_events");
     expect(orchestrator).toContain('eventType: "inbound_received"');
     expect(orchestrator).toContain('eventType: "handoff_created"');
-    expect(orchestrator).toContain('template_key: "dnc_ack"');
+    expect(orchestrator).toContain('kind: "dncAcknowledgement"');
+    expect(orchestrator).toContain('templateKey: "dnc_ack"');
     expect(orchestrator).toContain('title: `DNC: ${leadForNotification.name || phone} opted out`');
     expect(orchestrator).toContain("/functions/v1/whatsapp-ai-reply");
     expect(orchestrator).toContain("isLikelyFeedbackReply");
@@ -241,7 +244,7 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(aiReply).toContain('eventType: "ai_reply_sent"');
     expect(aiReply).toContain('eventType: "send_failed"');
     expect(aiReply).toContain('eventType: "human_mode_skip"');
-    expect(manualReply).toContain('decision: "manual_reply_sent"');
+    expect(conversationActionHelper).toContain('decision: "manual_reply_sent"');
     expect(routeHealth).toContain("token_present");
     expect(routeHealth).toContain("last_failure");
     expect(routeHealth).toContain("whatsapp_channels");
@@ -310,13 +313,16 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(outboundContextMigration).toContain("response_policy text not null default 'engine'");
     expect(outboundContextHelper).toContain("recordWhatsAppOutboundContext");
     expect(outboundContextHelper).toContain("expectedReplyTypeForTemplate");
-    expect(templateSend).toContain("recordWhatsAppOutboundContext(adminClient");
+    expect(templateSend).toContain("recordOutboundConversationAction(adminClient");
+    expect(templateSend).toContain('kind: "templateSend"');
     expect(templateSend).toContain('outboundKind: "template"');
-    expect(campaignSend).toContain("recordWhatsAppOutboundContext(adminClient");
+    expect(campaignSend).toContain("recordOutboundConversationAction(adminClient");
+    expect(campaignSend).toContain('kind: "campaignSend"');
     expect(campaignSend).toContain('outboundKind: "bulk_campaign"');
     expect(campaignSend).toContain("campaignRecipientId: recipient.id");
-    expect(manualReply).toContain('outboundKind: "manual_reply"');
-    expect(manualReply).toContain('responsePolicy: "human"');
+    expect(manualReply).toContain("recordManualReplyConversationAction");
+    expect(conversationActionHelper).toContain('outboundKind: "manual_reply"');
+    expect(conversationActionHelper).toContain('responsePolicy: "human"');
   });
 
   it("uses outbound context when routing inbound replies", () => {

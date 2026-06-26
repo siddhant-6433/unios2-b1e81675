@@ -24,6 +24,7 @@ import {
   cahetDeadlineDescription,
   cahetDeadlineMessage,
 } from "@/lib/deadlineRollover";
+import { leadTransitionStagePatch, resolveLeadTransitionCommand, type WorkflowLeadTransitionCommandName } from "@/lib/leadTransitions";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 
 const CONVERSATION_PAGE_SIZE = 120;
@@ -1680,10 +1681,24 @@ const WhatsAppInbox = () => {
   };
 
   const markLeadStage = async (leadId: string, stage: string) => {
-    await supabase.from("leads").update({ stage: stage as any }).eq("id", leadId);
-    setConversations(prev => prev.map(c => c.lead_id === leadId ? { ...c, lead_stage: stage } : c));
+    const commandByStage: Record<string, WorkflowLeadTransitionCommandName> = {
+      not_interested: "classifyNotInterested",
+      ineligible: "classifyIneligible",
+      new_lead: "classifyLead",
+      dnc: "markDnc",
+    };
+    const command = commandByStage[stage];
+    if (!command) return;
 
-    const message = STAGE_WA_MESSAGES[stage];
+    const currentStage = selectedConv?.lead_id === leadId ? selectedConv.lead_stage || "new_lead" : "new_lead";
+    const transition = resolveLeadTransitionCommand({ currentStage, command });
+    const patch = leadTransitionStagePatch(transition);
+    if (!patch) return;
+
+    await supabase.from("leads").update(patch as any).eq("id", leadId);
+    setConversations(prev => prev.map(c => c.lead_id === leadId ? { ...c, lead_stage: transition.newStage } : c));
+
+    const message = STAGE_WA_MESSAGES[transition.newStage || stage];
     if (!message || !selectedPhone) {
       toast({ title: "Stage updated" });
       return;
@@ -2254,7 +2269,11 @@ const WhatsAppInbox = () => {
                           // Mark DNC first; then send the farewell with bypass_dnc
                           // so the edge function's own DNC guard doesn't swallow it.
                           const dncLeadId = selectedConv.lead_id;
-                          await supabase.from("leads").update({ stage: "dnc" }).eq("id", dncLeadId);
+                          const transition = resolveLeadTransitionCommand({
+                            currentStage: selectedConv.lead_stage || "new_lead",
+                            command: "markDnc",
+                          });
+                          await supabase.from("leads").update(leadTransitionStagePatch(transition) as any).eq("id", dncLeadId);
                           const { error: replyErr } = await invokeEdge("whatsapp-reply", {
                             body: {
                               phone: selectedPhone,

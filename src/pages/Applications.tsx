@@ -7,13 +7,14 @@ import { MiniLifecycleStepper } from "@/components/admissions/MiniLifecycleStepp
 import { RecordPaymentDialog } from "@/components/admissions/RecordPaymentDialog";
 import { OfflinePaymentDialog } from "@/components/finance/OfflinePaymentDialog";
 import { NudgePaymentDialog } from "@/components/admissions/NudgePaymentDialog";
+import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
   FileText, Download, Eye, Loader2, Search, Filter, ExternalLink,
   CheckCircle, Clock, CreditCard, Upload, AlertCircle, ChevronDown, ChevronUp, ChevronRight, X,
-  Sparkles, Send, Gift, Wallet, UserCheck, GraduationCap, Receipt, RefreshCw, ClipboardCheck, Trash2, MessageCircle, Calendar,
+  Sparkles, Send, Gift, Wallet, UserCheck, GraduationCap, Receipt, RefreshCw, ClipboardCheck, Trash2, MessageCircle,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -32,6 +33,12 @@ import {
   deleteApplication as deleteApplicationRequest,
   PAID_APPLICATION_DELETE_CONFIRMATION,
 } from "@/lib/deleteApplication";
+import {
+  applyApplicationDossierToRow,
+  buildApplicationDossier,
+  type ApplicationDossier,
+} from "@/lib/applicationDossier";
+import type { DatePreset } from "@/lib/datePresets";
 import { exportRowsXlsx, formatExportDateTime } from "@/lib/xlsxExport";
 import { useToast } from "@/hooks/use-toast";
 
@@ -76,6 +83,7 @@ interface AppRow {
   an_due?: number | null;
   /** Remaining balance for the full first-year fee — needed by the nudge dialog. */
   year1_due?: number | null;
+  dossier?: ApplicationDossier;
 }
 
 // Mutually-exclusive funnel stages. Each app is bucketed by the FURTHEST
@@ -95,6 +103,7 @@ const FUNNEL_ORDER: FunnelStage[] = [
 
 const funnelStageOf = applicationFunnelStageOf;
 const RELATED_QUERY_BATCH_SIZE = 50;
+const APPLICATION_LIST_LIMIT = 500;
 const OFFER_OR_PAYMENT_STAGES = new Set(["offer_sent", "token_paid", "pre_admitted"]);
 
 const FUNNEL_META: Record<FunnelStage, {
@@ -164,6 +173,7 @@ export default function Applications() {
   const [paymentFilter, setPaymentFilter] = useState<"all" | "paid" | "pending">("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "draft" | "submitted">("all");
   const [stageFilter, setStageFilter] = useState<string | null>(null);
+  const [datePreset, setDatePreset] = useState<DatePreset>("all");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [sortMode, setSortMode] = useState<"date" | "nudge">("date");
@@ -285,7 +295,8 @@ export default function Applications() {
       } else {
         const { data } = await (supabase as any).from("applications")
           .select("id, application_id, lead_id, full_name, phone, email, status, payment_status, payment_ref, fee_amount, program_category, course_selections, completed_sections, submitted_at, created_at, flags, dob, gender, category, father, mother, address, academic_details, form_pdf_url, fee_receipt_url")
-          .order("created_at", { ascending: false });
+          .order("created_at", { ascending: false })
+          .limit(APPLICATION_LIST_LIMIT);
         rows = data || [];
       }
 
@@ -416,53 +427,83 @@ export default function Applications() {
           !!leadPanMap[lid]
         )
       );
-      if (feeStatusLeadIds.length > 0) {
-        await Promise.all(feeStatusLeadIds.map(async (lid: string) => {
-          const { data: fs } = await (supabase as any).rpc("lead_fee_status", { _lead_id: lid });
-          if (!fs) return;
-          const tokenReq = Number(fs.token_required || 0);
-          const anThr = Number(fs.an_threshold || 0);
-          const postSchY1 = Number(fs.post_scholarship_year_1 || fs.first_year_fee || 0);
-          // `paid_toward_course` excludes application_fee + registration_fee
-          // (the one-time admin gate at NIMT — same concept, two names) and
-          // is the right field for both the AN-gate balance and the year-1
-          // remaining. `total_paid` would double-count the app/reg fee and
-          // wrongly shrink the displayed dues.
-          const paidTowardCourse = Number(
-            fs.paid_toward_course ?? Math.max(
-              0,
-              Number(fs.total_paid || 0) -
-                Number(fs.application_paid || 0) -
-                Number(fs.registration_paid || 0)
-            )
-          );
-          const hasPan = !!leadPanMap[lid];
-          leadTokenCompleteMap[lid] = !!fs.token_complete;
-          panDueMap[lid] = hasPan ? null : Math.max(0, tokenReq - paidTowardCourse);
-          anDueMap[lid] = Math.max(0, anThr - paidTowardCourse);
-          year1DueMap[lid] = Math.max(0, postSchY1 - paidTowardCourse);
-        }));
-      }
 
-      const mapped = rows.map((a: any) => ({
-        ...a,
-        counsellor_name: counsellorMap[a.lead_id] || "",
-        lead_stage: leadStageMap[a.lead_id] || "",
-        lead_counsellor_id: leadCounsellorIdMap[a.lead_id] || "",
-        // Lifecycle inputs the MiniLifecycleStepper consumes
-        lead_pre_admission_no: leadPanMap[a.lead_id] || null,
-        lead_admission_no: leadAnMap[a.lead_id] || null,
-        has_offer: !!leadOfferMap[a.lead_id],
-        app_fee_paid: appFeePaidMap[a.lead_id] || 0,
-        has_token_fee_paid: leadTokenFeePaidSet.has(a.lead_id) || !!leadTokenCompleteMap[a.lead_id],
-        doc_counts: appDocCountsMap[a.application_id] || { total: 0, verified: 0, rejected: 0, pending: 0 },
-        pan_due: panDueMap[a.lead_id] ?? null,
-        an_due: anDueMap[a.lead_id] ?? null,
-        year1_due: year1DueMap[a.lead_id] ?? null,
-      }));
+      const mapRows = () => rows.map((a: any) => {
+        const leadId = a.lead_id || "";
+        const dossier = buildApplicationDossier(a, {
+          lead: {
+            hasLead: !!leadId && (
+              !!leadStageMap[leadId] ||
+              leadId in leadCounsellorIdMap ||
+              leadId in leadPanMap ||
+              leadId in leadAnMap
+            ),
+            leadStage: leadStageMap[leadId] || "",
+            counsellorId: leadCounsellorIdMap[leadId] || "",
+            counsellorName: counsellorMap[leadId] || "",
+            preAdmissionNo: leadPanMap[leadId] || null,
+            admissionNo: leadAnMap[leadId] || null,
+          },
+          hasOffer: !!leadOfferMap[leadId],
+          appFeePaid: appFeePaidMap[leadId] || 0,
+          hasTokenFeePaid: leadTokenFeePaidSet.has(leadId) || !!leadTokenCompleteMap[leadId],
+          docs: appDocCountsMap[a.application_id] || { total: 0, verified: 0, rejected: 0, pending: 0 },
+          panDue: panDueMap[leadId] ?? null,
+          anDue: anDueMap[leadId] ?? null,
+          year1Due: year1DueMap[leadId] ?? null,
+        });
+        return applyApplicationDossierToRow(a, dossier);
+      });
 
-      setApps(mapped);
+      setApps(mapRows());
       setLoading(false);
+
+      if (feeStatusLeadIds.length === 0) return;
+
+      const enrichFeeStatus = async () => {
+        const workerCount = Math.min(8, feeStatusLeadIds.length);
+        let nextIndex = 0;
+
+        const worker = async () => {
+          while (nextIndex < feeStatusLeadIds.length) {
+            const lid = feeStatusLeadIds[nextIndex];
+            nextIndex += 1;
+
+            try {
+              const { data: fs } = await (supabase as any).rpc("lead_fee_status", { _lead_id: lid });
+              if (!fs) continue;
+              const tokenReq = Number(fs.token_required || 0);
+              const anThr = Number(fs.an_threshold || 0);
+              const postSchY1 = Number(fs.post_scholarship_year_1 || fs.first_year_fee || 0);
+              // `paid_toward_course` excludes application_fee + registration_fee
+              // (the one-time admin gate at NIMT — same concept, two names) and
+              // is the right field for both the AN-gate balance and the year-1
+              // remaining. `total_paid` would double-count the app/reg fee and
+              // wrongly shrink the displayed dues.
+              const paidTowardCourse = Number(
+                fs.paid_toward_course ?? Math.max(
+                  0,
+                  Number(fs.total_paid || 0) -
+                    Number(fs.application_paid || 0) -
+                    Number(fs.registration_paid || 0)
+                )
+              );
+              const hasPan = !!leadPanMap[lid];
+              leadTokenCompleteMap[lid] = !!fs.token_complete;
+              panDueMap[lid] = hasPan ? null : Math.max(0, tokenReq - paidTowardCourse);
+              anDueMap[lid] = Math.max(0, anThr - paidTowardCourse);
+              year1DueMap[lid] = Math.max(0, postSchY1 - paidTowardCourse);
+            } catch (error) {
+              console.warn("[Applications] lead fee status enrichment skipped", { leadId: lid, error });
+            }
+          }
+        };
+
+        await Promise.all(Array.from({ length: workerCount }, () => worker()));
+        setApps(mapRows());
+      };
+
+      void enrichFeeStatus();
     };
     fetchApps();
   }, [profile?.id, isCounsellor]);
@@ -810,26 +851,17 @@ export default function Applications() {
           <option value="draft">Draft</option>
           <option value="submitted">Submitted</option>
         </select>
-        <div className="flex items-center gap-1.5 rounded-xl border border-input bg-background px-3 py-2">
-          <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
-          <input
-            type="date"
-            value={fromDate}
-            onChange={(e) => setFromDate(e.target.value)}
-            className="w-[128px] bg-transparent text-xs text-foreground outline-none"
-            title="Created from"
-          />
-          <span className="text-xs text-muted-foreground">to</span>
-          <input
-            type="date"
-            value={toDate}
-            onChange={(e) => setToDate(e.target.value)}
-            className="w-[128px] bg-transparent text-xs text-foreground outline-none"
-            title="Created to"
-          />
-        </div>
+        <DateRangeFilter
+          preset={datePreset}
+          fromDate={fromDate}
+          toDate={toDate}
+          onPresetChange={setDatePreset}
+          onFromDateChange={setFromDate}
+          onToDateChange={setToDate}
+          ariaPrefix="Application created"
+        />
         {(paymentFilter !== "all" || statusFilter !== "all" || stageFilter || fromDate || toDate) && (
-          <Button variant="ghost" size="sm" onClick={() => { setPaymentFilter("all"); setStatusFilter("all"); setStageFilter(null); setFromDate(""); setToDate(""); }}>
+          <Button variant="ghost" size="sm" onClick={() => { setPaymentFilter("all"); setStatusFilter("all"); setStageFilter(null); setDatePreset("all"); setFromDate(""); setToDate(""); }}>
             <X className="h-3.5 w-3.5 mr-1" />Clear
           </Button>
         )}
@@ -948,18 +980,14 @@ export default function Applications() {
                     <td className="px-3 py-2.5">
                       <MiniLifecycleStepper
                         showLabels
-                        app={{ status: app.status, payment_status: app.payment_status }}
-                        lead={app.lead_id ? {
-                          id: app.lead_id,
-                          pre_admission_no: app.lead_pre_admission_no,
-                          admission_no: app.lead_admission_no,
-                        } : null}
-                        hasLead={!!app.lead_id}
-                        appFeePaid={app.app_fee_paid}
-                        hasOffer={app.has_offer}
-                        docs={app.doc_counts}
-                        panDue={app.pan_due}
-                        anDue={app.an_due}
+                        app={app.dossier?.lifecycle.app || { status: app.status, payment_status: app.payment_status }}
+                        lead={app.dossier?.lifecycle.lead || null}
+                        hasLead={app.dossier?.lifecycle.hasLead ?? !!app.lead_id}
+                        appFeePaid={app.dossier?.lifecycle.appFeePaid ?? app.app_fee_paid}
+                        hasOffer={app.dossier?.lifecycle.hasOffer ?? app.has_offer}
+                        docs={app.dossier?.lifecycle.docs ?? app.doc_counts}
+                        panDue={app.dossier?.lifecycle.panDue ?? app.pan_due}
+                        anDue={app.dossier?.lifecycle.anDue ?? app.an_due}
                       />
                     </td>
                     {!isCounsellor && <td className="px-3 py-2.5 text-xs text-muted-foreground">{app.counsellor_name || "—"}</td>}

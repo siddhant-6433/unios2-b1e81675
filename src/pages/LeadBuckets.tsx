@@ -3,14 +3,17 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCampus } from "@/contexts/CampusContext";
 import { useToast } from "@/hooks/use-toast";
-import { School, GraduationCap, Search, Loader2, UserPlus, CheckCircle, AlertTriangle, ListPlus, Calendar, ArrowUpDown, Bot, PhoneOff } from "lucide-react";
+import { School, GraduationCap, Search, Loader2, UserPlus, CheckCircle, AlertTriangle, ListPlus, ArrowUpDown, Bot, PhoneOff } from "lucide-react";
 import { jdCategoryHint } from "@/lib/jdCategoryHint";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
+import { UpdeledPendingBadge } from "@/components/leads/UpdeledPendingBadge";
 import { isBptOrBmritCourse } from "@/components/leads/CahetRegisterDialog";
+import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import type { DatePreset } from "@/lib/datePresets";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -204,6 +207,7 @@ export default function LeadBuckets() {
   const [sourceFilterMode, setSourceFilterMode] = useState<FilterMode>("include");
   const [applicationFilter, setApplicationFilter] = useState<ApplicationFilter>("all");
   const [aiCallFilter, setAiCallFilter] = useState<AiCallFilter>("all");
+  const [datePreset, setDatePreset] = useState<DatePreset>("all");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [sortOrder, setSortOrder] = useState<BucketSortOrder>("newest");
@@ -997,26 +1001,18 @@ export default function LeadBuckets() {
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-1.5 rounded-xl border border-input bg-card px-3 py-2">
-          <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
-          <input
-            type="date"
-            value={fromDate}
-            onChange={(e) => setFromDate(e.target.value)}
-            className="w-[128px] bg-transparent text-xs text-foreground outline-none"
-            title="Created from"
-          />
-          <span className="text-xs text-muted-foreground">to</span>
-          <input
-            type="date"
-            value={toDate}
-            onChange={(e) => setToDate(e.target.value)}
-            className="w-[128px] bg-transparent text-xs text-foreground outline-none"
-            title="Created to"
-          />
-        </div>
+        <DateRangeFilter
+          preset={datePreset}
+          fromDate={fromDate}
+          toDate={toDate}
+          onPresetChange={setDatePreset}
+          onFromDateChange={setFromDate}
+          onToDateChange={setToDate}
+          className="flex flex-wrap items-center gap-2 rounded-xl border border-input bg-card px-3 py-2"
+          ariaPrefix="Lead created"
+        />
         {(fromDate || toDate) && (
-          <Button variant="ghost" size="sm" className="h-9 px-2 text-xs" onClick={() => { setFromDate(""); setToDate(""); }}>
+          <Button variant="ghost" size="sm" className="h-9 px-2 text-xs" onClick={() => { setDatePreset("all"); setFromDate(""); setToDate(""); }}>
             Clear dates
           </Button>
         )}
@@ -1097,7 +1093,7 @@ export default function LeadBuckets() {
                     <UrgencyBadge createdAt={lead.created_at} />
                   </td>
                   <td className="px-4 py-3">
-                    <p className="font-medium text-foreground flex items-center gap-1.5 flex-wrap">
+                    <div className="font-medium text-foreground flex items-center gap-1.5 flex-wrap">
                       {lead.name}
                       <Badge
                         variant="outline"
@@ -1114,7 +1110,13 @@ export default function LeadBuckets() {
                         courseName={lead.course_name}
                         registeredOverride={cahetStatusMap.has(lead.id) ? (cahetStatusMap.get(lead.id) ?? null) : undefined}
                       />
-                    </p>
+                      <UpdeledPendingBadge
+                        leadId={lead.id}
+                        leadName={lead.name}
+                        phone={lead.phone}
+                        courseName={lead.course_name}
+                      />
+                    </div>
                     {!lead.ai_called && lead.ai_not_called_reason && (
                       <p className="mt-0.5 flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
                         <PhoneOff className="h-3 w-3" />

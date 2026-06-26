@@ -4,6 +4,7 @@ import { ImpersonationBanner } from "@/components/layout/ImpersonationBanner";
 import { GlobalActionBar } from "@/components/layout/GlobalActionBar";
 import { LiveCallBar } from "@/components/layout/LiveCallBar";
 import { CahetSprintTicker } from "@/components/layout/CahetSprintTicker";
+import { UpdeledSprintTicker } from "@/components/layout/UpdeledSprintTicker";
 import { ApplicantDeadlineTicker } from "@/components/layout/ApplicantDeadlineTicker";
 import { NotificationPanel } from "@/components/layout/NotificationPanel";
 import { WhatsAppPanel } from "@/components/layout/WhatsAppPanel";
@@ -29,6 +30,7 @@ const pageTitles: Record<string, string> = {
   "/hr-directory": "Employee Directory",
   "/cloud-dialer": "Cloud Dialer",
   "/cahet-sprint": "CAHET Sprint",
+  "/updeled-sprint": "UPDELED Sprint",
   "/whatsapp-inbox": "WhatsApp Inbox",
   "/pending-followups": "Pending Follow-ups",
   "/fresh-leads": "Fresh Leads",
@@ -109,6 +111,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               </div>
             </header>
             {deferredShellReady && <CahetSprintTicker />}
+            {deferredShellReady && <UpdeledSprintTicker />}
             {deferredShellReady && <ApplicantDeadlineTicker />}
             {deferredShellReady && <GlobalActionBar />}
             {deferredShellReady && <LiveCallBar />}

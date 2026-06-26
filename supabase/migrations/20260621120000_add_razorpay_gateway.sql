@@ -21,7 +21,7 @@ ON CONFLICT (gateway) DO UPDATE SET
 INSERT INTO public.payment_gateway_rules (
   payment_context, scope_type, scope_id, gateway, is_enabled, is_staff_pilot_only, priority
 )
-SELECT ctx, 'global', NULL, 'razorpay', true, false, 40
+SELECT ctx, 'global', NULL, 'razorpay', true, false, 10
 FROM unnest(ARRAY['application_fee', 'token_fee', 'student_fee']) AS ctx
 WHERE NOT EXISTS (
   SELECT 1 FROM public.payment_gateway_rules r

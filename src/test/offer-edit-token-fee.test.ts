@@ -17,7 +17,7 @@ describe("offer edit request token fee approvals", () => {
 
   it("captures token fee as a structured edit request instead of only reason text", () => {
     expect(dialog).toContain("value={editForm.token_fee_amount}");
-    expect(dialog).toContain("proposedChanges.token_fee_amount = tokenFeeAmount");
+    expect(dialog).toContain("proposedChanges.token_fee_amount = nextTokenFeeAmount");
     expect(dialog).toContain("Token Fee Payable");
     expect(dialog).toContain("parseTokenFeeFromEditReason");
   });

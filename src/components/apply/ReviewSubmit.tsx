@@ -276,6 +276,8 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
                     ex.status === 'registered' ? `Registered${ex.registration_no ? `: ${ex.registration_no}` : ''}${ex.registered_name ? ` (${ex.registered_name})` : ''}`
                     : ex.exam_name?.toLowerCase?.().includes('cahet') && ex.registration_no ? `Registration No: ${ex.registration_no}${ex.registered_name ? ` (${ex.registered_name})` : ''}`
                     : ex.exam_name?.toLowerCase?.().includes('cahet') ? 'Not registered yet'
+                    : /up\s*d\.?\s*el\.?\s*ed|updeled|d\.?\s*el\.?\s*ed counselling|elementary education counselling/i.test(ex.exam_name || '') && ex.registration_no ? `Registration No: ${ex.registration_no}${ex.registered_name ? ` (${ex.registered_name})` : ''}`
+                    : /up\s*d\.?\s*el\.?\s*ed|updeled|d\.?\s*el\.?\s*ed counselling|elementary education counselling/i.test(ex.exam_name || '') ? 'Not registered yet'
                     :
                     ex.status === 'declared' ? `Score: ${ex.score || 'N/A'}`
                     : ex.status === 'not_declared' ? `Result pending${ex.expected_date ? ` (Expected: ${ex.expected_date})` : ''}`
