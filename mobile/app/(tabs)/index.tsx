@@ -1,17 +1,25 @@
-import { useEffect, useState } from 'react';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, SafeAreaView,
-  TouchableOpacity, TextInput, FlatList, Image,
+  TouchableOpacity,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
-import { colors, spacing, radius } from '../../constants/Colors';
+import { colors, spacing, radius, typography } from '../../constants/Colors';
 import { router } from 'expo-router';
 import {
-  Fingerprint, IndianRupee, BookOpen, ChevronRight, CheckCircle,
+  Fingerprint, IndianRupee, ChevronRight, CheckCircle,
   CalendarOff, Clock, Bell, Search, Megaphone, Gift, AlertCircle,
-  ClipboardCheck, Users, FileText, Briefcase,
+  ClipboardCheck, Users, FileText, Briefcase, Cake, BadgeCheck,
 } from 'lucide-react-native';
+import {
+  ActionTile,
+  MetricCard,
+  ScreenHeader,
+  SectionTitle,
+  StatusCard,
+} from '../../components/ui/DashboardPrimitives';
 
 export default function HomeScreen() {
   const { profile, role, user } = useAuth();
@@ -27,23 +35,20 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.greeting}>Hello, {displayName}</Text>
-            <Text style={styles.dateText}>
-              {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
-            </Text>
-          </View>
-          <TouchableOpacity style={styles.avatar}>
+        <ScreenHeader
+          title={isStaff ? `Hello, ${displayName}` : `Hello, ${displayName}`}
+          subtitle={new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
+          avatar={(
+            <TouchableOpacity style={styles.avatar} onPress={() => router.push('/(tabs)/profile' as any)}>
             <Text style={styles.avatarText}>
               {(profile?.display_name || 'U').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
             </Text>
-          </TouchableOpacity>
-        </View>
+            </TouchableOpacity>
+          )}
+        />
 
         {/* Staff views */}
-        {isStaff && <StaffHome isAdmin={isAdmin} userId={user?.id || ''} />}
+        {isStaff && <StaffHome isAdmin={isAdmin} userId={user?.id || ''} role={role || ''} />}
 
         {/* Student view */}
         {isStudent && <StudentHome userId={user?.id || ''} />}
@@ -56,18 +61,15 @@ export default function HomeScreen() {
 }
 
 // ── Staff/Admin Home ──
-function StaffHome({ isAdmin, userId }: { isAdmin: boolean; userId: string }) {
+function StaffHome({ isAdmin, userId, role }: { isAdmin: boolean; userId: string; role: string }) {
   const [punchStatus, setPunchStatus] = useState<'in' | 'out' | 'none'>('none');
   const [punchTime, setPunchTime] = useState<string | null>(null);
   const [pendingApprovals, setPendingApprovals] = useState(0);
   const [newLeads, setNewLeads] = useState(0);
   const [totalStudents, setTotalStudents] = useState(0);
   const [pendingFollowups, setPendingFollowups] = useState(0);
-  const [todayVisits, setTodayVisits] = useState(0);
 
-  useEffect(() => { fetchStatus(); }, []);
-
-  const fetchStatus = async () => {
+  const fetchStatus = useCallback(async () => {
     const today = new Date().toISOString().slice(0, 10);
 
     // Punch status
@@ -98,90 +100,75 @@ function StaffHome({ isAdmin, userId }: { isAdmin: boolean; userId: string }) {
       setTotalStudents(studentsRes.count || 0);
       setPendingFollowups(followupsRes.count || 0);
     }
-  };
+  }, [isAdmin, userId]);
+
+  useEffect(() => { fetchStatus(); }, [fetchStatus]);
 
   return (
     <View style={styles.section}>
-      {/* Admin dashboard stats */}
-      {isAdmin && (
-        <View style={styles.statRow}>
-          <StatCard label="New Leads" value={String(newLeads)} color="#7c3aed" icon={Users} />
-          <StatCard label="Students" value={String(totalStudents)} color="#059669" icon={Users} />
-        </View>
-      )}
-
-      {/* Pending items for admin */}
-      {isAdmin && (pendingApprovals > 0 || pendingFollowups > 0) && (
-        <View style={{ gap: 8 }}>
-          {pendingFollowups > 0 && (
-            <View style={styles.alertCard}>
-              <View style={[styles.alertIcon, { backgroundColor: '#fef3c7' }]}>
-                <Clock size={20} color="#d97706" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.alertTitle, { color: '#92400e' }]}>{pendingFollowups} Follow-ups Due</Text>
-                <Text style={styles.alertSub}>Scheduled for today or overdue</Text>
-              </View>
-            </View>
-          )}
-          {newLeads > 0 && (
-            <View style={styles.alertCard}>
-              <View style={[styles.alertIcon, { backgroundColor: '#f5f3ff' }]}>
-                <Users size={20} color="#7c3aed" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.alertTitle, { color: '#5b21b6' }]}>{newLeads} New Leads</Text>
-                <Text style={styles.alertSub}>Uncontacted leads awaiting action</Text>
-              </View>
-            </View>
-          )}
-          {pendingApprovals > 0 && (
-            <TouchableOpacity style={styles.alertCard} onPress={() => router.push('/(tabs)/inbox')} activeOpacity={0.7}>
-              <View style={styles.alertIcon}>
-                <AlertCircle size={20} color="#dc2626" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.alertTitle}>{pendingApprovals} HR Approvals</Text>
-                <Text style={styles.alertSub}>Leave, face registrations</Text>
-              </View>
-              <ChevronRight size={18} color={colors.textMuted} />
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
-
-      {/* Punch status card */}
-      <TouchableOpacity
-        style={[styles.punchCard, punchStatus === 'in' && styles.punchCardActive]}
+      <StatusCard
+        icon={punchStatus === 'in' ? CheckCircle : Fingerprint}
+        tone={punchStatus === 'in' ? 'green' : punchStatus === 'out' ? 'neutral' : 'blue'}
+        title={punchStatus === 'none' ? 'Mark attendance' : punchStatus === 'in' ? 'You are punched in' : 'Day complete'}
+        subtitle={
+          punchStatus === 'none'
+            ? 'Start your day with a secure campus punch.'
+            : punchTime
+              ? `Last update ${new Date(punchTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}`
+              : 'Attendance is up to date.'
+        }
+        value={punchStatus === 'in' ? 'Active' : punchStatus === 'out' ? 'Done' : 'Ready'}
         onPress={() => router.push('/(tabs)/punch' as any)}
-        activeOpacity={0.7}
-      >
-        <View style={[styles.punchIcon, punchStatus === 'in' && { backgroundColor: '#dcfce7' }]}>
-          {punchStatus === 'in' ? <CheckCircle size={24} color={colors.success} /> : <Fingerprint size={24} color={colors.primary} />}
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.punchTitle}>
-            {punchStatus === 'none' ? 'Mark Attendance' : punchStatus === 'in' ? 'Punched In' : 'Day Complete'}
-          </Text>
-          <Text style={styles.punchSub}>
-            {punchStatus === 'none' ? 'Tap to punch in' :
-             punchTime ? new Date(punchTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : ''}
-          </Text>
-        </View>
-        <ChevronRight size={20} color={colors.textMuted} />
-      </TouchableOpacity>
+      />
 
-      {/* Quick Actions — mixed platform + HR */}
-      <Text style={styles.sectionTitle}>Quick Actions</Text>
+      {isAdmin && (
+        <View style={styles.metricRow}>
+          <MetricCard icon={Users} label="New leads" value={String(newLeads)} tone="purple" />
+          <MetricCard icon={Users} label="Students" value={String(totalStudents)} tone="green" />
+          <MetricCard icon={Clock} label="Follow-ups" value={String(pendingFollowups)} tone="yellow" />
+        </View>
+      )}
+
+      {(pendingApprovals > 0 || pendingFollowups > 0 || newLeads > 0) && (
+        <TouchableOpacity style={styles.priorityCard} onPress={() => router.push('/(tabs)/inbox' as any)} activeOpacity={0.75}>
+          <View style={styles.priorityIcon}>
+            <AlertCircle size={20} color="#BE123C" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.priorityTitle}>Needs attention</Text>
+            <Text style={styles.prioritySub}>
+              {pendingApprovals} approvals · {pendingFollowups} follow-ups · {newLeads} new leads
+            </Text>
+          </View>
+          <ChevronRight size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+      )}
+
+      <SectionTitle title="Quick actions" />
       <View style={styles.actionGrid}>
-        <ActionCard icon={CalendarOff} label="Apply Leave" color="#7c3aed" bg="#f5f3ff" onPress={() => router.push('/(tabs)/hr')} />
-        <ActionCard icon={ClipboardCheck} label="Attendance" color="#059669" bg="#ecfdf5" onPress={() => router.push('/(tabs)/hr')} />
-        <ActionCard icon={FileText} label="Pay Slips" color="#0284c7" bg="#f0f9ff" onPress={() => router.push('/(tabs)/hr')} />
-        <ActionCard icon={Bell} label="Notices" color="#d97706" bg="#fffbeb" onPress={() => {}} />
+        <ActionTile icon={CalendarOff} label="Apply leave" subtitle="Request time off" tone="purple" onPress={() => router.push('/(tabs)/hr' as any)} />
+        <ActionTile icon={ClipboardCheck} label="Attendance" subtitle="Logs and shifts" tone="green" onPress={() => router.push('/(tabs)/hr' as any)} />
+        <ActionTile icon={FileText} label="Pay slips" subtitle="Salary documents" tone="blue" onPress={() => router.push('/(tabs)/hr' as any)} />
+        <ActionTile icon={Bell} label="Notices" subtitle="Announcements" tone="yellow" onPress={() => router.push('/(tabs)/notices' as any)} />
+        <ActionTile icon={Search} label="Directory" subtitle="Find people" tone="pink" onPress={() => router.push('/(tabs)/team' as any)} />
+        <ActionTile icon={Briefcase} label="My work" subtitle={role === 'librarian' ? 'Library desk' : 'Role workspace'} tone="orange" onPress={() => router.push('/(tabs)/work' as any)} />
       </View>
 
-      {/* Announcements */}
-      <Text style={styles.sectionTitle}>Announcements</Text>
+      <SectionTitle title="People moments" />
+      <View style={styles.momentRow}>
+        <View style={styles.momentCard}>
+          <Cake size={18} color="#BE185D" />
+          <Text style={styles.momentTitle}>Birthdays</Text>
+          <Text style={styles.momentSub}>No birthdays today</Text>
+        </View>
+        <View style={styles.momentCard}>
+          <BadgeCheck size={18} color="#15803D" />
+          <Text style={styles.momentTitle}>Anniversaries</Text>
+          <Text style={styles.momentSub}>No work anniversaries today</Text>
+        </View>
+      </View>
+
+      <SectionTitle title="Announcements" />
       <View style={styles.emptyCard}>
         <Megaphone size={24} color={colors.textMuted} />
         <Text style={styles.emptyText}>No announcements</Text>
@@ -195,11 +182,7 @@ function StudentHome({ userId }: { userId: string }) {
   const [attendance, setAttendance] = useState<number | null>(null);
   const [feeDue, setFeeDue] = useState(0);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     const { data: attData } = await supabase
       .from('daily_attendance').select('status').eq('student_id', userId);
     if (attData && attData.length > 0) {
@@ -209,7 +192,11 @@ function StudentHome({ userId }: { userId: string }) {
     const { data: feeData } = await supabase
       .from('fee_ledger').select('balance').in('status', ['due', 'overdue']);
     if (feeData) setFeeDue(feeData.reduce((s: number, f: any) => s + Number(f.balance || 0), 0));
-  };
+  }, [userId]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   return (
     <View style={styles.section}>
@@ -264,16 +251,6 @@ function ParentHome({ userId }: { userId: string }) {
   );
 }
 
-// ── Reusable components ──
-function ActionCard({ icon: Icon, label, color, bg, onPress }: { icon: any; label: string; color: string; bg: string; onPress: () => void }) {
-  return (
-    <TouchableOpacity style={[styles.actionCard, { backgroundColor: bg }]} onPress={onPress} activeOpacity={0.7}>
-      <Icon size={22} color={color} />
-      <Text style={[styles.actionLabel, { color }]}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
 function StatCard({ label, value, color, icon: Icon }: { label: string; value: string; color: string; icon: any }) {
   return (
     <View style={styles.statCard}>
@@ -300,6 +277,38 @@ const styles = StyleSheet.create({
   avatarText: { fontSize: 14, fontWeight: '600', color: colors.primary },
   section: { gap: 16 },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: colors.text, marginTop: 8 },
+  metricRow: { flexDirection: 'row', gap: spacing.sm },
+  priorityCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: '#FFE4E6',
+    borderRadius: 22,
+    padding: spacing.md,
+  },
+  priorityIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  priorityTitle: { ...typography.bodyMedium, color: colors.text },
+  prioritySub: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
+  momentRow: { flexDirection: 'row', gap: spacing.sm },
+  momentCard: {
+    flex: 1,
+    minHeight: 108,
+    borderRadius: 22,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    padding: spacing.md,
+    justifyContent: 'space-between',
+  },
+  momentTitle: { ...typography.bodyMedium, color: colors.text },
+  momentSub: { ...typography.caption, color: colors.textSecondary, lineHeight: 17 },
 
   // Punch card
   punchCard: {

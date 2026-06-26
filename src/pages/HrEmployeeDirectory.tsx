@@ -24,7 +24,7 @@ const roleLabels: Record<string, string> = {
   accountant: "Accountant", admission_head: "Admission Head",
   data_entry: "Data Entry", office_admin: "Office Admin",
   office_assistant: "Office Assistant", hostel_warden: "Hostel Warden",
-  ib_coordinator: "IB Coordinator",
+  ib_coordinator: "IB Coordinator", librarian: "Librarian",
 };
 
 const HrEmployeeDirectory = () => {

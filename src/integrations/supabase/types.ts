@@ -10555,6 +10555,7 @@ export type Database = {
         | "publisher"
         | "video_editor"
         | "academic_partner"
+        | "librarian"
       ib_programme: "pyp" | "myp"
       lead_source:
         | "website"
@@ -10754,6 +10755,7 @@ export const Constants = {
         "publisher",
         "video_editor",
         "academic_partner",
+        "librarian",
       ],
       ib_programme: ["pyp", "myp"],
       lead_source: [

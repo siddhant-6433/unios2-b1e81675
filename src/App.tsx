@@ -90,6 +90,7 @@ const FeeCollections       = lazy(() => import("./pages/FeeCollections"));
 const ParentPortal         = lazy(() => import("./pages/ParentPortal"));
 const StudentPortalPage    = lazy(() => import("./pages/StudentPortal"));
 const PaymentPortal        = lazy(() => import("./pages/PaymentPortal"));
+const Library              = lazy(() => import("./pages/Library"));
 // IB Academics pages
 const ProgrammeOfInquiry    = lazy(() => import("./pages/ib/ProgrammeOfInquiry"));
 const UnitPlanner           = lazy(() => import("./pages/ib/UnitPlanner"));
@@ -350,6 +351,7 @@ const App = () => (
                       {/* Misc */}
                       <Route path="/exams" element={<RequirePermission module="exams" action="view"><Exams /></RequirePermission>} />
                       <Route path="/documents" element={<RequirePermission module="documents" action="view"><Documents /></RequirePermission>} />
+                      <Route path="/library" element={<RequirePermission module="library" action="view"><Library /></RequirePermission>} />
                       {/* Personal Document Tracker — gated server-side via RLS to allow-listed emails */}
                       <Route path="/my-docs" element={<MyDocs />} />
                       <Route path="/alumni-verifications" element={<AlumniVerifications />} />
