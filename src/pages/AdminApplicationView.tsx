@@ -18,6 +18,7 @@ import {
   PAID_APPLICATION_DELETE_CONFIRMATION,
 } from "@/lib/deleteApplication";
 import { cahetRegistrationFromApplication, fetchCahetRegistration, isBptOrBmritCourseName, type CahetRegistrationDetails } from "@/lib/cahet";
+import { fetchUpdeledRegistration, isDeledCourseName, updeledRegistrationFromApplication, type SupabaseUpdeledClient, type UpdeledRegistrationDetails } from "@/lib/updeled";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -164,6 +165,7 @@ export default function AdminApplicationView() {
   const [hasOffer, setHasOffer] = useState(false);
   const [appFeePaid, setAppFeePaid] = useState(0);
   const [cahetRegistration, setCahetRegistration] = useState<CahetRegistrationDetails | null>(null);
+  const [updeledRegistration, setUpdeledRegistration] = useState<UpdeledRegistrationDetails | null>(null);
   const [docs, setDocs] = useState<PreviewDoc[]>([]);
   const [reviews, setReviews] = useState<Record<string, DocReview>>({});
   const [decisionBusy, setDecisionBusy] = useState(false);
@@ -225,7 +227,7 @@ export default function AdminApplicationView() {
       // Also pulls PAN/AN for the lifecycle stepper.
       if (appRow?.lead_id) {
         const primarySelection = ((appRow.course_selections || [])[0] as ApplicationCourseSelection | undefined) || null;
-        const [{ data: leadRow }, { data: offerRows }, { data: pmtRows }, cahetRow] = await Promise.all([
+        const [{ data: leadRow }, { data: offerRows }, { data: pmtRows }, cahetRow, updeledRow] = await Promise.all([
           supabase.from("leads")
             .select("id, name, course_id, campus_id, pre_admission_no, admission_no, course:course_id(name,code,duration_years,eligibility,entrance_exam,entrance_mandatory)")
             .eq("id", appRow.lead_id).maybeSingle(),
@@ -236,6 +238,7 @@ export default function AdminApplicationView() {
             .eq("type", "application_fee")
             .eq("status", "confirmed"),
           fetchCahetRegistration(supabase, appRow.lead_id),
+          fetchUpdeledRegistration(supabase as unknown as SupabaseUpdeledClient, appRow.lead_id),
         ]);
         const resolvedSelection = await resolvePrimaryCourseSelection(primarySelection);
         let effectiveLeadRow = leadRow as any;
@@ -276,13 +279,16 @@ export default function AdminApplicationView() {
         setAppFeePaid((pmtRows || []).reduce((sum, p: any) => sum + Number(p.amount || 0), 0));
         const courseName = effectiveLeadRow?.course?.name || primarySelection?.course_name || null;
         const applicationCahet = cahetRegistrationFromApplication(appRow, appRow.lead_id);
+        const applicationUpdeled = updeledRegistrationFromApplication(appRow, appRow.lead_id);
         setCahetRegistration(isBptOrBmritCourseName(courseName) ? (cahetRow || applicationCahet) : null);
+        setUpdeledRegistration(isDeledCourseName(courseName) ? (updeledRow || applicationUpdeled) : null);
       } else {
         setLead(null);
         setEligibilityRule(null);
         setHasOffer(false);
         setAppFeePaid(0);
         setCahetRegistration(null);
+        setUpdeledRegistration(null);
       }
     } catch (e: any) {
       console.error("[AdminApplicationView] refresh failed:", e);
@@ -967,6 +973,7 @@ export default function AdminApplicationView() {
           courseName={lead.course?.name}
           campusId={lead.campus_id}
           cahetRegistration={cahetRegistration}
+          updeledRegistration={updeledRegistration}
           onSuccess={() => { setShowOfferLetter(false); refresh(); }}
         />
       )}

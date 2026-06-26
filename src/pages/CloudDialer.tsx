@@ -21,6 +21,7 @@ import {
   Collapsible, CollapsibleTrigger, CollapsibleContent,
 } from "@/components/ui/collapsible";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
+import { UpdeledPendingBadge } from "@/components/leads/UpdeledPendingBadge";
 import { useCloudDialerBootstrap, useCloudDialerListQueue, useCloudDialerQueue, useMyProfileId } from "@/hooks/useAdmissionsData";
 import { isBscNursingCourse } from "@/lib/bscNursing";
 import { isBptOrBmritCourseName } from "@/lib/cahet";
@@ -2434,6 +2435,12 @@ export default function CloudDialer() {
                           <p className="text-xs text-muted-foreground">{currentLead.phone}</p>
                           <div className="mt-1">
                             <CahetPendingBadge
+                              leadId={currentLead.id}
+                              leadName={currentLead.name}
+                              phone={currentLead.phone}
+                              courseName={currentLead.course_name}
+                            />
+                            <UpdeledPendingBadge
                               leadId={currentLead.id}
                               leadName={currentLead.name}
                               phone={currentLead.phone}

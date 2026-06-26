@@ -55,8 +55,9 @@ describe("CAHET registration fallback", () => {
     expect(leadDetail).toContain("courseName={courseName}");
     expect(offerLetterDialog).toContain("const requiresCahetRegistration = isBptOrBmritCourseName(courseName)");
     expect(offerLetterDialog).toContain("const cahetOfferBlocked = requiresCahetRegistration && !cahetRegistration");
-    expect(offerLetterDialog).toContain("disabled={saving || programmeTotal <= 0 || cahetOfferBlocked}");
-    expect(offerLetterDialog).toContain("decision === \"approved\" && cahetOfferBlocked");
+    expect(offerLetterDialog).toContain("const registrationOfferBlocked = cahetOfferBlocked || updeledOfferBlocked");
+    expect(offerLetterDialog).toContain("disabled={saving || programmeTotal <= 0 || registrationOfferBlocked}");
+    expect(offerLetterDialog).toContain("decision === \"approved\" && registrationOfferBlocked");
     expect(offerLetterFunction).toContain("isBptOrBmritCourseName(course?.name) && !cahetRegistration");
     expect(offerLetterFunction).toContain("status: 409");
   });

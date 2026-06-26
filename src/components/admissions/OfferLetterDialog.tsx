@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, FileText, Plus, Gift, CheckCircle, XCircle, ShieldCheck, RefreshCw, ExternalLink, Pencil, Coins, Trash2, AlertCircle } from "lucide-react";
 import { CahetRegistrationDetails } from "@/components/leads/CahetRegistrationDetails";
+import { UpdeledRegistrationDetails } from "@/components/leads/UpdeledRegistrationDetails";
 import {
   cahetRegistrationFromApplication,
   fetchCahetRegistration,
@@ -15,6 +16,15 @@ import {
   type ApplicationCahetSource,
   type CahetRegistrationDetails as CahetRegistrationDetailsType,
 } from "@/lib/cahet";
+import {
+  fetchUpdeledRegistration,
+  isDeledCourseName,
+  isUpdeledExamName,
+  updeledRegistrationFromApplication,
+  type ApplicationUpdeledSource,
+  type SupabaseUpdeledClient,
+  type UpdeledRegistrationDetails as UpdeledRegistrationDetailsType,
+} from "@/lib/updeled";
 import { chooseOfferSessionId, feeBackedSessionIds, type OfferSessionOption } from "@/lib/offerSessions";
 
 interface OfferLetterDialogProps {
@@ -26,6 +36,7 @@ interface OfferLetterDialogProps {
   courseName?: string | null;
   campusId: string | null;
   cahetRegistration?: CahetRegistrationDetailsType | null;
+  updeledRegistration?: UpdeledRegistrationDetailsType | null;
   onSuccess: () => void;
 }
 
@@ -99,7 +110,7 @@ const ENTRANCE_OPTIONS = [
 const isDaottCourseName = (name: string | null | undefined) =>
   !!name && (/\bD\.?\s*A?OTT\b/i.test(name) || /ana?esthesia.*operation theatre/i.test(name));
 
-export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, courseId, courseName, campusId, cahetRegistration: cahetRegistrationProp, onSuccess }: OfferLetterDialogProps) {
+export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, courseId, courseName, campusId, cahetRegistration: cahetRegistrationProp, updeledRegistration: updeledRegistrationProp, onSuccess }: OfferLetterDialogProps) {
   const { user, role } = useAuth();
   const { toast } = useToast();
   const [offers, setOffers] = useState<OfferLetter[]>([]);
@@ -163,9 +174,16 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   const [pdfBust, setPdfBust] = useState<number>(() => Date.now());
   const [fetchedCahetRegistration, setFetchedCahetRegistration] = useState<CahetRegistrationDetailsType | null>(null);
   const cahetRegistration = cahetRegistrationProp ?? fetchedCahetRegistration;
+  const [fetchedUpdeledRegistration, setFetchedUpdeledRegistration] = useState<UpdeledRegistrationDetailsType | null>(null);
+  const updeledRegistration = updeledRegistrationProp ?? fetchedUpdeledRegistration;
   const requiresCahetRegistration = isBptOrBmritCourseName(courseName);
+  const requiresUpdeledRegistration = isDeledCourseName(courseName);
   const cahetOfferBlocked = requiresCahetRegistration && !cahetRegistration;
+  const updeledOfferBlocked = requiresUpdeledRegistration && !updeledRegistration;
+  const registrationOfferBlocked = cahetOfferBlocked || updeledOfferBlocked;
   const cahetOfferBlockMessage = "CAHET registration details are required before issuing an offer letter for BPT and BMRIT.";
+  const updeledOfferBlockMessage = "UPDELED registration details are required before issuing an offer letter for D.El.Ed.";
+  const registrationOfferBlockMessage = cahetOfferBlocked ? cahetOfferBlockMessage : updeledOfferBlockMessage;
 
   const fetchOffers = async () => {
     setLoading(true);
@@ -264,6 +282,28 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     return () => { cancelled = true; };
   }, [open, leadId, cahetRegistrationProp]);
 
+  useEffect(() => {
+    if (!open || updeledRegistrationProp !== undefined) return;
+    let cancelled = false;
+    (async () => {
+      const row = await fetchUpdeledRegistration(supabase as unknown as SupabaseUpdeledClient, leadId);
+      if (row) {
+        if (!cancelled) setFetchedUpdeledRegistration(row);
+        return;
+      }
+
+      const { data: appRow } = await supabase
+        .from("applications")
+        .select("id, application_id, lead_id, academic_details")
+        .eq("lead_id", leadId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!cancelled) setFetchedUpdeledRegistration(updeledRegistrationFromApplication(appRow as ApplicationUpdeledSource | null, leadId));
+    })();
+    return () => { cancelled = true; };
+  }, [open, leadId, updeledRegistrationProp]);
+
   // Pull sessions whenever the form opens so the select has data. Prefer a
   // session that actually has active year-wise fees for this course; multiple
   // sessions can be active, and principals cannot change this dropdown.
@@ -348,6 +388,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     ? form.entrance_exam_other.trim()
     : form.entrance_exam_name.trim();
   const isCahetOffer = form.admission_mode === "entrance" && selectedEntranceName.toLowerCase().includes("cahet");
+  const isUpdeledOffer = form.admission_mode === "entrance" && isUpdeledExamName(selectedEntranceName);
 
   /** Fee for a given term (e.g. 'year_1') from the active fee structure. */
   const feeForTerm = (term: string): number =>
@@ -404,10 +445,10 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     const entranceName = form.entrance_exam_name === "Other"
       ? form.entrance_exam_other.trim()
       : form.entrance_exam_name.trim();
-    if (cahetOfferBlocked) {
+    if (registrationOfferBlocked) {
       toast({
-        title: "CAHET registration required",
-        description: cahetOfferBlockMessage,
+        title: cahetOfferBlocked ? "CAHET registration required" : "UPDELED registration required",
+        description: registrationOfferBlockMessage,
         variant: "destructive",
       });
       return;
@@ -527,10 +568,10 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
 
   const decideOffer = async (offerId: string, decision: "approved" | "rejected", reason?: string) => {
     if (!isApprover) return;
-    if (decision === "approved" && cahetOfferBlocked) {
+    if (decision === "approved" && registrationOfferBlocked) {
       toast({
-        title: "CAHET registration required",
-        description: cahetOfferBlockMessage,
+        title: cahetOfferBlocked ? "CAHET registration required" : "UPDELED registration required",
+        description: registrationOfferBlockMessage,
         variant: "destructive",
       });
       return;
@@ -813,6 +854,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
           {/* ─── Left: list + new-offer form ─── */}
           <div className="overflow-y-auto px-5 py-4 space-y-4 border-b md:border-b-0 md:border-r border-border">
           <CahetRegistrationDetails registration={cahetRegistration} />
+          <UpdeledRegistrationDetails registration={updeledRegistration} />
           {!showForm && (
             <Button onClick={() => setShowForm(true)} size="sm" className="gap-1.5"><Plus className="h-4 w-4" />New Offer</Button>
           )}
@@ -820,10 +862,10 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
           {showForm && (
             <Card className="border-border/60">
               <CardContent className="p-4 space-y-3">
-                {cahetOfferBlocked && (
+                {registrationOfferBlocked && (
                   <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
                     <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                    <p>{cahetOfferBlockMessage}</p>
+                    <p>{registrationOfferBlockMessage}</p>
                   </div>
                 )}
                 {/* Programme fee summary — read-only, sourced directly from the
@@ -1142,8 +1184,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                   <p className="mt-1 text-[10px] text-muted-foreground/70">Date by which the candidate must accept and pay the token fee.</p>
                 </div>
                 <div className="flex gap-2">
-                  <Button onClick={handleCreate} disabled={saving || programmeTotal <= 0 || cahetOfferBlocked} size="sm" className="gap-1.5"
-                    title={cahetOfferBlocked ? cahetOfferBlockMessage : programmeTotal <= 0 ? "Publish a fee structure for this course + session first" : undefined}>
+                  <Button onClick={handleCreate} disabled={saving || programmeTotal <= 0 || registrationOfferBlocked} size="sm" className="gap-1.5"
+                    title={registrationOfferBlocked ? registrationOfferBlockMessage : programmeTotal <= 0 ? "Publish a fee structure for this course + session first" : undefined}>
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Issue Offer
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => {
@@ -1382,8 +1424,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                             size="sm"
                             className="text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700"
                             onClick={() => decideOffer(offer.id, "approved")}
-                            disabled={cahetOfferBlocked}
-                            title={cahetOfferBlocked ? cahetOfferBlockMessage : undefined}
+                            disabled={registrationOfferBlocked}
+                            title={registrationOfferBlocked ? registrationOfferBlockMessage : undefined}
                           >
                             <CheckCircle className="h-3 w-3" /> Approve Offer
                           </Button>
@@ -1621,6 +1663,24 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                       {isCahetOffer && !cahetRegistration && (
                         <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                           CAHET is selected, but this candidate is not marked CAHET registered yet. The registration number will appear on the final offer only after registration is recorded.
+                        </div>
+                      )}
+
+                      {isUpdeledOffer && updeledRegistration && (
+                        <div className="rounded-md border border-indigo-200 bg-indigo-50 p-3">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-700">UPDELED Registration</p>
+                          <p className="mt-1 text-sm font-semibold text-indigo-950">
+                            Registration No. {updeledRegistration.registration_no}
+                          </p>
+                          {updeledRegistration.notes && (
+                            <p className="mt-1 text-xs text-indigo-900/80">{updeledRegistration.notes}</p>
+                          )}
+                        </div>
+                      )}
+
+                      {isUpdeledOffer && !updeledRegistration && (
+                        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                          UPDELED is selected, but this candidate is not marked UPDELED registered yet. The registration number will appear on the final offer only after registration is recorded.
                         </div>
                       )}
 

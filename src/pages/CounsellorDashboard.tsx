@@ -12,6 +12,7 @@ import {
   ExternalLink, CalendarDays, History,
 } from "lucide-react";
 import { CahetSprintLeaderboard } from "@/components/dashboard/CahetSprintLeaderboard";
+import { UpdeledSprintLeaderboard } from "@/components/dashboard/UpdeledSprintLeaderboard";
 import { LeadAssignmentHistory } from "@/components/dashboard/LeadAssignmentHistory";
 
 interface CounsellorStats {
@@ -872,7 +873,10 @@ const CounsellorDashboard = () => {
         ))}
       </div>
 
-      <CahetSprintLeaderboard />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <CahetSprintLeaderboard />
+        <UpdeledSprintLeaderboard />
+      </div>
 
       {/* Tab toggle */}
       <div className="flex items-center gap-3 overflow-x-auto">

@@ -481,6 +481,10 @@ function isCahetExamName(name: string): boolean {
   return /cahet/i.test(name);
 }
 
+function isUpdeledExamName(name: string): boolean {
+  return /up\s*d\.?\s*el\.?\s*ed|updeled|d\.?\s*el\.?\s*ed counselling|elementary education counselling/i.test(name);
+}
+
 function EntranceExamSection({
   exams,
   onChange,
@@ -592,6 +596,13 @@ function EntranceExamSection({
                     Required for BPT/BMRIT admission through ABVMU Lucknow counselling.
                   </p>
                 </div>
+              ) : isUpdeledExamName(ex.exam_name) ? (
+                <div>
+                  <h4 className="text-sm font-semibold text-foreground">UPDELED Registration Details</h4>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Required for D.El.Ed admission through UP D.El.Ed counselling.
+                  </p>
+                </div>
               ) : (
                 <h4 className="text-sm font-medium text-foreground">{ex.exam_name}</h4>
               )}
@@ -629,6 +640,38 @@ function EntranceExamSection({
                     value={ex.registered_name || ''}
                     onChange={e => updateExam(idx, 'registered_name', e.target.value)}
                     placeholder="As entered on ABVMU CAHET"
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+            ) : isUpdeledExamName(ex.exam_name) ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">UPDELED Registration Status</label>
+                  <select
+                    value={ex.status === 'registered' ? 'registered' : 'yet_to_appear'}
+                    onChange={e => updateExam(idx, 'status', e.target.value)}
+                    className={inputCls}
+                  >
+                    <option value="registered">Registered for UPDELED 2026</option>
+                    <option value="yet_to_appear">Not registered yet</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">UPDELED Registration No.</label>
+                  <input
+                    value={ex.registration_no || ''}
+                    onChange={e => updateExam(idx, 'registration_no', e.target.value)}
+                    placeholder="e.g. UPDELED-2026-12345"
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Name on UPDELED Form</label>
+                  <input
+                    value={ex.registered_name || ''}
+                    onChange={e => updateExam(idx, 'registered_name', e.target.value)}
+                    placeholder="As entered on UPDELED registration"
                     className={inputCls}
                   />
                 </div>
