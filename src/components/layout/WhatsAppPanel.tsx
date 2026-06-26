@@ -52,6 +52,7 @@ export function WhatsAppPanel() {
   // every counsellor lead ID here; this component is mounted on every CRM page.
   const fetchNotifications = useCallback(async () => {
     if (!user?.id) return;
+    if (role === "academic_partner") return;
     setLoading(true);
 
     const q = supabase
@@ -68,13 +69,17 @@ export function WhatsAppPanel() {
     setNotifications(filtered);
     setUnreadNotifCount(filtered.filter((n) => !n.is_read).length);
     setLoading(false);
-  }, [user?.id]);
+  }, [user?.id, role]);
 
   // Reuse the badge RPC instead of doing a PostgREST head-count from every
   // mounted header. It scopes counsellors server-side and avoids materializing
   // their lead IDs in the client.
   const fetchUnreplied = useCallback(async () => {
     if (!role || (isCounsellor && !profile?.id)) return;
+    if (role === "academic_partner") {
+      setUnrepliedCount(0);
+      return;
+    }
     const { data, error } = await supabase.rpc("action_badge_counts" as never, {
       p_scope_counsellor_id: isCounsellor ? profile?.id : null,
       p_include_unassigned: true,
@@ -87,13 +92,20 @@ export function WhatsAppPanel() {
   }, [role, isCounsellor, profile?.id]);
 
   useEffect(() => {
+    if (role === "academic_partner") {
+      setNotifications([]);
+      setUnreadNotifCount(0);
+      setUnrepliedCount(0);
+      return;
+    }
     fetchNotifications();
     fetchUnreplied();
-  }, [fetchNotifications, fetchUnreplied]);
+  }, [fetchNotifications, fetchUnreplied, role]);
 
   // Realtime: new whatsapp_message notifications
   useEffect(() => {
     if (!user?.id) return;
+    if (role === "academic_partner") return;
     const notifChannel = supabase
       .channel("wa-notifications-realtime")
       .on("postgres_changes", {
@@ -126,7 +138,7 @@ export function WhatsAppPanel() {
       supabase.removeChannel(notifChannel);
       supabase.removeChannel(waChannel);
     };
-  }, [user?.id, fetchNotifications, fetchUnreplied]);
+  }, [user?.id, fetchNotifications, fetchUnreplied, role]);
 
   const handleClick = async (notif: Notification) => {
     if (!notif.is_read) {

@@ -15,6 +15,12 @@ interface Props {
   onNext: () => void;
   onBack?: () => void;
   saving: boolean;
+  onBehalfContext?: {
+    mode: "academic_partner_on_behalf";
+    token: string;
+    academic_partner_id: string;
+    lead_id: string;
+  } | null;
 }
 
 declare global {
@@ -23,7 +29,7 @@ declare global {
   }
 }
 
-export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props) {
+export function PaymentSection({ data, onChange, onNext, onBack, saving, onBehalfContext }: Props) {
   const isPaid   = data.payment_status === "paid";
   const isWaived = data.fee_amount === 0;
   const portal   = usePortal();
@@ -149,6 +155,27 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
     setElapsed(0);
   };
 
+  const auditOnBehalfPayment = async (
+    action: "application_fee_initiated_by_partner" | "application_fee_paid_by_partner",
+    metadata: Record<string, unknown> = {},
+    paymentRef?: string | null,
+  ) => {
+    if (!onBehalfContext?.token) return;
+    await supabase.functions.invoke("academic-partner-on-behalf-audit", {
+      body: {
+        token: onBehalfContext.token,
+        action,
+        application_id: data.application_id,
+        payment_ref: paymentRef || data.payment_ref || null,
+        metadata: {
+          amount: data.fee_amount,
+          gateway: selectedGateway,
+          ...metadata,
+        },
+      },
+    }).catch(() => {});
+  };
+
   const checkAndUpdatePayment = async () => {
     const { data: row } = await supabase
       .from("applications")
@@ -159,12 +186,16 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
     if (row?.payment_status === "paid") {
       stopPolling();
       onChange({ payment_status: "paid", payment_ref: row.payment_ref ?? undefined });
+      await auditOnBehalfPayment("application_fee_paid_by_partner", { source: "payment_poll" }, row.payment_ref);
       setLoading(false);
       if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
     }
   };
 
-  const handleMarkPaid = () => onChange({ payment_status: "paid" });
+  const handleMarkPaid = () => {
+    onChange({ payment_status: "paid" });
+    void auditOnBehalfPayment("application_fee_paid_by_partner", { source: "dev_mark_paid" });
+  };
 
   // ── Cashfree ────────────────────────────────────────────────────
   const handlePayCashfree = async () => {
@@ -179,6 +210,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
           customer_name: data.full_name,
           customer_phone: data.phone,
           customer_email: data.email || undefined,
+          on_behalf_token: onBehalfContext?.token || undefined,
         },
       });
 
@@ -186,6 +218,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
       if (fnData?.error) throw new Error(fnData.error);
 
       const { order_id, payment_session_id } = fnData;
+      await auditOnBehalfPayment("application_fee_initiated_by_partner", { gateway: "cashfree", order_id }, order_id);
 
       if (!cashfreeRef.current) {
         cashfreeRef.current = window.Cashfree({ mode: import.meta.env.DEV ? "sandbox" : "production" });
@@ -205,6 +238,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
           if (verifyError) throw new Error(verifyError.message);
           if (verifyData?.order_status === "PAID") {
             onChange({ payment_status: "paid", payment_ref: order_id });
+            await auditOnBehalfPayment("application_fee_paid_by_partner", { gateway: "cashfree" }, order_id);
           } else {
             setError("Payment could not be confirmed. If amount was deducted, contact support.");
           }
@@ -238,6 +272,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
           firstname: nameParts[0],
           email: data.email || undefined,
           phone: data.phone,
+          on_behalf_token: onBehalfContext?.token || undefined,
         },
       });
 
@@ -245,6 +280,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
       if (fnData?.error) throw new Error(fnData.error);
 
       const { pay_url } = fnData;
+      await auditOnBehalfPayment("application_fee_initiated_by_partner", { gateway: "easebuzz", txnid }, txnid);
 
       // Open EaseBuzz hosted payment page in popup
       popupRef.current = window.open(
@@ -284,6 +320,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
             });
             if (verifyData?.status?.toLowerCase() === "success") {
               onChange({ payment_status: "paid", payment_ref: verifyData.easepayid || txnid });
+              await auditOnBehalfPayment("application_fee_paid_by_partner", { gateway: "easebuzz", txnid }, verifyData.easepayid || txnid);
               setLoading(false);
               return;
             }
@@ -320,6 +357,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
           firstname: nameParts[0],
           email: data.email || undefined,
           phone: data.phone,
+          on_behalf_token: onBehalfContext?.token || undefined,
         },
       });
       // supabase-js puts the response body on fnError.context for non-2xx, not on fnData.
@@ -337,6 +375,7 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
       if (fnData?.error) throw new Error(fnData.error);
 
       const { pay_url } = fnData;
+      await auditOnBehalfPayment("application_fee_initiated_by_partner", { gateway: "icici", txnid }, txnid);
       popupRef.current = window.open(pay_url, "icici_payment", "width=680,height=720,scrollbars=yes,resizable=yes");
       if (!popupRef.current) throw new Error("Popup was blocked. Please allow popups for this site and try again.");
       setPopupStartedAt(Date.now());
@@ -358,8 +397,8 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
           // Fallback: ask ICICI directly via /command STATUS
           try {
             const { data: verifyData } = await supabase.functions.invoke("icici-payment", {
-              body: { action: "verify-payment", txnid, application_id: data.application_id },
-            });
+            body: { action: "verify-payment", txnid, application_id: data.application_id },
+          });
             if (verifyData?.status === "SUC" || verifyData?.raw?.responseCode === "0000" || verifyData?.raw?.responseCode === "000") {
               await checkAndUpdatePayment();
               return;
@@ -393,6 +432,8 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
         customerPhone: data.phone,
       });
       onChange({ payment_status: "paid", payment_ref: result.paymentId });
+      await auditOnBehalfPayment("application_fee_initiated_by_partner", { gateway: "razorpay" }, result.paymentId);
+      await auditOnBehalfPayment("application_fee_paid_by_partner", { gateway: "razorpay" }, result.paymentId);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Payment was cancelled.");
     } finally {

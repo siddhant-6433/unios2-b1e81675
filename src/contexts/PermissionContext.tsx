@@ -23,6 +23,8 @@ const PermissionContext = createContext<PermissionContextType>({
 
 export const usePermissions = () => useContext(PermissionContext);
 
+const ACADEMIC_PARTNER_ALLOWED_PERMISSIONS = new Set(["academic_partner_portal:view"]);
+
 /** Shorthand: usePermission("leads", "view") → boolean */
 export function usePermission(module: string, action?: string): boolean {
   const { can, canAny } = usePermissions();
@@ -41,6 +43,12 @@ export const PermissionProvider = ({ children }: { children: ReactNode }) => {
     // Super admin has all permissions — no query needed (even when impersonating)
     if (role === "super_admin" || realRole === "super_admin") {
       setPermissions(new Set(["*"])); // sentinel for "all"
+      setLoading(false);
+      return;
+    }
+
+    if (role === "academic_partner") {
+      setPermissions(new Set(ACADEMIC_PARTNER_ALLOWED_PERMISSIONS));
       setLoading(false);
       return;
     }
@@ -70,12 +78,19 @@ export const PermissionProvider = ({ children }: { children: ReactNode }) => {
   const can = useCallback((module: string, action: string): boolean => {
     if (role === "super_admin" || realRole === "super_admin") return true;
     if (loading) return false;
+    if (role === "academic_partner") return ACADEMIC_PARTNER_ALLOWED_PERMISSIONS.has(`${module}:${action}`);
     return permissions.has(`${module}:${action}`);
   }, [permissions, role, realRole, loading]);
 
   const canAny = useCallback((module: string): boolean => {
     if (role === "super_admin" || realRole === "super_admin") return true;
     if (loading) return false;
+    if (role === "academic_partner") {
+      for (const p of ACADEMIC_PARTNER_ALLOWED_PERMISSIONS) {
+        if (p.startsWith(`${module}:`)) return true;
+      }
+      return false;
+    }
     for (const p of permissions) {
       if (p.startsWith(`${module}:`)) return true;
     }
