@@ -1,5 +1,6 @@
 export const INITIAL_APPLICATION_DEADLINE = "2026-06-14";
 export const INITIAL_CAHET_DEADLINE_ISO = "2026-06-14T23:59:59+05:30";
+export const UPDELED_DEADLINE_ISO = "2026-07-09T23:59:59+05:30";
 
 const IST_DAY_MS = 86_400_000;
 const GENERAL_ADMISSION_ROUND_START = 2;
@@ -46,6 +47,14 @@ export function effectiveCahetDeadline(deadlineIso: string, _now = Date.now()): 
 
 export function effectiveCahetDeadlineLabel(_now = Date.now()): string {
   return "14 Jun 2026, 11:59 PM";
+}
+
+export function effectiveUpdeledDeadline(deadlineIso: string, _now = Date.now()): string {
+  return deadlineIso || UPDELED_DEADLINE_ISO;
+}
+
+export function effectiveUpdeledDeadlineLabel(_now = Date.now()): string {
+  return "9 Jul 2026, 11:59 PM";
 }
 
 export function effectiveCahetWhatsAppDeadlineText(_now = Date.now()): {

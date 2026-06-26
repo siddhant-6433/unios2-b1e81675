@@ -108,11 +108,12 @@ CREATE TRIGGER trg_payment_gateway_rules_updated_at
   BEFORE UPDATE ON public.payment_gateway_rules
   FOR EACH ROW EXECUTE FUNCTION public.set_payment_gateway_rules_updated_at();
 
--- Global defaults: Easebuzz stays public default everywhere it already works.
+-- Global defaults: Razorpay is the primary gateway, ICICI is the staff-visible
+-- second preference, and EaseBuzz remains available as a fallback.
 INSERT INTO public.payment_gateway_rules (
   payment_context, scope_type, scope_id, gateway, is_enabled, is_staff_pilot_only, priority
 )
-SELECT ctx, 'global', NULL, 'easebuzz', true, false, 10
+SELECT ctx, 'global', NULL, 'easebuzz', true, false, 30
 FROM unnest(ARRAY['application_fee', 'token_fee', 'student_fee', 'alumni_service']) AS ctx
 WHERE NOT EXISTS (
   SELECT 1 FROM public.payment_gateway_rules r
@@ -126,7 +127,7 @@ WHERE NOT EXISTS (
 INSERT INTO public.payment_gateway_rules (
   payment_context, scope_type, scope_id, gateway, is_enabled, is_staff_pilot_only, priority
 )
-SELECT ctx, 'global', NULL, 'cashfree', true, false, 20
+SELECT ctx, 'global', NULL, 'cashfree', true, false, 40
 FROM unnest(ARRAY['application_fee', 'student_fee']) AS ctx
 WHERE NOT EXISTS (
   SELECT 1 FROM public.payment_gateway_rules r
@@ -140,7 +141,7 @@ WHERE NOT EXISTS (
 INSERT INTO public.payment_gateway_rules (
   payment_context, scope_type, scope_id, gateway, is_enabled, is_staff_pilot_only, priority
 )
-SELECT ctx, 'global', NULL, 'icici', true, true, 30
+SELECT ctx, 'global', NULL, 'icici', true, true, 20
 FROM unnest(ARRAY['application_fee', 'token_fee', 'student_fee', 'alumni_service']) AS ctx
 WHERE NOT EXISTS (
   SELECT 1 FROM public.payment_gateway_rules r

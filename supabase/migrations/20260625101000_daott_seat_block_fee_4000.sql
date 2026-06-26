@@ -74,10 +74,20 @@ ALTER TABLE public.lead_payments
 ALTER TABLE public.lead_payments
   VALIDATE CONSTRAINT chk_lead_payments_token_fee_min;
 
-ALTER TABLE public.offer_letters
-  ADD CONSTRAINT chk_offer_letters_token_fee_min
-  CHECK (token_fee_amount IS NULL OR token_fee_amount >= 4000)
-  NOT VALID;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.offer_letters'::regclass
+      AND conname = 'chk_offer_letters_token_fee_min'
+  ) THEN
+    ALTER TABLE public.offer_letters
+      ADD CONSTRAINT chk_offer_letters_token_fee_min
+      CHECK (token_fee_amount IS NULL OR token_fee_amount >= 4000)
+      NOT VALID;
+  END IF;
+END $$;
 
 ALTER TABLE public.offer_letters
   VALIDATE CONSTRAINT chk_offer_letters_token_fee_min;

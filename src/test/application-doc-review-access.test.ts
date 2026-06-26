@@ -86,6 +86,13 @@ describe("application document review access", () => {
     expect(adminApplicationView).toContain("if (activeDocPaths.has(r.file_path))");
   });
 
+  it("uses fresh object keys and no-cache headers for document replacements", () => {
+    expect(applyPortalUploadDoc).toContain("const uploadId = new Date().toISOString()");
+    expect(applyPortalUploadDoc).toContain("passport_photo.${uploadId}.${extension}");
+    expect(applyPortalUploadDoc).toContain("${docKey}-${uploadId}-");
+    expect(applyPortalUploadDoc).toContain('cacheControl: "no-cache, max-age=0"');
+  });
+
   it("routes applicant uploads and generated admission PDFs through R2", () => {
     expect(applyPortalUploadDoc).toContain("uploadToR2");
     expect(applyPortalUploadDoc).toContain("application-portal/");

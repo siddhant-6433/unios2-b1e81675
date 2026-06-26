@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2, CreditCard, FileText, IndianRupee, Clock, Check, GraduationCap, Sparkles, ChevronRight, CalendarDays } from "lucide-react";
 import { buildApplicantFeeBreakdownRows, buildApplicantOneTimePaymentOptions } from "./feeBreakdown";
@@ -6,7 +6,7 @@ import {
   effectiveApplicationDeadline,
   INITIAL_APPLICATION_DEADLINE,
 } from "@/lib/deadlineRollover";
-import { useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
+import { preferredGateway, useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
 import { buildRazorpayReceipt, openRazorpayCheckout } from "@/lib/razorpayCheckout";
 
 // Fallbacks if the get_applicant_deadlines RPC is unreachable.
@@ -172,6 +172,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   const [showInstalment, setShowInstalment] = useState(false);
   const [instalmentPreset, setInstalmentPreset] = useState<number | null>(null);
   const [customAmt, setCustomAmt] = useState("");
+  const customAmountInputRef = useRef<HTMLInputElement | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedGateway, setSelectedGateway] = useState<string | null>(null);
   const [offerConsentVerified, setOfferConsentVerified] = useState(false);
@@ -191,10 +192,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
 
   useEffect(() => {
     if (tokenGatewayLoading) return;
-    if (tokenGateways.length === 1) {
-      setSelectedGateway(tokenGateways[0].gateway);
-    } else if (selectedGateway && !tokenGateways.some((g) => g.gateway === selectedGateway)) {
-      setSelectedGateway(null);
+    if (!selectedGateway || !tokenGateways.some((g) => g.gateway === selectedGateway)) {
+      setSelectedGateway(preferredGateway(tokenGateways));
     }
   }, [tokenGatewayLoading, tokenGateways, selectedGateway]);
 
@@ -273,6 +272,13 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         metadata,
       },
     }).catch(() => {});
+  };
+
+  const focusCustomAmountInput = () => {
+    requestAnimationFrame(() => {
+      customAmountInputRef.current?.focus();
+      customAmountInputRef.current?.select();
+    });
   };
 
   const load = async () => {
@@ -1591,7 +1597,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                             </button>
                           ))}
                           <button
-                            onClick={() => { setInstalmentPreset(null); setCustomAmt(""); }}
+                            onClick={() => { setInstalmentPreset(null); setCustomAmt(""); focusCustomAmountInput(); }}
                             className={`rounded-xl px-3.5 py-2 text-sm font-semibold border transition-all active:scale-95 ${
                               instalmentPreset === null
                                 ? "bg-blue-600 border-blue-600 text-white shadow-sm"
@@ -1606,6 +1612,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                           <div className="relative">
                             <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                             <input
+                              ref={customAmountInputRef}
                               type="number" step="500" min={minInstalment} max={tokenOutstanding}
                               value={customAmt}
                               onChange={e => setCustomAmt(e.target.value)}

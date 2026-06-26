@@ -28,6 +28,7 @@ import { TokenFeePanel } from "@/components/applicant/TokenFeePanel";
 import { ApplicationPreview, type PreviewDoc } from "@/components/applicant/ApplicationPreview";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
 import { ApplicantDeadlineTicker } from "@/components/layout/ApplicantDeadlineTicker";
+import { leadTransitionStagePatch, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { captureAttribution, trackPixelLead } from "@/lib/analytics";
 
 type OnBehalfContext = {
@@ -1989,10 +1990,13 @@ const ApplyPortal = () => {
       const { data: currentLead } = await supabase.from("leads").select("stage").eq("id", app.lead_id).single();
       const advanceableStages = ["new_lead", "ai_called", "counsellor_call", "application_in_progress", "application_fee_paid", "not_interested", "deferred"];
       if (currentLead && advanceableStages.includes(currentLead.stage)) {
-        await supabase.from("leads").update({
-          stage: "application_submitted" as any,
-          application_progress: { personal_details: true, education_details: true, application_fee_paid: true, documents_uploaded: true } as any,
-        }).eq("id", app.lead_id);
+        const transition = resolveLeadTransitionCommand({
+          currentStage: currentLead.stage,
+          command: "submitApplication",
+        });
+        await supabase.from("leads").update(leadTransitionStagePatch(transition, {
+          application_progress: { personal_details: true, education_details: true, application_fee_paid: true, documents_uploaded: true },
+        }) as any).eq("id", app.lead_id);
 
         await supabase.from("lead_activities").insert({
           lead_id: app.lead_id,

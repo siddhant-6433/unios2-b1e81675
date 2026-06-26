@@ -72,6 +72,7 @@ const admissionSubMenu: MenuItem[] = [
   { title: "Applications", url: "/applications", icon: FileText, permission: "students:view" },
   { title: "Cloud Dialer", url: "/cloud-dialer", icon: PhoneCall, permission: "call_log:view" },
   { title: "CAHET Sprint", url: "/cahet-sprint", icon: Flame, permission: "call_log:view" },
+  { title: "UPDELED Sprint", url: "/updeled-sprint", icon: GraduationCap, permission: "call_log:view" },
   { title: "Missed Calls", url: "/missed-calls", icon: PhoneMissed, permission: "call_log:view" },
   { title: "WhatsApp", url: "/whatsapp-inbox", icon: MessageSquare, permission: "whatsapp:view" },
   { title: "Performance", url: "/counsellor-dashboard", icon: BarChart3, permission: "performance:view" },
@@ -405,17 +406,21 @@ export function AppSidebar() {
                       <SidebarMenuSub>
                         {visibleAdmission.map((item) => {
                           const isCloudDialer = item.url === "/cloud-dialer";
-                          // CAHET Sprint gets a rose/urgent treatment to
-                          // signal the deadline pressure — matches the
-                          // ticker, leaderboard, and register-button colour.
+                          // Sprint routes get deadline-pressure treatment that
+                          // matches their ticker and register-button colours.
                           const isCahetSprint = item.url === "/cahet-sprint";
+                          const isUpdeledSprint = item.url === "/updeled-sprint";
                           const itemActiveClass = isCahetSprint
                             ? "!bg-rose-100 dark:!bg-rose-900/30 !text-rose-700 dark:!text-rose-300 font-semibold"
+                            : isUpdeledSprint
+                            ? "!bg-indigo-100 dark:!bg-indigo-900/30 !text-indigo-700 dark:!text-indigo-300 font-semibold"
                             : isCloudDialer
                             ? "!bg-cyan-100 dark:!bg-cyan-900/30 !text-cyan-700 dark:!text-cyan-300 font-semibold"
                             : activeClass;
                           const itemBaseClass = isCahetSprint
                             ? `${subLinkClass} text-rose-700 dark:text-rose-400 font-semibold`
+                            : isUpdeledSprint
+                            ? `${subLinkClass} text-indigo-700 dark:text-indigo-400 font-semibold`
                             : isCloudDialer
                             ? `${subLinkClass} text-cyan-700 dark:text-cyan-400`
                             : subLinkClass;
