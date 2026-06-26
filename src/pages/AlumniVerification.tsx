@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
+import { preferredGateway, useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
 import {
   Loader2, Phone, Upload, FileText, CheckCircle, Shield, Building2, GraduationCap, Mail, X, Users,
   ScrollText, Award, BookOpen,
@@ -375,10 +375,8 @@ export default function AlumniVerification() {
 
   useEffect(() => {
     if (alumniGatewaysLoading) return;
-    if (alumniGateways.length === 1) {
-      setSelectedGateway(alumniGateways[0].gateway);
-    } else if (selectedGateway && !alumniGateways.some((g) => g.gateway === selectedGateway)) {
-      setSelectedGateway(null);
+    if (!selectedGateway || !alumniGateways.some((g) => g.gateway === selectedGateway)) {
+      setSelectedGateway(preferredGateway(alumniGateways));
     }
   }, [alumniGatewaysLoading, alumniGateways, selectedGateway]);
 

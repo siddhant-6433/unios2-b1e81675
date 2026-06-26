@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowRight, ArrowLeft, Loader2, CreditCard, CheckCircle, Shield, AlertCircle, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
-import { useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
+import { preferredGateway, useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
 import { ApplicationData } from "./types";
 import { usePortal } from "./PortalContext";
 import { ReceiptDialog, ReceiptData } from "@/components/receipts/ReceiptDialog";
@@ -82,13 +82,11 @@ export function PaymentSection({ data, onChange, onNext, onBack, saving }: Props
     // path, so we don't need to duplicate the settle logic here.
   };
 
-  // Auto-select single gateway
+  // Auto-select the first resolved gateway so DB priority controls the default.
   useEffect(() => {
     if (gwLoading) return;
-    if (portalGateways.length === 1) {
-      setSelectedGateway(portalGateways[0].gateway);
-    } else if (selectedGateway && !portalGateways.some((g) => g.gateway === selectedGateway)) {
-      setSelectedGateway(null);
+    if (!selectedGateway || !portalGateways.some((g) => g.gateway === selectedGateway)) {
+      setSelectedGateway(preferredGateway(portalGateways));
     }
   }, [gwLoading, portalGateways, selectedGateway]);
 

@@ -7,6 +7,10 @@ const checkoutHelper = readFileSync("src/lib/razorpayCheckout.ts", "utf8");
 const receiptDialog = readFileSync("src/components/receipts/ReceiptDialog.tsx", "utf8");
 const applicationReceiptFunction = readFileSync("supabase/functions/generate-application-fee-receipt/index.ts", "utf8");
 const paymentReceiptFunction = readFileSync("supabase/functions/generate-payment-receipt/index.ts", "utf8");
+const prioritizeRazorpayMigration = readFileSync(
+  "supabase/migrations/20260625150000_prioritize_razorpay_gateway.sql",
+  "utf8",
+);
 
 describe("Razorpay payment gateway wiring", () => {
   it("exposes create-order and verify-payment API routes through Netlify", () => {
@@ -50,5 +54,12 @@ describe("Razorpay payment gateway wiring", () => {
     expect(receiptDialog).toContain("Payment Gateway");
     expect(applicationReceiptFunction).toContain("gatewayLabel(payment.gateway, payment.payment_mode, payment.transaction_ref)");
     expect(paymentReceiptFunction).toContain("gatewayLabel(lp.gateway, lp.payment_mode, lp.transaction_ref)");
+  });
+
+  it("promotes Razorpay ahead of ICICI and EaseBuzz in existing scoped gateway rules", () => {
+    expect(prioritizeRazorpayMigration).toContain("WHEN 'razorpay' THEN 10");
+    expect(prioritizeRazorpayMigration).toContain("WHEN 'icici'    THEN 20");
+    expect(prioritizeRazorpayMigration).toContain("WHEN 'easebuzz' THEN 30");
+    expect(prioritizeRazorpayMigration).toContain("gateway IN ('razorpay', 'icici', 'easebuzz', 'cashfree')");
   });
 });

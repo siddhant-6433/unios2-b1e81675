@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { AlertCircle, CreditCard, Info, Loader2, RefreshCw, ToggleLeft, ToggleRight } from "lucide-react";
+import { DEFAULT_GATEWAY_PRIORITY } from "@/lib/paymentGatewayResolver";
 import type { GatewayScopeType, PaymentContext, PaymentGateway } from "@/lib/paymentGatewayResolver";
 
 type Rule = {
@@ -176,7 +177,7 @@ export default function PaymentGatewaysPanel() {
         gateway,
         is_enabled: false,
         is_staff_pilot_only: gateway === "icici",
-        priority: gateway === "easebuzz" ? 10 : gateway === "cashfree" ? 20 : gateway === "icici" ? 30 : 40,
+        priority: DEFAULT_GATEWAY_PRIORITY[gateway] ?? 100,
       })
       .select("id, payment_context, scope_type, scope_id, gateway, is_enabled, is_staff_pilot_only, priority")
       .single();
