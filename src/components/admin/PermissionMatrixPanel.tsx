@@ -28,7 +28,7 @@ interface UserOverride {
 const ROLES = [
   "campus_admin", "principal", "admission_head", "counsellor", "accountant",
   "faculty", "teacher", "data_entry", "office_admin", "office_assistant", "hostel_warden",
-  "ib_coordinator", "consultant", "academic_partner", "student", "parent",
+  "ib_coordinator", "librarian", "consultant", "academic_partner", "student", "parent",
 ];
 
 const ROLE_LABELS: Record<string, string> = {
@@ -36,6 +36,7 @@ const ROLE_LABELS: Record<string, string> = {
   counsellor: "Counsellor", accountant: "Accountant", faculty: "Faculty",
   teacher: "Teacher", data_entry: "Data Entry", office_admin: "Office Admin", office_assistant: "Office Asst.",
   hostel_warden: "Hostel", ib_coordinator: "IB Coord.", consultant: "Consultant",
+  librarian: "Librarian",
   academic_partner: "Acad. Partner",
   student: "Student", parent: "Parent",
 };
@@ -51,7 +52,7 @@ const MODULE_LABELS: Record<string, string> = {
   ib_portfolios: "IB Portfolios", ib_action: "IB Action", ib_reports: "IB Reports",
   ib_exhibition: "IB Exhibition", ib_projects: "IB Projects", ib_idu: "IB IDU",
   campuses_courses: "Campuses", documents: "Documents", alumni_verification: "Alumni Verification",
-  user_management: "User Mgmt", permissions: "Permissions",
+  user_management: "User Mgmt", permissions: "Permissions", library: "Library",
 };
 
 export function PermissionMatrixPanel() {

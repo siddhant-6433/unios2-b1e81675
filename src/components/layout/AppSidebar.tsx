@@ -9,6 +9,7 @@ import {
   Briefcase, CalendarOff, UserCheck, Fingerprint, PhoneCall, PhoneMissed, Send, UserPlus, Footprints,
   FolderLock, Flame, Video, ListPlus,
   Megaphone,
+  Library, Barcode,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -28,7 +29,7 @@ type AppRole =
   | "super_admin" | "campus_admin" | "principal" | "admission_head"
   | "counsellor" | "accountant" | "faculty" | "teacher"
   | "data_entry" | "office_admin" | "office_assistant" | "hostel_warden" | "consultant" | "academic_partner" | "student" | "parent"
-  | "ib_coordinator" | "video_editor";
+  | "ib_coordinator" | "video_editor" | "librarian";
 
 type MenuItem = {
   title: string;
@@ -103,6 +104,17 @@ const marketingSubMenu: MenuItem[] = [
   { title: "WA Outbound", url: "/whatsapp-inbox?mode=outbound", icon: Send, permission: "whatsapp:view", blockedRoles: ["academic_partner"] },
 ];
 
+const academicsSubMenu: MenuItem[] = [
+  { title: "Library Dashboard", url: "/library?tab=dashboard", icon: Library, permission: "library:view" },
+  { title: "Catalog", url: "/library?tab=catalog", icon: BookOpen, permission: "library:view" },
+  { title: "Issue / Return", url: "/library?tab=circulation", icon: Shuffle, permission: "library:circulate" },
+  { title: "Inventory", url: "/library?tab=inventory", icon: ClipboardCheck, permission: "library:inventory" },
+  { title: "Digitization Queue", url: "/library?tab=digitization", icon: Barcode, permission: "library:digitize" },
+  { title: "Members", url: "/library?tab=members", icon: Users, permission: "library:view" },
+  { title: "Reports", url: "/library?tab=reports", icon: BarChart3, permission: "library:export" },
+  { title: "Settings", url: "/library?tab=settings", icon: Settings, permission: "library:manage_settings" },
+];
+
 const ibAcademicsSubMenu: MenuItem[] = [
   { title: "Programme of Inquiry", url: "/ib/poi",        icon: Globe,      permission: "ib_poi:view" },
   { title: "Unit Planner",         url: "/ib/units",      icon: BookOpen,   permission: "ib_units:view" },
@@ -158,6 +170,7 @@ const roleLabels: Record<string, string> = {
   academic_partner: "Academic Partner",
   ib_coordinator: "IB Coordinator",
   video_editor: "Video Editor",
+  librarian: "Librarian",
 };
 
 export function AppSidebar() {
@@ -314,11 +327,13 @@ export function AppSidebar() {
   }
   );
   const visibleMarketing = role === "academic_partner" ? [] : marketingSubMenu.filter(canSee);
+  const visibleAcademics = academicsSubMenu.filter(canSee);
   const visibleIB = ibAcademicsSubMenu.filter(canSee);
   const visibleHr = hrSubMenu.filter(canSee);
   const visibleMgmt = managementMenu.filter(canSee);
   const isAdmissionActive = role !== "academic_partner" && admissionSubMenu.some(item => isActive(item.url));
   const isMarketingActive = role !== "academic_partner" && marketingSubMenu.some(item => isActive(item.url));
+  const isAcademicsActive = academicsSubMenu.some(item => isActive(item.url) || location.pathname.startsWith("/library"));
   const isIBActive = ibAcademicsSubMenu.some(item => isActive(item.url) || location.pathname.startsWith("/ib/"));
   const isHrActive = hrSubMenu.some(item => isActive(item.url) || location.pathname.startsWith("/hr"));
 
@@ -470,6 +485,39 @@ export function AppSidebar() {
                         {visibleMarketing.map((item) => (
                           <SidebarMenuSubItem key={item.title}>
                             <SidebarMenuSubButton asChild isActive={isActive(item.url)}>
+                              <NavLink to={item.url} className={subLinkClass} activeClassName={activeClass}>
+                                <item.icon className="h-3.5 w-3.5" />
+                                <span>{item.title}</span>
+                              </NavLink>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        ))}
+                      </SidebarMenuSub>
+                    </CollapsibleContent>
+                  </SidebarMenuItem>
+                </Collapsible>
+              )}
+
+              {/* Library */}
+              {visibleAcademics.length > 0 && (
+                <Collapsible defaultOpen={isAcademicsActive} className="group/collapsible">
+                  <SidebarMenuItem>
+                    <CollapsibleTrigger asChild>
+                      <SidebarMenuButton className={`${linkClass} justify-between`} isActive={isAcademicsActive}>
+                        <span className="flex items-center gap-3">
+                          <Library className="h-[17px] w-[17px]" />
+                          {!collapsed && <span>Library</span>}
+                        </span>
+                        {!collapsed && (
+                          <ChevronDown className="h-3.5 w-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                        )}
+                      </SidebarMenuButton>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <SidebarMenuSub>
+                        {visibleAcademics.map((item) => (
+                          <SidebarMenuSubItem key={item.title}>
+                            <SidebarMenuSubButton asChild isActive={isActive(item.url) || (item.url.startsWith("/library") && location.pathname === "/library" && !location.search && item.url.includes("dashboard"))}>
                               <NavLink to={item.url} className={subLinkClass} activeClassName={activeClass}>
                                 <item.icon className="h-3.5 w-3.5" />
                                 <span>{item.title}</span>
