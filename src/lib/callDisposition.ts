@@ -14,12 +14,8 @@
 
 import type { CallDispositionData } from "@/components/admissions/CallDispositionDialog";
 
-// Stage model is canonical in src/lib/leadStages.ts. Imported locally (so this
-// module can use them directly) AND re-exported so the many existing
-// `@/lib/callDisposition` importers keep working. A re-export alone does not
-// create a usable local binding under every transform, so import explicitly.
-import { STAGE_LABELS, STAGE_ORDER, shouldAutoAdvance } from "@/lib/leadStages";
-export { STAGE_LABELS, STAGE_ORDER, shouldAutoAdvance };
+import { resolveCallDispositionTransition } from "@/lib/leadTransitions";
+export { STAGE_LABELS, STAGE_ORDER, shouldAutoAdvance } from "@/lib/leadStages";
 
 const DISPOSITION_LABELS: Record<string, string> = {
   interested: "Interested",
@@ -322,30 +318,15 @@ export async function recordCallDisposition(args: RecordCallDispositionArgs): Pr
   const callActivityDesc = `Call: ${label}${durationStr}${data.notes ? ` — ${data.notes}` : ""}`;
   const callNotes = data.notes || `${label}${loggedFromLabel ? ` (logged from ${loggedFromLabel})` : ""}`;
 
-  // Stage auto-advance — same targets, guards, and wording as before.
+  const transition = resolveCallDispositionTransition({
+    currentStage: lead.stage,
+    disposition: data.disposition,
+    futureEligibleSession: data.future_eligible_session,
+  });
   // newStage === null means "no stage change" (the RPC then skips that write).
-  let newStage: string | null = null;
-  let stageActivityDesc: string | null = null;
-  let futureEligibleSession: string | null = null;
-  if (data.disposition === "interested" || data.disposition === "call_back" || data.disposition === "not_answered") {
-    if (shouldAutoAdvance(lead.stage, "counsellor_call")) {
-      newStage = "counsellor_call";
-      stageActivityDesc = `Stage auto-advanced from ${STAGE_LABELS[lead.stage] || lead.stage} to ${STAGE_LABELS["counsellor_call"] || "counsellor_call"}`;
-    }
-  } else if (data.disposition === "not_interested") {
-    newStage = "not_interested";
-    stageActivityDesc = `Stage changed to Not Interested`;
-  } else if (data.disposition === "do_not_contact") {
-    newStage = "dnc";
-    stageActivityDesc = `Stage changed to Do Not Contact`;
-  } else if (data.disposition === "ineligible") {
-    newStage = data.future_eligible_session ? "deferred" : "ineligible";
-    const futureNote = data.future_eligible_session ? ` — eligible for ${data.future_eligible_session}` : "";
-    stageActivityDesc = newStage === "deferred"
-      ? `Stage changed to Deferred (Next Session${futureNote})`
-      : `Stage changed to Ineligible`;
-    futureEligibleSession = data.future_eligible_session ?? null;
-  }
+  const newStage = transition.newStage;
+  const stageActivityDesc = transition.activityDescription;
+  const futureEligibleSession = transition.futureEligibleSession;
 
   // Inline-scheduled follow-up — same wording. null followupAt => RPC skips it.
   let followupAt: string | null = null;
