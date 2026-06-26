@@ -1,5 +1,10 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { digits, sendWhatsAppText, type WhatsAppProvider } from "../_shared/whatsapp-channel.ts";
+import {
+  digits,
+  sendWhatsAppText,
+  type WhatsAppProvider,
+  type WhatsAppSendResult,
+} from "../_shared/whatsapp-channel.ts";
 import { logWhatsAppAutomationEvent } from "../_shared/whatsapp-automation-events.ts";
 import {
   upsertConversationState,
@@ -7,6 +12,8 @@ import {
   type ConversationState,
 } from "../_shared/whatsapp-conversation-state.ts";
 import { loadLatestOutboundContext } from "../_shared/whatsapp-outbound-context.ts";
+import { applyLeadTransition } from "../_shared/lead-transition.ts";
+import { recordOutboundConversationAction } from "../_shared/whatsapp-conversation-action.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -230,14 +237,15 @@ Deno.serve(async (req) => {
 
     if (messageType === "text" && content.trim() && DNC_PATTERNS.test(content.trim())) {
       const { data: leadForNotification } = leadId
-        ? await admin.from("leads").select("name,counsellor_id").eq("id", leadId).maybeSingle()
+        ? await admin.from("leads").select("name,counsellor_id,stage").eq("id", leadId).maybeSingle()
         : { data: null };
 
       if (leadId) {
-        await admin.from("leads").update({ stage: "dnc" }).eq("id", leadId);
-        await admin.from("lead_activities").insert({
-          lead_id: leadId,
-          type: "whatsapp",
+        await applyLeadTransition(admin, {
+          leadId,
+          currentStage: leadForNotification?.stage ?? null,
+          command: "markDnc",
+          activityType: "whatsapp",
           description: `Lead marked DNC by conversation engine: "${content.substring(0, 100)}"`,
         });
         if (leadForNotification?.counsellor_id) {
@@ -254,7 +262,12 @@ Deno.serve(async (req) => {
 
       const dncMsg = "You have been unsubscribed and added to our Do Not Contact list. We will not reach out to you again. If this was a mistake, please reply \"START\" to re-subscribe.";
       try {
-        const sendResult = await sendWhatsAppText(admin, {
+        const sendResult = await (sendWhatsAppText as (
+          admin: any,
+          hint: Parameters<typeof sendWhatsAppText>[1],
+          to: string,
+          text: string,
+        ) => Promise<WhatsAppSendResult>)(admin, {
           provider,
           route: provider === "plivo" ? "plivo_admissions" : "reply",
           businessPhoneNumberId: provider === "meta" ? businessNumber : null,
@@ -262,19 +275,25 @@ Deno.serve(async (req) => {
           requireManualReply: true,
         }, phone, dncMsg);
         if (sendResult.ok) {
-          await admin.from("whatsapp_messages").insert({
-            lead_id: leadId,
-            wa_message_id: sendResult.messageId,
-            direction: "outbound",
+          await recordOutboundConversationAction(admin, {
+            kind: "dncAcknowledgement",
             phone,
-            message_type: "text",
+            leadId,
             content: dncMsg,
+            messageType: "text",
+            templateKey: "dnc_ack",
             status: "sent",
-            is_read: true,
-            template_key: "dnc_ack",
-            provider: sendResult.provider,
-            business_phone_number_id: sendResult.businessPhoneNumberId,
-            business_phone_number: sendResult.businessNumber,
+            sendResult,
+            outboundKind: "system_notification",
+            expectedReplyType: "do_not_reply",
+            responsePolicy: "suppress",
+            conversationState: {
+              mode: "closed",
+              state: "dnc",
+              handoffReason: "opt_out_message",
+              priority: "normal",
+              lastIntent: "dnc",
+            },
           });
         } else {
           console.error("DNC ack send failed:", sendResult.raw || sendResult.error);

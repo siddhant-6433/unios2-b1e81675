@@ -24,6 +24,7 @@ import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
 import { useCloudDialerBootstrap, useCloudDialerListQueue, useCloudDialerQueue, useMyProfileId } from "@/hooks/useAdmissionsData";
 import { isBscNursingCourse } from "@/lib/bscNursing";
 import { isBptOrBmritCourseName } from "@/lib/cahet";
+import { isLeadCallDisposition, leadTransitionStagePatch, resolveCallDispositionTransition, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 
 const CourseInfoPanel = lazy(() =>
   import("@/components/leads/CourseInfoPanel").then((m) => ({ default: m.CourseInfoPanel })));
@@ -838,20 +839,21 @@ export default function CloudDialer() {
     if (disposition !== "not_answered") return true;
 
     const { start, end } = indiaDayBoundsUtc();
-    const { count, error } = await supabase
+    const { data, error } = await supabase
       .from("call_logs")
-      .select("id", { count: "exact", head: true })
+      .select("id")
       .eq("lead_id", currentLead.id)
       .eq("disposition", "not_answered")
       .gte("called_at", start)
-      .lt("called_at", end);
+      .lt("called_at", end)
+      .limit(2);
 
     if (error) {
       console.error("Failed to count same-day unanswered attempts:", error);
       return false;
     }
 
-    return (count || 0) >= 2;
+    return (data || []).length >= 2;
   };
 
   const completePendingFollowupsForCurrentLead = async (disposition: string) => {
@@ -880,6 +882,23 @@ export default function CloudDialer() {
       .from("leads")
       .update({ cahet_registered: cahetRegistered === "yes", updated_at: new Date().toISOString() } as any)
       .eq("id", currentLead.id);
+  };
+
+  const applyDispositionTransitionForCurrentLead = async (disposition: string) => {
+    if (!currentLead || !isLeadCallDisposition(disposition)) return;
+
+    const transition = resolveCallDispositionTransition({
+      currentStage: currentLead.stage,
+      disposition,
+    });
+    if (!transition.newStage) return;
+
+    const patch: Record<string, unknown> = { stage: transition.newStage };
+    if (transition.name === "recordDispositionNotInterested") {
+      patch.person_role = notIntCategory;
+    }
+
+    await supabase.from("leads").update(patch as any).eq("id", currentLead.id);
   };
 
   // ── Finalize a pre-selected disposition after call ends ─────────────────
@@ -946,11 +965,7 @@ export default function CloudDialer() {
     await supabase.from("leads").update({ first_contact_at: new Date().toISOString() } as any)
       .eq("id", currentLead.id).is("first_contact_at", null);
 
-    if (disposition === "interested") {
-      await supabase.from("leads").update({ stage: "counsellor_call" as any }).eq("id", currentLead.id);
-    } else if (disposition === "not_interested") {
-      await supabase.from("leads").update({ stage: "not_interested" as any, person_role: notIntCategory } as any).eq("id", currentLead.id);
-    }
+    await applyDispositionTransitionForCurrentLead(disposition);
 
     setStats(prev => ({
       ...prev,
@@ -958,7 +973,7 @@ export default function CloudDialer() {
     }));
 
     setCallState(prev => ({ ...prev, status: "auto-disposed", disposition, autoDisposition: false }));
-    showFollowupAndAutoNext(disposition, true, followupCleared);
+    await showFollowupAndAutoNext(disposition, true, followupCleared);
   };
 
   // ── Handle call end (counsellor marks disposition) ────────────────────────
@@ -1020,12 +1035,7 @@ export default function CloudDialer() {
     await supabase.from("leads").update({ first_contact_at: new Date().toISOString() } as any)
       .eq("id", currentLead.id).is("first_contact_at", null);
 
-    // Update lead stage based on disposition
-    if (disposition === "interested") {
-      await supabase.from("leads").update({ stage: "counsellor_call" as any }).eq("id", currentLead.id);
-    } else if (disposition === "not_interested") {
-      await supabase.from("leads").update({ stage: "not_interested" as any, person_role: notIntCategory } as any).eq("id", currentLead.id);
-    }
+    await applyDispositionTransitionForCurrentLead(disposition);
 
     setStats(prev => ({
       ...prev,
@@ -1035,7 +1045,7 @@ export default function CloudDialer() {
     }));
 
     setCallState(prev => ({ ...prev, status: "auto-disposed", disposition, autoDisposition: false }));
-    showFollowupAndAutoNext(disposition, false, followupCleared);
+    await showFollowupAndAutoNext(disposition, false, followupCleared);
   };
 
   // ── Auto-disposition (unanswered/busy/voicemail from Plivo) ───────────────
@@ -1123,7 +1133,7 @@ export default function CloudDialer() {
       });
     }
     const followupCleared = await completePendingFollowupsForCurrentLead(disposition);
-    showFollowupAndAutoNext(disposition, false, followupCleared);
+    await showFollowupAndAutoNext(disposition, false, followupCleared);
   };
 
   const handleCancelledCall = (title = "Call cancelled") => {
@@ -1136,7 +1146,7 @@ export default function CloudDialer() {
 
   // ── Show followup and start auto-next timer ───────────────────────────────
 
-  const showFollowupAndAutoNext = (disposition: string, wasConnected = false, followupCanBeRescheduled = true) => {
+  const showFollowupAndAutoNext = async (disposition: string, wasConnected = false, followupCanBeRescheduled = true) => {
     if (!currentLead) return;
     const attempt = currentLead.attempt_count + 1;
     const isAutoDisp = ["busy", "not_answered", "voicemail", "cancelled"].includes(disposition);
@@ -1156,7 +1166,11 @@ export default function CloudDialer() {
 
     // After MAX_AUTO_ATTEMPTS unanswered attempts → mark inactive, no followup
     if (isAutoDisp && attempt >= MAX_AUTO_ATTEMPTS) {
-      supabase.from("leads").update({ stage: "inactive" as any }).eq("id", currentLead.id);
+      const transition = resolveLeadTransitionCommand({
+        currentStage: currentLead.stage,
+        command: "classifyInactive",
+      });
+      await supabase.from("leads").update(leadTransitionStagePatch(transition) as any).eq("id", currentLead.id);
       setFollowupDate("");
       setFollowupTime("");
       setAutoNextTimer(10);
@@ -1245,7 +1259,11 @@ export default function CloudDialer() {
         status: "scheduled",
         notes: `Scheduled via Cloud Dialer`,
       });
-      await supabase.from("leads").update({ stage: "visit_scheduled" as any }).eq("id", currentLead.id);
+      const transition = resolveLeadTransitionCommand({
+        currentStage: currentLead.stage,
+        command: "scheduleVisit",
+      });
+      await supabase.from("leads").update(leadTransitionStagePatch(transition) as any).eq("id", currentLead.id);
     }
 
     // Save future session note for ineligible

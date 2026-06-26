@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 const inbox = readFileSync("src/pages/WhatsAppInbox.tsx", "utf8");
 const whatsappSend = readFileSync("supabase/functions/whatsapp-send/index.ts", "utf8");
 const whatsappReply = readFileSync("supabase/functions/whatsapp-reply/index.ts", "utf8");
+const conversationAction = readFileSync("supabase/functions/_shared/whatsapp-conversation-action.ts", "utf8");
 
 describe("WhatsApp inbox template rendering and speed guardrails", () => {
   it("renders course_info_v4 as readable message text instead of a template-key placeholder", () => {
@@ -50,7 +51,8 @@ describe("WhatsApp inbox template rendering and speed guardrails", () => {
     expect(whatsappReply).toContain('provider: requestedProvider');
     expect(whatsappReply).toContain('route: requestedProvider === "plivo" ? "plivo_admissions" : "reply"');
     expect(whatsappReply).toContain("businessNumber: requestedBusinessNumber || requestedPhoneNumberId");
-    expect(whatsappReply).toContain("sender_user_id: user.id");
+    expect(whatsappReply).toContain("recordManualReplyConversationAction");
+    expect(conversationAction).toContain("sender_user_id: action.userId");
     expect(inbox).toContain('invokeEdge<any>("whatsapp-send"');
   });
 

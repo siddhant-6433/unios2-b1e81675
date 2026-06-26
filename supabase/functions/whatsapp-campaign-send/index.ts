@@ -2,8 +2,8 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendWhatsAppTemplate } from "../_shared/whatsapp-channel.ts";
 import {
   expectedReplyTypeForTemplate,
-  recordWhatsAppOutboundContext,
 } from "../_shared/whatsapp-outbound-context.ts";
+import { recordOutboundConversationAction } from "../_shared/whatsapp-conversation-action.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -343,33 +343,18 @@ Deno.serve(async (req) => {
             })
             .eq("id", recipient.id);
 
-          // Log to whatsapp_messages for inbox visibility
-          const { data: insertedMessage } = await adminClient.from("whatsapp_messages").insert({
-            lead_id: recipient.lead_id || null,
-            wa_message_id: messageId,
-            direction: "outbound",
+          await recordOutboundConversationAction(adminClient, {
+            kind: "campaignSend",
             phone: waPhone,
-            message_type: "template",
-            content: `[Campaign: ${campaign.name}] [Template: ${campaign.template_key.replace(/_/g, " ")}]`,
-            template_key: campaign.template_key,
-            status: "sent",
-            is_read: true,
-            provider: sendResult.provider,
-            business_phone_number_id: sendResult.businessPhoneNumberId,
-            business_phone_number: sendResult.businessNumber,
-            sender_user_id: actorUserId,
-          }).select("id").maybeSingle();
-
-          await recordWhatsAppOutboundContext(adminClient, {
-            messageId: insertedMessage?.id || null,
-            providerMessageId: messageId,
-            phone: waPhone,
-            businessNumber: sendResult.businessNumber || sendResult.businessPhoneNumberId,
-            provider: sendResult.provider,
             leadId: recipient.lead_id || null,
+            content: `[Campaign: ${campaign.name}] [Template: ${campaign.template_key.replace(/_/g, " ")}]`,
+            messageType: "template",
+            templateKey: campaign.template_key,
+            status: "sent",
+            userId: actorUserId,
+            sendResult,
             campaignId: campaign_id,
             campaignRecipientId: recipient.id,
-            templateKey: campaign.template_key,
             outboundKind: "bulk_campaign",
             expectedReplyType: expectedReplyTypeForTemplate(campaign.template_key),
             responsePolicy: "engine",
@@ -381,17 +366,10 @@ Deno.serve(async (req) => {
               sent_by_user_id: actorUserId,
             },
             expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+            activityDescription: recipient.lead_id
+              ? `WhatsApp campaign "${campaign.name}" — Template: ${campaign.template_key.replace(/_/g, " ")}`
+              : null,
           });
-
-          // Log lead activity
-          if (recipient.lead_id) {
-            await adminClient.from("lead_activities").insert({
-              lead_id: recipient.lead_id,
-              user_id: actorProfileId,
-              type: "whatsapp",
-              description: `WhatsApp campaign "${campaign.name}" — Template: ${campaign.template_key.replace(/_/g, " ")}`,
-            });
-          }
 
           sentCount++;
         } else {

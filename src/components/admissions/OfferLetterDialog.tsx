@@ -16,6 +16,7 @@ import {
   type CahetRegistrationDetails as CahetRegistrationDetailsType,
 } from "@/lib/cahet";
 import { chooseOfferSessionId, feeBackedSessionIds, type OfferSessionOption } from "@/lib/offerSessions";
+import { leadTransitionStagePatch, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 
 interface OfferLetterDialogProps {
   open: boolean;
@@ -479,7 +480,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       }
       // Only advance lead stage if the offer is approved (not pending)
       if (autoApproved) {
-        await supabase.from("leads").update({ stage: "offer_sent" as any, offer_amount: totalFee }).eq("id", leadId);
+        const transition = resolveLeadTransitionCommand({ currentStage: "application_approved", command: "issueOffer" });
+        await supabase.from("leads").update(leadTransitionStagePatch(transition, { offer_amount: totalFee }) as any).eq("id", leadId);
       }
       await supabase.from("lead_activities").insert({
         lead_id: leadId, user_id: user?.id || null, type: "offer",
@@ -552,7 +554,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     if (decision === "approved") {
       const offer = offers.find(o => o.id === offerId);
       if (offer) {
-        await supabase.from("leads").update({ stage: "offer_sent" as any, offer_amount: offer.net_fee }).eq("id", leadId);
+        const transition = resolveLeadTransitionCommand({ currentStage: "application_approved", command: "issueOffer" });
+        await supabase.from("leads").update(leadTransitionStagePatch(transition, { offer_amount: offer.net_fee }) as any).eq("id", leadId);
       }
       await supabase.from("lead_activities").insert({
         lead_id: leadId, user_id: user?.id || null, type: "offer",
