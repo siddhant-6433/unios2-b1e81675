@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { LeadTemperatureBadge } from "@/components/admissions/LeadTemperatureBadge";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
+import { UpdeledPendingBadge } from "@/components/leads/UpdeledPendingBadge";
 import { CounsellorScoreBadge } from "@/components/admissions/CounsellorScoreBadge";
 import { type VisitAction } from "@/components/admissions/VisitActionCenter";
 import { type LeadFunnelStage, type VisitFunnelStage, VISIT_FUNNEL_ORDER, leadStagesForBucket } from "@/lib/leadStages";
@@ -2769,6 +2770,14 @@ const Admissions = () => {
                         <LeadTemperatureBadge temperature={lead.lead_temperature} score={lead.lead_score} />
                         <span onClick={(e) => e.stopPropagation()}>
                           <CahetPendingBadge
+                            leadId={lead.id}
+                            leadName={lead.name}
+                            phone={lead.phone}
+                            courseName={lead.course_name}
+                          />
+                        </span>
+                        <span onClick={(e) => e.stopPropagation()}>
+                          <UpdeledPendingBadge
                             leadId={lead.id}
                             leadName={lead.name}
                             phone={lead.phone}

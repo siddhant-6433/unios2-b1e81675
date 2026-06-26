@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
+import { UpdeledPendingBadge } from "@/components/leads/UpdeledPendingBadge";
 import {
   CallDispositionDialog,
   type CallDispositionData,
@@ -709,6 +710,11 @@ const PendingFollowups = () => {
                         {r.lead_name}
                         <span onClick={(e) => e.stopPropagation()}>
                           <CahetPendingBadge
+                            leadId={r.lead_id}
+                            leadName={r.lead_name}
+                            phone={r.lead_phone}
+                          />
+                          <UpdeledPendingBadge
                             leadId={r.lead_id}
                             leadName={r.lead_name}
                             phone={r.lead_phone}

@@ -6,6 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { School, GraduationCap, Search, Loader2, UserPlus, CheckCircle, AlertTriangle, ListPlus, ArrowUpDown, Bot, PhoneOff } from "lucide-react";
 import { jdCategoryHint } from "@/lib/jdCategoryHint";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
+import { UpdeledPendingBadge } from "@/components/leads/UpdeledPendingBadge";
 import { isBptOrBmritCourse } from "@/components/leads/CahetRegisterDialog";
 import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
 import { Card, CardContent } from "@/components/ui/card";
@@ -1108,6 +1109,12 @@ export default function LeadBuckets() {
                         phone={lead.phone}
                         courseName={lead.course_name}
                         registeredOverride={cahetStatusMap.has(lead.id) ? (cahetStatusMap.get(lead.id) ?? null) : undefined}
+                      />
+                      <UpdeledPendingBadge
+                        leadId={lead.id}
+                        leadName={lead.name}
+                        phone={lead.phone}
+                        courseName={lead.course_name}
                       />
                     </div>
                     {!lead.ai_called && lead.ai_not_called_reason && (
