@@ -175,6 +175,17 @@ verify_jwt = false
 [functions.apply-portal-upload-doc]
 verify_jwt = false
 
+# Anonymous applicants using an academic-partner on-behalf magic link call this
+# with the time-bound token in the request body. Gateway JWT verification would
+# 401 stale applicant browser sessions before the function can validate scope.
+[functions.academic-partner-application-action]
+verify_jwt = false
+
+# Same trust model as academic-partner-application-action: the function validates
+# the on-behalf token and lead scope itself before writing audit rows.
+[functions.academic-partner-on-behalf-audit]
+verify_jwt = false
+
 # Anonymous applicants and staff list uploaded application documents through
 # this service-role function. Apply portal access is already scoped by the
 # application flow, and gateway JWT verification would 401 applicants whose
