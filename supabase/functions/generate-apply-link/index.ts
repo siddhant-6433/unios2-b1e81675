@@ -9,6 +9,7 @@
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { buildApplyPortalUrl, resolveApplyPortal } from "./portal.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -49,11 +50,18 @@ Deno.serve(async (req) => {
     const expiresAt = new Date(Date.now() + hours * 3600 * 1000).toISOString();
 
     const { data: lead, error: leadErr } = await db.from("leads")
-      .select("id, name, phone, email")
+      .select("id, name, phone, email, portal_brand, lead_institution_type, source, origin_domain, landing_page, campus_id")
       .eq("id", lead_id)
       .single();
     if (leadErr || !lead) return json({ error: "Lead not found" }, 404);
     if (!lead.phone) return json({ error: "Lead has no phone number" }, 400);
+
+    const { data: applications, error: appErr } = await db.from("applications")
+      .select("flags, program_category, course_selections")
+      .eq("lead_id", lead_id)
+      .order("created_at", { ascending: false })
+      .limit(5);
+    if (appErr) return json({ error: appErr.message }, 500);
 
     const { data: profile } = await db.from("profiles").select("id").eq("user_id", user.id).maybeSingle();
 
@@ -72,8 +80,9 @@ Deno.serve(async (req) => {
       description: `Magic login link generated (valid ${hours}h)`,
     });
 
-    const url = `${PORTAL_BASE}?token=${tokenRow.token}`;
-    return json({ url, token: tokenRow.token, expires_at: tokenRow.expires_at });
+    const portal = resolveApplyPortal(lead, applications || []);
+    const url = buildApplyPortalUrl(PORTAL_BASE, portal, tokenRow.token);
+    return json({ url, token: tokenRow.token, expires_at: tokenRow.expires_at, portal });
   } catch (err: any) {
     console.error("[generate-apply-link]", err);
     return json({ error: err.message }, 500);
