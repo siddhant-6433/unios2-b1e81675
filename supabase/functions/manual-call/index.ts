@@ -48,6 +48,7 @@ Deno.serve(async (req) => {
     const PLIVO_DIALER_PHONE_NUMBERS = Deno.env.get("PLIVO_DIALER_PHONE_NUMBERS");
     const VOICE_AGENT_URL = Deno.env.get("VOICE_AGENT_URL");
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
     const dialerNumberSecrets = [PLIVO_DIALER_PHONE_NUMBERS, PLIVO_DIALER_PHONE_NUMBER];
@@ -77,11 +78,36 @@ Deno.serve(async (req) => {
     const authHeader = req.headers.get("authorization") || "";
     if (!authHeader) return json({ error: "Unauthorized" }, 401);
 
+    const callerDb = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: authData, error: authErr } = await callerDb.auth.getUser();
+    if (authErr || !authData?.user?.id) return json({ error: "Unauthorized" }, 401);
+
     const db = createClient(supabaseUrl, serviceRoleKey);
-    const { lead_id, caller_user_id } = await req.json();
+    const { lead_id } = await req.json();
     if (!lead_id) return json({ error: "lead_id required" }, 400);
 
-    const userId = caller_user_id || null;
+    const userId = authData.user.id;
+
+    const { data: callerRole, error: roleErr } = await db.rpc("get_user_role", { _user_id: userId });
+    if (roleErr || !callerRole) return json({ error: "Caller role not found" }, 403);
+    if (["student", "parent"].includes(String(callerRole))) {
+      return json({ error: "Only staff and academic partners can place cloud calls." }, 403);
+    }
+    if (callerRole === "academic_partner") {
+      const { data: canCallLead, error: scopeErr } = await db.rpc("can_academic_partner_view_mapped_lead", {
+        _user_id: userId,
+        _lead_id: lead_id,
+      });
+      if (scopeErr) {
+        console.error("Academic partner call scope check failed:", scopeErr);
+        return json({ error: "Could not verify lead access." }, 500);
+      }
+      if (!canCallLead) {
+        return json({ error: "You can call only leads assigned to your academic partner account." }, 403);
+      }
+    }
 
     const { data: latestManualCall, error: latestManualCallErr } = await db
       .from("ai_call_records")

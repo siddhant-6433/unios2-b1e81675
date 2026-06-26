@@ -42,6 +42,7 @@ jobs:
     name: Dry-run migration diff
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
+    environment: production-db
     env:
       # Hoist secrets to job level so the migration health script can link to
       # Supabase without per-step duplication.
@@ -129,6 +130,9 @@ jobs:
 
       - name: Deploy application deletion function
         run: supabase functions deploy delete-application --no-verify-jwt
+
+      - name: Deploy manual call function
+        run: supabase functions deploy manual-call --no-verify-jwt
 
       - name: Verify production has no pending migrations
         run: npm run db:migrations:clean

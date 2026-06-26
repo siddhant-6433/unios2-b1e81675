@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, SafeAreaView,
@@ -5,15 +6,18 @@ import {
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
-import { colors, radius } from '../../constants/Colors';
+import { colors, radius, spacing, typography } from '../../constants/Colors';
 import {
-  Clock, UserCheck, CalendarOff, MapPin, Briefcase,
-  Check, X, ChevronRight, Inbox as InboxIcon,
+  Clock, UserCheck, CalendarOff,
+  Check, X, Inbox as InboxIcon,
 } from 'lucide-react-native';
+import { PillFilter, ScreenHeader } from '../../components/ui/DashboardPrimitives';
 
 interface ApprovalItem {
   id: string;
   type: 'leave' | 'face' | 'attendance_reg';
+  source: 'HR' | 'Attendance' | 'Gatepass' | 'Messages' | 'WhatsApp';
+  priority: 'normal' | 'urgent';
   user_name: string;
   user_phone: string;
   date: string;
@@ -26,6 +30,7 @@ export default function InboxScreen() {
   const [items, setItems] = useState<ApprovalItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState<string | null>(null);
+  const [filter, setFilter] = useState<'all' | 'approvals' | 'messages'>('all');
 
   useEffect(() => { fetchApprovals(); }, []);
 
@@ -53,6 +58,8 @@ export default function InboxScreen() {
         allItems.push({
           id: l.id,
           type: 'leave',
+          source: 'HR',
+          priority: 'normal',
           user_name: p?.display_name || 'Unknown',
           user_phone: p?.phone || '',
           date: l.start_date,
@@ -81,6 +88,8 @@ export default function InboxScreen() {
         allItems.push({
           id: f.id,
           type: 'face',
+          source: 'Attendance',
+          priority: 'urgent',
           user_name: p?.display_name || 'Unknown',
           user_phone: p?.phone || '',
           date: f.created_at,
@@ -90,7 +99,7 @@ export default function InboxScreen() {
       }
     }
 
-    setItems(allItems);
+    setItems(allItems.sort((a, b) => Number(b.priority === 'urgent') - Number(a.priority === 'urgent')));
     setLoading(false);
   };
 
@@ -142,6 +151,12 @@ export default function InboxScreen() {
     return colors.background;
   };
 
+  const visibleItems = items.filter((item) => {
+    if (filter === 'approvals') return ['leave', 'face', 'attendance_reg'].includes(item.type);
+    if (filter === 'messages') return item.source === 'Messages' || item.source === 'WhatsApp';
+    return true;
+  });
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -155,19 +170,33 @@ export default function InboxScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <Text style={styles.title}>Inbox</Text>
-        <Text style={styles.subtitle}>{items.length} pending approval{items.length !== 1 ? 's' : ''}</Text>
+        <ScreenHeader title="Inbox" subtitle={`${items.length} pending item${items.length !== 1 ? 's' : ''}`} />
+        <PillFilter
+          value={filter}
+          onChange={setFilter}
+          options={[
+            { value: 'all', label: 'All' },
+            { value: 'approvals', label: 'Approvals' },
+            { value: 'messages', label: 'Messages' },
+          ]}
+        />
 
-        {items.length === 0 ? (
+        {visibleItems.length === 0 ? (
           <View style={styles.emptyCard}>
             <InboxIcon size={32} color={colors.textMuted} />
             <Text style={styles.emptyTitle}>All caught up!</Text>
-            <Text style={styles.emptyText}>No pending approvals</Text>
+            <Text style={styles.emptyText}>No pending items in this queue</Text>
           </View>
         ) : (
           <View style={styles.list}>
-            {items.map((item) => (
+            {visibleItems.map((item) => (
               <View key={`${item.type}-${item.id}`} style={styles.card}>
+                <View style={styles.badgeRow}>
+                  <Text style={styles.sourceBadge}>{item.source}</Text>
+                  <Text style={[styles.priorityBadge, item.priority === 'urgent' && styles.priorityUrgent]}>
+                    {item.priority}
+                  </Text>
+                </View>
                 {/* Face registration: show selfie prominently */}
                 {item.type === 'face' && item.image_url ? (
                   <>
@@ -223,16 +252,39 @@ export default function InboxScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  scroll: { padding: 16, paddingBottom: 100 },
+  scroll: { padding: spacing.lg, paddingBottom: 110, gap: spacing.lg },
   title: { fontSize: 24, fontWeight: '700', color: colors.text, paddingTop: 8 },
   subtitle: { fontSize: 13, color: colors.textSecondary, marginTop: 2, marginBottom: 16 },
   list: { gap: 12 },
   card: {
-    backgroundColor: colors.card, borderRadius: 16, padding: 16,
+    backgroundColor: colors.card, borderRadius: 24, padding: 16,
     borderWidth: 1, borderColor: colors.cardBorder, gap: 14,
   },
+  badgeRow: { flexDirection: 'row', gap: spacing.sm },
+  sourceBadge: {
+    ...typography.caption,
+    color: colors.primary,
+    fontWeight: '700',
+    backgroundColor: colors.primaryLight,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.full,
+    overflow: 'hidden',
+  },
+  priorityBadge: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    fontWeight: '700',
+    backgroundColor: colors.background,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.full,
+    overflow: 'hidden',
+    textTransform: 'capitalize',
+  },
+  priorityUrgent: { color: '#BE123C', backgroundColor: '#FFE4E6' },
   cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  typeIcon: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  typeIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   userName: { fontSize: 15, fontWeight: '600', color: colors.text },
   detail: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
   faceImage: {

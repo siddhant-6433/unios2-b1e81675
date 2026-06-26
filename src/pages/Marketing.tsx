@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   AlertTriangle,
-  CalendarDays,
   CheckCircle2,
   ListPlus,
   Loader2,
@@ -21,9 +22,9 @@ import {
   StopCircle,
   XCircle,
 } from "lucide-react";
+import { getDatePresetRange, getEndExclusiveIso, type DatePreset } from "@/lib/datePresets";
 
 type Channel = "whatsapp" | "email";
-type DatePreset = "all" | "7d" | "30d" | "90d" | "custom";
 
 interface CampaignRow {
   id: string;
@@ -73,39 +74,14 @@ const fmtDate = (value: string | null) => {
   });
 };
 
-const toDateInputValue = (date: Date) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
-
-const getPresetStart = (preset: Exclude<DatePreset, "all" | "custom">) => {
-  const days = preset === "7d" ? 7 : preset === "30d" ? 30 : 90;
-  const date = new Date();
-  date.setHours(0, 0, 0, 0);
-  date.setDate(date.getDate() - days + 1);
-  return date.toISOString();
-};
-
-const getEndExclusive = (dateValue: string) => {
-  const date = new Date(`${dateValue}T00:00:00`);
-  date.setDate(date.getDate() + 1);
-  return date.toISOString();
-};
-
 export default function Marketing() {
-  const today = useMemo(() => toDateInputValue(new Date()), []);
-  const thirtyDaysAgo = useMemo(() => {
-    const date = new Date();
-    date.setDate(date.getDate() - 29);
-    return toDateInputValue(date);
-  }, []);
+  const { role } = useAuth();
+  const initialCustomRange = useMemo(() => getDatePresetRange("last_30"), []);
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [datePreset, setDatePreset] = useState<DatePreset>("all");
-  const [dateFrom, setDateFrom] = useState(thirtyDaysAgo);
-  const [dateTo, setDateTo] = useState(today);
+  const [dateFrom, setDateFrom] = useState(initialCustomRange.from);
+  const [dateTo, setDateTo] = useState(initialCustomRange.to);
   const [detailCampaign, setDetailCampaign] = useState<CampaignRow | null>(null);
   const [failures, setFailures] = useState<FailureRow[]>([]);
   const [failuresLoading, setFailuresLoading] = useState(false);
@@ -114,14 +90,21 @@ export default function Marketing() {
 
   const dateBounds = useMemo(() => {
     if (datePreset === "all") return { from: null, to: null };
-    if (datePreset !== "custom") return { from: getPresetStart(datePreset), to: null };
+    const range = datePreset === "custom"
+      ? { from: dateFrom, to: dateTo }
+      : getDatePresetRange(datePreset);
     return {
-      from: dateFrom ? new Date(`${dateFrom}T00:00:00`).toISOString() : null,
-      to: dateTo ? getEndExclusive(dateTo) : null,
+      from: range.from ? new Date(`${range.from}T00:00:00`).toISOString() : null,
+      to: range.to ? getEndExclusiveIso(range.to) : null,
     };
   }, [dateFrom, datePreset, dateTo]);
 
   const load = useCallback(async () => {
+    if (role === "academic_partner") {
+      setCampaigns([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     let whatsappQuery = supabase
       .from("whatsapp_campaigns" as any)
@@ -192,7 +175,7 @@ export default function Marketing() {
 
     setCampaigns([...waRows, ...emailRows].sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
     setLoading(false);
-  }, [dateBounds]);
+  }, [dateBounds, role]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -298,6 +281,10 @@ export default function Marketing() {
     await load();
   };
 
+  if (role === "academic_partner") {
+    return <Navigate to="/academic-partner-portal" replace />;
+  }
+
   return (
     <div className="space-y-5 p-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -308,42 +295,17 @@ export default function Marketing() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
-            <CalendarDays className="h-4 w-4 text-muted-foreground" />
-            <select
-              value={datePreset}
-              onChange={(event) => setDatePreset(event.target.value as DatePreset)}
-              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-              aria-label="Campaign date range"
-            >
-              <option value="all">All time</option>
-              <option value="7d">Last 7 days</option>
-              <option value="30d">Last 30 days</option>
-              <option value="90d">Last 90 days</option>
-              <option value="custom">Custom</option>
-            </select>
-            {datePreset === "custom" && (
-              <>
-                <input
-                  type="date"
-                  value={dateFrom}
-                  max={dateTo || undefined}
-                  onChange={(event) => setDateFrom(event.target.value)}
-                  className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-                  aria-label="Campaign start date"
-                />
-                <span className="text-xs text-muted-foreground">to</span>
-                <input
-                  type="date"
-                  value={dateTo}
-                  min={dateFrom || undefined}
-                  onChange={(event) => setDateTo(event.target.value)}
-                  className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-                  aria-label="Campaign end date"
-                />
-              </>
-            )}
-          </div>
+          <DateRangeFilter
+            preset={datePreset}
+            fromDate={dateFrom}
+            toDate={dateTo}
+            onPresetChange={setDatePreset}
+            onFromDateChange={setDateFrom}
+            onToDateChange={setDateTo}
+            className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2"
+            inputClassName="h-8 rounded-md border border-input bg-background px-2 text-sm"
+            ariaPrefix="Campaign"
+          />
           <Button asChild variant="outline" size="sm">
             <Link to="/lists"><ListPlus className="mr-2 h-4 w-4" /> Lists</Link>
           </Button>

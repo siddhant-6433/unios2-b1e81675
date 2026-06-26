@@ -39,6 +39,10 @@ export function GlobalActionBar() {
 
   useEffect(() => {
     if (!role || ["student", "parent"].includes(role)) return;
+    if (role === "academic_partner") {
+      setItems([]);
+      return;
+    }
     if (!profileId && isCounsellor) return;
 
     const fetchCounts = async () => {

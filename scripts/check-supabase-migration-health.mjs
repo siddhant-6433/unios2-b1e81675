@@ -108,7 +108,9 @@ if (mode === "apply") {
   console.log("Supabase migration apply completed. Verifying production is clean...");
 }
 
-const dryRun = run("supabase", ["db", "push", "--dry-run"]);
+const dryRunArgs = ["db", "push", "--dry-run"];
+if (mode === "validate") dryRunArgs.push("--include-all");
+const dryRun = run("supabase", dryRunArgs);
 printResult(dryRun);
 
 if (dryRun.status !== 0) {

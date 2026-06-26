@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { comparePaymentGateways } from "@/lib/paymentGatewayResolver";
 
 export interface PaymentGateway {
   gateway: string;
@@ -10,6 +11,7 @@ export interface PaymentGateway {
   supports_token_fee?: boolean;
   supports_student_fee?: boolean;
   supports_alumni_service?: boolean;
+  priority?: number;
 }
 
 export function usePaymentGateways() {
@@ -25,7 +27,7 @@ export function usePaymentGateways() {
       .select("gateway, display_name, is_enabled_fee_collection, is_enabled_portal_payment, supports_application_fee, supports_token_fee, supports_student_fee, supports_alumni_service")
       .order("gateway");
     if (qErr) setError(qErr.message);
-    setGateways((data as PaymentGateway[]) || []);
+    setGateways([...(data as PaymentGateway[] || [])].sort(comparePaymentGateways));
     setLoading(false);
   };
 

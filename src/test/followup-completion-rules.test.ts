@@ -102,7 +102,8 @@ describe("follow-up completion rules", () => {
     expect(cloudDialerPage).toContain("canClearPendingFollowupsForCurrentLead");
     expect(cloudDialerPage).toContain('if (disposition !== "not_answered") return true');
     expect(cloudDialerPage).toContain(".eq(\"disposition\", \"not_answered\")");
-    expect(cloudDialerPage).toContain("return (count || 0) >= 2");
+    expect(cloudDialerPage).toContain(".limit(2)");
+    expect(cloudDialerPage).toContain("return (data || []).length >= 2");
     expect(cloudDialerPage).toContain("allowPostDispositionFollowup");
     expect(cloudDialerPage).toContain("First not answered attempt today. Existing pending follow-up remains open.");
   });

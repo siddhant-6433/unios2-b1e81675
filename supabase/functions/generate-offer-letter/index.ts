@@ -97,6 +97,23 @@ function isBptOrBmritCourseName(courseName: string | null | undefined): boolean 
   );
 }
 
+function isDeledCourseName(courseName: string | null | undefined): boolean {
+  if (!courseName) return false;
+  const c = courseName.toLowerCase();
+  return (
+    c.includes("d.el.ed") ||
+    c.includes("d el ed") ||
+    c.includes("deled") ||
+    (c.includes("diploma") && c.includes("elementary") && c.includes("education")) ||
+    c.includes("btc")
+  );
+}
+
+function isUpdeledExamName(name: string | null | undefined): boolean {
+  if (!name) return false;
+  return /up\s*d\.?\s*el\.?\s*ed|updeled|d\.?\s*el\.?\s*ed counselling|elementary education counselling/i.test(name);
+}
+
 interface ApplicationEntranceExam {
   exam_name?: string | null;
   registration_no?: string | null;
@@ -121,6 +138,21 @@ function cahetRegistrationFromApplication(app: ApplicationCahetSource | null): {
     registration_no: registrationNo,
     document_url: null,
     notes: registeredName ? `Name on CAHET form: ${registeredName}` : "Entered in application form",
+    registered_at: null,
+  };
+}
+
+function updeledRegistrationFromApplication(app: ApplicationCahetSource | null): { registration_no: string; document_url: string | null; notes: string | null; registered_at: string | null } | null {
+  const exams = app?.academic_details?.entrance_exams;
+  if (!Array.isArray(exams)) return null;
+  const exam = exams.find((entry) => isUpdeledExamName(String(entry?.exam_name || "")));
+  const registrationNo = String(exam?.registration_no || "").trim();
+  if (!registrationNo) return null;
+  const registeredName = String(exam?.registered_name || "").trim();
+  return {
+    registration_no: registrationNo,
+    document_url: null,
+    notes: registeredName ? `Name on UPDELED form: ${registeredName}` : "Entered in application form",
     registered_at: null,
   };
 }
@@ -470,6 +502,7 @@ interface BuildOpts {
   // recomputed to subtract these from the post-scholarship total.
   waivers: { term: string; amount: number }[];
   cahetRegistration?: { registration_no: string; document_url: string | null; notes: string | null; registered_at: string | null } | null;
+  updeledRegistration?: { registration_no: string; document_url: string | null; notes: string | null; registered_at: string | null } | null;
 }
 
 function isDaottCourse(course: BuildOpts["course"]) {
@@ -512,6 +545,7 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
   await newPage(ctx);
   const isDaott = isDaottCourse(opts.course);
   const isCahetRoute = String(opts.offer.entrance_exam_name || "").toLowerCase().includes("cahet");
+  const isUpdeledRoute = isUpdeledExamName(opts.offer.entrance_exam_name);
   const applicantName = sentenceCaseName(opts.lead.name);
   const institutionName = institutionNameForOffer(opts.branding?.name, opts.campus?.name);
 
@@ -563,6 +597,19 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
     ]);
     if (opts.cahetRegistration.notes) {
       drawKVGrid(ctx, [{ label: "CAHET Notes", value: opts.cahetRegistration.notes }], 26, 1);
+    }
+  }
+
+  if (opts.updeledRegistration && (isDeledCourseName(opts.course?.name) || isUpdeledRoute)) {
+    ctx.y -= 4;
+    drawKVGrid(ctx, [
+      { label: "UPDELED Status", value: "Registered" },
+      { label: "UPDELED Registration No.", value: opts.updeledRegistration.registration_no || "-" },
+      { label: "Registered On", value: fmtDate(opts.updeledRegistration.registered_at) },
+      { label: "Proof", value: opts.updeledRegistration.document_url ? "Uploaded" : "Not attached" },
+    ]);
+    if (opts.updeledRegistration.notes) {
+      drawKVGrid(ctx, [{ label: "UPDELED Notes", value: opts.updeledRegistration.notes }], 26, 1);
     }
   }
 
@@ -864,6 +911,21 @@ Deno.serve(async (req) => {
       });
     }
 
+    const { data: updeledRegistrationRow } = await admin
+      .from("updeled_registrations")
+      .select("registration_no, document_url, notes, registered_at")
+      .eq("lead_id", offer.lead_id)
+      .maybeSingle();
+    const updeledRegistration = updeledRegistrationRow || updeledRegistrationFromApplication(applicationRow);
+    if (isDeledCourseName(course?.name) && !updeledRegistration) {
+      return new Response(JSON.stringify({
+        error: "UPDELED registration details are required before issuing an offer letter for D.El.Ed.",
+      }), {
+        status: 409,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Token fee on the PDF: this is the amount the candidate must pay before
     // downloading the education-loan support letter — i.e. 25% of the
     // post-scholarship + post-waiver Year-1 fee, floored at the
@@ -903,6 +965,7 @@ Deno.serve(async (req) => {
       applicationId,
       waivers,
       cahetRegistration: cahetRegistration || null,
+      updeledRegistration: updeledRegistration || null,
     });
 
     const path = `offer-letters/${offer.lead_id}/${offer.id}.pdf`;

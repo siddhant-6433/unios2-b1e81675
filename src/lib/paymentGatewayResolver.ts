@@ -61,7 +61,24 @@ const SUPPORT_FIELD: Record<PaymentContext, keyof PaymentGateway> = {
   alumni_service: "supports_alumni_service",
 };
 
+export const DEFAULT_GATEWAY_PRIORITY: Record<string, number> = {
+  razorpay: 10,
+  icici: 20,
+  easebuzz: 30,
+  cashfree: 40,
+};
+
 const PILOT_ROLES = new Set(["super_admin", "admission_head", "campus_admin", "accountant"]);
+
+export function comparePaymentGateways(a: PaymentGateway, b: PaymentGateway): number {
+  const aPriority = a.priority ?? DEFAULT_GATEWAY_PRIORITY[a.gateway] ?? 100;
+  const bPriority = b.priority ?? DEFAULT_GATEWAY_PRIORITY[b.gateway] ?? 100;
+  return aPriority - bPriority || a.display_name.localeCompare(b.display_name);
+}
+
+export function preferredGateway(gateways: PaymentGateway[]): string | null {
+  return gateways[0]?.gateway ?? null;
+}
 
 function ruleMatchesOwner(rule: GatewayRule, owner: GatewayOwnerScope): boolean {
   if (rule.scope_type === "global") return rule.scope_id == null;
@@ -106,7 +123,7 @@ export function resolveGatewayRules(
 
   return visibleMatches
     .filter((gateway) => SPECIFICITY[gateway.scope_type] === bestSpecificity)
-    .sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100) || a.display_name.localeCompare(b.display_name));
+    .sort(comparePaymentGateways);
 }
 
 async function resolveCourseOwner(courseId?: string | null): Promise<GatewayOwnerScope> {
@@ -266,8 +283,8 @@ export function useScopedPaymentGateways(args: UseScopedGatewaysArgs) {
   const fallbackGateways = useMemo<PaymentGateway[]>(() => {
     if (gateways.length > 0 || loading) return gateways;
     return [{
-      gateway: "easebuzz",
-      display_name: "EaseBuzz",
+      gateway: args.context === "alumni_service" ? "easebuzz" : "razorpay",
+      display_name: args.context === "alumni_service" ? "EaseBuzz" : "Razorpay",
       is_staff_pilot_only: false,
       priority: 999,
     }];

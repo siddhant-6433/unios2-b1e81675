@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Loader2, UserCheck } from "lucide-react";
+import { leadTransitionStagePatch, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 
 interface InterviewScoringDialogProps {
   open: boolean;
@@ -26,12 +27,16 @@ export function InterviewScoringDialog({ open, onOpenChange, leadId, leadName, c
 
   const handleSave = async () => {
     setSaving(true);
-    const updates: any = { interview_score: score, interview_result: result };
-    // Auto-advance: scoring means interview stage at minimum
-    // If passed → move toward offer_sent, if failed → rejected
-    if (result === "passed") updates.stage = "offer_sent";
-    else if (result === "failed") updates.stage = "rejected";
-    else updates.stage = "interview";
+    const { data: lead } = await supabase.from("leads").select("stage").eq("id", leadId).maybeSingle();
+    const transition = resolveLeadTransitionCommand({
+      currentStage: lead?.stage || "interview",
+      command: result === "passed"
+        ? "recordInterviewPassed"
+        : result === "failed"
+          ? "recordInterviewFailed"
+          : "recordInterviewPending",
+    });
+    const updates: any = leadTransitionStagePatch(transition, { interview_score: score, interview_result: result });
 
     const { error } = await supabase.from("leads").update(updates).eq("id", leadId);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); setSaving(false); return; }

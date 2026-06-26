@@ -43,6 +43,8 @@ const readFunctionErrorMessage = async (error: unknown) => {
   return msg;
 };
 
+const isEmailLike = (value: string) => /\S+@\S+\.\S+/.test(value.trim());
+
 const Login = () => {
   const { session, loading, role, roleLoaded } = useAuth();
   const navigate = useNavigate();
@@ -373,15 +375,27 @@ const Login = () => {
 
   const handleStudentPasswordLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!studentUsername.trim() || !studentPassword) {
+    const username = studentUsername.trim();
+    if (!username || !studentPassword) {
       toast({ title: "Enter username and password", variant: "destructive" });
       return;
     }
     setSubmitting(true);
     try {
+      if (isEmailLike(username)) {
+        sessionStorage.removeItem("unios_impersonation");
+        const { error } = await supabase.auth.signInWithPassword({
+          email: username,
+          password: studentPassword,
+        });
+        if (error) throw error;
+        navigate("/");
+        return;
+      }
+
       const { data, error } = await supabase.functions.invoke("student-password-login", {
         body: {
-          username: studentUsername.trim(),
+          username,
           password: studentPassword,
         },
       });
@@ -646,7 +660,7 @@ const Login = () => {
                 Back to WhatsApp sign-in
               </button>
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Username</label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Username or email</label>
                 <input
                   value={studentUsername}
                   onChange={(e) => setStudentUsername(e.target.value)}

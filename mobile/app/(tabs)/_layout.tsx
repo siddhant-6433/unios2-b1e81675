@@ -4,9 +4,8 @@ import { Redirect } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
 import { colors } from '../../constants/Colors';
 import {
-  Home, Fingerprint, User, BookOpen, Bell,
-  IndianRupee, Inbox, Users, Briefcase,
-  Camera,
+  Home, User, BookOpen, Bell,
+  IndianRupee, Inbox, Briefcase,
 } from 'lucide-react-native';
 
 type TabConfig = {
@@ -16,39 +15,34 @@ type TabConfig = {
 };
 
 const roleTabs: Record<string, TabConfig[]> = {
-  // HR Admin / Super Admin: full platform view
   admin: [
-    { name: 'index', title: 'Home', icon: Home },
+    { name: 'index', title: 'Me', icon: Home },
     { name: 'inbox', title: 'Inbox', icon: Inbox },
-    { name: 'student-photos', title: 'Photos', icon: Camera },
-    { name: 'hr', title: 'HR', icon: Briefcase },
-    { name: 'team', title: 'Team', icon: Users },
-    { name: 'profile', title: 'Profile', icon: User },
+    { name: 'work', title: 'Work', icon: Briefcase },
   ],
-  // Regular employee/staff
   employee: [
-    { name: 'index', title: 'Home', icon: Home },
-    { name: 'punch', title: 'Punch', icon: Fingerprint },
-    { name: 'hr', title: 'HR', icon: Briefcase },
-    { name: 'profile', title: 'Profile', icon: User },
+    { name: 'index', title: 'Me', icon: Home },
+    { name: 'inbox', title: 'Inbox', icon: Inbox },
+    { name: 'work', title: 'Work', icon: Briefcase },
   ],
   office: [
-    { name: 'index', title: 'Home', icon: Home },
-    { name: 'punch', title: 'Punch', icon: Fingerprint },
-    { name: 'student-photos', title: 'Photos', icon: Camera },
-    { name: 'hr', title: 'HR', icon: Briefcase },
-    { name: 'profile', title: 'Profile', icon: User },
+    { name: 'index', title: 'Me', icon: Home },
+    { name: 'inbox', title: 'Inbox', icon: Inbox },
+    { name: 'work', title: 'Work', icon: Briefcase },
   ],
-  // Faculty / Teacher
+  librarian: [
+    { name: 'index', title: 'Me', icon: Home },
+    { name: 'inbox', title: 'Inbox', icon: Inbox },
+    { name: 'work', title: 'Work', icon: Briefcase },
+  ],
   faculty: [
-    { name: 'index', title: 'Home', icon: Home },
-    { name: 'classes', title: 'Classes', icon: BookOpen },
-    { name: 'hr', title: 'HR', icon: Briefcase },
-    { name: 'profile', title: 'Profile', icon: User },
+    { name: 'index', title: 'Me', icon: Home },
+    { name: 'inbox', title: 'Inbox', icon: Inbox },
+    { name: 'work', title: 'Work', icon: Briefcase },
   ],
-  // Student
   student: [
     { name: 'index', title: 'Home', icon: Home },
+    { name: 'library', title: 'Library', icon: BookOpen },
     { name: 'fees', title: 'Fees', icon: IndianRupee },
     { name: 'notices', title: 'Notices', icon: Bell },
     { name: 'profile', title: 'Profile', icon: User },
@@ -56,6 +50,7 @@ const roleTabs: Record<string, TabConfig[]> = {
   // Parent
   parent: [
     { name: 'index', title: 'Home', icon: Home },
+    { name: 'library', title: 'Library', icon: BookOpen },
     { name: 'fees', title: 'Fees', icon: IndianRupee },
     { name: 'notices', title: 'Notices', icon: Bell },
     { name: 'profile', title: 'Profile', icon: User },
@@ -65,6 +60,7 @@ const roleTabs: Record<string, TabConfig[]> = {
 function getTabSet(role: AppRole | null): TabConfig[] {
   if (!role) return roleTabs.student;
   if (['super_admin', 'campus_admin', 'principal', 'admission_head'].includes(role)) return roleTabs.admin;
+  if (role === 'librarian') return roleTabs.librarian;
   if (['faculty', 'teacher', 'ib_coordinator'].includes(role)) return roleTabs.faculty;
   if (['office_admin', 'office_assistant'].includes(role)) return roleTabs.office;
   if (['counsellor', 'accountant', 'data_entry', 'hostel_warden'].includes(role)) return roleTabs.employee;
@@ -74,7 +70,7 @@ function getTabSet(role: AppRole | null): TabConfig[] {
 }
 
 // All possible tab screen file names
-const allScreens = ['index', 'punch', 'student-photos', 'inbox', 'hr', 'team', 'classes', 'fees', 'notices', 'leave', 'profile'];
+const allScreens = ['index', 'work', 'punch', 'student-photos', 'inbox', 'hr', 'team', 'classes', 'library', 'fees', 'notices', 'leave', 'profile'];
 
 export default function TabLayout() {
   const { user, role, loading } = useAuth();

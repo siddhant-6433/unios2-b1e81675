@@ -28,10 +28,35 @@ import { TokenFeePanel } from "@/components/applicant/TokenFeePanel";
 import { ApplicationPreview, type PreviewDoc } from "@/components/applicant/ApplicationPreview";
 import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDialog";
 import { ApplicantDeadlineTicker } from "@/components/layout/ApplicantDeadlineTicker";
+import { leadTransitionStagePatch, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { captureAttribution, trackPixelLead } from "@/lib/analytics";
 
+type OnBehalfContext = {
+  mode: "academic_partner_on_behalf";
+  token: string;
+  actor_role: string;
+  actor_user_id: string;
+  academic_partner_id: string;
+  academic_partner_name: string;
+  lead_id: string;
+  candidate_phone: string;
+};
+
+function OnBehalfBanner({ context, candidateName }: { context: OnBehalfContext | null; candidateName: string }) {
+  if (!context) return null;
+  return (
+    <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+      <div className="font-semibold">Academic partner on-behalf mode</div>
+      <div className="mt-0.5 text-xs leading-relaxed text-amber-800">
+        You are completing this application for {candidateName || "the candidate"} as {context.academic_partner_name}.
+        Application changes and payments are internally audited under the academic partner account. Offer acceptance requires OTP confirmation from the student phone.
+      </div>
+    </div>
+  );
+}
+
 // ─── OTP Login Screen ───
-function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: string) => void }) {
+function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: string, onBehalf?: OnBehalfContext | null) => void }) {
   const { toast } = useToast();
   const [phone, setPhone] = useState("");
 
@@ -104,7 +129,7 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
         // Mirror the OTP login flow: just hand phone+name to onAuthenticated.
         // The apply portal is session-less for applicants — RLS on `applications`
         // already permits anon writes scoped by phone.
-        onAuthenticated(data.phone, data.name || "Applicant");
+        onAuthenticated(data.phone, data.name || "Applicant", data.on_behalf || null);
       } catch (err: any) {
         toast({
           title: "Login link expired or invalid",
@@ -1026,7 +1051,7 @@ function AllReceiptsDialog({
 }
 
 function ApplicationDashboardView({
-  apps, leadName, offerLetters, leadAdmissions, openAppId, setOpenAppId, onContinue, onStartNew, onLogout,
+  apps, leadName, offerLetters, leadAdmissions, openAppId, setOpenAppId, onContinue, onStartNew, onLogout, onBehalfContext,
 }: {
   apps: any[];
   leadName: string;
@@ -1037,6 +1062,7 @@ function ApplicationDashboardView({
   onContinue: (app: any) => void;
   onStartNew: () => void;
   onLogout: () => void;
+  onBehalfContext: OnBehalfContext | null;
 }) {
   const portal = usePortal();
   // Which app's fee-receipt dialog is open. Builds the same modern receipt
@@ -1083,6 +1109,7 @@ function ApplicationDashboardView({
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
+        <OnBehalfBanner context={onBehalfContext} candidateName={leadName} />
 
         {/* Welcome strip — state-aware nudge */}
         {(() => {
@@ -1352,6 +1379,7 @@ function ApplicationDashboardView({
                       ?.map((c: any) => c.course_name)
                       .filter(Boolean)
                       .join(", ") || null}
+                    onBehalfContext={onBehalfContext}
                   />
                 )}
               </div>
@@ -1391,6 +1419,7 @@ const ApplyPortal = () => {
   const [phone, setPhone] = useState("");
   const [leadName, setLeadName] = useState("");
   const [childDob, setChildDob] = useState("");
+  const [onBehalfContext, setOnBehalfContext] = useState<OnBehalfContext | null>(null);
   const [leadSource] = useState<string>(() => captureUtmSource());
   // True while we're checking localStorage for a saved session — prevents
   // flashing the OTP login screen before we know if the user is already in.
@@ -1407,9 +1436,9 @@ const ApplyPortal = () => {
     try {
       const raw = localStorage.getItem(PORTAL_AUTH_KEY);
       if (raw) {
-        const { phone: p, name: n, expiresAt } = JSON.parse(raw);
+        const { phone: p, name: n, expiresAt, onBehalf } = JSON.parse(raw);
         if (p && expiresAt && expiresAt > Date.now()) {
-          handleAuthenticated(p, n || "Applicant").finally(() => setRestoringSession(false));
+          handleAuthenticated(p, n || "Applicant", onBehalf || null).finally(() => setRestoringSession(false));
           return;
         }
       }
@@ -1431,6 +1460,7 @@ const ApplyPortal = () => {
     setLeadAdmissions({});
     setPreviewDocs([]);
     setHasDashboard(false);
+    setOnBehalfContext(null);
   };
 
   const [app, setApp] = useState<ApplicationData | null>(null);
@@ -1462,15 +1492,17 @@ const ApplyPortal = () => {
   const steps = isSchool ? SCHOOL_STEPS : DEFAULT_STEPS;
   const totalSteps = steps.length;
 
-  const handleAuthenticated = async (phoneVal: string, name: string) => {
+  const handleAuthenticated = async (phoneVal: string, name: string, onBehalf: OnBehalfContext | null = null) => {
     setPhone(phoneVal);
     setLeadName(name);
+    setOnBehalfContext(onBehalf);
     setAuthed(true);
     // Persist so refreshes don't log the user out (TTL: 7 days)
     try {
       localStorage.setItem(PORTAL_AUTH_KEY, JSON.stringify({
         phone: phoneVal,
         name,
+        onBehalf,
         expiresAt: Date.now() + SESSION_TTL_MS,
       }));
     } catch { /* storage quota exceeded or private mode — non-fatal */ }
@@ -1500,6 +1532,7 @@ const ApplyPortal = () => {
     //   3) flags has a `portal:*` for a DIFFERENT portal → don't match.
     const portalApps = (existingApps || []).filter(app => {
       const flags = (app.flags as string[]) || [];
+      if (onBehalf && app.lead_id !== onBehalf.lead_id) return false;
       if (flags.includes(`portal:${portal.id}`)) return true;
       const hasAnyPortalFlag = flags.some((f: string) => f.startsWith("portal:"));
       return !hasAnyPortalFlag;
@@ -1518,6 +1551,20 @@ const ApplyPortal = () => {
         const merged = [...((a.flags as string[]) || []), `portal:${portal.id}`];
         return supabase.from("applications").update({ flags: merged }).eq("id", a.id);
       })).catch(e => console.error("portal-flag self-heal failed:", e));
+    }
+
+    const forceStartNew = Boolean(onBehalf) && new URLSearchParams(window.location.search).get("start_new") === "1";
+    if (forceStartNew) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("start_new");
+      window.history.replaceState({}, "", url.toString());
+      setAppsList(null);
+      setHasDashboard(portalApps.length > 0);
+      setApp(null);
+      setSubmitted(false);
+      setShowCourseSelector(true);
+      setStep(0);
+      return;
     }
 
     // When ≥1 non-draft application exists, OR multiple apps exist, show the
@@ -1634,8 +1681,28 @@ const ApplyPortal = () => {
     setStep(0);
   };
 
+  const runOnBehalfApplicationAction = async (
+    action: "create" | "update" | "submit",
+    body: Record<string, any>,
+  ) => {
+    if (!onBehalfContext) throw new Error("Missing academic partner on-behalf context");
+    const { data, error } = await supabase.functions.invoke("academic-partner-application-action", {
+      body: {
+        token: onBehalfContext.token,
+        action,
+        ...body,
+      },
+    });
+    if (error || data?.error) {
+      const message = data?.error || error?.message || "On-behalf application action failed";
+      throw new Error(message);
+    }
+    return data?.application;
+  };
+
   const handleCourseSelected = async (sessionId: string, selections: CourseSelection[], leadId: string | null) => {
     setSaving(true);
+    const scopedLeadId = onBehalfContext?.lead_id || leadId;
 
     const primaryCategory = selections[0]?.program_category || 'undergraduate';
     const feeAmount = calculateFee(selections);
@@ -1654,16 +1721,31 @@ const ApplyPortal = () => {
         ? Object.fromEntries(Object.keys(app.completed_sections || {}).map(k => [k, false]))
         : undefined;
 
-      const { error } = await supabase
-        .from("applications")
-        .update({
-          course_selections: selections as any,
-          fee_amount: feeAmount,
-          program_category: primaryCategory,
-          session_id: sessionId,
-          ...(resetSections ? { completed_sections: resetSections } : {}),
-        })
-        .eq("id", app.id);
+      const updatePayload = {
+        course_selections: selections as any,
+        fee_amount: feeAmount,
+        program_category: primaryCategory,
+        session_id: sessionId,
+        ...(resetSections ? { completed_sections: resetSections } : {}),
+      };
+
+      let error: { message: string } | null = null;
+      try {
+        if (onBehalfContext) {
+          await runOnBehalfApplicationAction("update", {
+            application_uuid: app.id,
+            payload: updatePayload,
+          });
+        } else {
+          const res = await supabase
+            .from("applications")
+            .update(updatePayload)
+            .eq("id", app.id);
+          error = res.error;
+        }
+      } catch (err: any) {
+        error = { message: err.message || "Failed to update courses" };
+      }
 
       if (error) {
         toast({ title: "Failed to update courses", description: error.message, variant: "destructive" });
@@ -1698,7 +1780,7 @@ const ApplyPortal = () => {
     const newApp: any = {
       id: appDbId,
       application_id: appId,
-      lead_id: leadId,
+      lead_id: scopedLeadId,
       session_id: sessionId,
       status: 'draft',
       course_selections: selections,
@@ -1712,17 +1794,26 @@ const ApplyPortal = () => {
       ...(childDob ? { dob: childDob } : {}),
     };
 
-    const { error } = await supabase
-      .from("applications")
-      .insert(newApp);
+    let createError: { message: string } | null = null;
+    let inserted = newApp;
+    try {
+      if (onBehalfContext) {
+        inserted = await runOnBehalfApplicationAction("create", { payload: newApp });
+      } else {
+        const res = await supabase
+          .from("applications")
+          .insert(newApp);
+        createError = res.error;
+      }
+    } catch (err: any) {
+      createError = { message: err.message || "Failed to create application" };
+    }
 
-    if (error) {
-      toast({ title: "Failed to create application", description: error.message, variant: "destructive" });
+    if (createError) {
+      toast({ title: "Failed to create application", description: createError.message, variant: "destructive" });
       setSaving(false);
       return;
     }
-
-    const inserted = newApp;
 
     // Create/link lead via SECURITY DEFINER RPC (bypasses RLS restrictions on
     // the authenticated applicant, who has no staff role).
@@ -1732,30 +1823,32 @@ const ApplyPortal = () => {
     // originating GA4 property via Measurement Protocol. Server-side is the
     // single source of truth — we don't fire these events browser-side because
     // GA has no transaction_id on generate_lead, so dual fires would double-count.
-    let resolvedLeadId = leadId;
+    let resolvedLeadId = scopedLeadId;
     const attribution = captureAttribution(portal.id);
-    const { data: upsertedLeadId, error: leadErr } = await supabase.rpc(
-      "upsert_application_lead" as any,
-      {
-        _name: leadName,
-        _phone: phone,
-        _email: null,
-        _course_id: selections[0]?.course_id ?? null,
-        _campus_id: selections[0]?.campus_id ?? null,
-        _application_id: appId,
-        _source: leadSource,
-        ...attribution,
+    if (!onBehalfContext) {
+      const { data: upsertedLeadId, error: leadErr } = await supabase.rpc(
+        "upsert_application_lead" as any,
+        {
+          _name: leadName,
+          _phone: phone,
+          _email: null,
+          _course_id: selections[0]?.course_id ?? null,
+          _campus_id: selections[0]?.campus_id ?? null,
+          _application_id: appId,
+          _source: leadSource,
+          ...attribution,
+        }
+      );
+      if (leadErr) {
+        console.error("Failed to upsert lead for application:", leadErr);
+      } else if (upsertedLeadId) {
+        resolvedLeadId = upsertedLeadId as unknown as string;
+        // Link the application to the lead (anon UPDATE is allowed by policy)
+        await supabase.from("applications").update({ lead_id: resolvedLeadId }).eq("id", appDbId);
       }
-    );
-    if (leadErr) {
-      console.error("Failed to upsert lead for application:", leadErr);
-    } else if (upsertedLeadId) {
-      resolvedLeadId = upsertedLeadId as unknown as string;
-      // Link the application to the lead (anon UPDATE is allowed by policy)
-      await supabase.from("applications").update({ lead_id: resolvedLeadId }).eq("id", appDbId);
     }
 
-    if (resolvedLeadId) {
+    if (resolvedLeadId && !onBehalfContext) {
       await supabase.from("lead_activities").insert({
         lead_id: resolvedLeadId,
         type: "application_started",
@@ -1821,10 +1914,23 @@ const ApplyPortal = () => {
       flags,
     };
 
-    const { error } = await supabase
-      .from("applications")
-      .update(saveData)
-      .eq("id", app.id);
+    let error: { message: string } | null = null;
+    try {
+      if (onBehalfContext) {
+        await runOnBehalfApplicationAction("update", {
+          application_uuid: app.id,
+          payload: saveData,
+        });
+      } else {
+        const res = await supabase
+          .from("applications")
+          .update(saveData)
+          .eq("id", app.id);
+        error = res.error;
+      }
+    } catch (err: any) {
+      error = { message: err.message || "Save failed" };
+    }
 
     if (error) {
       toast({ title: "Save failed", description: error.message, variant: "destructive" });
@@ -1834,7 +1940,7 @@ const ApplyPortal = () => {
 
     // Sync the linked lead's name when the candidate's full_name changes
     // so the CRM shows the real name instead of "Applicant"
-    if (app.lead_id && updates.full_name && updates.full_name.trim() && updates.full_name !== leadName) {
+    if (!onBehalfContext && app.lead_id && updates.full_name && updates.full_name.trim() && updates.full_name !== leadName) {
       await supabase
         .from("leads")
         .update({ name: updates.full_name.trim(), person_role: "applicant" as any })
@@ -1850,14 +1956,27 @@ const ApplyPortal = () => {
     if (!app) return;
     setSaving(true);
 
-    const { error } = await supabase
-      .from("applications")
-      .update({
-        status: 'submitted',
-        submitted_at: new Date().toISOString(),
-        completed_sections: { ...app.completed_sections, review: true } as any,
-      })
-      .eq("id", app.id);
+    let error: { message: string } | null = null;
+    try {
+      if (onBehalfContext) {
+        await runOnBehalfApplicationAction("submit", {
+          application_uuid: app.id,
+          payload: { completed_sections: app.completed_sections },
+        });
+      } else {
+        const res = await supabase
+          .from("applications")
+          .update({
+            status: 'submitted',
+            submitted_at: new Date().toISOString(),
+            completed_sections: { ...app.completed_sections, review: true } as any,
+          })
+          .eq("id", app.id);
+        error = res.error;
+      }
+    } catch (err: any) {
+      error = { message: err.message || "Submit failed" };
+    }
 
     if (error) {
       toast({ title: "Submit failed", description: error.message, variant: "destructive" });
@@ -1865,16 +1984,19 @@ const ApplyPortal = () => {
       return;
     }
 
-    if (app.lead_id) {
+    if (app.lead_id && !onBehalfContext) {
       // Only advance stage if lead is in a stage where submission makes sense
       // DNC/rejected/ineligible leads keep their stage (but application is still saved)
       const { data: currentLead } = await supabase.from("leads").select("stage").eq("id", app.lead_id).single();
       const advanceableStages = ["new_lead", "ai_called", "counsellor_call", "application_in_progress", "application_fee_paid", "not_interested", "deferred"];
       if (currentLead && advanceableStages.includes(currentLead.stage)) {
-        await supabase.from("leads").update({
-          stage: "application_submitted" as any,
-          application_progress: { personal_details: true, education_details: true, application_fee_paid: true, documents_uploaded: true } as any,
-        }).eq("id", app.lead_id);
+        const transition = resolveLeadTransitionCommand({
+          currentStage: currentLead.stage,
+          command: "submitApplication",
+        });
+        await supabase.from("leads").update(leadTransitionStagePatch(transition, {
+          application_progress: { personal_details: true, education_details: true, application_fee_paid: true, documents_uploaded: true },
+        }) as any).eq("id", app.lead_id);
 
         await supabase.from("lead_activities").insert({
           lead_id: app.lead_id,
@@ -1983,6 +2105,7 @@ const ApplyPortal = () => {
         onContinue={loadAppIntoEditor}
         onStartNew={startNewApplication}
         onLogout={handleLogout}
+        onBehalfContext={onBehalfContext}
       />
     );
   }
@@ -2244,6 +2367,7 @@ const ApplyPortal = () => {
           }}
           onBack={backHandler}
           saving={saving}
+          onBehalfContext={onBehalfContext}
         />
       );
     }
@@ -2279,6 +2403,7 @@ const ApplyPortal = () => {
       <Header appId={app.application_id} completedCount={completedCount} totalSteps={totalSteps} onLogout={handleLogout} />
 
       <div className="max-w-3xl mx-auto px-6 py-8">
+        <OnBehalfBanner context={onBehalfContext} candidateName={leadName || app.full_name} />
         <CourseSummaryBanner
           app={app}
           leadName={leadName}

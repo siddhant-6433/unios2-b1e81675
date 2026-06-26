@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, FileText, Plus, Gift, CheckCircle, XCircle, ShieldCheck, RefreshCw, ExternalLink, Pencil, Coins, Trash2, AlertCircle } from "lucide-react";
 import { CahetRegistrationDetails } from "@/components/leads/CahetRegistrationDetails";
+import { UpdeledRegistrationDetails } from "@/components/leads/UpdeledRegistrationDetails";
 import {
   cahetRegistrationFromApplication,
   fetchCahetRegistration,
@@ -15,7 +16,17 @@ import {
   type ApplicationCahetSource,
   type CahetRegistrationDetails as CahetRegistrationDetailsType,
 } from "@/lib/cahet";
+import {
+  fetchUpdeledRegistration,
+  isDeledCourseName,
+  isUpdeledExamName,
+  updeledRegistrationFromApplication,
+  type ApplicationUpdeledSource,
+  type SupabaseUpdeledClient,
+  type UpdeledRegistrationDetails as UpdeledRegistrationDetailsType,
+} from "@/lib/updeled";
 import { chooseOfferSessionId, feeBackedSessionIds, type OfferSessionOption } from "@/lib/offerSessions";
+import { leadTransitionStagePatch, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 
 interface OfferLetterDialogProps {
   open: boolean;
@@ -26,11 +37,14 @@ interface OfferLetterDialogProps {
   courseName?: string | null;
   campusId: string | null;
   cahetRegistration?: CahetRegistrationDetailsType | null;
+  updeledRegistration?: UpdeledRegistrationDetailsType | null;
   onSuccess: () => void;
 }
 
 interface OfferLetter {
   id: string;
+  course_id?: string | null;
+  campus_id?: string | null;
   total_fee: number;
   scholarship_amount: number | null;
   net_fee: number;
@@ -45,11 +59,19 @@ interface OfferLetter {
   session_id?: string | null;
   letter_url?: string | null;
   loan_letter_url?: string | null;
+  token_fee_amount?: number | null;
+  token_fee_user_edited?: boolean | null;
   admission_mode?: "direct" | "entrance" | null;
   entrance_exam_name?: string | null;
 }
 
 type SessionOption = OfferSessionOption;
+
+interface CourseOption {
+  id: string;
+  name: string;
+  code: string | null;
+}
 
 interface OfferWaiver {
   id: string;
@@ -70,7 +92,7 @@ interface OfferLetterEditRequest {
   offer_letter_id: string;
   requested_by_name: string | null;
   requested_by_role: string | null;
-  proposed_changes: { acceptance_deadline?: string };
+  proposed_changes: { acceptance_deadline?: string; course_id?: string; token_fee_amount?: number };
   reason: string | null;
   status: "pending" | "approved" | "rejected";
   reviewed_at: string | null;
@@ -99,7 +121,15 @@ const ENTRANCE_OPTIONS = [
 const isDaottCourseName = (name: string | null | undefined) =>
   !!name && (/\bD\.?\s*A?OTT\b/i.test(name) || /ana?esthesia.*operation theatre/i.test(name));
 
-export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, courseId, courseName, campusId, cahetRegistration: cahetRegistrationProp, onSuccess }: OfferLetterDialogProps) {
+function parseTokenFeeFromEditReason(reason: string | null | undefined): number | null {
+  if (!reason || !/\btoken\b/i.test(reason)) return null;
+  const match = reason.match(/(?:rs\.?|₹|inr)?\s*([0-9][0-9,\s]{2,})/i);
+  if (!match) return null;
+  const amount = Number(match[1].replace(/[,\s]/g, ""));
+  return Number.isFinite(amount) && amount > 0 ? amount : null;
+}
+
+export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, courseId, courseName, campusId, cahetRegistration: cahetRegistrationProp, updeledRegistration: updeledRegistrationProp, onSuccess }: OfferLetterDialogProps) {
   const { user, role } = useAuth();
   const { toast } = useToast();
   const [offers, setOffers] = useState<OfferLetter[]>([]);
@@ -146,10 +176,11 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   const [showPreWaiverForm, setShowPreWaiverForm] = useState(false);
   const [preWaiverForm, setPreWaiverForm] = useState<{ term: string; amount: string; reason: string }>({ term: "year_1", amount: "", reason: "" });
   const [deletingOfferId, setDeletingOfferId] = useState<string | null>(null);
+  const [courseOptions, setCourseOptions] = useState<CourseOption[]>([]);
   // Edit requests
   const [editRequestsByOffer, setEditRequestsByOffer] = useState<Record<string, OfferLetterEditRequest[]>>({});
   const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ acceptance_deadline: "", reason: "" });
+  const [editForm, setEditForm] = useState({ acceptance_deadline: "", course_id: "", token_fee_amount: "", reason: "" });
   const [editSaving, setEditSaving] = useState(false);
   const [editDecidingId, setEditDecidingId] = useState<string | null>(null);
   // Which offer's PDF is showing in the right-hand preview pane.
@@ -163,9 +194,16 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   const [pdfBust, setPdfBust] = useState<number>(() => Date.now());
   const [fetchedCahetRegistration, setFetchedCahetRegistration] = useState<CahetRegistrationDetailsType | null>(null);
   const cahetRegistration = cahetRegistrationProp ?? fetchedCahetRegistration;
+  const [fetchedUpdeledRegistration, setFetchedUpdeledRegistration] = useState<UpdeledRegistrationDetailsType | null>(null);
+  const updeledRegistration = updeledRegistrationProp ?? fetchedUpdeledRegistration;
   const requiresCahetRegistration = isBptOrBmritCourseName(courseName);
+  const requiresUpdeledRegistration = isDeledCourseName(courseName);
   const cahetOfferBlocked = requiresCahetRegistration && !cahetRegistration;
+  const updeledOfferBlocked = requiresUpdeledRegistration && !updeledRegistration;
+  const registrationOfferBlocked = cahetOfferBlocked || updeledOfferBlocked;
   const cahetOfferBlockMessage = "CAHET registration details are required before issuing an offer letter for BPT and BMRIT.";
+  const updeledOfferBlockMessage = "UPDELED registration details are required before issuing an offer letter for D.El.Ed.";
+  const registrationOfferBlockMessage = cahetOfferBlocked ? cahetOfferBlockMessage : updeledOfferBlockMessage;
 
   const fetchOffers = async () => {
     setLoading(true);
@@ -243,6 +281,24 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   useEffect(() => { if (open) fetchOffers(); }, [open]);
 
   useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("courses")
+        .select("id, name, code")
+        .order("name", { ascending: true });
+      if (cancelled) return;
+      setCourseOptions(((data || []) as any[]).map((course) => ({
+        id: course.id,
+        name: course.name,
+        code: course.code ?? null,
+      })));
+    })();
+    return () => { cancelled = true; };
+  }, [open]);
+
+  useEffect(() => {
     if (!open || cahetRegistrationProp !== undefined) return;
     let cancelled = false;
     (async () => {
@@ -263,6 +319,28 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     })();
     return () => { cancelled = true; };
   }, [open, leadId, cahetRegistrationProp]);
+
+  useEffect(() => {
+    if (!open || updeledRegistrationProp !== undefined) return;
+    let cancelled = false;
+    (async () => {
+      const row = await fetchUpdeledRegistration(supabase as unknown as SupabaseUpdeledClient, leadId);
+      if (row) {
+        if (!cancelled) setFetchedUpdeledRegistration(row);
+        return;
+      }
+
+      const { data: appRow } = await supabase
+        .from("applications")
+        .select("id, application_id, lead_id, academic_details")
+        .eq("lead_id", leadId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!cancelled) setFetchedUpdeledRegistration(updeledRegistrationFromApplication(appRow as ApplicationUpdeledSource | null, leadId));
+    })();
+    return () => { cancelled = true; };
+  }, [open, leadId, updeledRegistrationProp]);
 
   // Pull sessions whenever the form opens so the select has data. Prefer a
   // session that actually has active year-wise fees for this course; multiple
@@ -348,6 +426,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     ? form.entrance_exam_other.trim()
     : form.entrance_exam_name.trim();
   const isCahetOffer = form.admission_mode === "entrance" && selectedEntranceName.toLowerCase().includes("cahet");
+  const isUpdeledOffer = form.admission_mode === "entrance" && isUpdeledExamName(selectedEntranceName);
 
   /** Fee for a given term (e.g. 'year_1') from the active fee structure. */
   const feeForTerm = (term: string): number =>
@@ -362,6 +441,39 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     (waiversByOffer[offerId] || [])
       .filter(w => w.term === term && (w.status === "approved" || w.status === "pending"))
       .reduce((s, w) => s + Number(w.amount || 0), 0);
+
+  const courseNameForId = (id: string | null | undefined) =>
+    id ? (courseOptions.find(c => c.id === id)?.name || (id === courseId ? courseName : null) || "Selected course") : (courseName || "Course not set");
+
+  const courseCodeForId = (id: string | null | undefined) =>
+    id ? courseOptions.find(c => c.id === id)?.code || null : null;
+
+  const fetchCourseFeeSnapshot = async (nextCourseId: string, sessionId: string) => {
+    const { data, error } = await supabase
+      .from("fee_structures")
+      .select("id, fee_structure_items ( term, amount )")
+      .eq("course_id", nextCourseId)
+      .eq("session_id", sessionId)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (error) throw error;
+
+    const byTerm = new Map<string, number>();
+    for (const item of (((data as any)?.fee_structure_items || []) as any[])) {
+      const term = String(item?.term || "");
+      if (!/^year_\d+$/.test(term)) continue;
+      byTerm.set(term, (byTerm.get(term) || 0) + Number(item?.amount || 0));
+    }
+
+    const yearTotalsForCourse = Array.from(byTerm.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([term, total]) => ({ term, total }));
+
+    return {
+      firstYearFee: byTerm.get("year_1") || 0,
+      totalFee: yearTotalsForCourse.reduce((sum, year) => sum + year.total, 0),
+    };
+  };
 
   // Net Year-1 fee = gross Year-1 fee minus any year_1 waivers already
   // staged in the pre-issuance waiver list. The loan-letter token fee
@@ -404,10 +516,10 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     const entranceName = form.entrance_exam_name === "Other"
       ? form.entrance_exam_other.trim()
       : form.entrance_exam_name.trim();
-    if (cahetOfferBlocked) {
+    if (registrationOfferBlocked) {
       toast({
-        title: "CAHET registration required",
-        description: cahetOfferBlockMessage,
+        title: cahetOfferBlocked ? "CAHET registration required" : "UPDELED registration required",
+        description: registrationOfferBlockMessage,
         variant: "destructive",
       });
       return;
@@ -479,7 +591,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       }
       // Only advance lead stage if the offer is approved (not pending)
       if (autoApproved) {
-        await supabase.from("leads").update({ stage: "offer_sent" as any, offer_amount: totalFee }).eq("id", leadId);
+        const transition = resolveLeadTransitionCommand({ currentStage: "application_approved", command: "issueOffer" });
+        await supabase.from("leads").update(leadTransitionStagePatch(transition, { offer_amount: totalFee }) as any).eq("id", leadId);
       }
       await supabase.from("lead_activities").insert({
         lead_id: leadId, user_id: user?.id || null, type: "offer",
@@ -527,10 +640,10 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
 
   const decideOffer = async (offerId: string, decision: "approved" | "rejected", reason?: string) => {
     if (!isApprover) return;
-    if (decision === "approved" && cahetOfferBlocked) {
+    if (decision === "approved" && registrationOfferBlocked) {
       toast({
-        title: "CAHET registration required",
-        description: cahetOfferBlockMessage,
+        title: cahetOfferBlocked ? "CAHET registration required" : "UPDELED registration required",
+        description: registrationOfferBlockMessage,
         variant: "destructive",
       });
       return;
@@ -552,7 +665,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     if (decision === "approved") {
       const offer = offers.find(o => o.id === offerId);
       if (offer) {
-        await supabase.from("leads").update({ stage: "offer_sent" as any, offer_amount: offer.net_fee }).eq("id", leadId);
+        const transition = resolveLeadTransitionCommand({ currentStage: "application_approved", command: "issueOffer" });
+        await supabase.from("leads").update(leadTransitionStagePatch(transition, { offer_amount: offer.net_fee }) as any).eq("id", leadId);
       }
       await supabase.from("lead_activities").insert({
         lead_id: leadId, user_id: user?.id || null, type: "offer",
@@ -700,31 +814,117 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   };
 
   const handleSubmitEditRequest = async (offerId: string) => {
-    if (!editForm.acceptance_deadline) {
-      toast({ title: "Enter a new acceptance deadline", variant: "destructive" });
+    const offer = offers.find(o => o.id === offerId);
+    if (!offer) {
+      toast({ title: "Offer not found", variant: "destructive" });
       return;
     }
+
+    const nextDeadline = editForm.acceptance_deadline || "";
+    const currentDeadline = offer.acceptance_deadline?.slice(0, 10) || "";
+    const nextCourseId = editForm.course_id || offer.course_id || courseId || "";
+    const currentCourseId = offer.course_id || courseId || "";
+    const deadlineChanged = nextDeadline !== currentDeadline;
+    const courseChanged = isSuperAdmin && !!nextCourseId && nextCourseId !== currentCourseId;
+    const nextTokenFeeRaw = editForm.token_fee_amount.trim();
+    let nextTokenFeeAmount: number | null = null;
+    if (nextTokenFeeRaw) {
+      const parsed = Number(nextTokenFeeRaw);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        toast({ title: "Enter a valid token fee", variant: "destructive" });
+        return;
+      }
+      nextTokenFeeAmount = parsed;
+    }
+    const tokenFeeChanged = nextTokenFeeAmount != null && nextTokenFeeAmount !== Number(offer.token_fee_amount || 0);
+    const proposedChanges: { acceptance_deadline?: string; course_id?: string; token_fee_amount?: number } = {};
+    if (deadlineChanged && nextDeadline) proposedChanges.acceptance_deadline = nextDeadline;
+    if (courseChanged) proposedChanges.course_id = nextCourseId;
+    if (tokenFeeChanged && nextTokenFeeAmount != null) proposedChanges.token_fee_amount = nextTokenFeeAmount;
+
+    if (!nextDeadline && !currentDeadline) {
+      toast({ title: "Enter an acceptance deadline", variant: "destructive" });
+      return;
+    }
+    if (!deadlineChanged && !courseChanged && !tokenFeeChanged) {
+      toast({ title: "No changes to update", variant: "destructive" });
+      return;
+    }
+
     setEditSaving(true);
     try {
       if (isSuperAdmin) {
+        let feeUpdate: Record<string, unknown> = {};
+        if (courseChanged) {
+          if (!offer.session_id) {
+            throw new Error("This offer has no academic session. Set a session before changing course.");
+          }
+          const feeSnapshot = await fetchCourseFeeSnapshot(nextCourseId, offer.session_id);
+          if (!feeSnapshot.totalFee || feeSnapshot.totalFee <= 0) {
+            throw new Error("The selected course has no active year-wise fee structure for this offer's session.");
+          }
+
+          const nextCourseName = courseNameForId(nextCourseId);
+          if (isBptOrBmritCourseName(nextCourseName) && !cahetRegistration) {
+            throw new Error(cahetOfferBlockMessage);
+          }
+          const nextCourseCode = courseCodeForId(nextCourseId);
+          const nextTokenFloor = isDaottCourseName(nextCourseName) || nextCourseCode === "DAOTT-GN" || nextCourseCode === "OTT-GN" ? 4000 : 5000;
+          const nextTokenDefault = feeSnapshot.firstYearFee > 0
+            ? Math.max(Math.round(feeSnapshot.firstYearFee * 0.25), nextTokenFloor)
+            : nextTokenFloor;
+          const currentToken = Number(offer.token_fee_amount || 0);
+
+          feeUpdate = {
+            course_id: nextCourseId,
+            total_fee: feeSnapshot.totalFee,
+            net_fee: feeSnapshot.totalFee,
+            token_fee_amount: offer.token_fee_user_edited && currentToken >= nextTokenFloor
+              ? currentToken
+              : nextTokenDefault,
+            token_fee_user_edited: offer.token_fee_user_edited && currentToken >= nextTokenFloor ? offer.token_fee_user_edited : false,
+            letter_url: null,
+            loan_letter_url: null,
+          };
+        }
+
         // Super admin edits directly — no approval needed
         const { error } = await supabase
           .from("offer_letters")
-          .update({ acceptance_deadline: editForm.acceptance_deadline })
+          .update({
+            ...feeUpdate,
+            ...proposedChanges,
+            ...(proposedChanges.token_fee_amount != null ? { token_fee_user_edited: true } : {}),
+          } as any)
           .eq("id", offerId);
         if (error) throw error;
+
+        if (courseChanged) {
+          await supabase.rpc("recalculate_offer_letter_net_fee" as any, { _offer_letter_id: offerId });
+          await supabase.from("lead_activities").insert({
+            lead_id: leadId,
+            user_id: user?.id || null,
+            type: "offer",
+            description: `Offer letter course changed to ${courseNameForId(nextCourseId)}`,
+          });
+        }
+
         toast({ title: "Offer letter updated" });
         setEditingOfferId(null);
-        setEditForm({ acceptance_deadline: "", reason: "" });
+        setEditForm({ acceptance_deadline: "", course_id: "", token_fee_amount: "", reason: "" });
         await fetchOffers();
         await regeneratePdf(offerId);
       } else {
+        if (!deadlineChanged && !tokenFeeChanged) {
+          toast({ title: "No changes to request", variant: "destructive" });
+          return;
+        }
         // Non-super-admin: create edit request for approval
         const { error } = await supabase
           .from("offer_letter_edit_requests" as any)
           .insert({
             offer_letter_id: offerId,
-            proposed_changes: { acceptance_deadline: editForm.acceptance_deadline },
+            proposed_changes: proposedChanges,
             reason: editForm.reason || null,
           });
         if (error) throw error;
@@ -733,7 +933,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
           description: "Super admin will be notified to review and approve.",
         });
         setEditingOfferId(null);
-        setEditForm({ acceptance_deadline: "", reason: "" });
+        setEditForm({ acceptance_deadline: "", course_id: "", token_fee_amount: "", reason: "" });
         await fetchOffers();
       }
     } catch (e: any) {
@@ -757,6 +957,15 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
         reviewed_by: user?.id,
         reviewed_at: new Date().toISOString(),
       };
+      if (decision === "approved" && req.proposed_changes.token_fee_amount == null) {
+        const tokenFeeAmount = parseTokenFeeFromEditReason(req.reason);
+        if (tokenFeeAmount != null) {
+          updates.proposed_changes = {
+            ...req.proposed_changes,
+            token_fee_amount: tokenFeeAmount,
+          };
+        }
+      }
       if (rejectionReason) updates.rejection_reason = rejectionReason;
       const { error } = await supabase
         .from("offer_letter_edit_requests" as any)
@@ -813,6 +1022,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
           {/* ─── Left: list + new-offer form ─── */}
           <div className="overflow-y-auto px-5 py-4 space-y-4 border-b md:border-b-0 md:border-r border-border">
           <CahetRegistrationDetails registration={cahetRegistration} />
+          <UpdeledRegistrationDetails registration={updeledRegistration} />
           {!showForm && (
             <Button onClick={() => setShowForm(true)} size="sm" className="gap-1.5"><Plus className="h-4 w-4" />New Offer</Button>
           )}
@@ -820,10 +1030,10 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
           {showForm && (
             <Card className="border-border/60">
               <CardContent className="p-4 space-y-3">
-                {cahetOfferBlocked && (
+                {registrationOfferBlocked && (
                   <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
                     <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                    <p>{cahetOfferBlockMessage}</p>
+                    <p>{registrationOfferBlockMessage}</p>
                   </div>
                 )}
                 {/* Programme fee summary — read-only, sourced directly from the
@@ -1142,8 +1352,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                   <p className="mt-1 text-[10px] text-muted-foreground/70">Date by which the candidate must accept and pay the token fee.</p>
                 </div>
                 <div className="flex gap-2">
-                  <Button onClick={handleCreate} disabled={saving || programmeTotal <= 0 || cahetOfferBlocked} size="sm" className="gap-1.5"
-                    title={cahetOfferBlocked ? cahetOfferBlockMessage : programmeTotal <= 0 ? "Publish a fee structure for this course + session first" : undefined}>
+                  <Button onClick={handleCreate} disabled={saving || programmeTotal <= 0 || registrationOfferBlocked} size="sm" className="gap-1.5"
+                    title={registrationOfferBlocked ? registrationOfferBlockMessage : programmeTotal <= 0 ? "Publish a fee structure for this course + session first" : undefined}>
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Issue Offer
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => {
@@ -1188,6 +1398,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <p className="text-lg font-bold text-foreground">₹{offer.net_fee.toLocaleString("en-IN")}</p>
+                          <p className="text-xs font-medium text-foreground/80">{courseNameForId(offer.course_id || courseId)}</p>
                           <p className="text-xs text-muted-foreground">
                             Total: ₹{offer.total_fee.toLocaleString("en-IN")}
                             {(waiversByOffer[offer.id]?.filter(w => w.status === "approved").length || 0) > 0 && (
@@ -1382,8 +1593,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                             size="sm"
                             className="text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700"
                             onClick={() => decideOffer(offer.id, "approved")}
-                            disabled={cahetOfferBlocked}
-                            title={cahetOfferBlocked ? cahetOfferBlockMessage : undefined}
+                            disabled={registrationOfferBlocked}
+                            title={registrationOfferBlocked ? registrationOfferBlockMessage : undefined}
                           >
                             <CheckCircle className="h-3 w-3" /> Approve Offer
                           </Button>
@@ -1411,6 +1622,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                     setEditingOfferId(offer.id);
                                     setEditForm({
                                       acceptance_deadline: offer.acceptance_deadline?.slice(0, 10) || "",
+                                      token_fee_amount: offer.token_fee_amount ? String(Number(offer.token_fee_amount)) : "",
+                                      course_id: offer.course_id || courseId || "",
                                       reason: "",
                                     });
                                   }}
@@ -1433,6 +1646,16 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                     {req.proposed_changes.acceptance_deadline && (
                                       <p className="text-amber-700 dark:text-amber-300">
                                         New deadline: {new Date(req.proposed_changes.acceptance_deadline).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                                      </p>
+                                    )}
+                                    {(req.proposed_changes.token_fee_amount != null || parseTokenFeeFromEditReason(req.reason) != null) && (
+                                      <p className="text-amber-700 dark:text-amber-300">
+                                        New token fee: ₹{Number(req.proposed_changes.token_fee_amount ?? parseTokenFeeFromEditReason(req.reason)).toLocaleString("en-IN")}
+                                      </p>
+                                    )}
+                                    {req.proposed_changes.course_id && (
+                                      <p className="text-amber-700 dark:text-amber-300">
+                                        New course: {courseNameForId(req.proposed_changes.course_id)}
                                       </p>
                                     )}
                                     {req.reason && <p className="text-amber-600 dark:text-amber-400">Reason: {req.reason}</p>}
@@ -1465,6 +1688,28 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                             {/* Inline edit form */}
                             {isEditing && (
                               <div className="rounded-md border border-primary/30 bg-primary/5 p-2 space-y-2">
+                                {isSuperAdmin && (
+                                  <div>
+                                    <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">
+                                      Course
+                                    </label>
+                                    <select
+                                      value={editForm.course_id}
+                                      onChange={(e) => setEditForm((p) => ({ ...p, course_id: e.target.value }))}
+                                      className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+                                    >
+                                      <option value="">Select course</option>
+                                      {courseOptions.map((course) => (
+                                        <option key={course.id} value={course.id}>
+                                          {course.name}{course.code ? ` (${course.code})` : ""}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <p className="mt-1 text-[10px] text-muted-foreground/70">
+                                      Changing course updates this issued offer letter's fee snapshot and regenerates the PDF.
+                                    </p>
+                                  </div>
+                                )}
                                 <div>
                                   <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">
                                     New Acceptance Deadline
@@ -1475,6 +1720,19 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                     min={new Date().toISOString().slice(0, 10)}
                                     onChange={(e) => setEditForm((p) => ({ ...p, acceptance_deadline: e.target.value }))}
                                     className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">
+                                    Token Fee Payable
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    value={editForm.token_fee_amount}
+                                    onChange={(e) => setEditForm((p) => ({ ...p, token_fee_amount: e.target.value }))}
+                                    className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+                                    placeholder="Amount shown on the offer PDF"
                                   />
                                 </div>
                                 {!isSuperAdmin && (
@@ -1505,7 +1763,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                   </Button>
                                   <Button
                                     size="sm" variant="outline" className="text-xs h-7"
-                                    onClick={() => { setEditingOfferId(null); setEditForm({ acceptance_deadline: "", reason: "" }); }}
+                                    onClick={() => { setEditingOfferId(null); setEditForm({ acceptance_deadline: "", course_id: "", token_fee_amount: "", reason: "" }); }}
                                   >
                                     Cancel
                                   </Button>
@@ -1621,6 +1879,24 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                       {isCahetOffer && !cahetRegistration && (
                         <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                           CAHET is selected, but this candidate is not marked CAHET registered yet. The registration number will appear on the final offer only after registration is recorded.
+                        </div>
+                      )}
+
+                      {isUpdeledOffer && updeledRegistration && (
+                        <div className="rounded-md border border-indigo-200 bg-indigo-50 p-3">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-700">UPDELED Registration</p>
+                          <p className="mt-1 text-sm font-semibold text-indigo-950">
+                            Registration No. {updeledRegistration.registration_no}
+                          </p>
+                          {updeledRegistration.notes && (
+                            <p className="mt-1 text-xs text-indigo-900/80">{updeledRegistration.notes}</p>
+                          )}
+                        </div>
+                      )}
+
+                      {isUpdeledOffer && !updeledRegistration && (
+                        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                          UPDELED is selected, but this candidate is not marked UPDELED registered yet. The registration number will appear on the final offer only after registration is recorded.
                         </div>
                       )}
 

@@ -11,9 +11,9 @@ if (Platform.OS === 'web') {
 
 export type AppRole =
   | 'super_admin' | 'campus_admin' | 'principal' | 'admission_head'
-  | 'counsellor' | 'accountant' | 'faculty' | 'teacher'
+  | 'counsellor' | 'accountant' | 'faculty' | 'teacher' | 'ib_coordinator'
   | 'data_entry' | 'office_admin' | 'office_assistant' | 'hostel_warden'
-  | 'student' | 'parent';
+  | 'librarian' | 'student' | 'parent';
 
 interface Profile {
   id: string;

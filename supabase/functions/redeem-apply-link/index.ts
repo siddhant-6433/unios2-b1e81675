@@ -15,7 +15,7 @@
  * Multi-use until expires_at; each redemption increments use_count for audit.
  *
  * Input:  { token: string }
- * Output: { phone, name, lead_id }
+ * Output: { phone, name, lead_id, on_behalf? }
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
     if (!token) return json({ error: "token required" }, 400);
 
     const { data: row, error } = await db.from("apply_magic_tokens")
-      .select("token, lead_id, phone, expires_at, revoked_at, use_count")
+      .select("token, lead_id, phone, expires_at, revoked_at, use_count, mode, actor_user_id, actor_role, academic_partner_id")
       .eq("token", token)
       .maybeSingle();
     if (error || !row) return json({ error: "Invalid link" }, 404);
@@ -65,17 +65,46 @@ Deno.serve(async (req) => {
     // without an extra round-trip.
     const { data: lead } = await db
       .from("leads")
-      .select("name")
+      .select("name, academic_partner_id")
       .eq("id", row.lead_id)
       .maybeSingle();
     const name = lead?.name || "Applicant";
+
+    let onBehalf: any = null;
+    if (row.mode === "academic_partner_on_behalf") {
+      if (!row.actor_user_id || !row.academic_partner_id || lead?.academic_partner_id !== row.academic_partner_id) {
+        return json({ error: "This on-behalf link is no longer valid for this lead." }, 403);
+      }
+      const { data: scoped } = await db.rpc("can_academic_partner_view_mapped_lead", {
+        _user_id: row.actor_user_id,
+        _lead_id: row.lead_id,
+      });
+      if (!scoped) return json({ error: "This lead is no longer assigned to the academic partner." }, 403);
+
+      const { data: partner } = await db
+        .from("academic_partners")
+        .select("name")
+        .eq("id", row.academic_partner_id)
+        .maybeSingle();
+
+      onBehalf = {
+        mode: "academic_partner_on_behalf",
+        token,
+        actor_role: row.actor_role || "academic_partner",
+        actor_user_id: row.actor_user_id,
+        academic_partner_id: row.academic_partner_id,
+        academic_partner_name: partner?.name || "Academic Partner",
+        lead_id: row.lead_id,
+        candidate_phone: phone,
+      };
+    }
 
     await db.from("apply_magic_tokens").update({
       last_used_at: new Date().toISOString(),
       use_count: (row.use_count || 0) + 1,
     }).eq("token", row.token);
 
-    return json({ phone, name, lead_id: row.lead_id });
+    return json({ phone, name, lead_id: row.lead_id, on_behalf: onBehalf });
   } catch (err: any) {
     console.error("[redeem-apply-link]", err);
     return json({ error: err.message }, 500);
