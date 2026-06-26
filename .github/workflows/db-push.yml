@@ -131,5 +131,8 @@ jobs:
       - name: Deploy application deletion function
         run: supabase functions deploy delete-application --no-verify-jwt
 
+      - name: Deploy manual call function
+        run: supabase functions deploy manual-call --no-verify-jwt
+
       - name: Verify production has no pending migrations
         run: npm run db:migrations:clean
