@@ -2,9 +2,9 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendWhatsAppTemplate, type WhatsAppChannelRoute } from "../_shared/whatsapp-channel.ts";
 import {
   expectedReplyTypeForTemplate,
-  recordWhatsAppOutboundContext,
   responsePolicyForTemplate,
 } from "../_shared/whatsapp-outbound-context.ts";
+import { recordOutboundConversationAction } from "../_shared/whatsapp-conversation-action.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -668,31 +668,17 @@ Deno.serve(async (req) => {
         }
       : null;
 
-    const { data: insertedMessage } = await adminClient.from("whatsapp_messages").insert({
-      lead_id: lead_id || null,
-      wa_message_id: sendResult.messageId,
-      direction: "outbound",
+    await recordOutboundConversationAction(adminClient, {
+      kind: "templateSend",
       phone: waPhone,
-      message_type: "template",
-      content: readableContent,
-      template_key,
-      status: metaFailed ? "failed" : "sent",
-      is_read: true,
-      provider: sendResult.provider,
-      business_phone_number_id: phoneNumberId,
-      business_phone_number: sendResult.businessNumber,
-      status_error: statusErrorPayload,
-      sender_user_id: user.id,
-    }).select("id").maybeSingle();
-
-    await recordWhatsAppOutboundContext(adminClient, {
-      messageId: insertedMessage?.id || null,
-      providerMessageId: sendResult.messageId,
-      phone: waPhone,
-      businessNumber: sendResult.businessNumber || phoneNumberId,
-      provider: sendResult.provider,
       leadId: lead_id || null,
+      content: readableContent,
+      messageType: "template",
       templateKey: template_key,
+      status: metaFailed ? "failed" : "sent",
+      userId: user.id,
+      sendResult,
+      statusError: statusErrorPayload,
       outboundKind: "template",
       expectedReplyType: expectedReplyTypeForTemplate(template_key),
       responsePolicy: responsePolicyForTemplate(template_key),
@@ -704,21 +690,12 @@ Deno.serve(async (req) => {
         invoked_by_user_id: user.id,
       },
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      activityDescription: lead_id
+        ? user.id === null
+          ? `Automated WhatsApp ${metaFailed ? "failed" : "sent"} — ${template_key.replace(/_/g, " ")}`
+          : `WhatsApp ${metaFailed ? "failed" : "sent"} — Template: ${template_key.replace(/_/g, " ")}`
+        : null,
     });
-
-    if (lead_id) {
-      const isSystem = user.id === null;
-      const statusLabel = metaFailed ? "failed" : "sent";
-      const { error: actErr } = await adminClient.from("lead_activities").insert({
-        lead_id,
-        user_id: user.id,
-        type: "whatsapp",
-        description: isSystem
-          ? `Automated WhatsApp ${statusLabel} — ${template_key.replace(/_/g, " ")}`
-          : `WhatsApp ${statusLabel} — Template: ${template_key.replace(/_/g, " ")}`,
-      });
-      if (actErr) console.error("lead_activities insert failed:", actErr.message);
-    }
 
     if (metaFailed) {
       return new Response(

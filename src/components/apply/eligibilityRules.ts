@@ -3,8 +3,6 @@
  * Marks parsing: values ≤ 10 treated as CGPA → converted via CGPA × 9.5.
  */
 
-import { supabase } from "@/integrations/supabase/client";
-
 export interface EligibilityRule {
   minAge?: number;
   maxAge?: number;
@@ -56,6 +54,7 @@ export function dbRuleToEligibility(row: EligibilityRuleDB): EligibilityRule {
 /** Fetch eligibility rules for a set of course IDs from DB. Returns map of courseId → rule. */
 export async function fetchEligibilityRules(courseIds: string[]): Promise<Record<string, EligibilityRule>> {
   if (!courseIds.length) return {};
+  const { supabase } = await import("@/integrations/supabase/client");
   const { data, error } = await supabase
     .from("eligibility_rules")
     .select("*")

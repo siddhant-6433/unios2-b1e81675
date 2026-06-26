@@ -17,6 +17,7 @@ import {
   ApplicantRoute,
   RequirePermission,
   RequireRole,
+  BlockRole,
 } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 
@@ -35,6 +36,7 @@ const CallLog              = lazy(() => import("./pages/CallLog"));
 const AiCallLog            = lazy(() => import("./pages/AiCallLog"));
 const CloudDialer          = lazy(() => import("./pages/CloudDialer"));
 const CahetSprint          = lazy(() => import("./pages/CahetSprint"));
+const UpdeledSprint        = lazy(() => import("./pages/UpdeledSprint"));
 const MissedCalls          = lazy(() => import("./pages/MissedCalls"));
 const Applications         = lazy(() => import("./pages/Applications"));
 const AdminApplicationView = lazy(() => import("./pages/AdminApplicationView"));
@@ -285,8 +287,8 @@ const App = () => (
                       <Route path="/admissions/:id" element={<RequirePermission module="leads" action="view"><LeadDetail /></RequirePermission>} />
                       <Route path="/lead-buckets" element={<RequirePermission module="lead_buckets" action="view"><LeadBuckets /></RequirePermission>} />
                       <Route path="/lead-assignments" element={<RequirePermission module="leads" action="view"><LeadAssignmentHistoryPage /></RequirePermission>} />
-                      <Route path="/lists" element={<RequirePermission module="leads" action="view"><LeadLists /></RequirePermission>} />
-                      <Route path="/marketing" element={<RequirePermission module="leads" action="view"><Marketing /></RequirePermission>} />
+                      <Route path="/lists" element={<BlockRole roles={["academic_partner"]}><RequirePermission module="leads" action="view"><LeadLists /></RequirePermission></BlockRole>} />
+                      <Route path="/marketing" element={<BlockRole roles={["academic_partner"]}><RequirePermission module="leads" action="view"><Marketing /></RequirePermission></BlockRole>} />
                       <Route path="/pending-followups" element={<RequirePermission module="leads" action="view"><PendingFollowups /></RequirePermission>} />
                       <Route path="/fresh-leads" element={<RequirePermission module="leads" action="view"><FreshLeads /></RequirePermission>} />
                       <Route path="/visit-monitor" element={<RequirePermission module="leads" action="view"><VisitMonitor /></RequirePermission>} />
@@ -294,6 +296,7 @@ const App = () => (
                       <Route path="/ai-call-log" element={<RequirePermission module="call_log" action="view"><AiCallLog /></RequirePermission>} />
                       <Route path="/cloud-dialer" element={<RequirePermission module="call_log" action="view"><CloudDialer /></RequirePermission>} />
                       <Route path="/cahet-sprint" element={<RequirePermission module="call_log" action="view"><CahetSprint /></RequirePermission>} />
+                      <Route path="/updeled-sprint" element={<RequirePermission module="call_log" action="view"><UpdeledSprint /></RequirePermission>} />
                       <Route path="/missed-calls" element={<RequirePermission module="call_log" action="view"><MissedCalls /></RequirePermission>} />
                       <Route path="/referrals" element={<RequirePermission module="referrals" action="view"><StudentReferrals /></RequirePermission>} />
 
@@ -332,7 +335,7 @@ const App = () => (
                       <Route path="/inbox" element={<Inbox />} />
                       <Route path="/whatsapp-inbox" element={<RequirePermission module="whatsapp" action="view"><WhatsAppInbox /></RequirePermission>} />
                       <Route path="/whatsapp-health" element={<RequirePermission module="user_management" action="view"><WhatsAppHealth /></RequirePermission>} />
-                      <Route path="/template-manager" element={<RequirePermission module="templates" action="view"><TemplateManager /></RequirePermission>} />
+                      <Route path="/template-manager" element={<BlockRole roles={["academic_partner"]}><RequirePermission module="templates" action="view"><TemplateManager /></RequirePermission></BlockRole>} />
 
                       {/* Analytics & reporting */}
                       <Route path="/admission-analytics" element={<RequirePermission module="analytics" action="view"><AdmissionAnalytics /></RequirePermission>} />

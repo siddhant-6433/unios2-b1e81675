@@ -64,6 +64,7 @@ const AuthContext = createContext<AuthContextType>({
 export const useAuth = () => useContext(AuthContext);
 
 const IMPERSONATION_KEY = "unios_impersonation";
+const ACADEMIC_PARTNER_ALLOWED_PERMISSIONS = ["academic_partner_portal:view"];
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [session, setSession] = useState<Session | null>(null);
@@ -120,7 +121,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       // Fetch permissions — non-critical, errors are safe to ignore
       supabase.rpc("get_user_permissions" as any, { _user_id: userId })
-        .then((res: any) => { if (Array.isArray(res?.data)) setPermissions(res.data); })
+        .then((res: any) => {
+          if (roleRes.data === "academic_partner") {
+            setPermissions(ACADEMIC_PARTNER_ALLOWED_PERMISSIONS);
+          } else if (Array.isArray(res?.data)) {
+            setPermissions(res.data);
+          }
+        })
         .catch(() => {});
     } catch (err) {
       fetchedUserDataForRef.current = null;
@@ -210,6 +217,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const hasPermission = useCallback((perm: string) => {
     // super_admin has all permissions
     if (role === "super_admin") return true;
+    if (role === "academic_partner") return ACADEMIC_PARTNER_ALLOWED_PERMISSIONS.includes(perm);
     return permissions.includes(perm);
   }, [role, permissions]);
 

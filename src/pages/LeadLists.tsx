@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { Navigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -208,7 +209,7 @@ const WhatsAppBusinessIdentity = ({
 
 export default function LeadLists() {
   const { toast } = useToast();
-  const { profile } = useAuth();
+  const { profile, role } = useAuth();
   const [lists, setLists] = useState<LeadList[]>([]);
   const [loading, setLoading] = useState(true);
   const [importOpen, setImportOpen] = useState(false);
@@ -269,6 +270,11 @@ export default function LeadLists() {
   const [deleting, setDeleting] = useState(false);
 
   const fetchLists = async () => {
+    if (role === "academic_partner") {
+      setLists([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const { data, error } = await supabase
       .from("lead_lists" as any)
@@ -280,6 +286,11 @@ export default function LeadLists() {
   };
 
   const fetchCampaignQueue = async () => {
+    if (role === "academic_partner") {
+      setCampaignQueue([]);
+      setQueueLoading(false);
+      return;
+    }
     setQueueLoading(true);
     const [waRes, emailRes] = await Promise.all([
       supabase
@@ -333,9 +344,10 @@ export default function LeadLists() {
   };
 
   useEffect(() => {
+    if (role === "academic_partner") return;
     fetchLists();
     fetchCampaignQueue();
-  }, []);
+  }, [role]);
 
   const loadWaSenders = async () => {
     setWaSenderLoading(true);
@@ -421,10 +433,12 @@ export default function LeadLists() {
   };
 
   useEffect(() => {
+    if (role === "academic_partner") return;
     if (waOpen) loadWaSenders();
-  }, [waOpen]);
+  }, [role, waOpen]);
 
   useEffect(() => {
+    if (role === "academic_partner") return;
     if (!emailOpen) return;
     (async () => {
       const { data } = await supabase
@@ -435,7 +449,7 @@ export default function LeadLists() {
       setEmailTemplates((data || []) as any);
       if ((data || []).length && !emailSlug) setEmailSlug((data as any)[0].slug);
     })();
-  }, [emailOpen]);
+  }, [emailOpen, role]);
 
   const openWa = (list: LeadList) => {
     setWaList(list);
@@ -724,6 +738,10 @@ export default function LeadLists() {
     setDeleteList(null);
     await fetchLists();
   };
+
+  if (role === "academic_partner") {
+    return <Navigate to="/academic-partner-portal" replace />;
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">

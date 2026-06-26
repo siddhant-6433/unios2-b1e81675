@@ -1,9 +1,10 @@
 import { ReactNode } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/contexts/PermissionContext";
 
 const NON_STAFF_ROLES = ["student", "parent"] as const;
+const ACADEMIC_PARTNER_ALLOWED_PERMISSION = "academic_partner_portal:view";
 
 const Spinner = () => (
   <div className="flex h-screen items-center justify-center bg-background">
@@ -30,10 +31,14 @@ export const ProtectedRoute = ({ children }: { children: ReactNode }) => {
 // the staff app and routes them to their own portals instead.
 export const StaffRoute = ({ children }: { children: ReactNode }) => {
   const { session, role, realRole, loading, roleLoaded } = useAuth();
+  const location = useLocation();
   if (loading || !roleLoaded) return <Spinner />;
   if (!session) return <Navigate to="/login" replace />;
   if (role === "student") return <Navigate to="/student" replace />;
   if (role === "parent") return <Navigate to="/parent" replace />;
+  if (role === "academic_partner" && location.pathname !== "/academic-partner-portal") {
+    return <Navigate to="/academic-partner-portal" replace />;
+  }
   if (role === null && realRole !== "super_admin") return <Navigate to="/my-applications" replace />;
   return <>{children}</>;
 };
@@ -84,8 +89,11 @@ export const RequirePermission = ({
   children: ReactNode;
 }) => {
   const { permissions, loading } = usePermissions();
-  const { realRole } = useAuth();
+  const { role, realRole } = useAuth();
   if (loading) return <Spinner />;
+  if (role === "academic_partner" && `${module}:${action}` !== ACADEMIC_PARTNER_ALLOWED_PERMISSION) {
+    return <Navigate to="/academic-partner-portal" replace />;
+  }
   if (realRole === "super_admin" || permissions.has(`${module}:${action}`)) return <>{children}</>;
   return <Navigate to="/forbidden" replace />;
 };
@@ -104,4 +112,20 @@ export const RequireRole = ({
   if (realRole === "super_admin") return <>{children}</>;
   if (role && roles.includes(role)) return <>{children}</>;
   return <Navigate to="/forbidden" replace />;
+};
+
+// ── BlockRole ───────────────────────────────────────────────────────────────
+// Use when a broad permission is shared by a narrow portal role but a specific
+// full-staff route must stay unavailable to that role.
+export const BlockRole = ({
+  roles,
+  children,
+}: {
+  roles: string[];
+  children: ReactNode;
+}) => {
+  const { role, realRole } = useAuth();
+  if (realRole === "super_admin") return <>{children}</>;
+  if (role && roles.includes(role)) return <Navigate to="/forbidden" replace />;
+  return <>{children}</>;
 };

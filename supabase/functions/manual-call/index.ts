@@ -15,7 +15,7 @@
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { maskPhoneForLog, normalizePlivoVoiceNumber, normalizePlivoVoiceNumbers } from "../_shared/phone.ts";
+import { maskPhoneForLog, normalizePlivoVoiceNumber, normalizePlivoVoiceNumberPool } from "../_shared/phone.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -30,6 +30,12 @@ function json(data: any, status = 200) {
   });
 }
 
+function chooseNextDialerNumber(dialerNumbers: string[], previousFromNumber: string | null | undefined): string {
+  const previous = normalizePlivoVoiceNumber(previousFromNumber);
+  const previousIndex = previous ? dialerNumbers.indexOf(previous) : -1;
+  return dialerNumbers[(previousIndex + 1) % dialerNumbers.length];
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -42,18 +48,29 @@ Deno.serve(async (req) => {
     const PLIVO_DIALER_PHONE_NUMBERS = Deno.env.get("PLIVO_DIALER_PHONE_NUMBERS");
     const VOICE_AGENT_URL = Deno.env.get("VOICE_AGENT_URL");
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    const dialerNumberSecret = PLIVO_DIALER_PHONE_NUMBERS || PLIVO_DIALER_PHONE_NUMBER;
+    const dialerNumberSecrets = [PLIVO_DIALER_PHONE_NUMBERS, PLIVO_DIALER_PHONE_NUMBER];
 
-    if (!PLIVO_AUTH_ID || !PLIVO_AUTH_TOKEN || !dialerNumberSecret || !VOICE_AGENT_URL) {
+    if (!PLIVO_AUTH_ID || !PLIVO_AUTH_TOKEN || !dialerNumberSecrets.some(Boolean) || !VOICE_AGENT_URL) {
       return json({ error: "Calling not configured. Contact admin." }, 503);
     }
 
-    const dialerNumbers = normalizePlivoVoiceNumbers(dialerNumberSecret);
+    const dialerNumbers = normalizePlivoVoiceNumberPool(dialerNumberSecrets);
     if (dialerNumbers.length === 0) {
-      console.error("Invalid PLIVO_DIALER_PHONE_NUMBER(S) for voice calls:", maskPhoneForLog(dialerNumberSecret));
+      console.error(
+        "Invalid PLIVO_DIALER_PHONE_NUMBER(S) for voice calls:",
+        dialerNumberSecrets.map(maskPhoneForLog).filter(Boolean).join(", "),
+      );
       return json({ error: "Calling number is not configured correctly. Contact admin." }, 503);
+    }
+    if (dialerNumbers.length < 2) {
+      console.error(
+        "At least two unique PLIVO_DIALER_PHONE_NUMBER(S) are required for Cloud Call rotation:",
+        dialerNumbers.map(maskPhoneForLog).join(", "),
+      );
+      return json({ error: "At least two calling numbers must be configured. Contact admin." }, 503);
     }
 
     // Auth: accept anon key (manual button) or service role (internal).
@@ -61,23 +78,51 @@ Deno.serve(async (req) => {
     const authHeader = req.headers.get("authorization") || "";
     if (!authHeader) return json({ error: "Unauthorized" }, 401);
 
+    const callerDb = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: authData, error: authErr } = await callerDb.auth.getUser();
+    if (authErr || !authData?.user?.id) return json({ error: "Unauthorized" }, 401);
+
     const db = createClient(supabaseUrl, serviceRoleKey);
-    const { lead_id, caller_user_id } = await req.json();
+    const { lead_id } = await req.json();
     if (!lead_id) return json({ error: "lead_id required" }, 400);
 
-    const userId = caller_user_id || null;
+    const userId = authData.user.id;
 
-    const { count: manualCallCount, error: manualCallCountErr } = await db
-      .from("ai_call_records")
-      .select("id", { count: "exact", head: true })
-      .eq("call_type", "manual");
-    if (manualCallCountErr) {
-      console.warn("Could not read manual call count for Plivo caller ID rotation:", manualCallCountErr);
+    const { data: callerRole, error: roleErr } = await db.rpc("get_user_role", { _user_id: userId });
+    if (roleErr || !callerRole) return json({ error: "Caller role not found" }, 403);
+    if (["student", "parent"].includes(String(callerRole))) {
+      return json({ error: "Only staff and academic partners can place cloud calls." }, 403);
     }
-    const dialerRotationIndex = manualCallCountErr
-      ? Math.floor(Date.now() / 1000)
-      : manualCallCount || 0;
-    const dialerFrom = dialerNumbers[dialerRotationIndex % dialerNumbers.length];
+    if (callerRole === "academic_partner") {
+      const { data: canCallLead, error: scopeErr } = await db.rpc("can_academic_partner_view_mapped_lead", {
+        _user_id: userId,
+        _lead_id: lead_id,
+      });
+      if (scopeErr) {
+        console.error("Academic partner call scope check failed:", scopeErr);
+        return json({ error: "Could not verify lead access." }, 500);
+      }
+      if (!canCallLead) {
+        return json({ error: "You can call only leads assigned to your academic partner account." }, 403);
+      }
+    }
+
+    const { data: latestManualCall, error: latestManualCallErr } = await db
+      .from("ai_call_records")
+      .select("from_number")
+      .eq("call_type", "manual")
+      .not("from_number", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latestManualCallErr) {
+      console.warn("Could not read last Plivo caller ID for rotation; defaulting to first dialer number:", latestManualCallErr);
+    }
+    const dialerFrom = latestManualCallErr
+      ? dialerNumbers[0]
+      : chooseNextDialerNumber(dialerNumbers, (latestManualCall as any)?.from_number);
 
     // Fetch lead
     const { data: lead, error: leadErr } = await db
@@ -125,6 +170,7 @@ Deno.serve(async (req) => {
       status: "initiated",
       call_type: "manual",
       caller_user_id: userId,
+      from_number: dialerFrom,
       summary: `Cloud Call: dialing counsellor ${profile.display_name}`,
     });
 
@@ -232,7 +278,6 @@ Deno.serve(async (req) => {
       ...plivoPayload,
       from: maskPhoneForLog(dialerFrom),
       to: maskPhoneForLog(counsellorPhone),
-      dialer_rotation_index: dialerRotationIndex,
       dialer_pool_size: dialerNumbers.length,
     }));
 

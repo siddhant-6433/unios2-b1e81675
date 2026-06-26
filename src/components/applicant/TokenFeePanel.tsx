@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2, CreditCard, FileText, IndianRupee, Clock, Check, GraduationCap, Sparkles, ChevronRight, CalendarDays } from "lucide-react";
 import { buildApplicantFeeBreakdownRows, buildApplicantOneTimePaymentOptions } from "./feeBreakdown";
@@ -6,7 +6,7 @@ import {
   effectiveApplicationDeadline,
   INITIAL_APPLICATION_DEADLINE,
 } from "@/lib/deadlineRollover";
-import { useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
+import { preferredGateway, useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
 import { buildRazorpayReceipt, openRazorpayCheckout } from "@/lib/razorpayCheckout";
 
 // Fallbacks if the get_applicant_deadlines RPC is unreachable.
@@ -99,6 +99,12 @@ interface Props {
   applicantEmail: string | null;
   courseName?: string | null;
   onPayment?: () => void;
+  onBehalfContext?: {
+    mode: "academic_partner_on_behalf";
+    token: string;
+    academic_partner_id: string;
+    lead_id: string;
+  } | null;
 }
 
 const isMbaCourse = (name: string | null | undefined) =>
@@ -149,7 +155,7 @@ const loadImageForPdf = async (url: string) => {
   return { dataUrl, width: img.naturalWidth || img.width, height: img.naturalHeight || img.height };
 };
 
-export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName, applicantPhone, applicantEmail, courseName, onPayment }: Props) {
+export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName, applicantPhone, applicantEmail, courseName, onPayment, onBehalfContext }: Props) {
   const [lead, setLead] = useState<Lead | null>(null);
   const [offer, setOffer] = useState<Offer | null>(null);
   const [feeStatus, setFeeStatus] = useState<FeeStatus | null>(null);
@@ -166,8 +172,13 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   const [showInstalment, setShowInstalment] = useState(false);
   const [instalmentPreset, setInstalmentPreset] = useState<number | null>(null);
   const [customAmt, setCustomAmt] = useState("");
+  const customAmountInputRef = useRef<HTMLInputElement | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedGateway, setSelectedGateway] = useState<string | null>(null);
+  const [offerConsentVerified, setOfferConsentVerified] = useState(false);
+  const [offerOtpSent, setOfferOtpSent] = useState(false);
+  const [offerOtp, setOfferOtp] = useState("");
+  const [offerOtpLoading, setOfferOtpLoading] = useState(false);
   const [deadlines, setDeadlines] = useState<{ fee_submission_deadline: string; full_course_payment_deadline: string }>({
     fee_submission_deadline:      DEFAULT_FEE_SUBMISSION_DEADLINE,
     full_course_payment_deadline: DEFAULT_FULL_COURSE_PAYMENT_DEADLINE,
@@ -181,12 +192,94 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
 
   useEffect(() => {
     if (tokenGatewayLoading) return;
-    if (tokenGateways.length === 1) {
-      setSelectedGateway(tokenGateways[0].gateway);
-    } else if (selectedGateway && !tokenGateways.some((g) => g.gateway === selectedGateway)) {
-      setSelectedGateway(null);
+    if (!selectedGateway || !tokenGateways.some((g) => g.gateway === selectedGateway)) {
+      setSelectedGateway(preferredGateway(tokenGateways));
     }
   }, [tokenGatewayLoading, tokenGateways, selectedGateway]);
+
+  useEffect(() => {
+    if (!onBehalfContext?.token || !offer?.id) return;
+    supabase.functions.invoke("academic-partner-offer-otp", {
+      body: {
+        token: onBehalfContext.token,
+        action: "check",
+        offer_letter_id: offer.id,
+        application_id: applicationId,
+      },
+    }).then(({ data }) => {
+      if (data?.verified) setOfferConsentVerified(true);
+    }).catch(() => {});
+  }, [applicationId, offer?.id, onBehalfContext?.token]);
+
+  const sendOfferOtp = async () => {
+    if (!onBehalfContext?.token || !offer?.id) return;
+    setOfferOtpLoading(true);
+    setError(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("academic-partner-offer-otp", {
+        body: {
+          token: onBehalfContext.token,
+          action: "send",
+          offer_letter_id: offer.id,
+          application_id: applicationId,
+        },
+      });
+      if (error || data?.error) throw new Error(data?.error || error?.message || "Could not send OTP");
+      setOfferOtpSent(true);
+    } catch (e: any) {
+      setError(e?.message || "Could not send OTP");
+    } finally {
+      setOfferOtpLoading(false);
+    }
+  };
+
+  const verifyOfferOtp = async () => {
+    if (!onBehalfContext?.token || !offer?.id) return;
+    setOfferOtpLoading(true);
+    setError(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("academic-partner-offer-otp", {
+        body: {
+          token: onBehalfContext.token,
+          action: "verify",
+          offer_letter_id: offer.id,
+          application_id: applicationId,
+          otp: offerOtp,
+        },
+      });
+      if (error || data?.error) throw new Error(data?.error || error?.message || "Invalid or expired OTP");
+      setOfferConsentVerified(Boolean(data?.verified));
+    } catch (e: any) {
+      setError(e?.message || "Invalid or expired OTP");
+    } finally {
+      setOfferOtpLoading(false);
+    }
+  };
+
+  const auditOnBehalfTokenPayment = async (
+    action: "token_fee_initiated_by_partner" | "token_fee_paid_by_partner",
+    metadata: Record<string, unknown> = {},
+    paymentRef?: string | null,
+  ) => {
+    if (!onBehalfContext?.token || !offer?.id) return;
+    await supabase.functions.invoke("academic-partner-on-behalf-audit", {
+      body: {
+        token: onBehalfContext.token,
+        action,
+        application_id: applicationId,
+        offer_letter_id: offer.id,
+        payment_ref: paymentRef || null,
+        metadata,
+      },
+    }).catch(() => {});
+  };
+
+  const focusCustomAmountInput = () => {
+    requestAnimationFrame(() => {
+      customAmountInputRef.current?.focus();
+      customAmountInputRef.current?.select();
+    });
+  };
 
   const load = async () => {
     setLoading(true);
@@ -321,6 +414,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
       if (e.data?.eb_payment === "success" || e.data?.icici_payment === "success") {
         // Refresh after a beat — gives the trigger time to commit.
         setTimeout(() => load(), 1500);
+        void auditOnBehalfTokenPayment("token_fee_paid_by_partner", { source: "gateway_popup_message" });
         onPayment?.();
       }
     };
@@ -335,6 +429,10 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   ) => {
     if (!lead || !applicantPhone) return;
     if (amount <= 0) { setError("Enter a valid amount"); return; }
+    if (onBehalfContext?.token && !offerConsentVerified) {
+      setError("Student WhatsApp OTP consent is required before accepting the offer or paying token/admission fees on behalf of the student.");
+      return;
+    }
 
     const gateway = selectedGateway || tokenGateways[0]?.gateway || "easebuzz";
     if (gateway === "razorpay") {
@@ -356,6 +454,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
           waiverReason: opts.reason || null,
           concessionBreakdown: opts.concessionBreakdown || null,
         });
+        await auditOnBehalfTokenPayment("token_fee_initiated_by_partner", { gateway: "razorpay", amount, payment_type: opts.paymentType || "token_fee" });
+        await auditOnBehalfTokenPayment("token_fee_paid_by_partner", { gateway: "razorpay", amount, payment_type: opts.paymentType || "token_fee" });
         await load();
         onPayment?.();
       } catch (e: unknown) {
@@ -387,6 +487,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
           concession_amount: opts.concession || 0,
           waiver_reason: opts.reason || null,
           concession_breakdown: opts.concessionBreakdown || null,
+          on_behalf_token: onBehalfContext?.token || undefined,
         },
       });
       if (invErr) {
@@ -403,6 +504,11 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
       }
       if (data?.error) throw new Error(data.error);
       if (!data?.pay_url) throw new Error("No payment URL returned");
+      await auditOnBehalfTokenPayment("token_fee_initiated_by_partner", {
+        gateway,
+        amount,
+        payment_type: opts.paymentType || "token_fee",
+      });
       if (payWin) {
         payWin.location.href = data.pay_url;
       } else {
@@ -1309,6 +1415,51 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         );
       })()}
 
+      {onBehalfContext?.token && !feeStatus.twenty_five_complete && (
+        <div className={`rounded-2xl border p-4 space-y-3 ${offerConsentVerified ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
+          <div className="flex items-start gap-3">
+            <Check className={`h-4 w-4 mt-0.5 shrink-0 ${offerConsentVerified ? "text-emerald-600" : "text-amber-600"}`} />
+            <div className="min-w-0 flex-1">
+              <p className={`text-sm font-bold ${offerConsentVerified ? "text-emerald-900" : "text-amber-900"}`}>
+                Student OTP consent required
+              </p>
+              <p className={`text-xs mt-0.5 leading-relaxed ${offerConsentVerified ? "text-emerald-700" : "text-amber-800"}`}>
+                Academic partners can pay after the student confirms offer acceptance by WhatsApp OTP on {applicantPhone || "the candidate phone"}.
+              </p>
+            </div>
+          </div>
+
+          {!offerConsentVerified && (
+            <div className="flex flex-col sm:flex-row gap-2">
+              <button
+                type="button"
+                disabled={offerOtpLoading}
+                onClick={sendOfferOtp}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-600 px-3.5 py-2.5 text-xs font-bold text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {offerOtpLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                {offerOtpSent ? "Resend OTP" : "Send OTP"}
+              </button>
+              <input
+                value={offerOtp}
+                onChange={(e) => setOfferOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="Enter OTP"
+                inputMode="numeric"
+                className="min-w-0 flex-1 rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-amber-500"
+              />
+              <button
+                type="button"
+                disabled={offerOtpLoading || offerOtp.length < 4}
+                onClick={verifyOfferOtp}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-3.5 py-2.5 text-xs font-bold text-white hover:bg-gray-800 disabled:opacity-50"
+              >
+                Verify
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {!feeStatus.twenty_five_complete && !tokenGatewayLoading && tokenGateways.length > 1 && (
         <div className="rounded-2xl border border-gray-200 bg-white p-3 space-y-2">
           <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Payment Gateway</p>
@@ -1446,7 +1597,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                             </button>
                           ))}
                           <button
-                            onClick={() => { setInstalmentPreset(null); setCustomAmt(""); }}
+                            onClick={() => { setInstalmentPreset(null); setCustomAmt(""); focusCustomAmountInput(); }}
                             className={`rounded-xl px-3.5 py-2 text-sm font-semibold border transition-all active:scale-95 ${
                               instalmentPreset === null
                                 ? "bg-blue-600 border-blue-600 text-white shadow-sm"
@@ -1461,6 +1612,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                           <div className="relative">
                             <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                             <input
+                              ref={customAmountInputRef}
                               type="number" step="500" min={minInstalment} max={tokenOutstanding}
                               value={customAmt}
                               onChange={e => setCustomAmt(e.target.value)}

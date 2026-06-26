@@ -11,6 +11,7 @@
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { applyLeadTransition } from "../_shared/lead-transition.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -162,10 +163,11 @@ async function applyDispositionToLeadStage(
   const TERMINAL = new Set(["not_interested", "dnc", "rejected", "ineligible", "admitted"]);
   if (TERMINAL.has(lead.stage)) return;
 
-  await db.from("leads").update({ stage: targetStage }).eq("id", leadId);
-  await db.from("lead_activities").insert({
-    lead_id: leadId,
-    type: "ai_call",
+  await applyLeadTransition(db, {
+    leadId,
+    currentStage: lead.stage,
+    command: targetStage === "dnc" ? "markDnc" : "classifyNotInterested",
+    activityType: "ai_call",
     description: `AI call disposition: ${disposition} → lead marked ${targetStage}`,
   });
   console.log(`Lead ${leadId} stage updated to ${targetStage} (AI disposition: ${disposition})`);

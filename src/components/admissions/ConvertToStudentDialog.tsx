@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2, UserCheck, ArrowRight } from "lucide-react";
 import { getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
 import { SCHOOL_SESSION_YEARS, isSchoolSessionYear, sessionYearLabel } from "@/lib/sessionYears";
+import { leadTransitionStagePatch, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 
 interface ConvertToStudentDialogProps {
   open: boolean;
@@ -119,10 +120,11 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
     }
 
     // Update lead
-    const leadUpdate: any = {
-      pre_admission_no: pan,
-      stage: isPreadmit ? "pre_admitted" as any : "admitted" as any,
-    };
+    const transition = resolveLeadTransitionCommand({
+      currentStage: lead.stage,
+      command: isPreadmit ? "convertPreAdmitted" : "convertAdmitted",
+    });
+    const leadUpdate: any = leadTransitionStagePatch(transition, { pre_admission_no: pan });
     if (an) leadUpdate.admission_no = an;
     await supabase.from("leads").update(leadUpdate).eq("id", lead.id);
 

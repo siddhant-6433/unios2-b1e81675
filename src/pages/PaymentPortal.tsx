@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { ReceiptDialog, type FeeLineItem, type ReceiptData } from "@/components/receipts/ReceiptDialog";
-import { useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
+import { preferredGateway, useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
 import { brandForStudentOwner, NIMT_EDU_BRAND, type StudentBrand } from "@/lib/studentBranding";
 import { useAuth } from "@/contexts/AuthContext";
 import { buildRazorpayReceipt, openRazorpayCheckout } from "@/lib/razorpayCheckout";
@@ -110,10 +110,8 @@ export default function PaymentPortal() {
 
   useEffect(() => {
     if (gatewaysLoading) return;
-    if (feeGateways.length === 1) {
-      setSelectedGateway(feeGateways[0].gateway);
-    } else if (selectedGateway && !feeGateways.some((g) => g.gateway === selectedGateway)) {
-      setSelectedGateway(null);
+    if (!selectedGateway || !feeGateways.some((g) => g.gateway === selectedGateway)) {
+      setSelectedGateway(preferredGateway(feeGateways));
     }
   }, [gatewaysLoading, feeGateways, selectedGateway]);
 

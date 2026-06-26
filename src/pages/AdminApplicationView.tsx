@@ -18,6 +18,8 @@ import {
   PAID_APPLICATION_DELETE_CONFIRMATION,
 } from "@/lib/deleteApplication";
 import { cahetRegistrationFromApplication, fetchCahetRegistration, isBptOrBmritCourseName, type CahetRegistrationDetails } from "@/lib/cahet";
+import { fetchUpdeledRegistration, isDeledCourseName, updeledRegistrationFromApplication, type SupabaseUpdeledClient, type UpdeledRegistrationDetails } from "@/lib/updeled";
+import { buildApplicationDossier } from "@/lib/applicationDossier";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -149,6 +151,8 @@ export default function AdminApplicationView() {
   const { role } = useAuth();
   const canApproveApplication = role === "super_admin" || role === "principal";
   const canUploadDocuments = role === "super_admin" || role === "principal" || role === "counsellor";
+  const canManageOffer = role === "super_admin" || role === "principal" || role === "counsellor" ||
+    role === "admission_head" || role === "campus_admin";
   const [loading, setLoading] = useState(true);
   const [app, setApp] = useState<any | null>(null);
   const [lead, setLead] = useState<{
@@ -164,6 +168,7 @@ export default function AdminApplicationView() {
   const [hasOffer, setHasOffer] = useState(false);
   const [appFeePaid, setAppFeePaid] = useState(0);
   const [cahetRegistration, setCahetRegistration] = useState<CahetRegistrationDetails | null>(null);
+  const [updeledRegistration, setUpdeledRegistration] = useState<UpdeledRegistrationDetails | null>(null);
   const [docs, setDocs] = useState<PreviewDoc[]>([]);
   const [reviews, setReviews] = useState<Record<string, DocReview>>({});
   const [decisionBusy, setDecisionBusy] = useState(false);
@@ -225,7 +230,7 @@ export default function AdminApplicationView() {
       // Also pulls PAN/AN for the lifecycle stepper.
       if (appRow?.lead_id) {
         const primarySelection = ((appRow.course_selections || [])[0] as ApplicationCourseSelection | undefined) || null;
-        const [{ data: leadRow }, { data: offerRows }, { data: pmtRows }, cahetRow] = await Promise.all([
+        const [{ data: leadRow }, { data: offerRows }, { data: pmtRows }, cahetRow, updeledRow] = await Promise.all([
           supabase.from("leads")
             .select("id, name, course_id, campus_id, pre_admission_no, admission_no, course:course_id(name,code,duration_years,eligibility,entrance_exam,entrance_mandatory)")
             .eq("id", appRow.lead_id).maybeSingle(),
@@ -236,6 +241,7 @@ export default function AdminApplicationView() {
             .eq("type", "application_fee")
             .eq("status", "confirmed"),
           fetchCahetRegistration(supabase, appRow.lead_id),
+          fetchUpdeledRegistration(supabase as unknown as SupabaseUpdeledClient, appRow.lead_id),
         ]);
         const resolvedSelection = await resolvePrimaryCourseSelection(primarySelection);
         let effectiveLeadRow = leadRow as any;
@@ -276,13 +282,16 @@ export default function AdminApplicationView() {
         setAppFeePaid((pmtRows || []).reduce((sum, p: any) => sum + Number(p.amount || 0), 0));
         const courseName = effectiveLeadRow?.course?.name || primarySelection?.course_name || null;
         const applicationCahet = cahetRegistrationFromApplication(appRow, appRow.lead_id);
+        const applicationUpdeled = updeledRegistrationFromApplication(appRow, appRow.lead_id);
         setCahetRegistration(isBptOrBmritCourseName(courseName) ? (cahetRow || applicationCahet) : null);
+        setUpdeledRegistration(isDeledCourseName(courseName) ? (updeledRow || applicationUpdeled) : null);
       } else {
         setLead(null);
         setEligibilityRule(null);
         setHasOffer(false);
         setAppFeePaid(0);
         setCahetRegistration(null);
+        setUpdeledRegistration(null);
       }
     } catch (e: any) {
       console.error("[AdminApplicationView] refresh failed:", e);
@@ -557,6 +566,34 @@ export default function AdminApplicationView() {
     return { total, verified, rejected, pending };
   }, [docs, reviews]);
 
+  const dossier = useMemo(() => {
+    if (!app) return null;
+    return buildApplicationDossier({
+      id: app.id,
+      application_id: app.application_id,
+      lead_id: app.lead_id || lead?.id || null,
+      status: app.status || "draft",
+      payment_status: app.payment_status || null,
+    }, {
+      lead: {
+        hasLead: !!lead?.id,
+        leadStage: "",
+        counsellorId: null,
+        counsellorName: null,
+        preAdmissionNo: lead?.pre_admission_no || null,
+        admissionNo: lead?.admission_no || null,
+      },
+      hasOffer,
+      appFeePaid,
+      hasTokenFeePaid: false,
+      docs: counts,
+      capabilities: {
+        canManageOffer,
+        hasLeadCourse: !!lead?.course_id,
+      },
+    });
+  }, [app, appFeePaid, canManageOffer, counts, hasOffer, lead]);
+
   const deleteApplication = async () => {
     if (!app || role !== "super_admin") return;
     const paidDeleteConfirmation = app.payment_status === "paid"
@@ -638,9 +675,6 @@ export default function AdminApplicationView() {
       setGeneratingReceipt(false);
     }
   };
-
-  const canManageOffer = role === "super_admin" || role === "principal" || role === "counsellor" ||
-    role === "admission_head" || role === "campus_admin";
 
   const issueOfferOrRepairLead = async () => {
     if (!canManageOffer) {
@@ -799,14 +833,8 @@ export default function AdminApplicationView() {
               </p>
             )}
             {decided && app.status === "approved" && (() => {
-              const canIssueOffer = canManageOffer && (!!hasOffer || !lead?.id || !!lead.course_id);
-              const reason = !canManageOffer
-                ? "You do not have permission to issue offers"
-                : !lead?.id
-                ? "Create a linked lead, then issue the offer"
-                : !lead.course_id
-                ? "No course/class is linked to this application yet"
-                : undefined;
+              const canIssueOffer = dossier?.canIssueOffer ?? false;
+              const reason = dossier?.offerBlockedReason || undefined;
               // Once an offer exists, this button switches to "View Offer Letter"
               // — same dialog, but framed as a viewer (and lets the user manage
               // waivers + see the PDF without re-issuing anything).
@@ -967,6 +995,7 @@ export default function AdminApplicationView() {
           courseName={lead.course?.name}
           campusId={lead.campus_id}
           cahetRegistration={cahetRegistration}
+          updeledRegistration={updeledRegistration}
           onSuccess={() => { setShowOfferLetter(false); refresh(); }}
         />
       )}

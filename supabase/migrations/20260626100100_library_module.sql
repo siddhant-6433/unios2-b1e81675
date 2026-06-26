@@ -343,26 +343,35 @@ ALTER TABLE public.library_digitization_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.library_audit_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.library_settings ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Authenticated users discover library branches" ON public.library_branches;
 CREATE POLICY "Authenticated users discover library branches" ON public.library_branches
   FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Library managers maintain branches" ON public.library_branches;
 CREATE POLICY "Library managers maintain branches" ON public.library_branches
   FOR ALL TO authenticated USING (public.can_manage_library()) WITH CHECK (public.can_manage_library());
 
+DROP POLICY IF EXISTS "Authenticated users discover library books" ON public.library_books;
 CREATE POLICY "Authenticated users discover library books" ON public.library_books
   FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Library staff catalog books" ON public.library_books;
 CREATE POLICY "Library staff catalog books" ON public.library_books
   FOR ALL TO authenticated USING (public.can_operate_library()) WITH CHECK (public.can_operate_library());
 
+DROP POLICY IF EXISTS "Authenticated users discover library items" ON public.library_items;
 CREATE POLICY "Authenticated users discover library items" ON public.library_items
   FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Library staff manage items" ON public.library_items;
 CREATE POLICY "Library staff manage items" ON public.library_items
   FOR ALL TO authenticated USING (public.can_operate_library()) WITH CHECK (public.can_operate_library());
 
+DROP POLICY IF EXISTS "Members view own library record" ON public.library_members;
 CREATE POLICY "Members view own library record" ON public.library_members
   FOR SELECT TO authenticated USING (user_id = auth.uid() OR public.can_manage_library());
+DROP POLICY IF EXISTS "Library staff manage members" ON public.library_members;
 CREATE POLICY "Library staff manage members" ON public.library_members
   FOR ALL TO authenticated USING (public.can_operate_library()) WITH CHECK (public.can_operate_library());
 
+DROP POLICY IF EXISTS "Members view own loans" ON public.library_loans;
 CREATE POLICY "Members view own loans" ON public.library_loans
   FOR SELECT TO authenticated USING (
     public.can_manage_library()
@@ -371,9 +380,11 @@ CREATE POLICY "Members view own loans" ON public.library_loans
       WHERE m.id = library_loans.member_id AND m.user_id = auth.uid()
     )
   );
+DROP POLICY IF EXISTS "Library staff circulate loans" ON public.library_loans;
 CREATE POLICY "Library staff circulate loans" ON public.library_loans
   FOR ALL TO authenticated USING (public.can_operate_library()) WITH CHECK (public.can_operate_library());
 
+DROP POLICY IF EXISTS "Members view own holds" ON public.library_holds;
 CREATE POLICY "Members view own holds" ON public.library_holds
   FOR SELECT TO authenticated USING (
     public.can_manage_library()
@@ -382,6 +393,7 @@ CREATE POLICY "Members view own holds" ON public.library_holds
       WHERE m.id = library_holds.member_id AND m.user_id = auth.uid()
     )
   );
+DROP POLICY IF EXISTS "Patrons create own holds" ON public.library_holds;
 CREATE POLICY "Patrons create own holds" ON public.library_holds
   FOR INSERT TO authenticated WITH CHECK (
     public.can_manage_library()
@@ -390,9 +402,11 @@ CREATE POLICY "Patrons create own holds" ON public.library_holds
       WHERE m.id = library_holds.member_id AND m.user_id = auth.uid()
     )
   );
+DROP POLICY IF EXISTS "Library staff manage holds" ON public.library_holds;
 CREATE POLICY "Library staff manage holds" ON public.library_holds
   FOR UPDATE TO authenticated USING (public.can_operate_library()) WITH CHECK (public.can_operate_library());
 
+DROP POLICY IF EXISTS "Members view own fines" ON public.library_fines;
 CREATE POLICY "Members view own fines" ON public.library_fines
   FOR SELECT TO authenticated USING (
     public.can_manage_library()
@@ -401,26 +415,35 @@ CREATE POLICY "Members view own fines" ON public.library_fines
       WHERE m.id = library_fines.member_id AND m.user_id = auth.uid()
     )
   );
+DROP POLICY IF EXISTS "Library staff manage fines" ON public.library_fines;
 CREATE POLICY "Library staff manage fines" ON public.library_fines
   FOR ALL TO authenticated USING (public.can_operate_library()) WITH CHECK (public.can_operate_library());
 
+DROP POLICY IF EXISTS "Library staff view digitization batches" ON public.library_digitization_batches;
 CREATE POLICY "Library staff view digitization batches" ON public.library_digitization_batches
   FOR SELECT TO authenticated USING (public.can_operate_library());
+DROP POLICY IF EXISTS "Library staff manage digitization batches" ON public.library_digitization_batches;
 CREATE POLICY "Library staff manage digitization batches" ON public.library_digitization_batches
   FOR ALL TO authenticated USING (public.can_operate_library()) WITH CHECK (public.can_operate_library());
 
+DROP POLICY IF EXISTS "Library staff view digitization records" ON public.library_digitization_records;
 CREATE POLICY "Library staff view digitization records" ON public.library_digitization_records
   FOR SELECT TO authenticated USING (public.can_operate_library());
+DROP POLICY IF EXISTS "Library staff manage digitization records" ON public.library_digitization_records;
 CREATE POLICY "Library staff manage digitization records" ON public.library_digitization_records
   FOR ALL TO authenticated USING (public.can_operate_library()) WITH CHECK (public.can_operate_library());
 
+DROP POLICY IF EXISTS "Library managers view audit events" ON public.library_audit_events;
 CREATE POLICY "Library managers view audit events" ON public.library_audit_events
   FOR SELECT TO authenticated USING (public.can_manage_library());
+DROP POLICY IF EXISTS "Library staff insert audit events" ON public.library_audit_events;
 CREATE POLICY "Library staff insert audit events" ON public.library_audit_events
   FOR INSERT TO authenticated WITH CHECK (public.can_operate_library());
 
+DROP POLICY IF EXISTS "Authenticated users view library settings" ON public.library_settings;
 CREATE POLICY "Authenticated users view library settings" ON public.library_settings
   FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Library managers maintain settings" ON public.library_settings;
 CREATE POLICY "Library managers maintain settings" ON public.library_settings
   FOR ALL TO authenticated USING (public.can_manage_library()) WITH CHECK (public.can_manage_library());
 
