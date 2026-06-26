@@ -50,6 +50,24 @@ export function normalizePlivoVoiceNumbers(value: string | null | undefined, def
   return numbers;
 }
 
+export function normalizePlivoVoiceNumberPool(
+  values: Array<string | null | undefined>,
+  defaultCountryCode = "91",
+): string[] {
+  const seen = new Set<string>();
+  const numbers: string[] = [];
+
+  for (const value of values) {
+    for (const normalized of normalizePlivoVoiceNumbers(value, defaultCountryCode)) {
+      if (seen.has(normalized)) continue;
+      seen.add(normalized);
+      numbers.push(normalized);
+    }
+  }
+
+  return numbers;
+}
+
 export function maskPhoneForLog(value: string | null | undefined): string {
   const digits = String(value || "").replace(/\D/g, "");
   if (digits.length <= 4) return digits ? "****" : "";
