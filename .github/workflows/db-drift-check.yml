@@ -30,6 +30,7 @@ jobs:
   drift:
     name: Detect migration drift
     runs-on: ubuntu-latest
+    environment: production-db
     permissions:
       issues: write
       contents: read
