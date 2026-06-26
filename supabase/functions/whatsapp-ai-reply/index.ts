@@ -9,8 +9,9 @@ import { logWhatsAppAutomationEvent } from "../_shared/whatsapp-automation-event
 import { createWhatsAppAgUiTrace } from "../_shared/copilotkit-agui.ts";
 import {
   conversationBusinessKey,
-  upsertConversationState,
 } from "../_shared/whatsapp-conversation-state.ts";
+import { applyLeadTransition } from "../_shared/lead-transition.ts";
+import { recordOutboundConversationAction } from "../_shared/whatsapp-conversation-action.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -609,32 +610,28 @@ Deno.serve(async (req) => {
         }, phone, reply);
 
         if (sendResult.ok) {
-          await admin.from("whatsapp_messages").insert({
-            lead_id: leadId,
-            wa_message_id: sendResult.messageId,
-            direction: "outbound",
+          await recordOutboundConversationAction(admin, {
+            kind: "handoff",
             phone,
-            message_type: "text",
-            content: reply,
-            status: "sent",
-            is_read: true,
-            template_key: role === "job_applicant" ? "hr_handoff" : "procurement_handoff",
-            provider: sendResult.provider,
-            business_phone_number_id: sendResult.businessPhoneNumberId,
-            business_phone_number: sendResult.businessNumber,
-          });
-          await upsertConversationState(admin, {
-            phone,
-            businessNumber: channelKey,
-            provider: sendResult.provider,
             leadId,
-            mode: "human",
-            state: role === "job_applicant" ? "job_handoff" : "vendor_handoff",
-            ownerUserId: existingLead?.counsellor_id || null,
-            escalationRole: role === "job_applicant" ? "hr" : "procurement",
-            handoffReason: `classified_${role}`,
-            priority: "normal",
-            lastIntent: role,
+            content: reply,
+            messageType: "text",
+            templateKey: role === "job_applicant" ? "hr_handoff" : "procurement_handoff",
+            status: "sent",
+            sendResult,
+            outboundKind: "system_notification",
+            expectedReplyType: "general",
+            responsePolicy: "human",
+            metadata: { role },
+            conversationState: {
+              mode: "human",
+              state: role === "job_applicant" ? "job_handoff" : "vendor_handoff",
+              ownerUserId: existingLead?.counsellor_id || null,
+              escalationRole: role === "job_applicant" ? "hr" : "procurement",
+              handoffReason: `classified_${role}`,
+              priority: "normal",
+              lastIntent: role,
+            },
           });
         } else {
           console.error("Job/vendor handoff send failed:", sendResult.raw || sendResult.error);
@@ -797,10 +794,20 @@ Deno.serve(async (req) => {
 
     // ── Act on bot-detected signals ──────────────────────────────────────────
     if (leadId && botAction === "mark_not_interested") {
-      await admin.from("leads").update({ stage: "not_interested" }).eq("id", leadId);
+      await applyLeadTransition(admin, {
+        leadId,
+        command: "classifyNotInterested",
+        activityType: "whatsapp",
+        description: "Bot auto-marked Not Interested from WhatsApp reply",
+      });
       console.log("Bot auto-marked not_interested:", leadId);
     } else if (leadId && botAction === "mark_dnc") {
-      await admin.from("leads").update({ stage: "dnc" }).eq("id", leadId);
+      await applyLeadTransition(admin, {
+        leadId,
+        command: "markDnc",
+        activityType: "whatsapp",
+        description: "Bot auto-marked DNC from WhatsApp reply",
+      });
       console.log("Bot auto-marked dnc:", leadId);
     }
 
@@ -865,51 +872,39 @@ Deno.serve(async (req) => {
       action: botAction,
     });
 
-    // Log outbound AI reply
-    await admin.from("whatsapp_messages").insert({
-      lead_id: leadId,
-      wa_message_id: sendResult.messageId,
-      direction: "outbound",
-      phone: digits(phone),
-      message_type: "text",
+    await recordOutboundConversationAction(admin, {
+      kind: "aiReply",
+      phone,
+      leadId,
       content: aiReply,
+      messageType: "text",
+      templateKey: "ai_auto_reply",
       status: "sent",
-      is_read: true,
-      template_key: "ai_auto_reply",
-      provider: sendResult.provider,
-      business_phone_number_id: sendResult.businessPhoneNumberId,
-      business_phone_number: sendResult.businessNumber,
-    });
-
-    await logWhatsAppAutomationEvent(admin, {
-      phone,
-      businessNumber: sendResult.businessNumber || sendResult.businessPhoneNumberId || channelKey,
-      provider: sendResult.provider,
-      leadId,
-      eventType: "ai_reply_sent",
-      decision: botAction,
-      reason: queryType,
-      confidence,
-      metadata: {
-        message_id: sendResult.messageId,
-        copilotkit: agUiTrace,
+      sendResult,
+      outboundKind: "ai_reply",
+      expectedReplyType: "general",
+      responsePolicy: "engine",
+      automationEvent: {
+        eventType: "ai_reply_sent",
+        decision: botAction,
+        reason: queryType,
+        confidence,
+        metadata: {
+          message_id: sendResult.messageId,
+          copilotkit: agUiTrace,
+        },
       },
-    });
-
-    await upsertConversationState(admin, {
-      phone,
-      businessNumber: sendResult.businessNumber || sendResult.businessPhoneNumberId || channelKey,
-      provider: sendResult.provider,
-      leadId,
-      mode: "ai",
-      state: confidence < 0.6 ? "knowledge_gap" : "answered_by_ai",
-      ownerUserId: existingLead?.counsellor_id || null,
-      escalationRole: confidence < 0.6 ? "admission_head" : null,
-      handoffReason: confidence < 0.6 ? "low_confidence" : null,
-      priority: confidence < 0.6 ? "high" : "normal",
-      lastIntent: queryType,
-      lastConfidence: confidence,
-      lastBotAction: botAction,
+      conversationState: {
+        mode: "ai",
+        state: confidence < 0.6 ? "knowledge_gap" : "answered_by_ai",
+        ownerUserId: existingLead?.counsellor_id || null,
+        escalationRole: confidence < 0.6 ? "admission_head" : null,
+        handoffReason: confidence < 0.6 ? "low_confidence" : null,
+        priority: confidence < 0.6 ? "high" : "normal",
+        lastIntent: queryType,
+        lastConfidence: confidence,
+        lastBotAction: botAction,
+      },
     });
 
     return new Response(JSON.stringify({ success: true, reply: aiReply, query_type: queryType, action: botAction }), {

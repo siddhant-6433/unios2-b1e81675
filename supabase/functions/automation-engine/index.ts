@@ -13,6 +13,7 @@
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { applyLeadTransition } from "../_shared/lead-transition.ts";
 
 /** Returns the next ISO timestamp within the 9AM–8PM IST calling window. */
 function nextPermittedCallTime(delayMs = 0): string {
@@ -296,13 +297,12 @@ Deno.serve(async (req) => {
 
             case "advance_stage": {
               if (!action.to_stage) break;
-              await admin.from("leads").update({ stage: action.to_stage }).eq("id", lead.id);
-              await admin.from("lead_activities").insert({
-                lead_id: lead.id,
-                type: "stage_change",
+              await applyLeadTransition(admin, {
+                leadId: lead.id,
+                currentStage: lead.stage,
+                command: "automationAdvanceStage",
+                targetStage: action.to_stage,
                 description: `Stage auto-advanced to ${action.to_stage} by automation: ${rule.name}`,
-                old_stage: lead.stage,
-                new_stage: action.to_stage,
               });
               executedActions.push({ type: "advance_stage", to: action.to_stage });
               break;

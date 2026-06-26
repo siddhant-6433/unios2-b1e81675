@@ -4,6 +4,7 @@ import {
   markWhatsAppInboundEvent,
   recordWhatsAppInboundEvent,
 } from "../_shared/whatsapp-inbound-events.ts";
+import { applyLeadTransition } from "../_shared/lead-transition.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -86,7 +87,7 @@ function extractWhatsAppLoginCode(content: string | null | undefined): string | 
 // Updates the whatsapp_templates mirror row and notifies the creator plus
 // every super-admin via the in-app notifications table (realtime → toast).
 async function handleTemplateStatusEvent(
-  admin: ReturnType<typeof createClient>,
+  admin: any,
   field: string,
   value: any,
 ): Promise<void> {
@@ -955,10 +956,11 @@ Deno.serve(async (req) => {
           if (!orchestratorOwnsReplyDecision && !feedbackHandled && msgType === "text" && content && DNC_PATTERNS.test(content.trim())) {
             // Mark lead as DNC if known
             if (lead?.id) {
-              await admin.from("leads").update({ stage: "dnc" }).eq("id", lead.id);
-              await admin.from("lead_activities").insert({
-                lead_id: lead.id,
-                type: "whatsapp",
+              await applyLeadTransition(admin, {
+                leadId: lead.id,
+                currentStage: lead.stage ?? null,
+                command: "markDnc",
+                activityType: "whatsapp",
                 description: `Lead marked DNC via WhatsApp opt-out: "${content.substring(0, 100)}"`,
               });
               // Notify counsellor / admins
@@ -1002,7 +1004,13 @@ Deno.serve(async (req) => {
           // ── Re-subscribe detection ───────────────────────────────────────
           if (!feedbackHandled && msgType === "text" && content && /^start$/i.test(content.trim())) {
             if (lead?.id) {
-              await admin.from("leads").update({ stage: "new_lead" }).eq("id", lead.id);
+              await applyLeadTransition(admin, {
+                leadId: lead.id,
+                currentStage: lead.stage ?? null,
+                command: "restoreFromDnc",
+                activityType: "whatsapp",
+                description: "Lead replied START on WhatsApp and was restored from DNC",
+              });
             }
           }
 
