@@ -9,6 +9,8 @@ describe("temporary Razorpay student password login", () => {
   it("exposes username/password sign-in from the production login page", () => {
     expect(loginPage).toContain('"student_password"');
     expect(loginPage).toContain('supabase.functions.invoke("student-password-login"');
+    expect(loginPage).toContain("supabase.auth.signInWithPassword");
+    expect(loginPage).toContain("Username or email");
     expect(loginPage).toContain("Sign in with username and password");
   });
 

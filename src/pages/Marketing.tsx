@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -74,6 +75,7 @@ const fmtDate = (value: string | null) => {
 };
 
 export default function Marketing() {
+  const { role } = useAuth();
   const initialCustomRange = useMemo(() => getDatePresetRange("last_30"), []);
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -98,6 +100,11 @@ export default function Marketing() {
   }, [dateFrom, datePreset, dateTo]);
 
   const load = useCallback(async () => {
+    if (role === "academic_partner") {
+      setCampaigns([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     let whatsappQuery = supabase
       .from("whatsapp_campaigns" as any)
@@ -168,7 +175,7 @@ export default function Marketing() {
 
     setCampaigns([...waRows, ...emailRows].sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
     setLoading(false);
-  }, [dateBounds]);
+  }, [dateBounds, role]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -273,6 +280,10 @@ export default function Marketing() {
     setQueueingId(null);
     await load();
   };
+
+  if (role === "academic_partner") {
+    return <Navigate to="/academic-partner-portal" replace />;
+  }
 
   return (
     <div className="space-y-5 p-6">

@@ -10,6 +10,9 @@ interface Props {
   leadName: string | null;
   leadPhone: string | null;
   compact?: boolean;
+  mode?: "student" | "academic_partner_on_behalf";
+  label?: string;
+  startNew?: boolean;
   /** Skip the share dialog: generate a short-lived link and open it in a new
    *  tab immediately (lets staff preview the portal as the student). */
   directOpen?: boolean;
@@ -23,7 +26,16 @@ const EXPIRY_OPTIONS: { label: string; hours: number }[] = [
   { label: "30 days", hours: 720 },
 ];
 
-export function ApplyMagicLinkButton({ leadId, leadName, leadPhone, compact = false, directOpen = false }: Props) {
+export function ApplyMagicLinkButton({
+  leadId,
+  leadName,
+  leadPhone,
+  compact = false,
+  mode = "student",
+  label,
+  startNew = false,
+  directOpen = false,
+}: Props) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [hours, setHours] = useState(168);
@@ -58,7 +70,7 @@ export function ApplyMagicLinkButton({ leadId, leadName, leadPhone, compact = fa
     setGenerating(true);
     try {
       const { data, error } = await supabase.functions.invoke("generate-apply-link", {
-        body: { lead_id: leadId, expires_in_hours: hours },
+        body: { lead_id: leadId, expires_in_hours: hours, mode },
       });
       if (error) {
         const detail = await extractFnError(error);
@@ -67,7 +79,8 @@ export function ApplyMagicLinkButton({ leadId, leadName, leadPhone, compact = fa
         throw new Error(detail);
       }
       if (data?.error) throw new Error(data.error);
-      setGenerated({ url: data.url, expiresAt: data.expires_at });
+      const url = startNew ? `${data.url}${data.url.includes("?") ? "&" : "?"}start_new=1` : data.url;
+      setGenerated({ url, expiresAt: data.expires_at });
     } catch (err: any) {
       toast({ title: "Failed to generate link", description: err.message || "Unknown error", variant: "destructive" });
     } finally {
@@ -89,13 +102,14 @@ export function ApplyMagicLinkButton({ leadId, leadName, leadPhone, compact = fa
     const tab = window.open("about:blank", "_blank");
     try {
       const { data, error } = await supabase.functions.invoke("generate-apply-link", {
-        body: { lead_id: leadId, expires_in_hours: 24 },
+        body: { lead_id: leadId, expires_in_hours: 24, mode },
       });
       if (error) throw new Error(await extractFnError(error));
       if (data?.error) throw new Error(data.error);
       if (!data?.url) throw new Error("No link returned");
-      if (tab) tab.location.href = data.url;
-      else window.open(data.url, "_blank"); // popup-blocker fallback
+      const url = startNew ? `${data.url}${data.url.includes("?") ? "&" : "?"}start_new=1` : data.url;
+      if (tab) tab.location.href = url;
+      else window.open(url, "_blank"); // popup-blocker fallback
     } catch (err: any) {
       if (tab) tab.close();
       toast({ title: "Failed to open as student", description: err.message, variant: "destructive" });
@@ -172,7 +186,7 @@ export function ApplyMagicLinkButton({ leadId, leadName, leadPhone, compact = fa
     ) : (
       <Button size="sm" variant="outline" className="gap-2" onClick={openAsStudent} disabled={!leadPhone || opening}>
         {opening ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LogIn className="h-3.5 w-3.5" />}
-        View as Student
+        {label || (mode === "academic_partner_on_behalf" ? "Complete Application" : "View as Student")}
       </Button>
     );
   }
@@ -195,7 +209,7 @@ export function ApplyMagicLinkButton({ leadId, leadName, leadPhone, compact = fa
       disabled={!leadPhone}
     >
       <LinkIcon className="h-3.5 w-3.5" />
-      Send Login Link
+      {label || (mode === "academic_partner_on_behalf" ? "Copy On-Behalf Link" : "Send Login Link")}
     </Button>
   );
 
@@ -206,13 +220,15 @@ export function ApplyMagicLinkButton({ leadId, leadName, leadPhone, compact = fa
       <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); }}>
         <DialogContent className="max-w-md w-[min(92vw,28rem)]">
           <DialogHeader>
-            <DialogTitle>Apply Portal Login Link</DialogTitle>
+            <DialogTitle>{mode === "academic_partner_on_behalf" ? "On-Behalf Application Link" : "Apply Portal Login Link"}</DialogTitle>
           </DialogHeader>
 
           {!generated ? (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                Generate a one-click login link for {leadName || "this lead"} so they can access the application portal directly without an OTP. The link is valid for the duration you choose and can be reused until it expires.
+                {mode === "academic_partner_on_behalf"
+                  ? `Generate a scoped link so you can complete the application for ${leadName || "this lead"}. Actions are audited under your academic partner account.`
+                  : `Generate a one-click login link for ${leadName || "this lead"} so they can access the application portal directly without an OTP. The link is valid for the duration you choose and can be reused until it expires.`}
               </p>
 
               <div>
