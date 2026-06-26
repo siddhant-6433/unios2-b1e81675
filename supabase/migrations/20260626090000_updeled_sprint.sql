@@ -7,6 +7,7 @@ INSERT INTO storage.buckets (id, name, public)
 VALUES ('updeled-registrations', 'updeled-registrations', false)
 ON CONFLICT (id) DO NOTHING;
 
+DROP POLICY IF EXISTS "Staff can upload updeled docs" ON storage.objects;
 CREATE POLICY "Staff can upload updeled docs"
   ON storage.objects FOR INSERT TO authenticated
   WITH CHECK (
@@ -18,6 +19,7 @@ CREATE POLICY "Staff can upload updeled docs"
     )
   );
 
+DROP POLICY IF EXISTS "Staff can view updeled docs" ON storage.objects;
 CREATE POLICY "Staff can view updeled docs"
   ON storage.objects FOR SELECT TO authenticated
   USING (
@@ -49,6 +51,7 @@ CREATE INDEX idx_updeled_registrations_registered_at
 
 ALTER TABLE public.updeled_registrations ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Staff can view updeled registrations" ON public.updeled_registrations;
 CREATE POLICY "Staff can view updeled registrations"
   ON public.updeled_registrations FOR SELECT TO authenticated
   USING (
@@ -58,6 +61,7 @@ CREATE POLICY "Staff can view updeled registrations"
     public.has_role(auth.uid(), 'counsellor')
   );
 
+DROP POLICY IF EXISTS "Staff can insert updeled registrations" ON public.updeled_registrations;
 CREATE POLICY "Staff can insert updeled registrations"
   ON public.updeled_registrations FOR INSERT TO authenticated
   WITH CHECK (
@@ -67,6 +71,7 @@ CREATE POLICY "Staff can insert updeled registrations"
     public.has_role(auth.uid(), 'counsellor')
   );
 
+DROP POLICY IF EXISTS "Staff can update updeled registrations" ON public.updeled_registrations;
 CREATE POLICY "Staff can update updeled registrations"
   ON public.updeled_registrations FOR UPDATE TO authenticated
   USING (
