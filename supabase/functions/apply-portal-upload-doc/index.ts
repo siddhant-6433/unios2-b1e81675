@@ -235,15 +235,14 @@ Deno.serve(async (req) => {
     }
 
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const uploadId = new Date().toISOString().replace(/[^0-9]/g, "");
     const extension = PHOTO_DOC_KEYS.has(docKey)
       ? extForMime(contentType)
       : safeName.split(".").pop() || "bin";
     const fileName = docKey === "passport_photo"
-      ? `passport_photo.${extension}`
-      : `${docKey}-${PHOTO_DOC_KEYS.has(docKey) ? `processed.${extension}` : safeName}`;
-    const legacyPath = docKey === "passport_photo"
-      ? `${applicationId}/passport_photo.${extension}`
-      : `${applicationId}/${fileName}`;
+      ? `passport_photo.${uploadId}.${extension}`
+      : `${docKey}-${uploadId}-${PHOTO_DOC_KEYS.has(docKey) ? `processed.${extension}` : safeName}`;
+    const legacyPath = `${applicationId}/${fileName}`;
     const { data: existingFiles } = await admin.storage
       .from("application-documents")
       .list(applicationId, { limit: 100 });
@@ -274,7 +273,7 @@ Deno.serve(async (req) => {
     if (storageTarget === "supabase") {
       const { error: upErr } = await admin.storage
         .from("application-documents")
-        .upload(legacyPath, buf, { contentType, upsert: true });
+        .upload(legacyPath, buf, { contentType, upsert: true, cacheControl: "no-cache, max-age=0" });
       if (upErr) {
         console.error("[apply-portal-upload-doc] supabase upload error:", upErr);
         return new Response(JSON.stringify({ error: upErr.message }), {
@@ -287,7 +286,7 @@ Deno.serve(async (req) => {
       storageProvider = "supabase";
     } else {
       const r2Key = `application-portal/${legacyPath}`;
-      const uploaded = await uploadToR2({ key: r2Key, body: buf, contentType });
+      const uploaded = await uploadToR2({ key: r2Key, body: buf, contentType, cacheControl: "no-cache, max-age=0" });
       uploadedPath = uploaded.key;
       uploadedUrl = uploaded.url;
       storageProvider = "r2";
