@@ -9,7 +9,7 @@
 // because that would require a known good (application_id, phone) pair and
 // would pollute production storage. The guards cover what's load-bearing.
 //
-// Set SKIP_NETWORK_TESTS=1 to skip (e.g. in offline CI).
+// Set RUN_NETWORK_TESTS=1 to run these live checks intentionally.
 
 import { describe, it, expect } from "vitest";
 
@@ -19,7 +19,7 @@ const ANON_KEY =
 
 const FN_URL = `${SUPABASE_URL}/functions/v1/apply-portal-upload-doc`;
 
-const skip = process.env.SKIP_NETWORK_TESTS === "1";
+const skip = process.env.RUN_NETWORK_TESTS !== "1";
 
 function makeForm(fields: Record<string, string | Blob>): FormData {
   const f = new FormData();
