@@ -37,6 +37,15 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ChevronDown } from "lucide-react";
 import { groupCourses, type CourseLike } from "@/lib/courseSort";
 import { exportRowsXlsx, formatExportDateTime } from "@/lib/xlsxExport";
+import {
+  ADMISSIONS_LEAD_LIST_SELECT,
+  applyAdmissionsLeadEnrichment,
+  applyAdmissionsLeadCursor,
+  applyAdmissionsLeadSort,
+  applyAdmissionsListQueryFilters,
+  hasActiveAdmissionsListFilters,
+  type AdmissionsListFilterModel,
+} from "@/lib/admissionsListRead";
 
 const AddLeadDialog = lazy(() =>
   import("@/components/admissions/AddLeadDialog").then((m) => ({ default: m.AddLeadDialog })));
@@ -444,6 +453,58 @@ const Admissions = () => {
     return debouncedCourseFilter.filter((id) => categorySet.has(id));
   }, [categoryCourseIds, debouncedCourseFilter, leadInstitutionType]);
 
+  const admissionsListFilter = useMemo<AdmissionsListFilterModel>(() => ({
+    role,
+    profileId: profile?.id,
+    selectedCampusId,
+    counsellorFilter,
+    stageFilter,
+    sourceFilter,
+    sourceFilterMode,
+    leadInstitutionType,
+    courseFilterMode,
+    debouncedCourseFilter,
+    scopedSelectedCourseFilterIds,
+    applicationStageFilterCount: applicationStageFilter.length,
+    applicationStageLeadScope,
+    roleFilter,
+    tempFilter,
+    debouncedSearch,
+    fromDate,
+    toDate,
+    newLeadAssignmentFilter,
+    inactiveIds,
+    followupLeadIds,
+    visitLeadIds,
+    actionLeadIds,
+    notCalledIds,
+  }), [
+    role,
+    profile?.id,
+    selectedCampusId,
+    counsellorFilter,
+    stageFilter,
+    sourceFilter,
+    sourceFilterMode,
+    leadInstitutionType,
+    courseFilterMode,
+    debouncedCourseFilter,
+    scopedSelectedCourseFilterIds,
+    applicationStageFilter.length,
+    applicationStageLeadScope,
+    roleFilter,
+    tempFilter,
+    debouncedSearch,
+    fromDate,
+    toDate,
+    newLeadAssignmentFilter,
+    inactiveIds,
+    followupLeadIds,
+    visitLeadIds,
+    actionLeadIds,
+    notCalledIds,
+  ]);
+
   const applicationStageFilterLabel = useMemo(() => {
     if (applicationStageFilter.length === 0) return "All Application Stages";
     if (applicationStageFilter.length === 1) {
@@ -452,15 +513,19 @@ const Admissions = () => {
     return `${applicationStageFilter.length} application stages`;
   }, [applicationStageFilter]);
 
-  const fetchAllQueryRows = async <T,>(makeQuery: (from: number, to: number) => any) => {
+  const fetchAllIdOrderedRows = async <T extends { id: string }>(
+    makeQuery: (cursorId: string | null, pageSize: number) => any,
+  ) => {
     const rows: T[] = [];
     const pageSize = 1000;
-    for (let from = 0; ; from += pageSize) {
-      const { data, error } = await makeQuery(from, from + pageSize - 1);
+    let cursorId: string | null = null;
+    for (;;) {
+      const { data, error } = await makeQuery(cursorId, pageSize);
       if (error) throw error;
       const batch = (data || []) as T[];
       rows.push(...batch);
       if (batch.length < pageSize) break;
+      cursorId = batch[batch.length - 1].id;
     }
     return rows;
   };
@@ -479,15 +544,21 @@ const Admissions = () => {
     (async () => {
       try {
         const [leadRows, appRows, paymentRows] = await Promise.all([
-          fetchAllQueryRows<{ id: string; stage: string }>((from, to) =>
-            supabase.from("leads").select("id, stage").range(from, to)
-          ),
-          fetchAllQueryRows<{ lead_id: string | null; status: string | null; submitted_at: string | null; payment_status: string | null }>((from, to) =>
-            supabase.from("applications").select("lead_id, status, submitted_at, payment_status").range(from, to)
-          ),
-          fetchAllQueryRows<{ lead_id: string | null; type: string | null; status: string | null }>((from, to) =>
-            supabase.from("lead_payments" as any).select("lead_id, type, status").range(from, to)
-          ),
+          fetchAllIdOrderedRows<{ id: string; stage: string }>((cursorId, pageSize) => {
+            let query = supabase.from("leads").select("id, stage").order("id", { ascending: true }).limit(pageSize);
+            if (cursorId) query = query.gt("id", cursorId);
+            return query;
+          }),
+          fetchAllIdOrderedRows<{ id: string; lead_id: string | null; status: string | null; submitted_at: string | null; payment_status: string | null }>((cursorId, pageSize) => {
+            let query = supabase.from("applications").select("id, lead_id, status, submitted_at, payment_status").order("id", { ascending: true }).limit(pageSize);
+            if (cursorId) query = query.gt("id", cursorId);
+            return query;
+          }),
+          fetchAllIdOrderedRows<{ id: string; lead_id: string | null; type: string | null; status: string | null }>((cursorId, pageSize) => {
+            let query = supabase.from("lead_payments" as any).select("id, lead_id, type, status").order("id", { ascending: true }).limit(pageSize);
+            if (cursorId) query = query.gt("id", cursorId);
+            return query;
+          }),
         ]);
 
         const allLeadIds = new Set(leadRows.map((lead) => lead.id));
@@ -572,112 +643,8 @@ const Admissions = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applicationStageFilter]);
 
-  const postgrestList = (values: string[]) => `(${values.join(",")})`;
-
   const applyListQueryFilters = (query: any) => {
-    // Counsellor / campus scope
-    if (role === "counsellor" && profile?.id) {
-      query = query.eq("counsellor_id", profile.id);
-    } else if (counsellorFilter === "unassigned") {
-      query = query.is("counsellor_id", null);
-    } else if (counsellorFilter !== "all") {
-      query = query.eq("counsellor_id", counsellorFilter);
-    } else if (selectedCampusId !== "all") {
-      query = query.eq("campus_id", selectedCampusId);
-    }
-
-    // Stage / source / role / temperature
-    if (stageFilter !== "all") {
-      const stages = stageFilter.split(",").map(s => s.trim()).filter(Boolean);
-      if (stages.length === 1) query = query.eq("stage", stages[0]);
-      else if (stages.length > 1) query = query.in("stage", stages);
-    }
-    if (sourceFilter !== "all") {
-      query = sourceFilterMode === "exclude"
-        ? query.neq("source", sourceFilter)
-        : query.eq("source", sourceFilter);
-    }
-
-    if (leadInstitutionType !== "all") {
-      query = query.eq("lead_institution_type", leadInstitutionType).eq("is_mirror", false);
-      if (courseFilterMode === "include") {
-        if (scopedSelectedCourseFilterIds.length > 0) {
-          query = query.in("course_id", scopedSelectedCourseFilterIds);
-        } else if (debouncedCourseFilter.length > 0) {
-          return { query, empty: true };
-        }
-      } else {
-        if (scopedSelectedCourseFilterIds.length > 0) {
-          query = query.not("course_id", "in", postgrestList(scopedSelectedCourseFilterIds));
-        } else if (debouncedCourseFilter.length > 0) {
-          return { query, empty: true };
-        }
-      }
-    } else if (debouncedCourseFilter.length > 0) {
-      query = courseFilterMode === "exclude"
-        ? query.not("course_id", "in", postgrestList(debouncedCourseFilter))
-        : query.in("course_id", debouncedCourseFilter);
-    }
-
-    if (roleFilter !== "all") query = query.eq("person_role", roleFilter);
-    if (tempFilter !== "all") query = query.eq("lead_temperature", tempFilter);
-
-    if (newLeadAssignmentFilter) {
-      query = query.eq("stage", "new_lead").eq("is_mirror", false);
-      query = newLeadAssignmentFilter === "assigned"
-        ? query.not("counsellor_id", "is", null)
-        : query.is("counsellor_id", null);
-    }
-
-    // Date range (applied to created_at)
-    if (fromDate) query = query.gte("created_at", `${fromDate}T00:00:00`);
-    if (toDate) query = query.lte("created_at", `${toDate}T23:59:59.999`);
-
-    // Multi-field search (server-side ilike OR). Triggered after >= 2 chars.
-    if (debouncedSearch.length >= 2) {
-      const q = debouncedSearch;
-      const digits = q.replace(/\D/g, "");
-      const phoneTerm = digits.length >= 3 ? digits : q;
-      // Escape any commas in the user-supplied search to avoid breaking the OR string
-      const safe = (s: string) => s.replace(/,/g, "");
-      query = query.or(
-        `name.ilike.%${safe(q)}%,phone.ilike.%${safe(phoneTerm)}%,email.ilike.%${safe(q)}%,application_id.ilike.%${safe(q)}%`
-      );
-    }
-
-    // ID-set filters: intersect any active sets and pass the result as .in("id", ...).
-    // Broad application-stage buckets use an exclusion scope so the URL does
-    // not explode with thousands of lead ids.
-    if (applicationStageFilter.length > 0 && applicationStageLeadScope === null) {
-      return { query, empty: true };
-    }
-    const idSets: (Set<string> | null)[] = [
-      inactiveIds,
-      followupLeadIds,
-      visitLeadIds,
-      actionLeadIds,
-      notCalledIds,
-      applicationStageLeadScope?.mode === "include" ? applicationStageLeadScope.ids : null,
-    ];
-    const activeSets = idSets.filter((s): s is Set<string> => s !== null);
-    if (activeSets.length > 0) {
-      let intersection = Array.from(activeSets[0]);
-      for (let i = 1; i < activeSets.length; i++) {
-        const other = activeSets[i];
-        intersection = intersection.filter(id => other.has(id));
-      }
-      if (intersection.length === 0) return { query, empty: true };
-      query = query.in("id", intersection);
-    }
-
-    if (applicationStageLeadScope?.mode === "exclude" && applicationStageLeadScope.ids.size > 0) {
-      const ids = Array.from(applicationStageLeadScope.ids);
-      for (let i = 0; i < ids.length; i += 100) {
-        query = query.not("id", "in", postgrestList(ids.slice(i, i + 100)));
-      }
-    }
-
-    return { query, empty: false };
+    return applyAdmissionsListQueryFilters(query, admissionsListFilter);
   };
 
   useEffect(() => {
@@ -690,34 +657,17 @@ const Admissions = () => {
     setCourseSearch("");
   }, [categoryCourseIds, courseOptions.length, leadInstitutionType]);
 
-  // Hydrate application completion % for whichever rows we just loaded.
-  // Split out so both fetch paths can reuse it.
   const hydrateLeadEnrichment = async (rows: any[]) => {
-    if (!rows.length) return { rows, summaries: {} as Record<string, string> };
+    if (!rows.length) return applyAdmissionsLeadEnrichment(rows, []);
     const leadIds = rows.map(r => r.id);
     const { data, error } = await supabase.rpc("admissions_lead_enrichment" as any, {
       p_lead_ids: leadIds,
     });
     if (error) {
       console.warn("[Admissions] lead enrichment skipped for this page", error.message);
-      return { rows, summaries: {} as Record<string, string> };
+      return applyAdmissionsLeadEnrichment(rows, []);
     }
-    const byLead = new Map<string, any>();
-    const summaries: Record<string, string> = {};
-    for (const row of (data || []) as any[]) {
-      if (!row?.lead_id) continue;
-      byLead.set(row.lead_id, row);
-      if (row.ai_summary) summaries[row.lead_id] = row.ai_summary;
-    }
-    rows.forEach((l: any) => {
-      const m = byLead.get(l.id);
-      if (m) {
-        l.app_completion_pct = m.app_completion_pct ?? null;
-        l.app_payment_status = m.app_payment_status ?? null;
-        l.app_fee_amount = m.app_fee_amount ?? null;
-      }
-    });
-    return { rows, summaries };
+    return applyAdmissionsLeadEnrichment(rows, data as any[] || []);
   };
 
   const applyLeadEnrichment = (rows: Lead[]) => {
@@ -802,38 +752,15 @@ const Admissions = () => {
       // whenever any list filter is active: that's precisely when the estimate
       // breaks and when the filtered set is small enough for an exact count to
       // be cheap.
-      const hasActiveListFilters =
-        stageFilter !== "all" ||
-        sourceFilter !== "all" ||
-        roleFilter !== "all" ||
-        tempFilter !== "all" ||
-        leadInstitutionType !== "all" ||
-        debouncedCourseFilter.length > 0 ||
-        applicationStageFilter.length > 0 ||
-        counsellorFilter !== "all" ||
-        selectedCampusId !== "all" ||
-        role === "counsellor" ||
-        debouncedSearch.length >= 2 ||
-        !!fromDate ||
-        !!toDate ||
-        newLeadAssignmentFilter !== null ||
-        inactiveIds !== null ||
-        followupLeadIds !== null ||
-        visitLeadIds !== null ||
-        actionLeadIds !== null ||
-        notCalledIds !== null;
+      const hasActiveListFilters = hasActiveAdmissionsListFilters(admissionsListFilter);
       let query: any = supabase
         .from("leads")
         .select(
-          `id, name, phone, email, stage, source, person_role, created_at,
-           application_id, pre_admission_no, admission_no, course_id, campus_id, lead_institution_type, is_mirror,
-           counsellor_id, lead_score, lead_temperature, ai_called,
-           courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`,
+          ADMISSIONS_LEAD_LIST_SELECT,
           page === 1 ? { count: hasActiveListFilters ? "exact" : "planned" } : undefined
-        )
-        .order("created_at", { ascending: leadSortOrder === "oldest" })
-        .order("id", { ascending: leadSortOrder === "oldest" })
-        .limit(PAGE_SIZE + 1);
+        );
+      query = applyAdmissionsLeadSort(query, leadSortOrder);
+      query = query.limit(PAGE_SIZE + 1);
 
       const scoped = applyListQueryFilters(query);
       if (scoped.empty) {
@@ -843,11 +770,7 @@ const Admissions = () => {
       }
       query = scoped.query;
 
-      if (pageCursor) {
-        query = leadSortOrder === "oldest"
-          ? query.or(`created_at.gt.${pageCursor.created_at},and(created_at.eq.${pageCursor.created_at},id.gt.${pageCursor.id})`)
-          : query.or(`created_at.lt.${pageCursor.created_at},and(created_at.eq.${pageCursor.created_at},id.lt.${pageCursor.id})`);
-      }
+      query = applyAdmissionsLeadCursor(query, pageCursor, leadSortOrder);
 
       const { data, count, error } = await query;
       if (error) throw error;
@@ -1226,14 +1149,6 @@ const Admissions = () => {
   };
 
   const fetchFilteredLeadsForExport = async () => {
-    if (
-      leadInstitutionType !== "all" &&
-      debouncedCourseFilter.length > 0 &&
-      scopedSelectedCourseFilterIds.length === 0
-    ) {
-      return [];
-    }
-
     const rows: Lead[] = [];
     const exportPageSize = 1000;
     let cursor: { created_at: string; id: string } | null = null;
@@ -1241,25 +1156,15 @@ const Admissions = () => {
     for (;;) {
       let query: any = supabase
         .from("leads")
-        .select(
-          `id, name, phone, email, stage, source, person_role, created_at,
-           application_id, pre_admission_no, admission_no, course_id, campus_id, lead_institution_type, is_mirror,
-           counsellor_id, lead_score, lead_temperature, ai_called,
-           courses:course_id(name), campuses:campus_id(name), profiles:counsellor_id(display_name)`
-        )
-        .order("created_at", { ascending: leadSortOrder === "oldest" })
-        .order("id", { ascending: leadSortOrder === "oldest" })
-        .limit(exportPageSize);
+        .select(ADMISSIONS_LEAD_LIST_SELECT);
+      query = applyAdmissionsLeadSort(query, leadSortOrder);
+      query = query.limit(exportPageSize);
 
       const scoped = applyListQueryFilters(query);
       if (scoped.empty) return [];
       query = scoped.query;
 
-      if (cursor) {
-        query = leadSortOrder === "oldest"
-          ? query.or(`created_at.gt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.gt.${cursor.id})`)
-          : query.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
-      }
+      query = applyAdmissionsLeadCursor(query, cursor, leadSortOrder);
 
       const { data, error } = await query;
       if (error) throw error;
