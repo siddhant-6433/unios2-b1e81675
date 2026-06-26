@@ -18,6 +18,7 @@ import {
   PAID_APPLICATION_DELETE_CONFIRMATION,
 } from "@/lib/deleteApplication";
 import { cahetRegistrationFromApplication, fetchCahetRegistration, isBptOrBmritCourseName, type CahetRegistrationDetails } from "@/lib/cahet";
+import { buildApplicationDossier } from "@/lib/applicationDossier";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -149,6 +150,8 @@ export default function AdminApplicationView() {
   const { role } = useAuth();
   const canApproveApplication = role === "super_admin" || role === "principal";
   const canUploadDocuments = role === "super_admin" || role === "principal" || role === "counsellor";
+  const canManageOffer = role === "super_admin" || role === "principal" || role === "counsellor" ||
+    role === "admission_head" || role === "campus_admin";
   const [loading, setLoading] = useState(true);
   const [app, setApp] = useState<any | null>(null);
   const [lead, setLead] = useState<{
@@ -557,6 +560,34 @@ export default function AdminApplicationView() {
     return { total, verified, rejected, pending };
   }, [docs, reviews]);
 
+  const dossier = useMemo(() => {
+    if (!app) return null;
+    return buildApplicationDossier({
+      id: app.id,
+      application_id: app.application_id,
+      lead_id: app.lead_id || lead?.id || null,
+      status: app.status || "draft",
+      payment_status: app.payment_status || null,
+    }, {
+      lead: {
+        hasLead: !!lead?.id,
+        leadStage: "",
+        counsellorId: null,
+        counsellorName: null,
+        preAdmissionNo: lead?.pre_admission_no || null,
+        admissionNo: lead?.admission_no || null,
+      },
+      hasOffer,
+      appFeePaid,
+      hasTokenFeePaid: false,
+      docs: counts,
+      capabilities: {
+        canManageOffer,
+        hasLeadCourse: !!lead?.course_id,
+      },
+    });
+  }, [app, appFeePaid, canManageOffer, counts, hasOffer, lead]);
+
   const deleteApplication = async () => {
     if (!app || role !== "super_admin") return;
     const paidDeleteConfirmation = app.payment_status === "paid"
@@ -638,9 +669,6 @@ export default function AdminApplicationView() {
       setGeneratingReceipt(false);
     }
   };
-
-  const canManageOffer = role === "super_admin" || role === "principal" || role === "counsellor" ||
-    role === "admission_head" || role === "campus_admin";
 
   const issueOfferOrRepairLead = async () => {
     if (!canManageOffer) {
@@ -799,14 +827,8 @@ export default function AdminApplicationView() {
               </p>
             )}
             {decided && app.status === "approved" && (() => {
-              const canIssueOffer = canManageOffer && (!!hasOffer || !lead?.id || !!lead.course_id);
-              const reason = !canManageOffer
-                ? "You do not have permission to issue offers"
-                : !lead?.id
-                ? "Create a linked lead, then issue the offer"
-                : !lead.course_id
-                ? "No course/class is linked to this application yet"
-                : undefined;
+              const canIssueOffer = dossier?.canIssueOffer ?? false;
+              const reason = dossier?.offerBlockedReason || undefined;
               // Once an offer exists, this button switches to "View Offer Letter"
               // — same dialog, but framed as a viewer (and lets the user manage
               // waivers + see the PDF without re-issuing anything).
