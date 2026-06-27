@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   BookOpen,
+  FileText,
   GraduationCap,
   Image as ImageIcon,
   IndianRupee,
@@ -16,6 +17,7 @@ import {
   Pencil,
   Plus,
   Search,
+  UserPlus,
   Users,
 } from "lucide-react";
 import { LeadAssociationRequestsPanel } from "@/components/admissions/LeadAssociationRequestsPanel";
@@ -31,6 +33,17 @@ type Partner = {
   default_payout_percentage: number;
   notes: string | null;
   logo_url: string | null;
+  company_name: string | null;
+  company_address: string | null;
+  pan_number: string | null;
+  gst_number: string | null;
+  authorised_signatory_name: string | null;
+  authorised_signatory_contact: string | null;
+  authorised_signatory_email: string | null;
+  onboarding_status: string;
+  onboarding_step: number;
+  logo_file_path: string | null;
+  logo_uploaded_at: string | null;
 };
 
 type Dashboard = {
@@ -60,9 +73,71 @@ type Assignment = {
 };
 
 type PartnerRole = { user_id: string };
+type PartnerDocument = {
+  id: string;
+  partner_id: string;
+  document_type: string;
+  title: string;
+  file_name: string;
+  file_path: string;
+  created_at: string;
+};
+type PartnerDocumentsClient = {
+  from: (
+    table: "academic_partner_documents",
+  ) => {
+    select: (columns: string) => {
+      order: (column: string, options?: { ascending?: boolean }) => Promise<{ data: PartnerDocument[] | null; error: { message: string } | null }>;
+    };
+  };
+};
+type LeadOption = {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  stage: string;
+  course_id: string | null;
+  academic_partner_id: string | null;
+  consultant_id: string | null;
+  courses?: { name: string } | null;
+};
+type AssignOwnerRpcClient = {
+  rpc: (
+    fn: "assign_lead_external_owner",
+    args: {
+      _lead_id: string;
+      _owner_type: "academic_partner";
+      _consultant_id: null;
+      _academic_partner_id: string;
+    },
+  ) => Promise<{ error: { message: string } | null }>;
+};
 
 const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 const fmt = (n: number | string | null | undefined) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
+const getPartnerInitials = (name: string): string => {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "?";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+};
+const errorMessage = (error: unknown) => {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string") return message;
+  }
+  return "Please try again.";
+};
+const docTypeLabel: Record<string, string> = {
+  agreement: "Agreement",
+  gst: "GST",
+  pan: "PAN",
+  fee_structure: "Fee Structure",
+  brochure: "Brochure",
+  additional: "Additional",
+};
 
 export default function AcademicPartners() {
   const { toast } = useToast();
@@ -70,14 +145,18 @@ export default function AcademicPartners() {
   const [partners, setPartners] = useState<Partner[]>([]);
   const [dashboard, setDashboard] = useState<Dashboard[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [partnerDocuments, setPartnerDocuments] = useState<PartnerDocument[]>([]);
+  const [leads, setLeads] = useState<LeadOption[]>([]);
   const [courses, setCourses] = useState<{ id: string; name: string }[]>([]);
   const [batches, setBatches] = useState<{ id: string; name: string; course_id: string }[]>([]);
   const [partnerUsers, setPartnerUsers] = useState<{ user_id: string; display_name: string | null; email: string | null }[]>([]);
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [showAssignment, setShowAssignment] = useState(false);
+  const [showLeadAssignment, setShowLeadAssignment] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [assignmentPartnerId, setAssignmentPartnerId] = useState<string | null>(null);
+  const [leadAssignmentPartnerId, setLeadAssignmentPartnerId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     name: "",
@@ -93,16 +172,26 @@ export default function AcademicPartners() {
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [assignmentForm, setAssignmentForm] = useState({ course_id: "", batch_id: "", payout_percentage: "" });
+  const [leadAssignmentForm, setLeadAssignmentForm] = useState({ lead_id: "" });
 
   const fetchAll = async () => {
     setLoading(true);
-    const [partnersRes, dashboardRes, assignmentsRes, coursesRes, batchesRes, rolesRes] = await Promise.all([
+    const [partnersRes, dashboardRes, assignmentsRes, coursesRes, batchesRes, rolesRes, leadsRes, documentsRes] = await Promise.all([
       supabase.from("academic_partners").select("*").order("created_at", { ascending: false }),
       supabase.from("academic_partner_dashboard").select("*").order("partner_name"),
       supabase.from("academic_partner_assignment_summary").select("*").order("course_name"),
       supabase.from("courses").select("id, name").order("name"),
       supabase.from("batches").select("id, name, course_id").order("name"),
       supabase.from("user_roles").select("user_id").eq("role", "academic_partner"),
+      supabase
+        .from("leads")
+        .select("id, name, phone, email, stage, course_id, academic_partner_id, consultant_id, courses:course_id(name)")
+        .order("created_at", { ascending: false })
+        .limit(500),
+      (supabase as unknown as PartnerDocumentsClient)
+        .from("academic_partner_documents")
+        .select("id, partner_id, document_type, title, file_name, file_path, created_at")
+        .order("created_at", { ascending: false }),
     ]);
 
     const roleUserIds = ((rolesRes.data || []) as PartnerRole[]).map((r) => r.user_id);
@@ -115,6 +204,8 @@ export default function AcademicPartners() {
     setPartners((partnersRes.data || []) as Partner[]);
     setDashboard((dashboardRes.data || []) as Dashboard[]);
     setAssignments((assignmentsRes.data || []) as Assignment[]);
+    setPartnerDocuments((documentsRes.data || []) as PartnerDocument[]);
+    setLeads((leadsRes.data || []) as LeadOption[]);
     setCourses(coursesRes.data || []);
     setBatches((batchesRes.data || []) as { id: string; name: string; course_id: string }[]);
     setPartnerUsers(profiles);
@@ -128,6 +219,14 @@ export default function AcademicPartners() {
     dashboard.forEach((d) => map.set(d.partner_id, d));
     return map;
   }, [dashboard]);
+
+  const documentsByPartner = useMemo(() => {
+    const map = new Map<string, PartnerDocument[]>();
+    partnerDocuments.forEach((document) => {
+      map.set(document.partner_id, [...(map.get(document.partner_id) || []), document]);
+    });
+    return map;
+  }, [partnerDocuments]);
 
   const filtered = partners.filter((partner) => {
     const q = search.toLowerCase();
@@ -218,8 +317,8 @@ export default function AcademicPartners() {
       toast({ title: editingId ? "Academic partner updated" : "Academic partner added" });
       resetForm();
       await fetchAll();
-    } catch (error: any) {
-      toast({ title: "Save failed", description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      toast({ title: "Save failed", description: errorMessage(error), variant: "destructive" });
     }
     setSaving(false);
   };
@@ -228,6 +327,26 @@ export default function AcademicPartners() {
     setAssignmentPartnerId(partnerId);
     setAssignmentForm({ course_id: "", batch_id: "", payout_percentage: "" });
     setShowAssignment(true);
+  };
+
+  const openLeadAssignment = (partnerId: string) => {
+    setLeadAssignmentPartnerId(partnerId);
+    setLeadAssignmentForm({ lead_id: "" });
+    setShowLeadAssignment(true);
+  };
+
+  const openAssignmentFromForm = () => {
+    if (!editingId) return;
+    const partnerId = editingId;
+    resetForm();
+    openAssignment(partnerId);
+  };
+
+  const openLeadAssignmentFromForm = () => {
+    if (!editingId) return;
+    const partnerId = editingId;
+    resetForm();
+    openLeadAssignment(partnerId);
   };
 
   const handleAddAssignment = async () => {
@@ -250,7 +369,43 @@ export default function AcademicPartners() {
     setSaving(false);
   };
 
+  const handleAssignLead = async () => {
+    if (!leadAssignmentPartnerId || !leadAssignmentForm.lead_id) return;
+    setSaving(true);
+    const assignOwnerClient = supabase as unknown as AssignOwnerRpcClient;
+    const { error } = await assignOwnerClient.rpc("assign_lead_external_owner", {
+      _lead_id: leadAssignmentForm.lead_id,
+      _owner_type: "academic_partner",
+      _consultant_id: null,
+      _academic_partner_id: leadAssignmentPartnerId,
+    });
+    if (error) {
+      toast({ title: "Lead assignment failed", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Lead assigned to academic partner" });
+      setShowLeadAssignment(false);
+      await fetchAll();
+    }
+    setSaving(false);
+  };
+
+  const openPartnerDocument = async (document: PartnerDocument) => {
+    const { data, error } = await supabase.storage
+      .from("academic-partner-documents")
+      .createSignedUrl(document.file_path, 60 * 30);
+    if (error || !data?.signedUrl) {
+      toast({ title: "Document unavailable", description: error?.message, variant: "destructive" });
+      return;
+    }
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  };
+
   const filteredBatches = batches.filter((batch) => batch.course_id === assignmentForm.course_id);
+  const editingAssignments = editingId ? assignments.filter((a) => a.partner_id === editingId) : [];
+  const selectedAssignmentPartner = assignmentPartnerId ? partners.find((partner) => partner.id === assignmentPartnerId) : null;
+  const selectedLeadPartner = leadAssignmentPartnerId ? partners.find((partner) => partner.id === leadAssignmentPartnerId) : null;
+  const selectedLead = leads.find((lead) => lead.id === leadAssignmentForm.lead_id);
+  const assignableLeads = leads.filter((lead) => !leadAssignmentPartnerId || lead.academic_partner_id !== leadAssignmentPartnerId);
   const totals = {
     partners: partners.length,
     candidates: dashboard.reduce((sum, row) => sum + Number(row.total_candidates || 0), 0),
@@ -304,30 +459,38 @@ export default function AcademicPartners() {
         {filtered.map((partner) => {
           const row = dashboardByPartner.get(partner.id);
           const partnerAssignments = assignments.filter((a) => a.partner_id === partner.id);
+          const partnerDocs = documentsByPartner.get(partner.id) || [];
           return (
             <Card key={partner.id} className="border-border/60 shadow-none">
               <CardContent className="p-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex min-w-0 items-start gap-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex min-w-0 flex-1 items-start gap-3">
                     <div className="flex h-12 w-16 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/30 p-2">
                       {partner.logo_url ? (
                         <img src={partner.logo_url} alt={`${partner.name} logo`} className="max-h-full max-w-full object-contain" />
                       ) : (
-                        <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                        <span className="text-sm font-semibold uppercase text-muted-foreground">
+                          {getPartnerInitials(partner.company_name || partner.organization || partner.name)}
+                        </span>
                       )}
                     </div>
                     <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-base font-semibold text-foreground">{partner.name}</h3>
-                      {partner.user_id && <Badge className="border-0 bg-emerald-100 text-emerald-700 text-[10px]">Linked</Badge>}
-                      <Badge className={`border-0 text-[10px] ${partner.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"}`}>{partner.status}</Badge>
-                    </div>
-                    {partner.organization && <p className="mt-0.5 text-sm text-primary">{partner.organization}</p>}
-                    <p className="mt-1 text-xs text-muted-foreground">{partner.email || partner.phone || "No contact details"}</p>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-base font-semibold text-foreground">{partner.name}</h3>
+                        {partner.user_id && <Badge className="border-0 bg-emerald-100 text-emerald-700 text-[10px]">Linked</Badge>}
+                        <Badge className={`border-0 text-[10px] ${partner.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"}`}>{partner.status}</Badge>
+                      </div>
+                      {partner.organization && <p className="mt-0.5 text-sm text-primary">{partner.organization}</p>}
+                      <p className="mt-1 text-xs text-muted-foreground">{partner.email || partner.phone || "No contact details"}</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openAssignment(partner.id)}><Link2 className="h-4 w-4" /></Button>
+                  <div className="flex flex-wrap items-center justify-end gap-1">
+                    <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => openAssignment(partner.id)}>
+                      <Link2 className="h-3.5 w-3.5" /> Assign Course/Batch
+                    </Button>
+                    <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => openLeadAssignment(partner.id)}>
+                      <UserPlus className="h-3.5 w-3.5" /> Assign Lead
+                    </Button>
                     <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(partner)}><Pencil className="h-4 w-4" /></Button>
                   </div>
                 </div>
@@ -341,7 +504,51 @@ export default function AcademicPartners() {
 
                 <div className="mt-4 border-t border-border/50 pt-3">
                   <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground">
+                    <FileText className="h-3.5 w-3.5" /> Onboarding
+                    <Badge variant="secondary" className="ml-auto text-[10px]">{partner.onboarding_status || "not_started"}</Badge>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                    <div className="rounded-lg border border-border/60 px-3 py-2">
+                      <p className="text-[11px] uppercase text-muted-foreground">Company</p>
+                      <p className="mt-1 font-medium">{partner.company_name || partner.organization || "Not submitted"}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{partner.company_address || "No registered address"}</p>
+                    </div>
+                    <div className="rounded-lg border border-border/60 px-3 py-2">
+                      <p className="text-[11px] uppercase text-muted-foreground">Tax IDs</p>
+                      <p className="mt-1 text-xs"><span className="font-medium">PAN:</span> {partner.pan_number || "Not submitted"}</p>
+                      <p className="mt-0.5 text-xs"><span className="font-medium">GST:</span> {partner.gst_number || "Not submitted"}</p>
+                    </div>
+                    <div className="rounded-lg border border-border/60 px-3 py-2 md:col-span-2">
+                      <p className="text-[11px] uppercase text-muted-foreground">Authorised Signatory</p>
+                      <p className="mt-1 font-medium">{partner.authorised_signatory_name || "Not submitted"}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {[partner.authorised_signatory_contact, partner.authorised_signatory_email].filter(Boolean).join(" · ") || "No contact details"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-3 rounded-lg border border-border/60 px-3 py-2">
+                    <p className="text-[11px] font-medium uppercase text-muted-foreground">Internal documents</p>
+                    {partnerDocs.length === 0 ? (
+                      <p className="mt-1 text-sm text-muted-foreground">No documents uploaded yet.</p>
+                    ) : (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {partnerDocs.map((document) => (
+                          <Button key={document.id} variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => openPartnerDocument(document)}>
+                            <FileText className="h-3.5 w-3.5" />
+                            {docTypeLabel[document.document_type] || document.title}: {document.file_name}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-4 border-t border-border/50 pt-3">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground">
                     <BookOpen className="h-3.5 w-3.5" /> Assignments
+                    <Button variant="ghost" size="sm" className="ml-auto h-7 gap-1.5 px-2 text-[11px]" onClick={() => openAssignment(partner.id)}>
+                      <Plus className="h-3 w-3" /> Add
+                    </Button>
                   </div>
                   {partnerAssignments.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No course or batch assignments yet.</p>
@@ -417,6 +624,26 @@ export default function AcademicPartners() {
               </select>
               <p className="mt-1 text-[10px] text-muted-foreground">Create or assign a user with the Academic Partner role first.</p>
             </div>
+            {editingId && (
+              <div className="rounded-xl border border-border/60 bg-muted/20 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Assignments</p>
+                    <p className="text-xs text-muted-foreground">
+                      {editingAssignments.length} course/batch assignment{editingAssignments.length === 1 ? "" : "s"} linked to this partner.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={openAssignmentFromForm}>
+                      <Link2 className="h-3.5 w-3.5" /> Assign Course/Batch
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={openLeadAssignmentFromForm}>
+                      <UserPlus className="h-3.5 w-3.5" /> Assign Lead
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Partner Logo</label>
               <div className="flex items-center gap-3 rounded-xl border border-dashed border-border bg-muted/20 p-3">
@@ -460,6 +687,11 @@ export default function AcademicPartners() {
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Add Course or Batch Assignment</DialogTitle></DialogHeader>
           <div className="space-y-4">
+            {selectedAssignmentPartner && (
+              <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                Academic partner: <span className="font-medium text-foreground">{selectedAssignmentPartner.name}</span>
+              </div>
+            )}
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Course *</label>
               <select value={assignmentForm.course_id} onChange={(e) => setAssignmentForm({ course_id: e.target.value, batch_id: "", payout_percentage: assignmentForm.payout_percentage })} className={inputCls}>
@@ -481,6 +713,46 @@ export default function AcademicPartners() {
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setShowAssignment(false)}>Cancel</Button>
               <Button onClick={handleAddAssignment} disabled={saving || !assignmentForm.course_id} className="gap-2">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />} Add Assignment</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showLeadAssignment} onOpenChange={setShowLeadAssignment}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Assign Lead to Academic Partner</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            {selectedLeadPartner && (
+              <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                Academic partner: <span className="font-medium text-foreground">{selectedLeadPartner.name}</span>
+              </div>
+            )}
+            <div>
+              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Lead *</label>
+              <select value={leadAssignmentForm.lead_id} onChange={(e) => setLeadAssignmentForm({ lead_id: e.target.value })} className={inputCls}>
+                <option value="">Select lead</option>
+                {assignableLeads.map((lead) => (
+                  <option key={lead.id} value={lead.id}>
+                    {lead.name} - {lead.phone || lead.email || "No contact"}{lead.courses?.name ? ` - ${lead.courses.name}` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {selectedLead?.academic_partner_id && selectedLead.academic_partner_id !== leadAssignmentPartnerId && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                This lead is currently assigned to another academic partner. Saving will replace that owner.
+              </div>
+            )}
+            {selectedLead?.consultant_id && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                This lead currently has a consultant owner. Saving will replace it with this academic partner.
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setShowLeadAssignment(false)}>Cancel</Button>
+              <Button onClick={handleAssignLead} disabled={saving || !leadAssignmentForm.lead_id} className="gap-2">
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />} Assign Lead
+              </Button>
             </div>
           </div>
         </DialogContent>
