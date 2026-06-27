@@ -4,41 +4,17 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Loader2, Calendar, TrendingUp, Users, Phone, FileText, GraduationCap,
+  Loader2, TrendingUp, Users, Phone, FileText, GraduationCap, BarChart3,
 } from "lucide-react";
-import {
-  startOfDay, endOfDay, startOfYesterday, endOfYesterday,
-  startOfWeek, endOfWeek, startOfMonth, endOfMonth, subMonths,
-} from "date-fns";
+import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
+import { getDatePresetRange, type DatePreset } from "@/lib/datePresets";
 
-type DatePreset =
-  | "today" | "yesterday" | "this_week" | "this_month" | "last_month" | "all" | "custom";
-
-const DATE_PRESET_LABELS: Record<DatePreset, string> = {
-  today: "Today",
-  yesterday: "Yesterday",
-  this_week: "This Week",
-  this_month: "This Month",
-  last_month: "Last Month",
-  all: "All Time",
-  custom: "Custom",
-};
-
-function dateRangeFor(preset: DatePreset, customStart?: string, customEnd?: string): [Date | null, Date | null] {
-  const now = new Date();
-  switch (preset) {
-    case "today":      return [startOfDay(now), endOfDay(now)];
-    case "yesterday":  return [startOfYesterday(), endOfYesterday()];
-    case "this_week":  return [startOfWeek(now, { weekStartsOn: 1 }), endOfWeek(now, { weekStartsOn: 1 })];
-    case "this_month": return [startOfMonth(now), endOfMonth(now)];
-    case "last_month": { const lm = subMonths(now, 1); return [startOfMonth(lm), endOfMonth(lm)]; }
-    case "custom":     return [
-      customStart ? startOfDay(new Date(customStart)) : null,
-      customEnd   ? endOfDay(new Date(customEnd))     : null,
-    ];
-    case "all":
-    default:           return [null, null];
-  }
+function dateRangeFor(preset: DatePreset, fromDate?: string, toDate?: string): [Date | null, Date | null] {
+  const range = preset === "custom" ? { from: fromDate || "", to: toDate || "" } : getDatePresetRange(preset);
+  return [
+    range.from ? new Date(`${range.from}T00:00:00`) : null,
+    range.to ? new Date(`${range.to}T23:59:59.999`) : null,
+  ];
 }
 
 interface LeadRow {
@@ -65,6 +41,13 @@ const SOURCE_LABELS: Record<string, string> = {
   reference: "Reference",
 };
 const labelFor = (s: string | null) => s ? (SOURCE_LABELS[s] || s) : "Unknown";
+
+const FLOW_WINDOWS = [
+  { key: "today", label: "Today" },
+  { key: "yesterday", label: "Yesterday" },
+  { key: "this_week", label: "This week" },
+  { key: "last_7", label: "Last 7 days" },
+] as const;
 
 // Stage groupings — drives the funnel columns
 const ENGAGED_STAGES = new Set([
@@ -151,8 +134,9 @@ export default function PublisherAnalytics() {
   const [leads, setLeads] = useState<LeadRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [datePreset, setDatePreset] = useState<DatePreset>("this_month");
-  const [customStart, setCustomStart] = useState("");
-  const [customEnd, setCustomEnd] = useState("");
+  const initialMonthRange = getDatePresetRange("this_month");
+  const [fromDate, setFromDate] = useState(initialMonthRange.from);
+  const [toDate, setToDate] = useState(initialMonthRange.to);
   const [sortBy, setSortBy] = useState<"total" | "not_interested_pct" | "engaged_pct" | "submitted_pct" | "admitted_pct">("total");
 
   // Fetch leads on mount — paginate to bypass Supabase's default 1000 cap.
@@ -168,17 +152,16 @@ export default function PublisherAnalytics() {
           .select("id, source, stage, created_at")
           .order("created_at", { ascending: false })
           .order("id", { ascending: false })
-          .limit(PAGE + 1);
+          .limit(PAGE);
         if (cursor) {
           query = query.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
         }
         const { data, error } = await query;
         if (error) break;
         const fetched = (data || []) as LeadRow[];
-        const rows = fetched.slice(0, PAGE);
-        all = all.concat(rows);
-        const last = rows[rows.length - 1];
-        if (!last || fetched.length <= PAGE) break;
+        all = all.concat(fetched);
+        const last = fetched[fetched.length - 1];
+        if (!last || fetched.length < PAGE) break;
         cursor = { created_at: last.created_at, id: last.id };
       }
       setLeads(all);
@@ -188,7 +171,7 @@ export default function PublisherAnalytics() {
 
   // Apply the date filter.
   const dateScopedLeads = useMemo(() => {
-    const [start, end] = dateRangeFor(datePreset, customStart, customEnd);
+    const [start, end] = dateRangeFor(datePreset, fromDate, toDate);
     if (!start && !end) return leads;
     return leads.filter(l => {
       const t = new Date(l.created_at).getTime();
@@ -196,7 +179,28 @@ export default function PublisherAnalytics() {
       if (end   && t > end.getTime())   return false;
       return true;
     });
-  }, [leads, datePreset, customStart, customEnd]);
+  }, [leads, datePreset, fromDate, toDate]);
+
+  const dailyFlow = useMemo(() => {
+    return FLOW_WINDOWS.map((window) => {
+      const [start, end] = dateRangeFor(window.key);
+      const sourceCounts = new Map<string | null, number>();
+      for (const lead of leads) {
+        const t = new Date(lead.created_at).getTime();
+        if (start && t < start.getTime()) continue;
+        if (end && t > end.getTime()) continue;
+        sourceCounts.set(lead.source || null, (sourceCounts.get(lead.source || null) || 0) + 1);
+      }
+      const sources = Array.from(sourceCounts.entries())
+        .map(([source, count]) => ({ source, label: labelFor(source), count }))
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+      return {
+        ...window,
+        total: sources.reduce((sum, source) => sum + source.count, 0),
+        sources,
+      };
+    });
+  }, [leads]);
 
   // Aggregate by source.
   const metrics: SourceMetrics[] = useMemo(() => {
@@ -265,29 +269,16 @@ export default function PublisherAnalytics() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative">
-            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-            <select
-              value={datePreset}
-              onChange={e => setDatePreset(e.target.value as DatePreset)}
-              className="rounded-xl border border-input bg-card pl-8 pr-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-            >
-              {(Object.entries(DATE_PRESET_LABELS) as [DatePreset, string][]).map(([key, label]) => (
-                <option key={key} value={key}>{label}</option>
-              ))}
-            </select>
-          </div>
-          {datePreset === "custom" && (
-            <div className="flex items-center gap-2">
-              <input type="date" value={customStart} max={customEnd || undefined}
-                onChange={e => setCustomStart(e.target.value)}
-                className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm" />
-              <span className="text-xs text-muted-foreground">to</span>
-              <input type="date" value={customEnd} min={customStart || undefined}
-                onChange={e => setCustomEnd(e.target.value)}
-                className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm" />
-            </div>
-          )}
+          <DateRangeFilter
+            preset={datePreset}
+            fromDate={fromDate}
+            toDate={toDate}
+            onPresetChange={setDatePreset}
+            onFromDateChange={setFromDate}
+            onToDateChange={setToDate}
+            className="flex flex-wrap items-center gap-2 rounded-xl border border-input bg-card px-3 py-2"
+            ariaPrefix="Publisher analytics"
+          />
         </div>
       </div>
 
@@ -301,6 +292,40 @@ export default function PublisherAnalytics() {
         <SummaryCard label="Admitted"       value={summary.admitted}  Icon={GraduationCap} iconBg="bg-emerald-100"  iconColor="text-emerald-600"
           sub={summary.total ? `${Math.round((summary.admitted / summary.total) * 100)}% of leads` : undefined} />
       </div>
+
+      <Card className="border-border/60 shadow-none">
+        <CardContent className="p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold text-foreground">Daily Lead Flow by Source</h2>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {dailyFlow.map((window) => (
+              <div key={window.key} className="rounded-lg border border-border/60 bg-background p-3">
+                <div className="mb-2 flex items-baseline justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{window.label}</p>
+                  <p className="text-2xl font-bold tabular-nums text-foreground">{window.total}</p>
+                </div>
+                {window.sources.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No leads</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {window.sources.slice(0, 6).map((source) => (
+                      <div key={source.source ?? "_unknown"} className="flex items-center justify-between gap-2 text-xs">
+                        <span className="truncate text-muted-foreground" title={source.label}>{source.label}</span>
+                        <span className="font-semibold tabular-nums text-foreground">{source.count}</span>
+                      </div>
+                    ))}
+                    {window.sources.length > 6 && (
+                      <p className="text-[11px] text-muted-foreground">+{window.sources.length - 6} more sources</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       {loading ? (
         <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
@@ -334,9 +359,9 @@ export default function PublisherAnalytics() {
                     const engagedPct   = m.total > 0 ? Math.round((m.engaged   / m.total) * 100) : 0;
                     const submittedPct = m.total > 0 ? Math.round((m.submitted / m.total) * 100) : 0;
                     const admittedPct  = m.total > 0 ? Math.round((m.admitted  / m.total) * 100) : 0;
-                    const [fromDate, toDate] = dateRangeFor(datePreset, customStart, customEnd);
+                    const [fromDateForLink, toDateForLink] = dateRangeFor(datePreset, fromDate, toDate);
                     const baseLink = (stages?: string) =>
-                      buildLeadListUrl({ source: m.source, stages, fromDate, toDate });
+                      buildLeadListUrl({ source: m.source, stages, fromDate: fromDateForLink, toDate: toDateForLink });
                     const linkCls = "underline decoration-dotted underline-offset-2 hover:text-primary";
                     return (
                       <tr key={m.source ?? "_unknown"} className="border-b border-border/60 hover:bg-muted/20">
