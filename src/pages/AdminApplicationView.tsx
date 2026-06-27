@@ -53,6 +53,11 @@ type LeadCourse = {
 };
 
 const COURSE_SELECT = "name,code,duration_years,eligibility,entrance_exam,entrance_mandatory";
+const APPROVABLE_APPLICATION_STATUSES = new Set(["submitted", "under_review"]);
+
+function isApprovableApplicationStatus(status: string | null | undefined): boolean {
+  return APPROVABLE_APPLICATION_STATUSES.has(status || "");
+}
 
 async function fetchCourseDetails(courseId: string): Promise<LeadCourse | null> {
   const { data } = await supabase
@@ -655,6 +660,7 @@ export default function AdminApplicationView() {
   }
 
   const decided = app.status === "approved" || app.status === "rejected";
+  const canDecideCurrentApplication = isApprovableApplicationStatus(app.status);
 
   const generateFeeReceipt = async () => {
     if (generatingReceipt || !app?.application_id) return;
@@ -777,7 +783,7 @@ export default function AdminApplicationView() {
           appFeePaid={appFeePaid}
           hasOffer={hasOffer}
           docs={counts}
-          onApprove={canApproveApplication && app.status === "submitted" ? () => decideApplication("approved") : undefined}
+          onApprove={canApproveApplication && canDecideCurrentApplication ? () => decideApplication("approved") : undefined}
           onIssueOffer={app.status === "approved" && !hasOffer && canManageOffer ? issueOfferOrRepairLead : undefined}
           feeReceiptUrl={app.fee_receipt_url || null}
           onGenerateFeeReceipt={appFeePaid > 0 ? generateFeeReceipt : undefined}
@@ -785,7 +791,7 @@ export default function AdminApplicationView() {
       </SectionErrorBoundary>
 
       {/* Review summary + application-level decision */}
-      {(app.status === "submitted" || decided) && (
+      {(canDecideCurrentApplication || decided) && (
         <div className="rounded-xl border border-border bg-card p-4 space-y-3">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-2 text-xs">
