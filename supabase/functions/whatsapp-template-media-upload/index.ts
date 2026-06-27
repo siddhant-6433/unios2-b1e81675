@@ -54,6 +54,16 @@ function errorMessage(err: unknown) {
   return err instanceof Error ? err.message : "Unexpected error";
 }
 
+async function readMetaResponse(res: Response) {
+  const text = await res.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { error: { message: text } };
+  }
+}
+
 function jwtRole(jwt: string): string | null {
   try {
     const payload = jwt.split(".")[1];
@@ -116,6 +126,7 @@ Deno.serve(async (req) => {
     }
 
     const mime = file.type || "application/octet-stream";
+    const fileName = file.name || `template-header-${Date.now()}`;
     const format = formatForMime(mime);
     if (!format) {
       return json({ error: `Unsupported media type: ${mime}. Allowed: jpeg, png, mp4, 3gpp, pdf.` }, 400);
@@ -131,10 +142,13 @@ Deno.serve(async (req) => {
     // ── Step 1: create an upload session ──
     const sessionUrl =
       `https://graph.facebook.com/v21.0/${appId}/uploads` +
-      `?file_length=${bytes.length}&file_type=${encodeURIComponent(mime)}&access_token=${waToken}`;
+      `?file_name=${encodeURIComponent(fileName)}` +
+      `&file_length=${bytes.length}` +
+      `&file_type=${encodeURIComponent(mime)}` +
+      `&access_token=${waToken}`;
 
     const sessionRes = await fetch(sessionUrl, { method: "POST" });
-    const sessionData = await sessionRes.json();
+    const sessionData = await readMetaResponse(sessionRes);
     if (!sessionRes.ok || !sessionData?.id) {
       console.error("upload session error:", sessionData);
       return json({ error: sessionData?.error?.message || "Failed to create upload session" }, 502);
@@ -150,7 +164,7 @@ Deno.serve(async (req) => {
       },
       body: bytes,
     });
-    const uploadData = await uploadRes.json();
+    const uploadData = await readMetaResponse(uploadRes);
     if (!uploadRes.ok || !uploadData?.h) {
       console.error("upload bytes error:", uploadData);
       return json({ error: uploadData?.error?.message || "Media upload failed" }, 502);

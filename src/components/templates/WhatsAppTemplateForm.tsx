@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeEdge } from "@/integrations/supabase/edge";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,6 +38,68 @@ const MEDIA_ACCEPT: Record<HeaderType, string> = {
   VIDEO: "video/mp4,video/3gpp",
   DOCUMENT: "application/pdf",
 };
+
+interface MediaUploadResult {
+  handle: string;
+  format: "IMAGE" | "VIDEO" | "DOCUMENT";
+  mime: string;
+  size: number;
+}
+
+async function readErrorBody(response: Response) {
+  const fallback = `HTTP ${response.status}`;
+  const contentType = response.headers.get("content-type") || "";
+  try {
+    if (contentType.includes("application/json")) {
+      const body = await response.json();
+      return body?.error || body?.message || JSON.stringify(body) || fallback;
+    }
+    const text = await response.text();
+    return text || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+async function uploadTemplateMedia(file: File): Promise<MediaUploadResult> {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  const accessToken = sessionData.session?.access_token;
+
+  if (sessionError || !accessToken) {
+    throw new Error(sessionError?.message || "You must be signed in to upload media");
+  }
+  if (!supabaseUrl || !anonKey) {
+    throw new Error("Supabase client is not configured");
+  }
+
+  const form = new FormData();
+  form.append("file", file);
+
+  const response = await fetch(`${supabaseUrl}/functions/v1/whatsapp-template-media-upload`, {
+    method: "POST",
+    headers: {
+      apikey: anonKey,
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: form,
+  });
+
+  if (!response.ok) {
+    throw new Error(await readErrorBody(response));
+  }
+
+  const data = await response.json();
+  if (data?.error) {
+    throw new Error(data.error);
+  }
+  if (!data?.handle) {
+    throw new Error("Media upload did not return a Meta header handle");
+  }
+
+  return data as MediaUploadResult;
+}
 
 export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial }: WhatsAppTemplateFormProps) {
   const { toast } = useToast();
@@ -82,16 +145,10 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
     setUploading(true);
     setMediaHandle(null);
     try {
-      const form = new FormData();
-      form.append("file", file);
-      const { data, error } = await supabase.functions.invoke("whatsapp-template-media-upload", { body: form });
-      if (error || data?.error) {
-        toast({ title: "Upload failed", description: data?.error || error?.message, variant: "destructive" });
-      } else if (data?.handle) {
-        setMediaHandle(data.handle);
-        setMediaFileName(file.name);
-        toast({ title: "Media uploaded", description: file.name });
-      }
+      const data = await uploadTemplateMedia(file);
+      setMediaHandle(data.handle);
+      setMediaFileName(file.name);
+      toast({ title: "Media uploaded", description: file.name });
     } catch (err: unknown) {
       toast({ title: "Upload failed", description: err instanceof Error ? err.message : "Unexpected error", variant: "destructive" });
     }
@@ -156,7 +213,7 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
         );
     }
 
-    const { data, error } = await supabase.functions.invoke("whatsapp-templates", { body: payload });
+    const { data, error } = await invokeEdge<{ error?: string }>("whatsapp-templates", { body: payload });
     if (error || data?.error) {
       toast({ title: "Submission failed", description: data?.error || error?.message, variant: "destructive" });
     } else {

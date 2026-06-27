@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeEdge } from "@/integrations/supabase/edge";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -116,7 +117,7 @@ export function WhatsAppTemplateTab() {
 
   const syncFromMeta = async () => {
     setSyncing(true);
-    const { data, error } = await supabase.functions.invoke("whatsapp-templates", { body: { action: "sync" } });
+    const { data, error } = await invokeEdge<{ synced?: number; error?: string }>("whatsapp-templates", { body: { action: "sync" } });
     if (error || data?.error) {
       toast({ title: "Sync failed", description: data?.error || error?.message, variant: "destructive" });
     } else {
@@ -128,7 +129,7 @@ export function WhatsAppTemplateTab() {
 
   const deleteTemplate = async (name: string) => {
     setDeleting(name);
-    const { data, error } = await supabase.functions.invoke("whatsapp-templates", { body: { action: "delete", name } });
+    const { data, error } = await invokeEdge<{ error?: string }>("whatsapp-templates", { body: { action: "delete", name } });
     if (error || data?.error) {
       toast({ title: "Delete failed", description: data?.error || error?.message, variant: "destructive" });
     } else {
