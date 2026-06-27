@@ -101,12 +101,6 @@ type LoanLetterOpts = {
   yearItems: { term: string; total: number; waiver: number; applicable: number; dueDate?: string | null }[];
 };
 
-function isDaottCourse(course: LoanLetterOpts["course"]) {
-  const code = String(course?.code || "").toUpperCase();
-  const name = String(course?.name || "").toLowerCase();
-  return code.includes("DAOTT") || code.includes("DOTT") || /ana?esthesia.*operation theatre/.test(name);
-}
-
 type LoanLetterCtx = {
   pdf: PDFDocument;
   page: PDFPage;
@@ -534,7 +528,7 @@ Deno.serve(async (req) => {
       )
       ?? tokenPaid
     );
-    const loanLetterUnlockAmount = isDaottCourse((offer as any).courses) ? 4000 : LOAN_LETTER_UNLOCK_TOKEN_FEE;
+    const loanLetterUnlockAmount = LOAN_LETTER_UNLOCK_TOKEN_FEE;
     if (paidTowardCourse < loanLetterUnlockAmount) {
       return new Response(JSON.stringify({
         error: `Loan letter unlocks after token fee payment of at least ${fmtINR(loanLetterUnlockAmount)}.`,

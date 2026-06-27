@@ -53,6 +53,7 @@ export function RecordPaymentDialog({
     first_year_fee: number;
     token_required: number;
     token_paid: number;
+    paid_toward_course?: number;
     application_paid: number;
     total_paid: number;
     twenty_five_pct: number;
@@ -70,7 +71,10 @@ export function RecordPaymentDialog({
     });
   }, [open, leadId]);
 
-  const tokenOutstanding = feeStatus ? Math.max(0, feeStatus.token_required - feeStatus.token_paid) : 0;
+  const tokenPaidForProgress = feeStatus
+    ? Number(feeStatus.paid_toward_course ?? feeStatus.token_paid ?? 0)
+    : 0;
+  const tokenOutstanding = feeStatus ? Math.max(0, feeStatus.token_required - tokenPaidForProgress) : 0;
   const minInstalment = feeStatus?.min_token_instalment ?? 5000;
   const isTokenInstalmentBelowMin =
     type === "token_fee" &&
@@ -85,7 +89,7 @@ export function RecordPaymentDialog({
   // commit the receipt.
   const tokenShortfallAfterThis =
     type === "token_fee" && feeStatus && !feeStatus.token_complete && amount !== ""
-      ? Math.max(0, feeStatus.token_required - feeStatus.token_paid - parseFloat(amount || "0"))
+      ? Math.max(0, feeStatus.token_required - tokenPaidForProgress - parseFloat(amount || "0"))
       : 0;
   const willCrossTokenThreshold =
     type === "token_fee" && feeStatus && !feeStatus.token_complete &&
@@ -215,7 +219,7 @@ export function RecordPaymentDialog({
             <div className="flex justify-between">
               <span className="text-muted-foreground">Token (10%)</span>
               <span className="text-foreground">
-                ₹{feeStatus.token_paid.toLocaleString("en-IN")} / ₹{feeStatus.token_required.toLocaleString("en-IN")}
+                ₹{tokenPaidForProgress.toLocaleString("en-IN")} / ₹{feeStatus.token_required.toLocaleString("en-IN")}
                 {feeStatus.token_complete && <span className="ml-1 text-emerald-600">✓ complete</span>}
               </span>
             </div>

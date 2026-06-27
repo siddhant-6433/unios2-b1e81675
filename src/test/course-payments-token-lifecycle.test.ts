@@ -8,6 +8,7 @@ const migration = readFileSync(
 const applicationsPage = readFileSync("src/pages/Applications.tsx", "utf8");
 const applicationDossier = readFileSync("src/lib/applicationDossier.ts", "utf8");
 const tokenFeePanel = readFileSync("src/components/applicant/TokenFeePanel.tsx", "utf8");
+const feeBreakdown = readFileSync("src/components/applicant/feeBreakdown.ts", "utf8");
 
 describe("course payments unlock token lifecycle", () => {
   it("counts confirmed course payments toward token completion", () => {
@@ -48,7 +49,10 @@ describe("course payments unlock token lifecycle", () => {
   });
 
   it("shows applicant token progress from course-eligible paid amount", () => {
-    expect(tokenFeePanel).toContain("feeStatus.total_paid - feeStatus.application_paid - (feeStatus.registration_paid || 0)");
+    expect(tokenFeePanel).toContain("resolvePaidTowardCourse(feeStatus)");
+    expect(feeBreakdown).toContain("clampMoney(status.total_paid || 0) -");
+    expect(feeBreakdown).toContain("clampMoney(status.application_paid || 0) -");
+    expect(feeBreakdown).toContain("clampMoney(status.registration_paid || 0)");
     expect(tokenFeePanel).toContain("const tokenOutstanding = Math.max(0, feeStatus.token_required - paidTowardCourse);");
     expect(tokenFeePanel).toContain("const loanLetterUnlocked = coursePaid >= loanLetterUnlockAmount;");
   });

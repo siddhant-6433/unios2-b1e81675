@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Loader2, CheckCircle, XCircle, Tag } from "lucide-react";
+import { feeTermLabel } from "@/lib/feeTermLabels";
 
 const statusBadge: Record<string, string> = {
   pending:  "bg-amber-100 text-amber-700",
@@ -13,13 +14,11 @@ const statusBadge: Record<string, string> = {
   rejected: "bg-destructive/10 text-destructive",
 };
 
-const termLabel = (t: string) =>
-  t.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-
 interface Waiver {
   id: string;
   offer_letter_id: string;
   term: string;
+  term_label: string;
   amount: number;
   reason: string | null;
   status: string;
@@ -82,6 +81,7 @@ export function OfferWaiverApprovalPanel() {
       if (c && s) offerKeys.add(`${c}::${s}`);
     }
     const yearAmountByKey = new Map<string, number>(); // `${courseId}::${sessionId}::${term}` -> total
+    const yearLabelByKey = new Map<string, string>();
 
     if (offerKeys.size > 0) {
       const pairs = Array.from(offerKeys).map(k => k.split("::"));
@@ -89,7 +89,7 @@ export function OfferWaiverApprovalPanel() {
       const sessionIds = Array.from(new Set(pairs.map(p => p[1])));
       const { data: fsRows } = await supabase
         .from("fee_structures")
-        .select("course_id, session_id, is_active, fee_structure_items ( term, amount )")
+        .select("course_id, session_id, is_active, metadata, fee_structure_items ( term, amount )")
         .in("course_id", courseIds)
         .in("session_id", sessionIds)
         .eq("is_active", true);
@@ -97,6 +97,7 @@ export function OfferWaiverApprovalPanel() {
       for (const fs of (fsRows || []) as any[]) {
         const key = `${fs.course_id}::${fs.session_id}`;
         if (!offerKeys.has(key)) continue;
+        const metadata = fs.metadata as Record<string, unknown> | null;
         const byTerm = new Map<string, number>();
         for (const it of (fs.fee_structure_items || []) as any[]) {
           const t = String(it.term || "");
@@ -105,6 +106,7 @@ export function OfferWaiverApprovalPanel() {
         }
         for (const [t, total] of byTerm) {
           yearAmountByKey.set(`${key}::${t}`, total);
+          yearLabelByKey.set(`${key}::${t}`, feeTermLabel(t, metadata));
         }
       }
     }
@@ -115,10 +117,14 @@ export function OfferWaiverApprovalPanel() {
       const yearAmount = (courseId && sessionId)
         ? yearAmountByKey.get(`${courseId}::${sessionId}::${w.term}`) ?? null
         : null;
+      const termLabel = (courseId && sessionId)
+        ? yearLabelByKey.get(`${courseId}::${sessionId}::${w.term}`) ?? feeTermLabel(w.term)
+        : feeTermLabel(w.term);
       return {
         id: w.id,
         offer_letter_id: w.offer_letter_id,
         term: w.term,
+        term_label: termLabel,
         amount: Number(w.amount),
         reason: w.reason,
         status: w.status,
@@ -248,7 +254,7 @@ export function OfferWaiverApprovalPanel() {
                     </td>
                     <td className="px-4 py-3">
                       <Badge className="bg-pastel-blue text-foreground/70 border-0 text-[10px]">
-                        {termLabel(w.term)}
+                        {w.term_label}
                       </Badge>
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums text-foreground">

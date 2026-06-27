@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2, CreditCard, FileText, IndianRupee, Clock, Check, GraduationCap, Sparkles, ChevronRight, CalendarDays } from "lucide-react";
-import { buildApplicantFeeBreakdownRows, buildApplicantOneTimePaymentOptions } from "./feeBreakdown";
+import {
+  buildApplicantFeeBreakdownRows,
+  buildApplicantOneTimePaymentOptions,
+  resolvePaidTowardCourse,
+} from "./feeBreakdown";
 import {
   effectiveApplicationDeadline,
   INITIAL_APPLICATION_DEADLINE,
@@ -43,10 +47,11 @@ type FeeStatus = {
   application_paid: number;
   registration_paid?: number;
   total_paid: number;
-  /** Sum of token_fee + 'other' lead_payments — i.e. money applied
-   *  toward the course balance. Excludes application_fee and
-   *  registration_fee which are separate charges. */
+  /** Money applied toward the course balance. Usually token_fee + other;
+   *  for seat-block structures this may include application-fee credit. */
   paid_toward_course?: number;
+  /** Application-fee amount credited against a seat-block fee line. */
+  seat_block_application_credit?: number;
   twenty_five_pct: number;
   min_token_instalment?: number;
   token_complete: boolean;
@@ -109,9 +114,6 @@ interface Props {
 
 const isMbaCourse = (name: string | null | undefined) =>
   !!name && /\bMBA\b/i.test(name);
-
-const isDaottCourseName = (name: string | null | undefined) =>
-  !!name && (/\bD\.?\s*A?OTT\b/i.test(name) || /ana?esthesia.*operation theatre/i.test(name));
 
 const LOAN_LETTER_UNLOCK_TOKEN_FEE = 5000;
 const DEFAULT_NIMT_LETTERHEAD_URL = "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/application-documents/branding/nimt_he/letterhead.png";
@@ -389,10 +391,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
   useEffect(() => {
     if (!feeStatus) return;
 
-    const paidTowardCourse = feeStatus.paid_toward_course ?? Math.max(
-      0,
-      (feeStatus.total_paid || 0) - (feeStatus.application_paid || 0) - (feeStatus.registration_paid || 0)
-    );
+    const paidTowardCourse = resolvePaidTowardCourse(feeStatus);
     const nextOutstanding = Math.max(0, feeStatus.token_required - paidTowardCourse);
 
     setInstalmentPreset((current) => {
@@ -685,10 +684,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
     });
     const totalCourseFee = feeRows.reduce((sum, r) => sum + r.net, 0) || offer.net_fee || offer.total_fee || 0;
     const programmeName = courseName || "the selected programme";
-    const paidTowardCourse = feeStatus.paid_toward_course ?? Math.max(
-      0,
-      (feeStatus.total_paid || 0) - (feeStatus.application_paid || 0) - (feeStatus.registration_paid || 0)
-    );
+    const paidTowardCourse = resolvePaidTowardCourse(feeStatus);
     const firstYearNet = feeRows.find(r => r.term === "year_1")?.net || feeStatus.post_scholarship_year_1 || 0;
     const firstYearAmountDue = Math.max(0, firstYearNet - paidTowardCourse);
     const loanReferenceNo = buildLoanReferenceNo(offer.id, applicationId);
@@ -905,15 +901,12 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
 
   // Application fee is a separate charge. Course-fee progress includes
   // token_fee plus lump-sum/course payments recorded as `other`.
-  const paidTowardCourse = feeStatus.paid_toward_course ?? Math.max(
-    0,
-    feeStatus.total_paid - feeStatus.application_paid - (feeStatus.registration_paid || 0)
-  );
+  const paidTowardCourse = resolvePaidTowardCourse(feeStatus);
   const tokenOutstanding = Math.max(0, feeStatus.token_required - paidTowardCourse);
   const coursePaid = paidTowardCourse;
   const towardsAdmission = Math.max(0, feeStatus.twenty_five_pct - coursePaid);
   const minInstalment = feeStatus.min_token_instalment ?? 5000;
-  const loanLetterUnlockAmount = isDaottCourseName(courseName) ? 4000 : LOAN_LETTER_UNLOCK_TOKEN_FEE;
+  const loanLetterUnlockAmount = LOAN_LETTER_UNLOCK_TOKEN_FEE;
   const loanLetterUnlocked = coursePaid >= loanLetterUnlockAmount;
   const isAdmitted = !!lead.admission_no;
   const isPreAdmitted = !!lead.pre_admission_no;
@@ -1271,6 +1264,9 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         const grandRaw = rows.reduce((s, r) => s + r.raw, 0);
         const grandNet = rows.reduce((s, r) => s + r.net, 0);
         const grandDeductions = grandRaw - grandNet;
+        const seatBlockCredit = Math.max(0, Number(feeStatus.seat_block_application_credit || 0));
+        const unappliedApplicationPaid = Math.max(0, Number(feeStatus.application_paid || 0) - seatBlockCredit);
+        const seatBlockNet = Math.max(0, Number(feeStatus.token_required || 0) - seatBlockCredit);
         const hasMultiYear = rows.length > 1;
         const hasAnyDeduction = grandDeductions > 0;
 
@@ -1316,6 +1312,18 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                       <span className="text-xs font-bold text-gray-800">{fmt(net)}</span>
                     </div>
                   )}
+                  {term === "year_1" && seatBlockCredit > 0 && (
+                    <div className="mt-1.5 rounded-lg border border-emerald-100 bg-emerald-50/70 px-3 py-2 space-y-1">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs text-emerald-700">Application fee adjusted against Sem 1 seat block</span>
+                        <span className="text-xs font-semibold text-emerald-700">− {fmt(seatBlockCredit)}</span>
+                      </div>
+                      <div className="flex justify-between items-center pt-1 border-t border-emerald-100">
+                        <span className="text-xs font-semibold text-gray-700">Seat block net payable</span>
+                        <span className="text-xs font-bold text-gray-900">{fmt(seatBlockNet)}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
 
@@ -1340,18 +1348,18 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
               )}
 
               {/* Application / Registration Fee — separate from course structure */}
-              {feeStatus.application_paid > 0 && (
+              {unappliedApplicationPaid > 0 && (
                 <div className="px-4 py-3 space-y-1.5 bg-gray-50/60">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Application / Registration Fee</p>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-600">Registration Fee</span>
-                    <span className="text-sm font-semibold text-gray-900">{fmt(feeStatus.application_paid)}</span>
+                    <span className="text-sm font-semibold text-gray-900">{fmt(unappliedApplicationPaid)}</span>
                   </div>
                   <div className="flex justify-between items-center pl-3">
                     <span className="text-xs text-green-600 flex items-center gap-1">
                       <Check className="h-3 w-3" /> Paid
                     </span>
-                    <span className="text-xs font-medium text-green-600">− {fmt(feeStatus.application_paid)}</span>
+                    <span className="text-xs font-medium text-green-600">− {fmt(unappliedApplicationPaid)}</span>
                   </div>
                   <div className="flex justify-between items-center pl-3 pt-0.5 border-t border-dashed border-gray-200">
                     <span className="text-xs font-semibold text-gray-500">Balance</span>
@@ -1664,11 +1672,9 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
           scholarshipAmount: offer.scholarship_amount || 0,
           feeStatus,
         });
-        // Use paid_toward_course (token_fee + 'other'), NOT total_paid —
-        // application_fee and registration_fee are separate charges and
-        // shouldn't reduce the course-fee due. Falls back to total_paid
-        // for older RPC responses missing the new field.
-        const paid      = feeStatus.paid_toward_course ?? feeStatus.total_paid ?? 0;
+        // Use paid_toward_course, NOT total_paid. It is the authoritative
+        // course-applied amount, including any seat-block application credit.
+        const paid      = resolvePaidTowardCourse(feeStatus);
         const paymentOptions = buildApplicantOneTimePaymentOptions({
           rows,
           paidTowardCourse: paid,

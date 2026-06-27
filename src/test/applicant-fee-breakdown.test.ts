@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildApplicantFeeBreakdownRows,
   buildApplicantOneTimePaymentOptions,
+  resolvePaidTowardCourse,
 } from "@/components/applicant/feeBreakdown";
 
 describe("applicant fee breakdown", () => {
@@ -99,5 +100,22 @@ describe("applicant fee breakdown", () => {
       year1AmountDue: 33_750,
       fullCourseAmountDue: 241_875,
     });
+  });
+
+  it("does not count application or registration fee as course-paid fallback", () => {
+    expect(resolvePaidTowardCourse({
+      total_paid: 11_000,
+      application_paid: 1_000,
+      registration_paid: 5_000,
+    })).toBe(5_000);
+  });
+
+  it("prefers authoritative paid_toward_course when present", () => {
+    expect(resolvePaidTowardCourse({
+      paid_toward_course: 4_000,
+      total_paid: 10_000,
+      application_paid: 1_000,
+      registration_paid: 5_000,
+    })).toBe(4_000);
   });
 });

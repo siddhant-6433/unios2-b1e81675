@@ -190,7 +190,8 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
 
   // Distribute confirmed pre-admission payments across the preview rows
   // the same way provision_student_fees would at PAN issuance: application
-  // fee → form fee row; token / other → year_N rows oldest-first.
+  // fee -> form fee row, or seat-block row when the structure has no form
+  // fee; token / other -> year_N rows oldest-first.
   const previewWithPaid = useMemo(() => {
     if (preview.length === 0) return [];
     const rows = preview.map(p => ({ ...p, paid_amount: 0, paid_payment_ids: [] as string[] }));
@@ -198,15 +199,17 @@ export function LeadFeeLedger({ leadId, studentId, refreshKey }: Props) {
     const appPayments   = confirmed.filter(p => p.type === "application_fee");
     const tokenPayments = confirmed.filter(p => p.type === "token_fee" || p.type === "other" || p.type === "registration_fee");
 
-    const formRow = rows.find(r => /FORM|APPLICATION/i.test(r.fee_code_code));
-    if (formRow) {
-      let cap = formRow.total_amount;
+    const applicationCreditRow =
+      rows.find(r => /FORM|APPLICATION/i.test(r.fee_code_code)) ||
+      rows.find(r => r.term === "year_1" && /SEAT|BLOCK/i.test(`${r.fee_code_code} ${r.fee_code_name}`));
+    if (applicationCreditRow) {
+      let cap = applicationCreditRow.total_amount;
       for (const p of appPayments) {
         if (cap <= 0) break;
         const take = Math.min(cap, Number(p.amount || 0));
         if (take > 0) {
-          formRow.paid_amount += take;
-          formRow.paid_payment_ids.push(p.id);
+          applicationCreditRow.paid_amount += take;
+          applicationCreditRow.paid_payment_ids.push(p.id);
           cap -= take;
         }
       }

@@ -10,6 +10,16 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ApplyMagicLinkButton } from "@/components/leads/ApplyMagicLinkButton";
+import { LeadPipeline } from "@/components/admissions/LeadPipeline";
+import { ApplicationFunnelStrip } from "@/components/admissions/ApplicationFunnelStrip";
+import {
+  type LeadFunnelStage,
+  leadStagesForBucket,
+} from "@/lib/leadStages";
+import {
+  applicationFunnelStageOf,
+  type ApplicationFunnelStage,
+} from "@/lib/applicationFunnel";
 import {
   Building2,
   BookOpen,
@@ -87,6 +97,8 @@ type Lead = {
   phone: string;
   email: string | null;
   stage: string;
+  source: string | null;
+  academic_partner_id: string | null;
   application_id: string | null;
   application_status: string | null;
   application_payment_status: string | null;
@@ -344,6 +356,13 @@ const errorMessage = (error: unknown) => {
   return "Please try again.";
 };
 
+const ACADEMIC_PARTNER_PIPELINE_LEAD_SELECT = "id, name, phone, email, stage, source, academic_partner_id, application_id, course_id, created_at, courses:course_id(name), campuses:campus_id(name), applications:applications(application_id, status, payment_status, fee_amount, completed_sections, submitted_at, created_at, form_pdf_url)";
+
+// Partner-created new leads are mapped on insert; duplicate existing CRM leads
+// remain pending requests and enter these pipelines only after admin approval.
+const scopePartnerPipelineLeads = (rows: LeadRow[], partnerId: string) =>
+  rows.filter((lead) => lead.academic_partner_id === partnerId);
+
 export default function AcademicPartnerPortal() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -367,6 +386,8 @@ export default function AcademicPartnerPortal() {
   const [callingLeadId, setCallingLeadId] = useState<string | null>(null);
   const [agentPhone, setAgentPhone] = useState("");
   const [leadForm, setLeadForm] = useState({ name: "", phone: "", email: "", course_id: "", notes: "" });
+  const [leadFunnelStage, setLeadFunnelStage] = useState<LeadFunnelStage | "leakage" | null>(null);
+  const [appFunnelStage, setAppFunnelStage] = useState<ApplicationFunnelStage | null>(null);
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [showOnboarding, setShowOnboarding] = useState(true);
   const [onboardingSaving, setOnboardingSaving] = useState(false);
@@ -415,6 +436,44 @@ export default function AcademicPartnerPortal() {
   const onboardingSkipped = partner?.onboarding_status === "skipped";
   const onboardingNeedsAttention = Boolean(partner && !onboardingComplete && showOnboarding);
 
+  // Lead-pipeline funnel counts, built only from this partner's scoped leads.
+  const stageCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    leads.forEach((lead) => {
+      counts[lead.stage] = (counts[lead.stage] || 0) + 1;
+    });
+    return counts;
+  }, [leads]);
+
+  // Leads table filtered to the clicked funnel bucket (or all when no filter).
+  const visibleLeads = useMemo(() => {
+    if (!leadFunnelStage) return leads;
+    const stages = new Set(leadStagesForBucket(leadFunnelStage));
+    return leads.filter((lead) => stages.has(lead.stage));
+  }, [leads, leadFunnelStage]);
+
+  // Application-pipeline funnel rows, derived from the scoped application leads.
+  const applicationFunnelItems = useMemo(
+    () => applicationLeads.map((lead) => ({
+      status: lead.application_status,
+      payment_status: lead.application_payment_status,
+      lead_stage: lead.stage,
+    })),
+    [applicationLeads],
+  );
+
+  // Applications table filtered to the clicked application-funnel stage.
+  const visibleApplicationLeads = useMemo(() => {
+    if (!appFunnelStage) return applicationLeads;
+    return applicationLeads.filter((lead) =>
+      applicationFunnelStageOf({
+        status: lead.application_status,
+        payment_status: lead.application_payment_status,
+        lead_stage: lead.stage,
+      }) === appFunnelStage,
+    );
+  }, [applicationLeads, appFunnelStage]);
+
   const loadPartnerLogoUrl = useCallback(async (filePath: string | null, fallbackUrl?: string | null) => {
     if (!filePath) {
       setLogoUrl(fallbackUrl || null);
@@ -432,7 +491,7 @@ export default function AcademicPartnerPortal() {
     const [statsRes, assignmentsRes, leadsRes, studentsRes, attendanceRes, feesRes, payoutsRes] = await Promise.all([
       supabase.from("academic_partner_dashboard").select("*").eq("partner_id", partnerId).single(),
       supabase.from("academic_partner_assignment_summary").select("*").eq("partner_id", partnerId).eq("is_active", true).order("course_name"),
-      supabase.from("leads").select("id, name, phone, email, stage, application_id, course_id, created_at, courses:course_id(name), campuses:campus_id(name), applications:applications(application_id, status, payment_status, fee_amount, completed_sections, submitted_at, created_at, form_pdf_url)").eq("academic_partner_id", partnerId).order("created_at", { ascending: false }).limit(200),
+      supabase.from("leads").select(ACADEMIC_PARTNER_PIPELINE_LEAD_SELECT).eq("academic_partner_id", partnerId).order("created_at", { ascending: false }).limit(200),
       supabase.from("students").select("id, name, admission_no, phone, status, courses:course_id(name), batches:batch_id(name)").order("created_at", { ascending: false }).limit(200),
       supabase.from("daily_attendance").select("id, student_id, date, status, subject, students:student_id(name, admission_no, pre_admission_no), batches:batch_id(name)").order("date", { ascending: false }).limit(200),
       supabase.from("fee_ledger").select("id, student_id, term, total_amount, paid_amount, balance, status, students:student_id(name, admission_no, pre_admission_no)").order("due_date", { ascending: false }).limit(300),
@@ -446,7 +505,7 @@ export default function AcademicPartnerPortal() {
       candidates: Number(a.candidates || 0),
       fee_collected: Number(a.fee_collected || 0),
     })));
-    setLeads(((leadsRes.data || []) as unknown as LeadRow[]).map((l) => ({
+    setLeads(scopePartnerPipelineLeads((leadsRes.data || []) as unknown as LeadRow[], partnerId).map((l) => ({
       ...l,
       application_id: l.applications?.[0]?.application_id || l.application_id || null,
       application_status: l.applications?.[0]?.status || null,
@@ -1003,7 +1062,12 @@ export default function AcademicPartnerPortal() {
           ))}
         </TabsList>
 
-        <TabsContent value="leads" className="mt-4">
+        <TabsContent value="leads" className="mt-4 space-y-4">
+          <LeadPipeline
+            stageCounts={stageCounts}
+            activeStage={leadFunnelStage}
+            onStageClick={setLeadFunnelStage}
+          />
           <Card className="border-border/60 shadow-none overflow-hidden"><CardContent className="p-0">
             <div className="overflow-x-auto">
             <table className="w-full min-w-[980px] text-sm">
@@ -1015,7 +1079,7 @@ export default function AcademicPartnerPortal() {
                 <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Actions</th>
               </tr></thead>
               <tbody>
-                {leads.map((lead) => (
+                {visibleLeads.map((lead) => (
                   <tr key={lead.id} className="border-b last:border-0 hover:bg-muted/30">
                     <td className="px-4 py-3"><div className="font-medium">{lead.name}</div><div className="text-xs text-muted-foreground">{lead.phone}</div></td>
                     <td className="px-4 py-3"><div>{lead.course_name}</div><div className="text-xs text-muted-foreground">{lead.campus_name}</div></td>
@@ -1039,14 +1103,19 @@ export default function AcademicPartnerPortal() {
                     </td>
                   </tr>
                 ))}
-                {leads.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">No leads added yet</td></tr>}
+                {visibleLeads.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">{leadFunnelStage ? "No leads at this stage" : "No leads added yet"}</td></tr>}
               </tbody>
             </table>
             </div>
           </CardContent></Card>
         </TabsContent>
 
-        <TabsContent value="applications" className="mt-4">
+        <TabsContent value="applications" className="mt-4 space-y-4">
+          <ApplicationFunnelStrip
+            items={applicationFunnelItems}
+            activeStage={appFunnelStage}
+            onStageClick={setAppFunnelStage}
+          />
           <Card className="border-border/60 shadow-none overflow-hidden"><CardContent className="p-0">
             <div className="overflow-x-auto">
             <table className="w-full min-w-[980px] text-sm">
@@ -1059,7 +1128,7 @@ export default function AcademicPartnerPortal() {
                 <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Submitted</th>
               </tr></thead>
               <tbody>
-                {applicationLeads.map((lead) => {
+                {visibleApplicationLeads.map((lead) => {
                   const completed = isCompletedApplication(lead);
                   return (
                   <tr key={lead.id} className="border-b last:border-0 hover:bg-muted/30">
@@ -1128,7 +1197,7 @@ export default function AcademicPartnerPortal() {
                   </tr>
                   );
                 })}
-                {applicationLeads.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No applications found for assigned leads</td></tr>}
+                {visibleApplicationLeads.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">{appFunnelStage ? "No applications at this stage" : "No applications found for assigned leads"}</td></tr>}
               </tbody>
             </table>
             </div>

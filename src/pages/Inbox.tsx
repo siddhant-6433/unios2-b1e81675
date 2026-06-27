@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VIDEO_BRAND_LABEL, type VideoBrand } from "@/lib/videoBrands";
+import { feeTermLabel } from "@/lib/feeTermLabels";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,7 @@ interface WaiverItem {
   id: string;
   offer_letter_id: string;
   term: string;
+  term_label: string;
   amount: number;
   reason: string | null;
   status: string;
@@ -149,9 +151,6 @@ const fmtTime = (s: string | null | undefined) => {
   if (diffH < 24) return `${Math.round(diffH)}h ago`;
   return fmtDate(s);
 };
-
-const termLabel = (t: string) =>
-  t.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
 const ADMISSIONS_ROLES = [
   "super_admin", "campus_admin", "principal", "admission_head", "counsellor", "data_entry",
@@ -402,19 +401,21 @@ export default function Inbox() {
           if (c && s) offerKeys.add(`${c}::${s}`);
         }
         const yearAmountByKey = new Map<string, number>();
+        const yearLabelByKey = new Map<string, string>();
         if (offerKeys.size > 0) {
           const pairs = Array.from(offerKeys).map(k => k.split("::"));
           const courseIds = Array.from(new Set(pairs.map(p => p[0])));
           const sessionIds = Array.from(new Set(pairs.map(p => p[1])));
           const { data: fsRows } = await supabase
             .from("fee_structures")
-            .select("course_id, session_id, is_active, fee_structure_items ( term, amount )")
+            .select("course_id, session_id, is_active, metadata, fee_structure_items ( term, amount )")
             .in("course_id", courseIds)
             .in("session_id", sessionIds)
             .eq("is_active", true);
           for (const fs of (fsRows || []) as any[]) {
             const key = `${fs.course_id}::${fs.session_id}`;
             if (!offerKeys.has(key)) continue;
+            const metadata = fs.metadata as Record<string, unknown> | null;
             const byTerm = new Map<string, number>();
             for (const it of (fs.fee_structure_items || []) as any[]) {
               const t = String(it.term || "");
@@ -423,6 +424,7 @@ export default function Inbox() {
             }
             for (const [t, total] of byTerm) {
               yearAmountByKey.set(`${key}::${t}`, total);
+              yearLabelByKey.set(`${key}::${t}`, feeTermLabel(t, metadata));
             }
           }
         }
@@ -434,10 +436,14 @@ export default function Inbox() {
             const yearAmount = (courseId && sessionId)
               ? yearAmountByKey.get(`${courseId}::${sessionId}::${w.term}`) ?? null
               : null;
+            const termLabel = (courseId && sessionId)
+              ? yearLabelByKey.get(`${courseId}::${sessionId}::${w.term}`) ?? feeTermLabel(w.term)
+              : feeTermLabel(w.term);
             return {
               id: w.id,
               offer_letter_id: w.offer_letter_id,
               term: w.term,
+              term_label: termLabel,
               amount: Number(w.amount),
               reason: w.reason,
               status: w.status,
@@ -815,7 +821,7 @@ export default function Inbox() {
           </div>
           <div className="flex items-center gap-2 mt-1">
             <Badge className="bg-muted text-muted-foreground border-0 text-[10px] capitalize">
-              {termLabel(w.term)}
+              {w.term_label}
             </Badge>
             <span className="text-[10px] text-muted-foreground/60">{fmtTime(w.created_at)}</span>
           </div>
@@ -979,7 +985,7 @@ export default function Inbox() {
           </div>
 
           <div className="rounded-xl border border-border bg-card divide-y divide-border">
-            <Row label="Fee Particular" value={termLabel(w.term)} />
+            <Row label="Fee Particular" value={w.term_label} />
             <Row label="Amount" value={fmtINR(w.year_amount)} />
             <Row label="Waiver Requested" value={fmtINR(w.amount)} highlight />
             <Row label="Applicable Amount After Waiver" value={fmtINR(applicableAfterWaiver)} />
