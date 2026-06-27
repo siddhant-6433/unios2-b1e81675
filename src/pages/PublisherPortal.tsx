@@ -11,40 +11,17 @@ import {
 import {
   Loader2, Users, TrendingUp, CheckCircle, Clock,
   Search, ChevronRight, ArrowUpRight, Activity, Phone, PhoneOff,
-  BookOpen, MapPin, BarChart3, Calendar,
+  BookOpen, MapPin, BarChart3,
 } from "lucide-react";
-import {
-  startOfDay, endOfDay, startOfYesterday, endOfYesterday,
-  startOfWeek, endOfWeek, startOfMonth, endOfMonth, subMonths,
-} from "date-fns";
+import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
+import { getDatePresetRange, type DatePreset } from "@/lib/datePresets";
 
-type DatePreset = "today" | "yesterday" | "this_week" | "this_month" | "last_month" | "all" | "custom";
-
-const DATE_PRESET_LABELS: Record<DatePreset, string> = {
-  today: "Today",
-  yesterday: "Yesterday",
-  this_week: "This Week",
-  this_month: "This Month",
-  last_month: "Last Month",
-  all: "All Time",
-  custom: "Custom",
-};
-
-function dateRangeFor(preset: DatePreset, customStart?: string, customEnd?: string): [Date | null, Date | null] {
-  const now = new Date();
-  switch (preset) {
-    case "today":      return [startOfDay(now), endOfDay(now)];
-    case "yesterday":  return [startOfYesterday(), endOfYesterday()];
-    case "this_week":  return [startOfWeek(now, { weekStartsOn: 1 }), endOfWeek(now, { weekStartsOn: 1 })];
-    case "this_month": return [startOfMonth(now), endOfMonth(now)];
-    case "last_month": { const lm = subMonths(now, 1); return [startOfMonth(lm), endOfMonth(lm)]; }
-    case "custom":     return [
-      customStart ? startOfDay(new Date(customStart)) : null,
-      customEnd   ? endOfDay(new Date(customEnd))     : null,
-    ];
-    case "all":
-    default:           return [null, null];
-  }
+function dateRangeFor(preset: DatePreset, fromDate?: string, toDate?: string): [Date | null, Date | null] {
+  const range = preset === "custom" ? { from: fromDate || "", to: toDate || "" } : getDatePresetRange(preset);
+  return [
+    range.from ? new Date(`${range.from}T00:00:00`) : null,
+    range.to ? new Date(`${range.to}T23:59:59.999`) : null,
+  ];
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -173,8 +150,8 @@ export default function PublisherPortal() {
   const [aiFilter, setAiFilter] = useState("all"); // "all" | "called" | "not_called"
   const [aiNotInterestedOnly, setAiNotInterestedOnly] = useState(false);
   const [datePreset, setDatePreset] = useState<DatePreset>("all");
-  const [customStart, setCustomStart] = useState<string>("");
-  const [customEnd, setCustomEnd] = useState<string>("");
+  const [fromDate, setFromDate] = useState<string>("");
+  const [toDate, setToDate] = useState<string>("");
   const [contractFilter, setContractFilter] = useState<string>("all");
 
   const [avgAiCallMs, setAvgAiCallMs] = useState<number | null>(null);
@@ -232,7 +209,9 @@ export default function PublisherPortal() {
       }
       setPublisher(pub);
 
-      // Paginate to bypass Supabase server-side max-rows cap (default 1000)
+      // Paginate to bypass Supabase server-side max-rows cap (default 1000).
+      // Do not request PAGE + 1 here: PostgREST still caps the response at
+      // 1000, so the sentinel row never arrives and totals stick at 1000.
       const PAGE = 1000;
       let allLeads: any[] = [];
       let cursor: { created_at: string; id: string } | null = null;
@@ -249,17 +228,16 @@ export default function PublisherPortal() {
           .eq("source", pub.source)
           .order("created_at", { ascending: false })
           .order("id", { ascending: false })
-          .limit(PAGE + 1);
+          .limit(PAGE);
         if (cursor) {
           query = query.or(`created_at.lt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.lt.${cursor.id})`);
         }
         const { data: batch, error } = await query;
         if (error) { fetchErr = error; break; }
         const fetched = batch ?? [];
-        const rows = fetched.slice(0, PAGE);
-        allLeads = allLeads.concat(rows);
-        const last = rows[rows.length - 1];
-        if (!last || fetched.length <= PAGE) break; // last page
+        allLeads = allLeads.concat(fetched);
+        const last = fetched[fetched.length - 1];
+        if (!last || fetched.length < PAGE) break; // last page
         cursor = { created_at: last.created_at, id: last.id };
       }
 
@@ -388,7 +366,7 @@ export default function PublisherPortal() {
 
   // Date-scoped lead set — drives stats, breakdowns, and the table.
   // Avg AI/manual response cards keep their own fixed 3-day window above.
-  const [dateStart, dateEnd] = dateRangeFor(datePreset, customStart, customEnd);
+  const [dateStart, dateEnd] = dateRangeFor(datePreset, fromDate, toDate);
   const dateScopedLeads = leads.filter(l => {
     if (!dateStart && !dateEnd) return true;
     const t = new Date(l.created_at).getTime();
@@ -483,7 +461,7 @@ export default function PublisherPortal() {
           <div className="flex items-center gap-2 flex-wrap">
             <select
               value={impersonatingId}
-              onChange={e => { setImpersonatingId(e.target.value); setSearch(""); setStageFilter("all"); setAiFilter("all"); setDatePreset("all"); setCustomStart(""); setCustomEnd(""); setContractFilter("all"); setAvgAiCallMs(null); setAvgManualCallMs(null); }}
+              onChange={e => { setImpersonatingId(e.target.value); setSearch(""); setStageFilter("all"); setAiFilter("all"); setDatePreset("all"); setFromDate(""); setToDate(""); setContractFilter("all"); setAvgAiCallMs(null); setAvgManualCallMs(null); }}
               className="rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
             >
               <option value="">— Switch Publisher —</option>
@@ -897,37 +875,16 @@ export default function PublisherPortal() {
             className="w-full rounded-xl border border-input bg-card pl-9 pr-4 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
           />
         </div>
-        <div className="relative">
-          <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-          <select
-            value={datePreset}
-            onChange={e => setDatePreset(e.target.value as DatePreset)}
-            className="rounded-xl border border-input bg-card pl-8 pr-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-          >
-            {(Object.entries(DATE_PRESET_LABELS) as [DatePreset, string][]).map(([key, label]) => (
-              <option key={key} value={key}>{label}</option>
-            ))}
-          </select>
-        </div>
-        {datePreset === "custom" && (
-          <div className="flex items-center gap-2">
-            <input
-              type="date"
-              value={customStart}
-              max={customEnd || undefined}
-              onChange={e => setCustomStart(e.target.value)}
-              className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-            />
-            <span className="text-xs text-muted-foreground">to</span>
-            <input
-              type="date"
-              value={customEnd}
-              min={customStart || undefined}
-              onChange={e => setCustomEnd(e.target.value)}
-              className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-            />
-          </div>
-        )}
+        <DateRangeFilter
+          preset={datePreset}
+          fromDate={fromDate}
+          toDate={toDate}
+          onPresetChange={setDatePreset}
+          onFromDateChange={setFromDate}
+          onToDateChange={setToDate}
+          className="flex flex-wrap items-center gap-2 rounded-xl border border-input bg-card px-3 py-2"
+          ariaPrefix="Publisher leads"
+        />
         <select
           value={stageFilter}
           onChange={e => setStageFilter(e.target.value)}

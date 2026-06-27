@@ -12,8 +12,8 @@ CREATE TABLE IF NOT EXISTS public.whatsapp_templates (
   name               text NOT NULL,
   language           text NOT NULL DEFAULT 'en',
   category           text,                              -- UTILITY / MARKETING / AUTHENTICATION
-  status             text NOT NULL DEFAULT 'PENDING'    -- PENDING/APPROVED/REJECTED/PAUSED/DISABLED/IN_APPEAL
-    CHECK (status IN ('PENDING','APPROVED','REJECTED','PAUSED','DISABLED','IN_APPEAL','FLAGGED')),
+  status             text NOT NULL DEFAULT 'PENDING'    -- PENDING/APPROVED/REJECTED/PAUSED/DISABLED/IN_APPEAL/Meta lifecycle statuses
+    CHECK (status IN ('PENDING','APPROVED','REJECTED','PAUSED','DISABLED','IN_APPEAL','FLAGGED','PENDING_DELETION','DELETED')),
   header_format      text DEFAULT 'NONE'                -- NONE/TEXT/IMAGE/VIDEO/DOCUMENT
     CHECK (header_format IN ('NONE','TEXT','IMAGE','VIDEO','DOCUMENT')),
   has_media          boolean NOT NULL DEFAULT false,
@@ -54,7 +54,12 @@ CREATE TRIGGER trg_whatsapp_templates_updated_at
 GRANT SELECT ON public.whatsapp_templates TO authenticated;
 
 -- Live status updates in the dashboard list.
-ALTER PUBLICATION supabase_realtime ADD TABLE public.whatsapp_templates;
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.whatsapp_templates;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
 COMMENT ON TABLE public.whatsapp_templates IS
   'Local mirror of Meta WhatsApp message templates: submission record + approval status, updated via Graph API create/sync and message_template_status_update webhooks.';

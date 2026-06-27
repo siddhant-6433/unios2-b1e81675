@@ -10,7 +10,7 @@ import { useIsTeamLeader } from "@/hooks/useTeamLeader";
 import { useToast } from "@/hooks/use-toast";
 import {
   Phone, MessageSquare, ChevronRight, Plus, Search, Filter, Upload,
-  Eye, Calendar, MoreHorizontal, Users, TrendingUp, ArrowUpRight,
+  Eye, MoreHorizontal, Users, TrendingUp, ArrowUpRight,
   Bot, UserCheck, MapPin, FileText, CheckCircle, XCircle, Clock, Loader2,
   Trash2, ArrowRightLeft, Send, Flag, Inbox, Gift, Shield, CreditCard, ListPlus, Bell, Download,
 } from "lucide-react";
@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
 import { LeadTemperatureBadge } from "@/components/admissions/LeadTemperatureBadge";
 import { CahetPendingBadge } from "@/components/leads/CahetPendingBadge";
 import { UpdeledPendingBadge } from "@/components/leads/UpdeledPendingBadge";
@@ -37,6 +38,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ChevronDown } from "lucide-react";
 import { groupCourses, type CourseLike } from "@/lib/courseSort";
 import { exportRowsXlsx, formatExportDateTime } from "@/lib/xlsxExport";
+import type { DatePreset } from "@/lib/datePresets";
 import {
   ADMISSIONS_LEAD_LIST_SELECT,
   applyAdmissionsLeadEnrichment,
@@ -331,6 +333,7 @@ const Admissions = () => {
   const canFilterByCounsellor = role === "super_admin" || role === "admission_head" || role === "campus_admin" || isTeamLeader;
   const [notCalledIds, setNotCalledIds] = useState<Set<string> | null>(null);
   const [pendingNotCalledFilter, setPendingNotCalledFilter] = useState<string | null>(null);
+  const [datePreset, setDatePreset] = useState<DatePreset>("all");
   const [fromDate, setFromDate] = useState<string>("");
   const [toDate, setToDate] = useState<string>("");
   const [leadSortOrder, setLeadSortOrder] = useState<LeadSortOrder>("newest");
@@ -2428,33 +2431,27 @@ const Admissions = () => {
               ))}
             </select>
           )}
-          <div className="flex items-center gap-1.5 rounded-xl border border-input bg-card px-3 py-2.5">
-            <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
-            <input
-              type="date"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-              className="w-[128px] bg-transparent text-xs text-foreground outline-none"
-              title="Lead created from"
-            />
-            <span className="text-xs text-muted-foreground">to</span>
-            <input
-              type="date"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-              className="w-[128px] bg-transparent text-xs text-foreground outline-none"
-              title="Lead created to"
-            />
-            {(fromDate || toDate) && (
-              <button
-                type="button"
-                onClick={() => { setFromDate(""); setToDate(""); }}
-                className="ml-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/10"
-              >
-                Clear
-              </button>
-            )}
-          </div>
+          <DateRangeFilter
+            preset={datePreset}
+            fromDate={fromDate}
+            toDate={toDate}
+            onPresetChange={setDatePreset}
+            onFromDateChange={setFromDate}
+            onToDateChange={setToDate}
+            className="flex flex-wrap items-center gap-2 rounded-xl border border-input bg-card px-3 py-2"
+            ariaPrefix="Lead created"
+          />
+          {(fromDate || toDate) && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-9 px-2 text-xs"
+              onClick={() => { setDatePreset("all"); setFromDate(""); setToDate(""); }}
+            >
+              Clear dates
+            </Button>
+          )}
           <select
             value={leadSortOrder}
             onChange={(e) => setLeadSortOrder(e.target.value as LeadSortOrder)}
