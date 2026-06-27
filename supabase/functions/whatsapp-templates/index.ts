@@ -17,6 +17,39 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const json = (payload: Record<string, unknown>, status = 200) =>
+  new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+
+const isMissingMirrorTable = (error: any) => {
+  const code = String(error?.code || "");
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    code === "42P01" ||
+    code === "PGRST205" ||
+    (message.includes("whatsapp_templates") &&
+      (message.includes("does not exist") ||
+        message.includes("could not find the table") ||
+        message.includes("schema cache")))
+  );
+};
+
+const normalizeTemplateStatus = (status: unknown) => {
+  const value = String(status || "PENDING").toUpperCase();
+  const known = new Set([
+    "PENDING",
+    "APPROVED",
+    "REJECTED",
+    "PAUSED",
+    "DISABLED",
+    "IN_APPEAL",
+    "FLAGGED",
+  ]);
+  return known.has(value) ? value : "FLAGGED";
+};
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -260,7 +293,7 @@ Deno.serve(async (req) => {
           name: t.name,
           language: t.language || "en",
           category: t.category || null,
-          status: (t.status || "PENDING").toUpperCase(),
+          status: normalizeTemplateStatus(t.status),
           header_format: ["TEXT", "IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat) ? headerFormat : "NONE",
           has_media: ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat),
           placeholder_count: placeholderCount,
@@ -275,15 +308,20 @@ Deno.serve(async (req) => {
           .from("whatsapp_templates")
           .upsert(rows, { onConflict: "name,language" });
         if (syncErr) {
-          return new Response(JSON.stringify({ error: syncErr.message }), {
-            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
+          if (isMissingMirrorTable(syncErr)) {
+            console.warn("whatsapp_templates mirror unavailable during sync:", syncErr.message);
+            return json({
+              success: true,
+              synced: 0,
+              fetched: rows.length,
+              warning: "Fetched templates from Meta, but the local whatsapp_templates mirror table is not deployed yet. Apply migration 20260624100800_whatsapp_templates.sql to persist sync results.",
+            });
+          }
+          return json({ error: syncErr.message, details: syncErr }, 500);
         }
       }
 
-      return new Response(JSON.stringify({ success: true, synced: rows.length }), {
-        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ success: true, synced: rows.length, fetched: rows.length });
     }
 
     // ── DELETE: Delete a template ──

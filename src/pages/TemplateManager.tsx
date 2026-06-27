@@ -269,15 +269,15 @@ Buttons:
         <p className="text-sm text-muted-foreground mt-1">Manage WhatsApp and email templates</p>
       </div>
 
-      <Tabs defaultValue="email" className="w-full">
+      <Tabs defaultValue="whatsapp" className="w-full">
         <TabsList className="bg-transparent border-b border-border rounded-none p-0 h-auto gap-0 w-full justify-start">
-          <TabsTrigger value="email"
-            className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
-            Email Templates
-          </TabsTrigger>
           <TabsTrigger value="whatsapp"
             className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
             WhatsApp Templates
+          </TabsTrigger>
+          <TabsTrigger value="email"
+            className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
+            Email Templates
           </TabsTrigger>
           <TabsTrigger value="courses"
             className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">

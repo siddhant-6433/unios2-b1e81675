@@ -174,6 +174,7 @@ export type Database = {
           default_payout_percentage: number
           email: string | null
           id: string
+          logo_url: string | null
           name: string
           notes: string | null
           organization: string | null
@@ -187,6 +188,7 @@ export type Database = {
           default_payout_percentage?: number
           email?: string | null
           id?: string
+          logo_url?: string | null
           name: string
           notes?: string | null
           organization?: string | null
@@ -200,6 +202,7 @@ export type Database = {
           default_payout_percentage?: number
           email?: string | null
           id?: string
+          logo_url?: string | null
           name?: string
           notes?: string | null
           organization?: string | null

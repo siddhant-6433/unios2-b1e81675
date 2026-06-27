@@ -28,6 +28,7 @@ type Partner = {
   id: string;
   name: string;
   default_payout_percentage: number;
+  logo_url: string | null;
 };
 
 type DashboardStats = {
@@ -365,7 +366,7 @@ export default function AcademicPartnerPortal() {
     (async () => {
       if (!user?.id) return;
       setLoading(true);
-      const { data } = await supabase.from("academic_partners").select("id, name, default_payout_percentage").eq("user_id", user.id).single();
+      const { data } = await supabase.from("academic_partners").select("id, name, default_payout_percentage, logo_url").eq("user_id", user.id).single();
       if (!data) {
         setLoading(false);
         return;
@@ -476,9 +477,16 @@ export default function AcademicPartnerPortal() {
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+        <div className="flex min-w-0 items-center gap-4">
+          {partner.logo_url && (
+            <div className="flex h-14 w-24 shrink-0 items-center justify-center rounded-lg border border-border bg-background p-2">
+              <img src={partner.logo_url} alt={`${stats?.partner_name || partner.name} logo`} className="max-h-full max-w-full object-contain" />
+            </div>
+          )}
+          <div className="min-w-0">
           <h1 className="text-2xl font-bold text-foreground">Academic Partner Dashboard</h1>
           <p className="mt-1 text-sm text-muted-foreground">Welcome, {stats?.partner_name || partner.name}</p>
+          </div>
         </div>
         <Button onClick={() => setShowAddLead(true)} className="gap-2">
           <Plus className="h-4 w-4" /> Add Lead
