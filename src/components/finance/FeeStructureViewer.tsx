@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, ChevronDown, ChevronUp, Building2 } from "lucide-react";
 import { ScholarshipPanel } from "./ScholarshipPanel";
+import { feeTermLabel } from "@/lib/feeTermLabels";
 
 const categoryBadge: Record<string, string> = {
   tuition: "bg-pastel-blue", lab: "bg-pastel-purple", enrollment: "bg-pastel-green",
@@ -54,6 +55,90 @@ type StudentTypeFilter = "day_scholar" | "day_boarder" | "boarder";
 
 /** Beacon school codes have boarding/transport options */
 const isSchoolCourse = (code: string) => /^(BSAV|BSA|MIR)-/.test(code);
+
+const termSortValue = (term: string) => {
+  const match = term.match(/^year_(\d+)$/);
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+};
+
+const cleanFeeHeadLabel = (item: FeeItem) => {
+  const label = item.name
+    .replace(/^DAOTT\s+/i, "")
+    .replace(/\bYear\s*\d+\s*/gi, "")
+    .replace(/\bSem(?:ester)?\s*\d+\s*/gi, "")
+    .replace(/\s+Fee$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (/seat\s*block/i.test(label)) return "Seat Block";
+  if (/admin/i.test(label) && /tech/i.test(label)) return "Admin/Tech";
+  if (/exam/i.test(label)) return "Examination";
+  if (/tuition/i.test(label)) return "Tuition";
+  return label || "Fee";
+};
+
+const feeHeadKey = (item: FeeItem) => {
+  const code = item.code.toUpperCase();
+  const name = item.name.toLowerCase();
+  if (code.includes("SEAT") || name.includes("seat block")) return "seat_block";
+  if (item.category === "tuition" || code.includes("TUITION")) return "tuition";
+  if (code.includes("ADMIN") || name.includes("admin")) return "admin_tech";
+  if (item.category === "exam" || code.includes("EXAM") || name.includes("exam")) return "exam";
+  return `${item.category}:${cleanFeeHeadLabel(item).toLowerCase()}`;
+};
+
+const feeHeadRank = (key: string, category: string) => {
+  if (key === "seat_block") return 0;
+  if (category === "enrollment") return 1;
+  if (key === "tuition") return 2;
+  if (key === "admin_tech") return 3;
+  if (category === "lab") return 4;
+  if (key === "exam" || category === "exam") return 5;
+  return 10;
+};
+
+type FeeMatrixRow = {
+  key: string;
+  label: string;
+  category: string;
+  values: Record<string, number>;
+  total: number;
+};
+
+const buildPeriodFeeMatrix = (items: FeeItem[], metadata: any) => {
+  const terms = Array.from(new Set(items.map((item) => item.term).filter(Boolean)))
+    .sort((a, b) => termSortValue(a) - termSortValue(b) || a.localeCompare(b));
+  const rows = new Map<string, FeeMatrixRow>();
+
+  for (const item of items) {
+    const key = feeHeadKey(item);
+    const current = rows.get(key) || {
+      key,
+      label: cleanFeeHeadLabel(item),
+      category: item.category,
+      values: {},
+      total: 0,
+    };
+    current.values[item.term] = (current.values[item.term] || 0) + item.amount;
+    current.total += item.amount;
+    rows.set(key, current);
+  }
+
+  const rowList = Array.from(rows.values())
+    .sort((a, b) => feeHeadRank(a.key, a.category) - feeHeadRank(b.key, b.category) || a.label.localeCompare(b.label));
+  const termTotals = Object.fromEntries(
+    terms.map((term) => [term, rowList.reduce((sum, row) => sum + (row.values[term] || 0), 0)]),
+  ) as Record<string, number>;
+  const grandTotal = rowList.reduce((sum, row) => sum + row.total, 0);
+
+  return {
+    terms,
+    rows: rowList,
+    termTotals,
+    grandTotal,
+    termLabels: Object.fromEntries(terms.map((term) => [term, feeTermLabel(term, metadata)])) as Record<string, string>,
+  };
+};
 
 export function FeeStructureViewer({ courseId, compact = false, showFilter = false, newAdmissionOnly = false }: Props) {
   const [structures, setStructures] = useState<FeeStructure[]>([]);
@@ -550,14 +635,68 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                 ? splitSchoolFeeItems(fs.items, fs.course_code)
                 : { oneTime: [] as FeeItem[], tuition: [] as FeeItem[], boarding: [] as FeeItem[], transport: [] as FeeItem[], other: nonSchoolItems };
 
+              const termLabel = (term: string) => feeTermLabel(term, fs.metadata);
               const renderItemRows = (items: FeeItem[]) =>
                 items.map((item, i) => (
                   <tr key={i} className="border-b border-border/40 last:border-0">
                     <td className="px-3 py-2 text-foreground">{item.name}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{item.term}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{termLabel(item.term)}</td>
                     <td className="px-3 py-2 text-right font-semibold text-foreground">{fmt(item.amount)}</td>
                   </tr>
                 ));
+
+              const renderPeriodMatrix = (items: FeeItem[]) => {
+                const matrix = buildPeriodFeeMatrix(items, fs.metadata);
+                if (matrix.rows.length === 0 || matrix.terms.length === 0) return null;
+                const gridColumns = `minmax(160px,1.4fr) repeat(${matrix.terms.length}, minmax(86px,1fr)) minmax(96px,1fr)`;
+                const periodTotalLabel = `${fs.metadata?.period_label || "Period"} Total`;
+
+                return (
+                  <div className="border-t border-border">
+                    <div className="overflow-x-auto">
+                      <div className="min-w-[760px] text-xs">
+                        <div
+                          className="grid bg-muted/50 border-b border-border font-semibold text-muted-foreground uppercase"
+                          style={{ gridTemplateColumns: gridColumns }}
+                        >
+                          <div className="px-3 py-2 text-left">Fee Head</div>
+                          {matrix.terms.map((term) => (
+                            <div key={term} className="px-3 py-2 text-right">{matrix.termLabels[term]}</div>
+                          ))}
+                          <div className="px-3 py-2 text-right">Total</div>
+                        </div>
+
+                        {matrix.rows.map((row) => (
+                          <div
+                            key={row.key}
+                            className="grid border-b border-border/40 last:border-0"
+                            style={{ gridTemplateColumns: gridColumns }}
+                          >
+                            <div className="px-3 py-2 text-foreground font-medium">{row.label}</div>
+                            {matrix.terms.map((term) => (
+                              <div key={term} className="px-3 py-2 text-right text-foreground tabular-nums">
+                                {row.values[term] ? fmt(row.values[term]) : <span className="text-muted-foreground">—</span>}
+                              </div>
+                            ))}
+                            <div className="px-3 py-2 text-right font-semibold text-foreground tabular-nums">{fmt(row.total)}</div>
+                          </div>
+                        ))}
+
+                        <div
+                          className="grid bg-primary/5 border-t border-border font-bold text-primary"
+                          style={{ gridTemplateColumns: gridColumns }}
+                        >
+                          <div className="px-3 py-2">{periodTotalLabel}</div>
+                          {matrix.terms.map((term) => (
+                            <div key={term} className="px-3 py-2 text-right tabular-nums">{fmt(matrix.termTotals[term])}</div>
+                          ))}
+                          <div className="px-3 py-2 text-right tabular-nums">{fmt(matrix.grandTotal)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              };
 
               const renderSection = (label: string, items: FeeItem[], bgClass: string) => {
                 if (items.length === 0) return null;
@@ -667,15 +806,8 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                     </>
                   ) : (
                     <>
-                      {/* Non-school: single table */}
-                      <table className="w-full text-xs">
-                        <thead><tr className="bg-muted/50">
-                          <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase">Fee</th>
-                          <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase">Term</th>
-                          <th className="px-3 py-2 text-right font-semibold text-muted-foreground uppercase">Amount</th>
-                        </tr></thead>
-                        <tbody>{renderItemRows(sections.other)}</tbody>
-                      </table>
+                      {/* Non-school: fee heads as rows, years/semesters as columns. */}
+                      {renderPeriodMatrix(sections.other)}
                       <div className="px-3 py-2 bg-muted/30 border-t border-border flex items-center justify-between">
                         <span className="text-[10px] text-muted-foreground">{sections.other.length} fee items · {fs.session_name}</span>
                         <span className="text-xs font-bold text-primary">{fmt(fs.total)}</span>
