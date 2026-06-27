@@ -25,6 +25,7 @@ const ALLOWED_DOC_KEYS = new Set([
   "birth_certificate", "report_card", "student_photo",
   "transfer_certificate", "aadhaar", "medical_record",
   // Identity / category / migration (UG + PG + K-12)
+  "father_aadhaar", "mother_aadhaar", "guardian_aadhaar",
   "parent_aadhaar", "caste_certificate",
   "migration_certificate", "school_transfer_certificate",
   // Photo
