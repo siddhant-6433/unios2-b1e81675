@@ -1,24 +1,16 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { Navigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
   ListPlus, Loader2, Send, Mail, Trash2, Users, MessageSquare, AlertTriangle, Upload,
-  Pause, PlayCircle, RefreshCw, XCircle, Phone, Check, ChevronDown,
 } from "lucide-react";
 import { WA_BULK_TEMPLATES } from "@/config/waBulkTemplates";
-import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 
 const BulkLeadImportDialog = lazy(() =>
   import("@/components/admissions/BulkLeadImportDialog").then((m) => ({ default: m.BulkLeadImportDialog })));
@@ -33,189 +25,17 @@ interface LeadList {
   created_at: string;
 }
 
-type CampaignChannel = "whatsapp" | "email";
-
-interface CampaignQueueItem {
-  id: string;
-  channel: CampaignChannel;
-  name: string;
-  template: string | null;
-  status: "pending" | "sending" | "paused" | "completed" | "failed" | "terminated";
-  total_recipients: number;
-  sent_count: number;
-  failed_count: number;
-  business_phone_number_id: string | null;
-  business_phone_number: string | null;
-  created_at: string;
-  completed_at: string | null;
-}
-
-type WaPhoneHealth = {
-  phone_number_id: string;
-  business_phone_number?: string | null;
-  total: number;
-  failed: number;
-  read: number;
-  failed_pct: number | null;
-  read_pct: number | null;
-};
-
-type WaSenderOption = {
-  value: string;
-  label: string;
-  provider: "meta" | "plivo";
-  phoneNumberId: string | null;
-  businessNumber: string | null;
-  total: number | null;
-  failed: number | null;
-  failedPct: number | null;
-  readPct: number | null;
-  qualityRiskLevel: string | null;
-};
-
 const SOURCE_BADGE: Record<LeadList["source"], { label: string; cls: string }> = {
   manual:  { label: "Manual",   cls: "bg-pastel-blue text-foreground/70" },
   import:  { label: "Imported", cls: "bg-pastel-green text-foreground/70" },
   filter:  { label: "Filter",   cls: "bg-pastel-yellow text-foreground/70" },
 };
 
-const CAMPAIGN_STATUS_BADGE: Record<CampaignQueueItem["status"], string> = {
-  pending: "bg-blue-100 text-blue-700",
-  sending: "bg-emerald-100 text-emerald-700",
-  paused: "bg-amber-100 text-amber-700",
-  completed: "bg-muted text-muted-foreground",
-  failed: "bg-rose-100 text-rose-700",
-  terminated: "bg-zinc-200 text-zinc-700",
-};
-
-const DEFAULT_WA_SENDER = "__default_bulk_sender__";
-const WHATSAPP_BUSINESS_NAME = "NIMT Educational Institutions";
-const KNOWN_META_PHONE_NUMBER_ID_TO_NUMBER: Record<string, string> = {
-  "1075269918995469": "917428499849",
-  "970526789470416": "919599675267",
-};
-
-const defaultWaSenderOption = (): WaSenderOption => ({
-  value: DEFAULT_WA_SENDER,
-  label: "Bulk default sender",
-  provider: "meta",
-  phoneNumberId: null,
-  businessNumber: null,
-  total: null,
-  failed: null,
-  failedPct: null,
-  readPct: null,
-  qualityRiskLevel: null,
-});
-
-const digitsOnly = (value: string | null | undefined) => (value || "").replace(/[^0-9]/g, "");
-
-const formatSenderNumber = (value: string | null | undefined) => {
-  const digits = digitsOnly(value);
-  if (digits.length === 12 && digits.startsWith("91")) {
-    return `+91 ${digits.slice(2, 7)} ${digits.slice(7)}`;
-  }
-  if (digits.length === 10) return `${digits.slice(0, 5)} ${digits.slice(5)}`;
-  return value || "";
-};
-
-const formatPct = (value: number | null | undefined) =>
-  typeof value === "number" ? `${value.toFixed(1)}%` : "n/a";
-
-const senderHealthClass = (failedPct: number | null | undefined) => {
-  if (typeof failedPct !== "number") return "bg-muted text-muted-foreground";
-  if (failedPct >= 10) return "bg-rose-100 text-rose-700";
-  if (failedPct >= 5) return "bg-amber-100 text-amber-700";
-  return "bg-emerald-100 text-emerald-700";
-};
-
-const resolveBusinessNumber = (
-  phoneNumberId: string | null | undefined,
-  businessNumber: string | null | undefined,
-) => {
-  const numberDigits = digitsOnly(businessNumber);
-  if (numberDigits) return numberDigits;
-  return phoneNumberId ? KNOWN_META_PHONE_NUMBER_ID_TO_NUMBER[phoneNumberId] || null : null;
-};
-
-const sampleValueForParam = (name: string) => {
-  if (name === "student_name") return "Rahul Sharma";
-  if (name === "course_name") return "BPT";
-  if (name === "campus_name") return "NIMT Greater Noida";
-  if (name === "visit_date") return "14 Jun 2026, 11:00 AM";
-  if (name === "amount") return "5,000";
-  if (name === "due_date") return "14 Jun 2026";
-  if (name === "application_id") return "NIMT-2026-001";
-  return name.replace(/_/g, " ");
-};
-
-const renderTemplatePreview = (preview: string, staticParams: Record<string, string>) =>
-  preview.replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, (_match, name: string) => {
-    const typed = staticParams[name]?.trim();
-    return typed || sampleValueForParam(name);
-  });
-
-const WhatsAppBusinessIdentity = ({
-  sender,
-  selected,
-  compact = false,
-}: {
-  sender: WaSenderOption;
-  selected?: boolean;
-  compact?: boolean;
-}) => {
-  const formattedNumber = formatSenderNumber(sender.businessNumber);
-  const primaryLabel = formattedNumber || sender.label || "Default bulk route";
-  const countryLabel = formattedNumber ? "🇮🇳 India" : "Default route";
-
-  return (
-    <div className={`flex w-full items-center gap-3 ${compact ? "py-1" : "rounded-md p-2"}`}>
-      <Avatar className={compact ? "h-9 w-9 border bg-white" : "h-10 w-10 border bg-white"}>
-        <AvatarImage src={nimtLogo} alt={WHATSAPP_BUSINESS_NAME} className="object-contain p-1" />
-        <AvatarFallback className="bg-emerald-50 text-[10px] font-semibold text-emerald-700">NIMT</AvatarFallback>
-      </Avatar>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <p className="truncate text-sm font-semibold text-foreground">{primaryLabel}</p>
-          {sender.provider === "meta" && (
-            <Badge variant="outline" className="h-5 rounded-full px-1.5 text-[10px]">Meta</Badge>
-          )}
-        </div>
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-          <span>{countryLabel}</span>
-          <span className="hidden sm:inline">•</span>
-          <span className="truncate">{WHATSAPP_BUSINESS_NAME}</span>
-          {!compact && <span>Name visible to customers</span>}
-        </div>
-        {!compact && (
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            <Badge className={`border-0 text-[10px] ${senderHealthClass(sender.failedPct)}`}>
-              7d failed {formatPct(sender.failedPct)}
-            </Badge>
-            <span className="text-[11px] text-muted-foreground">Read {formatPct(sender.readPct)}</span>
-            {sender.total != null && (
-              <span className="text-[11px] text-muted-foreground">{sender.total.toLocaleString("en-IN")} sends</span>
-            )}
-            {sender.qualityRiskLevel && (
-              <span className="text-[11px] text-muted-foreground">Risk: {sender.qualityRiskLevel}</span>
-            )}
-          </div>
-        )}
-      </div>
-      {selected && <Check className="h-4 w-4 shrink-0 text-emerald-600" />}
-    </div>
-  );
-};
-
 export default function LeadLists() {
   const { toast } = useToast();
-  const { profile, role } = useAuth();
   const [lists, setLists] = useState<LeadList[]>([]);
   const [loading, setLoading] = useState(true);
   const [importOpen, setImportOpen] = useState(false);
-  const [campaignQueue, setCampaignQueue] = useState<CampaignQueueItem[]>([]);
-  const [queueLoading, setQueueLoading] = useState(true);
-  const [queueBusyId, setQueueBusyId] = useState<string | null>(null);
 
   // Send-WhatsApp dialog
   const [waOpen, setWaOpen] = useState(false);
@@ -223,10 +43,6 @@ export default function LeadLists() {
   const [waTemplate, setWaTemplate] = useState<string>(WA_BULK_TEMPLATES[0].key);
   const [waCampaignName, setWaCampaignName] = useState("");
   const [waStaticParams, setWaStaticParams] = useState<Record<string, string>>({});
-  const [waSenderValue, setWaSenderValue] = useState(DEFAULT_WA_SENDER);
-  const [waSenderOptions, setWaSenderOptions] = useState<WaSenderOption[]>(() => [defaultWaSenderOption()]);
-  const [waSenderLoading, setWaSenderLoading] = useState(false);
-  const [waSenderError, setWaSenderError] = useState<string | null>(null);
   const [waSending, setWaSending] = useState(false);
 
   // Selected template definition — drives which static inputs we render.
@@ -238,15 +54,11 @@ export default function LeadLists() {
     () => waTemplateDef.params.filter(p => p.source === "static"),
     [waTemplateDef]
   );
+  const waAutoFields = useMemo(
+    () => waTemplateDef.params.filter(p => p.source === "auto"),
+    [waTemplateDef]
+  );
   const waMissingStatic = waStaticFields.some(p => !waStaticParams[p.name]?.trim());
-  const waSelectedSender = useMemo(
-    () => waSenderOptions.find((s) => s.value === waSenderValue) || waSenderOptions[0] || null,
-    [waSenderOptions, waSenderValue]
-  );
-  const waRenderedPreview = useMemo(
-    () => renderTemplatePreview(waTemplateDef.preview, waStaticParams),
-    [waTemplateDef.preview, waStaticParams]
-  );
 
   // Send-Email dialog
   const [emailOpen, setEmailOpen] = useState(false);
@@ -270,11 +82,6 @@ export default function LeadLists() {
   const [deleting, setDeleting] = useState(false);
 
   const fetchLists = async () => {
-    if (role === "academic_partner") {
-      setLists([]);
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     const { data, error } = await supabase
       .from("lead_lists" as any)
@@ -285,160 +92,9 @@ export default function LeadLists() {
     setLoading(false);
   };
 
-  const fetchCampaignQueue = async () => {
-    if (role === "academic_partner") {
-      setCampaignQueue([]);
-      setQueueLoading(false);
-      return;
-    }
-    setQueueLoading(true);
-    const [waRes, emailRes] = await Promise.all([
-      supabase
-        .from("whatsapp_campaigns" as any)
-        .select("id,name,template_key,status,total_recipients,sent_count,failed_count,business_phone_number_id,business_phone_number,created_at,completed_at")
-        .order("created_at", { ascending: false })
-        .limit(20),
-      supabase
-        .from("email_campaigns" as any)
-        .select("id,name,template_slug,status,total_recipients,sent_count,failed_count,created_at,completed_at")
-        .order("created_at", { ascending: false })
-        .limit(20),
-    ]);
-
-    if (waRes.error) console.error("Fetch WhatsApp campaigns failed:", waRes.error);
-    if (emailRes.error) console.error("Fetch email campaigns failed:", emailRes.error);
-
-    const wa = ((waRes.data || []) as any[]).map((c) => ({
-      id: c.id,
-      channel: "whatsapp" as const,
-      name: c.name,
-      template: c.template_key || null,
-      status: c.status,
-      total_recipients: c.total_recipients || 0,
-      sent_count: c.sent_count || 0,
-      failed_count: c.failed_count || 0,
-      business_phone_number_id: c.business_phone_number_id || null,
-      business_phone_number: c.business_phone_number || null,
-      created_at: c.created_at,
-      completed_at: c.completed_at || null,
-    }));
-    const email = ((emailRes.data || []) as any[]).map((c) => ({
-      id: c.id,
-      channel: "email" as const,
-      name: c.name,
-      template: c.template_slug || "custom",
-      status: c.status,
-      total_recipients: c.total_recipients || 0,
-      sent_count: c.sent_count || 0,
-      failed_count: c.failed_count || 0,
-      business_phone_number_id: null,
-      business_phone_number: null,
-      created_at: c.created_at,
-      completed_at: c.completed_at || null,
-    }));
-
-    setCampaignQueue([...wa, ...email]
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-      .slice(0, 20));
-    setQueueLoading(false);
-  };
+  useEffect(() => { fetchLists(); }, []);
 
   useEffect(() => {
-    if (role === "academic_partner") return;
-    fetchLists();
-    fetchCampaignQueue();
-  }, [role]);
-
-  const loadWaSenders = async () => {
-    setWaSenderLoading(true);
-    setWaSenderError(null);
-
-    const [channelsRes, healthRes] = await Promise.all([
-      supabase
-        .from("whatsapp_channels" as any)
-        .select("id,label,provider,route,business_number,meta_phone_number_id,allow_bulk,quality_risk_level")
-        .eq("is_active", true)
-        .eq("allow_bulk", true)
-        .order("label", { ascending: true }),
-      supabase.rpc("fn_whatsapp_health_dashboard" as any, { p_days: 7 }),
-    ]);
-
-    const healthRows = ((healthRes.data as any)?.phones || []) as WaPhoneHealth[];
-    const healthByPhone = new Map(
-      healthRows
-        .filter((p) => p.phone_number_id && p.phone_number_id !== "(unset)")
-        .map((p) => [p.phone_number_id, p])
-    );
-
-    const options = new Map<string, WaSenderOption>();
-    options.set(DEFAULT_WA_SENDER, defaultWaSenderOption());
-
-    if (!channelsRes.error) {
-      for (const channel of ((channelsRes.data || []) as any[])) {
-        const phoneNumberId = channel.meta_phone_number_id || null;
-        const businessNumber = channel.business_number || null;
-        if (!phoneNumberId && !businessNumber) continue;
-        const value = `${channel.provider}:${phoneNumberId || businessNumber}`;
-        const health = phoneNumberId ? healthByPhone.get(phoneNumberId) : undefined;
-        const resolvedBusinessNumber = resolveBusinessNumber(phoneNumberId, businessNumber || health?.business_phone_number);
-        options.set(value, {
-          value,
-          label: formatSenderNumber(resolvedBusinessNumber) || channel.label || phoneNumberId || "WhatsApp sender",
-          provider: channel.provider === "plivo" ? "plivo" : "meta",
-          phoneNumberId,
-          businessNumber: resolvedBusinessNumber,
-          total: health?.total ?? null,
-          failed: health?.failed ?? null,
-          failedPct: health?.failed_pct ?? null,
-          readPct: health?.read_pct ?? null,
-          qualityRiskLevel: channel.quality_risk_level || null,
-        });
-      }
-    }
-
-    for (const health of healthRows) {
-      if (!health.phone_number_id || health.phone_number_id === "(unset)") continue;
-      const value = `meta:${health.phone_number_id}`;
-      const existing = options.get(value);
-      const businessNumber = resolveBusinessNumber(health.phone_number_id, existing?.businessNumber || health.business_phone_number);
-      const existingByNumber = businessNumber
-        ? [...options.values()].find((option) =>
-            option.provider === "meta" && digitsOnly(option.businessNumber) === digitsOnly(businessNumber))
-        : null;
-      const targetValue = existingByNumber?.value || value;
-      options.set(targetValue, {
-        value: targetValue,
-        label: formatSenderNumber(businessNumber) || existingByNumber?.label || existing?.label || `Meta sender ${health.phone_number_id}`,
-        provider: "meta",
-        phoneNumberId: existingByNumber?.phoneNumberId || health.phone_number_id,
-        businessNumber,
-        total: health.total,
-        failed: health.failed,
-        failedPct: health.failed_pct,
-        readPct: health.read_pct,
-        qualityRiskLevel: existingByNumber?.qualityRiskLevel || existing?.qualityRiskLevel || null,
-      });
-      if (targetValue !== value) options.delete(value);
-    }
-
-    if (channelsRes.error || healthRes.error) {
-      setWaSenderError(channelsRes.error?.message || healthRes.error?.message || "Could not load WhatsApp sender health.");
-    }
-
-    const concreteOptions = [...options.values()].filter((option) => option.value !== DEFAULT_WA_SENDER);
-    const nextOptions = concreteOptions.length > 0 ? concreteOptions : [defaultWaSenderOption()];
-    setWaSenderOptions(nextOptions);
-    setWaSenderValue((current) => nextOptions.some((o) => o.value === current) ? current : nextOptions[0]?.value || DEFAULT_WA_SENDER);
-    setWaSenderLoading(false);
-  };
-
-  useEffect(() => {
-    if (role === "academic_partner") return;
-    if (waOpen) loadWaSenders();
-  }, [role, waOpen]);
-
-  useEffect(() => {
-    if (role === "academic_partner") return;
     if (!emailOpen) return;
     (async () => {
       const { data } = await supabase
@@ -449,14 +105,13 @@ export default function LeadLists() {
       setEmailTemplates((data || []) as any);
       if ((data || []).length && !emailSlug) setEmailSlug((data as any)[0].slug);
     })();
-  }, [emailOpen, role]);
+  }, [emailOpen]);
 
   const openWa = (list: LeadList) => {
     setWaList(list);
     setWaCampaignName(`${list.name} — WhatsApp`);
     setWaTemplate(WA_BULK_TEMPLATES[0].key);
     setWaStaticParams({});
-    setWaSenderValue(DEFAULT_WA_SENDER);
     setWaOpen(true);
   };
 
@@ -529,11 +184,6 @@ export default function LeadLists() {
         list_id: waList.id,
         total_recipients: valid.length,
         static_params: staticParamsToSend,
-        business_phone_number_id: waSelectedSender?.phoneNumberId || null,
-        business_phone_number: waSelectedSender?.businessNumber || null,
-        created_by: profile?.id || null,
-        next_attempt_at: new Date().toISOString(),
-        worker_locked_at: null,
         status: "pending",
       })
       .select("id")
@@ -559,15 +209,18 @@ export default function LeadLists() {
       if (error) console.error("Recipient insert failed:", error);
     }
 
+    const { error: invokeErr } = await supabase.functions.invoke("whatsapp-campaign-send", {
+      body: { campaign_id: campaignId },
+    });
+
     setWaSending(false);
     setWaOpen(false);
-    toast({
-      title: "WhatsApp campaign queued",
-      description: `${valid.length} recipients queued. You can close this screen; progress is tracked in Marketing.`,
-    });
-    supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1 } }).catch(() => {});
+    if (invokeErr) {
+      toast({ title: "Send started but errored", description: invokeErr.message, variant: "destructive" });
+    } else {
+      toast({ title: "WhatsApp campaign sent", description: `Dispatched to ${valid.length} lead${valid.length === 1 ? "" : "s"}.` });
+    }
     await fetchLists();
-    await fetchCampaignQueue();
   };
 
   const handleSendEmail = async () => {
@@ -610,9 +263,6 @@ export default function LeadLists() {
         custom_subject: emailMode === "custom" ? emailSubject.trim() : null,
         custom_body: emailMode === "custom" ? emailBody : null,
         total_recipients: valid.length,
-        created_by: profile?.id || null,
-        next_attempt_at: new Date().toISOString(),
-        worker_locked_at: null,
         status: "pending",
       })
       .select("id")
@@ -636,93 +286,18 @@ export default function LeadLists() {
       if (error) console.error("Email recipient insert failed:", error);
     }
 
+    const { error: invokeErr } = await supabase.functions.invoke("email-campaign-send", {
+      body: { campaign_id: campaignId },
+    });
+
     setEmailSending(false);
     setEmailOpen(false);
-    toast({
-      title: "Email campaign queued",
-      description: `${valid.length} recipients queued. You can close this screen; progress is tracked in Marketing.`,
-    });
-    supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1 } }).catch(() => {});
-    await fetchLists();
-    await fetchCampaignQueue();
-  };
-
-  const campaignTables = (channel: CampaignChannel) => ({
-    campaign: channel === "whatsapp" ? "whatsapp_campaigns" : "email_campaigns",
-    recipients: channel === "whatsapp" ? "whatsapp_campaign_recipients" : "email_campaign_recipients",
-    sender: channel === "whatsapp" ? "whatsapp-campaign-send" : "email-campaign-send",
-  });
-
-  const pauseCampaign = async (item: CampaignQueueItem) => {
-    const tables = campaignTables(item.channel);
-    setQueueBusyId(item.id);
-    const { error } = await supabase
-      .from(tables.campaign as any)
-      .update({ status: "paused" })
-      .eq("id", item.id)
-      .in("status", ["pending", "sending"]);
-    setQueueBusyId(null);
-    if (error) {
-      toast({ title: "Could not pause campaign", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "Campaign paused", description: "The sender will stop before the next pending recipient." });
-    }
-    await fetchCampaignQueue();
-  };
-
-  const resumeCampaign = async (item: CampaignQueueItem) => {
-    const tables = campaignTables(item.channel);
-    setQueueBusyId(item.id);
-    const { error } = await supabase
-      .from(tables.campaign as any)
-      .update({ status: "pending", completed_at: null })
-      .eq("id", item.id)
-      .eq("status", "paused");
-    if (error) {
-      setQueueBusyId(null);
-      toast({ title: "Could not resume campaign", description: error.message, variant: "destructive" });
-      await fetchCampaignQueue();
-      return;
-    }
-
-    const { error: invokeErr } = await supabase.functions.invoke(tables.sender, {
-      body: { campaign_id: item.id },
-    });
-    setQueueBusyId(null);
     if (invokeErr) {
-      toast({ title: "Resume requested but sender errored", description: invokeErr.message, variant: "destructive" });
+      toast({ title: "Send started but errored", description: invokeErr.message, variant: "destructive" });
     } else {
-      toast({ title: "Campaign resumed", description: "Remaining pending recipients are being processed." });
+      toast({ title: "Email campaign sent", description: `Dispatched to ${valid.length} lead${valid.length === 1 ? "" : "s"}.` });
     }
-    await fetchCampaignQueue();
-  };
-
-  const terminateCampaign = async (item: CampaignQueueItem) => {
-    const ok = window.confirm(`Terminate "${item.name}"? Pending recipients will be canceled and cannot be resumed.`);
-    if (!ok) return;
-
-    const tables = campaignTables(item.channel);
-    setQueueBusyId(item.id);
-    const { error: campaignErr } = await supabase
-      .from(tables.campaign as any)
-      .update({ status: "terminated", completed_at: new Date().toISOString() })
-      .eq("id", item.id)
-      .in("status", ["pending", "sending", "paused", "failed"]);
-
-    const { error: recipientErr } = await supabase
-      .from(tables.recipients as any)
-      .update({ status: "canceled", error_message: "Campaign terminated by operator" })
-      .eq("campaign_id", item.id)
-      .eq("status", "pending");
-
-    setQueueBusyId(null);
-    const error = campaignErr || recipientErr;
-    if (error) {
-      toast({ title: "Could not terminate campaign", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "Campaign terminated", description: "Pending recipients were canceled." });
-    }
-    await fetchCampaignQueue();
+    await fetchLists();
   };
 
   const handleDelete = async () => {
@@ -739,10 +314,6 @@ export default function LeadLists() {
     await fetchLists();
   };
 
-  if (role === "academic_partner") {
-    return <Navigate to="/academic-partner-portal" replace />;
-  }
-
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -757,101 +328,6 @@ export default function LeadLists() {
           Import CSV
         </Button>
       </div>
-
-      <Card className="border-border/60 shadow-none">
-        <CardContent className="p-0">
-          <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-            <div>
-              <p className="text-sm font-semibold text-foreground">Campaign Queue</p>
-              <p className="text-xs text-muted-foreground">Pause, resume, or terminate bulk message queues before old recipients are processed.</p>
-            </div>
-            <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={fetchCampaignQueue} disabled={queueLoading}>
-              {queueLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              Refresh
-            </Button>
-          </div>
-
-          {queueLoading ? (
-            <div className="flex h-24 items-center justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-            </div>
-          ) : campaignQueue.length === 0 ? (
-            <div className="px-4 py-8 text-center text-sm text-muted-foreground">No campaigns queued yet.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[820px] text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted/30">
-                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Campaign</th>
-                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Channel</th>
-                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Status</th>
-                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Progress</th>
-                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Created</th>
-                    <th className="px-4 py-2.5 text-right font-medium text-muted-foreground">Controls</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {campaignQueue.map((item) => {
-                    const busy = queueBusyId === item.id;
-                    const active = item.status === "pending" || item.status === "sending";
-                    const canResume = item.status === "paused";
-                    const canTerminate = ["pending", "sending", "paused", "failed"].includes(item.status);
-                    const accounted = item.sent_count + item.failed_count;
-                    const pending = Math.max(item.total_recipients - accounted, 0);
-                    return (
-                      <tr key={`${item.channel}-${item.id}`} className="border-b border-border/50 last:border-0">
-                        <td className="px-4 py-3">
-                          <p className="font-medium text-foreground truncate max-w-[280px]">{item.name}</p>
-                          {item.template && <p className="text-[11px] text-muted-foreground mt-0.5">{item.template}</p>}
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge variant="outline" className="text-[10px] capitalize">{item.channel}</Badge>
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge className={`border-0 text-[10px] capitalize ${CAMPAIGN_STATUS_BADGE[item.status] || "bg-muted text-muted-foreground"}`}>
-                            {item.status}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3 text-xs text-muted-foreground">
-                          <span className="font-semibold text-foreground">{item.sent_count}</span> sent
-                          <span className="mx-1.5">/</span>
-                          <span className="font-semibold text-foreground">{pending}</span> pending
-                          {item.failed_count > 0 && <span className="ml-1.5 text-rose-600">({item.failed_count} failed)</span>}
-                        </td>
-                        <td className="px-4 py-3 text-xs text-muted-foreground">
-                          {new Date(item.created_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex justify-end gap-2">
-                            {active && (
-                              <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => pauseCampaign(item)} disabled={busy}>
-                                {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pause className="h-3.5 w-3.5" />}
-                                Pause
-                              </Button>
-                            )}
-                            {canResume && (
-                              <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => resumeCampaign(item)} disabled={busy}>
-                                {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlayCircle className="h-3.5 w-3.5" />}
-                                Resume
-                              </Button>
-                            )}
-                            {canTerminate && (
-                              <Button size="sm" variant="ghost" className="h-8 gap-1.5 text-destructive hover:text-destructive" onClick={() => terminateCampaign(item)} disabled={busy}>
-                                <XCircle className="h-3.5 w-3.5" />
-                                Terminate
-                              </Button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
       {loading ? (
         <div className="flex h-40 items-center justify-center">
@@ -947,11 +423,25 @@ export default function LeadLists() {
           <DialogHeader>
             <DialogTitle>Send WhatsApp to "{waList?.name}"</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+          <div className="space-y-4 py-2 max-h-[70vh] overflow-y-auto pr-1">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
+                <p className="text-[10px] uppercase text-muted-foreground font-semibold">List size</p>
+                <p className="text-sm font-semibold text-foreground">{waList?.member_count ?? 0} leads</p>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
+                <p className="text-[10px] uppercase text-muted-foreground font-semibold">Safety</p>
+                <p className="text-sm font-semibold text-foreground">DNC skipped</p>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
+                <p className="text-[10px] uppercase text-muted-foreground font-semibold">Route</p>
+                <p className="text-sm font-semibold text-foreground">Bulk-approved WA</p>
+              </div>
+            </div>
             <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
               <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
               <p className="text-xs text-amber-800">
-                Only Meta-approved templates can be sent in bulk. DNC leads and members without a phone are skipped automatically.
+                Bulk sends use Meta-approved templates only. The campaign sender resolves each recipient just before send, so lead name, course, and campus stay current with the list data.
               </p>
             </div>
             <div>
@@ -962,70 +452,6 @@ export default function LeadLists() {
                 onChange={(e) => setWaCampaignName(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
               />
-            </div>
-            <div>
-              <div className="flex items-center justify-between gap-2">
-                <label className="text-xs font-medium text-muted-foreground">Outgoing WhatsApp number</label>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={loadWaSenders}
-                  disabled={waSenderLoading}
-                  className="h-6 gap-1 px-1.5 text-[11px]"
-                >
-                  {waSenderLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-                  Refresh
-                </Button>
-              </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    disabled={waSenderLoading}
-                    className="mt-1 flex w-full items-center gap-2 rounded-lg border border-input bg-card px-3 py-2 text-left text-sm transition-colors hover:bg-muted/40 focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {waSelectedSender ? (
-                      <WhatsAppBusinessIdentity sender={waSelectedSender} compact />
-                    ) : (
-                      <span className="flex-1 text-muted-foreground">Select outgoing WhatsApp number</span>
-                    )}
-                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)] p-1.5">
-                  {waSenderOptions.map((sender) => (
-                    <DropdownMenuItem
-                      key={sender.value}
-                      onSelect={() => setWaSenderValue(sender.value)}
-                      className="cursor-pointer p-0 focus:bg-muted"
-                    >
-                      <WhatsAppBusinessIdentity sender={sender} selected={sender.value === waSenderValue} />
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              {waSelectedSender && (
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                  <Badge variant="outline" className="gap-1 text-[10px]">
-                    <Phone className="h-3 w-3" />
-                    {waSelectedSender.businessNumber
-                      ? formatSenderNumber(waSelectedSender.businessNumber)
-                      : waSelectedSender.phoneNumberId || "Default bulk route"}
-                  </Badge>
-                  <Badge className={`border-0 text-[10px] ${senderHealthClass(waSelectedSender.failedPct)}`}>
-                    7d failed {formatPct(waSelectedSender.failedPct)}
-                  </Badge>
-                  <span>Read {formatPct(waSelectedSender.readPct)}</span>
-                  {waSelectedSender.total != null && <span>{waSelectedSender.total.toLocaleString("en-IN")} sends</span>}
-                  {waSelectedSender.qualityRiskLevel && <span>Risk: {waSelectedSender.qualityRiskLevel}</span>}
-                </div>
-              )}
-              {waSenderError && (
-                <p className="mt-1 text-[11px] text-amber-700">
-                  Could not refresh sender health: {waSenderError}
-                </p>
-              )}
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground">Template</label>
@@ -1043,10 +469,31 @@ export default function LeadLists() {
               )}
             </div>
 
+            <div className="rounded-lg border border-border bg-card p-3">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <p className="text-[11px] font-semibold text-foreground uppercase tracking-wide">Template preview</p>
+                <Badge variant="outline" className="text-[10px]">{waTemplateDef.key}</Badge>
+              </div>
+              <p className="text-xs text-foreground/80 whitespace-pre-wrap max-h-40 overflow-y-auto">{waTemplateDef.preview}</p>
+            </div>
+
+            {waAutoFields.length > 0 && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+                <p className="text-[11px] font-semibold text-emerald-800 uppercase tracking-wide">Auto-filled per lead</p>
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {waAutoFields.map((p) => (
+                    <Badge key={p.name} className="border-0 bg-white text-emerald-800 text-[10px]">
+                      {p.name.replace(/_/g, " ")}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Per-template static params — one input per non-auto-filled slot */}
             {waStaticFields.length > 0 && (
               <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-3">
-                <p className="text-[11px] font-semibold text-foreground uppercase tracking-wide">Template values</p>
+                <p className="text-[11px] font-semibold text-foreground uppercase tracking-wide">Campaign-wide values</p>
                 {waStaticFields.map(p => (
                   <div key={p.name}>
                     <label className="text-xs font-medium text-muted-foreground capitalize">
@@ -1063,30 +510,20 @@ export default function LeadLists() {
                   </div>
                 ))}
                 <p className="text-[11px] text-muted-foreground">
-                  Per-lead values (name, course, campus) are filled automatically from each lead's record.
+                  These values are intentionally shared across the whole list. Use a smaller list when the date, amount, or application ID differs by recipient.
                 </p>
               </div>
             )}
 
-            <div className="rounded-lg border border-border bg-muted/30 p-3">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-foreground">Template preview</p>
-                <span className="text-[11px] text-muted-foreground">Sample values shown</span>
-              </div>
-              <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-background px-3 py-2 text-xs leading-relaxed text-foreground">
-                {waRenderedPreview}
-              </pre>
-            </div>
-
             <p className="text-xs text-muted-foreground">
-              Sending to <strong className="text-foreground">{waList?.member_count}</strong> lead{waList?.member_count === 1 ? "" : "s"} on this list (DNC + no-phone excluded at send time).
+              Final reachable count is calculated at send time after removing DNC leads and records without a phone number.
             </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setWaOpen(false)}>Cancel</Button>
             <Button onClick={handleSendWhatsApp} disabled={waSending || waMissingStatic} className="gap-2">
               {waSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              Send
+              Create & Send Campaign
             </Button>
           </DialogFooter>
         </DialogContent>

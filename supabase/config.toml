@@ -1,8 +1,5 @@
 project_id = "deylhigsisuexszsmypq"
 
-[functions.backfill-student-photos]
-verify_jwt = false
-
 [functions.invite-user]
 verify_jwt = false
 
@@ -10,12 +7,6 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.whatsapp-otp]
-verify_jwt = false
-
-[functions.apply-portal-password-login]
-verify_jwt = false
-
-[functions.student-password-login]
 verify_jwt = false
 
 [functions.ai-first-call]
@@ -48,13 +39,7 @@ verify_jwt = false
 [functions.easebuzz-payment]
 verify_jwt = false
 
-[functions.easebuzz-webhook]
-verify_jwt = false
-
 [functions.icici-payment]
-verify_jwt = false
-
-[functions.razorpay-payment]
 verify_jwt = false
 
 [functions.generate-payment-receipt]
@@ -99,15 +84,6 @@ verify_jwt = false
 [functions.whatsapp-route-health]
 verify_jwt = false
 
-[functions.whatsapp-copilot-assist]
-verify_jwt = false
-
-[functions.whatsapp-copilot-events]
-verify_jwt = false
-
-[functions.whatsapp-reply-learning]
-verify_jwt = false
-
 [functions.whatsapp-campaign-send]
 verify_jwt = false
 
@@ -124,9 +100,6 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.delete-user]
-verify_jwt = false
-
-[functions.delete-application]
 verify_jwt = false
 
 [functions.whatsapp-templates]
@@ -173,11 +146,4 @@ verify_jwt = false
 # its own identity check by matching (application_id, phone) against the
 # applications row, so JWT verification at the gateway is redundant.
 [functions.apply-portal-upload-doc]
-verify_jwt = false
-
-# Anonymous applicants and staff list uploaded application documents through
-# this service-role function. Apply portal access is already scoped by the
-# application flow, and gateway JWT verification would 401 applicants whose
-# browser carries a stale session before the function can run.
-[functions.list-app-docs]
 verify_jwt = false

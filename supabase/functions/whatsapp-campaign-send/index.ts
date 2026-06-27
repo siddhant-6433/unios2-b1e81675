@@ -2,13 +2,13 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendWhatsAppTemplate } from "../_shared/whatsapp-channel.ts";
 import {
   expectedReplyTypeForTemplate,
+  recordWhatsAppOutboundContext,
 } from "../_shared/whatsapp-outbound-context.ts";
-import { recordOutboundConversationAction } from "../_shared/whatsapp-conversation-action.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-cron-secret, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 // Same template definitions as whatsapp-send
@@ -31,36 +31,6 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
 };
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-async function syncCampaignCounts(adminClient: any, campaignId: string) {
-  const [
-    { count: totalSent },
-    { count: totalFailed },
-    { count: pendingCount },
-  ] = await Promise.all([
-    adminClient
-      .from("whatsapp_campaign_recipients")
-      .select("id", { count: "exact", head: true })
-      .eq("campaign_id", campaignId)
-      .eq("status", "sent"),
-    adminClient
-      .from("whatsapp_campaign_recipients")
-      .select("id", { count: "exact", head: true })
-      .eq("campaign_id", campaignId)
-      .eq("status", "failed"),
-    adminClient
-      .from("whatsapp_campaign_recipients")
-      .select("id", { count: "exact", head: true })
-      .eq("campaign_id", campaignId)
-      .eq("status", "pending"),
-  ]);
-
-  return {
-    totalSent: totalSent || 0,
-    totalFailed: totalFailed || 0,
-    pendingCount: pendingCount || 0,
-  };
-}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -86,7 +56,27 @@ Deno.serve(async (req) => {
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    const { campaign_id, batch_size } = await req.json();
+    // Validate auth
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user }, error: authError } = await userClient.auth.getUser();
+    if (authError || !user) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const { campaign_id } = await req.json();
 
     if (!campaign_id) {
       return new Response(
@@ -96,35 +86,6 @@ Deno.serve(async (req) => {
     }
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
-    const batchSize = Math.max(1, Math.min(Number(batch_size) || 50, 100));
-
-    const authHeader = req.headers.get("Authorization") || "";
-    const expectedCronSecret = Deno.env.get("CRON_SECRET") || "";
-    const isTrustedWorker =
-      (!!expectedCronSecret && req.headers.get("x-cron-secret") === expectedCronSecret) ||
-      authHeader === `Bearer ${serviceRoleKey}`;
-
-    let actorUserId: string | null = null;
-    if (!isTrustedWorker) {
-      if (!authHeader) {
-        return new Response(
-          JSON.stringify({ error: "Unauthorized" }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-        global: { headers: { Authorization: authHeader } },
-      });
-      const { data: { user }, error: authError } = await userClient.auth.getUser();
-      if (authError || !user) {
-        return new Response(
-          JSON.stringify({ error: "Unauthorized" }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      actorUserId = user.id;
-    }
 
     // Fetch the campaign record
     const { data: campaign, error: campaignError } = await adminClient
@@ -138,37 +99,6 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: "Campaign not found" }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
-    }
-
-    if (campaign.status === "paused" || campaign.status === "terminated") {
-      return new Response(
-        JSON.stringify({
-          success: true,
-          done: true,
-          paused: campaign.status === "paused",
-          terminated: campaign.status === "terminated",
-          message: `Campaign is ${campaign.status}`,
-        }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    let actorProfileId: string | null = (campaign as any).created_by || null;
-    if (!actorUserId && actorProfileId) {
-      const { data: profile } = await adminClient
-        .from("profiles")
-        .select("user_id")
-        .eq("id", actorProfileId)
-        .maybeSingle();
-      actorUserId = (profile as any)?.user_id || null;
-    }
-    if (!actorProfileId && actorUserId) {
-      const { data: profile } = await adminClient
-        .from("profiles")
-        .select("id")
-        .eq("user_id", actorUserId)
-        .maybeSingle();
-      actorProfileId = (profile as any)?.id || null;
     }
 
     const templateDef = TEMPLATES[campaign.template_key];
@@ -192,8 +122,7 @@ Deno.serve(async (req) => {
       .from("whatsapp_campaign_recipients")
       .select("id, campaign_id, lead_id, phone, status, leads(name, courses(name), campuses(name))")
       .eq("campaign_id", campaign_id)
-      .eq("status", "pending")
-      .limit(batchSize);
+      .eq("status", "pending");
 
     if (recipientsError) {
       console.error("Failed to fetch recipients:", recipientsError);
@@ -213,7 +142,7 @@ Deno.serve(async (req) => {
         .update({ status: "completed", completed_at: new Date().toISOString() })
         .eq("id", campaign_id);
       return new Response(
-        JSON.stringify({ success: true, sent: 0, failed: 0, total_sent: 0, total_failed: 0, pending: 0, done: true, message: "No pending recipients" }),
+        JSON.stringify({ success: true, sent: 0, failed: 0, message: "No pending recipients" }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -226,78 +155,8 @@ Deno.serve(async (req) => {
     // due_date, application_id, etc. Auto-filled per-lead from the leads
     // join: student_name, course_name, campus_name.
     const staticParams: Record<string, string> = ((campaign as any).static_params || {}) as any;
-    const campaignBusinessPhoneNumberId =
-      typeof (campaign as any).business_phone_number_id === "string"
-        ? (campaign as any).business_phone_number_id
-        : null;
-    const campaignBusinessNumber =
-      typeof (campaign as any).business_phone_number === "string"
-        ? (campaign as any).business_phone_number
-        : null;
 
     for (const recipient of recipients) {
-      const { data: liveCampaign } = await adminClient
-        .from("whatsapp_campaigns")
-        .select("status")
-        .eq("id", campaign_id)
-        .single();
-
-      if (liveCampaign?.status === "paused") {
-        const counts = await syncCampaignCounts(adminClient, campaign_id);
-        await adminClient
-          .from("whatsapp_campaigns")
-          .update({
-            sent_count: counts.totalSent,
-            failed_count: counts.totalFailed,
-          })
-          .eq("id", campaign_id);
-
-        return new Response(
-          JSON.stringify({
-            success: true,
-            paused: true,
-            sent: sentCount,
-            failed: failedCount,
-            total_sent: counts.totalSent,
-            total_failed: counts.totalFailed,
-            pending: counts.pendingCount,
-            done: false,
-          }),
-          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      if (liveCampaign?.status === "terminated") {
-        await adminClient
-          .from("whatsapp_campaign_recipients")
-          .update({ status: "canceled", error_message: "Campaign terminated before send" })
-          .eq("campaign_id", campaign_id)
-          .eq("status", "pending");
-
-        const counts = await syncCampaignCounts(adminClient, campaign_id);
-        await adminClient
-          .from("whatsapp_campaigns")
-          .update({
-            sent_count: counts.totalSent,
-            failed_count: counts.totalFailed,
-          })
-          .eq("id", campaign_id);
-
-        return new Response(
-          JSON.stringify({
-            success: true,
-            terminated: true,
-            sent: sentCount,
-            failed: failedCount,
-            total_sent: counts.totalSent,
-            total_failed: counts.totalFailed,
-            pending: counts.pendingCount,
-            done: true,
-          }),
-          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
       const lead = (recipient as any).leads || {};
       const leadName = lead.name || "Student";
       const courseName = lead.courses?.name || "";
@@ -317,11 +176,9 @@ Deno.serve(async (req) => {
       const bodyParams = templateDef.params.map(p => ({ type: "text", text: resolveParam(p) }));
 
       try {
-        const sendResult = await sendWhatsAppTemplate(adminClient as any, {
+        const sendResult = await sendWhatsAppTemplate(adminClient, {
           route: "bulk",
           requireBulk: true,
-          businessPhoneNumberId: campaignBusinessPhoneNumberId,
-          businessNumber: campaignBusinessNumber,
         }, waPhone, {
           name: templateDef.name,
           language: "en",
@@ -343,33 +200,53 @@ Deno.serve(async (req) => {
             })
             .eq("id", recipient.id);
 
-          await recordOutboundConversationAction(adminClient, {
-            kind: "campaignSend",
+          // Log to whatsapp_messages for inbox visibility
+          const { data: insertedMessage } = await adminClient.from("whatsapp_messages").insert({
+            lead_id: recipient.lead_id || null,
+            wa_message_id: messageId,
+            direction: "outbound",
             phone: waPhone,
-            leadId: recipient.lead_id || null,
+            message_type: "template",
             content: `[Campaign: ${campaign.name}] [Template: ${campaign.template_key.replace(/_/g, " ")}]`,
-            messageType: "template",
-            templateKey: campaign.template_key,
+            template_key: campaign.template_key,
             status: "sent",
-            userId: actorUserId,
-            sendResult,
+            is_read: true,
+            provider: sendResult.provider,
+            business_phone_number_id: sendResult.businessPhoneNumberId,
+            business_phone_number: sendResult.businessNumber,
+            sender_user_id: user.id,
+          }).select("id").maybeSingle();
+
+          await recordWhatsAppOutboundContext(adminClient, {
+            messageId: insertedMessage?.id || null,
+            providerMessageId: messageId,
+            phone: waPhone,
+            businessNumber: sendResult.businessNumber || sendResult.businessPhoneNumberId,
+            provider: sendResult.provider,
+            leadId: recipient.lead_id || null,
             campaignId: campaign_id,
             campaignRecipientId: recipient.id,
+            templateKey: campaign.template_key,
             outboundKind: "bulk_campaign",
             expectedReplyType: expectedReplyTypeForTemplate(campaign.template_key),
             responsePolicy: "engine",
             metadata: {
               campaign_name: campaign.name,
               static_params: staticParams,
-              selected_business_phone_number_id: campaignBusinessPhoneNumberId,
-              selected_business_number: campaignBusinessNumber,
-              sent_by_user_id: actorUserId,
+              sent_by_user_id: user.id,
             },
             expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-            activityDescription: recipient.lead_id
-              ? `WhatsApp campaign "${campaign.name}" — Template: ${campaign.template_key.replace(/_/g, " ")}`
-              : null,
           });
+
+          // Log lead activity
+          if (recipient.lead_id) {
+            await adminClient.from("lead_activities").insert({
+              lead_id: recipient.lead_id,
+              user_id: user.id,
+              type: "whatsapp",
+              description: `WhatsApp campaign "${campaign.name}" — Template: ${campaign.template_key.replace(/_/g, " ")}`,
+            });
+          }
 
           sentCount++;
         } else {
@@ -404,48 +281,24 @@ Deno.serve(async (req) => {
       await delay(200);
     }
 
-    const counts = await syncCampaignCounts(adminClient, campaign_id);
-    const { data: finalCampaign } = await adminClient
+    // Update campaign totals
+    // Fetch current counts in case there were already some sent/failed from a previous run
+    const { data: updatedCampaign } = await adminClient
       .from("whatsapp_campaigns")
-      .select("status")
+      .select("sent_count, failed_count")
       .eq("id", campaign_id)
       .single();
 
-    if (finalCampaign?.status === "paused" || finalCampaign?.status === "terminated") {
-      await adminClient
-        .from("whatsapp_campaigns")
-        .update({
-          sent_count: counts.totalSent,
-          failed_count: counts.totalFailed,
-        })
-        .eq("id", campaign_id);
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          status: finalCampaign.status,
-          paused: finalCampaign.status === "paused",
-          terminated: finalCampaign.status === "terminated",
-          sent: sentCount,
-          failed: failedCount,
-          total_sent: counts.totalSent,
-          total_failed: counts.totalFailed,
-          pending: counts.pendingCount,
-          done: finalCampaign.status === "terminated",
-        }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const done = counts.pendingCount === 0;
+    const totalSent = (updatedCampaign?.sent_count || 0) + sentCount;
+    const totalFailed = (updatedCampaign?.failed_count || 0) + failedCount;
 
     await adminClient
       .from("whatsapp_campaigns")
       .update({
-        sent_count: counts.totalSent,
-        failed_count: counts.totalFailed,
-        status: done ? "completed" : "sending",
-        completed_at: done ? new Date().toISOString() : null,
+        sent_count: totalSent,
+        failed_count: totalFailed,
+        status: "completed",
+        completed_at: new Date().toISOString(),
       })
       .eq("id", campaign_id);
 
@@ -454,10 +307,8 @@ Deno.serve(async (req) => {
         success: true,
         sent: sentCount,
         failed: failedCount,
-        total_sent: counts.totalSent,
-        total_failed: counts.totalFailed,
-        pending: counts.pendingCount,
-        done,
+        total_sent: totalSent,
+        total_failed: totalFailed,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

@@ -38,6 +38,18 @@ const MEDIA_ACCEPT: Record<HeaderType, string> = {
   DOCUMENT: "application/pdf",
 };
 
+async function edgeErrorMessage(error: unknown, data: any, fallback: string) {
+  if (data?.error) return String(data.error);
+  const err = error as { message?: string; context?: Response } | null;
+  if (err?.context) {
+    const body = await err.context.clone().json().catch(() => null);
+    if (body?.error) return String(body.error);
+    if (body?.details?.message) return String(body.details.message);
+    if (body?.message) return String(body.message);
+  }
+  return err?.message || fallback;
+}
+
 export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial }: WhatsAppTemplateFormProps) {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -69,6 +81,12 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
   );
 
   const isMediaHeader = headerType === "IMAGE" || headerType === "VIDEO" || headerType === "DOCUMENT";
+  const invalidButtons = buttons.some((button) => {
+    if (!button.text.trim()) return false;
+    if (button.type === "URL") return !button.url?.trim();
+    if (button.type === "PHONE_NUMBER") return !button.phone_number?.trim();
+    return false;
+  });
 
   const reset = () => {
     setName(""); setCategory("UTILITY"); setHeaderType("NONE"); setHeaderText("");
@@ -86,7 +104,11 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
       form.append("file", file);
       const { data, error } = await supabase.functions.invoke("whatsapp-template-media-upload", { body: form });
       if (error || data?.error) {
-        toast({ title: "Upload failed", description: data?.error || error?.message, variant: "destructive" });
+        toast({
+          title: "Upload failed",
+          description: await edgeErrorMessage(error, data, "Media upload failed"),
+          variant: "destructive",
+        });
       } else if (data?.handle) {
         setMediaHandle(data.handle);
         setMediaFileName(file.name);
@@ -125,7 +147,9 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
     body.trim().length > 0 &&
     !submitting &&
     !uploading &&
-    (!isMediaHeader || !!mediaHandle);
+    (!isMediaHeader || !!mediaHandle) &&
+    (headerType !== "TEXT" || !!headerText.trim()) &&
+    !invalidButtons;
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -135,13 +159,16 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
       name: name.trim(),
       category,
       body_text: body,
-      header_format: headerType,
     };
     if (headerType === "TEXT") {
+      payload.header_format = "TEXT";
       payload.header_text = headerText;
       if (headerHasVar) payload.header_example = headerExample || "example";
     }
-    if (isMediaHeader && mediaHandle) payload.header_handle = mediaHandle;
+    if (isMediaHeader && mediaHandle) {
+      payload.header_format = headerType;
+      payload.header_handle = mediaHandle;
+    }
     if (placeholderCount > 0) payload.body_examples = bodyExamples.slice(0, placeholderCount);
     if (footer.trim()) payload.footer_text = footer.trim();
     if (buttons.length > 0) {
@@ -158,7 +185,11 @@ export function WhatsAppTemplateForm({ open, onOpenChange, onSubmitted, initial 
 
     const { data, error } = await supabase.functions.invoke("whatsapp-templates", { body: payload });
     if (error || data?.error) {
-      toast({ title: "Submission failed", description: data?.error || error?.message, variant: "destructive" });
+      toast({
+        title: "Submission failed",
+        description: await edgeErrorMessage(error, data, "Template submission failed"),
+        variant: "destructive",
+      });
     } else {
       toast({ title: "Template submitted", description: "Sent to Meta for approval." });
       reset();

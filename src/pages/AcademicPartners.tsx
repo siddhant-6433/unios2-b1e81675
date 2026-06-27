@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import {
   BookOpen,
   GraduationCap,
+  Image as ImageIcon,
   IndianRupee,
   Link2,
   Loader2,
@@ -29,6 +30,7 @@ type Partner = {
   status: string;
   default_payout_percentage: number;
   notes: string | null;
+  logo_url: string | null;
 };
 
 type Dashboard = {
@@ -86,7 +88,10 @@ export default function AcademicPartners() {
     default_payout_percentage: "0",
     user_id: "",
     notes: "",
+    logo_url: "",
   });
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [assignmentForm, setAssignmentForm] = useState({ course_id: "", batch_id: "", payout_percentage: "" });
 
   const fetchAll = async () => {
@@ -132,11 +137,17 @@ export default function AcademicPartners() {
   const resetForm = () => {
     setShowForm(false);
     setEditingId(null);
-    setForm({ name: "", organization: "", phone: "", email: "", status: "active", default_payout_percentage: "0", user_id: "", notes: "" });
+    if (logoPreview?.startsWith("blob:")) URL.revokeObjectURL(logoPreview);
+    setLogoFile(null);
+    setLogoPreview(null);
+    setForm({ name: "", organization: "", phone: "", email: "", status: "active", default_payout_percentage: "0", user_id: "", notes: "", logo_url: "" });
   };
 
   const openEdit = (partner: Partner) => {
     setEditingId(partner.id);
+    if (logoPreview?.startsWith("blob:")) URL.revokeObjectURL(logoPreview);
+    setLogoFile(null);
+    setLogoPreview(partner.logo_url || null);
     setForm({
       name: partner.name,
       organization: partner.organization || "",
@@ -146,8 +157,39 @@ export default function AcademicPartners() {
       default_payout_percentage: String(partner.default_payout_percentage || 0),
       user_id: partner.user_id || "",
       notes: partner.notes || "",
+      logo_url: partner.logo_url || "",
     });
     setShowForm(true);
+  };
+
+  const openCreate = () => {
+    resetForm();
+    setShowForm(true);
+  };
+
+  const handleLogoPick = (file: File | null) => {
+    if (logoPreview?.startsWith("blob:")) URL.revokeObjectURL(logoPreview);
+    setLogoFile(file);
+    setLogoPreview(file ? URL.createObjectURL(file) : form.logo_url || null);
+  };
+
+  const uploadLogo = async () => {
+    if (!logoFile) return form.logo_url || null;
+    if (logoFile.type !== "image/png") {
+      throw new Error("Please upload a transparent PNG logo.");
+    }
+    const safeName = (form.organization || form.name || "academic-partner")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      || "academic-partner";
+    const path = `academic-partner-logos/${safeName}-${Date.now()}.png`;
+    const { error: uploadError } = await supabase.storage
+      .from("application-documents")
+      .upload(path, logoFile, { contentType: "image/png", upsert: true });
+    if (uploadError) throw uploadError;
+    const { data } = supabase.storage.from("application-documents").getPublicUrl(path);
+    return data.publicUrl;
   };
 
   const handleSave = async () => {
@@ -156,25 +198,28 @@ export default function AcademicPartners() {
       return;
     }
     setSaving(true);
-    const payload = {
-      name: form.name.trim(),
-      organization: form.organization.trim() || null,
-      phone: form.phone.trim() || null,
-      email: form.email.trim() || null,
-      status: form.status,
-      default_payout_percentage: Number(form.default_payout_percentage) || 0,
-      user_id: form.user_id || null,
-      notes: form.notes.trim() || null,
-    };
-    const { error } = editingId
-      ? await supabase.from("academic_partners").update(payload).eq("id", editingId)
-      : await supabase.from("academic_partners").insert(payload);
-    if (error) {
-      toast({ title: "Save failed", description: error.message, variant: "destructive" });
-    } else {
+    try {
+      const logoUrl = await uploadLogo();
+      const payload = {
+        name: form.name.trim(),
+        organization: form.organization.trim() || null,
+        phone: form.phone.trim() || null,
+        email: form.email.trim() || null,
+        status: form.status,
+        default_payout_percentage: Number(form.default_payout_percentage) || 0,
+        user_id: form.user_id || null,
+        notes: form.notes.trim() || null,
+        logo_url: logoUrl,
+      };
+      const { error } = editingId
+        ? await supabase.from("academic_partners").update(payload).eq("id", editingId)
+        : await supabase.from("academic_partners").insert(payload);
+      if (error) throw error;
       toast({ title: editingId ? "Academic partner updated" : "Academic partner added" });
       resetForm();
       await fetchAll();
+    } catch (error: any) {
+      toast({ title: "Save failed", description: error.message, variant: "destructive" });
     }
     setSaving(false);
   };
@@ -222,7 +267,7 @@ export default function AcademicPartners() {
           <h1 className="text-2xl font-bold text-foreground">Academic Partners</h1>
           <p className="mt-1 text-sm text-muted-foreground">Manage batch ownership, admissions access, and partner payouts</p>
         </div>
-        <Button onClick={() => setShowForm(true)} className="gap-2"><Plus className="h-4 w-4" /> Add Partner</Button>
+        <Button onClick={openCreate} className="gap-2"><Plus className="h-4 w-4" /> Add Partner</Button>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -263,7 +308,15 @@ export default function AcademicPartners() {
             <Card key={partner.id} className="border-border/60 shadow-none">
               <CardContent className="p-5">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
+                  <div className="flex min-w-0 items-start gap-3">
+                    <div className="flex h-12 w-16 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/30 p-2">
+                      {partner.logo_url ? (
+                        <img src={partner.logo_url} alt={`${partner.name} logo`} className="max-h-full max-w-full object-contain" />
+                      ) : (
+                        <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <h3 className="text-base font-semibold text-foreground">{partner.name}</h3>
                       {partner.user_id && <Badge className="border-0 bg-emerald-100 text-emerald-700 text-[10px]">Linked</Badge>}
@@ -271,6 +324,7 @@ export default function AcademicPartners() {
                     </div>
                     {partner.organization && <p className="mt-0.5 text-sm text-primary">{partner.organization}</p>}
                     <p className="mt-1 text-xs text-muted-foreground">{partner.email || partner.phone || "No contact details"}</p>
+                    </div>
                   </div>
                   <div className="flex items-center gap-1">
                     <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openAssignment(partner.id)}><Link2 className="h-4 w-4" /></Button>
@@ -362,6 +416,33 @@ export default function AcademicPartners() {
                 {partnerUsers.map((u) => <option key={u.user_id} value={u.user_id}>{u.display_name || "Unnamed"} {u.email ? `(${u.email})` : ""}</option>)}
               </select>
               <p className="mt-1 text-[10px] text-muted-foreground">Create or assign a user with the Academic Partner role first.</p>
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Partner Logo</label>
+              <div className="flex items-center gap-3 rounded-xl border border-dashed border-border bg-muted/20 p-3">
+                <div className="flex h-14 w-24 items-center justify-center rounded-lg border border-border bg-background p-2">
+                  {logoPreview ? (
+                    <img src={logoPreview} alt="Partner logo preview" className="max-h-full max-w-full object-contain" />
+                  ) : (
+                    <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <input
+                    id="academic-partner-logo"
+                    type="file"
+                    accept="image/png"
+                    className="hidden"
+                    onChange={(event) => handleLogoPick(event.target.files?.[0] || null)}
+                  />
+                  <Button asChild variant="outline" size="sm" className="gap-2">
+                    <label htmlFor="academic-partner-logo" className="cursor-pointer">
+                      <ImageIcon className="h-4 w-4" /> Upload PNG
+                    </label>
+                  </Button>
+                  <p className="mt-1 text-[10px] text-muted-foreground">Transparent PNG recommended for clean dashboard branding.</p>
+                </div>
+              </div>
             </div>
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Notes</label>

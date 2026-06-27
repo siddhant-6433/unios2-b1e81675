@@ -28,6 +28,7 @@ interface WaTemplateRow {
   reject_reason: string | null;
   quality_score: string | null;
   submitted_at: string | null;
+  status_updated_at?: string | null;
 }
 
 interface TemplateButtonComponent {
@@ -37,8 +38,18 @@ interface TemplateButtonComponent {
 
 interface TemplateComponent {
   type?: string;
+  format?: string;
   text?: string;
   buttons?: TemplateButtonComponent[];
+}
+
+interface MetaTemplate {
+  id: string;
+  name: string;
+  status: string;
+  category: string;
+  language: string;
+  components: TemplateComponent[];
 }
 
 // Pre-built templates ready to submit (match approved Meta templates).
@@ -81,6 +92,140 @@ function statusVisual(status: string) {
   return { Icon, color };
 }
 
+function templateBody(t: WaTemplateRow) {
+  return t.components?.find((c) => c.type === "BODY")?.text || "";
+}
+
+function templateButtons(t: WaTemplateRow) {
+  return t.components?.find((c) => c.type === "BUTTONS")?.buttons || [];
+}
+
+function formatMetaDate(value?: string | null) {
+  if (!value) return "Not synced";
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function edgeErrorMessage(error: any, data?: any) {
+  if (data?.error) return data.error;
+  if (data?.warning) return data.warning;
+  if (error?.context?.error) return error.context.error;
+  if (error?.context?.message) return error.context.message;
+  if (error?.message) return error.message;
+  return "Unknown error";
+}
+
+function TemplateCard({
+  template,
+  deleting,
+  onDelete,
+}: {
+  template: WaTemplateRow;
+  deleting: string | null;
+  onDelete: (name: string) => void;
+}) {
+  const { Icon, color } = statusVisual(template.status);
+  const body = templateBody(template);
+  const buttons = templateButtons(template);
+  const metaCategory = (template.category || "UNKNOWN").toUpperCase();
+
+  return (
+    <Card className="border-border/60 shadow-none">
+      <CardContent className="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <MessageSquare className="h-4 w-4 text-green-600 shrink-0" />
+              <h3 className="text-sm font-semibold text-foreground font-mono truncate">{template.name}</h3>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1 font-mono">
+              Meta ID: {template.meta_template_id || "Not returned yet"}
+            </p>
+          </div>
+          <Badge className={`text-[9px] border-0 gap-1 shrink-0 ${color}`}>
+            <Icon className="h-3 w-3" />
+            {template.status}
+          </Badge>
+        </div>
+
+        <div className="flex flex-wrap gap-1.5 mt-3">
+          <Badge variant="outline" className="text-[9px]">Category: {metaCategory}</Badge>
+          <Badge variant="outline" className="text-[9px]">Language: {template.language}</Badge>
+          <Badge variant="outline" className="text-[9px]">Header: {template.header_format || "NONE"}</Badge>
+          <Badge variant="outline" className="text-[9px]">Vars: {template.placeholder_count}</Badge>
+          {template.quality_score && (
+            <Badge variant="outline" className="text-[9px]">Quality: {template.quality_score}</Badge>
+          )}
+        </div>
+
+        {body && (
+          <div className="mt-3 rounded-lg bg-muted/30 px-3 py-2">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase mb-0.5">Body</p>
+            <p className="text-xs text-foreground whitespace-pre-wrap line-clamp-5">{body}</p>
+          </div>
+        )}
+
+        {template.status === "REJECTED" && template.reject_reason && (
+          <div className="mt-3 rounded-lg bg-red-50 dark:bg-red-950/20 px-3 py-2">
+            <p className="text-[10px] font-semibold text-red-700 dark:text-red-400 uppercase mb-0.5">Rejection reason</p>
+            <p className="text-xs text-red-700/90 dark:text-red-300">{template.reject_reason}</p>
+          </div>
+        )}
+
+        {buttons.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-2">
+            {buttons.map((b, i) => (
+              <Badge key={i} variant="outline" className="text-[9px]">
+                {b.type === "URL" ? `URL: ${b.text}` : b.text}
+              </Badge>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 mt-3 pt-2 border-t border-border/40">
+          <p className="text-[11px] text-muted-foreground">Synced {formatMetaDate(template.status_updated_at || template.submitted_at)}</p>
+          <div className="ml-auto">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground hover:text-red-600"
+              disabled={deleting === template.name}
+              onClick={() => onDelete(template.name)}
+              title="Delete template from Meta"
+            >
+              {deleting === template.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function SectionHeader({
+  title,
+  count,
+  description,
+}: {
+  title: string;
+  count: number;
+  description: string;
+}) {
+  return (
+    <div className="flex items-end justify-between gap-3">
+      <div>
+        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+        <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+      </div>
+      <Badge variant="outline" className="text-[10px] shrink-0">{count}</Badge>
+    </div>
+  );
+}
+
 export function WhatsAppTemplateTab() {
   const { toast } = useToast();
   const [rows, setRows] = useState<WaTemplateRow[]>([]);
@@ -91,12 +236,51 @@ export function WhatsAppTemplateTab() {
   const [initialForm, setInitialForm] = useState<{ name?: string; category?: string; body?: string } | undefined>();
 
   const fetchRows = useCallback(async () => {
-    const { data, error } = await supabase
+    setLoading(true);
+    const { data: dbRows, error: dbError } = await supabase
       .from("whatsapp_templates" as never)
       .select("*")
       .order("submitted_at", { ascending: false });
-    if (error) console.error("Failed to fetch whatsapp_templates:", error);
-    if (data) setRows(data as unknown as WaTemplateRow[]);
+
+    if (dbError) console.error("Failed to fetch whatsapp_templates:", dbError);
+    const localRows = (dbRows || []) as unknown as WaTemplateRow[];
+
+    const { data: metaData, error: metaError } = await supabase.functions.invoke("whatsapp-templates", {
+      body: { action: "list" },
+    });
+    if (metaError || metaData?.error) {
+      console.error("Failed to list Meta templates:", metaData?.error || metaError?.message);
+      setRows(localRows);
+      setLoading(false);
+      return;
+    }
+
+    const localByName = new Map(localRows.map((row) => [`${row.name}:${row.language}`, row]));
+    const metaRows: WaTemplateRow[] = ((metaData?.templates || []) as MetaTemplate[]).map((template) => {
+      const local = localByName.get(`${template.name}:${template.language}`);
+      const header = template.components?.find((component) => component.type === "HEADER");
+      const bodyComp = template.components?.find((component) => component.type === "BODY");
+      return {
+        id: local?.id || template.id,
+        meta_template_id: template.id,
+        name: template.name,
+        language: template.language || "en",
+        category: template.category || local?.category || null,
+        status: (template.status || local?.status || "PENDING").toUpperCase(),
+        header_format: header?.format || local?.header_format || "NONE",
+        has_media: ["IMAGE", "VIDEO", "DOCUMENT"].includes((header?.format || "").toUpperCase()),
+        placeholder_count: (String(bodyComp?.text || "").match(/\{\{\d+\}\}/g) || []).length,
+        components: template.components || local?.components || null,
+        reject_reason: local?.reject_reason || null,
+        quality_score: local?.quality_score || null,
+        submitted_at: local?.submitted_at || null,
+        status_updated_at: local?.status_updated_at || new Date().toISOString(),
+      };
+    });
+
+    const metaKeys = new Set(metaRows.map((row) => `${row.name}:${row.language}`));
+    const localOnlyRows = localRows.filter((row) => !metaKeys.has(`${row.name}:${row.language}`));
+    setRows([...metaRows, ...localOnlyRows]);
     setLoading(false);
   }, []);
 
@@ -118,9 +302,12 @@ export function WhatsAppTemplateTab() {
     setSyncing(true);
     const { data, error } = await supabase.functions.invoke("whatsapp-templates", { body: { action: "sync" } });
     if (error || data?.error) {
-      toast({ title: "Sync failed", description: data?.error || error?.message, variant: "destructive" });
+      toast({ title: "Sync failed", description: edgeErrorMessage(error, data), variant: "destructive" });
     } else {
-      toast({ title: "Synced from Meta", description: `${data?.synced ?? 0} template(s) reconciled.` });
+      toast({
+        title: data?.warning ? "Meta fetched" : "Synced from Meta",
+        description: data?.warning || `${data?.synced ?? 0} template(s) reconciled.`,
+      });
       await fetchRows();
     }
     setSyncing(false);
@@ -150,32 +337,70 @@ export function WhatsAppTemplateTab() {
 
   const existingNames = new Set(rows.map((r) => r.name));
   const pendingSuggested = SUGGESTED_TEMPLATES.filter((s) => !existingNames.has(s.name));
+  const approvedRows = rows.filter((r) => r.status === "APPROVED");
+  const submittedRows = rows.filter((r) => r.status !== "APPROVED" && r.status !== "REJECTED");
+  const attentionRows = rows.filter((r) => r.status === "REJECTED");
+  const metaBackedCount = rows.filter((r) => r.meta_template_id).length;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <Button variant="outline" size="sm" className="gap-2" onClick={syncFromMeta} disabled={syncing}>
-          <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} /> Sync from Meta
-        </Button>
-        <Button size="sm" className="gap-2" onClick={openBlank}>
-          <Plus className="h-4 w-4" /> New Template
-        </Button>
+    <div className="space-y-5">
+      <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">WhatsApp Templates</h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            {metaBackedCount} Meta template{metaBackedCount === 1 ? "" : "s"} synced. Approval status, template ID, and category come from Meta.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" className="gap-2" onClick={syncFromMeta} disabled={syncing}>
+            <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} /> Sync from Meta
+          </Button>
+          <Button size="sm" className="gap-2" onClick={openBlank}>
+            <Plus className="h-4 w-4" /> Submit New Template
+          </Button>
+        </div>
       </div>
 
-      {/* Suggested templates to submit */}
-      {pendingSuggested.length > 0 && !loading && (
-        <div className="rounded-xl border border-primary/20 bg-primary/[0.02] p-4 space-y-3">
-          <div>
-            <p className="text-sm font-semibold text-foreground">Ready to Submit</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{pendingSuggested.length} template(s) not yet submitted to Meta</p>
+      <section className="space-y-3">
+        <SectionHeader
+          title="Approved Templates"
+          count={approvedRows.length}
+          description="Ready for one-to-one sends, automations, and bulk campaigns."
+        />
+        {loading ? (
+          <div className="flex h-28 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+        ) : approvedRows.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+            No approved templates synced from Meta yet.
           </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {approvedRows.map((template) => (
+              <TemplateCard key={template.id} template={template} deleting={deleting} onDelete={deleteTemplate} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="space-y-3">
+        <SectionHeader
+          title="Drafts"
+          count={pendingSuggested.length}
+          description="Suggested templates that are not yet submitted locally. Review them, edit copy/samples, then submit to Meta."
+        />
+        {pendingSuggested.length === 0 && !loading ? (
+          <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+            No draft suggestions left. Use Submit New Template for a custom template.
+          </div>
+        ) : (
           <div className="space-y-2">
             {pendingSuggested.map((s) => (
               <div key={s.name} className="flex items-start gap-3 rounded-lg border border-border bg-card p-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-medium text-foreground font-mono">{s.name}</p>
-                    <Badge variant="outline" className="text-[9px]">{s.category}</Badge>
+                    <Badge variant="outline" className="text-[9px]">Draft</Badge>
+                    <Badge variant="outline" className="text-[9px]">Category: {s.category}</Badge>
                   </div>
                   <p className="text-[11px] text-muted-foreground mt-0.5">{s.description}</p>
                   <p className="text-xs text-foreground/70 mt-1.5 whitespace-pre-wrap bg-muted/30 rounded-lg px-2 py-1.5 line-clamp-3">{s.body}</p>
@@ -186,90 +411,27 @@ export function WhatsAppTemplateTab() {
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </section>
 
-      {loading ? (
-        <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
-      ) : rows.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-30" />
-          <p className="text-sm">No WhatsApp templates yet — submit one to Meta to get started.</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {rows.map((t) => {
-            const bodyComp = t.components?.find((c) => c.type === "BODY");
-            const buttonComp = t.components?.find((c) => c.type === "BUTTONS");
-            const { Icon, color } = statusVisual(t.status);
-            return (
-              <Card key={t.id} className="border-border/60 shadow-none">
-                <CardContent className="p-5">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <MessageSquare className="h-4 w-4 text-green-600" />
-                      <h3 className="text-sm font-semibold text-foreground">{t.name}</h3>
-                    </div>
-                    <Badge className={`text-[9px] border-0 gap-1 ${color}`}>
-                      <Icon className="h-3 w-3" />
-                      {t.status}
-                    </Badge>
-                  </div>
-
-                  {t.header_format && t.header_format !== "NONE" && (
-                    <div className="mt-2">
-                      <Badge variant="outline" className="text-[9px]">Header: {t.header_format}</Badge>
-                    </div>
-                  )}
-
-                  {bodyComp?.text && (
-                    <div className="mt-2 rounded-lg bg-muted/30 px-3 py-2">
-                      <p className="text-[10px] font-semibold text-muted-foreground uppercase mb-0.5">Body</p>
-                      <p className="text-xs text-foreground whitespace-pre-wrap">{bodyComp.text}</p>
-                    </div>
-                  )}
-
-                  {t.status === "REJECTED" && t.reject_reason && (
-                    <div className="mt-2 rounded-lg bg-red-50 dark:bg-red-950/20 px-3 py-2">
-                      <p className="text-[10px] font-semibold text-red-700 dark:text-red-400 uppercase mb-0.5">Rejection reason</p>
-                      <p className="text-xs text-red-700/90 dark:text-red-300">{t.reject_reason}</p>
-                    </div>
-                  )}
-
-                  {buttonComp?.buttons && (
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {buttonComp.buttons.map((b, i) => (
-                        <Badge key={i} variant="outline" className="text-[9px]">
-                          {b.type === "URL" ? `🔗 ${b.text}` : b.text}
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="flex items-center gap-2 mt-3 pt-2 border-t border-border/40">
-                    <Badge variant="outline" className="text-[9px]">{t.category}</Badge>
-                    <Badge variant="outline" className="text-[9px]">{t.language}</Badge>
-                    {t.quality_score && (
-                      <Badge variant="outline" className="text-[9px]">Quality: {t.quality_score}</Badge>
-                    )}
-                    <div className="ml-auto">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-red-600"
-                        disabled={deleting === t.name}
-                        onClick={() => deleteTemplate(t.name)}
-                      >
-                        {deleting === t.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-      )}
+      <section className="space-y-3">
+        <SectionHeader
+          title="Submitted To Meta"
+          count={submittedRows.length + attentionRows.length}
+          description="Pending, paused, disabled, or rejected templates that need monitoring or action."
+        />
+        {!loading && submittedRows.length === 0 && attentionRows.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+            Nothing pending with Meta.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {[...attentionRows, ...submittedRows].map((template) => (
+              <TemplateCard key={template.id} template={template} deleting={deleting} onDelete={deleteTemplate} />
+            ))}
+          </div>
+        )}
+      </section>
 
       <WhatsAppTemplateForm
         key={showCreate ? (initialForm?.name ?? "blank") : "closed"}
