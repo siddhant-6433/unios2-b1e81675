@@ -398,10 +398,10 @@ function drawParagraph(ctx: Ctx, text: string, opts: { size?: number; bold?: boo
   ctx.y -= opts.gapAfter ?? 0;
 }
 
-// Fee ledger table — Particulars / Amount / [Waiver/Scholarship] / Applicable Fee.
-// The Waiver/Scholarship column is rendered only when at least one row carries
-// a non-zero waiver (so a clean offer with no discounts still shows a tight
-// 3-column grid instead of an empty middle column).
+// Fee ledger table — Particulars / Amount / [Waiver/Adjustment] / Applicable Fee.
+// The adjustment column is rendered only when at least one row carries a
+// non-zero waiver/payment adjustment, so a clean offer still shows a tight
+// 3-column grid instead of an empty middle column.
 interface LedgerRow {
   label: string;
   amount: number;
@@ -409,6 +409,14 @@ interface LedgerRow {
   applicable: number;
   bold?: boolean;
   highlight?: boolean;
+}
+
+interface FeeStructureItem {
+  term: string;
+  amount: number;
+  fee_code_code?: string | null;
+  fee_code_name?: string | null;
+  fee_code_category?: string | null;
 }
 
 function drawFeeLedger(ctx: Ctx, rows: LedgerRow[]) {
@@ -426,7 +434,7 @@ function drawFeeLedger(ctx: Ctx, rows: LedgerRow[]) {
     ? [labelW, numW, numW, numW]
     : [labelW, numW, numW];
   const headers = hasWaiverCol
-    ? ["Particulars", "Amount", "Waiver/Scholarship", "Applicable Fee"]
+    ? ["Particulars", "Amount", "Waiver/Adjustment", "Applicable Fee"]
     : ["Particulars", "Amount", "Applicable Fee"];
 
   const drawRowFrame = (fillColor: any) => {
@@ -490,9 +498,11 @@ interface BuildOpts {
   course: { name: string; code?: string | null; duration_years?: number | null } | null;
   campus: { name: string; address?: string | null } | null;
   yearItems: { term: string; total: number }[];
+  feeItems: FeeStructureItem[];
   branding: any;
   totalCourseFee: number;
   tokenAmount: number;
+  applicationFeePaid: number;
   sessionName: string | null;
   // Resolved separately from applications table — leads.application_id is
   // often null for leads created via the SQL/test path.
@@ -521,6 +531,37 @@ function isBptOrBmritCourse(course: BuildOpts["course"]) {
     name.includes("bmrit") ||
     (name.includes("radiology") && name.includes("imaging")) ||
     (name.includes("radiology") && name.includes("b.sc"));
+}
+
+function labelForOfferTerm(term: string, isDaott: boolean) {
+  return isDaott
+    ? term.replace(/^year_(\d+)$/, "Sem $1")
+    : term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function daottFeeHeadLabel(item: FeeStructureItem) {
+  const code = String(item.fee_code_code || "").toUpperCase();
+  const name = String(item.fee_code_name || "").toLowerCase();
+  if (code === "DAOTT-SEAT" || name.includes("seat block")) return "Seat Block";
+  if (code === "DAOTT-TUITION" || name.includes("tuition")) return "Tuition";
+  if (code === "DAOTT-ADMIN-TECH" || name.includes("admin")) return "Admin/Tech";
+  if (code === "DAOTT-EXAM" || name.includes("exam")) return "Examination";
+  return String(item.fee_code_name || "Fee").replace(/^DAOTT\s+/i, "").replace(/\s+Fee$/i, "");
+}
+
+function daottFeeItemRank(item: FeeStructureItem) {
+  const code = String(item.fee_code_code || "").toUpperCase();
+  if (code === "DAOTT-SEAT") return 0;
+  if (code === "DAOTT-TUITION") return 1;
+  if (code === "DAOTT-ADMIN-TECH") return 2;
+  if (code === "DAOTT-EXAM") return 3;
+  return 9;
+}
+
+function isDaottSeatBlockItem(item: FeeStructureItem) {
+  const code = String(item.fee_code_code || "").toUpperCase();
+  const name = String(item.fee_code_name || "").toLowerCase();
+  return code === "DAOTT-SEAT" || name.includes("seat block");
 }
 
 async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
@@ -618,10 +659,10 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
   // ── Fee structure ──────────────────────────────────────────────────────
   drawSection(ctx, "FEE STRUCTURE");
 
-  // Build per-year ledger rows. Legacy `scholarship_amount` is attributed to
-  // Year 1 (that's also how the token-fee math handles it upstream); newer
-  // discounts live in `offer_waivers`. Waiver column is shown only if any
-  // year carries a non-zero waiver/scholarship.
+  // Build ledger rows. Legacy `scholarship_amount` is attributed to Year 1
+  // (that's also how the token-fee math handles it upstream); newer discounts
+  // live in `offer_waivers`. DAOTT offers are rendered from fee-head rows so
+  // the seat-block line remains visible instead of being hidden inside Sem 1.
   const scholarship = Number(opts.offer.scholarship_amount || 0);
   const ledgerRows: LedgerRow[] = [];
 
@@ -629,27 +670,78 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
   let totalWaiver = 0;
   let totalApplicable = 0;
 
-  for (const it of opts.yearItems) {
-    const yearLabel = isDaott
-      ? it.term.replace(/^year_(\d+)$/, "Semester $1")
-      : it.term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-    const waiverForYear = opts.waivers
-      .filter(w => w.term === it.term)
-      .reduce((s, w) => s + Number(w.amount || 0), 0);
-    const scholarshipShare = it.term === "year_1" ? scholarship : 0;
-    const lineWaiver = waiverForYear + scholarshipShare;
-    const applicable = Math.max(0, Number(it.total) - lineWaiver);
+  if (isDaott && opts.feeItems.length > 0) {
+    const sortedFeeItems = [...opts.feeItems]
+      .filter((it) => it.term?.startsWith("year_"))
+      .sort((a, b) => a.term.localeCompare(b.term) || daottFeeItemRank(a) - daottFeeItemRank(b));
 
-    ledgerRows.push({
-      label: yearLabel,
-      amount: Number(it.total),
-      waiver: lineWaiver,
-      applicable,
-    });
+    const termAdjustmentRemaining = new Map<string, number>();
+    for (const it of sortedFeeItems) {
+      if (!termAdjustmentRemaining.has(it.term)) {
+        const waiverForTerm = opts.waivers
+          .filter(w => w.term === it.term)
+          .reduce((s, w) => s + Number(w.amount || 0), 0);
+        termAdjustmentRemaining.set(it.term, waiverForTerm + (it.term === "year_1" ? scholarship : 0));
+      }
+    }
 
-    totalAmount     += Number(it.total);
-    totalWaiver     += lineWaiver;
-    totalApplicable += applicable;
+    const termHasNonSeatItem = new Map<string, boolean>();
+    for (const it of sortedFeeItems) {
+      if (!isDaottSeatBlockItem(it)) termHasNonSeatItem.set(it.term, true);
+    }
+
+    let applicationCreditRemaining = Math.max(0, Number(opts.applicationFeePaid || 0));
+
+    for (const it of sortedFeeItems) {
+      const amount = Number(it.amount || 0);
+      const isSeatBlock = isDaottSeatBlockItem(it);
+      const applicationAdjustment = isSeatBlock
+        ? Math.min(applicationCreditRemaining, amount)
+        : 0;
+      applicationCreditRemaining -= applicationAdjustment;
+
+      const termAdjustment = termAdjustmentRemaining.get(it.term) || 0;
+      const shouldApplyTermAdjustment = !isSeatBlock || !termHasNonSeatItem.get(it.term);
+      const waiverAdjustment = shouldApplyTermAdjustment
+        ? Math.min(termAdjustment, Math.max(0, amount - applicationAdjustment))
+        : 0;
+      termAdjustmentRemaining.set(it.term, termAdjustment - waiverAdjustment);
+
+      const lineAdjustment = applicationAdjustment + waiverAdjustment;
+      const applicable = Math.max(0, amount - lineAdjustment);
+
+      ledgerRows.push({
+        label: `${labelForOfferTerm(it.term, true)} - ${daottFeeHeadLabel(it)}`,
+        amount,
+        waiver: lineAdjustment,
+        applicable,
+      });
+
+      totalAmount += amount;
+      totalWaiver += lineAdjustment;
+      totalApplicable += applicable;
+    }
+  } else {
+    for (const it of opts.yearItems) {
+      const yearLabel = labelForOfferTerm(it.term, isDaott);
+      const waiverForYear = opts.waivers
+        .filter(w => w.term === it.term)
+        .reduce((s, w) => s + Number(w.amount || 0), 0);
+      const scholarshipShare = it.term === "year_1" ? scholarship : 0;
+      const lineWaiver = waiverForYear + scholarshipShare;
+      const applicable = Math.max(0, Number(it.total) - lineWaiver);
+
+      ledgerRows.push({
+        label: yearLabel,
+        amount: Number(it.total),
+        waiver: lineWaiver,
+        applicable,
+      });
+
+      totalAmount     += Number(it.total);
+      totalWaiver     += lineWaiver;
+      totalApplicable += applicable;
+    }
   }
 
   if (opts.totalCourseFee > 0 || ledgerRows.length > 0) {
@@ -680,11 +772,12 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
 
   // ── Terms (compact, smaller font) ──────────────────────────────────────
   drawSection(ctx, "TERMS & NEXT STEPS");
+  const firstFeePeriod = isDaott ? "Semester 1" : "first-year";
   const terms = [
     "Provisional offer subject to verification of original documents at physical admission.",
-    "Token fee is adjustable against the first-year programme fee and is non-refundable once paid.",
+    `Token fee is adjustable against the ${firstFeePeriod} programme fee and is non-refundable once paid.`,
     "Education loan support letter can be downloaded from the applicant portal after the token fee is paid.",
-    "Remaining first-year fee is due as per the schedule communicated post token-fee confirmation.",
+    `Remaining ${firstFeePeriod} fee is due as per the schedule communicated post token-fee confirmation.`,
     "The above fee does not include Uniform Fee, Examination Fee and other applicable fees levied by the University / Examination Body, if any.",
     "Offer lapses automatically if token fee is not received by the acceptance deadline.",
     "The institution may revoke this offer if any submitted information is found inaccurate.",
@@ -825,24 +918,43 @@ Deno.serve(async (req) => {
     const course: any = offer.courses;
     const campus: any = offer.campuses;
 
-    // Per-year fee breakdown from fee_structure_items.
+    // Per-year fee breakdown from fee_structure_items. Keep both the grouped
+    // term totals for token math and detailed fee-code rows for DAOTT offer
+    // PDFs, where the seat-block fee must be shown explicitly.
     const { data: yearRows } = await admin
       .from("fee_structures")
-      .select("id, fee_structure_items ( term, amount )")
+      .select("id, fee_structure_items ( term, amount, fee_codes:fee_code_id ( code, name, category ) )")
       .eq("course_id", offer.course_id)
       .eq("session_id", offer.session_id)
       .eq("is_active", true)
       .single();
 
     const yearMap = new Map<string, number>();
-    for (const it of ((yearRows as any)?.fee_structure_items || []) as { term: string; amount: number }[]) {
+    const feeItems: FeeStructureItem[] = [];
+    for (const it of ((yearRows as any)?.fee_structure_items || []) as { term: string; amount: number; fee_codes?: { code?: string | null; name?: string | null; category?: string | null } | null }[]) {
       if (!it.term?.startsWith("year_")) continue;
       yearMap.set(it.term, (yearMap.get(it.term) || 0) + Number(it.amount));
+      feeItems.push({
+        term: it.term,
+        amount: Number(it.amount || 0),
+        fee_code_code: it.fee_codes?.code || null,
+        fee_code_name: it.fee_codes?.name || null,
+        fee_code_category: it.fee_codes?.category || null,
+      });
     }
     const yearItems = Array.from(yearMap.entries())
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([term, total]) => ({ term, total }));
     const totalCourseFee = yearItems.reduce((s, y) => s + y.total, 0);
+
+    const { data: applicationFeeRows } = await admin
+      .from("lead_payments")
+      .select("amount")
+      .eq("lead_id", offer.lead_id)
+      .eq("type", "application_fee")
+      .eq("status", "confirmed");
+    const applicationFeePaid = ((applicationFeeRows || []) as { amount: number | string | null }[])
+      .reduce((sum, row) => sum + Number(row.amount || 0), 0);
 
     // Resolve session name for the top-right pill + programme details grid.
     let sessionName: string | null = null;
@@ -946,7 +1058,7 @@ Deno.serve(async (req) => {
         .filter(w => w.term === "year_1")
         .reduce((s, w) => s + Number(w.amount || 0), 0);
       const postY1 = Math.max(0, y1Total - scholarship - y1Waivers);
-      const tokenFloor = isDaottCourse(course) ? 4000 : 5000;
+      const tokenFloor = 5000;
       tokenAmount = postY1 > 0
         ? Math.max(Math.round(postY1 * 0.25), tokenFloor)
         : Number(lead?.token_amount || 0);
@@ -958,9 +1070,11 @@ Deno.serve(async (req) => {
       course,
       campus,
       yearItems,
+      feeItems,
       branding,
       totalCourseFee,
       tokenAmount,
+      applicationFeePaid,
       sessionName,
       applicationId,
       waivers,

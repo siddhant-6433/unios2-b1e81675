@@ -475,11 +475,10 @@ export default function Applications() {
               const tokenReq = Number(fs.token_required || 0);
               const anThr = Number(fs.an_threshold || 0);
               const postSchY1 = Number(fs.post_scholarship_year_1 || fs.first_year_fee || 0);
-              // `paid_toward_course` excludes application_fee + registration_fee
-              // (the one-time admin gate at NIMT — same concept, two names) and
-              // is the right field for both the AN-gate balance and the year-1
-              // remaining. `total_paid` would double-count the app/reg fee and
-              // wrongly shrink the displayed dues.
+              // `paid_toward_course` is the authoritative course-applied
+              // amount. It excludes separate app/reg payments unless the fee
+              // structure explicitly credits application fee to a seat-block
+              // line. `total_paid` would wrongly shrink displayed dues.
               const paidTowardCourse = Number(
                 fs.paid_toward_course ?? Math.max(
                   0,

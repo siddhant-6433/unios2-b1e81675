@@ -27,6 +27,7 @@ import {
 } from "@/lib/updeled";
 import { chooseOfferSessionId, feeBackedSessionIds, type OfferSessionOption } from "@/lib/offerSessions";
 import { leadTransitionStagePatch, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
+import { feeTermLabel } from "@/lib/feeTermLabels";
 
 interface OfferLetterDialogProps {
   open: boolean;
@@ -118,9 +119,6 @@ const ENTRANCE_OPTIONS = [
   "Other",
 ];
 
-const isDaottCourseName = (name: string | null | undefined) =>
-  !!name && (/\bD\.?\s*A?OTT\b/i.test(name) || /ana?esthesia.*operation theatre/i.test(name));
-
 function parseTokenFeeFromEditReason(reason: string | null | undefined): number | null {
   if (!reason || !/\btoken\b/i.test(reason)) return null;
   const match = reason.match(/(?:rs\.?|₹|inr)?\s*([0-9][0-9,\s]{2,})/i);
@@ -160,7 +158,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   const [availableTerms, setAvailableTerms] = useState<string[]>([]);
   // Per-year totals from the active fee structure, used for the summary card
   // at offer-creation time and for stamping offer.total_fee.
-  const [yearTotals, setYearTotals] = useState<{ term: string; total: number }[]>([]);
+  const [yearTotals, setYearTotals] = useState<{ term: string; total: number; label: string }[]>([]);
   // offer_id → waivers list, fetched alongside offers.
   const [waiversByOffer, setWaiversByOffer] = useState<Record<string, OfferWaiver[]>>({});
   // Which offer's add-waiver inline form is currently visible.
@@ -389,13 +387,14 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     (async () => {
       const { data } = await supabase
         .from("fee_structures")
-        .select("id, fee_structure_items ( term, amount )")
+        .select("id, metadata, fee_structure_items ( term, amount )")
         .eq("course_id", courseId)
         .eq("session_id", sessionId)
         .eq("is_active", true)
         .maybeSingle();
       if (cancelled) return;
       const items: any[] = (data as any)?.fee_structure_items ?? [];
+      const metadata = (data as any)?.metadata as Record<string, unknown> | null;
       // Sum per year_N term so we have both Year-1 (for token math) and the
       // full per-year breakdown (for the summary card + offer.total_fee).
       const byTerm = new Map<string, number>();
@@ -406,7 +405,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       }
       const sorted = Array.from(byTerm.entries())
         .sort(([a], [b]) => a.localeCompare(b))
-        .map(([term, total]) => ({ term, total }));
+        .map(([term, total]) => ({ term, total, label: feeTermLabel(term, metadata) }));
       const y1 = byTerm.get("year_1") || 0;
       setFirstYearFee(y1);
       setYearTotals(sorted);
@@ -431,6 +430,10 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   /** Fee for a given term (e.g. 'year_1') from the active fee structure. */
   const feeForTerm = (term: string): number =>
     yearTotals.find(y => y.term === term)?.total ?? 0;
+
+  const labelForTerm = (term: string): string =>
+    yearTotals.find(y => y.term === term)?.label ?? feeTermLabel(term);
+  const firstTermLabel = labelForTerm("year_1");
 
   /** Sum of pre-issuance waivers already queued for the same term in the new-offer form. */
   const preWaiverTotalForTerm = (term: string): number =>
@@ -482,7 +485,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
 
   // Token fee defaults to 25% of net Year-1. Admissions can lower it while
   // issuing the offer, but never below the course-specific seat-block floor.
-  const tokenFloor = isDaottCourseName(courseName) ? 4000 : 5000;
+  const tokenFloor = 5000;
   const tokenDefault = netFirstYearFee > 0
     ? Math.max(Math.round(netFirstYearFee * 0.25), tokenFloor)
     : 0;
@@ -697,7 +700,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       return;
     }
     if (!waiverForm.term) {
-      toast({ title: "Pick a year for this waiver", variant: "destructive" });
+      toast({ title: "Pick a period for this waiver", variant: "destructive" });
       return;
     }
     // Cap: a single year's waivers (approved + pending + this one) cannot
@@ -708,8 +711,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     const available = Math.max(0, yearFee - existing);
     if (yearFee <= 0) {
       toast({
-        title: "No fee published for this year",
-        description: `The active fee structure has no "${waiverForm.term.replace(/_/g, " ")}" line — can't apply a waiver against it.`,
+        title: "No fee published for this period",
+        description: `The active fee structure has no "${labelForTerm(waiverForm.term)}" line — can't apply a waiver against it.`,
         variant: "destructive",
       });
       return;
@@ -718,8 +721,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       toast({
         title: "Waiver exceeds available fee",
         description: existing > 0
-          ? `Year fee is ₹${yearFee.toLocaleString("en-IN")}; ₹${existing.toLocaleString("en-IN")} already waived (approved or pending). At most ₹${available.toLocaleString("en-IN")} more can be applied here.`
-          : `Year fee is ₹${yearFee.toLocaleString("en-IN")}. The waiver can't exceed that.`,
+          ? `Published fee is ₹${yearFee.toLocaleString("en-IN")}; ₹${existing.toLocaleString("en-IN")} already waived (approved or pending). At most ₹${available.toLocaleString("en-IN")} more can be applied here.`
+          : `Published fee is ₹${yearFee.toLocaleString("en-IN")}. The waiver can't exceed that.`,
         variant: "destructive",
       });
       return;
@@ -869,7 +872,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
             throw new Error(cahetOfferBlockMessage);
           }
           const nextCourseCode = courseCodeForId(nextCourseId);
-          const nextTokenFloor = isDaottCourseName(nextCourseName) || nextCourseCode === "DAOTT-GN" || nextCourseCode === "OTT-GN" ? 4000 : 5000;
+          const nextTokenFloor = 5000;
           const nextTokenDefault = feeSnapshot.firstYearFee > 0
             ? Math.max(Math.round(feeSnapshot.firstYearFee * 0.25), nextTokenFloor)
             : nextTokenFloor;
@@ -1046,7 +1049,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                     <div className="rounded-xl border border-border/60 bg-muted/30 p-3 text-xs space-y-1">
                       {yearTotals.map(y => (
                         <div key={y.term} className="flex items-center justify-between">
-                          <span className="text-muted-foreground">{y.term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}</span>
+                          <span className="text-muted-foreground">{y.label}</span>
                           <span className="text-foreground tabular-nums">₹{y.total.toLocaleString("en-IN")}</span>
                         </div>
                       ))}
@@ -1061,7 +1064,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                     </div>
                   )}
                   <p className="mt-1.5 text-[10px] text-muted-foreground/70 leading-relaxed">
-                    Sourced from the published fee structure for the selected session. Add year-wise discounts (scholarship, sibling, alumni, hardship etc.) as waivers below before issuing.
+                    Sourced from the published fee structure for the selected session. Add period-wise discounts (scholarship, sibling, alumni, hardship etc.) as waivers below before issuing.
                   </p>
                 </div>
 
@@ -1090,7 +1093,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                       <div className="space-y-1 mb-2">
                         {preWaivers.map((w, i) => (
                           <div key={i} className="flex items-center justify-between rounded-md border border-border/50 bg-background/50 px-2 py-1.5 text-xs">
-                            <span className="text-muted-foreground">{w.term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}</span>
+                            <span className="text-muted-foreground">{labelForTerm(w.term)}</span>
                             <span className="font-medium">−₹{w.amount.toLocaleString("en-IN")}</span>
                             {w.reason && <span className="text-muted-foreground truncate max-w-[80px]">{w.reason}</span>}
                             <button
@@ -1119,14 +1122,14 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                       <div className="rounded-md border border-primary/30 bg-primary/5 p-2 space-y-2">
                         <div className="grid grid-cols-2 gap-2">
                           <div>
-                            <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Year</label>
+                            <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Period</label>
                             <select
                               value={preWaiverForm.term}
                               onChange={e => setPreWaiverForm(p => ({ ...p, term: e.target.value }))}
                               className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
                             >
                               {availableTerms.map(t => (
-                                <option key={t} value={t}>{t.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}</option>
+                                <option key={t} value={t}>{labelForTerm(t)}</option>
                               ))}
                             </select>
                           </div>
@@ -1184,8 +1187,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                               const available = Math.max(0, yearFee - existing);
                               if (yearFee <= 0) {
                                 toast({
-                                  title: "No fee published for this year",
-                                  description: `The active fee structure has no "${preWaiverForm.term.replace(/_/g, " ")}" line.`,
+                                  title: "No fee published for this period",
+                                  description: `The active fee structure has no "${labelForTerm(preWaiverForm.term)}" line.`,
                                   variant: "destructive",
                                 });
                                 return;
@@ -1194,8 +1197,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                 toast({
                                   title: "Waiver exceeds available fee",
                                   description: existing > 0
-                                    ? `Year fee is ₹${yearFee.toLocaleString("en-IN")}; ₹${existing.toLocaleString("en-IN")} already added in this form. At most ₹${available.toLocaleString("en-IN")} more can be applied here.`
-                                    : `Year fee is ₹${yearFee.toLocaleString("en-IN")}. The waiver can't exceed that.`,
+                                    ? `Published fee is ₹${yearFee.toLocaleString("en-IN")}; ₹${existing.toLocaleString("en-IN")} already added in this form. At most ₹${available.toLocaleString("en-IN")} more can be applied here.`
+                                    : `Published fee is ₹${yearFee.toLocaleString("en-IN")}. The waiver can't exceed that.`,
                                   variant: "destructive",
                                 });
                                 return;
@@ -1269,7 +1272,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                   </div>
                 )}
 
-                {/* Token fee — defaults to 25% of Year-1, editable but floored at
+                {/* Token fee — defaults to 25% of the first fee period, editable but floored at
                     the course-specific seat-block amount. The pencil icon flips edit mode;
                     the field is read-only otherwise to discourage casual changes. */}
                 <div>
@@ -1302,14 +1305,14 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                         <>
                           Minimum <span className="font-semibold text-foreground">₹{tokenFloor.toLocaleString("en-IN")}</span>. This is the amount the applicant must pay before downloading the education loan letter.
                           {firstYearFee !== netFirstYearFee && (
-                            <> Gross Year-1 is ₹{firstYearFee.toLocaleString("en-IN")}; Year-1 waiver of ₹{(firstYearFee - netFirstYearFee).toLocaleString("en-IN")} applied.</>
+                            <> Gross {firstTermLabel} is ₹{firstYearFee.toLocaleString("en-IN")}; {firstTermLabel} waiver of ₹{(firstYearFee - netFirstYearFee).toLocaleString("en-IN")} applied.</>
                           )}
                         </>
                       ) : (
                         <>
-                          Default = 25% of net Year-1 fee (₹{netFirstYearFee.toLocaleString("en-IN")}) = ₹{tokenDefault.toLocaleString("en-IN")}.
+                          Default = 25% of net {firstTermLabel} fee (₹{netFirstYearFee.toLocaleString("en-IN")}) = ₹{tokenDefault.toLocaleString("en-IN")}.
                           {firstYearFee !== netFirstYearFee && (
-                            <> Gross ₹{firstYearFee.toLocaleString("en-IN")} minus ₹{(firstYearFee - netFirstYearFee).toLocaleString("en-IN")} Year-1 waiver.</>
+                            <> Gross ₹{firstYearFee.toLocaleString("en-IN")} minus ₹{(firstYearFee - netFirstYearFee).toLocaleString("en-IN")} {firstTermLabel} waiver.</>
                           )}
                           {" "}Click Edit to override.
                         </>
@@ -1334,7 +1337,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                     ))}
                   </select>
                   <p className="mt-1 text-[10px] text-muted-foreground/70">
-                    Locks the fee structure for this offer. Token amount defaults to 25% of first-year fee from this session's structure.
+                    Locks the fee structure for this offer. Token amount defaults to 25% of the first fee period from this session's structure.
                     {!isSuperAdmin && " Only super admin can pick a non-active session."}
                   </p>
                 </div>
@@ -1470,7 +1473,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                             )}
 
                             {offerWaivers.map(w => {
-                              const yearLabel = w.term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+                              const yearLabel = labelForTerm(w.term);
                               const statusCls =
                                 w.status === "approved"  ? "bg-emerald-100 text-emerald-700 border-emerald-200" :
                                 w.status === "rejected"  ? "bg-red-100 text-red-700 border-red-200" :
@@ -1524,14 +1527,14 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                               <div className="rounded-md border border-primary/30 bg-primary/5 p-2 space-y-2">
                                 <div className="grid grid-cols-2 gap-2">
                                   <div>
-                                    <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Year</label>
+                                    <label className="block text-[10px] font-medium text-muted-foreground mb-0.5">Period</label>
                                     <select
                                       value={waiverForm.term}
                                       onChange={e => setWaiverForm(p => ({ ...p, term: e.target.value }))}
                                       className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
                                     >
                                       {availableTerms.map(t => (
-                                        <option key={t} value={t}>{t.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}</option>
+                                        <option key={t} value={t}>{labelForTerm(t)}</option>
                                       ))}
                                     </select>
                                   </div>
@@ -1906,7 +1909,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                           <div className="divide-y divide-border/60">
                             {yearTotals.map((year) => (
                               <div key={year.term} className="flex items-center justify-between px-3 py-2">
-                                <span>{year.term.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}</span>
+                                <span>{year.label}</span>
                                 <span className="font-medium">₹{year.total.toLocaleString("en-IN")}</span>
                               </div>
                             ))}

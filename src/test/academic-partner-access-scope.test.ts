@@ -14,6 +14,10 @@ const migration = readFileSync(
   "supabase/migrations/20260626082924_restrict_academic_partner_portal_permissions.sql",
   "utf8",
 );
+const leadAssociationMigration = readFileSync(
+  "supabase/migrations/20260619121300_lead_association_approval_requests.sql",
+  "utf8",
+);
 
 describe("academic partner access scope", () => {
   it("hides and blocks marketing surfaces for academic partners", () => {
@@ -67,9 +71,20 @@ describe("academic partner access scope", () => {
   });
 
   it("keeps leads and applications scoped to the mapped academic partner", () => {
+    expect(portal).toContain("LeadPipeline");
+    expect(portal).toContain("ApplicationFunnelStrip");
+    expect(portal).toContain("ACADEMIC_PARTNER_PIPELINE_LEAD_SELECT");
+    expect(portal).toContain("source, academic_partner_id");
+    expect(portal).toContain("scopePartnerPipelineLeads");
+    expect(portal).toContain("lead.academic_partner_id === partnerId");
     expect(portal).toContain('.eq("academic_partner_id", partnerId)');
+    expect(portal).toContain("Partner-created new leads are mapped on insert");
+    expect(portal).toContain("duplicate existing CRM leads");
     expect(portal).toContain("applicationLeads");
     expect(portal).toContain("No applications found for assigned leads");
+    expect(leadAssociationMigration).toContain("v_existing_lead_id IS NULL");
+    expect(leadAssociationMigration).toContain("CASE WHEN _requester_type = 'academic_partner' THEN _academic_partner_id ELSE NULL END");
+    expect(leadAssociationMigration).toContain("'status', 'pending'");
   });
 
   it("allows cloud calls from the portal only through scoped manual-call authorization", () => {
