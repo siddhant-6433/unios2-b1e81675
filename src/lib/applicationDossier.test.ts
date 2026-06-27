@@ -76,6 +76,18 @@ describe("buildApplicationDossier", () => {
     expect(dossier.anDue).toBe(25000);
   });
 
+  it("treats under-review applications as ready for approval", () => {
+    const dossier = buildApplicationDossier(
+      app({ status: "under_review", payment_status: "paid" }),
+      facts({
+        appFeePaid: 1500,
+        docs: { total: 2, verified: 2, rejected: 0, pending: 0 },
+      }),
+    );
+
+    expect(dossier.nextAction).toBe("approve_application");
+  });
+
   it("surfaces approved orphan applications as create-lead work", () => {
     const dossier = buildApplicationDossier(
       app({ status: "approved", payment_status: "paid" }),

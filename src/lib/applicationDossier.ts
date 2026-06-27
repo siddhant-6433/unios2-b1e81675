@@ -201,7 +201,7 @@ function resolveApplicationDossierNextAction(
   if (lifecycle.app?.payment_status !== "paid") return "collect_application_fee";
   if (lifecycle.app?.status === "draft") return "complete_application";
   if (lifecycle.docs.rejected > 0 && lifecycle.app?.status !== "approved") return "review_documents";
-  if (lifecycle.app?.status === "submitted") return "approve_application";
+  if (lifecycle.app?.status === "submitted" || lifecycle.app?.status === "under_review") return "approve_application";
   if (lifecycle.app?.status === "approved" && !lifecycle.hasOffer) return "issue_offer";
   if (lifecycle.hasOffer && !lifecycle.lead?.pre_admission_no) return "collect_token_fee";
   if (lifecycle.lead?.pre_admission_no && !lifecycle.lead?.admission_no) return "collect_admission_fee";

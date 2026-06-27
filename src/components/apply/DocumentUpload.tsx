@@ -25,6 +25,12 @@ interface DocSpec {
   required: boolean;
 }
 
+const PARENT_AADHAAR_DOCS: DocSpec[] = [
+  { key: 'father_aadhaar', label: 'Father Aadhaar Card', desc: 'JPEG / PNG / PDF (optional)', required: false },
+  { key: 'mother_aadhaar', label: 'Mother Aadhaar Card', desc: 'JPEG / PNG / PDF (optional)', required: false },
+  { key: 'guardian_aadhaar', label: 'Guardian Aadhaar Card', desc: 'JPEG / PNG / PDF (optional)', required: false },
+];
+
 function getRequiredDocs(
   programCategory: string,
   academicDetails?: Record<string, any>,
@@ -48,7 +54,7 @@ function getRequiredDocs(
       { key: 'student_photo', label: 'Student Photograph', desc: 'Passport size photo', required: true },
       { key: 'transfer_certificate', label: 'Transfer Certificate', desc: 'If applicable', required: false },
       { key: 'aadhaar', label: 'Student Aadhaar Card', desc: 'JPEG / PNG / PDF', required: true },
-      { key: 'parent_aadhaar', label: 'Parent / Guardian Aadhaar', desc: 'JPEG / PNG / PDF (optional)', required: false },
+      ...PARENT_AADHAAR_DOCS,
       { key: 'caste_certificate', label: 'Caste Certificate', desc: 'Mandatory for SC / ST / OBC', required: needsCasteCert },
       { key: 'medical_record', label: 'Medical Record', desc: 'If applicable', required: false },
     ];
@@ -115,7 +121,7 @@ function getRequiredDocs(
   // Identity + parent + caste — required across all higher-ed program
   // categories. Caste cert only kicks in for reserved categories.
   base.push({ key: 'aadhaar',           label: 'Student Aadhaar Card',     desc: 'JPEG / PNG / PDF',                  required: true });
-  base.push({ key: 'parent_aadhaar',    label: 'Parent / Guardian Aadhaar', desc: 'JPEG / PNG / PDF (optional)',       required: false });
+  base.push(...PARENT_AADHAAR_DOCS);
   base.push({ key: 'caste_certificate', label: 'Caste Certificate',         desc: 'Mandatory for SC / ST / OBC',       required: needsCasteCert });
 
   // Transfer / Migration Certificate — sourced from the most recent

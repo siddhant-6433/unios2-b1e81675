@@ -41,7 +41,9 @@ describe("application document review access", () => {
   });
 
   it("blocks counsellors from application approval at the database layer", () => {
-    expect(adminApplicationView).toContain('onApprove={canApproveApplication && app.status === "submitted"');
+    expect(adminApplicationView).toContain('const APPROVABLE_APPLICATION_STATUSES = new Set(["submitted", "under_review"])');
+    expect(adminApplicationView).toContain("isApprovableApplicationStatus(app.status)");
+    expect(adminApplicationView).toContain("canApproveApplication && canDecideCurrentApplication");
     expect(applicationDecisionGuard).toContain("guard_application_decision_roles");
     expect(applicationDecisionGuard).toContain("Only principals and super admins can approve or reject applications");
     expect(applicationDecisionGuard).toContain("public.has_role(auth.uid(), 'super_admin')");
