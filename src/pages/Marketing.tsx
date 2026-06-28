@@ -23,6 +23,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { getDatePresetRange, getEndExclusiveIso, type DatePreset } from "@/lib/datePresets";
+import { decideBlockedRoleAccess } from "@/lib/accessPolicy";
 
 type Channel = "whatsapp" | "email";
 
@@ -75,7 +76,7 @@ const fmtDate = (value: string | null) => {
 };
 
 export default function Marketing() {
-  const { role } = useAuth();
+  const { role, realRole, permissions, isImpersonating, user } = useAuth();
   const initialCustomRange = useMemo(() => getDatePresetRange("last_30"), []);
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -281,9 +282,14 @@ export default function Marketing() {
     await load();
   };
 
-  if (role === "academic_partner") {
-    return <Navigate to="/academic-partner-portal" replace />;
-  }
+  const accessDecision = decideBlockedRoleAccess({
+    isAuthenticated: !!user,
+    role,
+    realRole,
+    permissions,
+    isImpersonating,
+  }, ["academic_partner"]);
+  if (accessDecision.allowed === false) return <Navigate to={accessDecision.redirectTo} replace />;
 
   return (
     <div className="space-y-5 p-6">

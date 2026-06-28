@@ -300,7 +300,7 @@ function downloadCsv(filename: string, rows: Record<string, unknown>[]) {
 }
 
 const Library = () => {
-  const { user, role, realRole } = useAuth();
+  const { user, role } = useAuth();
   const { can } = usePermissions();
   const { campuses, selectedCampusId: globalCampusId, selectedCampusName: globalCampusName } = useCampus();
   const { toast } = useToast();
@@ -312,7 +312,7 @@ const Library = () => {
   const canInventory = can("library", "inventory");
   const canDigitize = can("library", "digitize");
   const canManageSettings = can("library", "manage_settings");
-  const canCreateLibrary = role === "super_admin" || role === "campus_admin" || role === "principal" || realRole === "super_admin";
+  const canCreateLibrary = role === "super_admin" || role === "campus_admin" || role === "principal";
   const canExport = can("library", "export");
   const isPatronOnly = !canCatalog && !canCirculate && !canInventory && !canDigitize;
 
@@ -437,7 +437,7 @@ const Library = () => {
     return institutions.filter((institution) => libraryCampusId === "all" || institution.campus_id === libraryCampusId);
   }, [institutions, libraryCampusId]);
 
-  const isLibraryAdministrator = role === "super_admin" || role === "campus_admin" || role === "principal" || realRole === "super_admin";
+  const isLibraryAdministrator = role === "super_admin" || role === "campus_admin" || role === "principal";
   const assignmentScopedUser = role === "librarian" && !isLibraryAdministrator;
   const myAssignedBranchIds = useMemo(() => {
     return new Set(staffAssignments.filter((assignment) => assignment.user_id === user?.id && assignment.active).map((assignment) => assignment.branch_id));

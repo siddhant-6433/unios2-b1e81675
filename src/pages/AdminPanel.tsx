@@ -88,7 +88,7 @@ function timeAgo(dateStr: string): string {
 }
 
 const AdminPanel = () => {
-  const { user: authUser, role, realRole, isImpersonating, startImpersonating, hasPermission, loading: authLoading, roleLoaded } = useAuth();
+  const { user: authUser, role, isImpersonating, startImpersonating, hasPermission, loading: authLoading, roleLoaded } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [users, setUsers] = useState<UserWithRole[]>([]);
@@ -122,54 +122,30 @@ const AdminPanel = () => {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      let profileQuery = supabase
-        .from("profiles")
-        .select("id, user_id, display_name, email, phone, campus, updated_at, login_disabled, last_seen_at, archived_at")
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false });
-
-      profileQuery = showArchivedUsers
-        ? profileQuery.not("archived_at", "is", null)
-        : profileQuery.is("archived_at", null);
-
-      const { data: profiles, error: profileError } = await profileQuery;
-
-      if (profileError) {
-        toast({ title: "Error loading profiles", description: profileError.message, variant: "destructive" });
-        return;
-      }
-
-      const [{ data: roles, error: roleError }, { data: authInfo }] = await Promise.all([
-        supabase.from("user_roles").select("id, user_id, role"),
-        supabase.rpc("get_user_auth_info" as any).then((r: any) => r).catch(() => ({ data: [], error: null })),
-      ]);
-
-      if (roleError) {
-        toast({ title: "Error loading roles", description: roleError.message, variant: "destructive" });
-        return;
-      }
-
-      const authMap: Record<string, string | null> = {};
-      (authInfo || []).forEach((a: any) => { authMap[a.user_id] = a.last_sign_in_at; });
-
-      const merged: UserWithRole[] = (profiles || []).map((p: any) => {
-        const userRole = (roles || []).find((r) => r.user_id === p.user_id);
-        return {
-          user_id: p.user_id,
-          profile_id: p.id,
-          display_name: p.display_name,
-          email: p.email || null,
-          phone: p.phone,
-          campus: p.campus,
-          role: userRole?.role ?? null,
-          role_id: userRole?.id ?? null,
-          last_sign_in_at: authMap[p.user_id] || null,
-          profile_updated_at: p.updated_at || null,
-          login_disabled: !!p.login_disabled,
-          last_seen_at: p.last_seen_at || null,
-          archived_at: p.archived_at || null,
-        };
+      const { data, error } = await supabase.rpc("admin_user_directory" as any, {
+        _show_archived: showArchivedUsers,
       });
+
+      if (error) {
+        toast({ title: "Error loading users", description: error.message, variant: "destructive" });
+        return;
+      }
+
+      const merged: UserWithRole[] = ((data || []) as any[]).map((row) => ({
+        user_id: row.user_id,
+        profile_id: row.profile_id,
+        display_name: row.display_name,
+        email: row.email || null,
+        phone: row.phone,
+        campus: row.campus,
+        role: row.role ?? null,
+        role_id: row.role_id ?? null,
+        last_sign_in_at: row.last_sign_in_at || null,
+        profile_updated_at: row.profile_updated_at || null,
+        login_disabled: !!row.login_disabled,
+        last_seen_at: row.last_seen_at || null,
+        archived_at: row.archived_at || null,
+      }));
 
       setUsers(merged);
     } catch (err: any) {
@@ -180,7 +156,7 @@ const AdminPanel = () => {
     }
   };
 
-  const isSuperAdmin = realRole === "super_admin" || role === "super_admin";
+  const isSuperAdmin = role === "super_admin";
   const canManageUsers = isSuperAdmin || hasPermission("user_management:view");
 
   const fetchPublishers = async () => {

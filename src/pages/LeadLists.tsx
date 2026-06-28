@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { WA_BULK_TEMPLATES } from "@/config/waBulkTemplates";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
+import { decideBlockedRoleAccess } from "@/lib/accessPolicy";
 
 const BulkLeadImportDialog = lazy(() =>
   import("@/components/admissions/BulkLeadImportDialog").then((m) => ({ default: m.BulkLeadImportDialog })));
@@ -209,7 +210,7 @@ const WhatsAppBusinessIdentity = ({
 
 export default function LeadLists() {
   const { toast } = useToast();
-  const { profile, role } = useAuth();
+  const { profile, role, realRole, permissions, isImpersonating, user } = useAuth();
   const [lists, setLists] = useState<LeadList[]>([]);
   const [loading, setLoading] = useState(true);
   const [importOpen, setImportOpen] = useState(false);
@@ -739,9 +740,14 @@ export default function LeadLists() {
     await fetchLists();
   };
 
-  if (role === "academic_partner") {
-    return <Navigate to="/academic-partner-portal" replace />;
-  }
+  const accessDecision = decideBlockedRoleAccess({
+    isAuthenticated: !!user,
+    role,
+    realRole,
+    permissions,
+    isImpersonating,
+  }, ["academic_partner"]);
+  if (accessDecision.allowed === false) return <Navigate to={accessDecision.redirectTo} replace />;
 
   return (
     <div className="space-y-6 animate-fade-in">

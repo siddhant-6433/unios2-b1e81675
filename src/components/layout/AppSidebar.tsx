@@ -16,6 +16,7 @@ import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { supabase } from "@/integrations/supabase/client";
+import { canSeePolicyItem, type AccessState } from "@/lib/accessPolicy";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
   SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem,
@@ -188,34 +189,16 @@ export function AppSidebar() {
   const roleLabel = role ? (roleLabels[role] || role) : "User";
   const initials = displayName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
 
-  const { can } = usePermissions();
+  const { permissions } = usePermissions();
+  const accessState: AccessState = {
+    isAuthenticated: !!user,
+    role,
+    realRole,
+    permissions,
+    isImpersonating,
+  };
   const canSee = (item: MenuItem) => {
-    // When impersonating, always show User Management so admin can navigate back
-    if (isImpersonating && realRole === "super_admin" && item.url === "/admin") return true;
-    if (role && item.blockedRoles?.includes(role)) return false;
-    if (role === "academic_partner") {
-      if (item.roles?.includes("academic_partner")) return true;
-      return item.permission === "academic_partner_portal:view";
-    }
-    // Role-specific portals: hide from super_admin when not impersonating
-    if (item.hideForSuperAdmin && realRole === "super_admin" && !isImpersonating) return false;
-    // anyPermission: show if the user has at least one of the listed perms.
-    // Used by consolidated entries like "Admin Panel" that fold multiple
-    // tabs (course-campus / user-management / permissions) into a single
-    // sidebar link, where accountants might have only user_management
-    // and counsellors might have only campuses_courses.
-    if (item.anyPermission && item.anyPermission.length > 0) {
-      const hasAnyPermission = item.anyPermission.some(p => {
-        const [mod, act] = p.split(":");
-        return can(mod, act);
-      });
-      if (hasAnyPermission) return true;
-      if (!item.roles) return false;
-    }
-    if (item.roles && role) return item.roles.includes(role);
-    if (!item.permission) return true;
-    const [mod, act] = item.permission.split(":");
-    return can(mod, act);
+    return canSeePolicyItem(accessState, item);
   };
 
   // WhatsApp unread count
