@@ -43,6 +43,10 @@ const COURSE_VIDEO_MAP: { pattern: RegExp; url: string; label: string }[] = [
   { pattern: /mirai|mes|pyp|myp|eyp|montessori|ib/i, url: "https://www.instagram.com/p/DXMsuIBgYwF/", label: "Mirai School" },
 ];
 const DEFAULT_VIDEO_URL = "https://youtu.be/CyLpFGx67u4?si=7CepKXL3Dm2GfmaK";
+const CUET_2026_COUNSELLING_IMAGE_URL =
+  "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/whatsapp-media/template-assets/cuet_2026_counselling_open.jpeg";
+const CUET_2026_COUNSELLING_PREVIEW =
+  "The CUET 2026 result is out, and admission counselling is now open at NIMT.\n\nIf you're planning your next step after CUET, we're here to help.\n\nDuring your counselling session, our admission expert will guide you with:\n\n• Choosing the right course for your career goals\n• Scholarship opportunities based on your CUET score\n• Admission process, eligibility, fees, and required documents\n• Placements, internships, and career opportunities\n\nWe look forward to helping you build a successful future.\n\nTeam NIMT Educational Institutions";
 
 const getVideoUrl = (courseName?: string, campusName?: string): string => {
   const text = `${courseName || ""} ${campusName || ""}`;
@@ -88,6 +92,16 @@ const TEMPLATES = [
     followUpMsg: null,
     buildParams: (lead: any) => [lead.name],
     preview: "Dear {{1}}\n\nCNET result is declared. If you have NOT qualified, you can still choose healthcare career options: *BPT* or *BMRIT*.\n\nLast date: *14th June 2026*.\n\nBoth are mandatory:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667691872, 9555192192\n\n---\n\nप्रिय {{1}}\n\nCNET result आ गया है। यदि आप qualify नहीं हुए हैं, तब भी healthcare career के लिए *BPT* या *BMRIT* option है।\n\nLast date: *14th June 2026*.\n\nदोनों mandatory हैं:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667691872, 9555192192",
+  },
+  {
+    key: "cuet_2026_counselling_open",
+    label: "CUET 2026 Counselling Open",
+    description: "CUET result follow-up with counselling guidance",
+    badge: "CUET",
+    followUpMsg: null,
+    buildParams: () => [],
+    headerImageUrl: CUET_2026_COUNSELLING_IMAGE_URL,
+    preview: CUET_2026_COUNSELLING_PREVIEW,
   },
   {
     key: "course_details",
@@ -299,7 +313,14 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
         const response = await fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
           method: "POST",
           headers: authHeaders,
-          body: JSON.stringify({ template_key: selectedTemplate, phone: lead.phone, params, lead_id: lead.id, ...(button_urls ? { button_urls } : {}) }),
+          body: JSON.stringify({
+            template_key: selectedTemplate,
+            phone: lead.phone,
+            params,
+            lead_id: lead.id,
+            ...(button_urls ? { button_urls } : {}),
+            ...((selectedTmpl as any).headerImageUrl ? { header_image_url: (selectedTmpl as any).headerImageUrl } : {}),
+          }),
         });
         const responseBody = await response.json().catch(() => ({ error: "Invalid response" }));
         if (!response.ok) {

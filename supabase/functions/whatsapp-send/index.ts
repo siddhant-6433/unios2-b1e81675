@@ -12,6 +12,9 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const CUET_2026_COUNSELLING_IMAGE_URL =
+  "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/whatsapp-media/template-assets/cuet_2026_counselling_open.jpeg";
+
 function cahetDeadlineMessage(): string {
   const bodyDate = "14th June 2026";
   const prefix = "";
@@ -60,7 +63,7 @@ Help: 7428499849, 9667691872, 9555192192`;
 }
 
 // Template definitions with their expected parameters
-const TEMPLATES: Record<string, { name: string; params: string[] }> = {
+const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl?: string }> = {
   lead_welcome: { name: "admissions_lead_intro", params: ["student_name", "course_name", "lead_source"] },
   visit_confirmation: { name: "visit_confirmed", params: ["student_name", "visit_date", "campus_name"] },
   visit_reminder_24hr: { name: "visit_reminder", params: ["student_name", "visit_date", "campus_name"] },
@@ -79,6 +82,7 @@ const TEMPLATES: Record<string, { name: string; params: string[] }> = {
   course_info_video_v2: { name: "course_info_video_v2", params: ["student_name", "course_label", "course_url", "campus_url", "apply_url"] },
   bpt_bmrit_cahet_deadline: { name: "bpt_bmrit_cahet_deadline", params: [] },
   cnet_not_qualified_bpt_bmrit: { name: "cnet_not_qualified_bpt_bmrit", params: ["student_name"] },
+  cuet_2026_counselling_open: { name: "cuet_2026_counselling_open", params: [], headerImageUrl: CUET_2026_COUNSELLING_IMAGE_URL },
   // Counsellor utility — tap-to-call link sent to counsellor's own phone
   counsellor_call_lead: { name: "lead_queue_item", params: ["counsellor_name", "lead_name", "lead_phone", "course"] },
   // Call disposition auto-replies to leads
@@ -313,6 +317,7 @@ Deno.serve(async (req) => {
     const {
       phone,
       lead_id,
+      header_image_url,
       header_video_url,
       header_document_url,
       header_document_filename,
@@ -541,6 +546,7 @@ Deno.serve(async (req) => {
 
     const phoneRoute = getRouteForTemplate(template_key);
     const channelRoute: WhatsAppChannelRoute = phoneRoute === "default" ? "admissions" : phoneRoute;
+    const effectiveHeaderImageUrl = header_image_url || templateDef.headerImageUrl;
 
     // Build template components
     const waPhone = phone.replace(/[^0-9]/g, "");
@@ -565,6 +571,11 @@ Deno.serve(async (req) => {
       components.push({
         type: "header",
         parameters: [{ type: "video", video: { link: header_video_url } }],
+      });
+    } else if (effectiveHeaderImageUrl) {
+      components.push({
+        type: "header",
+        parameters: [{ type: "image", image: { link: effectiveHeaderImageUrl } }],
       });
     }
 
@@ -636,6 +647,7 @@ Deno.serve(async (req) => {
       application_rejected: "Dear {{1}}, after review we are unable to proceed with your application {{2}}. Reason: {{3}}. Please contact our admissions office if you'd like to discuss alternatives.",
       application_approved: "Congratulations {{1}}! Your application {{2}} for {{3}} has been approved. Our admissions team will be in touch with your offer letter shortly. Tap below to track your application in the apply portal.",
       applicant_welcome: "Hi {{1}}, thank you for starting your application at NIMT Educational Institutions!\n\nYour Application ID: {{2}}\nCourse: {{3}}\n\nComplete your application at https://uni.nimt.ac.in/apply/nimt/\n\nOur admissions team is here to help. Feel free to reach out anytime!",
+      cuet_2026_counselling_open: "The CUET 2026 result is out, and admission counselling is now open at NIMT.\n\nIf you're planning your next step after CUET, we're here to help.\n\nDuring your counselling session, our admission expert will guide you with:\n\n• Choosing the right course for your career goals\n• Scholarship opportunities based on your CUET score\n• Admission process, eligibility, fees, and required documents\n• Placements, internships, and career opportunities\n\nWe look forward to helping you build a successful future.\n\nTeam NIMT Educational Institutions",
       ai_call_course_info: "Hi {{1}}, thank you for speaking with us about {{2}} at NIMT Educational Institutions! 🎓\n\n🏫 Campus: {{3}}\n\n📄 Course Details: {{4}}\n📝 Apply Now: {{5}}\n\nFor questions, reply to this message or call our admissions team.\n\nWe look forward to welcoming you!",
       ai_call_post_summary: "Hi {{1}}, as discussed on our call, here are the details for {{2}} at NIMT Educational Institutions:\n\n🏫 Campus: {{3}}\n📄 Course details: {{4}}\n📝 Apply now: {{5}}\n🎥 Watch course video: {{6}}\n\nReply to this message for any questions, or our admissions team will reach out shortly.",
       ai_missed_call_followup: "Hi {{1}}, this is Navya from NIMT Educational Institutions. I tried calling you regarding your enquiry about {{2}}.\n\nPlease feel free to call back at {{3}} during 9 AM-8 PM IST.\n\n📄 Course information: {{4}}\n🎥 Watch course video: {{5}}\n\nLooking forward to assisting you with your admission journey.",
