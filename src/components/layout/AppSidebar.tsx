@@ -200,6 +200,12 @@ export function AppSidebar() {
   const canSee = (item: MenuItem) => {
     return canSeePolicyItem(accessState, item);
   };
+  const canViewSettings = canSeePolicyItem(accessState, {
+    title: "Settings",
+    url: "/settings",
+    icon: Settings,
+    permission: "user_management:view",
+  });
 
   // WhatsApp unread count
   const [waUnread, setWaUnread] = useState(0);
@@ -627,7 +633,7 @@ export function AppSidebar() {
 
         {/* Bottom: Settings + Account */}
         <div className="mt-auto">
-          {can("user_management", "view") && (
+          {canViewSettings && (
           <SidebarGroup>
             <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/50 px-4 mb-0.5">
               Settings
