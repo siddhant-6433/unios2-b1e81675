@@ -45,6 +45,11 @@ type Partner = {
   email: string | null;
   status: string;
   default_payout_percentage: number;
+  minimum_guarantee_year1: number;
+  minimum_guarantee_year2: number;
+  minimum_guarantee_year3: number;
+  lock_in_years: number;
+  lock_in_start_date: string | null;
   notes: string | null;
   logo_url: string | null;
   company_name: string | null;
@@ -69,10 +74,44 @@ type Dashboard = {
   assigned_courses: number;
   assigned_batches: number;
   total_leads: number;
+  conversions: number;
+  pipeline: number;
   total_candidates: number;
   total_fee_collected: number;
   total_payout: number;
   pending_payout: number;
+  paid_payout: number;
+  minimum_guarantee_year1: number;
+  minimum_guarantee_year2: number;
+  minimum_guarantee_year3: number;
+  lock_in_years: number;
+  lock_in_start_date: string | null;
+};
+
+type PartnerStudent = {
+  partner_id: string;
+  student_id: string;
+  lead_id: string | null;
+  student_name: string;
+  admission_no: string | null;
+  status: string;
+  course_name: string | null;
+  batch_name: string | null;
+  fee_total: number;
+  fee_paid: number;
+  fee_balance: number;
+};
+type PartnerStudentsClient = {
+  from: (
+    table: "academic_partner_students",
+  ) => {
+    select: (columns: string) => {
+      order: (
+        column: string,
+        options?: { ascending?: boolean },
+      ) => Promise<{ data: PartnerStudent[] | null; error: { message: string } | null }>;
+    };
+  };
 };
 
 type Assignment = {
@@ -208,6 +247,20 @@ const docTypeLabel: Record<string, string> = {
   brochure: "Brochure",
   additional: "Additional",
 };
+const humanize = (value: string | null | undefined) =>
+  (value || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase()) || "Unknown";
+const stageBadgeClass = (stage: string | null | undefined) => {
+  if (stage === "admitted") return "bg-emerald-100 text-emerald-700";
+  if (stage === "rejected" || stage === "lost") return "bg-rose-100 text-rose-700";
+  return "bg-sky-100 text-sky-700";
+};
+const studentStatusBadgeClass = (status: string | null | undefined) => {
+  if (status === "active") return "bg-emerald-100 text-emerald-700";
+  if (status === "inactive" || status === "dropped") return "bg-rose-100 text-rose-700";
+  return "bg-amber-100 text-amber-700";
+};
 const ONBOARDING_STEPS = ["Company", "Tax", "Signatory", "Documents"] as const;
 const ONBOARDING_DOC_TYPES: { value: OnboardingDocType; label: string; required?: boolean }[] = [
   { value: "agreement", label: "Agreement", required: true },
@@ -262,6 +315,7 @@ export default function AcademicPartners() {
   const [dashboard, setDashboard] = useState<Dashboard[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [partnerDocuments, setPartnerDocuments] = useState<PartnerDocument[]>([]);
+  const [partnerStudents, setPartnerStudents] = useState<PartnerStudent[]>([]);
   const [leads, setLeads] = useState<LeadOption[]>([]);
   const [courses, setCourses] = useState<{ id: string; name: string }[]>([]);
   const [batches, setBatches] = useState<{ id: string; name: string; course_id: string }[]>([]);
@@ -272,6 +326,7 @@ export default function AcademicPartners() {
   const [showLeadAssignment, setShowLeadAssignment] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showPayoutEdit, setShowPayoutEdit] = useState(false);
+  const [detailPartnerId, setDetailPartnerId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [assignmentPartnerId, setAssignmentPartnerId] = useState<string | null>(null);
   const [leadAssignmentPartnerId, setLeadAssignmentPartnerId] = useState<string | null>(null);
@@ -288,6 +343,9 @@ export default function AcademicPartners() {
     email: "",
     status: "active",
     default_payout_percentage: "0",
+    minimum_guarantee_year1: "0",
+    minimum_guarantee_year2: "0",
+    minimum_guarantee_year3: "0",
     user_id: "",
     notes: "",
     logo_url: "",
@@ -301,7 +359,7 @@ export default function AcademicPartners() {
 
   const fetchAll = async () => {
     setLoading(true);
-    const [partnersRes, dashboardRes, assignmentsRes, coursesRes, batchesRes, rolesRes, leadsRes, documentsRes] = await Promise.all([
+    const [partnersRes, dashboardRes, assignmentsRes, coursesRes, batchesRes, rolesRes, leadsRes, documentsRes, studentsRes] = await Promise.all([
       supabase.from("academic_partners").select("*").order("created_at", { ascending: false }),
       supabase.from("academic_partner_dashboard").select("*").order("partner_name"),
       supabase.from("academic_partner_assignment_summary").select("*").order("course_name"),
@@ -317,6 +375,10 @@ export default function AcademicPartners() {
         .from("academic_partner_documents")
         .select("id, partner_id, document_type, title, file_name, file_path, created_at")
         .order("created_at", { ascending: false }),
+      (supabase as unknown as PartnerStudentsClient)
+        .from("academic_partner_students")
+        .select("partner_id, student_id, lead_id, student_name, admission_no, status, course_name, batch_name, fee_total, fee_paid, fee_balance")
+        .order("created_at", { ascending: false }),
     ]);
 
     const roleUserIds = ((rolesRes.data || []) as PartnerRole[]).map((r) => r.user_id);
@@ -330,6 +392,7 @@ export default function AcademicPartners() {
     setDashboard((dashboardRes.data || []) as Dashboard[]);
     setAssignments((assignmentsRes.data || []) as Assignment[]);
     setPartnerDocuments((documentsRes.data || []) as PartnerDocument[]);
+    setPartnerStudents((studentsRes.data || []) as PartnerStudent[]);
     setLeads((leadsRes.data || []) as LeadOption[]);
     setCourses(coursesRes.data || []);
     setBatches((batchesRes.data || []) as { id: string; name: string; course_id: string }[]);
@@ -353,6 +416,23 @@ export default function AcademicPartners() {
     return map;
   }, [partnerDocuments]);
 
+  const studentsByPartner = useMemo(() => {
+    const map = new Map<string, PartnerStudent[]>();
+    partnerStudents.forEach((student) => {
+      map.set(student.partner_id, [...(map.get(student.partner_id) || []), student]);
+    });
+    return map;
+  }, [partnerStudents]);
+
+  const leadsByPartner = useMemo(() => {
+    const map = new Map<string, LeadOption[]>();
+    leads.forEach((lead) => {
+      if (!lead.academic_partner_id) return;
+      map.set(lead.academic_partner_id, [...(map.get(lead.academic_partner_id) || []), lead]);
+    });
+    return map;
+  }, [leads]);
+
   const filtered = partners.filter((partner) => {
     const q = search.toLowerCase();
     return !q || partner.name.toLowerCase().includes(q) || (partner.organization || "").toLowerCase().includes(q) || (partner.email || "").toLowerCase().includes(q);
@@ -364,7 +444,7 @@ export default function AcademicPartners() {
     if (logoPreview?.startsWith("blob:")) URL.revokeObjectURL(logoPreview);
     setLogoFile(null);
     setLogoPreview(null);
-    setForm({ name: "", organization: "", phone: "", email: "", status: "active", default_payout_percentage: "0", user_id: "", notes: "", logo_url: "" });
+    setForm({ name: "", organization: "", phone: "", email: "", status: "active", default_payout_percentage: "0", minimum_guarantee_year1: "0", minimum_guarantee_year2: "0", minimum_guarantee_year3: "0", user_id: "", notes: "", logo_url: "" });
   };
 
   const openEdit = (partner: Partner) => {
@@ -379,6 +459,9 @@ export default function AcademicPartners() {
       email: partner.email || "",
       status: partner.status,
       default_payout_percentage: String(partner.default_payout_percentage || 0),
+      minimum_guarantee_year1: String(partner.minimum_guarantee_year1 || 0),
+      minimum_guarantee_year2: String(partner.minimum_guarantee_year2 || 0),
+      minimum_guarantee_year3: String(partner.minimum_guarantee_year3 || 0),
       user_id: partner.user_id || "",
       notes: partner.notes || "",
       logo_url: partner.logo_url || "",
@@ -447,6 +530,9 @@ export default function AcademicPartners() {
         email: form.email.trim() || null,
         status: form.status,
         default_payout_percentage: canManagePayout ? nextDefaultPayout : currentDefaultPayout,
+        minimum_guarantee_year1: canManagePayout ? Number(form.minimum_guarantee_year1) || 0 : (currentPartner?.minimum_guarantee_year1 ?? 0),
+        minimum_guarantee_year2: canManagePayout ? Number(form.minimum_guarantee_year2) || 0 : (currentPartner?.minimum_guarantee_year2 ?? 0),
+        minimum_guarantee_year3: canManagePayout ? Number(form.minimum_guarantee_year3) || 0 : (currentPartner?.minimum_guarantee_year3 ?? 0),
         user_id: form.user_id || null,
         notes: form.notes.trim() || null,
         logo_url: logoUrl,
@@ -807,16 +893,32 @@ export default function AcademicPartners() {
                     <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => openLeadAssignment(partner.id)}>
                       <UserPlus className="h-3.5 w-3.5" /> Assign Lead
                     </Button>
+                    <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setDetailPartnerId(partner.id)}>
+                      <Users className="h-3.5 w-3.5" /> Leads &amp; Students
+                    </Button>
                     <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(partner)}><Pencil className="h-4 w-4" /></Button>
                   </div>
                 </div>
 
-                <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div><p className="text-lg font-bold">{row?.assigned_batches || 0}</p><p className="text-xs text-muted-foreground">Batches</p></div>
-                  <div><p className="text-lg font-bold">{row?.total_candidates || 0}</p><p className="text-xs text-muted-foreground">Candidates</p></div>
+                <div className="mt-4 grid grid-cols-3 md:grid-cols-6 gap-3">
+                  <div><p className="text-lg font-bold">{row?.total_leads || 0}</p><p className="text-xs text-muted-foreground">Leads</p></div>
+                  <div><p className="text-lg font-bold text-sky-600">{row?.pipeline || 0}</p><p className="text-xs text-muted-foreground">In Pipeline</p></div>
+                  <div><p className="text-lg font-bold text-emerald-600">{row?.conversions || 0}</p><p className="text-xs text-muted-foreground">Admitted</p></div>
+                  <div><p className="text-lg font-bold">{row?.total_candidates || 0}</p><p className="text-xs text-muted-foreground">Students</p></div>
                   <div><p className="text-lg font-bold">{fmt(row?.total_fee_collected)}</p><p className="text-xs text-muted-foreground">Fee</p></div>
-                  <div><p className="text-lg font-bold">{fmt(row?.pending_payout)}</p><p className="text-xs text-muted-foreground">Payout</p></div>
+                  <div><p className="text-lg font-bold">{fmt(row?.pending_payout)}</p><p className="text-xs text-muted-foreground">Pending Payout</p></div>
                 </div>
+
+                {canManagePayout && Number(partner.minimum_guarantee_year1 || 0) + Number(partner.minimum_guarantee_year2 || 0) + Number(partner.minimum_guarantee_year3 || 0) > 0 && (
+                  <div className="mt-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
+                    <p className="text-[11px] font-semibold uppercase text-muted-foreground">Minimum Guarantee · {Number(partner.default_payout_percentage || 0)}% payout</p>
+                    <div className="mt-1.5 grid grid-cols-3 gap-2 text-xs">
+                      <div><span className="text-muted-foreground">Yr 1</span><p className="font-semibold">{fmt(partner.minimum_guarantee_year1)}</p></div>
+                      <div><span className="text-muted-foreground">Yr 2</span><p className="font-semibold">{fmt(partner.minimum_guarantee_year2)}</p></div>
+                      <div><span className="text-muted-foreground">Yr 3</span><p className="font-semibold">{fmt(partner.minimum_guarantee_year3)}</p></div>
+                    </div>
+                  </div>
+                )}
 
                 <div className="mt-4 border-t border-border/50 pt-3">
                   <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground">
@@ -951,6 +1053,29 @@ export default function AcademicPartners() {
                 </select>
               </div>
             </div>
+            {canManagePayout && (
+              <div className="rounded-xl border border-border/60 bg-muted/20 p-3">
+                <p className="text-[11px] font-semibold uppercase text-muted-foreground">Minimum Guarantee (per agreement)</p>
+                <p className="mt-0.5 text-[10px] text-muted-foreground">Lock-in guarantee of academic revenue share over the agreement term.</p>
+                <div className="mt-2 grid grid-cols-3 gap-3">
+                  {([1, 2, 3] as const).map((year) => {
+                    const field = `minimum_guarantee_year${year}` as const;
+                    return (
+                      <div key={year}>
+                        <label className="block text-[11px] font-medium text-muted-foreground mb-1">Year {year} (₹)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={form[field]}
+                          onChange={(e) => setForm((p) => ({ ...p, [field]: e.target.value }))}
+                          className={inputCls}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">Linked User Account</label>
               <select value={form.user_id} onChange={(e) => setForm((p) => ({ ...p, user_id: e.target.value }))} className={inputCls}>
@@ -1302,6 +1427,119 @@ export default function AcademicPartners() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={Boolean(detailPartnerId)} onOpenChange={(open) => { if (!open) setDetailPartnerId(null); }}>
+        <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
+          {(() => {
+            const partner = detailPartnerId ? partners.find((p) => p.id === detailPartnerId) : null;
+            if (!partner) return null;
+            const row = dashboardByPartner.get(partner.id);
+            const detailLeads = leadsByPartner.get(partner.id) || [];
+            const detailStudents = studentsByPartner.get(partner.id) || [];
+            const detailStats = [
+              { label: "Leads", value: row?.total_leads ?? detailLeads.length },
+              { label: "In Pipeline", value: row?.pipeline ?? 0 },
+              { label: "Admitted", value: row?.conversions ?? 0 },
+              { label: "Students", value: detailStudents.length },
+              { label: "Fee Collected", value: fmt(row?.total_fee_collected) },
+              ...(canManagePayout ? [{ label: "Pending Payout", value: fmt(row?.pending_payout) }] : []),
+            ];
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle>{partner.name} · Leads &amp; Students</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-5">
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                    {detailStats.map((stat) => (
+                      <div key={stat.label} className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
+                        <p className="text-base font-bold text-foreground">{stat.value}</p>
+                        <p className="text-[11px] text-muted-foreground">{stat.label}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div>
+                    <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground">
+                      <UserPlus className="h-3.5 w-3.5" /> Leads ({detailLeads.length})
+                    </p>
+                    {detailLeads.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No leads owned by this partner yet.</p>
+                    ) : (
+                      <div className="overflow-hidden rounded-lg border border-border/60">
+                        <table className="w-full text-left text-sm">
+                          <thead className="bg-muted/40 text-[11px] uppercase text-muted-foreground">
+                            <tr>
+                              <th className="px-3 py-2 font-medium">Name</th>
+                              <th className="px-3 py-2 font-medium">Contact</th>
+                              <th className="px-3 py-2 font-medium">Course</th>
+                              <th className="px-3 py-2 font-medium">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border/50">
+                            {detailLeads.map((lead) => (
+                              <tr key={lead.id}>
+                                <td className="px-3 py-2 font-medium text-foreground">{lead.name}</td>
+                                <td className="px-3 py-2 text-muted-foreground">{lead.phone || lead.email || "—"}</td>
+                                <td className="px-3 py-2 text-muted-foreground">{lead.courses?.name || "—"}</td>
+                                <td className="px-3 py-2">
+                                  <Badge className={`border-0 text-[10px] ${stageBadgeClass(lead.stage)}`}>{humanize(lead.stage)}</Badge>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground">
+                      <GraduationCap className="h-3.5 w-3.5" /> Students ({detailStudents.length})
+                    </p>
+                    {detailStudents.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No enrolled students from this partner yet.</p>
+                    ) : (
+                      <div className="overflow-hidden rounded-lg border border-border/60">
+                        <table className="w-full text-left text-sm">
+                          <thead className="bg-muted/40 text-[11px] uppercase text-muted-foreground">
+                            <tr>
+                              <th className="px-3 py-2 font-medium">Name</th>
+                              <th className="px-3 py-2 font-medium">Course / Batch</th>
+                              <th className="px-3 py-2 font-medium">Status</th>
+                              <th className="px-3 py-2 font-medium text-right">Fee Paid</th>
+                              <th className="px-3 py-2 font-medium text-right">Balance</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border/50">
+                            {detailStudents.map((student) => (
+                              <tr key={student.student_id}>
+                                <td className="px-3 py-2">
+                                  <p className="font-medium text-foreground">{student.student_name || "Unnamed"}</p>
+                                  {student.admission_no && <p className="text-[11px] text-muted-foreground">{student.admission_no}</p>}
+                                </td>
+                                <td className="px-3 py-2 text-muted-foreground">
+                                  {student.course_name || "—"}
+                                  {student.batch_name ? ` · ${student.batch_name}` : ""}
+                                </td>
+                                <td className="px-3 py-2">
+                                  <Badge className={`border-0 text-[10px] ${studentStatusBadgeClass(student.status)}`}>{humanize(student.status)}</Badge>
+                                </td>
+                                <td className="px-3 py-2 text-right text-foreground">{fmt(student.fee_paid)}</td>
+                                <td className="px-3 py-2 text-right text-muted-foreground">{fmt(student.fee_balance)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

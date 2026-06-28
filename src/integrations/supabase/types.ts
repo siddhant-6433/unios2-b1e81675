@@ -180,9 +180,14 @@ export type Database = {
           email: string | null
           gst_number: string | null
           id: string
+          lock_in_start_date: string | null
+          lock_in_years: number
           logo_file_path: string | null
           logo_uploaded_at: string | null
           logo_url: string | null
+          minimum_guarantee_year1: number
+          minimum_guarantee_year2: number
+          minimum_guarantee_year3: number
           name: string
           notes: string | null
           onboarding_completed_at: string | null
@@ -208,9 +213,14 @@ export type Database = {
           email?: string | null
           gst_number?: string | null
           id?: string
+          lock_in_start_date?: string | null
+          lock_in_years?: number
           logo_file_path?: string | null
           logo_uploaded_at?: string | null
           logo_url?: string | null
+          minimum_guarantee_year1?: number
+          minimum_guarantee_year2?: number
+          minimum_guarantee_year3?: number
           name: string
           notes?: string | null
           onboarding_completed_at?: string | null
@@ -236,9 +246,14 @@ export type Database = {
           email?: string | null
           gst_number?: string | null
           id?: string
+          lock_in_start_date?: string | null
+          lock_in_years?: number
           logo_file_path?: string | null
           logo_uploaded_at?: string | null
           logo_url?: string | null
+          minimum_guarantee_year1?: number
+          minimum_guarantee_year2?: number
+          minimum_guarantee_year3?: number
           name?: string
           notes?: string | null
           onboarding_completed_at?: string | null
