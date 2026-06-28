@@ -61,7 +61,8 @@ import { useCallQueue } from "@/hooks/useCallQueue";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLeadDetail, useCampuses, useCourses, useMyProfileId } from "@/hooks/useAdmissionsData";
 import { STAGE_LABELS, STAGE_ORDER, shouldAutoAdvance } from "@/lib/leadStages";
-import { leadTransitionStagePatch, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
+import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
+import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 
 // Score points for each disposition (mirrors DB trigger)
 const DISPOSITION_POINTS: Record<string, { points: number; label: string }> = {
@@ -636,26 +637,28 @@ const LeadDetail = () => {
       command: "adminOverrideStage",
       targetStage: newStage,
     });
-    const { error } = await supabase.from("leads").update(leadTransitionStagePatch(transition) as any).eq("id", id);
-    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
-    await supabase.from("lead_activities").insert({
-      lead_id: id, user_id: profileId, type: "stage_change",
-      description: `Stage changed from ${STAGE_LABELS[lead.stage] || lead.stage} to ${STAGE_LABELS[newStage] || newStage}`,
-      old_stage: lead.stage as any, new_stage: newStage as any,
-    });
+    try {
+      await applyResolvedLeadTransition(supabase as any, {
+        leadId: id,
+        transition,
+        reason: `Stage changed from ${STAGE_LABELS[lead.stage] || lead.stage} to ${STAGE_LABELS[newStage] || newStage}`,
+      });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      return;
+    }
     await fetchAll(true);
   };
 
   const markAsDnc = async () => {
     if (!id || !lead || lead.stage === "dnc") return;
     const transition = resolveLeadTransitionCommand({ currentStage: lead.stage, command: "markDnc" });
-    const { error } = await supabase.from("leads").update(leadTransitionStagePatch(transition) as any).eq("id", id);
-    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
-    await supabase.from("lead_activities").insert({
-      lead_id: id, user_id: profileId, type: "stage_change",
-      description: transition.activityDescription,
-      old_stage: lead.stage as any, new_stage: "dnc" as any,
-    });
+    try {
+      await applyResolvedLeadTransition(supabase as any, { leadId: id, transition });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      return;
+    }
     // Send DNC acknowledgment via WhatsApp if phone available
     if (lead.phone) {
       try {
@@ -675,13 +678,12 @@ const LeadDetail = () => {
   const unmarkDnc = async () => {
     if (!id || !lead || lead.stage !== "dnc") return;
     const transition = resolveLeadTransitionCommand({ currentStage: lead.stage, command: "restoreFromDnc" });
-    const { error } = await supabase.from("leads").update(leadTransitionStagePatch(transition) as any).eq("id", id);
-    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
-    await supabase.from("lead_activities").insert({
-      lead_id: id, user_id: profileId, type: "stage_change",
-      description: transition.activityDescription,
-      old_stage: "dnc" as any, new_stage: "new_lead" as any,
-    });
+    try {
+      await applyResolvedLeadTransition(supabase as any, { leadId: id, transition });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      return;
+    }
     toast({ title: "DNC removed", description: "Lead restored to New Lead." });
     await fetchAll(true);
   };
@@ -695,11 +697,10 @@ const LeadDetail = () => {
         command: "adminOverrideStage",
         targetStage,
       });
-      await supabase.from("leads").update(leadTransitionStagePatch(transition) as any).eq("id", id);
-      await supabase.from("lead_activities").insert({
-        lead_id: id, user_id: profileId, type: "stage_change",
-        description: `Stage auto-advanced from ${STAGE_LABELS[lead.stage] || lead.stage} to ${STAGE_LABELS[targetStage] || targetStage}`,
-        old_stage: lead.stage as any, new_stage: targetStage as any,
+      await applyResolvedLeadTransition(supabase as any, {
+        leadId: id,
+        transition,
+        reason: `Stage auto-advanced from ${STAGE_LABELS[lead.stage] || lead.stage} to ${STAGE_LABELS[targetStage] || targetStage}`,
       });
     }
   };
@@ -890,12 +891,17 @@ const LeadDetail = () => {
 
     // Update lead stage + category (lock to prevent auto-override)
     const transition = resolveLeadTransitionCommand({ currentStage: lead?.stage || "new_lead", command: "classifyNotInterested" });
-    const { error: stageErr } = await supabase.from("leads").update(leadTransitionStagePatch(transition, {
-      person_role: notInterestedCategory,
-      category_locked: true,
-    }) as any).eq("id", id);
-    if (stageErr) {
-      toast({ title: "Error", description: stageErr.message, variant: "destructive" });
+    try {
+      await applyResolvedLeadTransition(supabase as any, {
+        leadId: id,
+        transition,
+        extraPatch: {
+          person_role: notInterestedCategory,
+          category_locked: true,
+        },
+      });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
       setSavingNotInterested(false);
       return;
     }
@@ -2202,7 +2208,7 @@ function ScheduledVisitsSection({ visits, campuses, courses, coursesByDepartment
                   scheduled_by: userId,
                 } as any);
                 const transition = resolveLeadTransitionCommand({ currentStage: "visit_scheduled", command: "rescheduleVisit" });
-                await supabase.from("leads").update(leadTransitionStagePatch(transition) as any).eq("id", leadId);
+                await applyResolvedLeadTransition(supabase as any, { leadId, transition });
                 toast({ title: "No-show recorded", description: `Visit rescheduled for ${new Date(noShowDate).toLocaleDateString("en-IN")}` });
               } else {
                 await supabase.from("lead_followups").insert({

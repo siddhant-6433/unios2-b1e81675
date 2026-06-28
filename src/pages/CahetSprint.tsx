@@ -21,7 +21,8 @@ import {
   effectiveCahetDeadline,
   effectiveCahetDeadlineLabel,
 } from "@/lib/deadlineRollover";
-import { isLeadCallDisposition, leadTransitionStagePatch, resolveCallDispositionTransition } from "@/lib/leadTransitions";
+import { isLeadCallDisposition, resolveCallDispositionTransition } from "@/lib/leadTransitions";
+import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 
 // Mirrors CloudDialer.CONNECTED_DISPOSITIONS — kept in sync deliberately so
 // counsellors see the same options. If you add/rename a disposition there,
@@ -291,7 +292,7 @@ const CahetSprint = () => {
       });
 
       if (transition.newStage) {
-        await supabase.from("leads").update(leadTransitionStagePatch(transition) as any).eq("id", lead.lead_id);
+        await applyResolvedLeadTransition(supabase as any, { leadId: lead.lead_id, transition });
       }
     }
   }, [user?.id, profileId]);

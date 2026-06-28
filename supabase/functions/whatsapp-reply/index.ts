@@ -117,7 +117,7 @@ Deno.serve(async (req) => {
     }
 
     const waPhone = digits(phone);
-    const sendResult = await sendWhatsAppText(admin as any, channelHint, waPhone, message);
+    const sendResult = await sendWhatsAppText(admin, channelHint, waPhone, message);
 
     if (!sendResult.ok) {
       await logWhatsAppAutomationEvent(admin, {

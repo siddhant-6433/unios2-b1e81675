@@ -246,7 +246,7 @@ export function WhatsAppTemplateTab() {
     if (dbError) console.error("Failed to fetch whatsapp_templates:", dbError);
     const localRows = (dbRows || []) as unknown as WaTemplateRow[];
 
-    const { data: metaData, error: metaError } = await supabase.functions.invoke("whatsapp-templates", {
+    const { data: metaData, error: metaError } = await invokeEdge<{ templates?: MetaTemplate[]; error?: string }>("whatsapp-templates", {
       body: { action: "list" },
     });
     if (metaError || metaData?.error) {

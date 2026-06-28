@@ -39,7 +39,13 @@ verify_jwt = false
 [functions.easebuzz-payment]
 verify_jwt = false
 
+[functions.easebuzz-webhook]
+verify_jwt = false
+
 [functions.icici-payment]
+verify_jwt = false
+
+[functions.razorpay-payment]
 verify_jwt = false
 
 [functions.generate-payment-receipt]
@@ -102,6 +108,9 @@ verify_jwt = false
 [functions.delete-user]
 verify_jwt = false
 
+[functions.delete-application]
+verify_jwt = false
+
 [functions.whatsapp-templates]
 verify_jwt = false
 
@@ -115,6 +124,18 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.provision-student-fees]
+verify_jwt = false
+
+[functions.student-password-login]
+verify_jwt = false
+
+[functions.apply-portal-password-login]
+verify_jwt = false
+
+[functions.whatsapp-copilot-assist]
+verify_jwt = false
+
+[functions.whatsapp-reply-learning]
 verify_jwt = false
 
 # Public endpoint hit by anonymous applicants opening a magic link.
