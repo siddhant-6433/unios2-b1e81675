@@ -170,44 +170,86 @@ export type Database = {
       }
       academic_partners: {
         Row: {
+          authorised_signatory_contact: string | null
+          authorised_signatory_email: string | null
+          authorised_signatory_name: string | null
+          company_address: string | null
+          company_name: string | null
           created_at: string
           default_payout_percentage: number
           email: string | null
+          gst_number: string | null
           id: string
+          logo_file_path: string | null
+          logo_uploaded_at: string | null
           logo_url: string | null
           name: string
           notes: string | null
+          onboarding_completed_at: string | null
+          onboarding_skipped_at: string | null
+          onboarding_status: string
+          onboarding_step: number
           organization: string | null
+          pan_number: string | null
           phone: string | null
           status: string
+          tan_number: string | null
           updated_at: string
           user_id: string | null
         }
         Insert: {
+          authorised_signatory_contact?: string | null
+          authorised_signatory_email?: string | null
+          authorised_signatory_name?: string | null
+          company_address?: string | null
+          company_name?: string | null
           created_at?: string
           default_payout_percentage?: number
           email?: string | null
+          gst_number?: string | null
           id?: string
+          logo_file_path?: string | null
+          logo_uploaded_at?: string | null
           logo_url?: string | null
           name: string
           notes?: string | null
+          onboarding_completed_at?: string | null
+          onboarding_skipped_at?: string | null
+          onboarding_status?: string
+          onboarding_step?: number
           organization?: string | null
+          pan_number?: string | null
           phone?: string | null
           status?: string
+          tan_number?: string | null
           updated_at?: string
           user_id?: string | null
         }
         Update: {
+          authorised_signatory_contact?: string | null
+          authorised_signatory_email?: string | null
+          authorised_signatory_name?: string | null
+          company_address?: string | null
+          company_name?: string | null
           created_at?: string
           default_payout_percentage?: number
           email?: string | null
+          gst_number?: string | null
           id?: string
+          logo_file_path?: string | null
+          logo_uploaded_at?: string | null
           logo_url?: string | null
           name?: string
           notes?: string | null
+          onboarding_completed_at?: string | null
+          onboarding_skipped_at?: string | null
+          onboarding_status?: string
+          onboarding_step?: number
           organization?: string | null
+          pan_number?: string | null
           phone?: string | null
           status?: string
+          tan_number?: string | null
           updated_at?: string
           user_id?: string | null
         }
