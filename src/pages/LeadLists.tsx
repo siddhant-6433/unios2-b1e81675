@@ -148,6 +148,18 @@ const knownBulkSenderOptions = (): WaSenderOption[] => [
   },
 ];
 
+const mergeKnownBulkSenders = (options: Map<string, WaSenderOption>) => {
+  for (const sender of knownBulkSenderOptions()) {
+    const byValue = options.get(sender.value);
+    const byNumber = [...options.values()].find((option) =>
+      option.provider === sender.provider &&
+      digitsOnly(option.businessNumber) === digitsOnly(sender.businessNumber)
+    );
+    if (byValue || byNumber) continue;
+    options.set(sender.value, sender);
+  }
+};
+
 const digitsOnly = (value: string | null | undefined) => (value || "").replace(/[^0-9]/g, "");
 
 const formatSenderNumber = (value: string | null | undefined) => {
@@ -423,9 +435,7 @@ export default function LeadLists() {
 
     const options = new Map<string, WaSenderOption>();
     options.set(DEFAULT_WA_SENDER, defaultWaSenderOption());
-    for (const sender of knownBulkSenderOptions()) {
-      options.set(sender.value, sender);
-    }
+    mergeKnownBulkSenders(options);
 
     if (!channelsRes.error) {
       for (const channel of ((channelsRes.data || []) as any[])) {
@@ -479,6 +489,7 @@ export default function LeadLists() {
       setWaSenderError(channelsRes.error?.message || healthRes.error?.message || "Could not load WhatsApp sender health.");
     }
 
+    mergeKnownBulkSenders(options);
     const concreteOptions = [...options.values()].filter((option) => option.value !== DEFAULT_WA_SENDER);
     const nextOptions = concreteOptions.length > 0 ? concreteOptions : [defaultWaSenderOption()];
     setWaSenderOptions(nextOptions);
