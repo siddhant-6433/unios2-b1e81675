@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { Suspense, lazy, useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
@@ -10,26 +10,29 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import EligibilityConfigPanel from "@/components/admin/EligibilityConfigPanel";
-import { PermissionMatrixPanel } from "@/components/admin/PermissionMatrixPanel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import InviteUserDialog from "@/components/admin/InviteUserDialog";
-import BulkImportDialog from "@/components/admin/BulkImportDialog";
-import EditPhoneDialog from "@/components/admin/EditPhoneDialog";
-import EmployeeProfileDialog from "@/components/admin/EmployeeProfileDialog";
-import SetPasswordDialog from "@/components/admin/SetPasswordDialog";
-import UserPermissionsDialog from "@/components/admin/UserPermissionsDialog";
-import TeamManagement from "@/components/admin/TeamManagement";
-import CourseCampusMaster from "@/components/admin/CourseCampusMaster";
-import FinancialGroupsPanel from "@/components/admin/FinancialGroupsPanel";
-import PaymentGatewaysPanel from "@/components/admin/PaymentGatewaysPanel";
-import ApprovalLettersPanel from "@/components/admin/ApprovalLettersPanel";
-import { BrandingPanel } from "@/components/admin/BrandingPanel";
-import CampusGeofencePanel from "@/components/admin/CampusGeofencePanel";
-import FaceApprovalPanel from "@/components/admin/FaceApprovalPanel";
-import { TransferAccountDialog } from "@/components/admin/TransferAccountDialog";
 import { Switch } from "@/components/ui/switch";
 import type { Database } from "@/integrations/supabase/types";
+
+const EligibilityConfigPanel = lazy(() => import("@/components/admin/EligibilityConfigPanel"));
+const PermissionMatrixPanel = lazy(() =>
+  import("@/components/admin/PermissionMatrixPanel").then((m) => ({ default: m.PermissionMatrixPanel })));
+const InviteUserDialog = lazy(() => import("@/components/admin/InviteUserDialog"));
+const BulkImportDialog = lazy(() => import("@/components/admin/BulkImportDialog"));
+const EditPhoneDialog = lazy(() => import("@/components/admin/EditPhoneDialog"));
+const EmployeeProfileDialog = lazy(() => import("@/components/admin/EmployeeProfileDialog"));
+const SetPasswordDialog = lazy(() => import("@/components/admin/SetPasswordDialog"));
+const UserPermissionsDialog = lazy(() => import("@/components/admin/UserPermissionsDialog"));
+const TeamManagement = lazy(() => import("@/components/admin/TeamManagement"));
+const CourseCampusMaster = lazy(() => import("@/components/admin/CourseCampusMaster"));
+const FinancialGroupsPanel = lazy(() => import("@/components/admin/FinancialGroupsPanel"));
+const PaymentGatewaysPanel = lazy(() => import("@/components/admin/PaymentGatewaysPanel"));
+const ApprovalLettersPanel = lazy(() => import("@/components/admin/ApprovalLettersPanel"));
+const BrandingPanel = lazy(() =>
+  import("@/components/admin/BrandingPanel").then((m) => ({ default: m.BrandingPanel })));
+const FaceApprovalPanel = lazy(() => import("@/components/admin/FaceApprovalPanel"));
+const TransferAccountDialog = lazy(() =>
+  import("@/components/admin/TransferAccountDialog").then((m) => ({ default: m.TransferAccountDialog })));
 
 type AppRole = Database["public"]["Enums"]["app_role"];
 
@@ -87,8 +90,17 @@ function timeAgo(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }
 
+function AdminLazyFallback() {
+  return (
+    <div className="flex min-h-24 items-center justify-center text-sm text-muted-foreground">
+      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+      Loading...
+    </div>
+  );
+}
+
 const AdminPanel = () => {
-  const { user: authUser, role, realRole, isImpersonating, startImpersonating, hasPermission, loading: authLoading, roleLoaded } = useAuth();
+  const { user: authUser, role, isImpersonating, startImpersonating, hasPermission, loading: authLoading, roleLoaded } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [users, setUsers] = useState<UserWithRole[]>([]);
@@ -122,54 +134,30 @@ const AdminPanel = () => {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      let profileQuery = supabase
-        .from("profiles")
-        .select("id, user_id, display_name, email, phone, campus, updated_at, login_disabled, last_seen_at, archived_at")
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false });
-
-      profileQuery = showArchivedUsers
-        ? profileQuery.not("archived_at", "is", null)
-        : profileQuery.is("archived_at", null);
-
-      const { data: profiles, error: profileError } = await profileQuery;
-
-      if (profileError) {
-        toast({ title: "Error loading profiles", description: profileError.message, variant: "destructive" });
-        return;
-      }
-
-      const [{ data: roles, error: roleError }, { data: authInfo }] = await Promise.all([
-        supabase.from("user_roles").select("id, user_id, role"),
-        supabase.rpc("get_user_auth_info" as any).then((r: any) => r).catch(() => ({ data: [], error: null })),
-      ]);
-
-      if (roleError) {
-        toast({ title: "Error loading roles", description: roleError.message, variant: "destructive" });
-        return;
-      }
-
-      const authMap: Record<string, string | null> = {};
-      (authInfo || []).forEach((a: any) => { authMap[a.user_id] = a.last_sign_in_at; });
-
-      const merged: UserWithRole[] = (profiles || []).map((p: any) => {
-        const userRole = (roles || []).find((r) => r.user_id === p.user_id);
-        return {
-          user_id: p.user_id,
-          profile_id: p.id,
-          display_name: p.display_name,
-          email: p.email || null,
-          phone: p.phone,
-          campus: p.campus,
-          role: userRole?.role ?? null,
-          role_id: userRole?.id ?? null,
-          last_sign_in_at: authMap[p.user_id] || null,
-          profile_updated_at: p.updated_at || null,
-          login_disabled: !!p.login_disabled,
-          last_seen_at: p.last_seen_at || null,
-          archived_at: p.archived_at || null,
-        };
+      const { data, error } = await supabase.rpc("admin_user_directory" as any, {
+        _show_archived: showArchivedUsers,
       });
+
+      if (error) {
+        toast({ title: "Error loading users", description: error.message, variant: "destructive" });
+        return;
+      }
+
+      const merged: UserWithRole[] = ((data || []) as any[]).map((row) => ({
+        user_id: row.user_id,
+        profile_id: row.profile_id,
+        display_name: row.display_name,
+        email: row.email || null,
+        phone: row.phone,
+        campus: row.campus,
+        role: row.role ?? null,
+        role_id: row.role_id ?? null,
+        last_sign_in_at: row.last_sign_in_at || null,
+        profile_updated_at: row.profile_updated_at || null,
+        login_disabled: !!row.login_disabled,
+        last_seen_at: row.last_seen_at || null,
+        archived_at: row.archived_at || null,
+      }));
 
       setUsers(merged);
     } catch (err: any) {
@@ -180,7 +168,7 @@ const AdminPanel = () => {
     }
   };
 
-  const isSuperAdmin = realRole === "super_admin" || role === "super_admin";
+  const isSuperAdmin = role === "super_admin";
   const canManageUsers = isSuperAdmin || hasPermission("user_management:view");
 
   const fetchPublishers = async () => {
@@ -950,24 +938,36 @@ const AdminPanel = () => {
               </>);
             })()}
 
-            <InviteUserDialog
-              open={inviteOpen}
-              onClose={() => { setInviteOpen(false); setInviteDefaults({}); }}
-              onSuccess={() => { fetchUsers(); fetchPublishers(); }}
-              defaultRole={inviteDefaults.role}
-              defaultPublisherSource={inviteDefaults.source}
-              publisherId={inviteDefaults.publisherId}
-            />
-            <BulkImportDialog open={bulkOpen} onClose={() => setBulkOpen(false)} onSuccess={() => fetchUsers()} />
-            <EditPhoneDialog open={!!phoneEdit} onClose={() => setPhoneEdit(null)} onSuccess={() => fetchUsers()}
-              userId={phoneEdit?.userId || ""} userName={phoneEdit?.name || ""} currentPhone={phoneEdit?.phone || null} />
-            <EmployeeProfileDialog open={!!employeeProfile} onClose={() => setEmployeeProfile(null)}
-              onSuccess={() => fetchUsers()}
-              userId={employeeProfile?.userId || ""} userName={employeeProfile?.name || ""} />
-            <SetPasswordDialog open={!!setPasswordTarget} onClose={() => setSetPasswordTarget(null)}
-              userId={setPasswordTarget?.userId || ""} userName={setPasswordTarget?.name || ""} />
-            <UserPermissionsDialog open={!!permTarget} onClose={() => setPermTarget(null)}
-              userId={permTarget?.userId || ""} userName={permTarget?.name || ""} userRole={permTarget?.role || null} />
+            <Suspense fallback={null}>
+              {inviteOpen && (
+                <InviteUserDialog
+                  open={inviteOpen}
+                  onClose={() => { setInviteOpen(false); setInviteDefaults({}); }}
+                  onSuccess={() => { fetchUsers(); fetchPublishers(); }}
+                  defaultRole={inviteDefaults.role}
+                  defaultPublisherSource={inviteDefaults.source}
+                  publisherId={inviteDefaults.publisherId}
+                />
+              )}
+              {bulkOpen && <BulkImportDialog open={bulkOpen} onClose={() => setBulkOpen(false)} onSuccess={() => fetchUsers()} />}
+              {phoneEdit && (
+                <EditPhoneDialog open onClose={() => setPhoneEdit(null)} onSuccess={() => fetchUsers()}
+                  userId={phoneEdit.userId} userName={phoneEdit.name} currentPhone={phoneEdit.phone || null} />
+              )}
+              {employeeProfile && (
+                <EmployeeProfileDialog open onClose={() => setEmployeeProfile(null)}
+                  onSuccess={() => fetchUsers()}
+                  userId={employeeProfile.userId} userName={employeeProfile.name} />
+              )}
+              {setPasswordTarget && (
+                <SetPasswordDialog open onClose={() => setSetPasswordTarget(null)}
+                  userId={setPasswordTarget.userId} userName={setPasswordTarget.name} />
+              )}
+              {permTarget && (
+                <UserPermissionsDialog open onClose={() => setPermTarget(null)}
+                  userId={permTarget.userId} userName={permTarget.name} userRole={permTarget.role || null} />
+              )}
+            </Suspense>
 
             <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
               <AlertDialogContent>
@@ -1019,54 +1019,58 @@ const AdminPanel = () => {
               </AlertDialogContent>
             </AlertDialog>
 
-            <TransferAccountDialog
-              source={transferTarget}
-              allUsers={users.filter((u) => u.role && !["super_admin", "student", "parent"].includes(u.role)).map((u) => ({
-                profile_id: u.profile_id,
-                user_id: u.user_id,
-                name: u.display_name || "Unnamed",
-                role: u.role,
-              }))}
-              onClose={() => setTransferTarget(null)}
-              onDone={() => { setTransferTarget(null); fetchUsers(); }}
-            />
+            {transferTarget && (
+              <Suspense fallback={null}>
+                <TransferAccountDialog
+                  source={transferTarget}
+                  allUsers={users.filter((u) => u.role && !["super_admin", "student", "parent"].includes(u.role)).map((u) => ({
+                    profile_id: u.profile_id,
+                    user_id: u.user_id,
+                    name: u.display_name || "Unnamed",
+                    role: u.role,
+                  }))}
+                  onClose={() => setTransferTarget(null)}
+                  onDone={() => { setTransferTarget(null); fetchUsers(); }}
+                />
+              </Suspense>
+            )}
           </div>
         </TabsContent>
 
         <TabsContent value="teams" className="mt-6">
-          <TeamManagement />
+          <Suspense fallback={<AdminLazyFallback />}><TeamManagement /></Suspense>
         </TabsContent>
 
         <TabsContent value="course-campus" className="mt-6">
-          <CourseCampusMaster />
+          <Suspense fallback={<AdminLazyFallback />}><CourseCampusMaster /></Suspense>
         </TabsContent>
 
         <TabsContent value="eligibility" className="mt-6">
-          <EligibilityConfigPanel />
+          <Suspense fallback={<AdminLazyFallback />}><EligibilityConfigPanel /></Suspense>
         </TabsContent>
 
         <TabsContent value="financial-groups" className="mt-6">
-          <FinancialGroupsPanel />
+          <Suspense fallback={<AdminLazyFallback />}><FinancialGroupsPanel /></Suspense>
         </TabsContent>
 
         <TabsContent value="payment-gateways" className="mt-6">
-          <PaymentGatewaysPanel />
+          <Suspense fallback={<AdminLazyFallback />}><PaymentGatewaysPanel /></Suspense>
         </TabsContent>
 
         <TabsContent value="approval-letters" className="mt-6">
-          <ApprovalLettersPanel />
+          <Suspense fallback={<AdminLazyFallback />}><ApprovalLettersPanel /></Suspense>
         </TabsContent>
 
         <TabsContent value="branding" className="mt-6">
-          <BrandingPanel />
+          <Suspense fallback={<AdminLazyFallback />}><BrandingPanel /></Suspense>
         </TabsContent>
 
         <TabsContent value="face-approval" className="mt-6">
-          <FaceApprovalPanel />
+          <Suspense fallback={<AdminLazyFallback />}><FaceApprovalPanel /></Suspense>
         </TabsContent>
 
         <TabsContent value="permissions" className="mt-6">
-          <PermissionMatrixPanel />
+          <Suspense fallback={<AdminLazyFallback />}><PermissionMatrixPanel /></Suspense>
         </TabsContent>
       </Tabs>
     </div>

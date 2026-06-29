@@ -173,6 +173,11 @@ describe("resolveLeadTransitionCommand", () => {
     }).newStage).toBe("application_submitted");
 
     expect(resolveLeadTransitionCommand({
+      currentStage: "application_submitted",
+      command: "approveApplication",
+    }).newStage).toBe("application_approved");
+
+    expect(resolveLeadTransitionCommand({
       currentStage: "interview",
       command: "recordInterviewPassed",
     }).newStage).toBe("offer_sent");

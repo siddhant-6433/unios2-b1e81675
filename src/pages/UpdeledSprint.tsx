@@ -21,6 +21,8 @@ import {
   effectiveUpdeledDeadline,
   effectiveUpdeledDeadlineLabel,
 } from "@/lib/deadlineRollover";
+import { isLeadCallDisposition, resolveCallDispositionTransition } from "@/lib/leadTransitions";
+import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 
 // Mirrors CloudDialer.CONNECTED_DISPOSITIONS — kept in sync deliberately so
 // counsellors see the same options. If you add/rename a disposition there,
@@ -364,10 +366,14 @@ const UpdeledSprint = () => {
     await supabase.from("leads").update({ first_contact_at: new Date().toISOString() })
       .eq("id", lead.lead_id).is("first_contact_at", null);
 
-    if (disposition === "interested") {
-      await supabase.from("leads").update({ stage: "counsellor_call" }).eq("id", lead.lead_id);
-    } else if (disposition === "not_interested") {
-      await supabase.from("leads").update({ stage: "not_interested" }).eq("id", lead.lead_id);
+    if (isLeadCallDisposition(disposition)) {
+      const transition = resolveCallDispositionTransition({
+        currentStage: lead.stage || "new_lead",
+        disposition,
+      });
+      if (transition.newStage) {
+        await applyResolvedLeadTransition(supabase as any, { leadId: lead.lead_id, transition });
+      }
     }
   }, [user?.id, profileId]);
 

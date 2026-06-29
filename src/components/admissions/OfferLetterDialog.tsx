@@ -26,7 +26,8 @@ import {
   type UpdeledRegistrationDetails as UpdeledRegistrationDetailsType,
 } from "@/lib/updeled";
 import { chooseOfferSessionId, feeBackedSessionIds, type OfferSessionOption } from "@/lib/offerSessions";
-import { leadTransitionStagePatch, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
+import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
+import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 import { feeTermLabel } from "@/lib/feeTermLabels";
 
 interface OfferLetterDialogProps {
@@ -595,7 +596,11 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       // Only advance lead stage if the offer is approved (not pending)
       if (autoApproved) {
         const transition = resolveLeadTransitionCommand({ currentStage: "application_approved", command: "issueOffer" });
-        await supabase.from("leads").update(leadTransitionStagePatch(transition, { offer_amount: totalFee }) as any).eq("id", leadId);
+        await applyResolvedLeadTransition(supabase as any, {
+          leadId,
+          transition,
+          extraPatch: { offer_amount: totalFee },
+        });
       }
       await supabase.from("lead_activities").insert({
         lead_id: leadId, user_id: user?.id || null, type: "offer",
@@ -669,7 +674,11 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       const offer = offers.find(o => o.id === offerId);
       if (offer) {
         const transition = resolveLeadTransitionCommand({ currentStage: "application_approved", command: "issueOffer" });
-        await supabase.from("leads").update(leadTransitionStagePatch(transition, { offer_amount: offer.net_fee }) as any).eq("id", leadId);
+        await applyResolvedLeadTransition(supabase as any, {
+          leadId,
+          transition,
+          extraPatch: { offer_amount: offer.net_fee },
+        });
       }
       await supabase.from("lead_activities").insert({
         lead_id: leadId, user_id: user?.id || null, type: "offer",

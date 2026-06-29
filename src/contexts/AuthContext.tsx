@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, useCallback, Re
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { ACADEMIC_PARTNER_ALLOWED_PERMISSIONS, canUsePermission, type AccessState } from "@/lib/accessPolicy";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
 
@@ -20,6 +21,7 @@ interface ImpersonationTarget {
   displayName: string;
   role: AppRole | null;
   profile: Profile | null;
+  permissions: string[];
 }
 
 interface AuthContextType {
@@ -64,7 +66,6 @@ const AuthContext = createContext<AuthContextType>({
 export const useAuth = () => useContext(AuthContext);
 
 const IMPERSONATION_KEY = "unios_impersonation";
-const ACADEMIC_PARTNER_ALLOWED_PERMISSIONS = ["academic_partner_portal:view"];
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [session, setSession] = useState<Session | null>(null);
@@ -120,10 +121,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
 
       // Fetch permissions — non-critical, errors are safe to ignore
-      supabase.rpc("get_user_permissions" as any, { _user_id: userId })
-        .then((res: any) => {
+      supabase.rpc("get_user_permissions", { _user_id: userId })
+        .then((res) => {
           if (roleRes.data === "academic_partner") {
-            setPermissions(ACADEMIC_PARTNER_ALLOWED_PERMISSIONS);
+            setPermissions(Array.from(ACADEMIC_PARTNER_ALLOWED_PERMISSIONS));
           } else if (Array.isArray(res?.data)) {
             setPermissions(res.data);
           }
@@ -184,16 +185,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const startImpersonating = useCallback(async (userId: string) => {
     if (role !== "super_admin") return;
 
-    const [profileRes, roleRes] = await Promise.all([
+    const [profileRes, roleRes, permissionRes] = await Promise.all([
       supabase.from("profiles").select("id, display_name, phone, avatar_url, campus, department, institution").eq("user_id", userId).single(),
       supabase.rpc("get_user_role", { _user_id: userId }),
+      supabase.rpc("get_user_permissions", { _user_id: userId }),
     ]);
+
+    const targetRole = (roleRes.data as AppRole) || null;
+    const targetPermissions = targetRole === "academic_partner"
+      ? Array.from(ACADEMIC_PARTNER_ALLOWED_PERMISSIONS)
+      : Array.isArray(permissionRes.data)
+        ? permissionRes.data
+        : [];
 
     const target: ImpersonationTarget = {
       userId,
       displayName: profileRes.data?.display_name || "Unknown User",
-      role: (roleRes.data as AppRole) || null,
+      role: targetRole,
       profile: profileRes.data || null,
+      permissions: targetPermissions,
     };
 
     setImpersonation(target);
@@ -214,20 +224,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setRole(null);
   };
 
-  const hasPermission = useCallback((perm: string) => {
-    // super_admin has all permissions
-    if (role === "super_admin") return true;
-    if (role === "academic_partner") return ACADEMIC_PARTNER_ALLOWED_PERMISSIONS.includes(perm);
-    return permissions.includes(perm);
-  }, [role, permissions]);
-
   // When impersonating, override role, profile, and user.id
   const effectiveRole = impersonation ? impersonation.role : role;
   const effectiveProfile = impersonation ? impersonation.profile : profile;
+  const effectivePermissions = impersonation ? impersonation.permissions : permissions;
   const realUser = session?.user ?? null;
   const effectiveUser = impersonation && realUser
     ? { ...realUser, id: impersonation.userId } as User
     : realUser;
+
+  const hasPermission = useCallback((perm: string) => {
+    const accessState: AccessState = {
+      isAuthenticated: !!session,
+      role: effectiveRole,
+      realRole: role,
+      permissions: effectivePermissions,
+      isImpersonating: !!impersonation,
+    };
+    return canUsePermission(accessState, perm);
+  }, [effectivePermissions, effectiveRole, impersonation, role, session]);
 
   return (
     <AuthContext.Provider value={{
@@ -235,7 +250,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       user: effectiveUser,
       profile: effectiveProfile,
       role: effectiveRole,
-      permissions,
+      permissions: effectivePermissions,
       hasPermission,
       loading,
       roleLoaded,

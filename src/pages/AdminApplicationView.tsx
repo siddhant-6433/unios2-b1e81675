@@ -20,6 +20,8 @@ import {
 import { cahetRegistrationFromApplication, fetchCahetRegistration, isBptOrBmritCourseName, type CahetRegistrationDetails } from "@/lib/cahet";
 import { fetchUpdeledRegistration, isDeledCourseName, updeledRegistrationFromApplication, type SupabaseUpdeledClient, type UpdeledRegistrationDetails } from "@/lib/updeled";
 import { buildApplicationDossier } from "@/lib/applicationDossier";
+import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
+import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -417,14 +419,14 @@ export default function AdminApplicationView() {
     // Advance lead stage on approval (if this app has a lead). Reject leaves
     // stage alone — operator can move the lead manually if needed.
     if (decision === "approved" && app.lead_id) {
-      await supabase.from("leads")
-        .update({ stage: "application_approved" } as any)
-        .eq("id", app.lead_id);
-      await supabase.from("lead_activities").insert({
-        lead_id: app.lead_id,
-        type: "stage_change",
-        description: `Application ${app.application_id} approved`,
-        new_stage: "application_approved",
+      const transition = resolveLeadTransitionCommand({
+        currentStage: lead?.stage || "application_submitted",
+        command: "approveApplication",
+      });
+      await applyResolvedLeadTransition(supabase as any, {
+        leadId: app.lead_id,
+        transition,
+        reason: `Application ${app.application_id} approved`,
       });
       // Notify student + counsellor via WA + email
       supabase.functions.invoke("notify-event", {

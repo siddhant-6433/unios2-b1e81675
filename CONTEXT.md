@@ -19,3 +19,11 @@ _Avoid_: application row, lifecycle blob, app summary
 **Conversation action**:
 A communication action in a WhatsApp conversation, including manual replies, template sends, AI replies, campaign sends, DNC acknowledgements, and handoffs.
 _Avoid_: WhatsApp send, message insert, provider call
+
+**Access policy**:
+The rule set that decides what a signed-in user can see and do, using the effective user identity when impersonation is active while preserving the real user identity only for meta actions such as stopping impersonation.
+_Avoid_: permission helper, route guard, menu filter
+
+**Access decision**:
+A structured outcome from the Access policy that says whether access is allowed, why it is denied when blocked, and where the user should be redirected when a redirect is part of the product behavior.
+_Avoid_: boolean permission check, allowed flag

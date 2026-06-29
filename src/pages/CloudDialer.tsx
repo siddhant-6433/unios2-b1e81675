@@ -25,7 +25,8 @@ import { UpdeledPendingBadge } from "@/components/leads/UpdeledPendingBadge";
 import { useCloudDialerBootstrap, useCloudDialerListQueue, useCloudDialerQueue, useMyProfileId } from "@/hooks/useAdmissionsData";
 import { isBscNursingCourse } from "@/lib/bscNursing";
 import { isBptOrBmritCourseName } from "@/lib/cahet";
-import { isLeadCallDisposition, leadTransitionStagePatch, resolveCallDispositionTransition, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
+import { isLeadCallDisposition, resolveCallDispositionTransition, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
+import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 
 const CourseInfoPanel = lazy(() =>
   import("@/components/leads/CourseInfoPanel").then((m) => ({ default: m.CourseInfoPanel })));
@@ -894,12 +895,13 @@ export default function CloudDialer() {
     });
     if (!transition.newStage) return;
 
-    const patch: Record<string, unknown> = { stage: transition.newStage };
-    if (transition.name === "recordDispositionNotInterested") {
-      patch.person_role = notIntCategory;
-    }
-
-    await supabase.from("leads").update(patch as any).eq("id", currentLead.id);
+    await applyResolvedLeadTransition(supabase as any, {
+      leadId: currentLead.id,
+      transition,
+      extraPatch: transition.name === "recordDispositionNotInterested"
+        ? { person_role: notIntCategory }
+        : undefined,
+    });
   };
 
   // ── Finalize a pre-selected disposition after call ends ─────────────────
@@ -1171,7 +1173,7 @@ export default function CloudDialer() {
         currentStage: currentLead.stage,
         command: "classifyInactive",
       });
-      await supabase.from("leads").update(leadTransitionStagePatch(transition) as any).eq("id", currentLead.id);
+      await applyResolvedLeadTransition(supabase as any, { leadId: currentLead.id, transition });
       setFollowupDate("");
       setFollowupTime("");
       setAutoNextTimer(10);
@@ -1264,7 +1266,7 @@ export default function CloudDialer() {
         currentStage: currentLead.stage,
         command: "scheduleVisit",
       });
-      await supabase.from("leads").update(leadTransitionStagePatch(transition) as any).eq("id", currentLead.id);
+      await applyResolvedLeadTransition(supabase as any, { leadId: currentLead.id, transition });
     }
 
     // Save future session note for ineligible

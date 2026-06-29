@@ -45,6 +45,7 @@ export type LeadTransitionCommandName =
   | "classifyIneligible"
   | "classifyInactive"
   | "submitApplication"
+  | "approveApplication"
   | "recordInterviewPending"
   | "recordInterviewPassed"
   | "recordInterviewFailed"
@@ -77,6 +78,7 @@ export type WorkflowLeadTransitionCommandName =
   | "classifyIneligible"
   | "classifyInactive"
   | "submitApplication"
+  | "approveApplication"
   | "recordInterviewPending"
   | "recordInterviewPassed"
   | "recordInterviewFailed"
@@ -251,6 +253,16 @@ export function resolveLeadTransitionCommand(args: ResolveWorkflowLeadTransition
       currentStage,
       newStage: "application_submitted",
       activityDescription: "Application submitted",
+      futureEligibleSession: null,
+    };
+  }
+
+  if (command === "approveApplication") {
+    return {
+      name: command,
+      currentStage,
+      newStage: "application_approved",
+      activityDescription: "Application approved",
       futureEligibleSession: null,
     };
   }

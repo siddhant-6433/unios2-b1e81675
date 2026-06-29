@@ -1,9 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendWhatsAppTemplate } from "../_shared/whatsapp-channel.ts";
-import {
-  expectedReplyTypeForTemplate,
-  recordWhatsAppOutboundContext,
-} from "../_shared/whatsapp-outbound-context.ts";
+import { expectedReplyTypeForTemplate } from "../_shared/whatsapp-outbound-context.ts";
+import { recordOutboundConversationAction } from "../_shared/whatsapp-conversation-action.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -35,6 +33,36 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
 };
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function syncCampaignCounts(admin: any, campaignId: string) {
+  const [
+    { count: totalSent },
+    { count: totalFailed },
+    { count: pendingCount },
+  ] = await Promise.all([
+    admin
+      .from("whatsapp_campaign_recipients")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignId)
+      .eq("status", "sent"),
+    admin
+      .from("whatsapp_campaign_recipients")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignId)
+      .in("status", ["failed", "skipped", "canceled"]),
+    admin
+      .from("whatsapp_campaign_recipients")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignId)
+      .eq("status", "pending"),
+  ]);
+
+  return {
+    totalSent: totalSent || 0,
+    totalFailed: totalFailed || 0,
+    pendingCount: pendingCount || 0,
+  };
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -113,6 +141,19 @@ Deno.serve(async (req) => {
       );
     }
 
+    if (campaign.status === "paused" || campaign.status === "terminated") {
+      return new Response(JSON.stringify({
+        success: true,
+        done: true,
+        paused: campaign.status === "paused",
+        terminated: campaign.status === "terminated",
+        message: campaign.status === "terminated" ? "Campaign terminated before send" : "Campaign paused before send",
+      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    const campaignBusinessPhoneNumberId = campaign.business_phone_number_id || campaign.selected_business_phone_number_id || null;
+    const campaignBusinessNumber = campaign.business_phone_number || null;
+
     // Mark campaign as in-progress
     await adminClient
       .from("whatsapp_campaigns")
@@ -190,9 +231,29 @@ Deno.serve(async (req) => {
       }
 
       try {
+        const { data: liveCampaign } = await adminClient
+          .from("whatsapp_campaigns")
+          .select("status")
+          .eq("id", campaign_id)
+          .single();
+        if (liveCampaign?.status === "paused" || liveCampaign?.status === "terminated") {
+          const finalCampaign = liveCampaign;
+          const counts = await syncCampaignCounts(adminClient, campaign_id);
+          return new Response(JSON.stringify({
+            success: true,
+            done: true,
+            paused: finalCampaign.status === "paused",
+            terminated: finalCampaign.status === "terminated",
+            message: finalCampaign.status === "terminated" ? "Campaign terminated before send" : "Campaign paused before send",
+            ...counts,
+          }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+
         const sendResult = await sendWhatsAppTemplate(adminClient, {
           route: "bulk",
           requireBulk: true,
+          businessPhoneNumberId: campaignBusinessPhoneNumberId,
+          businessNumber: campaignBusinessNumber,
         }, waPhone, {
           name: templateDef.name,
           language: "en",
@@ -212,33 +273,18 @@ Deno.serve(async (req) => {
             })
             .eq("id", recipient.id);
 
-          // Log to whatsapp_messages for inbox visibility
-          const { data: insertedMessage } = await adminClient.from("whatsapp_messages").insert({
-            lead_id: recipient.lead_id || null,
-            wa_message_id: messageId,
-            direction: "outbound",
+          await recordOutboundConversationAction(adminClient, {
+            kind: "campaignSend",
             phone: waPhone,
-            message_type: "template",
-            content: `[Campaign: ${campaign.name}] [Template: ${campaign.template_key.replace(/_/g, " ")}]`,
-            template_key: campaign.template_key,
-            status: "sent",
-            is_read: true,
-            provider: sendResult.provider,
-            business_phone_number_id: sendResult.businessPhoneNumberId,
-            business_phone_number: sendResult.businessNumber,
-            sender_user_id: user.id,
-          }).select("id").maybeSingle();
-
-          await recordWhatsAppOutboundContext(adminClient, {
-            messageId: insertedMessage?.id || null,
-            providerMessageId: messageId,
-            phone: waPhone,
-            businessNumber: sendResult.businessNumber || sendResult.businessPhoneNumberId,
-            provider: sendResult.provider,
             leadId: recipient.lead_id || null,
+            content: `[Campaign: ${campaign.name}] [Template: ${campaign.template_key.replace(/_/g, " ")}]`,
+            messageType: "template",
+            templateKey: campaign.template_key,
+            status: "sent",
+            userId: user.id,
+            sendResult,
             campaignId: campaign_id,
             campaignRecipientId: recipient.id,
-            templateKey: campaign.template_key,
             outboundKind: "bulk_campaign",
             expectedReplyType: expectedReplyTypeForTemplate(campaign.template_key),
             responsePolicy: "engine",
@@ -248,17 +294,10 @@ Deno.serve(async (req) => {
               sent_by_user_id: user.id,
             },
             expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+            activityDescription: recipient.lead_id
+              ? `WhatsApp campaign "${campaign.name}" — Template: ${campaign.template_key.replace(/_/g, " ")}`
+              : null,
           });
-
-          // Log lead activity
-          if (recipient.lead_id) {
-            await adminClient.from("lead_activities").insert({
-              lead_id: recipient.lead_id,
-              user_id: user.id,
-              type: "whatsapp",
-              description: `WhatsApp campaign "${campaign.name}" — Template: ${campaign.template_key.replace(/_/g, " ")}`,
-            });
-          }
 
           sentCount++;
         } else {
@@ -295,6 +334,24 @@ Deno.serve(async (req) => {
 
     // Update campaign totals
     // Fetch current counts in case there were already some sent/failed from a previous run
+    const finalCampaign = await adminClient
+      .from("whatsapp_campaigns")
+      .select("status")
+      .eq("id", campaign_id)
+      .single()
+      .then(({ data }) => data);
+    if (finalCampaign?.status === "paused" || finalCampaign?.status === "terminated") {
+      const counts = await syncCampaignCounts(adminClient, campaign_id);
+      return new Response(JSON.stringify({
+        success: true,
+        done: true,
+        paused: finalCampaign.status === "paused",
+        terminated: finalCampaign.status === "terminated",
+        message: finalCampaign.status === "terminated" ? "Campaign terminated before send" : "Campaign paused before send",
+        ...counts,
+      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     const { data: updatedCampaign } = await adminClient
       .from("whatsapp_campaigns")
       .select("sent_count, failed_count")

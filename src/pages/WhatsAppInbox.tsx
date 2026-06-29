@@ -24,7 +24,8 @@ import {
   cahetDeadlineDescription,
   cahetDeadlineMessage,
 } from "@/lib/deadlineRollover";
-import { leadTransitionStagePatch, resolveLeadTransitionCommand, type WorkflowLeadTransitionCommandName } from "@/lib/leadTransitions";
+import { resolveLeadTransitionCommand, type WorkflowLeadTransitionCommandName } from "@/lib/leadTransitions";
+import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 
 const CONVERSATION_PAGE_SIZE = 120;
@@ -1692,10 +1693,9 @@ const WhatsAppInbox = () => {
 
     const currentStage = selectedConv?.lead_id === leadId ? selectedConv.lead_stage || "new_lead" : "new_lead";
     const transition = resolveLeadTransitionCommand({ currentStage, command });
-    const patch = leadTransitionStagePatch(transition);
-    if (!patch) return;
+    if (!transition.newStage) return;
 
-    await supabase.from("leads").update(patch as any).eq("id", leadId);
+    await applyResolvedLeadTransition(supabase as any, { leadId, transition });
     setConversations(prev => prev.map(c => c.lead_id === leadId ? { ...c, lead_stage: transition.newStage } : c));
 
     const message = STAGE_WA_MESSAGES[transition.newStage || stage];
@@ -2273,7 +2273,7 @@ const WhatsAppInbox = () => {
                             currentStage: selectedConv.lead_stage || "new_lead",
                             command: "markDnc",
                           });
-                          await supabase.from("leads").update(leadTransitionStagePatch(transition) as any).eq("id", dncLeadId);
+                          await applyResolvedLeadTransition(supabase as any, { leadId: dncLeadId, transition });
                           const { error: replyErr } = await invokeEdge("whatsapp-reply", {
                             body: {
                               phone: selectedPhone,

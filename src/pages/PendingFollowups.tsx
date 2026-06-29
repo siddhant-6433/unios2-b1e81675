@@ -22,7 +22,8 @@ import {
 } from "@/components/admissions/CallDispositionDialog";
 import { recordCallDisposition } from "@/lib/callDisposition";
 import { useCampuses } from "@/hooks/useAdmissionsData";
-import { leadTransitionStagePatch, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
+import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
+import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 
 type Tab = "overdue" | "today" | "upcoming" | "visit_confirm" | "unclosed_visits" | "post_visit";
 
@@ -393,7 +394,7 @@ const PendingFollowups = () => {
         scheduled_by: user?.id || null,
       } as any);
       const transition = resolveLeadTransitionCommand({ currentStage: "visit_scheduled", command: "rescheduleVisit" });
-      await supabase.from("leads").update(leadTransitionStagePatch(transition) as any).eq("id", noShowDialog.leadId);
+      await applyResolvedLeadTransition(supabase as any, { leadId: noShowDialog.leadId, transition });
       toast({ title: "No-show recorded", description: `Visit rescheduled for ${new Date(rescheduleDate).toLocaleDateString("en-IN")}` });
     } else {
       // The DB trigger already creates a followup, but let's ensure the user's date is used
@@ -431,7 +432,7 @@ const PendingFollowups = () => {
       .update({ visit_date: newDateIso, status: "scheduled" })
       .eq("id", rescheduleVisitDialog.visitId);
     const transition = resolveLeadTransitionCommand({ currentStage: "visit_scheduled", command: "rescheduleVisit" });
-    await supabase.from("leads").update(leadTransitionStagePatch(transition) as any).eq("id", rescheduleVisitDialog.leadId);
+    await applyResolvedLeadTransition(supabase as any, { leadId: rescheduleVisitDialog.leadId, transition });
     await supabase.from("lead_activities").insert({
       lead_id: rescheduleVisitDialog.leadId, user_id: user?.id || null, type: "visit",
       description: `Visit rescheduled to ${new Date(newDateIso).toLocaleString("en-IN")}`,

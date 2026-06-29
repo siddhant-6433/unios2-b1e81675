@@ -1,6 +1,12 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./AuthContext";
+import {
+  ACADEMIC_PARTNER_ALLOWED_PERMISSIONS,
+  canUseModule,
+  canUsePermissionParts,
+  type AccessState,
+} from "@/lib/accessPolicy";
 
 interface PermissionContextType {
   permissions: Set<string>;
@@ -23,8 +29,6 @@ const PermissionContext = createContext<PermissionContextType>({
 
 export const usePermissions = () => useContext(PermissionContext);
 
-const ACADEMIC_PARTNER_ALLOWED_PERMISSIONS = new Set(["academic_partner_portal:view"]);
-
 /** Shorthand: usePermission("leads", "view") → boolean */
 export function usePermission(module: string, action?: string): boolean {
   const { can, canAny } = usePermissions();
@@ -33,15 +37,14 @@ export function usePermission(module: string, action?: string): boolean {
 }
 
 export const PermissionProvider = ({ children }: { children: ReactNode }) => {
-  const { user, role, realRole, roleLoaded } = useAuth();
+  const { user, role, realRole, roleLoaded, isImpersonating } = useAuth();
   const [permissions, setPermissions] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
 
   const fetchPermissions = useCallback(async () => {
     if (!user?.id || !roleLoaded) return;
 
-    // Super admin has all permissions — no query needed (even when impersonating)
-    if (role === "super_admin" || realRole === "super_admin") {
+    if (role === "super_admin") {
       setPermissions(new Set(["*"])); // sentinel for "all"
       setLoading(false);
       return;
@@ -61,7 +64,7 @@ export const PermissionProvider = ({ children }: { children: ReactNode }) => {
       setPermissions(new Set(data || []));
     }
     setLoading(false);
-  }, [user?.id, role, realRole, roleLoaded]);
+  }, [user?.id, role, roleLoaded]);
 
   useEffect(() => {
     if (roleLoaded) fetchPermissions();
@@ -76,26 +79,28 @@ export const PermissionProvider = ({ children }: { children: ReactNode }) => {
   }, [user]);
 
   const can = useCallback((module: string, action: string): boolean => {
-    if (role === "super_admin" || realRole === "super_admin") return true;
     if (loading) return false;
-    if (role === "academic_partner") return ACADEMIC_PARTNER_ALLOWED_PERMISSIONS.has(`${module}:${action}`);
-    return permissions.has(`${module}:${action}`);
-  }, [permissions, role, realRole, loading]);
+    const accessState: AccessState = {
+      isAuthenticated: !!user,
+      role,
+      realRole,
+      permissions,
+      isImpersonating,
+    };
+    return canUsePermissionParts(accessState, module, action);
+  }, [isImpersonating, loading, permissions, realRole, role, user]);
 
   const canAny = useCallback((module: string): boolean => {
-    if (role === "super_admin" || realRole === "super_admin") return true;
     if (loading) return false;
-    if (role === "academic_partner") {
-      for (const p of ACADEMIC_PARTNER_ALLOWED_PERMISSIONS) {
-        if (p.startsWith(`${module}:`)) return true;
-      }
-      return false;
-    }
-    for (const p of permissions) {
-      if (p.startsWith(`${module}:`)) return true;
-    }
-    return false;
-  }, [permissions, role, realRole, loading]);
+    const accessState: AccessState = {
+      isAuthenticated: !!user,
+      role,
+      realRole,
+      permissions,
+      isImpersonating,
+    };
+    return canUseModule(accessState, module);
+  }, [isImpersonating, loading, permissions, realRole, role, user]);
 
   return (
     <PermissionContext.Provider value={{ permissions, loading, can, canAny, refresh: fetchPermissions }}>
