@@ -59,7 +59,7 @@ export function WhatsAppPanel() {
       .from("notifications" as never)
       .select("*")
       .eq("user_id", user.id)
-      .eq("type", "whatsapp_message")
+      .in("type", ["whatsapp_message", "whatsapp_sla_warning", "whatsapp_sla_breach"] as never)
       .order("created_at", { ascending: false })
       .limit(50);
 
@@ -113,7 +113,7 @@ export function WhatsAppPanel() {
         filter: `user_id=eq.${user.id}`,
       }, (payload: { new: Notification }) => {
         const n = payload.new as Notification;
-        if (n.type !== "whatsapp_message") return;
+        if (!["whatsapp_message", "whatsapp_sla_warning", "whatsapp_sla_breach"].includes(n.type)) return;
         if (toastIdSet.current.has(n.id)) return;
         fetchNotifications();
         fetchUnreplied();

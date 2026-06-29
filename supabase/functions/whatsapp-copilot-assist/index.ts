@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { loadVerifiedAdmissionsContext } from "../_shared/nimt-admissions-context.ts";
 import { digits, errorMessage } from "../_shared/whatsapp-channel.ts";
 
 const corsHeaders = {
@@ -172,6 +173,7 @@ Deno.serve(async (req) => {
         .maybeSingle()
       : { data: null };
     const lead = leadData as LeadRow | null;
+    const verifiedAdmissionsContext = await loadVerifiedAdmissionsContext(admin, null, lead?.courses?.name || null);
     const fallback = fallbackAssist(messages, lead);
 
     if (!googleApiKey) {
@@ -194,6 +196,8 @@ Return only compact JSON with keys: summary, intent, draft_reply, next_action_la
 Rules:
 - Do not claim the message was sent.
 - Do not invent fees, waivers, deadlines, eligibility, or approvals.
+- If the student asks about fees, include verified fee details when present in the thread/lead/course context and always include the canonical fee page: https://nimt.ac.in/admissions/fees/
+- If the exact course fee is unclear, ask for course/campus while still sharing https://nimt.ac.in/admissions/fees/ and mention that counsellors can confirm the exact breakup.
 - Keep draft_reply WhatsApp-ready, concise, and professional.
 - If the thread involves DNC, complaints, eligibility risk, fee negotiation, job/vendor, or low certainty, set should_pause_ai true.
 - If a human should call, make next_action_label a short operator action like "Call lead" or "Schedule follow-up".
@@ -204,6 +208,7 @@ Stage: ${lead?.stage || "unknown"}
 Role: ${lead?.person_role || "lead"}
 Course: ${lead?.courses?.name || "unknown"}
 
+${verifiedAdmissionsContext ? `Verified admissions context:\n${verifiedAdmissionsContext}\n\n` : ""}
 Transcript:
 ${transcript}`;
 
