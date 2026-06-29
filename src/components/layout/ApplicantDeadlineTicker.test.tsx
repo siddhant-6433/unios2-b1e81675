@@ -33,7 +33,7 @@ describe("ApplicantDeadlineTicker", () => {
     );
 
     expect(screen.getByText("Admissions 2026-27")).toBeInTheDocument();
-    expect(screen.getByText("UP-DELED Deadline: apply by 9th July 2026")).toBeInTheDocument();
+    expect(screen.getByText("Application Deadline for all other courses: apply by 14th June 2026")).toBeInTheDocument();
     expect(screen.getByText("UP-DELED")).toBeInTheDocument();
     expect(screen.getByText((_, element) => element?.textContent === "Deadline 9th July 2026, 11:59 PM")).toBeInTheDocument();
     expect(screen.getByText("27d 23h 59m 59s")).toBeInTheDocument();
@@ -55,7 +55,7 @@ describe("ApplicantDeadlineTicker", () => {
     );
 
     expect(screen.getByText("Admissions 2026-27")).toBeInTheDocument();
-    expect(screen.getByText("UP-DELED Deadline: apply by 9th July 2026")).toBeInTheDocument();
+    expect(screen.getByText("Application Deadline for all other courses: apply by 14th June 2026")).toBeInTheDocument();
     expect(screen.getByText("UP-DELED")).toBeInTheDocument();
     expect(screen.getByText((_, element) => element?.textContent === "Deadline 9th July 2026, 11:59 PM")).toBeInTheDocument();
     expect(screen.getByText("27d 23h 59m 59s")).toBeInTheDocument();
