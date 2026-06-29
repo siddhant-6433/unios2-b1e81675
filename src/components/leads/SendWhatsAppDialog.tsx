@@ -73,6 +73,17 @@ const hasDynamicUrlButton = (components?: Array<{ type?: string; buttons?: Array
     (component.buttons || []).some((button) => button.type === "URL" && typeof button.url === "string" && button.url.includes("{{"))
   );
 
+const metaTemplatePreview = (components?: Array<{ type?: string; text?: string; buttons?: Array<{ text?: string }> }> | null) => {
+  const body = components?.find((component) => component.type === "BODY")?.text || "";
+  const buttons = components?.find((component) => component.type === "BUTTONS")?.buttons || [];
+  const buttonText = buttons
+    .map((button) => button.text)
+    .filter(Boolean)
+    .map((text) => `- ${text}`)
+    .join("\n");
+  return [body, buttonText ? `Buttons:\n${buttonText}` : ""].filter(Boolean).join("\n\n");
+};
+
 const getVideoUrl = (courseName?: string, campusName?: string): string => {
   const text = `${courseName || ""} ${campusName || ""}`;
   const match = COURSE_VIDEO_MAP.find(m => m.pattern.test(text));
@@ -265,11 +276,13 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
   // immediately instead of after a refresh.
   const [allowedKeys, setAllowedKeys] = useState<Set<string> | null>(null);
   const [dynamicTemplates, setDynamicTemplates] = useState<WhatsAppPickerTemplate[]>([]);
+  const [metaTemplateOverrides, setMetaTemplateOverrides] = useState<Record<string, Partial<Pick<WhatsAppPickerTemplate, "preview">>>>({});
 
   useEffect(() => {
     if (!open) return;
     (async () => {
       setDynamicTemplates([]);
+      setMetaTemplateOverrides({});
       const { data: { user } } = await supabase.auth.getUser();
       const { data, error } = await (supabase as any)
         .from("whatsapp_template_settings")
@@ -317,12 +330,20 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
       const { data: approvedRows } = await (supabase as any)
         .from("whatsapp_templates")
         .select("name, components, placeholder_count, has_media, header_format")
-        .eq("status", "APPROVED")
-        .eq("placeholder_count", 0)
-        .eq("has_media", false);
+        .eq("status", "APPROVED");
+      const overrides: Record<string, Partial<Pick<WhatsAppPickerTemplate, "preview">>> = {};
+      ((approvedRows || []) as Array<{
+        name: string;
+        components?: Array<{ type?: string; text?: string; buttons?: Array<{ text?: string }> }> | null;
+      }>).forEach((row) => {
+        if (!row.name || !knownKeys.has(row.name)) return;
+        const preview = metaTemplatePreview(row.components);
+        if (preview) overrides[row.name] = { preview };
+      });
+      setMetaTemplateOverrides(overrides);
       const dynamic = ((approvedRows || []) as Array<{
         name: string;
-        components?: Array<{ type?: string; text?: string; buttons?: Array<{ type?: string; url?: string }> }> | null;
+        components?: Array<{ type?: string; text?: string; buttons?: Array<{ type?: string; text?: string; url?: string }> }> | null;
         placeholder_count?: number | null;
         has_media?: boolean | null;
         header_format?: string | null;
@@ -346,7 +367,7 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
             badge: null,
             followUpMsg: null,
             buildParams: () => [],
-            preview: body,
+            preview: metaTemplatePreview(row.components) || body,
           };
         });
       setDynamicTemplates(dynamic);
@@ -355,8 +376,9 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
 
   const visibleTemplates = useMemo(() => {
     if (!allowedKeys) return [];
-    return [...TEMPLATES, ...dynamicTemplates].filter(t => allowedKeys.has(t.key));
-  }, [allowedKeys, dynamicTemplates]);
+    const configuredTemplates = TEMPLATES.map((template) => ({ ...template, ...(metaTemplateOverrides[template.key] || {}) }));
+    return [...configuredTemplates, ...dynamicTemplates].filter(t => allowedKeys.has(t.key));
+  }, [allowedKeys, dynamicTemplates, metaTemplateOverrides]);
 
   const selectedTmpl = visibleTemplates.find(t => t.key === selectedTemplate) || TEMPLATES.find(t => t.key === selectedTemplate);
   const previewParams = selectedTmpl?.buildParams(lead, courseName, campusName, courseDuration, courseType) || [];

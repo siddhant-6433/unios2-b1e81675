@@ -35,6 +35,7 @@ interface WaTemplateRow {
 interface TemplateButtonComponent {
   type?: string;
   text?: string;
+  url?: string;
 }
 
 interface TemplateComponent {
@@ -99,6 +100,10 @@ function templateBody(t: WaTemplateRow) {
 
 function templateButtons(t: WaTemplateRow) {
   return t.components?.find((c) => c.type === "BUTTONS")?.buttons || [];
+}
+
+function templateHeader(t: WaTemplateRow) {
+  return t.components?.find((c) => c.type === "HEADER");
 }
 
 function formatMetaDate(value?: string | null) {
@@ -166,7 +171,7 @@ function TemplateCard({
         {body && (
           <div className="mt-3 rounded-lg bg-muted/30 px-3 py-2">
             <p className="text-[10px] font-semibold text-muted-foreground uppercase mb-0.5">Body</p>
-            <p className="text-xs text-foreground whitespace-pre-wrap line-clamp-5">{body}</p>
+            <p className="text-xs text-foreground whitespace-pre-wrap">{body}</p>
           </div>
         )}
 
@@ -207,6 +212,115 @@ function TemplateCard({
   );
 }
 
+function TemplatePreviewPanel({
+  template,
+  deleting,
+  onDelete,
+}: {
+  template: WaTemplateRow | null;
+  deleting: string | null;
+  onDelete: (name: string) => void;
+}) {
+  if (!template) {
+    return (
+      <div className="flex min-h-[420px] items-center justify-center text-sm text-muted-foreground">
+        Select a template to preview it.
+      </div>
+    );
+  }
+
+  const { Icon, color } = statusVisual(template.status);
+  const body = templateBody(template);
+  const buttons = templateButtons(template);
+  const header = templateHeader(template);
+  const headerFormat = (header?.format || template.header_format || "NONE").toUpperCase();
+  const metaCategory = (template.category || "UNKNOWN").toUpperCase();
+
+  return (
+    <div className="flex min-h-[520px] flex-col">
+      <div className="border-b border-border px-5 py-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h3 className="truncate font-mono text-base font-semibold text-foreground">{template.name}</h3>
+            <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+              Meta ID: {template.meta_template_id || "Not returned yet"}
+            </p>
+          </div>
+          <Badge className={`shrink-0 gap-1 border-0 text-[10px] ${color}`}>
+            <Icon className="h-3 w-3" />
+            {template.status}
+          </Badge>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          <Badge variant="outline" className="text-[9px]">Category: {metaCategory}</Badge>
+          <Badge variant="outline" className="text-[9px]">Language: {template.language}</Badge>
+          <Badge variant="outline" className="text-[9px]">Header: {headerFormat}</Badge>
+          <Badge variant="outline" className="text-[9px]">Vars: {template.placeholder_count}</Badge>
+          {template.quality_score && (
+            <Badge variant="outline" className="text-[9px]">Quality: {template.quality_score}</Badge>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-5">
+        <div className="mx-auto max-w-2xl rounded-xl border border-border bg-muted/20 p-4">
+          {headerFormat !== "NONE" && (
+            <div className="mb-3 rounded-lg border border-border bg-background px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase text-muted-foreground">Header</p>
+              {header?.text ? (
+                <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{header.text}</p>
+              ) : (
+                <p className="mt-1 text-sm text-muted-foreground">{headerFormat} header</p>
+              )}
+            </div>
+          )}
+
+          <div className="rounded-lg bg-background px-3 py-3">
+            <p className="mb-2 text-[10px] font-semibold uppercase text-muted-foreground">Body</p>
+            {body ? (
+              <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">{body}</p>
+            ) : (
+              <p className="text-sm text-muted-foreground">No body text synced for this template.</p>
+            )}
+          </div>
+
+          {buttons.length > 0 && (
+            <div className="mt-3 space-y-2">
+              <p className="text-[10px] font-semibold uppercase text-muted-foreground">Buttons</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {buttons.map((button, index) => (
+                  <div key={`${button.text || "button"}-${index}`} className="rounded-lg border border-border bg-background px-3 py-2">
+                    <p className="text-xs font-medium text-foreground">{button.text || `Button ${index + 1}`}</p>
+                    <p className="mt-0.5 text-[11px] uppercase text-muted-foreground">{button.type || "BUTTON"}</p>
+                    {button.url && <p className="mt-1 break-all text-[11px] text-muted-foreground">{button.url}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 border-t border-border px-5 py-3">
+        <p className="text-[11px] text-muted-foreground">
+          Synced {formatMetaDate(template.status_updated_at || template.submitted_at)}
+        </p>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="ml-auto h-8 gap-1.5 text-muted-foreground hover:text-red-600"
+          disabled={deleting === template.name}
+          onClick={() => onDelete(template.name)}
+          title="Delete template from Meta"
+        >
+          {deleting === template.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+          Delete
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function SectionHeader({
   title,
   count,
@@ -235,6 +349,7 @@ export function WhatsAppTemplateTab() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [initialForm, setInitialForm] = useState<{ name?: string; category?: string; body?: string } | undefined>();
+  const [selectedApprovedId, setSelectedApprovedId] = useState<string | null>(null);
 
   const fetchRows = useCallback(async () => {
     setLoading(true);
@@ -342,6 +457,17 @@ export function WhatsAppTemplateTab() {
   const submittedRows = rows.filter((r) => r.status !== "APPROVED" && r.status !== "REJECTED");
   const attentionRows = rows.filter((r) => r.status === "REJECTED");
   const metaBackedCount = rows.filter((r) => r.meta_template_id).length;
+  const selectedApproved = approvedRows.find((row) => row.id === selectedApprovedId) || approvedRows[0] || null;
+
+  useEffect(() => {
+    if (approvedRows.length === 0) {
+      if (selectedApprovedId !== null) setSelectedApprovedId(null);
+      return;
+    }
+    if (!selectedApprovedId || !approvedRows.some((row) => row.id === selectedApprovedId)) {
+      setSelectedApprovedId(approvedRows[0].id);
+    }
+  }, [approvedRows, selectedApprovedId]);
 
   return (
     <div className="space-y-5">
@@ -375,10 +501,45 @@ export function WhatsAppTemplateTab() {
             No approved templates synced from Meta yet.
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {approvedRows.map((template) => (
-              <TemplateCard key={template.id} template={template} deleting={deleting} onDelete={deleteTemplate} />
-            ))}
+          <div className="grid min-h-[520px] overflow-hidden rounded-lg border border-border bg-card lg:grid-cols-[360px_minmax(0,1fr)]">
+            <div className="border-b border-border lg:border-b-0 lg:border-r">
+              <div className="max-h-[70vh] overflow-y-auto p-2">
+                {approvedRows.map((template) => {
+                  const { Icon, color } = statusVisual(template.status);
+                  const body = templateBody(template);
+                  const active = selectedApproved?.id === template.id;
+                  return (
+                    <button
+                      key={template.id}
+                      type="button"
+                      onClick={() => setSelectedApprovedId(template.id)}
+                      className={`w-full rounded-lg px-3 py-3 text-left transition-colors ${
+                        active ? "bg-primary/10 text-foreground" : "hover:bg-muted/60"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate font-mono text-sm font-semibold text-foreground">{template.name}</p>
+                          <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
+                            {template.meta_template_id || "No Meta ID"}
+                          </p>
+                        </div>
+                        <Badge className={`shrink-0 gap-1 border-0 text-[9px] ${color}`}>
+                          <Icon className="h-3 w-3" />
+                          {template.status}
+                        </Badge>
+                      </div>
+                      {body && (
+                        <p className="mt-2 line-clamp-2 whitespace-pre-wrap text-xs leading-5 text-muted-foreground">
+                          {body}
+                        </p>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <TemplatePreviewPanel template={selectedApproved} deleting={deleting} onDelete={deleteTemplate} />
           </div>
         )}
       </section>
