@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -141,7 +141,7 @@ Buttons:
 
   useEffect(() => { fetchCourses(); }, []);
 
-  // ── Lead Picker tab state ────────────────────────────────────────────────
+  // ── Template Visibility tab state ────────────────────────────────────────
   // whatsapp_template_settings.show_in_lead_picker drives the visible list
   // in the lead-page SendWhatsAppDialog. Admin toggles each here.
   type WaSetting = {
@@ -150,23 +150,40 @@ Buttons:
     description: string | null;
     category: string | null;
     show_in_lead_picker: boolean;
+    created_at: string | null;
+    updated_at: string | null;
+    last_used_at?: string | null;
   };
+  type WaVisibilitySort = "date_added_desc" | "date_added_asc" | "date_used_desc" | "date_used_asc" | "name_asc" | "name_desc";
   const [waSettings, setWaSettings] = useState<WaSetting[]>([]);
   const [waSettingsLoading, setWaSettingsLoading] = useState(false);
   const [waToggling, setWaToggling] = useState<string | null>(null);
+  const [waSearch, setWaSearch] = useState("");
+  const [waSort, setWaSort] = useState<WaVisibilitySort>("date_added_desc");
 
   const fetchWaSettings = async () => {
     setWaSettingsLoading(true);
     const { data, error } = await (supabase as any)
       .from("whatsapp_template_settings")
-      .select("template_key, display_name, description, category, show_in_lead_picker")
-      .order("category", { ascending: true })
-      .order("display_name", { ascending: true });
+      .select("template_key, display_name, description, category, show_in_lead_picker, created_at, updated_at")
+      .order("created_at", { ascending: false });
     if (!error && data) {
+      const { data: usedRows } = await (supabase as any)
+        .from("whatsapp_messages")
+        .select("template_key, created_at")
+        .not("template_key", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(1000);
+      const lastUsedByTemplate = new Map<string, string>();
+      ((usedRows || []) as Array<{ template_key: string | null; created_at: string | null }>).forEach((row) => {
+        if (row.template_key && row.created_at && !lastUsedByTemplate.has(row.template_key)) {
+          lastUsedByTemplate.set(row.template_key, row.created_at);
+        }
+      });
       setWaSettings((data as WaSetting[]).map((setting) => (
         setting.template_key === "bpt_bmrit_cahet_deadline"
-          ? { ...setting, description: cahetDeadlineDescription() }
-          : setting
+          ? { ...setting, description: cahetDeadlineDescription(), last_used_at: lastUsedByTemplate.get(setting.template_key) || null }
+          : { ...setting, last_used_at: lastUsedByTemplate.get(setting.template_key) || null }
       )));
     }
     setWaSettingsLoading(false);
@@ -187,6 +204,29 @@ Buttons:
   };
 
   useEffect(() => { fetchWaSettings(); }, []);
+
+  const visibleWaSettings = useMemo(() => {
+    const query = waSearch.trim().toLowerCase();
+    const filtered = query
+      ? waSettings.filter((setting) =>
+          [
+            setting.template_key,
+            setting.display_name,
+            setting.description || "",
+            setting.category || "",
+          ].some((value) => value.toLowerCase().includes(query)))
+      : waSettings;
+
+    const dateValue = (value?: string | null) => value ? new Date(value).getTime() : 0;
+    return [...filtered].sort((a, b) => {
+      if (waSort === "date_added_asc") return dateValue(a.created_at) - dateValue(b.created_at);
+      if (waSort === "date_used_desc") return dateValue(b.last_used_at) - dateValue(a.last_used_at);
+      if (waSort === "date_used_asc") return dateValue(a.last_used_at) - dateValue(b.last_used_at);
+      if (waSort === "name_asc") return a.display_name.localeCompare(b.display_name);
+      if (waSort === "name_desc") return b.display_name.localeCompare(a.display_name);
+      return dateValue(b.created_at) - dateValue(a.created_at);
+    });
+  }, [waSearch, waSettings, waSort]);
 
   const fetchTemplates = async () => {
     const { data, error } = await supabase
@@ -259,6 +299,9 @@ Buttons:
   };
 
   const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
+  const formatShortDate = (value?: string | null) => value
+    ? new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value))
+    : "Never";
 
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
 
@@ -285,7 +328,7 @@ Buttons:
           </TabsTrigger>
           <TabsTrigger value="picker"
             className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-sm px-4 py-2 text-muted-foreground data-[state=active]:text-foreground data-[state=active]:font-semibold">
-            Lead Picker
+            Template Visibility
           </TabsTrigger>
         </TabsList>
 
@@ -473,24 +516,45 @@ Buttons:
           )}
         </TabsContent>
 
-        {/* LEAD PICKER — toggle which WhatsApp templates appear in the lead-page picker */}
+        {/* TEMPLATE VISIBILITY — toggle which WhatsApp templates appear in manual send pickers */}
         <TabsContent value="picker" className="mt-4 space-y-4">
           <div className="rounded-xl border border-border bg-card p-4">
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
                   <Filter className="h-4 w-4 text-primary" />
-                  Lead-page Send WhatsApp picker
+                  Template Visibility
                 </h3>
                 <p className="text-xs text-muted-foreground mt-1 max-w-2xl">
-                  Toggle which templates the counsellor sees when they tap <span className="font-mono">Send WhatsApp</span> on a lead.
+                  Toggle which templates counsellors see when they tap <span className="font-mono">Send WhatsApp</span> on a lead.
                   Auto-fired templates (missed_call, nimt_followup_v1, offer_letter_acceptance) are off by default — they're sent
                   by the system on disposition / offer issuance, not by hand.
                 </p>
               </div>
-              <Button variant="outline" size="sm" className="gap-2" onClick={fetchWaSettings} disabled={waSettingsLoading}>
-                <RefreshCw className={`h-3.5 w-3.5 ${waSettingsLoading ? "animate-spin" : ""}`} /> Reload
-              </Button>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  type="search"
+                  value={waSearch}
+                  onChange={(e) => setWaSearch(e.target.value)}
+                  placeholder="Search template name"
+                  className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                />
+                <select
+                  value={waSort}
+                  onChange={(e) => setWaSort(e.target.value as WaVisibilitySort)}
+                  className="h-9 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                >
+                  <option value="date_added_desc">Date added: newest first</option>
+                  <option value="date_added_asc">Date added: oldest first</option>
+                  <option value="date_used_desc">Date used: newest first</option>
+                  <option value="date_used_asc">Date used: oldest first</option>
+                  <option value="name_asc">Name: A-Z</option>
+                  <option value="name_desc">Name: Z-A</option>
+                </select>
+                <Button variant="outline" size="sm" className="h-9 gap-2" onClick={fetchWaSettings} disabled={waSettingsLoading}>
+                  <RefreshCw className={`h-3.5 w-3.5 ${waSettingsLoading ? "animate-spin" : ""}`} /> Reload
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -505,11 +569,13 @@ Buttons:
                     <th className="text-left px-3 py-2 font-medium">Display name</th>
                     <th className="text-left px-3 py-2 font-medium">Category</th>
                     <th className="text-left px-3 py-2 font-medium">Description</th>
+                    <th className="text-left px-3 py-2 font-medium">Date added</th>
+                    <th className="text-left px-3 py-2 font-medium">Date used</th>
                     <th className="text-center px-3 py-2 font-medium">Show in picker</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {waSettings.map((s) => (
+                  {visibleWaSettings.map((s) => (
                     <tr key={s.template_key} className="border-t border-border">
                       <td className="px-3 py-2 font-mono text-foreground">{s.template_key}</td>
                       <td className="px-3 py-2 text-foreground">{s.display_name}</td>
@@ -517,6 +583,8 @@ Buttons:
                         <Badge variant="outline" className="text-[10px]">{s.category || "general"}</Badge>
                       </td>
                       <td className="px-3 py-2 text-muted-foreground max-w-md">{s.description || "—"}</td>
+                      <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{formatShortDate(s.created_at)}</td>
+                      <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{formatShortDate(s.last_used_at)}</td>
                       <td className="px-3 py-2 text-center">
                         <button
                           role="switch"
@@ -536,8 +604,8 @@ Buttons:
                       </td>
                     </tr>
                   ))}
-                  {waSettings.length === 0 && (
-                    <tr><td colSpan={5} className="text-center py-6 text-muted-foreground">No settings yet. Apply migration 20260610100900_whatsapp_template_settings to seed.</td></tr>
+                  {visibleWaSettings.length === 0 && (
+                    <tr><td colSpan={7} className="text-center py-6 text-muted-foreground">{waSettings.length === 0 ? "No settings yet. Apply migration 20260610100900_whatsapp_template_settings to seed." : "No templates match your search."}</td></tr>
                   )}
                 </tbody>
               </table>

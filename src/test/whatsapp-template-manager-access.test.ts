@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const templateFunction = readFileSync("supabase/functions/whatsapp-templates/index.ts", "utf8");
 const mediaUploadFunction = readFileSync("supabase/functions/whatsapp-template-media-upload/index.ts", "utf8");
+const templateManager = readFileSync("src/pages/TemplateManager.tsx", "utf8");
 const templateMirrorMigration = readFileSync("supabase/migrations/20260624100800_whatsapp_templates.sql", "utf8");
 const serviceRoleGrantMigration = readFileSync(
   "supabase/migrations/20260628183000_grant_service_role_whatsapp_templates.sql",
@@ -26,5 +27,21 @@ describe("WhatsApp template manager access", () => {
     expect(serviceRoleGrantMigration).toContain(
       "GRANT SELECT, INSERT, UPDATE, DELETE ON public.whatsapp_templates TO service_role",
     );
+  });
+
+  it("exposes searchable and sortable template visibility controls", () => {
+    expect(templateManager).toContain("Template Visibility");
+    expect(templateManager).toContain('placeholder="Search template name"');
+    expect(templateManager).toContain('value="date_added_desc"');
+    expect(templateManager).toContain('value="date_used_desc"');
+    expect(templateManager).toContain('value="name_asc"');
+    expect(templateManager).toContain("last_used_at");
+  });
+
+  it("auto-registers newly approved Meta templates with visibility disabled", () => {
+    expect(templateFunction).toContain("registerApprovedTemplateVisibilityRows");
+    expect(templateFunction).toContain('show_in_lead_picker: false');
+    expect(templateFunction).toContain("visibility_registered");
+    expect(templateFunction).toContain("normalizeTemplateStatus(template.status) === \"APPROVED\"");
   });
 });

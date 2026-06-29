@@ -36,6 +36,19 @@ const isMissingMirrorTable = (error: any) => {
   );
 };
 
+const isMissingSettingsTable = (error: any) => {
+  const code = String(error?.code || "");
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    code === "42P01" ||
+    code === "PGRST205" ||
+    (message.includes("whatsapp_template_settings") &&
+      (message.includes("does not exist") ||
+        message.includes("could not find the table") ||
+        message.includes("schema cache")))
+  );
+};
+
 const normalizeTemplateStatus = (status: unknown) => {
   const value = String(status || "PENDING").toUpperCase();
   const known = new Set([
@@ -51,6 +64,64 @@ const normalizeTemplateStatus = (status: unknown) => {
 };
 
 const TEMPLATE_MANAGER_ROLES = new Set(["super_admin", "admission_head"]);
+
+const displayNameForTemplate = (name: string) =>
+  name
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+
+async function registerApprovedTemplateVisibilityRows(adminClient: any, templates: Array<{
+  name: string;
+  status: string;
+  category?: string | null;
+}>) {
+  const approved = templates.filter((template) =>
+    template.name && normalizeTemplateStatus(template.status) === "APPROVED"
+  );
+  if (approved.length === 0) return { registered: 0 };
+
+  const keys = [...new Set(approved.map((template) => template.name))];
+  const { data: existing, error: existingErr } = await adminClient
+    .from("whatsapp_template_settings")
+    .select("template_key")
+    .in("template_key", keys);
+
+  if (existingErr) {
+    if (isMissingSettingsTable(existingErr)) {
+      console.warn("whatsapp_template_settings unavailable during template sync:", existingErr.message);
+      return { registered: 0, warning: "whatsapp_template_settings table is not deployed yet." };
+    }
+    throw existingErr;
+  }
+
+  const existingKeys = new Set(((existing || []) as Array<{ template_key: string }>).map((row) => row.template_key));
+  const rows = approved
+    .filter((template) => !existingKeys.has(template.name))
+    .map((template) => ({
+      template_key: template.name,
+      display_name: displayNameForTemplate(template.name),
+      description: "Approved Meta template. Configure parameters before enabling if it uses variables.",
+      category: String(template.category || "general").toLowerCase(),
+      show_in_lead_picker: false,
+    }));
+
+  if (rows.length === 0) return { registered: 0 };
+
+  const { error: insertErr } = await adminClient
+    .from("whatsapp_template_settings")
+    .insert(rows);
+  if (insertErr) {
+    if (isMissingSettingsTable(insertErr)) {
+      console.warn("whatsapp_template_settings unavailable during template sync:", insertErr.message);
+      return { registered: 0, warning: "whatsapp_template_settings table is not deployed yet." };
+    }
+    throw insertErr;
+  }
+
+  return { registered: rows.length };
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -119,13 +190,15 @@ Deno.serve(async (req) => {
       const templates = (data.data || []).map((t: any) => ({
         id: t.id,
         name: t.name,
-        status: t.status,
+        status: normalizeTemplateStatus(t.status),
         category: t.category,
         language: t.language,
         components: t.components,
       }));
 
-      return new Response(JSON.stringify({ templates }), {
+      const visibility = await registerApprovedTemplateVisibilityRows(adminClient, templates);
+
+      return new Response(JSON.stringify({ templates, visibility_registered: visibility.registered, visibility_warning: visibility.warning }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -323,7 +396,15 @@ Deno.serve(async (req) => {
         }
       }
 
-      return json({ success: true, synced: rows.length, fetched: rows.length });
+      const visibility = await registerApprovedTemplateVisibilityRows(adminClient, rows);
+
+      return json({
+        success: true,
+        synced: rows.length,
+        fetched: rows.length,
+        visibility_registered: visibility.registered,
+        ...(visibility.warning ? { warning: visibility.warning } : {}),
+      });
     }
 
     // ── DELETE: Delete a template ──

@@ -17,7 +17,7 @@ import {
   ListPlus, Loader2, Send, Mail, Trash2, Users, MessageSquare, AlertTriangle, Upload,
   Pause, PlayCircle, RefreshCw, XCircle, Phone, Check, ChevronDown,
 } from "lucide-react";
-import { WA_BULK_TEMPLATES } from "@/config/waBulkTemplates";
+import { WA_BULK_TEMPLATES, type WaBulkTemplate } from "@/config/waBulkTemplates";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 import { decideBlockedRoleAccess } from "@/lib/accessPolicy";
 
@@ -109,6 +109,45 @@ const defaultWaSenderOption = (): WaSenderOption => ({
   qualityRiskLevel: null,
 });
 
+const knownBulkSenderOptions = (): WaSenderOption[] => [
+  {
+    value: "meta:919667691872",
+    label: "Admissions Meta sender 9667691872",
+    provider: "meta",
+    phoneNumberId: null,
+    businessNumber: "919667691872",
+    total: null,
+    failed: null,
+    failedPct: null,
+    readPct: null,
+    qualityRiskLevel: "normal",
+  },
+  {
+    value: "meta:1075269918995469",
+    label: "Bulk campaign Meta sender 7428499849",
+    provider: "meta",
+    phoneNumberId: "1075269918995469",
+    businessNumber: "917428499849",
+    total: null,
+    failed: null,
+    failedPct: null,
+    readPct: null,
+    qualityRiskLevel: "watch",
+  },
+  {
+    value: "plivo:919555192192",
+    label: "Admissions Plivo sender 9555192192",
+    provider: "plivo",
+    phoneNumberId: null,
+    businessNumber: "919555192192",
+    total: null,
+    failed: null,
+    failedPct: null,
+    readPct: null,
+    qualityRiskLevel: "normal",
+  },
+];
+
 const digitsOnly = (value: string | null | undefined) => (value || "").replace(/[^0-9]/g, "");
 
 const formatSenderNumber = (value: string | null | undefined) => {
@@ -155,6 +194,12 @@ const renderTemplatePreview = (preview: string, staticParams: Record<string, str
     const typed = staticParams[name]?.trim();
     return typed || sampleValueForParam(name);
   });
+
+const hasDynamicUrlButton = (components?: Array<{ type?: string; buttons?: Array<{ type?: string; url?: string }> }> | null) =>
+  (components || []).some((component) =>
+    component.type === "BUTTONS" &&
+    (component.buttons || []).some((button) => button.type === "URL" && typeof button.url === "string" && button.url.includes("{{"))
+  );
 
 const WhatsAppBusinessIdentity = ({
   sender,
@@ -229,11 +274,16 @@ export default function LeadLists() {
   const [waSenderLoading, setWaSenderLoading] = useState(false);
   const [waSenderError, setWaSenderError] = useState<string | null>(null);
   const [waSending, setWaSending] = useState(false);
+  const [dynamicWaBulkTemplates, setDynamicWaBulkTemplates] = useState<WaBulkTemplate[]>([]);
 
   // Selected template definition — drives which static inputs we render.
+  const availableWaBulkTemplates = useMemo(
+    () => [...WA_BULK_TEMPLATES, ...dynamicWaBulkTemplates],
+    [dynamicWaBulkTemplates]
+  );
   const waTemplateDef = useMemo(
-    () => WA_BULK_TEMPLATES.find(t => t.key === waTemplate) || WA_BULK_TEMPLATES[0],
-    [waTemplate]
+    () => availableWaBulkTemplates.find(t => t.key === waTemplate) || availableWaBulkTemplates[0] || WA_BULK_TEMPLATES[0],
+    [availableWaBulkTemplates, waTemplate]
   );
   const waStaticFields = useMemo(
     () => waTemplateDef.params.filter(p => p.source === "static"),
@@ -373,6 +423,9 @@ export default function LeadLists() {
 
     const options = new Map<string, WaSenderOption>();
     options.set(DEFAULT_WA_SENDER, defaultWaSenderOption());
+    for (const sender of knownBulkSenderOptions()) {
+      options.set(sender.value, sender);
+    }
 
     if (!channelsRes.error) {
       for (const channel of ((channelsRes.data || []) as any[])) {
@@ -436,6 +489,62 @@ export default function LeadLists() {
   useEffect(() => {
     if (role === "academic_partner") return;
     if (waOpen) loadWaSenders();
+  }, [role, waOpen]);
+
+  useEffect(() => {
+    if (role === "academic_partner") return;
+    if (!waOpen) {
+      setDynamicWaBulkTemplates([]);
+      return;
+    }
+    (async () => {
+      const knownKeys = new Set(WA_BULK_TEMPLATES.map((template) => template.key));
+      const { data: settings } = await (supabase as any)
+        .from("whatsapp_template_settings")
+        .select("template_key, display_name, description, category, show_in_lead_picker")
+        .eq("show_in_lead_picker", true);
+      const settingsRows = ((settings || []) as Array<{
+        template_key: string;
+        display_name?: string | null;
+        description?: string | null;
+        category?: string | null;
+      }>);
+      const settingsByKey = new Map(settingsRows.map((row) => [row.template_key, row]));
+      const enabledKeys = new Set(settingsRows.map((row) => row.template_key));
+      const { data: approvedRows } = await (supabase as any)
+        .from("whatsapp_templates")
+        .select("name, components, placeholder_count, has_media, header_format")
+        .eq("status", "APPROVED")
+        .eq("placeholder_count", 0)
+        .eq("has_media", false);
+      const dynamic = ((approvedRows || []) as Array<{
+        name: string;
+        components?: Array<{ type?: string; text?: string; buttons?: Array<{ type?: string; url?: string }> }> | null;
+        placeholder_count?: number | null;
+        has_media?: boolean | null;
+        header_format?: string | null;
+      }>)
+        .filter((row) =>
+          row.name &&
+          enabledKeys.has(row.name) &&
+          !knownKeys.has(row.name) &&
+          row.placeholder_count === 0 &&
+          row.has_media !== true &&
+          !["IMAGE", "VIDEO", "DOCUMENT"].includes(String(row.header_format || "").toUpperCase()) &&
+          !hasDynamicUrlButton(row.components)
+        )
+        .map((row) => {
+          const setting = settingsByKey.get(row.name);
+          return {
+            key: row.name,
+            label: setting?.display_name || row.name.replace(/_/g, " "),
+            description: setting?.description || "Approved Meta template",
+            preview: row.components?.find((component) => component.type === "BODY")?.text || setting?.description || row.name,
+            params: [],
+          };
+        });
+      setDynamicWaBulkTemplates(dynamic);
+    })();
   }, [role, waOpen]);
 
   useEffect(() => {
@@ -949,11 +1058,11 @@ export default function LeadLists() {
 
       {/* WhatsApp send dialog */}
       <Dialog open={waOpen} onOpenChange={setWaOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-hidden p-0 flex flex-col">
+          <DialogHeader className="px-6 pt-6">
             <DialogTitle>Send WhatsApp to "{waList?.name}"</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+          <div className="space-y-4 overflow-y-auto px-6 py-4">
             <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
               <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
               <p className="text-xs text-amber-800">
@@ -1040,7 +1149,7 @@ export default function LeadLists() {
                 onChange={(e) => { setWaTemplate(e.target.value); setWaStaticParams({}); }}
                 className="mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
               >
-                {WA_BULK_TEMPLATES.map((t) => (
+                {availableWaBulkTemplates.map((t) => (
                   <option key={t.key} value={t.key}>{t.label}</option>
                 ))}
               </select>
@@ -1088,7 +1197,7 @@ export default function LeadLists() {
               Sending to <strong className="text-foreground">{waList?.member_count}</strong> lead{waList?.member_count === 1 ? "" : "s"} on this list (DNC + no-phone excluded at send time).
             </p>
           </div>
-          <DialogFooter>
+          <DialogFooter className="border-t border-border bg-background px-6 py-4">
             <Button variant="outline" onClick={() => setWaOpen(false)}>Cancel</Button>
             <Button onClick={handleSendWhatsApp} disabled={waSending || waMissingStatic} className="gap-2">
               {waSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}

@@ -34,4 +34,21 @@ describe("campaign queue controls", () => {
     expect(leadLists).toContain("whatsapp-campaign-send");
     expect(leadLists).toContain("email-campaign-send");
   });
+
+  it("keeps the bulk WhatsApp send dialog usable on short screens", () => {
+    expect(leadLists).toContain("max-h-[90vh]");
+    expect(leadLists).toContain("overflow-y-auto px-6 py-4");
+    expect(leadLists).toContain("knownBulkSenderOptions");
+    expect(leadLists).toContain("919667691872");
+    expect(leadLists).toContain("917428499849");
+    expect(leadLists).toContain("919555192192");
+  });
+
+  it("can load enabled zero-parameter approved templates dynamically", () => {
+    expect(leadLists).toContain("dynamicWaBulkTemplates");
+    expect(leadLists).toContain("availableWaBulkTemplates");
+    expect(leadLists).toContain('from("whatsapp_templates")');
+    expect(leadLists).toContain('eq("placeholder_count", 0)');
+    expect(leadLists).toContain("hasDynamicUrlButton");
+  });
 });
