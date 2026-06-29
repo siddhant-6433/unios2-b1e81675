@@ -6,7 +6,7 @@
  * POST — create/submit a new template for approval
  * DELETE — delete a template
  *
- * Auth: requires authenticated user with super_admin role.
+ * Auth: requires authenticated user with super_admin or admission_head role.
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -50,6 +50,8 @@ const normalizeTemplateStatus = (status: unknown) => {
   return known.has(value) ? value : "FLAGGED";
 };
 
+const TEMPLATE_MANAGER_ROLES = new Set(["super_admin", "admission_head"]);
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -70,7 +72,7 @@ Deno.serve(async (req) => {
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-    // Auth — verify JWT with Supabase Auth, then verify super_admin role
+    // Auth — verify JWT with Supabase Auth, then verify template-manager role.
     const authHeader = req.headers.get("Authorization") || req.headers.get("authorization");
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "Unauthorized: no auth header" }), {
@@ -88,8 +90,8 @@ Deno.serve(async (req) => {
     }
 
     const { data: role } = await adminClient.rpc("get_user_role", { _user_id: userId });
-    if (role !== "super_admin") {
-      return new Response(JSON.stringify({ error: "Forbidden: super_admin only" }), {
+    if (!TEMPLATE_MANAGER_ROLES.has(String(role || ""))) {
+      return new Response(JSON.stringify({ error: "Forbidden: super_admin or admission_head only" }), {
         status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

@@ -8,7 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2, UserCheck, ArrowRight } from "lucide-react";
 import { getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
 import { SCHOOL_SESSION_YEARS, isSchoolSessionYear, sessionYearLabel } from "@/lib/sessionYears";
-import { leadTransitionStagePatch, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
+import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
+import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 
 interface ConvertToStudentDialogProps {
   open: boolean;
@@ -124,9 +125,23 @@ export function ConvertToStudentDialog({ open, onOpenChange, lead, courseName, c
       currentStage: lead.stage,
       command: isPreadmit ? "convertPreAdmitted" : "convertAdmitted",
     });
-    const leadUpdate: any = leadTransitionStagePatch(transition, { pre_admission_no: pan });
-    if (an) leadUpdate.admission_no = an;
-    await supabase.from("leads").update(leadUpdate).eq("id", lead.id);
+    try {
+      await applyResolvedLeadTransition(supabase as any, {
+        leadId: lead.id,
+        transition,
+        extraPatch: {
+          pre_admission_no: pan,
+          ...(an ? { admission_no: an } : {}),
+        },
+      });
+    } catch (error: any) {
+      if (student?.id) {
+        await supabase.from("students").delete().eq("id", student.id);
+      }
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      setSaving(false);
+      return;
+    }
 
     // Activity log
     await supabase.from("lead_activities").insert({

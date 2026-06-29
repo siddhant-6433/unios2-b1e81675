@@ -246,7 +246,7 @@ export function WhatsAppTemplateTab() {
     if (dbError) console.error("Failed to fetch whatsapp_templates:", dbError);
     const localRows = (dbRows || []) as unknown as WaTemplateRow[];
 
-    const { data: metaData, error: metaError } = await supabase.functions.invoke("whatsapp-templates", {
+    const { data: metaData, error: metaError } = await invokeEdge<{ templates?: MetaTemplate[]; error?: string }>("whatsapp-templates", {
       body: { action: "list" },
     });
     if (metaError || metaData?.error) {
@@ -257,7 +257,7 @@ export function WhatsAppTemplateTab() {
     }
 
     const localByName = new Map(localRows.map((row) => [`${row.name}:${row.language}`, row]));
-    const metaRows: WaTemplateRow[] = ((metaData?.templates || []) as MetaTemplate[]).map((template) => {
+    const metaRows: WaTemplateRow[] = (metaData?.templates || []).map((template) => {
       const local = localByName.get(`${template.name}:${template.language}`);
       const header = template.components?.find((component) => component.type === "HEADER");
       const bodyComp = template.components?.find((component) => component.type === "BODY");

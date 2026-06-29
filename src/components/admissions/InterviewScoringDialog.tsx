@@ -5,7 +5,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Loader2, UserCheck } from "lucide-react";
-import { leadTransitionStagePatch, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
+import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
+import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 
 interface InterviewScoringDialogProps {
   open: boolean;
@@ -36,10 +37,17 @@ export function InterviewScoringDialog({ open, onOpenChange, leadId, leadName, c
           ? "recordInterviewFailed"
           : "recordInterviewPending",
     });
-    const updates: any = leadTransitionStagePatch(transition, { interview_score: score, interview_result: result });
-
-    const { error } = await supabase.from("leads").update(updates).eq("id", leadId);
-    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); setSaving(false); return; }
+    try {
+      await applyResolvedLeadTransition(supabase as any, {
+        leadId,
+        transition,
+        extraPatch: { interview_score: score, interview_result: result },
+      });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      setSaving(false);
+      return;
+    }
 
     // Log activity
     await supabase.from("lead_activities").insert({

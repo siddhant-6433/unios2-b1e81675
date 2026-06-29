@@ -1,13 +1,14 @@
 import { readFileSync } from "fs";
 import { describe, expect, it } from "vitest";
+import {
+  canSeePolicyItem,
+  canUsePermission,
+  decideBlockedRoleAccess,
+  decidePermissionAccess,
+  decideStaffAppAccess,
+  type AccessState,
+} from "@/lib/accessPolicy";
 
-const app = readFileSync("src/App.tsx", "utf8");
-const authContext = readFileSync("src/contexts/AuthContext.tsx", "utf8");
-const sidebar = readFileSync("src/components/layout/AppSidebar.tsx", "utf8");
-const protectedRoute = readFileSync("src/components/ProtectedRoute.tsx", "utf8");
-const permissionContext = readFileSync("src/contexts/PermissionContext.tsx", "utf8");
-const marketing = readFileSync("src/pages/Marketing.tsx", "utf8");
-const leadLists = readFileSync("src/pages/LeadLists.tsx", "utf8");
 const portal = readFileSync("src/pages/AcademicPartnerPortal.tsx", "utf8");
 const manualCall = readFileSync("supabase/functions/manual-call/index.ts", "utf8");
 const migration = readFileSync(
@@ -21,25 +22,36 @@ const leadAssociationMigration = readFileSync(
 
 describe("academic partner access scope", () => {
   it("hides and blocks marketing surfaces for academic partners", () => {
-    expect(protectedRoute).toContain('role === "academic_partner" && location.pathname !== "/academic-partner-portal"');
-    expect(protectedRoute).toContain('role === "academic_partner" && `${module}:${action}` !== ACADEMIC_PARTNER_ALLOWED_PERMISSION');
-    expect(permissionContext).toContain('role === "academic_partner"');
-    expect(permissionContext).toContain('ACADEMIC_PARTNER_ALLOWED_PERMISSIONS.has(`${module}:${action}`)');
-    expect(authContext).toContain('role === "academic_partner") return ACADEMIC_PARTNER_ALLOWED_PERMISSIONS.includes(perm)');
-    expect(sidebar).toContain("const academicPartnerMenu");
-    expect(sidebar).toContain('/academic-partner-portal?tab=applications');
-    expect(sidebar).toContain('/academic-partner-portal?tab=fees');
-    expect(sidebar).toContain('if (item.roles?.includes("academic_partner")) return true');
-    expect(sidebar).toContain('role !== "academic_partner" && campuses.length > 0');
-    expect(sidebar).toContain('role === "academic_partner" ? [] : marketingSubMenu.filter(canSee)');
-    expect(sidebar).toContain('blockedRoles: ["academic_partner"]');
-    expect(app).toContain('<BlockRole roles={["academic_partner"]}><RequirePermission module="leads" action="view"><LeadLists />');
-    expect(app).toContain('<BlockRole roles={["academic_partner"]}><RequirePermission module="leads" action="view"><Marketing />');
-    expect(app).toContain('<BlockRole roles={["academic_partner"]}><RequirePermission module="templates" action="view"><TemplateManager />');
-    expect(marketing).toContain('role === "academic_partner"');
-    expect(marketing).toContain('<Navigate to="/academic-partner-portal" replace />');
-    expect(leadLists).toContain('role === "academic_partner"');
-    expect(leadLists).toContain('<Navigate to="/academic-partner-portal" replace />');
+    const academicPartner: AccessState = {
+      isAuthenticated: true,
+      role: "academic_partner",
+      realRole: "academic_partner",
+      permissions: ["academic_partner_portal:view"],
+    };
+
+    expect(decideStaffAppAccess(academicPartner, "/academic-partner-portal")).toEqual({ allowed: true });
+    expect(decideStaffAppAccess(academicPartner, "/marketing")).toEqual({
+      allowed: false,
+      reason: "academic_partner_scope",
+      redirectTo: "/academic-partner-portal",
+    });
+    expect(decidePermissionAccess(academicPartner, "leads:view")).toEqual({
+      allowed: false,
+      reason: "academic_partner_scope",
+      redirectTo: "/academic-partner-portal",
+    });
+    expect(decideBlockedRoleAccess(academicPartner, ["academic_partner"])).toEqual({
+      allowed: false,
+      reason: "wrong_role",
+      redirectTo: "/forbidden",
+    });
+    expect(canUsePermission(academicPartner, "academic_partner_portal:view")).toBe(true);
+    expect(canUsePermission(academicPartner, "templates:view")).toBe(false);
+    expect(canSeePolicyItem(academicPartner, { url: "/academic-partner-portal?tab=applications" })).toBe(true);
+    expect(canSeePolicyItem(academicPartner, { url: "/academic-partner-portal?tab=fees" })).toBe(true);
+    expect(canSeePolicyItem(academicPartner, { url: "/lists", permission: "leads:view", blockedRoles: ["academic_partner"] })).toBe(false);
+    expect(canSeePolicyItem(academicPartner, { url: "/marketing", permission: "leads:view", blockedRoles: ["academic_partner"] })).toBe(false);
+    expect(canSeePolicyItem(academicPartner, { url: "/template-manager", permission: "templates:view", blockedRoles: ["academic_partner"] })).toBe(false);
   });
 
   it("keeps academic partners inside their dedicated portal instead of full CRM lead detail", () => {

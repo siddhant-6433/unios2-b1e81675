@@ -118,7 +118,7 @@ function PublicApplicationDeadlineHeader({
   const capsuleDeadlineLabel = showUpDeledDeadline ? upDeledDeadlineLabel : deadlineLabel;
   const backgroundColor = audience === "staff" ? "#0b1f4d" : portalPrimaryColor;
   const headlineText = showUpDeledDeadline
-    ? `UP-DELED Deadline: apply by ${upDeledDeadlineLabel}`
+    ? `Application Deadline for all other courses: apply by ${deadlineLabel}`
     : `${headline}: apply by ${deadlineLabel}`;
 
   useEffect(() => {

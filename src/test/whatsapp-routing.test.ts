@@ -113,7 +113,7 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(manualReply).toContain('from "../_shared/whatsapp-channel.ts"');
     expect(manualReply).toContain("inferRouteFromLatestMessage");
     expect(manualReply).toContain("provider === \"plivo\"");
-    expect(manualReply).toContain("sendWhatsAppText(admin as any, channelHint");
+    expect(manualReply).toContain("sendWhatsAppText(admin, channelHint");
     expect(manualReply).toContain("provider: sendResult.provider");
     expect(manualReply).toContain("rawRequestedPhoneNumberId");
     expect(manualReply).toContain("!isLikelyBusinessPhoneNumber(rawRequestedPhoneNumberId)");
@@ -145,7 +145,7 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
   });
 
   it("uses the shared WhatsApp channel adapter for reply, AI, template, and campaign sends", () => {
-    expect(manualReply).toContain("sendWhatsAppText(admin as any, channelHint");
+    expect(manualReply).toContain("sendWhatsAppText(admin, channelHint");
     expect(aiReply).toContain("sendWhatsAppText(admin");
     expect(templateSend).toContain("sendWhatsAppTemplate(admin");
     expect(campaignSend).toContain("sendWhatsAppTemplate(adminClient");
