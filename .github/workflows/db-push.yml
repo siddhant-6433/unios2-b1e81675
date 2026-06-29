@@ -51,8 +51,30 @@ jobs:
       SUPABASE_DB_PASSWORD:  ${{ secrets.SUPABASE_DB_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect migration changes
+        id: migration_changes
+        run: |
+          if [ "${{ github.event_name }}" = "merge_group" ]; then
+            BASE="${{ github.event.merge_group.base_sha }}"
+            HEAD="${{ github.event.merge_group.head_sha }}"
+          else
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+          fi
+
+          if git diff --name-only "$BASE" "$HEAD" | grep -q '^supabase/migrations/.*\.sql$'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Migration files changed; running Supabase dry-run."
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No migration files changed; skipping live Supabase dry-run for this PR."
+          fi
 
       - name: Check secrets
+        if: steps.migration_changes.outputs.changed == 'true'
         run: |
           missing=()
           [ -z "$SUPABASE_ACCESS_TOKEN" ] && missing+=(SUPABASE_ACCESS_TOKEN)
@@ -64,10 +86,12 @@ jobs:
           fi
 
       - uses: supabase/setup-cli@v1
+        if: steps.migration_changes.outputs.changed == 'true'
         with:
           version: latest
 
       - name: Validate migration push
+        if: steps.migration_changes.outputs.changed == 'true'
         # --dry-run already fails non-zero on drift (remote-only versions,
         # local versions inserted before the last remote, duplicate-key
         # collisions). Pending branch migrations are OK on PRs as long as
@@ -98,14 +122,31 @@ jobs:
       SUPABASE_DB_PASSWORD:  ${{ secrets.SUPABASE_DB_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect migration changes
+        id: migration_changes
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Manual run requested; applying/verifying migrations."
+          elif git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" | grep -q '^supabase/migrations/.*\.sql$'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Migration files changed on main; applying migrations."
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No migration files changed on main; skipping production DB push."
+          fi
 
       - name: Refuse branch manual production push
-        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        if: steps.migration_changes.outputs.changed == 'true' && github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
         run: |
           echo "::error title=Manual db push must run from main::This workflow applies migrations to production. Re-run it from the main branch so branch-only migration files cannot be recorded in production before they exist on main."
           exit 1
 
       - name: Verify secrets
+        if: steps.migration_changes.outputs.changed == 'true'
         # For the push path we WANT to fail loudly: a missing secret means
         # nothing got applied, which is silent data drift waiting to happen.
         run: |
@@ -119,17 +160,21 @@ jobs:
           fi
 
       - uses: supabase/setup-cli@v1
+        if: steps.migration_changes.outputs.changed == 'true'
         with:
           version: latest
 
       - name: Apply pending migrations
+        if: steps.migration_changes.outputs.changed == 'true'
         # The script first rejects duplicate local migration versions, then
         # uses --include-all so a PR that was valid when reviewed still applies
         # if another migration reached main first.
         run: npm run db:migrations:apply
 
       - name: Deploy application deletion function
+        if: steps.migration_changes.outputs.changed == 'true'
         run: supabase functions deploy delete-application --no-verify-jwt
 
       - name: Verify production has no pending migrations
+        if: steps.migration_changes.outputs.changed == 'true'
         run: npm run db:migrations:clean

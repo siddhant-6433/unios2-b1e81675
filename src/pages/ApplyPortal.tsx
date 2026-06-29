@@ -30,6 +30,7 @@ import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDi
 import { ApplicantDeadlineTicker } from "@/components/layout/ApplicantDeadlineTicker";
 import { leadTransitionStagePatch, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { captureAttribution, trackPixelLead } from "@/lib/analytics";
+import { PORTAL_CONFIGS, type PortalId } from "@/components/apply/portalConfig";
 
 type OnBehalfContext = {
   mode: "academic_partner_on_behalf";
@@ -56,7 +57,11 @@ function OnBehalfBanner({ context, candidateName }: { context: OnBehalfContext |
 }
 
 // ─── OTP Login Screen ───
-function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: string, onBehalf?: OnBehalfContext | null) => void }) {
+function OtpLogin({
+  onAuthenticated,
+}: {
+  onAuthenticated: (phone: string, name: string, onBehalf?: OnBehalfContext | null, portalId?: PortalId | null) => void;
+}) {
   const { toast } = useToast();
   const [phone, setPhone] = useState("");
 
@@ -126,10 +131,14 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
         url.searchParams.delete("token");
         window.history.replaceState({}, "", url.toString());
 
+        const portalId = typeof data.portal === "string" && data.portal in PORTAL_CONFIGS
+          ? data.portal as PortalId
+          : null;
+
         // Mirror the OTP login flow: just hand phone+name to onAuthenticated.
         // The apply portal is session-less for applicants — RLS on `applications`
         // already permits anon writes scoped by phone.
-        onAuthenticated(data.phone, data.name || "Applicant", data.on_behalf || null);
+        onAuthenticated(data.phone, data.name || "Applicant", data.on_behalf || null, portalId);
       } catch (err: any) {
         toast({
           title: "Login link expired or invalid",
@@ -1407,7 +1416,7 @@ function ApplicationDashboardView({
   );
 }
 
-const ApplyPortal = () => {
+const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: PortalId) => void }) => {
   const { toast } = useToast();
   const portal = usePortal();
   const isSchool = portal.programCategories.includes("school");
@@ -1492,14 +1501,23 @@ const ApplyPortal = () => {
   const steps = isSchool ? SCHOOL_STEPS : DEFAULT_STEPS;
   const totalSteps = steps.length;
 
-  const handleAuthenticated = async (phoneVal: string, name: string, onBehalf: OnBehalfContext | null = null) => {
+  const handleAuthenticated = async (
+    phoneVal: string,
+    name: string,
+    onBehalf: OnBehalfContext | null = null,
+    resolvedPortalId: PortalId | null = null,
+  ) => {
+    const activePortal = resolvedPortalId ? PORTAL_CONFIGS[resolvedPortalId] : portal;
+    if (resolvedPortalId && resolvedPortalId !== portal.id) {
+      onPortalResolved?.(resolvedPortalId);
+    }
     setPhone(phoneVal);
     setLeadName(name);
     setOnBehalfContext(onBehalf);
     setAuthed(true);
     // Persist so refreshes don't log the user out (TTL: 7 days)
     try {
-      localStorage.setItem(PORTAL_AUTH_KEY, JSON.stringify({
+      localStorage.setItem(`portal_auth_${activePortal.id}`, JSON.stringify({
         phone: phoneVal,
         name,
         onBehalf,
@@ -1533,7 +1551,7 @@ const ApplyPortal = () => {
     const portalApps = (existingApps || []).filter(app => {
       const flags = (app.flags as string[]) || [];
       if (onBehalf && app.lead_id !== onBehalf.lead_id) return false;
-      if (flags.includes(`portal:${portal.id}`)) return true;
+      if (flags.includes(`portal:${activePortal.id}`)) return true;
       const hasAnyPortalFlag = flags.some((f: string) => f.startsWith("portal:"));
       return !hasAnyPortalFlag;
     });
@@ -1544,11 +1562,11 @@ const ApplyPortal = () => {
     // this completing. RLS on applications permits anon writes scoped by phone.
     const needsTag = portalApps.filter(a => {
       const f = (a.flags as string[]) || [];
-      return !f.includes(`portal:${portal.id}`);
+      return !f.includes(`portal:${activePortal.id}`);
     });
     if (needsTag.length > 0) {
       void Promise.all(needsTag.map(a => {
-        const merged = [...((a.flags as string[]) || []), `portal:${portal.id}`];
+        const merged = [...((a.flags as string[]) || []), `portal:${activePortal.id}`];
         return supabase.from("applications").update({ flags: merged }).eq("id", a.id);
       })).catch(e => console.error("portal-flag self-heal failed:", e));
     }
@@ -1610,12 +1628,13 @@ const ApplyPortal = () => {
     // editing, current behaviour).
     const existingApp = portalApps[0];
     if (existingApp) {
-      loadAppIntoEditor(existingApp);
+      const activeSteps = activePortal.programCategories.includes("school") ? SCHOOL_STEPS : DEFAULT_STEPS;
+      loadAppIntoEditor(existingApp, activeSteps);
     }
   };
 
   // Load a row from the dashboard into the step-by-step editor.
-  const loadAppIntoEditor = (existingApp: any) => {
+  const loadAppIntoEditor = (existingApp: any, stepList = steps) => {
     const appData: ApplicationData = {
       ...DEFAULT_APPLICATION,
       ...existingApp,
@@ -1641,10 +1660,10 @@ const ApplyPortal = () => {
     if (existingApp.status === 'submitted' || existingApp.status === 'under_review' || existingApp.status === 'approved') {
       if (editUnlocked) {
         setSubmitted(false);
-        const stepKeys = steps.map(s => s.key);
+        const stepKeys = stepList.map(s => s.key);
         const preferredKey = unlockedSections?.find(key => stepKeys.includes(key)) || "documents";
         const preferredIdx = stepKeys.indexOf(preferredKey);
-        setStep(preferredIdx >= 0 ? preferredIdx : totalSteps - 2);
+        setStep(preferredIdx >= 0 ? preferredIdx : stepList.length - 2);
         return;
       }
       setSubmitted(true);
@@ -1656,10 +1675,10 @@ const ApplyPortal = () => {
         .catch(() => setPreviewDocs([]));
       return;
     }
-    const stepKeys = steps.map(s => s.key);
+    const stepKeys = stepList.map(s => s.key);
     const cs = appData.completed_sections as Record<string, boolean>;
     const firstIncomplete = stepKeys.findIndex(k => !cs[k]);
-    setStep(firstIncomplete >= 0 ? firstIncomplete : totalSteps - 1);
+    setStep(firstIncomplete >= 0 ? firstIncomplete : stepList.length - 1);
   };
 
   // Return to the dashboard from a submitted/preview view (only available
@@ -2497,10 +2516,12 @@ function Header({ appId, completedCount, totalSteps, onLogout }: { appId: string
 
 // ─── Wrapped with PortalProvider ───
 function ApplyPortalWrapper() {
+  const [resolvedPortalId, setResolvedPortalId] = useState<PortalId | null>(null);
+
   return (
-    <PortalProvider>
+    <PortalProvider overridePortalId={resolvedPortalId}>
       <ApplicantDeadlineTicker audience="public" />
-      <ApplyPortal />
+      <ApplyPortal onPortalResolved={setResolvedPortalId} />
     </PortalProvider>
   );
 }

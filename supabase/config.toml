@@ -141,6 +141,22 @@ verify_jwt = false
 [functions.apply-portal-password-login]
 verify_jwt = false
 
+# Anonymous applicants list their already-uploaded docs from the apply portal.
+# The function authorizes by application identity, so gateway JWT verification
+# would only reject valid users carrying stale browser sessions.
+[functions.list-app-docs]
+verify_jwt = false
+
+# Anonymous academic-partner on-behalf applicants write audit events through
+# a scoped token. The function validates that token itself.
+[functions.academic-partner-on-behalf-audit]
+verify_jwt = false
+
+# Academic partners complete applications from a magic-link token, not from a
+# Supabase browser session. The function validates the token and partner scope.
+[functions.academic-partner-application-action]
+verify_jwt = false
+
 # Public endpoint hit by anonymous applicants opening a magic link.
 # JWT verification at the gateway breaks the redeem flow whenever the browser
 # carries a stale/expired/malformed session JWT (the gateway returns 401
