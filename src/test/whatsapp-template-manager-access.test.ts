@@ -31,11 +31,21 @@ describe("WhatsApp template manager access", () => {
 
   it("exposes searchable and sortable template visibility controls", () => {
     expect(templateManager).toContain("Template Visibility");
+    expect(templateManager).not.toContain("Lead Picker");
     expect(templateManager).toContain('placeholder="Search template name"');
     expect(templateManager).toContain('value="date_added_desc"');
     expect(templateManager).toContain('value="date_used_desc"');
     expect(templateManager).toContain('value="name_asc"');
     expect(templateManager).toContain("last_used_at");
+  });
+
+  it("shows approved Meta templates even if their visibility row is missing", () => {
+    expect(templateManager).toContain('from("whatsapp_templates")');
+    expect(templateManager).toContain('eq("status", "APPROVED")');
+    expect(templateManager).toContain("missingApprovedSettings");
+    expect(templateManager).toContain("displayNameForWaTemplate");
+    expect(templateManager).toContain(".upsert({");
+    expect(templateManager).toContain('onConflict: "template_key"');
   });
 
   it("auto-registers newly approved Meta templates with visibility disabled", () => {

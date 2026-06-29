@@ -47,6 +47,13 @@ const CATEGORIES = [
   { value: "notification", label: "Counsellor Notification" },
 ];
 
+const displayNameForWaTemplate = (key: string) =>
+  key
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.length <= 4 ? part.toUpperCase() : part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+
 const TemplateManager = () => {
   const { toast } = useToast();
   const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>([]);
@@ -168,6 +175,13 @@ Buttons:
       .select("template_key, display_name, description, category, show_in_lead_picker, created_at, updated_at")
       .order("created_at", { ascending: false });
     if (!error && data) {
+      const settingsRows = (data as WaSetting[]);
+      const settingsByKey = new Map(settingsRows.map((setting) => [setting.template_key, setting]));
+      const { data: approvedTemplates } = await (supabase as any)
+        .from("whatsapp_templates")
+        .select("name, category, created_at, status_updated_at")
+        .eq("status", "APPROVED")
+        .order("created_at", { ascending: false });
       const { data: usedRows } = await (supabase as any)
         .from("whatsapp_messages")
         .select("template_key, created_at")
@@ -180,7 +194,24 @@ Buttons:
           lastUsedByTemplate.set(row.template_key, row.created_at);
         }
       });
-      setWaSettings((data as WaSetting[]).map((setting) => (
+      const missingApprovedSettings = ((approvedTemplates || []) as Array<{
+        name: string;
+        category?: string | null;
+        created_at?: string | null;
+        status_updated_at?: string | null;
+      }>)
+        .filter((template) => template.name && !settingsByKey.has(template.name))
+        .map((template) => ({
+          template_key: template.name,
+          display_name: displayNameForWaTemplate(template.name),
+          description: "Approved Meta template. Configure parameters before enabling if it uses variables.",
+          category: String(template.category || "general").toLowerCase(),
+          show_in_lead_picker: false,
+          created_at: template.created_at || template.status_updated_at || null,
+          updated_at: template.status_updated_at || template.created_at || null,
+        } satisfies WaSetting));
+      const mergedSettings = [...settingsRows, ...missingApprovedSettings];
+      setWaSettings(mergedSettings.map((setting) => (
         setting.template_key === "bpt_bmrit_cahet_deadline"
           ? { ...setting, description: cahetDeadlineDescription(), last_used_at: lastUsedByTemplate.get(setting.template_key) || null }
           : { ...setting, last_used_at: lastUsedByTemplate.get(setting.template_key) || null }
@@ -191,10 +222,17 @@ Buttons:
 
   const toggleWaSetting = async (templateKey: string, next: boolean) => {
     setWaToggling(templateKey);
+    const current = waSettings.find((setting) => setting.template_key === templateKey);
     const { error } = await (supabase as any)
       .from("whatsapp_template_settings")
-      .update({ show_in_lead_picker: next })
-      .eq("template_key", templateKey);
+      .upsert({
+        template_key: templateKey,
+        display_name: current?.display_name || displayNameForWaTemplate(templateKey),
+        description: current?.description || null,
+        category: current?.category || "general",
+        show_in_lead_picker: next,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "template_key" });
     if (error) {
       toast({ title: "Update failed", description: error.message, variant: "destructive" });
     } else {

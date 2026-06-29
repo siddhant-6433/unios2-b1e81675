@@ -49,6 +49,10 @@ const CUET_2026_COUNSELLING_PREVIEW =
   "The CUET 2026 result is out, and admission counselling is now open at NIMT.\n\nIf you're planning your next step after CUET, we're here to help.\n\nDuring your counselling session, our admission expert will guide you with:\n\n• Choosing the right course for your career goals\n• Scholarship opportunities based on your CUET score\n• Admission process, eligibility, fees, and required documents\n• Placements, internships, and career opportunities\n\nWe look forward to helping you build a successful future.\n\nTeam NIMT Educational Institutions";
 const CUET_COUNSELLING_BOOKING_PREVIEW =
   "CUET counselling booking is now open at NIMT. Share this approved Meta template with CUET leads so they can book a counselling session with the admissions team.";
+const DEFAULT_VISIBLE_WHEN_UNCONFIGURED = new Set([
+  "cuet_2026_counselling_open",
+  "cuet_counselling_booking",
+]);
 
 interface WhatsAppPickerTemplate {
   key: string;
@@ -269,8 +273,7 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
       const { data: { user } } = await supabase.auth.getUser();
       const { data, error } = await (supabase as any)
         .from("whatsapp_template_settings")
-        .select("template_key, show_in_lead_picker, allowed_team_ids, allowed_user_ids")
-        .eq("show_in_lead_picker", true);
+        .select("template_key, display_name, description, category, show_in_lead_picker, allowed_team_ids, allowed_user_ids");
       if (error) {
         // Fail open — show everything rather than a blank picker.
         setAllowedKeys(new Set(TEMPLATES.map(t => t.key)));
@@ -284,10 +287,13 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
         display_name?: string | null;
         description?: string | null;
         category?: string | null;
+        show_in_lead_picker?: boolean | null;
         allowed_team_ids?: string[] | null;
         allowed_user_ids?: string[] | null;
       }>;
+      const settingsByKey = new Map(settingsRows.map((row) => [row.template_key, row]));
       settingsRows.forEach((r: any) => {
+        if (r.show_in_lead_picker !== true) return;
         const teamScoped = Array.isArray(r.allowed_team_ids) && r.allowed_team_ids.length > 0;
         const userScoped = Array.isArray(r.allowed_user_ids) && r.allowed_user_ids.length > 0;
         // Team scoping (when active) is enforced server-side via RLS-aware
@@ -301,8 +307,12 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
         }
         keys.add(r.template_key);
       });
+      TEMPLATES.forEach((template) => {
+        if (DEFAULT_VISIBLE_WHEN_UNCONFIGURED.has(template.key) && !settingsByKey.has(template.key)) {
+          keys.add(template.key);
+        }
+      });
       setAllowedKeys(keys);
-      const settingsByKey = new Map(settingsRows.map((row) => [row.template_key, row]));
       const knownKeys = new Set(TEMPLATES.map((template) => template.key));
       const { data: approvedRows } = await (supabase as any)
         .from("whatsapp_templates")
@@ -479,7 +489,7 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
             )}
             {allowedKeys !== null && visibleTemplates.length === 0 && (
               <div className="px-4 py-6 text-xs text-muted-foreground text-center">
-                No templates available. Ask an admin to enable templates in Template Manager → Lead Picker.
+                No templates available. Ask an admin to enable templates in Template Manager → Template Visibility.
               </div>
             )}
             {visibleTemplates.map((t) => (

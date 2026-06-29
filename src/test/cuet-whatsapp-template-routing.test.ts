@@ -13,11 +13,18 @@ const bookingMigration = readFileSync(
   "supabase/migrations/20260629143000_enable_cuet_counselling_booking_whatsapp.sql",
   "utf8",
 );
+const forceVisibilityMigration = readFileSync(
+  "supabase/migrations/20260629190000_force_cuet_whatsapp_template_visibility.sql",
+  "utf8",
+);
 
 describe("CUET 2026 counselling WhatsApp template routing", () => {
   it("is available in the lead picker and list bulk picker", () => {
     expect(leadPicker).toContain('key: "cuet_2026_counselling_open"');
     expect(leadPicker).toContain('key: "cuet_counselling_booking"');
+    expect(leadPicker).toContain("DEFAULT_VISIBLE_WHEN_UNCONFIGURED");
+    expect(leadPicker).toContain("show_in_lead_picker !== true");
+    expect(leadPicker).toContain("Template Manager → Template Visibility");
     expect(leadPicker).toContain('from("whatsapp_templates")');
     expect(leadPicker).toContain("hasDynamicUrlButton");
     expect(leadPicker).toContain("header_image_url");
@@ -58,5 +65,8 @@ describe("CUET 2026 counselling WhatsApp template routing", () => {
     expect(bookingMigration).toContain("'cuet_counselling_booking'");
     expect(bookingMigration).toContain("1330123838631682");
     expect(bookingMigration).toContain("show_in_lead_picker = true");
+    expect(forceVisibilityMigration).toContain("'cuet_2026_counselling_open'");
+    expect(forceVisibilityMigration).toContain("'cuet_counselling_booking'");
+    expect(forceVisibilityMigration).toContain("show_in_lead_picker = true");
   });
 });
