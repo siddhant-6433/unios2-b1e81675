@@ -11,6 +11,7 @@ export interface WhatsAppTemplateDefinition {
   category?: WhatsAppTemplateCategory;
   status?: WhatsAppTemplateStatus;
   buttons?: string[];
+  buttonParams?: string[];
   footer?: string;
 }
 
@@ -29,6 +30,7 @@ export interface WhatsAppTemplateLeadContext {
   approval?: string | null;
   video_url?: string | null;
   course_url?: string | null;
+  course_url_suffix?: string | null;
   campus_url?: string | null;
   apply_url?: string | null;
 }
@@ -49,6 +51,7 @@ export interface RenderedWhatsAppTemplate {
   status: WhatsAppTemplateStatus;
   body: string;
   params: RenderedWhatsAppTemplateParam[];
+  buttonParams: RenderedWhatsAppTemplateParam[];
   unresolved: string[];
   buttons: string[];
   footer?: string;
@@ -70,6 +73,7 @@ const HUMAN_PARAM_LABELS: Record<string, string> = {
   approval: "Approval",
   video_url: "Video URL",
   course_url: "Course URL",
+  course_url_suffix: "Course page button",
   campus_url: "Campus URL",
   apply_url: "Apply URL",
 };
@@ -90,6 +94,7 @@ const FALLBACK_VALUES: Record<string, string> = {
   approval: "NIMT Educational Institutions",
   video_url: "course video link",
   course_url: "https://nimt.ac.in/courses",
+  course_url_suffix: "",
   campus_url: "https://nimt.ac.in/contact",
   apply_url: "https://uni.nimt.ac.in/apply/nimt",
 };
@@ -98,6 +103,16 @@ const normalizeKey = (key: string) => key.trim().replace(/\s+/g, "_");
 
 const humanizeParam = (key: string) =>
   HUMAN_PARAM_LABELS[key] || key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+
+const resolveCourseUrlSuffix = (courseUrl?: string | null): string => {
+  const raw = String(courseUrl || "").trim();
+  if (!raw) return "";
+  const marker = "/courses/";
+  const markerIndex = raw.indexOf(marker);
+  if (markerIndex === -1) return "";
+  const suffix = raw.slice(markerIndex + marker.length).split("?")[0].replace(/^\/+|\/+$/g, "");
+  return suffix.split("#")[0];
+};
 
 export const inferWhatsAppTemplateCategory = (key: string): WhatsAppTemplateCategory => {
   if (/visit/i.test(key)) return "visit";
@@ -132,8 +147,13 @@ export function renderWhatsAppTemplate(
 
   if (!values.course_label && values.course_name) values.course_label = values.course_name;
   if (providedKeys.has("course_name")) providedKeys.add("course_label");
+  if (!values.course_url_suffix && values.course_url) {
+    values.course_url_suffix = resolveCourseUrlSuffix(values.course_url);
+  }
+  if (values.course_url_suffix) providedKeys.add("course_url_suffix");
 
   const requiredKeys = new Set(template.params.map(normalizeKey));
+  const requiredButtonKeys = new Set((template.buttonParams || []).map(normalizeKey));
   const encounteredKeys = new Set<string>();
   let body = template.preview.replace(/\{\{(\w+)\}\}/g, (_, rawKey) => {
     const key = normalizeKey(rawKey);
@@ -159,6 +179,16 @@ export function renderWhatsAppTemplate(
       resolved: !required || (providedKeys.has(key) && !!value) || (!!value && value !== fallback && !/^.+ (duration|criteria|link)$/.test(value)),
     };
   });
+  const buttonParams = Array.from(requiredButtonKeys).map(key => {
+    const value = values[key] || "";
+    return {
+      key,
+      label: humanizeParam(key),
+      value,
+      required: true,
+      resolved: providedKeys.has(key) && !!value,
+    };
+  });
 
   return {
     key: template.key,
@@ -168,7 +198,8 @@ export function renderWhatsAppTemplate(
     status: template.status || "approved",
     body,
     params,
-    unresolved: params.filter(param => param.required && !param.resolved).map(param => param.key),
+    buttonParams,
+    unresolved: [...params, ...buttonParams].filter(param => param.required && !param.resolved).map(param => param.key),
     buttons: template.buttons || [],
     footer: template.footer,
   };

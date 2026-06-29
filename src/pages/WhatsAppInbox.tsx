@@ -18,7 +18,7 @@ import {
   ThumbsDown, AlertOctagon, ThumbsUp, CalendarPlus, Bot, Cpu, CheckCheck, CircleCheck,
 } from "lucide-react";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
   cahetDeadlineDescription,
@@ -310,6 +310,8 @@ const INBOX_TEMPLATES: WhatsAppTemplateDefinition[] = [
     label: "Course Info",
     description: "Auto-filled course duration, eligibility, approval and video",
     params: ["student_name", "course_name", "duration", "eligibility", "approval", "video_url"],
+    buttonParams: ["course_url_suffix"],
+    buttons: ["Open course page"],
     preview: TEMPLATE_MESSAGE_TEXTS.course_info_v4,
   },
   {
@@ -1820,6 +1822,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     "kb_apply_link", "kb_campus_addresses", "kb_rankings", "kb_approvals",
     "kb_scholarships", "kb_placements", "kb_eligibility", "kb_fee_structure", "kb_course_details",
   ]);
+  const COURSE_INFO_TEMPLATE_KEYS = new Set(["course_info_v1", "course_info_v2", "course_info_v3", "course_info_v4"]);
 
   const handleSendTemplate = async () => {
     if (!selectedTemplate || !selectedPhone) return;
@@ -1923,11 +1926,19 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       }
     }
 
-    // Meta-approved templates via whatsapp-send
-    let params: string[] = render?.params
+    const hasTemplateOverrides = Object.values(templateParamOverrides).some(value => String(value || "").trim().length > 0);
+    const useServerResolvedCourseTemplate = COURSE_INFO_TEMPLATE_KEYS.has(selectedTemplate) && Boolean(conv?.lead_id) && !hasTemplateOverrides;
+
+    // Meta-approved templates via whatsapp-send. Course-info templates are
+    // server-authoritative unless the user manually edits a preview variable.
+    let params: string[] = useServerResolvedCourseTemplate ? [] : (render?.params
       .filter(param => param.required)
-      .map(param => param.value) || [];
-    let buttonUrls: string[] | undefined;
+      .map(param => param.value) || []);
+    let buttonUrls: string[] | undefined = useServerResolvedCourseTemplate ? undefined : (render?.buttonParams
+      .filter(param => param.required)
+      .map(param => param.value)
+      .filter(Boolean) || undefined);
+    if (buttonUrls && buttonUrls.length === 0) buttonUrls = undefined;
     switch (selectedTemplate) {
       case "lead_welcome": params = params.length ? params : [leadName, courseName, leadSource]; break;
       case "visit_confirmation": params = [leadName, "the scheduled date", campusName]; buttonUrls = ["1820424915210710582"]; break;
@@ -1946,7 +1957,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
         lead_id: conv?.lead_id || null,
         clear_unread_after_send: true,
         rendered_template: render,
-        ...(buttonUrls ? { button_urls: buttonUrls } : {}),
+        ...(buttonUrls?.length ? { button_urls: buttonUrls } : {}),
       },
     });
 
@@ -1958,7 +1969,10 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       }
       console.error("whatsapp-send template error:", { error, errBody, data });
       appendTemplateBubble("failed", { message: detail });
-      toast({ title: "Failed to send template", description: detail, variant: "destructive" });
+      const friendlyDetail = /131008|required parameter is missing/i.test(detail || "")
+        ? `${detail}. A required Meta template field is missing. Check body variables, header media, and button URL fields before sending.`
+        : detail;
+      toast({ title: "Failed to send template", description: friendlyDetail, variant: "destructive" });
     } else if (data?.error) {
       appendTemplateBubble("failed", { message: data.error });
       toast({ title: "Failed to send template", description: data.error, variant: "destructive" });
@@ -2003,6 +2017,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
     approval: selectedCourseInfo?.approval || "NIMT Educational Institutions",
     video_url: selectedCourseInfo?.video_url || null,
     course_url: selectedCourseInfo?.course_url || "https://nimt.ac.in/courses",
+    course_url_suffix: selectedCourseInfo?.course_url_suffix || null,
     campus_url: selectedCourseInfo?.campus_url || "https://nimt.ac.in/contact",
     apply_url: selectedCourseInfo?.apply_url || "https://uni.nimt.ac.in/apply/nimt",
   };
@@ -2066,8 +2081,8 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
         eligibility: "10+2 / graduation as per programme norms",
         approval: "NIMT Educational Institutions",
         campus_name: "Greater Noida campus",
-        video_url: "https://nimt.ac.in/courses",
-        course_url: "https://nimt.ac.in/courses",
+        video_url: "https://nimt.ac.in/courses/b-sc-nursing",
+        course_url: "https://nimt.ac.in/courses/b-sc-nursing#admissions",
         campus_url: "https://nimt.ac.in/contact",
         apply_url: "https://uni.nimt.ac.in/apply/nimt",
       });
@@ -2123,6 +2138,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       approval: selectedCourseInfo?.approval || "NIMT Educational Institutions",
       video_url: selectedCourseInfo?.video_url || "course video link",
       course_url: selectedCourseInfo?.course_url || "https://nimt.ac.in/courses",
+      course_url_suffix: selectedCourseInfo?.course_url_suffix || "",
       campus_url: selectedCourseInfo?.campus_url || "https://nimt.ac.in/contact",
       apply_url: selectedCourseInfo?.apply_url || "https://uni.nimt.ac.in/apply/nimt",
       "1": selectedCourseInfo?.student_name || selectedConv?.lead_name || "Student",
@@ -2166,6 +2182,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
       status: template.status || "approved",
       body,
       params: rendered.params,
+      buttonParams: rendered.buttonParams,
       unresolved: [],
       buttons: template.buttons || [],
       footer: template.footer,
@@ -3240,16 +3257,19 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                     }
                   }}
                 >
-                  <DialogContent className="max-h-[86vh] max-w-5xl overflow-hidden p-0">
-                    <DialogHeader className="border-b px-4 py-3">
+                  <DialogContent className="!flex h-[100dvh] w-screen max-w-none flex-col gap-0 overflow-hidden p-0 sm:h-[min(86vh,760px)] sm:w-[min(96vw,64rem)] sm:max-w-5xl">
+                    <DialogHeader className="flex-none border-b px-4 py-3 pr-11">
                       <DialogTitle className="flex items-center gap-2 text-sm">
                         <LayoutTemplate className="h-4 w-4 text-emerald-600" />
                         Send WhatsApp Template
                       </DialogTitle>
+                      <DialogDescription className="sr-only">
+                        Search approved WhatsApp templates, verify required body and button variables, preview the rendered message, then send it to the selected conversation.
+                      </DialogDescription>
                     </DialogHeader>
-                    <div className="grid min-h-[620px] grid-cols-1 md:grid-cols-[300px_1fr]">
-                      <div className="border-r bg-slate-50/70">
-                        <div className="border-b p-3">
+                    <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[300px_1fr]">
+                      <div className="flex min-h-0 flex-col border-r bg-slate-50/70">
+                        <div className="flex-none border-b p-3">
                           <div className="relative">
                             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                             <input
@@ -3260,7 +3280,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                             />
                           </div>
                         </div>
-                        <div className="max-h-[540px] overflow-y-auto p-2">
+                        <div className="max-h-48 min-h-0 flex-1 overflow-y-auto p-2 md:max-h-none">
                           {Object.entries(templateGroups).map(([category, templates]) => (
                             <div key={category} className="mb-3">
                               <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
@@ -3295,8 +3315,8 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                         </div>
                       </div>
 
-                      <div className="flex min-h-0 flex-col">
-                        <div className="border-b px-4 py-3">
+                      <div className="flex min-h-0 flex-col overflow-hidden">
+                        <div className="flex-none border-b px-4 py-3">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div>
                               <p className="text-xs font-semibold text-slate-900">
@@ -3323,9 +3343,9 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                           </div>
                         </div>
 
-                        <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[1fr_260px]">
+                        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[1fr_260px]">
                           <div
-                            className="min-h-[360px] overflow-y-auto p-5"
+                            className="min-h-0 overflow-y-auto p-5"
                             style={{
                               backgroundColor: "#efeae2",
                               backgroundImage: "radial-gradient(circle at 1px 1px, rgba(17,94,89,.08) 1px, transparent 0)",
@@ -3364,13 +3384,13 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                             )}
                           </div>
 
-                          <div className="border-l bg-white p-3">
+                          <div className="min-h-0 overflow-y-auto border-l bg-white p-3">
                             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                               Template variables
                             </p>
                             {selectedTemplateRender ? (
                               <div className="space-y-2">
-                                {selectedTemplateRender.params.length === 0 && (
+                                {selectedTemplateRender.params.length === 0 && selectedTemplateRender.buttonParams.length === 0 && (
                                   <p className="rounded-md bg-slate-50 p-3 text-xs text-muted-foreground">No variables required.</p>
                                 )}
                                 {selectedTemplateRender.params.map(param => (
@@ -3388,6 +3408,30 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                                     />
                                   </label>
                                 ))}
+                                {selectedTemplateRender.buttonParams.length > 0 && (
+                                  <div className="rounded-md border border-emerald-100 bg-emerald-50/60 p-2">
+                                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+                                      Button parameters required by Meta
+                                    </p>
+                                    <div className="space-y-2">
+                                      {selectedTemplateRender.buttonParams.map(param => (
+                                        <label key={param.key} className="block">
+                                          <span className="mb-1 flex items-center justify-between text-[10px] font-medium text-slate-600">
+                                            {param.label}
+                                            {param.required && !param.resolved && <span className="text-red-600">Required</span>}
+                                          </span>
+                                          <input
+                                            value={templateParamOverrides[param.key] ?? param.value}
+                                            onChange={e => setTemplateParamOverrides(prev => ({ ...prev, [param.key]: e.target.value }))}
+                                            className={`h-8 w-full rounded-md border px-2 text-xs outline-none focus:ring-2 focus:ring-emerald-500/20 ${
+                                              param.required && !param.resolved ? "border-red-300 bg-red-50" : "border-input bg-white"
+                                            }`}
+                                          />
+                                        </label>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             ) : (
                               <p className="rounded-md bg-slate-50 p-3 text-xs text-muted-foreground">Choose a template from the list.</p>
@@ -3395,7 +3439,7 @@ const WhatsAppInbox = ({ demoMode = false }: { demoMode?: boolean } = {}) => {
                           </div>
                         </div>
 
-                        <DialogFooter className="border-t px-4 py-3">
+                        <DialogFooter className="flex-none border-t bg-white px-4 py-3">
                           <Button
                             variant="ghost"
                             onClick={() => {

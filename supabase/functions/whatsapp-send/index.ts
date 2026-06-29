@@ -371,7 +371,22 @@ Deno.serve(async (req) => {
     //     top of the course page where the embedded video plays
     //   Button 2 (v1) / Button 1 (v2) "View fees & apply" → slug + #admissions
     //     anchor scrolls to the fees section
-    if ((template_key === "course_info_v1" || template_key === "course_info_v2" || template_key === "course_info_v3" || template_key === "course_info_v4") && lead_id && (!params || params.length === 0)) {
+    const isCourseInfoTemplate = template_key === "course_info_v1"
+      || template_key === "course_info_v2"
+      || template_key === "course_info_v3"
+      || template_key === "course_info_v4";
+    const requiredCourseInfoButtonUrlCount = template_key === "course_info_v1"
+      ? 2
+      : isCourseInfoTemplate
+        ? 1
+        : 0;
+    const missingCourseInfoBodyParams = !params || params.length === 0;
+    const missingCourseInfoButtonUrls = requiredCourseInfoButtonUrlCount > 0
+      && (!Array.isArray(button_urls)
+        || button_urls.length < requiredCourseInfoButtonUrlCount
+        || button_urls.slice(0, requiredCourseInfoButtonUrlCount).some((value: unknown) => String(value || "").trim().length === 0));
+
+    if (isCourseInfoTemplate && lead_id && (missingCourseInfoBodyParams || missingCourseInfoButtonUrls)) {
       const { data: resolved, error: resolveErr } = await admin.rpc(
         "fn_resolve_course_info_params",
         { p_lead_id: lead_id }
@@ -387,9 +402,12 @@ Deno.serve(async (req) => {
         ];
         // Derive the bare slug + the slug#admissions suffix from the resolver's
         // course_url ("https://www.nimt.ac.in/courses/{slug}#admissions").
-        const prefix = "https://www.nimt.ac.in/courses/";
+        const courseUrlMarker = "/courses/";
         const courseUrlFull = typeof resolved.course_url === "string" ? resolved.course_url : "";
-        const afterPrefix = courseUrlFull.startsWith(prefix) ? courseUrlFull.slice(prefix.length) : "";
+        const courseUrlMarkerIndex = courseUrlFull.indexOf(courseUrlMarker);
+        const afterPrefix = courseUrlMarkerIndex >= 0
+          ? courseUrlFull.slice(courseUrlMarkerIndex + courseUrlMarker.length)
+          : "";
         const bareSlug = afterPrefix.split("#")[0] || "";
         const slugWithFees = bareSlug ? `${bareSlug}#admissions` : afterPrefix;
         if (template_key === "course_info_v3" || template_key === "course_info_v4") {
@@ -401,24 +419,43 @@ Deno.serve(async (req) => {
           const videoUrl = (typeof resolved.video_url === "string" && resolved.video_url.length > 0)
             ? resolved.video_url
             : courseUrlFull;
-          params = [...baseParams, videoUrl];
+          if (missingCourseInfoBodyParams) params = [...baseParams, videoUrl];
           // v4's single URL button is the bare slug ("Open course page"),
           // v3's was slug#admissions ("View fees & apply").
-          button_urls = template_key === "course_info_v4" ? [bareSlug] : [slugWithFees];
+          if (missingCourseInfoButtonUrls) button_urls = template_key === "course_info_v4" ? [bareSlug] : [slugWithFees];
         } else if (template_key === "course_info_v2") {
-          params = baseParams;
-          button_urls = [slugWithFees];
+          if (missingCourseInfoBodyParams) params = baseParams;
+          if (missingCourseInfoButtonUrls) button_urls = [slugWithFees];
         } else {
           // v1: button 1 = video (top of page), button 2 = fees section
-          params = baseParams;
-          button_urls = [bareSlug, slugWithFees];
+          if (missingCourseInfoBodyParams) params = baseParams;
+          if (missingCourseInfoButtonUrls) button_urls = [bareSlug, slugWithFees];
+        }
+        if (missingCourseInfoButtonUrls && (!Array.isArray(button_urls) || button_urls.some((value: unknown) => String(value || "").trim().length === 0))) {
+          return new Response(
+            JSON.stringify({
+              error: `${template_key} requires a resolved course page URL button. The lead's course is missing a valid course URL slug.`,
+              missing_field: "button_urls",
+            }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
         }
       } else {
-        // No course on the lead — switch to the generic template.
-        template_key = "course_info_generic";
-        const { data: leadRow } = await admin.from("leads").select("name").eq("id", lead_id).single();
-        params = [leadRow?.name || "there"];
-        button_urls = undefined;
+        if (missingCourseInfoBodyParams) {
+          // No course on the lead — switch to the generic template.
+          template_key = "course_info_generic";
+          const { data: leadRow } = await admin.from("leads").select("name").eq("id", lead_id).single();
+          params = [leadRow?.name || "there"];
+          button_urls = undefined;
+        } else {
+          return new Response(
+            JSON.stringify({
+              error: `${template_key} requires button_urls, but the lead's course details could not be resolved.`,
+              missing_field: "button_urls",
+            }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
       }
     }
 
@@ -543,6 +580,30 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: `Unknown template: ${template_key}` }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    const requiredUrlButtonCounts: Record<string, number> = {
+      course_info_v1: 2,
+      course_info_v2: 1,
+      course_info_v3: 1,
+      course_info_v4: 1,
+      visit_confirmation: 1,
+      course_info_video: 2,
+    };
+    const requiredUrlButtonCount = requiredUrlButtonCounts[template_key] || 0;
+    if (requiredUrlButtonCount > 0) {
+      const hasAllButtonUrls = Array.isArray(button_urls)
+        && button_urls.length >= requiredUrlButtonCount
+        && button_urls.slice(0, requiredUrlButtonCount).every((value: unknown) => String(value || "").trim().length > 0);
+      if (!hasAllButtonUrls) {
+        return new Response(
+          JSON.stringify({
+            error: `${template_key} requires ${requiredUrlButtonCount} URL button parameter${requiredUrlButtonCount === 1 ? "" : "s"} before it can be sent.`,
+            missing_field: "button_urls",
+          }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     const phoneRoute = getRouteForTemplate(template_key);
@@ -697,6 +758,7 @@ Deno.serve(async (req) => {
       renderMetadata: rendered_template && typeof rendered_template === "object"
         ? {
             ...rendered_template,
+            body: readableContent,
             params,
             button_urls,
             provider_template_name: templateDef.name,

@@ -38,6 +38,45 @@ describe("WhatsApp inbox template rendering and speed guardrails", () => {
     expect(render.body).toContain("Approval: NIMT Educational Institutions");
   });
 
+  it("requires and resolves Meta URL button parameters for course_info_v4", () => {
+    const template = {
+      key: "course_info_v4",
+      label: "Course Info",
+      description: "Course details",
+      params: ["student_name", "course_name", "duration", "eligibility", "approval", "video_url"],
+      buttonParams: ["course_url_suffix"],
+      buttons: ["Open course page"],
+      preview: "Hi {{student_name}}, here are the details for {{course_name}}.\n\nDuration: {{duration}}\nEligibility: {{eligibility}}\nApproval: {{approval}}\nCourse video: {{video_url}}",
+    };
+
+    const missingButton = renderWhatsAppTemplate(template, {
+      student_name: "Riya Sharma",
+      course_name: "B.Sc Nursing",
+      duration: "4 years",
+      eligibility: "10+2 / graduation as per programme norms",
+      approval: "NIMT Educational Institutions",
+      video_url: "https://nimt.ac.in/courses/b-sc-nursing",
+      course_url: "https://nimt.ac.in/courses",
+    });
+    expect(missingButton.unresolved).toContain("course_url_suffix");
+
+    const resolvedButton = renderWhatsAppTemplate(template, {
+      student_name: "Riya Sharma",
+      course_name: "B.Sc Nursing",
+      duration: "4 years",
+      eligibility: "10+2 / graduation as per programme norms",
+      approval: "NIMT Educational Institutions",
+      video_url: "https://nimt.ac.in/courses/b-sc-nursing",
+      course_url: "https://nimt.ac.in/courses/b-sc-nursing#admissions",
+    });
+    expect(resolvedButton.unresolved).toEqual([]);
+    expect(resolvedButton.buttonParams[0]).toMatchObject({
+      key: "course_url_suffix",
+      value: "b-sc-nursing",
+      resolved: true,
+    });
+  });
+
   it("renders course_info_v4 as readable message text instead of a template-key placeholder", () => {
     expect(inbox).toContain("course_info_v4:");
     expect(inbox).toContain("course_info_video_v2:");
@@ -48,8 +87,17 @@ describe("WhatsApp inbox template rendering and speed guardrails", () => {
     expect(inbox).toContain("getMessageText(m)");
     expect(inbox).toContain("renderWhatsAppTemplate");
     expect(inbox).toContain("selectedTemplateRender");
+    expect(inbox).toContain("Button parameters required by Meta");
+    expect(inbox).toContain("useServerResolvedCourseTemplate");
+    expect(inbox).toContain("DialogDescription");
+    expect(inbox).toContain("h-[100dvh]");
+    expect(inbox).toContain("sm:h-[min(86vh,760px)]");
     expect(templateRenderer).toContain("export function renderWhatsAppTemplate");
+    expect(templateRenderer).toContain("buttonParams");
     expect(whatsappSend).toContain("rendered_template");
+    expect(whatsappSend).toContain("missingCourseInfoButtonUrls");
+    expect(whatsappSend).toContain("requiredUrlButtonCounts");
+    expect(whatsappSend).toContain("body: readableContent");
     expect(conversationAction).toContain("render_metadata");
     expect(inbox).not.toContain("Template: {m.template_key}");
     expect(inbox).toContain("appendTemplateBubble");
