@@ -38,6 +38,18 @@ describe("CUET 2026 counselling WhatsApp template routing", () => {
     expect(campaignSend).toContain('type: "image"');
   });
 
+  it("uses application names and school or college greetings for Dear-style bulk sends", () => {
+    expect(campaignSend).toContain("DEAR_STUDENT_NAME_TEMPLATES");
+    expect(campaignSend).toContain("resolveLeadDisplayName");
+    expect(campaignSend).toContain("resolveDearRecipientName");
+    expect(campaignSend).toContain('from("applications")');
+    expect(campaignSend).toContain("full_name");
+    expect(campaignSend).toContain("lead_institution_type");
+    expect(campaignSend).toContain('"Parent"');
+    expect(campaignSend).toContain('"Applicant"');
+    expect(campaignSend).toContain('"cnet_not_qualified_bpt_bmrit"');
+  });
+
   it("seeds lead-picker visibility and allows template asset uploads", () => {
     expect(migration).toContain("'cuet_2026_counselling_open'");
     expect(migration).toContain("show_in_lead_picker = true");

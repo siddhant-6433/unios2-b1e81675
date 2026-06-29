@@ -33,6 +33,51 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
   counsellor_followup_overdue: { name: "counsellor_followup_overdue", params: ["lead_name", "followup_date"] },
 };
 
+const DEAR_STUDENT_NAME_TEMPLATES = new Set([
+  "cnet_not_qualified_bpt_bmrit",
+]);
+
+function cleanPersonName(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim().replace(/\s+/g, " ");
+  return trimmed.includes("@") ? "" : trimmed;
+}
+
+function stringifyForClassification(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "";
+  }
+}
+
+function isSchoolRecipient(lead: any, application: any): boolean {
+  if ((lead?.lead_institution_type || "").toLowerCase() === "school") return true;
+  if ((application?.program_category || "").toLowerCase() === "school") return true;
+
+  const haystack = [
+    lead?.courses?.name,
+    lead?.campuses?.name,
+    application?.course_selections,
+  ].map(stringifyForClassification).join(" ").toLowerCase();
+
+  return /\b(school|beacon|mirai|nursery|kindergarten|grade|lkg|ukg|pyp|myp|cbse|icse)\b/.test(haystack);
+}
+
+function resolveLeadDisplayName(lead: any, application: any): string {
+  return cleanPersonName(application?.full_name) || cleanPersonName(lead?.name) || "Student";
+}
+
+function resolveDearRecipientName(lead: any, application: any): string {
+  const prefix = isSchoolRecipient(lead, application) ? "Parent" : "Applicant";
+  const displayName = cleanPersonName(application?.full_name) || cleanPersonName(lead?.name);
+  if (!displayName) return prefix;
+  if (new RegExp(`^${prefix}\\b`, "i").test(displayName)) return displayName;
+  return `${prefix} ${displayName}`;
+}
+
 function templateBodyFromComponents(components: unknown): string | null {
   if (!Array.isArray(components)) return null;
   const body = components.find((component) => {
@@ -205,7 +250,7 @@ Deno.serve(async (req) => {
     // template params per recipient — see substitution loop below.
     const { data: recipients, error: recipientsError } = await adminClient
       .from("whatsapp_campaign_recipients")
-      .select("id, campaign_id, lead_id, phone, status, leads(name, courses(name), campuses(name))")
+      .select("id, campaign_id, lead_id, phone, status, leads(name, lead_institution_type, courses(name), campuses(name))")
       .eq("campaign_id", campaign_id)
       .eq("status", "pending");
 
@@ -235,6 +280,29 @@ Deno.serve(async (req) => {
     let sentCount = 0;
     let failedCount = 0;
 
+    const leadIds = Array.from(new Set(
+      recipients
+        .map((recipient: any) => recipient.lead_id)
+        .filter((leadId: unknown): leadId is string => typeof leadId === "string" && leadId.length > 0)
+    ));
+    const latestApplicationByLeadId = new Map<string, any>();
+    if (leadIds.length > 0) {
+      const { data: applications, error: applicationsError } = await adminClient
+        .from("applications")
+        .select("lead_id, full_name, program_category, course_selections, created_at")
+        .in("lead_id", leadIds)
+        .order("created_at", { ascending: false });
+      if (applicationsError) {
+        console.error("Failed to fetch recipient applications:", applicationsError.message);
+      } else {
+        for (const application of applications || []) {
+          if (application?.lead_id && !latestApplicationByLeadId.has(application.lead_id)) {
+            latestApplicationByLeadId.set(application.lead_id, application);
+          }
+        }
+      }
+    }
+
     // Static params filled once at campaign-creation time (see Lists UI).
     // Used to plug params that aren't per-lead — visit_date, fee amount,
     // due_date, application_id, etc. Auto-filled per-lead from the leads
@@ -243,7 +311,9 @@ Deno.serve(async (req) => {
 
     for (const recipient of recipients) {
       const lead = (recipient as any).leads || {};
-      const leadName = lead.name || "Student";
+      const latestApplication = latestApplicationByLeadId.get((recipient as any).lead_id);
+      const leadName = resolveLeadDisplayName(lead, latestApplication);
+      const dearLeadName = resolveDearRecipientName(lead, latestApplication);
       const courseName = lead.courses?.name || "";
       const campusName = lead.campuses?.name || "";
       const waPhone = recipient.phone.replace(/[^0-9]/g, "");
@@ -253,7 +323,9 @@ Deno.serve(async (req) => {
       // course_name override at campaign level still loses to the actual
       // course the lead enquired about — that's the desired behavior).
       const resolveParam = (name: string): string => {
-        if (name === "student_name") return leadName;
+        if (name === "student_name") {
+          return DEAR_STUDENT_NAME_TEMPLATES.has(campaign.template_key) ? dearLeadName : leadName;
+        }
         if (name === "course_name")  return courseName || staticParams[name] || "";
         if (name === "campus_name")  return campusName || staticParams[name] || "";
         return staticParams[name] || "";
