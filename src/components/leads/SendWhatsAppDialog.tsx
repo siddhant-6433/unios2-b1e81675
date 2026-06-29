@@ -47,6 +47,27 @@ const CUET_2026_COUNSELLING_IMAGE_URL =
   "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/whatsapp-media/template-assets/cuet_2026_counselling_open.jpeg";
 const CUET_2026_COUNSELLING_PREVIEW =
   "The CUET 2026 result is out, and admission counselling is now open at NIMT.\n\nIf you're planning your next step after CUET, we're here to help.\n\nDuring your counselling session, our admission expert will guide you with:\n\n• Choosing the right course for your career goals\n• Scholarship opportunities based on your CUET score\n• Admission process, eligibility, fees, and required documents\n• Placements, internships, and career opportunities\n\nWe look forward to helping you build a successful future.\n\nTeam NIMT Educational Institutions";
+const CUET_COUNSELLING_BOOKING_PREVIEW =
+  "CUET counselling booking is now open at NIMT. Share this approved Meta template with CUET leads so they can book a counselling session with the admissions team.";
+
+interface WhatsAppPickerTemplate {
+  key: string;
+  label: string;
+  description: string;
+  badge: string | null;
+  followUpMsg: null | string | ((courseName?: string, campusName?: string) => string);
+  buildParams: (lead: any, courseName?: string, campusName?: string, courseDuration?: number, courseType?: string) => string[];
+  preview: string;
+  headerImageUrl?: string;
+  isQuickReply?: boolean;
+  quickReplyText?: string;
+}
+
+const hasDynamicUrlButton = (components?: Array<{ type?: string; buttons?: Array<{ type?: string; url?: string }> }> | null) =>
+  (components || []).some((component) =>
+    component.type === "BUTTONS" &&
+    (component.buttons || []).some((button) => button.type === "URL" && typeof button.url === "string" && button.url.includes("{{"))
+  );
 
 const getVideoUrl = (courseName?: string, campusName?: string): string => {
   const text = `${courseName || ""} ${campusName || ""}`;
@@ -54,7 +75,7 @@ const getVideoUrl = (courseName?: string, campusName?: string): string => {
   return match?.url || DEFAULT_VIDEO_URL;
 };
 
-const TEMPLATES = [
+const TEMPLATES: WhatsAppPickerTemplate[] = [
   {
     key: "lead_welcome",
     label: "Lead Welcome",
@@ -102,6 +123,15 @@ const TEMPLATES = [
     buildParams: () => [],
     headerImageUrl: CUET_2026_COUNSELLING_IMAGE_URL,
     preview: CUET_2026_COUNSELLING_PREVIEW,
+  },
+  {
+    key: "cuet_counselling_booking",
+    label: "CUET Counselling Booking",
+    description: "Approved CUET counselling booking template",
+    badge: "CUET",
+    followUpMsg: null,
+    buildParams: () => [],
+    preview: CUET_COUNSELLING_BOOKING_PREVIEW,
   },
   {
     key: "course_details",
@@ -230,10 +260,12 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
   // hardcoded list, so admins who toggle a template off see it disappear
   // immediately instead of after a refresh.
   const [allowedKeys, setAllowedKeys] = useState<Set<string> | null>(null);
+  const [dynamicTemplates, setDynamicTemplates] = useState<WhatsAppPickerTemplate[]>([]);
 
   useEffect(() => {
     if (!open) return;
     (async () => {
+      setDynamicTemplates([]);
       const { data: { user } } = await supabase.auth.getUser();
       const { data, error } = await (supabase as any)
         .from("whatsapp_template_settings")
@@ -242,11 +274,20 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
       if (error) {
         // Fail open — show everything rather than a blank picker.
         setAllowedKeys(new Set(TEMPLATES.map(t => t.key)));
+        setDynamicTemplates([]);
         return;
       }
       const userId = user?.id || null;
       const keys = new Set<string>();
-      (data || []).forEach((r: any) => {
+      const settingsRows = (data || []) as Array<{
+        template_key: string;
+        display_name?: string | null;
+        description?: string | null;
+        category?: string | null;
+        allowed_team_ids?: string[] | null;
+        allowed_user_ids?: string[] | null;
+      }>;
+      settingsRows.forEach((r: any) => {
         const teamScoped = Array.isArray(r.allowed_team_ids) && r.allowed_team_ids.length > 0;
         const userScoped = Array.isArray(r.allowed_user_ids) && r.allowed_user_ids.length > 0;
         // Team scoping (when active) is enforced server-side via RLS-aware
@@ -261,13 +302,51 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
         keys.add(r.template_key);
       });
       setAllowedKeys(keys);
+      const settingsByKey = new Map(settingsRows.map((row) => [row.template_key, row]));
+      const knownKeys = new Set(TEMPLATES.map((template) => template.key));
+      const { data: approvedRows } = await (supabase as any)
+        .from("whatsapp_templates")
+        .select("name, components, placeholder_count, has_media, header_format")
+        .eq("status", "APPROVED")
+        .eq("placeholder_count", 0)
+        .eq("has_media", false);
+      const dynamic = ((approvedRows || []) as Array<{
+        name: string;
+        components?: Array<{ type?: string; text?: string; buttons?: Array<{ type?: string; url?: string }> }> | null;
+        placeholder_count?: number | null;
+        has_media?: boolean | null;
+        header_format?: string | null;
+      }>)
+        .filter((row) =>
+          row.name &&
+          keys.has(row.name) &&
+          !knownKeys.has(row.name) &&
+          row.placeholder_count === 0 &&
+          row.has_media !== true &&
+          !["IMAGE", "VIDEO", "DOCUMENT"].includes(String(row.header_format || "").toUpperCase()) &&
+          !hasDynamicUrlButton(row.components)
+        )
+        .map((row) => {
+          const setting = settingsByKey.get(row.name);
+          const body = row.components?.find((component) => component.type === "BODY")?.text || setting?.description || row.name;
+          return {
+            key: row.name,
+            label: setting?.display_name || row.name.replace(/_/g, " "),
+            description: setting?.description || "Approved Meta template",
+            badge: null,
+            followUpMsg: null,
+            buildParams: () => [],
+            preview: body,
+          };
+        });
+      setDynamicTemplates(dynamic);
     })();
   }, [open]);
 
   const visibleTemplates = useMemo(() => {
     if (!allowedKeys) return [];
-    return TEMPLATES.filter(t => allowedKeys.has(t.key));
-  }, [allowedKeys]);
+    return [...TEMPLATES, ...dynamicTemplates].filter(t => allowedKeys.has(t.key));
+  }, [allowedKeys, dynamicTemplates]);
 
   const selectedTmpl = visibleTemplates.find(t => t.key === selectedTemplate) || TEMPLATES.find(t => t.key === selectedTemplate);
   const previewParams = selectedTmpl?.buildParams(lead, courseName, campusName, courseDuration, courseType) || [];

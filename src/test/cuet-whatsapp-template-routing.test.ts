@@ -9,18 +9,32 @@ const migration = readFileSync(
   "supabase/migrations/20260628190000_enable_cuet_2026_counselling_whatsapp.sql",
   "utf8",
 );
+const bookingMigration = readFileSync(
+  "supabase/migrations/20260629143000_enable_cuet_counselling_booking_whatsapp.sql",
+  "utf8",
+);
 
 describe("CUET 2026 counselling WhatsApp template routing", () => {
   it("is available in the lead picker and list bulk picker", () => {
     expect(leadPicker).toContain('key: "cuet_2026_counselling_open"');
+    expect(leadPicker).toContain('key: "cuet_counselling_booking"');
+    expect(leadPicker).toContain('from("whatsapp_templates")');
+    expect(leadPicker).toContain("hasDynamicUrlButton");
     expect(leadPicker).toContain("header_image_url");
     expect(bulkTemplates).toContain('key: "cuet_2026_counselling_open"');
+    expect(bulkTemplates).toContain('key: "cuet_counselling_booking"');
   });
 
   it("is accepted by both WhatsApp send functions with an image header", () => {
     expect(whatsappSend).toContain("cuet_2026_counselling_open");
+    expect(whatsappSend).toContain("cuet_counselling_booking");
+    expect(whatsappSend).toContain("Dynamic WhatsApp template lookup failed");
+    expect(whatsappSend).toContain("templateHasDynamicUrlButton");
     expect(whatsappSend).toContain('type: "image"');
     expect(campaignSend).toContain("cuet_2026_counselling_open");
+    expect(campaignSend).toContain("cuet_counselling_booking");
+    expect(campaignSend).toContain("Dynamic campaign template lookup failed");
+    expect(campaignSend).toContain("templateHasDynamicUrlButton");
     expect(campaignSend).toContain('type: "image"');
   });
 
@@ -29,5 +43,8 @@ describe("CUET 2026 counselling WhatsApp template routing", () => {
     expect(migration).toContain("show_in_lead_picker = true");
     expect(migration).toContain("'template-assets'");
     expect(migration).toContain("'admission_head'::public.app_role");
+    expect(bookingMigration).toContain("'cuet_counselling_booking'");
+    expect(bookingMigration).toContain("1330123838631682");
+    expect(bookingMigration).toContain("show_in_lead_picker = true");
   });
 });

@@ -83,6 +83,7 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
   bpt_bmrit_cahet_deadline: { name: "bpt_bmrit_cahet_deadline", params: [] },
   cnet_not_qualified_bpt_bmrit: { name: "cnet_not_qualified_bpt_bmrit", params: ["student_name"] },
   cuet_2026_counselling_open: { name: "cuet_2026_counselling_open", params: [], headerImageUrl: CUET_2026_COUNSELLING_IMAGE_URL },
+  cuet_counselling_booking: { name: "cuet_counselling_booking", params: [] },
   // Counsellor utility — tap-to-call link sent to counsellor's own phone
   counsellor_call_lead: { name: "lead_queue_item", params: ["counsellor_name", "lead_name", "lead_phone", "course"] },
   // Call disposition auto-replies to leads
@@ -227,6 +228,28 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
   // post it and submit the published Instagram/LinkedIn/YouTube links.
   video_approved_editor:   { name: "video_approved_editor",  params: ["editor_name", "video_title"] },
 };
+
+function templateBodyFromComponents(components: unknown): string | null {
+  if (!Array.isArray(components)) return null;
+  const body = components.find((component) => {
+    const data = component as Record<string, unknown>;
+    return data.type === "BODY";
+  }) as Record<string, unknown> | undefined;
+  return typeof body?.text === "string" ? body.text : null;
+}
+
+function templateHasDynamicUrlButton(components: unknown): boolean {
+  if (!Array.isArray(components)) return false;
+  const buttons = components.find((component) => {
+    const data = component as Record<string, unknown>;
+    return data.type === "BUTTONS";
+  }) as Record<string, unknown> | undefined;
+  if (!Array.isArray(buttons?.buttons)) return false;
+  return buttons.buttons.some((button) => {
+    const data = button as Record<string, unknown>;
+    return data.type === "URL" && typeof data.url === "string" && data.url.includes("{{");
+  });
+}
 
 type WhatsAppRoute = "default" | "call" | "visit";
 
@@ -537,12 +560,29 @@ Deno.serve(async (req) => {
       );
     }
 
-    const templateDef = TEMPLATES[template_key];
+    let dynamicTemplateBody: string | null = null;
+    let templateDef = TEMPLATES[template_key];
     if (!templateDef) {
-      return new Response(
-        JSON.stringify({ error: `Unknown template: ${template_key}` }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      const { data: dynamicTemplate, error: dynamicErr } = await admin
+        .from("whatsapp_templates")
+        .select("name, status, placeholder_count, has_media, header_format, components")
+        .eq("name", template_key)
+        .eq("status", "APPROVED")
+        .maybeSingle();
+      if (dynamicErr) console.error("Dynamic WhatsApp template lookup failed:", dynamicErr.message);
+      const canSendDynamic = dynamicTemplate
+        && (dynamicTemplate as any).placeholder_count === 0
+        && (dynamicTemplate as any).has_media !== true
+        && !["IMAGE", "VIDEO", "DOCUMENT"].includes(String((dynamicTemplate as any).header_format || "").toUpperCase())
+        && !templateHasDynamicUrlButton((dynamicTemplate as any).components);
+      if (!canSendDynamic) {
+        return new Response(
+          JSON.stringify({ error: `Unknown template: ${template_key}` }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      dynamicTemplateBody = templateBodyFromComponents((dynamicTemplate as any).components);
+      templateDef = { name: (dynamicTemplate as any).name, params: [] };
     }
 
     const phoneRoute = getRouteForTemplate(template_key);
@@ -649,6 +689,7 @@ Deno.serve(async (req) => {
       application_approved: "Congratulations {{1}}! Your application {{2}} for {{3}} has been approved. Our admissions team will be in touch with your offer letter shortly. Tap below to track your application in the apply portal.",
       applicant_welcome: "Hi {{1}}, thank you for starting your application at NIMT Educational Institutions!\n\nYour Application ID: {{2}}\nCourse: {{3}}\n\nComplete your application at https://uni.nimt.ac.in/apply/nimt/\n\nOur admissions team is here to help. Feel free to reach out anytime!",
       cuet_2026_counselling_open: "The CUET 2026 result is out, and admission counselling is now open at NIMT.\n\nIf you're planning your next step after CUET, we're here to help.\n\nDuring your counselling session, our admission expert will guide you with:\n\n• Choosing the right course for your career goals\n• Scholarship opportunities based on your CUET score\n• Admission process, eligibility, fees, and required documents\n• Placements, internships, and career opportunities\n\nWe look forward to helping you build a successful future.\n\nTeam NIMT Educational Institutions",
+      cuet_counselling_booking: "CUET counselling booking is now open at NIMT. Share this approved Meta template with CUET leads so they can book a counselling session with the admissions team.",
       ai_call_course_info: "Hi {{1}}, thank you for speaking with us about {{2}} at NIMT Educational Institutions! 🎓\n\n🏫 Campus: {{3}}\n\n📄 Course Details: {{4}}\n📝 Apply Now: {{5}}\n\nFor questions, reply to this message or call our admissions team.\n\nWe look forward to welcoming you!",
       ai_call_post_summary: "Hi {{1}}, as discussed on our call, here are the details for {{2}} at NIMT Educational Institutions:\n\n🏫 Campus: {{3}}\n📄 Course details: {{4}}\n📝 Apply now: {{5}}\n🎥 Watch course video: {{6}}\n\nReply to this message for any questions, or our admissions team will reach out shortly.",
       ai_missed_call_followup: "Hi {{1}}, this is Navya from NIMT Educational Institutions. I tried calling you regarding your enquiry about {{2}}.\n\nPlease feel free to call back at {{3}} during 9 AM-8 PM IST.\n\n📄 Course information: {{4}}\n🎥 Watch course video: {{5}}\n\nLooking forward to assisting you with your admission journey.",
@@ -665,7 +706,7 @@ Deno.serve(async (req) => {
 
     let readableContent = typeof rendered_template?.body === "string" && rendered_template.body.trim()
       ? rendered_template.body.trim()
-      : TEMPLATE_TEXTS[template_key] || `[Template: ${template_key}]`;
+      : TEMPLATE_TEXTS[template_key] || dynamicTemplateBody || `[Template: ${template_key}]`;
     if (params && Array.isArray(params)) {
       params.forEach((p: string, i: number) => {
         readableContent = readableContent.replace(`{{${i + 1}}}`, p);

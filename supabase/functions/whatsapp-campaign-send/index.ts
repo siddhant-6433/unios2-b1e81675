@@ -24,6 +24,7 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
   bpt_bmrit_cahet_deadline: { name: "bpt_bmrit_cahet_deadline", params: [] },
   cnet_not_qualified_bpt_bmrit: { name: "cnet_not_qualified_bpt_bmrit", params: ["student_name"] },
   cuet_2026_counselling_open: { name: "cuet_2026_counselling_open", params: [], headerImageUrl: CUET_2026_COUNSELLING_IMAGE_URL },
+  cuet_counselling_booking: { name: "cuet_counselling_booking", params: [] },
   course_details: { name: "course_details", params: ["student_name", "course_name"] },
   counsellor_lead_assigned: { name: "counsellor_lead_assigned", params: ["counsellor_name", "lead_name", "lead_phone_last4", "sla_hours"] },
   counsellor_sla_warning: { name: "counsellor_sla_warning", params: ["lead_name", "hours_remaining"] },
@@ -31,6 +32,28 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
   counsellor_visit_confirmation: { name: "counsellor_visit_confirmation", params: ["lead_name", "visit_date", "campus_name"] },
   counsellor_followup_overdue: { name: "counsellor_followup_overdue", params: ["lead_name", "followup_date"] },
 };
+
+function templateBodyFromComponents(components: unknown): string | null {
+  if (!Array.isArray(components)) return null;
+  const body = components.find((component) => {
+    const data = component as Record<string, unknown>;
+    return data.type === "BODY";
+  }) as Record<string, unknown> | undefined;
+  return typeof body?.text === "string" ? body.text : null;
+}
+
+function templateHasDynamicUrlButton(components: unknown): boolean {
+  if (!Array.isArray(components)) return false;
+  const buttons = components.find((component) => {
+    const data = component as Record<string, unknown>;
+    return data.type === "BUTTONS";
+  }) as Record<string, unknown> | undefined;
+  if (!Array.isArray(buttons?.buttons)) return false;
+  return buttons.buttons.some((button) => {
+    const data = button as Record<string, unknown>;
+    return data.type === "URL" && typeof data.url === "string" && data.url.includes("{{");
+  });
+}
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -133,12 +156,29 @@ Deno.serve(async (req) => {
       );
     }
 
-    const templateDef = TEMPLATES[campaign.template_key];
+    let dynamicTemplateBody: string | null = null;
+    let templateDef = TEMPLATES[campaign.template_key];
     if (!templateDef) {
-      return new Response(
-        JSON.stringify({ error: `Unknown template: ${campaign.template_key}` }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      const { data: dynamicTemplate, error: dynamicErr } = await adminClient
+        .from("whatsapp_templates")
+        .select("name, status, placeholder_count, has_media, header_format, components")
+        .eq("name", campaign.template_key)
+        .eq("status", "APPROVED")
+        .maybeSingle();
+      if (dynamicErr) console.error("Dynamic campaign template lookup failed:", dynamicErr.message);
+      const canSendDynamic = dynamicTemplate
+        && (dynamicTemplate as any).placeholder_count === 0
+        && (dynamicTemplate as any).has_media !== true
+        && !["IMAGE", "VIDEO", "DOCUMENT"].includes(String((dynamicTemplate as any).header_format || "").toUpperCase())
+        && !templateHasDynamicUrlButton((dynamicTemplate as any).components);
+      if (!canSendDynamic) {
+        return new Response(
+          JSON.stringify({ error: `Unknown template: ${campaign.template_key}` }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      dynamicTemplateBody = templateBodyFromComponents((dynamicTemplate as any).components);
+      templateDef = { name: (dynamicTemplate as any).name, params: [] };
     }
 
     if (campaign.status === "paused" || campaign.status === "terminated") {
@@ -274,7 +314,7 @@ Deno.serve(async (req) => {
             .eq("id", recipient.id);
 
           const resolvedParams = templateDef.params.map(resolveParam);
-          const readableContent = `[Campaign: ${campaign.name}] [Template: ${campaign.template_key.replace(/_/g, " ")}]`;
+          const readableContent = dynamicTemplateBody || `[Campaign: ${campaign.name}] [Template: ${campaign.template_key.replace(/_/g, " ")}]`;
           await recordOutboundConversationAction(adminClient, {
             kind: "campaignSend",
             phone: waPhone,
