@@ -322,6 +322,7 @@ Deno.serve(async (req) => {
       header_document_url,
       header_document_filename,
       clear_unread_after_send,
+      rendered_template,
     } = requestBody;
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
@@ -662,7 +663,9 @@ Deno.serve(async (req) => {
       video_approved_editor: "Hi {{1}}, your video \"{{2}}\" has been approved on the NIMT Video Portal. Please post it on Instagram, LinkedIn and YouTube, then add the published links (with date & time) in your portal so it counts toward your billing.",
     };
 
-    let readableContent = TEMPLATE_TEXTS[template_key] || `[Template: ${template_key}]`;
+    let readableContent = typeof rendered_template?.body === "string" && rendered_template.body.trim()
+      ? rendered_template.body.trim()
+      : TEMPLATE_TEXTS[template_key] || `[Template: ${template_key}]`;
     if (params && Array.isArray(params)) {
       params.forEach((p: string, i: number) => {
         readableContent = readableContent.replace(`{{${i + 1}}}`, p);
@@ -691,6 +694,23 @@ Deno.serve(async (req) => {
       userId: user.id,
       sendResult,
       statusError: statusErrorPayload,
+      renderMetadata: rendered_template && typeof rendered_template === "object"
+        ? {
+            ...rendered_template,
+            params,
+            button_urls,
+            provider_template_name: templateDef.name,
+            language: rendered_template.language || "en",
+          }
+        : {
+            key: template_key,
+            label: template_key.replace(/_/g, " "),
+            body: readableContent,
+            params,
+            button_urls,
+            provider_template_name: templateDef.name,
+            language: "en",
+          },
       outboundKind: "template",
       expectedReplyType: expectedReplyTypeForTemplate(template_key),
       responsePolicy: responsePolicyForTemplate(template_key),

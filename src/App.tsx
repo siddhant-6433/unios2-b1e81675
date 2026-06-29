@@ -272,6 +272,9 @@ const App = () => (
               element={<StudentPortalEntry />}
             />
             <Route path="/forbidden" element={<Forbidden />} />
+            {import.meta.env.DEV && (
+              <Route path="/dev/whatsapp-inbox" element={<WhatsAppInbox demoMode />} />
+            )}
             <Route
               path="/*"
               element={

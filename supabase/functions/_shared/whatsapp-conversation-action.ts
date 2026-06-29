@@ -59,6 +59,7 @@ export interface OutboundConversationAction {
   campaignId?: string | null;
   campaignRecipientId?: string | null;
   metadata?: Record<string, unknown>;
+  renderMetadata?: Record<string, unknown> | null;
   expiresAt?: string;
   activityDescription?: string | null;
   automationEvent?: {
@@ -93,6 +94,7 @@ export async function recordOutboundConversationAction(
     business_phone_number_id: sendResult.businessPhoneNumberId,
     business_phone_number: sendResult.businessNumber,
     status_error: action.statusError || null,
+    render_metadata: action.renderMetadata || null,
     sender_user_id: action.userId || null,
   }).select("id").maybeSingle();
 

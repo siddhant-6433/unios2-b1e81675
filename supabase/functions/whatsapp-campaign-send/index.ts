@@ -273,25 +273,37 @@ Deno.serve(async (req) => {
             })
             .eq("id", recipient.id);
 
+          const resolvedParams = templateDef.params.map(resolveParam);
+          const readableContent = `[Campaign: ${campaign.name}] [Template: ${campaign.template_key.replace(/_/g, " ")}]`;
           await recordOutboundConversationAction(adminClient, {
             kind: "campaignSend",
             phone: waPhone,
             leadId: recipient.lead_id || null,
-            content: `[Campaign: ${campaign.name}] [Template: ${campaign.template_key.replace(/_/g, " ")}]`,
+            content: readableContent,
             messageType: "template",
             templateKey: campaign.template_key,
             status: "sent",
             userId: user.id,
             sendResult,
-            campaignId: campaign_id,
-            campaignRecipientId: recipient.id,
             outboundKind: "bulk_campaign",
             expectedReplyType: expectedReplyTypeForTemplate(campaign.template_key),
             responsePolicy: "engine",
+            campaignId: campaign_id,
+            campaignRecipientId: recipient.id,
             metadata: {
               campaign_name: campaign.name,
               static_params: staticParams,
               sent_by_user_id: user.id,
+              params: resolvedParams,
+            },
+            renderMetadata: {
+              key: campaign.template_key,
+              label: campaign.template_key.replace(/_/g, " "),
+              body: readableContent,
+              params: resolvedParams,
+              provider_template_name: templateDef.name,
+              language: "en",
+              campaign_name: campaign.name,
             },
             expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
             activityDescription: recipient.lead_id

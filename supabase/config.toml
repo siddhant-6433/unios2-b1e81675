@@ -90,6 +90,15 @@ verify_jwt = false
 [functions.whatsapp-route-health]
 verify_jwt = false
 
+[functions.whatsapp-copilot-assist]
+verify_jwt = false
+
+[functions.whatsapp-reply-learning]
+verify_jwt = false
+
+[functions.whatsapp-buffer-worker]
+verify_jwt = false
+
 [functions.whatsapp-campaign-send]
 verify_jwt = false
 

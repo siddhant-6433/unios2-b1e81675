@@ -57,10 +57,71 @@ async function userRole(
 
   const { data: role } = await admin.rpc("get_user_role", { _user_id: user.id });
   const roleName = typeof role === "string" ? role : null;
-  if (roleName !== "super_admin" && roleName !== "admission_head") {
+  if (!["super_admin", "campus_admin", "admission_head", "counsellor"].includes(roleName || "")) {
     return { ok: false, userId: user.id, role: roleName, error: "Forbidden", status: 403 };
   }
   return { ok: true, userId: user.id, role: roleName };
+}
+
+async function ingestReplyExample(
+  admin: ReturnType<typeof createClient>,
+  reply: {
+    id: string;
+    lead_id: string | null;
+    phone: string | null;
+    content: string | null;
+    created_at: string;
+    sender_user_id: string | null;
+  },
+): Promise<"inserted" | "skipped"> {
+  const replyText = redactForLearning(reply.content);
+  if (!isUsefulReply(replyText)) return "skipped";
+
+  const phone = digits(reply.phone);
+  const { data: inboundRows } = await admin
+    .from("whatsapp_messages")
+    .select("content, created_at")
+    .eq("phone", phone || reply.phone)
+    .eq("direction", "inbound")
+    .lt("created_at", reply.created_at)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  const queryText = redactForLearning(inboundRows?.[0]?.content);
+  if (queryText.length < 5) return "skipped";
+
+  let courseId: string | null = null;
+  if (reply.lead_id) {
+    const { data: lead } = await admin
+      .from("leads")
+      .select("course_id")
+      .eq("id", reply.lead_id)
+      .maybeSingle();
+    courseId = lead?.course_id || null;
+  }
+
+  const { error: upsertError } = await admin
+    .from("admissions_ai_reply_examples")
+    .upsert({
+      source_message_id: reply.id,
+      lead_id: reply.lead_id || null,
+      course_id: courseId,
+      counsellor_id: reply.sender_user_id || null,
+      source_channel: "whatsapp",
+      target_channels: ["whatsapp", "voice"],
+      phone,
+      query_text: queryText,
+      reply_text: replyText,
+      language: detectLanguage(`${queryText} ${replyText}`),
+      tags: courseId ? ["manual_reply", "corrected_reply", "course_scoped"] : ["manual_reply", "corrected_reply"],
+      status: "needs_review",
+      review_reason: "manual_or_corrected_whatsapp_reply",
+      quality_score: 0.5,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "source_message_id" });
+
+  if (upsertError) throw upsertError;
+  return "inserted";
 }
 
 Deno.serve(async (req) => {
@@ -81,9 +142,85 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const action = body.action || "ingest_recent";
-    if (action !== "ingest_recent") {
+    if (!["ingest_recent", "ingest_message", "review_example"].includes(action)) {
       return new Response(JSON.stringify({ error: "Unsupported action" }), {
         status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (action === "review_example") {
+      if (auth.role !== "service_role" && auth.role !== "super_admin" && auth.role !== "admission_head") {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const exampleId = String(body.example_id || body.id || "");
+      const decision = String(body.decision || "");
+      if (!exampleId || !["approve", "reject"].includes(decision)) {
+        return new Response(JSON.stringify({ error: "example_id and decision=approve|reject are required" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data, error } = await admin.rpc("review_admissions_ai_reply_example", {
+        p_example_id: exampleId,
+        p_decision: decision,
+        p_quality_score: body.quality_score ?? null,
+        p_reviewer_note: body.reviewer_note || null,
+      });
+      if (error) throw error;
+      return new Response(JSON.stringify({ ok: true, example: data }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (action === "ingest_message") {
+      const messageId = String(body.message_id || "");
+      if (!messageId) {
+        return new Response(JSON.stringify({ error: "message_id is required" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data: reply, error: replyError } = await admin
+        .from("whatsapp_messages")
+        .select("id, lead_id, phone, content, created_at, sender_user_id, direction, template_key")
+        .eq("id", messageId)
+        .maybeSingle();
+      if (replyError) throw replyError;
+      if (!reply || reply.direction !== "outbound" || reply.template_key !== "manual_reply") {
+        return new Response(JSON.stringify({ ok: true, inserted: 0, skipped: 1, reason: "not_manual_reply" }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (auth.role === "counsellor" && reply.sender_user_id && reply.sender_user_id !== auth.userId) {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const outcome = await ingestReplyExample(admin, reply);
+      return new Response(JSON.stringify({
+        ok: true,
+        considered: 1,
+        inserted: outcome === "inserted" ? 1 : 0,
+        skipped: outcome === "skipped" ? 1 : 0,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (auth.role !== "service_role" && auth.role !== "super_admin" && auth.role !== "admission_head") {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -110,60 +247,9 @@ Deno.serve(async (req) => {
 
     for (const reply of replies || []) {
       considered += 1;
-      const replyText = redactForLearning(reply.content);
-      if (!isUsefulReply(replyText)) {
-        skipped += 1;
-        continue;
-      }
-
-      const phone = digits(reply.phone);
-      const { data: inboundRows } = await admin
-        .from("whatsapp_messages")
-        .select("content, created_at")
-        .eq("phone", phone || reply.phone)
-        .eq("direction", "inbound")
-        .lt("created_at", reply.created_at)
-        .order("created_at", { ascending: false })
-        .limit(1);
-
-      const queryText = redactForLearning(inboundRows?.[0]?.content);
-      if (queryText.length < 5) {
-        skipped += 1;
-        continue;
-      }
-
-      let courseId: string | null = null;
-      if (reply.lead_id) {
-        const { data: lead } = await admin
-        .from("leads")
-          .select("course_id")
-          .eq("id", reply.lead_id)
-          .maybeSingle();
-        courseId = lead?.course_id || null;
-      }
-
-      const status = replyText.length >= 55 && queryText.length >= 8 ? "active" : "needs_review";
-      const { error: upsertError } = await admin
-        .from("admissions_ai_reply_examples")
-        .upsert({
-          source_message_id: reply.id,
-          lead_id: reply.lead_id || null,
-          course_id: courseId,
-          counsellor_id: reply.sender_user_id || null,
-          source_channel: "whatsapp",
-          target_channels: ["whatsapp", "voice"],
-          phone,
-          query_text: queryText,
-          reply_text: replyText,
-          language: detectLanguage(`${queryText} ${replyText}`),
-          tags: courseId ? ["manual_reply", "course_scoped"] : ["manual_reply"],
-          status,
-          quality_score: status === "active" ? 0.7 : 0.5,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: "source_message_id" });
-
-      if (upsertError) throw upsertError;
-      inserted += 1;
+      const outcome = await ingestReplyExample(admin, reply);
+      if (outcome === "inserted") inserted += 1;
+      else skipped += 1;
     }
 
     return new Response(JSON.stringify({ ok: true, considered, inserted, skipped, days, limit }), {
