@@ -21,8 +21,14 @@ alter table public.notifications add constraint notifications_type_check check (
   'tat_defaults_report',
   'post_visit_nudge',
   'score_penalty',
+  'lead_bucket_backlog',
   'feedback_received',
-  'general'
+  'general',
+  -- Legacy and existing app types preserved so the CHECK does not reject
+  -- production rows or existing notification producers.
+  'visit_due',
+  'missed_call',
+  'callback_requested'
 ));
 
 alter table public.admissions_ai_reply_examples
