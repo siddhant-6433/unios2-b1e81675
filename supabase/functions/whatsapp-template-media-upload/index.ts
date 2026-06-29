@@ -11,7 +11,7 @@
  * The returned handle is short-lived — the caller should submit the template
  * (via `whatsapp-templates` create) immediately after uploading.
  *
- * Auth: requires an authenticated user with the super_admin role.
+ * Auth: requires an authenticated user with the super_admin or admission_head role.
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -77,6 +77,8 @@ function jwtRole(jwt: string): string | null {
   }
 }
 
+const TEMPLATE_MANAGER_ROLES = new Set(["super_admin", "admission_head"]);
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -97,7 +99,7 @@ Deno.serve(async (req) => {
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-    // ── Auth: verify JWT with Supabase Auth, then verify super_admin ──
+    // ── Auth: verify JWT with Supabase Auth, then verify template-manager role ──
     // Service-role automation is allowed for deployment scripts that need to
     // upload Meta sample media before submitting templates.
     const authHeader = req.headers.get("Authorization") || req.headers.get("authorization");
@@ -113,8 +115,8 @@ Deno.serve(async (req) => {
       }
 
       const { data: role } = await adminClient.rpc("get_user_role", { _user_id: userId });
-      if (role !== "super_admin") {
-        return json({ error: "Forbidden: super_admin only" }, 403);
+      if (!TEMPLATE_MANAGER_ROLES.has(String(role || ""))) {
+        return json({ error: "Forbidden: super_admin or admission_head only" }, 403);
       }
     }
 
