@@ -141,12 +141,6 @@ verify_jwt = false
 [functions.apply-portal-password-login]
 verify_jwt = false
 
-[functions.whatsapp-copilot-assist]
-verify_jwt = false
-
-[functions.whatsapp-reply-learning]
-verify_jwt = false
-
 # Public endpoint hit by anonymous applicants opening a magic link.
 # JWT verification at the gateway breaks the redeem flow whenever the browser
 # carries a stale/expired/malformed session JWT (the gateway returns 401
