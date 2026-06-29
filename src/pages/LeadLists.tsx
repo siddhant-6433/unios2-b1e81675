@@ -191,6 +191,7 @@ const resolveBusinessNumber = (
 };
 
 const sampleValueForParam = (name: string) => {
+  if (/^\d+$/.test(name)) return `sample ${name}`;
   if (name === "student_name") return "Rahul Sharma";
   if (name === "course_name") return "BPT";
   if (name === "campus_name") return "NIMT Greater Noida";
@@ -201,10 +202,15 @@ const sampleValueForParam = (name: string) => {
   return name.replace(/_/g, " ");
 };
 
-const renderTemplatePreview = (preview: string, staticParams: Record<string, string>) =>
+const renderTemplatePreview = (
+  preview: string,
+  staticParams: Record<string, string>,
+  params: WaBulkTemplate["params"] = [],
+) =>
   preview.replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, (_match, name: string) => {
-    const typed = staticParams[name]?.trim();
-    return typed || sampleValueForParam(name);
+    const paramName = /^\d+$/.test(name) ? params[Number(name) - 1]?.name || name : name;
+    const typed = staticParams[paramName]?.trim();
+    return typed || sampleValueForParam(paramName);
   });
 
 const hasDynamicUrlButton = (components?: Array<{ type?: string; buttons?: Array<{ type?: string; url?: string }> }> | null) =>
@@ -212,6 +218,17 @@ const hasDynamicUrlButton = (components?: Array<{ type?: string; buttons?: Array
     component.type === "BUTTONS" &&
     (component.buttons || []).some((button) => button.type === "URL" && typeof button.url === "string" && button.url.includes("{{"))
   );
+
+const metaTemplatePreview = (components?: Array<{ type?: string; text?: string; buttons?: Array<{ text?: string }> }> | null) => {
+  const body = components?.find((component) => component.type === "BODY")?.text || "";
+  const buttons = components?.find((component) => component.type === "BUTTONS")?.buttons || [];
+  const buttonText = buttons
+    .map((button) => button.text)
+    .filter(Boolean)
+    .map((text) => `- ${text}`)
+    .join("\n");
+  return [body, buttonText ? `Buttons:\n${buttonText}` : ""].filter(Boolean).join("\n\n");
+};
 
 const WhatsAppBusinessIdentity = ({
   sender,
@@ -287,11 +304,15 @@ export default function LeadLists() {
   const [waSenderError, setWaSenderError] = useState<string | null>(null);
   const [waSending, setWaSending] = useState(false);
   const [dynamicWaBulkTemplates, setDynamicWaBulkTemplates] = useState<WaBulkTemplate[]>([]);
+  const [waMetaTemplateOverrides, setWaMetaTemplateOverrides] = useState<Record<string, Partial<Pick<WaBulkTemplate, "description" | "preview">>>>({});
 
   // Selected template definition — drives which static inputs we render.
   const availableWaBulkTemplates = useMemo(
-    () => [...WA_BULK_TEMPLATES, ...dynamicWaBulkTemplates],
-    [dynamicWaBulkTemplates]
+    () => [
+      ...WA_BULK_TEMPLATES.map((template) => ({ ...template, ...(waMetaTemplateOverrides[template.key] || {}) })),
+      ...dynamicWaBulkTemplates,
+    ],
+    [dynamicWaBulkTemplates, waMetaTemplateOverrides]
   );
   const waTemplateDef = useMemo(
     () => availableWaBulkTemplates.find(t => t.key === waTemplate) || availableWaBulkTemplates[0] || WA_BULK_TEMPLATES[0],
@@ -307,8 +328,8 @@ export default function LeadLists() {
     [waSenderOptions, waSenderValue]
   );
   const waRenderedPreview = useMemo(
-    () => renderTemplatePreview(waTemplateDef.preview, waStaticParams),
-    [waTemplateDef.preview, waStaticParams]
+    () => renderTemplatePreview(waTemplateDef.preview, waStaticParams, waTemplateDef.params),
+    [waTemplateDef.preview, waTemplateDef.params, waStaticParams]
   );
 
   // Send-Email dialog
@@ -506,6 +527,7 @@ export default function LeadLists() {
     if (role === "academic_partner") return;
     if (!waOpen) {
       setDynamicWaBulkTemplates([]);
+      setWaMetaTemplateOverrides({});
       return;
     }
     (async () => {
@@ -525,12 +547,20 @@ export default function LeadLists() {
       const { data: approvedRows } = await (supabase as any)
         .from("whatsapp_templates")
         .select("name, components, placeholder_count, has_media, header_format")
-        .eq("status", "APPROVED")
-        .eq("placeholder_count", 0)
-        .eq("has_media", false);
+        .eq("status", "APPROVED");
+      const overrides: Record<string, Partial<Pick<WaBulkTemplate, "description" | "preview">>> = {};
+      ((approvedRows || []) as Array<{
+        name: string;
+        components?: Array<{ type?: string; text?: string; buttons?: Array<{ text?: string }> }> | null;
+      }>).forEach((row) => {
+        if (!row.name || !knownKeys.has(row.name)) return;
+        const preview = metaTemplatePreview(row.components);
+        if (preview) overrides[row.name] = { preview };
+      });
+      setWaMetaTemplateOverrides(overrides);
       const dynamic = ((approvedRows || []) as Array<{
         name: string;
-        components?: Array<{ type?: string; text?: string; buttons?: Array<{ type?: string; url?: string }> }> | null;
+        components?: Array<{ type?: string; text?: string; buttons?: Array<{ type?: string; text?: string; url?: string }> }> | null;
         placeholder_count?: number | null;
         has_media?: boolean | null;
         header_format?: string | null;
@@ -550,7 +580,7 @@ export default function LeadLists() {
             key: row.name,
             label: setting?.display_name || row.name.replace(/_/g, " "),
             description: setting?.description || "Approved Meta template",
-            preview: row.components?.find((component) => component.type === "BODY")?.text || setting?.description || row.name,
+            preview: metaTemplatePreview(row.components) || setting?.description || row.name,
             params: [],
           };
         });

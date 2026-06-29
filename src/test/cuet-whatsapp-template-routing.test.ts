@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const leadPicker = readFileSync("src/components/leads/SendWhatsAppDialog.tsx", "utf8");
 const bulkTemplates = readFileSync("src/config/waBulkTemplates.ts", "utf8");
+const leadLists = readFileSync("src/pages/LeadLists.tsx", "utf8");
 const whatsappSend = readFileSync("supabase/functions/whatsapp-send/index.ts", "utf8");
 const campaignSend = readFileSync("supabase/functions/whatsapp-campaign-send/index.ts", "utf8");
 const migration = readFileSync(
@@ -30,6 +31,14 @@ describe("CUET 2026 counselling WhatsApp template routing", () => {
     expect(leadPicker).toContain("header_image_url");
     expect(bulkTemplates).toContain('key: "cuet_2026_counselling_open"');
     expect(bulkTemplates).toContain('key: "cuet_counselling_booking"');
+  });
+
+  it("uses synced Meta bodies for known CUET template previews", () => {
+    expect(leadPicker).toContain("metaTemplatePreview");
+    expect(leadPicker).toContain("metaTemplateOverrides");
+    expect(leadLists).toContain("metaTemplatePreview");
+    expect(leadLists).toContain("waMetaTemplateOverrides");
+    expect(leadLists).toContain("renderTemplatePreview(waTemplateDef.preview, waStaticParams, waTemplateDef.params)");
   });
 
   it("is accepted by both WhatsApp send functions with an image header", () => {
