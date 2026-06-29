@@ -42,10 +42,19 @@ describe("WhatsApp template manager access", () => {
 
   it("renders approved WhatsApp templates with a full side-by-side preview", () => {
     expect(whatsappTemplateTab).toContain("TemplatePreviewPanel");
+    expect(whatsappTemplateTab).toContain("WhatsAppTemplatePreviewBubble");
     expect(whatsappTemplateTab).toContain("selectedApprovedId");
     expect(whatsappTemplateTab).toContain("lg:grid-cols-[360px_minmax(0,1fr)]");
-    expect(whatsappTemplateTab).toContain("whitespace-pre-wrap text-sm leading-6");
     expect(whatsappTemplateTab).not.toContain("line-clamp-5");
+  });
+
+  it("deletes Meta templates with id and language when available", () => {
+    expect(whatsappTemplateTab).toContain("meta_template_id: template.meta_template_id");
+    expect(whatsappTemplateTab).toContain("language: template.language");
+    expect(templateFunction).toContain("hsm_id: templateId");
+    expect(templateFunction).toContain("URLSearchParams");
+    expect(templateFunction).toContain('from("whatsapp_templates")');
+    expect(templateFunction).toContain('from("whatsapp_template_settings")');
   });
 
   it("shows approved Meta templates even if their visibility row is missing", () => {

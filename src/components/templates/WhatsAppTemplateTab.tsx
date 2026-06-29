@@ -14,6 +14,14 @@ import {
   cahetDeadlineMessage,
 } from "@/lib/deadlineRollover";
 import { WhatsAppTemplateForm } from "./WhatsAppTemplateForm";
+import {
+  WhatsAppTemplatePreviewBubble,
+  templateBodyFromComponents,
+  templateButtonsFromComponents,
+  templateHeaderFromComponents,
+  type WhatsAppTemplateButtonComponent,
+  type WhatsAppTemplateComponent,
+} from "./WhatsAppTemplatePreviewBubble";
 
 interface WaTemplateRow {
   id: string;
@@ -32,18 +40,8 @@ interface WaTemplateRow {
   status_updated_at?: string | null;
 }
 
-interface TemplateButtonComponent {
-  type?: string;
-  text?: string;
-  url?: string;
-}
-
-interface TemplateComponent {
-  type?: string;
-  format?: string;
-  text?: string;
-  buttons?: TemplateButtonComponent[];
-}
+type TemplateButtonComponent = WhatsAppTemplateButtonComponent;
+type TemplateComponent = WhatsAppTemplateComponent;
 
 interface MetaTemplate {
   id: string;
@@ -95,15 +93,15 @@ function statusVisual(status: string) {
 }
 
 function templateBody(t: WaTemplateRow) {
-  return t.components?.find((c) => c.type === "BODY")?.text || "";
+  return templateBodyFromComponents(t.components);
 }
 
 function templateButtons(t: WaTemplateRow) {
-  return t.components?.find((c) => c.type === "BUTTONS")?.buttons || [];
+  return templateButtonsFromComponents(t.components);
 }
 
 function templateHeader(t: WaTemplateRow) {
-  return t.components?.find((c) => c.type === "HEADER");
+  return templateHeaderFromComponents(t.components);
 }
 
 function formatMetaDate(value?: string | null) {
@@ -132,7 +130,7 @@ function TemplateCard({
 }: {
   template: WaTemplateRow;
   deleting: string | null;
-  onDelete: (name: string) => void;
+  onDelete: (template: WaTemplateRow) => void;
 }) {
   const { Icon, color } = statusVisual(template.status);
   const body = templateBody(template);
@@ -200,7 +198,7 @@ function TemplateCard({
               size="icon"
               className="h-7 w-7 text-muted-foreground hover:text-red-600"
               disabled={deleting === template.name}
-              onClick={() => onDelete(template.name)}
+              onClick={() => onDelete(template)}
               title="Delete template from Meta"
             >
               {deleting === template.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
@@ -219,7 +217,7 @@ function TemplatePreviewPanel({
 }: {
   template: WaTemplateRow | null;
   deleting: string | null;
-  onDelete: (name: string) => void;
+  onDelete: (template: WaTemplateRow) => void;
 }) {
   if (!template) {
     return (
@@ -231,7 +229,6 @@ function TemplatePreviewPanel({
 
   const { Icon, color } = statusVisual(template.status);
   const body = templateBody(template);
-  const buttons = templateButtons(template);
   const header = templateHeader(template);
   const headerFormat = (header?.format || template.header_format || "NONE").toUpperCase();
   const metaCategory = (template.category || "UNKNOWN").toUpperCase();
@@ -263,42 +260,12 @@ function TemplatePreviewPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto p-5">
-        <div className="mx-auto max-w-2xl rounded-xl border border-border bg-muted/20 p-4">
-          {headerFormat !== "NONE" && (
-            <div className="mb-3 rounded-lg border border-border bg-background px-3 py-2">
-              <p className="text-[10px] font-semibold uppercase text-muted-foreground">Header</p>
-              {header?.text ? (
-                <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{header.text}</p>
-              ) : (
-                <p className="mt-1 text-sm text-muted-foreground">{headerFormat} header</p>
-              )}
-            </div>
-          )}
-
-          <div className="rounded-lg bg-background px-3 py-3">
-            <p className="mb-2 text-[10px] font-semibold uppercase text-muted-foreground">Body</p>
-            {body ? (
-              <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">{body}</p>
-            ) : (
-              <p className="text-sm text-muted-foreground">No body text synced for this template.</p>
-            )}
-          </div>
-
-          {buttons.length > 0 && (
-            <div className="mt-3 space-y-2">
-              <p className="text-[10px] font-semibold uppercase text-muted-foreground">Buttons</p>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {buttons.map((button, index) => (
-                  <div key={`${button.text || "button"}-${index}`} className="rounded-lg border border-border bg-background px-3 py-2">
-                    <p className="text-xs font-medium text-foreground">{button.text || `Button ${index + 1}`}</p>
-                    <p className="mt-0.5 text-[11px] uppercase text-muted-foreground">{button.type || "BUTTON"}</p>
-                    {button.url && <p className="mt-1 break-all text-[11px] text-muted-foreground">{button.url}</p>}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
+        <WhatsAppTemplatePreviewBubble
+          templateKey={template.name}
+          components={template.components}
+          fallbackText={body}
+          className="mx-auto max-w-2xl"
+        />
       </div>
 
       <div className="flex items-center gap-2 border-t border-border px-5 py-3">
@@ -310,7 +277,7 @@ function TemplatePreviewPanel({
           size="sm"
           className="ml-auto h-8 gap-1.5 text-muted-foreground hover:text-red-600"
           disabled={deleting === template.name}
-          onClick={() => onDelete(template.name)}
+          onClick={() => onDelete(template)}
           title="Delete template from Meta"
         >
           {deleting === template.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
@@ -429,9 +396,16 @@ export function WhatsAppTemplateTab() {
     setSyncing(false);
   };
 
-  const deleteTemplate = async (name: string) => {
-    setDeleting(name);
-    const { data, error } = await invokeEdge<{ error?: string }>("whatsapp-templates", { body: { action: "delete", name } });
+  const deleteTemplate = async (template: WaTemplateRow) => {
+    setDeleting(template.name);
+    const { data, error } = await invokeEdge<{ error?: string }>("whatsapp-templates", {
+      body: {
+        action: "delete",
+        name: template.name,
+        meta_template_id: template.meta_template_id,
+        language: template.language,
+      },
+    });
     if (error || data?.error) {
       toast({ title: "Delete failed", description: data?.error || error?.message, variant: "destructive" });
     } else {

@@ -18,6 +18,11 @@ import {
   Pause, PlayCircle, RefreshCw, XCircle, Phone, Check, ChevronDown,
 } from "lucide-react";
 import { WA_BULK_TEMPLATES, type WaBulkTemplate } from "@/config/waBulkTemplates";
+import {
+  WhatsAppTemplatePreviewBubble,
+  templateTextPreviewFromComponents,
+  type WhatsAppTemplateComponent,
+} from "@/components/templates/WhatsAppTemplatePreviewBubble";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 import { decideBlockedRoleAccess } from "@/lib/accessPolicy";
 
@@ -219,17 +224,6 @@ const hasDynamicUrlButton = (components?: Array<{ type?: string; buttons?: Array
     (component.buttons || []).some((button) => button.type === "URL" && typeof button.url === "string" && button.url.includes("{{"))
   );
 
-const metaTemplatePreview = (components?: Array<{ type?: string; text?: string; buttons?: Array<{ text?: string }> }> | null) => {
-  const body = components?.find((component) => component.type === "BODY")?.text || "";
-  const buttons = components?.find((component) => component.type === "BUTTONS")?.buttons || [];
-  const buttonText = buttons
-    .map((button) => button.text)
-    .filter(Boolean)
-    .map((text) => `- ${text}`)
-    .join("\n");
-  return [body, buttonText ? `Buttons:\n${buttonText}` : ""].filter(Boolean).join("\n\n");
-};
-
 const WhatsAppBusinessIdentity = ({
   sender,
   selected,
@@ -305,6 +299,7 @@ export default function LeadLists() {
   const [waSending, setWaSending] = useState(false);
   const [dynamicWaBulkTemplates, setDynamicWaBulkTemplates] = useState<WaBulkTemplate[]>([]);
   const [waMetaTemplateOverrides, setWaMetaTemplateOverrides] = useState<Record<string, Partial<Pick<WaBulkTemplate, "description" | "preview">>>>({});
+  const [waTemplateComponentsByKey, setWaTemplateComponentsByKey] = useState<Record<string, WhatsAppTemplateComponent[]>>({});
 
   // Selected template definition — drives which static inputs we render.
   const availableWaBulkTemplates = useMemo(
@@ -528,6 +523,7 @@ export default function LeadLists() {
     if (!waOpen) {
       setDynamicWaBulkTemplates([]);
       setWaMetaTemplateOverrides({});
+      setWaTemplateComponentsByKey({});
       return;
     }
     (async () => {
@@ -549,18 +545,21 @@ export default function LeadLists() {
         .select("name, components, placeholder_count, has_media, header_format")
         .eq("status", "APPROVED");
       const overrides: Record<string, Partial<Pick<WaBulkTemplate, "description" | "preview">>> = {};
+      const componentsByKey: Record<string, WhatsAppTemplateComponent[]> = {};
       ((approvedRows || []) as Array<{
         name: string;
-        components?: Array<{ type?: string; text?: string; buttons?: Array<{ text?: string }> }> | null;
+        components?: WhatsAppTemplateComponent[] | null;
       }>).forEach((row) => {
+        if (row.name && row.components) componentsByKey[row.name] = row.components;
         if (!row.name || !knownKeys.has(row.name)) return;
-        const preview = metaTemplatePreview(row.components);
+        const preview = templateTextPreviewFromComponents(row.components);
         if (preview) overrides[row.name] = { preview };
       });
       setWaMetaTemplateOverrides(overrides);
+      setWaTemplateComponentsByKey(componentsByKey);
       const dynamic = ((approvedRows || []) as Array<{
         name: string;
-        components?: Array<{ type?: string; text?: string; buttons?: Array<{ type?: string; text?: string; url?: string }> }> | null;
+        components?: WhatsAppTemplateComponent[] | null;
         placeholder_count?: number | null;
         has_media?: boolean | null;
         header_format?: string | null;
@@ -580,7 +579,7 @@ export default function LeadLists() {
             key: row.name,
             label: setting?.display_name || row.name.replace(/_/g, " "),
             description: setting?.description || "Approved Meta template",
-            preview: metaTemplatePreview(row.components) || setting?.description || row.name,
+            preview: templateTextPreviewFromComponents(row.components) || setting?.description || row.name,
             params: [],
           };
         });
@@ -1229,9 +1228,13 @@ export default function LeadLists() {
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-foreground">Template preview</p>
                 <span className="text-[11px] text-muted-foreground">Sample values shown</span>
               </div>
-              <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-background px-3 py-2 text-xs leading-relaxed text-foreground">
-                {waRenderedPreview}
-              </pre>
+              <WhatsAppTemplatePreviewBubble
+                templateKey={waTemplateDef.key}
+                components={waTemplateComponentsByKey[waTemplateDef.key]}
+                bodyText={waRenderedPreview}
+                fallbackText={waRenderedPreview}
+                className="max-h-[360px] overflow-y-auto"
+              />
             </div>
 
             <p className="text-xs text-muted-foreground">

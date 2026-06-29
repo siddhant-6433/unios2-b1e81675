@@ -34,10 +34,14 @@ describe("CUET 2026 counselling WhatsApp template routing", () => {
   });
 
   it("uses synced Meta bodies for known CUET template previews", () => {
-    expect(leadPicker).toContain("metaTemplatePreview");
+    expect(leadPicker).toContain("WhatsAppTemplatePreviewBubble");
+    expect(leadPicker).toContain("templateTextPreviewFromComponents");
     expect(leadPicker).toContain("metaTemplateOverrides");
-    expect(leadLists).toContain("metaTemplatePreview");
+    expect(leadPicker).toContain("templateComponentsByKey");
+    expect(leadLists).toContain("WhatsAppTemplatePreviewBubble");
+    expect(leadLists).toContain("templateTextPreviewFromComponents");
     expect(leadLists).toContain("waMetaTemplateOverrides");
+    expect(leadLists).toContain("waTemplateComponentsByKey");
     expect(leadLists).toContain("renderTemplatePreview(waTemplateDef.preview, waStaticParams, waTemplateDef.params)");
   });
 

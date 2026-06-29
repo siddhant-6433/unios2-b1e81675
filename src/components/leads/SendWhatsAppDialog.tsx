@@ -7,6 +7,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { MessageSquare, Send, Loader2, Check } from "lucide-react";
 import {
+  WhatsAppTemplatePreviewBubble,
+  templateTextPreviewFromComponents,
+  type WhatsAppTemplateComponent,
+} from "@/components/templates/WhatsAppTemplatePreviewBubble";
+import {
   cahetDeadlineDescription,
   cahetDeadlineMessage,
 } from "@/lib/deadlineRollover";
@@ -72,17 +77,6 @@ const hasDynamicUrlButton = (components?: Array<{ type?: string; buttons?: Array
     component.type === "BUTTONS" &&
     (component.buttons || []).some((button) => button.type === "URL" && typeof button.url === "string" && button.url.includes("{{"))
   );
-
-const metaTemplatePreview = (components?: Array<{ type?: string; text?: string; buttons?: Array<{ text?: string }> }> | null) => {
-  const body = components?.find((component) => component.type === "BODY")?.text || "";
-  const buttons = components?.find((component) => component.type === "BUTTONS")?.buttons || [];
-  const buttonText = buttons
-    .map((button) => button.text)
-    .filter(Boolean)
-    .map((text) => `- ${text}`)
-    .join("\n");
-  return [body, buttonText ? `Buttons:\n${buttonText}` : ""].filter(Boolean).join("\n\n");
-};
 
 const getVideoUrl = (courseName?: string, campusName?: string): string => {
   const text = `${courseName || ""} ${campusName || ""}`;
@@ -277,12 +271,14 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
   const [allowedKeys, setAllowedKeys] = useState<Set<string> | null>(null);
   const [dynamicTemplates, setDynamicTemplates] = useState<WhatsAppPickerTemplate[]>([]);
   const [metaTemplateOverrides, setMetaTemplateOverrides] = useState<Record<string, Partial<Pick<WhatsAppPickerTemplate, "preview">>>>({});
+  const [templateComponentsByKey, setTemplateComponentsByKey] = useState<Record<string, WhatsAppTemplateComponent[]>>({});
 
   useEffect(() => {
     if (!open) return;
     (async () => {
       setDynamicTemplates([]);
       setMetaTemplateOverrides({});
+      setTemplateComponentsByKey({});
       const { data: { user } } = await supabase.auth.getUser();
       const { data, error } = await (supabase as any)
         .from("whatsapp_template_settings")
@@ -291,6 +287,7 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
         // Fail open — show everything rather than a blank picker.
         setAllowedKeys(new Set(TEMPLATES.map(t => t.key)));
         setDynamicTemplates([]);
+        setTemplateComponentsByKey({});
         return;
       }
       const userId = user?.id || null;
@@ -332,18 +329,21 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
         .select("name, components, placeholder_count, has_media, header_format")
         .eq("status", "APPROVED");
       const overrides: Record<string, Partial<Pick<WhatsAppPickerTemplate, "preview">>> = {};
+      const componentsByKey: Record<string, WhatsAppTemplateComponent[]> = {};
       ((approvedRows || []) as Array<{
         name: string;
-        components?: Array<{ type?: string; text?: string; buttons?: Array<{ text?: string }> }> | null;
+        components?: WhatsAppTemplateComponent[] | null;
       }>).forEach((row) => {
+        if (row.name && row.components) componentsByKey[row.name] = row.components;
         if (!row.name || !knownKeys.has(row.name)) return;
-        const preview = metaTemplatePreview(row.components);
+        const preview = templateTextPreviewFromComponents(row.components);
         if (preview) overrides[row.name] = { preview };
       });
       setMetaTemplateOverrides(overrides);
+      setTemplateComponentsByKey(componentsByKey);
       const dynamic = ((approvedRows || []) as Array<{
         name: string;
-        components?: Array<{ type?: string; text?: string; buttons?: Array<{ type?: string; text?: string; url?: string }> }> | null;
+        components?: WhatsAppTemplateComponent[] | null;
         placeholder_count?: number | null;
         has_media?: boolean | null;
         header_format?: string | null;
@@ -367,7 +367,7 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
             badge: null,
             followUpMsg: null,
             buildParams: () => [],
-            preview: metaTemplatePreview(row.components) || body,
+            preview: templateTextPreviewFromComponents(row.components) || body,
           };
         });
       setDynamicTemplates(dynamic);
@@ -543,11 +543,13 @@ export function SendWhatsAppDialog({ open, onOpenChange, lead, courseName, campu
         {selectedTemplate && (
           <div className="space-y-1.5">
             <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Preview</p>
-            <div className="rounded-xl bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800/40 p-3">
-              <p className="text-xs text-green-900 dark:text-green-200 whitespace-pre-wrap leading-relaxed">
-                {previewText}
-              </p>
-            </div>
+            <WhatsAppTemplatePreviewBubble
+              templateKey={selectedTemplate}
+              components={templateComponentsByKey[selectedTemplate]}
+              bodyText={previewText}
+              fallbackText={previewText}
+              className="max-h-[280px] overflow-y-auto"
+            />
           </div>
         )}
 
