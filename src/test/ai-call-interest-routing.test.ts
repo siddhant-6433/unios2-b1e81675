@@ -46,4 +46,11 @@ describe("AI call interest routing", () => {
     expect(applications).toContain('new Date(`${fromDate}T00:00:00`)');
     expect(applications).toContain('new Date(`${toDate}T23:59:59.999`)');
   });
+
+  it("sorts Applications by most recent activity by default", () => {
+    expect(applications).toContain('updated_at, flags');
+    expect(applications).toContain('const applicationActivityTime');
+    expect(applications).toContain('return applicationActivityTime(b) - applicationActivityTime(a);');
+    expect(applications).toContain('Sort: Activity');
+  });
 });
