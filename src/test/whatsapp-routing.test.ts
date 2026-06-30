@@ -148,7 +148,7 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(manualReply).toContain("sendWhatsAppText(admin, channelHint");
     expect(aiReply).toContain("sendWhatsAppText(admin");
     expect(templateSend).toContain("sendWhatsAppTemplate(admin");
-    expect(campaignSend).toContain("sendWhatsAppTemplate(adminClient");
+    expect(campaignSend).toMatch(/sendWhatsAppTemplate(?: as any)?\)\(adminClient|sendWhatsAppTemplate\(adminClient/);
   });
 
   it("lets bulk campaigns persist and use an operator-selected WhatsApp sender", () => {
