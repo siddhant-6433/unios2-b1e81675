@@ -31,6 +31,7 @@ import { ApplicantDeadlineTicker } from "@/components/layout/ApplicantDeadlineTi
 import { leadTransitionStagePatch, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { captureAttribution, trackPixelLead } from "@/lib/analytics";
 import { PORTAL_CONFIGS, type PortalId } from "@/components/apply/portalConfig";
+import { displayValue } from "@/lib/displayValue";
 
 type OnBehalfContext = {
   mode: "academic_partner_on_behalf";
@@ -796,7 +797,7 @@ function CourseSummaryBanner({ app, leadName, onEdit }: { app: ApplicationData; 
   return (
     <div className="mb-6 space-y-3">
       <div>
-        <h1 className="text-xl font-bold text-foreground">Welcome, {app.full_name || leadName}</h1>
+        <h1 className="text-xl font-bold text-foreground">Welcome, {displayValue(app.full_name) || leadName}</h1>
         <p className="text-sm text-muted-foreground">Complete all steps to submit your application.</p>
         <p className="text-xs text-muted-foreground mt-1">
           Application ID: <span className="font-mono font-semibold text-primary">{app.application_id}</span>
@@ -839,12 +840,12 @@ function CourseSummaryBanner({ app, leadName, onEdit }: { app: ApplicationData; 
               <div key={s.course_id} className="flex items-center gap-3 py-2">
                 <Badge className="bg-primary/10 text-primary border-0 text-xs shrink-0">P{s.preference_order}</Badge>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{s.course_name}</p>
+                  <p className="text-sm font-medium text-foreground truncate">{displayValue(s.course_name) || "Course"}</p>
                   <p className="text-xs text-muted-foreground flex items-center gap-1">
-                    <MapPin className="h-3 w-3" /> {s.campus_name}
+                    <MapPin className="h-3 w-3" /> {displayValue(s.campus_name) || "Campus"}
                   </p>
                 </div>
-                <Badge variant="outline" className="text-[10px] shrink-0">{s.program_category}</Badge>
+                <Badge variant="outline" className="text-[10px] shrink-0">{displayValue(s.program_category) || "Program"}</Badge>
               </div>
             ))}
             {ageValidation && (
@@ -1168,7 +1169,7 @@ function ApplicationDashboardView({
             );
           } else if (offerApp) {
             const courseLabel = (offerApp.course_selections as any[])
-              ?.map((c: any) => c.course_name).filter(Boolean).join(", ") || "your course";
+              ?.map((c: any) => displayValue(c.course_name)).filter(Boolean).join(", ") || "your course";
             subtitle = <>🎉 Offer approved for <span className="font-semibold">{courseLabel}</span></>;
             cta = (
               <button onClick={() => onContinue(offerApp)}
@@ -1225,7 +1226,7 @@ function ApplicationDashboardView({
         {/* Application cards */}
         {apps.map((app) => {
           const a = app as DashboardApp;
-          const courses = (a.course_selections || []).map((c: any) => c.course_name).filter(Boolean);
+          const courses = (a.course_selections || []).map((c: any) => displayValue(c.course_name)).filter(Boolean);
           const offer = a.lead_id ? offerLetters[a.lead_id] : undefined;
           const admInfo = a.lead_id ? leadAdmissions[a.lead_id] : undefined;
           const preAdmNo = admInfo?.pre_admission_no ?? null;
@@ -1385,7 +1386,7 @@ function ApplicationDashboardView({
                     applicantPhone={a.phone}
                     applicantEmail={a.email}
                     courseName={(a.course_selections || [])
-                      ?.map((c: any) => c.course_name)
+                      ?.map((c: any) => displayValue(c.course_name))
                       .filter(Boolean)
                       .join(", ") || null}
                     onBehalfContext={onBehalfContext}
@@ -2422,7 +2423,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
       <Header appId={app.application_id} completedCount={completedCount} totalSteps={totalSteps} onLogout={handleLogout} />
 
       <div className="max-w-3xl mx-auto px-6 py-8">
-        <OnBehalfBanner context={onBehalfContext} candidateName={leadName || app.full_name} />
+        <OnBehalfBanner context={onBehalfContext} candidateName={leadName || displayValue(app.full_name) || "the candidate"} />
         <CourseSummaryBanner
           app={app}
           leadName={leadName}

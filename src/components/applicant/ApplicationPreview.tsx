@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { CahetRegistrationDetails } from "@/components/leads/CahetRegistrationDetails";
 import type { CahetRegistrationDetails as CahetRegistrationDetailsType } from "@/lib/cahet";
+import { displayValue } from "@/lib/displayValue";
 
 export type PreviewDoc = {
   name: string;
@@ -175,13 +176,13 @@ export function ApplicationPreview({ app, docs, cahetRegistration }: Props) {
                     details.map((d: any, i: number) => (
                       <div key={i} className="text-[11px] text-muted-foreground mb-1">
                         {Object.entries(d).map(([k, v]) =>
-                          v ? <span key={k} className="mr-2">{k}: <span className="text-foreground">{String(v)}</span></span> : null
+                          v ? <span key={k} className="mr-2">{k}: <span className="text-foreground">{displayValue(v)}</span></span> : null
                         )}
                       </div>
                     ))
                   ) : (
                     Object.entries(details).map(([k, v]) =>
-                      v ? <Row key={k} label={k.replace(/_/g, " ")} value={String(v)} /> : null
+                      v ? <Row key={k} label={k.replace(/_/g, " ")} value={v} /> : null
                     )
                   )}
                 </div>
@@ -199,7 +200,7 @@ export function ApplicationPreview({ app, docs, cahetRegistration }: Props) {
               <Award className="h-3 w-3" />Extracurricular
             </p>
             {Object.entries(app.extracurricular).map(([k, v]) =>
-              v ? <Row key={k} label={k.replace(/_/g, " ")} value={String(v)} /> : null
+              v ? <Row key={k} label={k.replace(/_/g, " ")} value={v} /> : null
             )}
           </CardContent>
         </Card>
@@ -247,29 +248,6 @@ export function ApplicationPreview({ app, docs, cahetRegistration }: Props) {
       </Card>
     </div>
   );
-}
-
-function displayValue(value: unknown): string | null {
-  if (value == null || value === "") return null;
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) {
-    const parts = value.map(displayValue).filter(Boolean);
-    return parts.length > 0 ? parts.join(", ") : null;
-  }
-  if (typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    for (const key of ["label", "name", "value", "title", "text"]) {
-      const nested = displayValue(record[key]);
-      if (nested) return nested;
-    }
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return null;
-    }
-  }
-  return String(value);
 }
 
 function Row({ label, value }: { label: string; value?: unknown }) {
