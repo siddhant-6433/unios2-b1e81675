@@ -48,7 +48,7 @@ describe("campaign queue controls", () => {
     expect(leadLists).toContain("dynamicWaBulkTemplates");
     expect(leadLists).toContain("availableWaBulkTemplates");
     expect(leadLists).toContain('from("whatsapp_templates")');
-    expect(leadLists).toContain('eq("placeholder_count", 0)');
+    expect(leadLists).toContain("row.placeholder_count === 0");
     expect(leadLists).toContain("hasDynamicUrlButton");
   });
 });

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 const templateFunction = readFileSync("supabase/functions/whatsapp-templates/index.ts", "utf8");
 const mediaUploadFunction = readFileSync("supabase/functions/whatsapp-template-media-upload/index.ts", "utf8");
 const templateManager = readFileSync("src/pages/TemplateManager.tsx", "utf8");
+const whatsappTemplateTab = readFileSync("src/components/templates/WhatsAppTemplateTab.tsx", "utf8");
 const templateMirrorMigration = readFileSync("supabase/migrations/20260624100800_whatsapp_templates.sql", "utf8");
 const serviceRoleGrantMigration = readFileSync(
   "supabase/migrations/20260628183000_grant_service_role_whatsapp_templates.sql",
@@ -37,6 +38,23 @@ describe("WhatsApp template manager access", () => {
     expect(templateManager).toContain('value="date_used_desc"');
     expect(templateManager).toContain('value="name_asc"');
     expect(templateManager).toContain("last_used_at");
+  });
+
+  it("renders approved WhatsApp templates with a full side-by-side preview", () => {
+    expect(whatsappTemplateTab).toContain("TemplatePreviewPanel");
+    expect(whatsappTemplateTab).toContain("WhatsAppTemplatePreviewBubble");
+    expect(whatsappTemplateTab).toContain("selectedApprovedId");
+    expect(whatsappTemplateTab).toContain("lg:grid-cols-[360px_minmax(0,1fr)]");
+    expect(whatsappTemplateTab).not.toContain("line-clamp-5");
+  });
+
+  it("deletes Meta templates with id and language when available", () => {
+    expect(whatsappTemplateTab).toContain("meta_template_id: template.meta_template_id");
+    expect(whatsappTemplateTab).toContain("language: template.language");
+    expect(templateFunction).toContain("hsm_id: templateId");
+    expect(templateFunction).toContain("URLSearchParams");
+    expect(templateFunction).toContain('from("whatsapp_templates")');
+    expect(templateFunction).toContain('from("whatsapp_template_settings")');
   });
 
   it("shows approved Meta templates even if their visibility row is missing", () => {
