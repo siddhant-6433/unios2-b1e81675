@@ -23,6 +23,12 @@ describe("parent Aadhaar document slots", () => {
     expect(applyPortalUploadDoc).toContain('"parent_aadhaar"');
   });
 
+  it("surfaces Edge Function response bodies instead of the generic SDK error", () => {
+    expect(documentUpload).toContain("readFunctionErrorMessage");
+    expect(documentUpload).toContain("body?.error");
+    expect(documentUpload).toContain("context?: unknown");
+  });
+
   it("renders friendly names for new and legacy Aadhaar document keys", () => {
     expect(applicationFormPdf).toContain('father_aadhaar:         "Father Aadhaar Card"');
     expect(applicationFormPdf).toContain('mother_aadhaar:         "Mother Aadhaar Card"');
