@@ -26,11 +26,24 @@ describe("campaign queue controls", () => {
       expect(sender).toContain("finalCampaign");
     }
   });
+
+  it("lets the background dispatcher drain WhatsApp queues in bounded worker batches", () => {
+    expect(whatsappSender).toContain("x-cron-secret");
+    expect(whatsappSender).toContain("isTrustedWorker");
+    expect(whatsappSender).toContain('authHeader === `Bearer ${serviceRoleKey}`');
+    expect(whatsappSender).toContain("const batchSize = Math.max");
+    expect(whatsappSender).toContain(".limit(batchSize)");
+    expect(whatsappSender).toContain("const done = counts.pendingCount === 0");
+    expect(whatsappSender).toContain('status: done ? "completed" : "sending"');
+  });
+
   it("exposes queue controls in the lead-list campaign queue", () => {
     expect(leadLists).toContain("Campaign Queue");
     expect(leadLists).toContain("pauseCampaign");
     expect(leadLists).toContain("resumeCampaign");
     expect(leadLists).toContain("terminateCampaign");
+    expect(leadLists).toContain('.in("status", ["paused", "failed"])');
+    expect(leadLists).toContain('item.status === "failed" ? "Retry" : "Resume"');
     expect(leadLists).toContain("whatsapp-campaign-send");
     expect(leadLists).toContain("email-campaign-send");
   });
