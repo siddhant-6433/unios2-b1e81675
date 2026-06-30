@@ -409,27 +409,72 @@ Deno.serve(async (req) => {
 
     // ── DELETE: Delete a template ──
     if (action === "delete") {
-      const { name } = body;
+      const { name, language, meta_template_id, id } = body;
       if (!name) {
         return new Response(JSON.stringify({ error: "name is required" }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 
-      const res = await fetch(
-        `${metaUrl}?name=${encodeURIComponent(name)}&access_token=${waToken}`,
-        { method: "DELETE" }
-      );
-      const result = await res.json();
-
-      if (!res.ok) {
-        return new Response(JSON.stringify({ error: result?.error?.message || "Delete failed" }), {
-          status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      const templateId = String(meta_template_id || id || "").trim();
+      const safeLanguage = language ? String(language).trim() : "";
+      const attempts: Record<string, string>[] = [];
+      if (templateId) {
+        attempts.push({
+          name: String(name),
+          ...(safeLanguage ? { language: safeLanguage } : {}),
+          hsm_id: templateId,
         });
+        attempts.push({ name: String(name), hsm_id: templateId });
+        attempts.push({ hsm_id: templateId });
+      }
+      if (safeLanguage) attempts.push({ name: String(name), language: safeLanguage });
+      attempts.push({ name: String(name) });
+
+      const uniqueAttempts = attempts.filter((params, index) => {
+        const key = JSON.stringify(params);
+        return attempts.findIndex((candidate) => JSON.stringify(candidate) === key) === index;
+      });
+
+      let result: any = null;
+      let status = 502;
+      for (const params of uniqueAttempts) {
+        const search = new URLSearchParams({ ...params, access_token: waToken });
+        const res = await fetch(`${metaUrl}?${search.toString()}`, { method: "DELETE" });
+        result = await res.json().catch(() => ({}));
+        status = res.status;
+        if (res.ok) {
+          const localDelete = adminClient
+            .from("whatsapp_templates")
+            .delete()
+            .eq("name", String(name));
+          const { error: localDeleteErr } = await (safeLanguage
+            ? localDelete.eq("language", safeLanguage)
+            : localDelete);
+          if (localDeleteErr && !isMissingMirrorTable(localDeleteErr)) {
+            console.error("whatsapp_templates local delete failed:", localDeleteErr.message);
+          }
+
+          const { error: settingsDeleteErr } = await adminClient
+            .from("whatsapp_template_settings")
+            .delete()
+            .eq("template_key", String(name));
+          if (settingsDeleteErr && !isMissingSettingsTable(settingsDeleteErr)) {
+            console.error("whatsapp_template_settings local delete failed:", settingsDeleteErr.message);
+          }
+
+          return new Response(JSON.stringify({ success: true }), {
+            status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
       }
 
-      return new Response(JSON.stringify({ success: true }), {
-        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      return new Response(JSON.stringify({
+        error: result?.error?.error_user_msg || result?.error?.message || "Delete failed",
+        details: result?.error || result,
+      }), {
+        status: status >= 400 && status < 500 ? status : 502,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
