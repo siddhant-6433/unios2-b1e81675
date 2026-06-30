@@ -33,6 +33,7 @@ import {
   deleteApplication as deleteApplicationRequest,
   PAID_APPLICATION_DELETE_CONFIRMATION,
 } from "@/lib/deleteApplication";
+import { fetchAllApplicationRows, type ApplicationsReadClient } from "@/lib/applicationsRead";
 import {
   applyApplicationDossierToRow,
   buildApplicationDossier,
@@ -103,7 +104,6 @@ const FUNNEL_ORDER: FunnelStage[] = [
 
 const funnelStageOf = applicationFunnelStageOf;
 const RELATED_QUERY_BATCH_SIZE = 50;
-const APPLICATION_LIST_LIMIT = 500;
 const OFFER_OR_PAYMENT_STAGES = new Set(["offer_sent", "token_paid", "pre_admitted"]);
 
 const FUNNEL_META: Record<FunnelStage, {
@@ -293,11 +293,19 @@ export default function Applications() {
         }
         rows = data || [];
       } else {
-        const { data } = await (supabase as any).from("applications")
-          .select("id, application_id, lead_id, full_name, phone, email, status, payment_status, payment_ref, fee_amount, program_category, course_selections, completed_sections, submitted_at, created_at, flags, dob, gender, category, father, mother, address, academic_details, form_pdf_url, fee_receipt_url")
-          .order("created_at", { ascending: false })
-          .limit(APPLICATION_LIST_LIMIT);
-        rows = data || [];
+        try {
+          rows = await fetchAllApplicationRows<AppRow>(supabase as unknown as ApplicationsReadClient<AppRow>);
+        } catch (error) {
+          console.error("applications list fetch failed:", error);
+          toast({
+            title: "Could not load applications",
+            description: error instanceof Error ? error.message : "Please refresh and try again.",
+            variant: "destructive",
+          });
+          setApps([]);
+          setLoading(false);
+          return;
+        }
       }
 
       // Batch-fetch counsellor names + lead stage + lifecycle data via
@@ -505,7 +513,7 @@ export default function Applications() {
       void enrichFeeStatus();
     };
     fetchApps();
-  }, [profile?.id, isCounsellor]);
+  }, [profile?.id, isCounsellor, toast]);
 
   const completedCount = (cs: Record<string, boolean>) => Object.values(cs || {}).filter(Boolean).length;
   const totalCount = (cs: Record<string, boolean>) => Object.keys(cs || {}).length;
