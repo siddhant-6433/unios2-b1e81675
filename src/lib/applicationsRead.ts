@@ -1,4 +1,4 @@
-export const APPLICATION_LIST_SELECT = "id, application_id, lead_id, full_name, phone, email, status, payment_status, payment_ref, fee_amount, program_category, course_selections, completed_sections, submitted_at, created_at, flags, dob, gender, category, father, mother, address, academic_details, form_pdf_url, fee_receipt_url";
+export const APPLICATION_LIST_SELECT = "id, application_id, lead_id, full_name, phone, email, status, payment_status, payment_ref, fee_amount, program_category, course_selections, completed_sections, submitted_at, created_at, updated_at, flags, dob, gender, category, father, mother, address, academic_details, form_pdf_url, fee_receipt_url";
 export const APPLICATION_LIST_PAGE_SIZE = 500;
 
 export type ApplicationsReadQuery<TRow = unknown> = {
@@ -22,7 +22,7 @@ export async function fetchAllApplicationRows<TRow = unknown>(
     const { data, error } = await client
       .from("applications")
       .select(APPLICATION_LIST_SELECT)
-      .order("created_at", { ascending: false })
+      .order("updated_at", { ascending: false })
       .order("id", { ascending: false })
       .range(from, to);
 

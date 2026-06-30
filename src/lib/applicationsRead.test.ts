@@ -41,11 +41,11 @@ describe("fetchAllApplicationRows", () => {
     expect(rows.at(-1)).toEqual({ id: "sidra-app" });
     expect(query.calls).toEqual([
       { method: "select", args: [APPLICATION_LIST_SELECT] },
-      { method: "order", args: ["created_at", { ascending: false }] },
+      { method: "order", args: ["updated_at", { ascending: false }] },
       { method: "order", args: ["id", { ascending: false }] },
       { method: "range", args: [0, APPLICATION_LIST_PAGE_SIZE - 1] },
       { method: "select", args: [APPLICATION_LIST_SELECT] },
-      { method: "order", args: ["created_at", { ascending: false }] },
+      { method: "order", args: ["updated_at", { ascending: false }] },
       { method: "order", args: ["id", { ascending: false }] },
       { method: "range", args: [APPLICATION_LIST_PAGE_SIZE, APPLICATION_LIST_PAGE_SIZE * 2 - 1] },
     ]);

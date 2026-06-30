@@ -59,6 +59,7 @@ interface AppRow {
   completed_sections: Record<string, boolean>;
   submitted_at: string | null;
   created_at: string;
+  updated_at?: string | null;
   flags: string[] | null;
   dob: string | null;
   gender: string | null;
@@ -159,6 +160,9 @@ const LEAD_STAGE_BADGE: Record<string, string> = {
   pre_admitted: "bg-emerald-100 text-emerald-700",
   admitted: "bg-green-100 text-green-700",
 };
+
+const applicationActivityTime = (app: Pick<AppRow, "updated_at" | "submitted_at" | "created_at">) =>
+  new Date(app.updated_at || app.submitted_at || app.created_at).getTime();
 
 export default function Applications() {
   const { role, profile } = useAuth();
@@ -553,7 +557,8 @@ export default function Applications() {
       const aPaid = a.payment_status === "paid" ? 1 : 0;
       const bPaid = b.payment_status === "paid" ? 1 : 0;
       if (bPaid !== aPaid) return bPaid - aPaid;
-      return completionPct(b.completed_sections) - completionPct(a.completed_sections);
+      const completionDelta = completionPct(b.completed_sections) - completionPct(a.completed_sections);
+      return completionDelta || applicationActivityTime(b) - applicationActivityTime(a);
     }
 
     // "In Progress" filter: paid first → then most sections completed first
@@ -561,23 +566,25 @@ export default function Applications() {
       const aPaid = a.payment_status === "paid" ? 1 : 0;
       const bPaid = b.payment_status === "paid" ? 1 : 0;
       if (bPaid !== aPaid) return bPaid - aPaid;
-      return completionPct(b.completed_sections) - completionPct(a.completed_sections);
+      const completionDelta = completionPct(b.completed_sections) - completionPct(a.completed_sections);
+      return completionDelta || applicationActivityTime(b) - applicationActivityTime(a);
     }
 
     // "Paid" filter: most sections completed first (closest to submission)
     if (paymentFilter === "paid") {
-      return completionPct(b.completed_sections) - completionPct(a.completed_sections);
+      const completionDelta = completionPct(b.completed_sections) - completionPct(a.completed_sections);
+      return completionDelta || applicationActivityTime(b) - applicationActivityTime(a);
     }
 
     // "Submitted" filter: most recent submission first
     if (statusFilter === "submitted") {
       const aDate = a.submitted_at ? new Date(a.submitted_at).getTime() : 0;
       const bDate = b.submitted_at ? new Date(b.submitted_at).getTime() : 0;
-      return bDate - aDate;
+      return (bDate - aDate) || applicationActivityTime(b) - applicationActivityTime(a);
     }
 
-    // Default: date descending
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    // Default: most recently active applications first.
+    return applicationActivityTime(b) - applicationActivityTime(a);
   });
 
   const fetchDocs = async (appId: string, applicationId: string) => {
@@ -738,7 +745,7 @@ export default function Applications() {
             className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
               sortMode === "nudge" ? "border-amber-300 bg-amber-50 text-amber-700" : "border-input bg-background text-muted-foreground hover:bg-muted/50"
             }`}>
-            <Sparkles className="h-3 w-3" />{sortMode === "nudge" ? "Nudge View" : "Sort: Date"}
+            <Sparkles className="h-3 w-3" />{sortMode === "nudge" ? "Nudge View" : "Sort: Activity"}
           </button>
         </div>
       </div>
@@ -914,7 +921,7 @@ export default function Applications() {
                 )}
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground min-w-[420px]" title="Submission → Fee → Docs → Approved → Offer → Token → Admitted">Lifecycle</th>
                 {!isCounsellor && <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Counsellor</th>}
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Date</th>
+                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Active</th>
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Actions</th>
               </tr>
             </thead>
@@ -999,7 +1006,7 @@ export default function Applications() {
                     </td>
                     {!isCounsellor && <td className="px-3 py-2.5 text-xs text-muted-foreground">{app.counsellor_name || "—"}</td>}
                     <td className="px-3 py-2.5 text-[10px] text-muted-foreground">
-                      {new Date(app.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })}
+                      {new Date(applicationActivityTime(app)).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })}
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="inline-flex items-center gap-2">

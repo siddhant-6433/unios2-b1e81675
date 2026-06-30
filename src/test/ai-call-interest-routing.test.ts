@@ -5,6 +5,7 @@ const routingMigration = readFileSync("supabase/migrations/20260620113000_ai_cal
 const callback = readFileSync("supabase/functions/voice-call-callback/index.ts", "utf8");
 const failedHandler = readFileSync("supabase/functions/ai-call-failed-handler/index.ts", "utf8");
 const applications = readFileSync("src/pages/Applications.tsx", "utf8");
+const applicationsRead = readFileSync("src/lib/applicationsRead.ts", "utf8");
 
 describe("AI call interest routing", () => {
   it("assigns interested or high-conversion AI call outcomes through round robin", () => {
@@ -45,5 +46,13 @@ describe("AI call interest routing", () => {
     expect(applications).toContain('const [toDate, setToDate] = useState("")');
     expect(applications).toContain('new Date(`${fromDate}T00:00:00`)');
     expect(applications).toContain('new Date(`${toDate}T23:59:59.999`)');
+  });
+
+  it("sorts Applications by most recent activity by default", () => {
+    expect(applicationsRead).toContain('updated_at, flags');
+    expect(applicationsRead).toContain('.order("updated_at", { ascending: false })');
+    expect(applications).toContain('const applicationActivityTime');
+    expect(applications).toContain('return applicationActivityTime(b) - applicationActivityTime(a);');
+    expect(applications).toContain('Sort: Activity');
   });
 });
