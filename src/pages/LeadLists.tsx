@@ -825,9 +825,15 @@ export default function LeadLists() {
     setQueueBusyId(item.id);
     const { error } = await supabase
       .from(tables.campaign as any)
-      .update({ status: "pending", completed_at: null })
+      .update({
+        status: "pending",
+        completed_at: null,
+        next_attempt_at: new Date().toISOString(),
+        worker_locked_at: null,
+        worker_error: null,
+      })
       .eq("id", item.id)
-      .eq("status", "paused");
+      .in("status", ["paused", "failed"]);
     if (error) {
       setQueueBusyId(null);
       toast({ title: "Could not resume campaign", description: error.message, variant: "destructive" });
@@ -949,10 +955,10 @@ export default function LeadLists() {
                   {campaignQueue.map((item) => {
                     const busy = queueBusyId === item.id;
                     const active = item.status === "pending" || item.status === "sending";
-                    const canResume = item.status === "paused";
-                    const canTerminate = ["pending", "sending", "paused", "failed"].includes(item.status);
                     const accounted = item.sent_count + item.failed_count;
                     const pending = Math.max(item.total_recipients - accounted, 0);
+                    const canResume = (item.status === "paused" || item.status === "failed") && pending > 0;
+                    const canTerminate = ["pending", "sending", "paused", "failed"].includes(item.status);
                     return (
                       <tr key={`${item.channel}-${item.id}`} className="border-b border-border/50 last:border-0">
                         <td className="px-4 py-3">
@@ -987,7 +993,7 @@ export default function LeadLists() {
                             {canResume && (
                               <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => resumeCampaign(item)} disabled={busy}>
                                 {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlayCircle className="h-3.5 w-3.5" />}
-                                Resume
+                                {item.status === "failed" ? "Retry" : "Resume"}
                               </Button>
                             )}
                             {canTerminate && (
