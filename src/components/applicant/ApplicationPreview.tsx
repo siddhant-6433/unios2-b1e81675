@@ -102,9 +102,11 @@ export function ApplicationPreview({ app, docs, cahetRegistration }: Props) {
                 <div key={i} className="flex items-center justify-between gap-2 rounded-lg border border-border p-2 text-xs">
                   <div>
                     <span className="text-muted-foreground">#{c.preference_order || i + 1}</span>{" "}
-                    <span className="font-medium">{c.course_name}</span>
+                    <span className="font-medium">{displayValue(c.course_name) || "Course"}</span>
                   </div>
-                  <Badge className="text-[10px] border-0 bg-muted text-muted-foreground">{c.campus_name}</Badge>
+                  <Badge className="text-[10px] border-0 bg-muted text-muted-foreground">
+                    {displayValue(c.campus_name) || "Campus"}
+                  </Badge>
                 </div>
               ))}
             </div>
@@ -247,12 +249,36 @@ export function ApplicationPreview({ app, docs, cahetRegistration }: Props) {
   );
 }
 
-function Row({ label, value }: { label: string; value?: string | null }) {
-  if (!value) return null;
+function displayValue(value: unknown): string | null {
+  if (value == null || value === "") return null;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    const parts = value.map(displayValue).filter(Boolean);
+    return parts.length > 0 ? parts.join(", ") : null;
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    for (const key of ["label", "name", "value", "title", "text"]) {
+      const nested = displayValue(record[key]);
+      if (nested) return nested;
+    }
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return null;
+    }
+  }
+  return String(value);
+}
+
+function Row({ label, value }: { label: string; value?: unknown }) {
+  const text = displayValue(value);
+  if (!text) return null;
   return (
     <div className="flex items-baseline justify-between gap-3 py-1 text-xs border-b border-border/50 last:border-0">
       <span className="text-muted-foreground capitalize">{label}</span>
-      <span className="text-foreground text-right font-medium truncate max-w-[60%]">{value}</span>
+      <span className="text-foreground text-right font-medium truncate max-w-[60%]">{text}</span>
     </div>
   );
 }
