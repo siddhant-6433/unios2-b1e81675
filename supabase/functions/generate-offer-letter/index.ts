@@ -43,6 +43,32 @@ async function fetchImage(pdf: PDFDocument, url: string | null): Promise<PDFImag
 const fmtINR = (n: number) =>
   "Rs. " + Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isUuidLike(value: string | null | undefined): boolean {
+  return UUID_RE.test(String(value || "").trim());
+}
+
+const SCHOOL_OFFER_TERM_ORDER = ["admission", "q1", "q2", "q3", "q4"];
+
+function isOfferProgrammeFeeTerm(term: string | null | undefined): boolean {
+  const normalized = String(term || "").trim().toLowerCase();
+  return /^year_\d+$/.test(normalized) || SCHOOL_OFFER_TERM_ORDER.includes(normalized);
+}
+
+function offerFeeTermRank(term: string): number {
+  const normalized = String(term || "").trim().toLowerCase();
+  const yearMatch = normalized.match(/^year_(\d+)$/);
+  if (yearMatch) return Number(yearMatch[1]);
+  const schoolIndex = SCHOOL_OFFER_TERM_ORDER.indexOf(normalized);
+  if (schoolIndex >= 0) return 100 + schoolIndex;
+  return 1_000;
+}
+
+function firstOfferFeeTerm(items: { term: string; total: number }[]): string {
+  return items.find(it => it.term === "year_1")?.term || items[0]?.term || "year_1";
+}
+
 const fmtDate = (d?: string | null) => {
   if (!d) return "-";
   const dt = new Date(d);
@@ -579,7 +605,7 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
     y: 0, contentStart: 0, contentEnd: 0,
     branding: { ...(opts.branding || {}), _lh: lh, _footer: ftr },
     hasLetterhead: !!lh,
-    appId: opts.applicationId || opts.lead.application_id,
+    appId: opts.applicationId || (!isUuidLike(opts.lead.application_id) ? opts.lead.application_id : null),
     sessionName: opts.sessionName,
   };
 
@@ -618,7 +644,7 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
     { label: "Applicant Name",    value: applicantName },
     { label: "Phone",             value: opts.lead.phone || "-" },
     { label: "Email",             value: opts.lead.email || "-" },
-    { label: "Application ID",    value: opts.applicationId || opts.lead.application_id || "-" },
+    { label: "Application ID",    value: opts.applicationId || (!isUuidLike(opts.lead.application_id) ? opts.lead.application_id : null) || "-" },
   ]);
 
   if (opts.campus?.address) {
@@ -672,8 +698,8 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
 
   if (isDaott && opts.feeItems.length > 0) {
     const sortedFeeItems = [...opts.feeItems]
-      .filter((it) => it.term?.startsWith("year_"))
-      .sort((a, b) => a.term.localeCompare(b.term) || daottFeeItemRank(a) - daottFeeItemRank(b));
+      .filter((it) => isOfferProgrammeFeeTerm(it.term))
+      .sort((a, b) => offerFeeTermRank(a.term) - offerFeeTermRank(b.term) || daottFeeItemRank(a) - daottFeeItemRank(b));
 
     const termAdjustmentRemaining = new Map<string, number>();
     for (const it of sortedFeeItems) {
@@ -765,14 +791,14 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
     { label: "Token Fee Payable",   value: fmtINR(opts.tokenAmount || 0) },
     { label: "Acceptance Deadline", value: fmtDeadline(opts.offer.acceptance_deadline) },
     { label: "Pay Online",          value: "uni.nimt.ac.in" },
-    { label: "Reference No.",       value: opts.applicationId || opts.lead.application_id || "-" },
+    { label: "Reference No.",       value: opts.applicationId || (!isUuidLike(opts.lead.application_id) ? opts.lead.application_id : null) || "-" },
   ]);
 
   ctx.y -= 4;
 
   // ── Terms (compact, smaller font) ──────────────────────────────────────
   drawSection(ctx, "TERMS & NEXT STEPS");
-  const firstFeePeriod = isDaott ? "Semester 1" : "first-year";
+  const firstFeePeriod = isDaott ? "Semester 1" : labelForOfferTerm(firstOfferFeeTerm(opts.yearItems), false);
   const terms = [
     "Provisional offer subject to verification of original documents at physical admission.",
     `Token fee is adjustable against the ${firstFeePeriod} programme fee and is non-refundable once paid.`,
@@ -918,7 +944,7 @@ Deno.serve(async (req) => {
     const course: any = offer.courses;
     const campus: any = offer.campuses;
 
-    // Per-year fee breakdown from fee_structure_items. Keep both the grouped
+    // Programme fee breakdown from fee_structure_items. Keep both the grouped
     // term totals for token math and detailed fee-code rows for DAOTT offer
     // PDFs, where the seat-block fee must be shown explicitly.
     const { data: yearRows } = await admin
@@ -932,10 +958,11 @@ Deno.serve(async (req) => {
     const yearMap = new Map<string, number>();
     const feeItems: FeeStructureItem[] = [];
     for (const it of ((yearRows as any)?.fee_structure_items || []) as { term: string; amount: number; fee_codes?: { code?: string | null; name?: string | null; category?: string | null } | null }[]) {
-      if (!it.term?.startsWith("year_")) continue;
-      yearMap.set(it.term, (yearMap.get(it.term) || 0) + Number(it.amount));
+      const term = String(it.term || "").trim().toLowerCase();
+      if (!isOfferProgrammeFeeTerm(term)) continue;
+      yearMap.set(term, (yearMap.get(term) || 0) + Number(it.amount));
       feeItems.push({
-        term: it.term,
+        term,
         amount: Number(it.amount || 0),
         fee_code_code: it.fee_codes?.code || null,
         fee_code_name: it.fee_codes?.name || null,
@@ -943,7 +970,7 @@ Deno.serve(async (req) => {
       });
     }
     const yearItems = Array.from(yearMap.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
+      .sort(([a], [b]) => offerFeeTermRank(a) - offerFeeTermRank(b) || a.localeCompare(b))
       .map(([term, total]) => ({ term, total }));
     const totalCourseFee = yearItems.reduce((s, y) => s + y.total, 0);
 
@@ -963,13 +990,14 @@ Deno.serve(async (req) => {
       sessionName = sess?.name || null;
     }
 
-    // Resolve application_id directly from applications. leads.application_id
-    // is sometimes null (test data, manual SQL inserts, race conditions on
-    // the trigger that mirrors it). Pull the latest application linked to
-    // this lead — that's the authoritative source for the top-right badge.
-    let applicationId: string | null = lead?.application_id || null;
+    // Resolve the display application ID directly from applications. Do not
+    // display leads.application_id blindly: older sync paths can store the
+    // internal applications.id UUID there, while PDFs must show APP-... IDs.
+    // Pull the latest application linked to this lead first — that's the
+    // authoritative source for the top-right badge and reference fields.
+    let applicationId: string | null = null;
     let applicationRow: ApplicationCahetSource | null = null;
-    if (!applicationId && offer.lead_id) {
+    if (offer.lead_id) {
       const { data: appRow } = await admin
         .from("applications")
         .select("application_id, academic_details")
@@ -980,13 +1008,23 @@ Deno.serve(async (req) => {
       applicationRow = appRow || null;
       applicationId = appRow?.application_id || null;
     }
-    if (!applicationRow && applicationId) {
+    if (!applicationRow && lead?.application_id && isUuidLike(lead.application_id)) {
       const { data: appRow } = await admin
         .from("applications")
         .select("application_id, academic_details")
-        .eq("application_id", applicationId)
+        .eq("id", lead.application_id)
         .maybeSingle();
       applicationRow = appRow || null;
+      applicationId = appRow?.application_id || null;
+    }
+    if (!applicationRow && lead?.application_id && !isUuidLike(lead.application_id)) {
+      const { data: appRow } = await admin
+        .from("applications")
+        .select("application_id, academic_details")
+        .eq("application_id", lead.application_id)
+        .maybeSingle();
+      applicationRow = appRow || null;
+      applicationId = appRow?.application_id || lead.application_id || null;
     }
 
     // Branding (doc-type-aware: prefers a template tagged 'offer_letter',
@@ -1052,12 +1090,13 @@ Deno.serve(async (req) => {
     //      legacy leads.token_amount.
     let tokenAmount = Number((offer as any)?.token_fee_amount ?? 0);
     if (!tokenAmount || tokenAmount <= 0) {
-      const y1Total = yearItems.find(it => it.term === "year_1")?.total ?? 0;
+      const firstTerm = firstOfferFeeTerm(yearItems);
+      const firstTermTotal = yearItems.find(it => it.term === firstTerm)?.total ?? 0;
       const scholarship = Number(offer.scholarship_amount || 0);
       const y1Waivers = waivers
-        .filter(w => w.term === "year_1")
+        .filter(w => w.term === firstTerm)
         .reduce((s, w) => s + Number(w.amount || 0), 0);
-      const postY1 = Math.max(0, y1Total - scholarship - y1Waivers);
+      const postY1 = Math.max(0, firstTermTotal - scholarship - y1Waivers);
       const tokenFloor = 5000;
       tokenAmount = postY1 > 0
         ? Math.max(Math.round(postY1 * 0.25), tokenFloor)

@@ -1486,6 +1486,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
   const [dashboardOpenAppId, setDashboardOpenAppId] = useState<string | null>(null);
   const [offerLetters, setOfferLetters] = useState<Record<string, { letter_url: string | null; approval_status: string }>>({});
   const [leadAdmissions, setLeadAdmissions] = useState<Record<string, { pre_admission_no: string | null; admission_no: string | null }>>({});
+  const [generatingApplicationPdf, setGeneratingApplicationPdf] = useState(false);
 
   // Auto-open the token fee panel for whichever app has an approved offer,
   // but only if the user hasn't manually toggled something already.
@@ -1681,6 +1682,33 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
     const firstIncomplete = stepKeys.findIndex(k => !cs[k]);
     setStep(firstIncomplete >= 0 ? firstIncomplete : stepList.length - 1);
   };
+
+  const ensureApplicationPdf = async (applicationId: string) => {
+    if (!applicationId || generatingApplicationPdf) return;
+    setGeneratingApplicationPdf(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-application-form", {
+        body: { application_id: applicationId },
+      });
+      if (error) throw error;
+      const formPdfUrl = (data as any)?.form_pdf_url as string | undefined;
+      if (formPdfUrl) {
+        setApp(prev => prev?.application_id === applicationId ? { ...prev, form_pdf_url: formPdfUrl } : prev);
+        setAppsList(prev => prev?.map(item => item.application_id === applicationId ? { ...item, form_pdf_url: formPdfUrl } : item) ?? prev);
+      }
+    } catch (err) {
+      console.error("[ApplyPortal] application PDF generation failed:", err);
+    } finally {
+      setGeneratingApplicationPdf(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!submitted || !app || app.form_pdf_url) return;
+    if (!["submitted", "under_review", "approved"].includes(String(app.status))) return;
+    void ensureApplicationPdf(app.application_id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submitted, app?.application_id, app?.form_pdf_url, app?.status]);
 
   // Return to the dashboard from a submitted/preview view (only available
   // when the dashboard was previously shown — i.e. multiple apps).
@@ -2033,6 +2061,13 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
       }
     }
 
+    const submittedAt = new Date().toISOString();
+    setApp(prev => prev ? {
+      ...prev,
+      status: "submitted",
+      submitted_at: submittedAt,
+      completed_sections: { ...prev.completed_sections, review: true },
+    } : prev);
     setSubmitted(true);
     setSaving(false);
     toast({ title: "Application submitted!" });
@@ -2047,9 +2082,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
     // get the internal email. Brief delay so the form-PDF generator has a
     // chance to populate applications.form_pdf_url before notify-event
     // looks it up — keeps the WA button URL non-empty for most cases.
-    supabase.functions.invoke("generate-application-form", {
-      body: { application_id: app.application_id },
-    }).catch(() => {});
+    void ensureApplicationPdf(app.application_id);
     if (app.payment_status === "paid") {
       supabase.functions.invoke("generate-application-fee-receipt", {
         body: { application_id: app.application_id },
@@ -2173,6 +2206,11 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
                   className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20">
                   <FileText className="h-3.5 w-3.5" />Application PDF
                 </a>
+              )}
+              {!app.form_pdf_url && generatingApplicationPdf && (
+                <span className="inline-flex items-center gap-1.5 rounded-lg border border-muted bg-muted/50 px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />Preparing PDF
+                </span>
               )}
               <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-1.5">
                 <LogOut className="h-4 w-4" /> Logout

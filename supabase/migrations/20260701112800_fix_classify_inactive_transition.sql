@@ -1,6 +1,6 @@
--- Server-side lead transition command executor for staff/browser workflows.
--- The client names an allowed command; this function owns the stage write and
--- stage-change activity so pages do not patch leads.stage directly.
+-- Fix live lead-transition RPCs that still cast classifyInactive to the
+-- non-existent lead_stage value 'inactive'. Replacing the function is required
+-- because the original migration may already be applied on Supabase projects.
 
 CREATE OR REPLACE FUNCTION public.apply_lead_transition_command(
   _lead_id uuid,
@@ -144,5 +144,3 @@ BEGIN
   RETURN NEXT;
 END;
 $$;
-
-GRANT EXECUTE ON FUNCTION public.apply_lead_transition_command(uuid, text, public.lead_stage, text, jsonb) TO authenticated;
