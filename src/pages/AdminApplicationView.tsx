@@ -56,6 +56,7 @@ type LeadCourse = {
 
 const COURSE_SELECT = "name,code,duration_years,eligibility,entrance_exam,entrance_mandatory";
 const APPROVABLE_APPLICATION_STATUSES = new Set(["submitted", "under_review"]);
+const APPLICATION_FORM_PDF_STATUSES = new Set(["submitted", "under_review", "approved", "rejected"]);
 
 function isApprovableApplicationStatus(status: string | null | undefined): boolean {
   return APPROVABLE_APPLICATION_STATUSES.has(status || "");
@@ -186,6 +187,7 @@ export default function AdminApplicationView() {
   const [deleting, setDeleting] = useState(false);
   const [showOfferLetter, setShowOfferLetter] = useState(false);
   const [generatingReceipt, setGeneratingReceipt] = useState(false);
+  const [generatingFormPdf, setGeneratingFormPdf] = useState(false);
   const [repairingLead, setRepairingLead] = useState(false);
   const [applicationApproverName, setApplicationApproverName] = useState<string | null>(null);
 
@@ -684,6 +686,25 @@ export default function AdminApplicationView() {
     }
   };
 
+  const generateFormPdf = async () => {
+    if (generatingFormPdf || !app?.application_id) return;
+    setGeneratingFormPdf(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-application-form", {
+        body: { application_id: app.application_id },
+      });
+      if (error) throw error;
+      const url = (data as any)?.form_pdf_url;
+      if (!url) throw new Error("PDF URL was not returned");
+      setApp((prev: any) => prev ? { ...prev, form_pdf_url: url } : prev);
+      window.open(url, "_blank");
+    } catch (e: any) {
+      toast({ title: "Couldn't generate form PDF", description: e?.message || "Please try again.", variant: "destructive" });
+    } finally {
+      setGeneratingFormPdf(false);
+    }
+  };
+
   const issueOfferOrRepairLead = async () => {
     if (!canManageOffer) {
       toast({ title: "Offer restricted", description: "You do not have permission to issue offers.", variant: "destructive" });
@@ -765,11 +786,22 @@ export default function AdminApplicationView() {
               Delete
             </Button>
           )}
-          {app.form_pdf_url && (
+          {app.form_pdf_url ? (
             <a href={app.form_pdf_url} target="_blank" rel="noreferrer"
               className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20">
               <FileText className="h-3.5 w-3.5" />Form PDF
             </a>
+          ) : APPLICATION_FORM_PDF_STATUSES.has(app.status) && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              onClick={generateFormPdf}
+              disabled={generatingFormPdf}
+            >
+              {generatingFormPdf ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+              Generate Form PDF
+            </Button>
           )}
         </div>
       </div>

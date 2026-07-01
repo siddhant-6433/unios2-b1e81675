@@ -914,10 +914,15 @@ type DashboardApp = {
   course_selections: any[];
   form_pdf_url: string | null;
   fee_receipt_url: string | null;
+  payment_ref: string | null;
   phone: string;
   email: string | null;
+  submitted_at?: string | null;
+  updated_at?: string | null;
   created_at: string;
 };
+
+const APPLICATION_FORM_PDF_STATUSES = new Set(["submitted", "under_review", "approved", "rejected"]);
 
 function statusBadge(status: string, paymentStatus: string | null) {
   if (status === "approved") return { label: "Approved", className: "bg-green-100 text-green-700", Icon: CheckCircle };
@@ -1078,6 +1083,8 @@ function ApplicationDashboardView({
   // Which app's fee-receipt dialog is open. Builds the same modern receipt
   // the student gets via email — single canonical format.
   const [receiptApp, setReceiptApp] = useState<any | null>(null);
+  const [generatedPdfUrls, setGeneratedPdfUrls] = useState<Record<string, string>>({});
+  const [generatingPdfFor, setGeneratingPdfFor] = useState<string | null>(null);
   const buildReceiptData = (a: any): ReceiptData => {
     const nameIsEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.full_name || "");
     const courses = (a.course_selections as any[]) || [];
@@ -1097,6 +1104,25 @@ function ApplicationDashboardView({
       logo: portal.logo,
       primaryColor: portal.primaryColor,
     };
+  };
+
+  const generateApplicationPdf = async (a: DashboardApp) => {
+    if (generatingPdfFor || !a.application_id) return;
+    setGeneratingPdfFor(a.id);
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-application-form", {
+        body: { application_id: a.application_id },
+      });
+      if (error) throw error;
+      const url = (data as any)?.form_pdf_url;
+      if (!url) throw new Error("PDF URL was not returned");
+      setGeneratedPdfUrls(prev => ({ ...prev, [a.id]: url }));
+      window.open(url, "_blank");
+    } catch (e: any) {
+      console.error("generate-application-form failed:", e);
+    } finally {
+      setGeneratingPdfFor(null);
+    }
   };
 
   return (
@@ -1237,6 +1263,7 @@ function ApplicationDashboardView({
           const isDraft = a.status === "draft";
           const isPaid = a.payment_status === "paid";
           const isUnderReview = a.status === "submitted" || a.status === "under_review";
+          const formPdfUrl = generatedPdfUrls[a.id] || a.form_pdf_url;
           const isOpen = openAppId === a.id;
 
           // Card accent colour by state
@@ -1333,13 +1360,22 @@ function ApplicationDashboardView({
                       <FileText className="h-3.5 w-3.5" /> View Application
                     </button>
                   )}
-                  {a.form_pdf_url && (
+                  {formPdfUrl ? (
                     <a
-                      href={a.form_pdf_url} target="_blank" rel="noreferrer"
+                      href={formPdfUrl} target="_blank" rel="noreferrer"
                       className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 active:scale-95 transition-all"
                     >
                       <FileText className="h-3.5 w-3.5" /> PDF
                     </a>
+                  ) : APPLICATION_FORM_PDF_STATUSES.has(a.status) && (
+                    <button
+                      onClick={() => generateApplicationPdf(a)}
+                      disabled={generatingPdfFor === a.id}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 active:scale-95 transition-all disabled:opacity-60"
+                    >
+                      {generatingPdfFor === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                      Generate PDF
+                    </button>
                   )}
                   {isPaid && (
                     <button
@@ -1476,6 +1512,7 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
   const [app, setApp] = useState<ApplicationData | null>(null);
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [generatingApplicationPdf, setGeneratingApplicationPdf] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [showCourseSelector, setShowCourseSelector] = useState(true);
   // Dashboard listing all applications for the authenticated phone in this portal.
@@ -2061,6 +2098,32 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
     // the call always silently 401'd from anonymous applicants.
   };
 
+  const generateSubmittedApplicationPdf = async () => {
+    if (!app?.application_id || generatingApplicationPdf) return;
+    setGeneratingApplicationPdf(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-application-form", {
+        body: { application_id: app.application_id },
+      });
+      if (error) throw error;
+      const url = (data as any)?.form_pdf_url;
+      if (!url) throw new Error("PDF URL was not returned");
+      setApp(prev => prev ? { ...prev, form_pdf_url: url } : prev);
+      setAppsList(prev => prev
+        ? prev.map(a => a.id === app.id ? { ...a, form_pdf_url: url } : a)
+        : prev);
+      window.open(url, "_blank");
+    } catch (e: any) {
+      toast({
+        title: "Couldn't generate application PDF",
+        description: e?.message || "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setGeneratingApplicationPdf(false);
+    }
+  };
+
   const onChange = (updates: Partial<ApplicationData>) => {
     setApp(prev => prev ? { ...prev, ...updates } : prev);
   };
@@ -2168,11 +2231,22 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
                   Paid
                 </span>
               )}
-              {app.form_pdf_url && (
+              {app.form_pdf_url ? (
                 <a href={app.form_pdf_url} target="_blank" rel="noreferrer"
                   className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20">
                   <FileText className="h-3.5 w-3.5" />Application PDF
                 </a>
+              ) : APPLICATION_FORM_PDF_STATUSES.has(app.status) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={generateSubmittedApplicationPdf}
+                  disabled={generatingApplicationPdf}
+                  className="gap-1.5"
+                >
+                  {generatingApplicationPdf ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                  Generate PDF
+                </Button>
               )}
               <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-1.5">
                 <LogOut className="h-4 w-4" /> Logout

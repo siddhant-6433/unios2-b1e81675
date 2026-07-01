@@ -105,6 +105,7 @@ export interface ApplicationData {
   fee_amount: number;
   payment_status: string;
   payment_ref: string | null;
+  form_pdf_url?: string | null;
   flags: string[];
   institution_id: string | null;
   program_category: string;
