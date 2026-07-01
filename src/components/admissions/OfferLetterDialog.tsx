@@ -29,6 +29,7 @@ import { chooseOfferSessionId, feeBackedSessionIds, type OfferSessionOption } fr
 import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 import { feeTermLabel } from "@/lib/feeTermLabels";
+import { collectOfferFeeTermTotals, firstOfferFeeTerm } from "@/lib/offerFeeTerms";
 
 interface OfferLetterDialogProps {
   open: boolean;
@@ -152,12 +153,12 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   });
   const [tokenFeeEdited, setTokenFeeEdited] = useState(false);
   const [sessions, setSessions] = useState<SessionOption[]>([]);
-  // First-year fee for the picked session — used to default the token fee.
+  // First payable programme-fee period for the picked session, used to default the token fee.
   const [firstYearFee, setFirstYearFee] = useState<number>(0);
-  // Term keys present in the active fee structure (e.g. ['year_1', 'year_2']) —
+  // Term keys present in the active fee structure (e.g. ['year_1'] or ['admission', 'q1']) —
   // drives the year picker in the Add-Waiver inline form.
   const [availableTerms, setAvailableTerms] = useState<string[]>([]);
-  // Per-year totals from the active fee structure, used for the summary card
+  // Per-period totals from the active fee structure, used for the summary card
   // at offer-creation time and for stamping offer.total_fee.
   const [yearTotals, setYearTotals] = useState<{ term: string; total: number; label: string }[]>([]);
   // offer_id → waivers list, fetched alongside offers.
@@ -375,7 +376,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     return () => { cancelled = true; };
   }, [showForm, courseId]);
 
-  // Resolve the first-year fee + the list of available year terms for the
+  // Resolve the first offer-fee period + the list of available waiver terms for the
   // picked course+session pair. firstYearFee drives token-fee defaults;
   // availableTerms drives the year picker in the Add-Waiver form.
   useEffect(() => {
@@ -396,19 +397,11 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       if (cancelled) return;
       const items: any[] = (data as any)?.fee_structure_items ?? [];
       const metadata = (data as any)?.metadata as Record<string, unknown> | null;
-      // Sum per year_N term so we have both Year-1 (for token math) and the
-      // full per-year breakdown (for the summary card + offer.total_fee).
-      const byTerm = new Map<string, number>();
-      for (const it of items) {
-        const t = String(it?.term || "");
-        if (!/^year_\d+$/.test(t)) continue;
-        byTerm.set(t, (byTerm.get(t) || 0) + Number(it?.amount || 0));
-      }
-      const sorted = Array.from(byTerm.entries())
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([term, total]) => ({ term, total, label: feeTermLabel(term, metadata) }));
-      const y1 = byTerm.get("year_1") || 0;
-      setFirstYearFee(y1);
+      const totals = collectOfferFeeTermTotals(items);
+      const sorted = totals.map(({ term, total }) => ({ term, total, label: feeTermLabel(term, metadata) }));
+      const firstTerm = firstOfferFeeTerm(totals);
+      const firstPeriodFee = totals.find((item) => item.term === firstTerm)?.total || 0;
+      setFirstYearFee(firstPeriodFee);
       setYearTotals(sorted);
       setAvailableTerms(sorted.length ? sorted.map(s => s.term) : ["year_1"]);
     })().catch(() => { setFirstYearFee(0); setAvailableTerms([]); setYearTotals([]); });
@@ -434,7 +427,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
 
   const labelForTerm = (term: string): string =>
     yearTotals.find(y => y.term === term)?.label ?? feeTermLabel(term);
-  const firstTermLabel = labelForTerm("year_1");
+  const firstOfferTerm = firstOfferFeeTerm(yearTotals);
+  const firstTermLabel = labelForTerm(firstOfferTerm);
 
   /** Sum of pre-issuance waivers already queued for the same term in the new-offer form. */
   const preWaiverTotalForTerm = (term: string): number =>
@@ -462,27 +456,19 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       .maybeSingle();
     if (error) throw error;
 
-    const byTerm = new Map<string, number>();
-    for (const item of (((data as any)?.fee_structure_items || []) as any[])) {
-      const term = String(item?.term || "");
-      if (!/^year_\d+$/.test(term)) continue;
-      byTerm.set(term, (byTerm.get(term) || 0) + Number(item?.amount || 0));
-    }
-
-    const yearTotalsForCourse = Array.from(byTerm.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([term, total]) => ({ term, total }));
+    const yearTotalsForCourse = collectOfferFeeTermTotals(((data as any)?.fee_structure_items || []) as any[]);
+    const firstTerm = firstOfferFeeTerm(yearTotalsForCourse);
 
     return {
-      firstYearFee: byTerm.get("year_1") || 0,
+      firstYearFee: yearTotalsForCourse.find((item) => item.term === firstTerm)?.total || 0,
       totalFee: yearTotalsForCourse.reduce((sum, year) => sum + year.total, 0),
     };
   };
 
-  // Net Year-1 fee = gross Year-1 fee minus any year_1 waivers already
-  // staged in the pre-issuance waiver list. The loan-letter token fee
+  // Net first-period fee = gross first-period fee minus any matching waivers
+  // already staged in the pre-issuance waiver list. The loan-letter token fee
   // defaults to 25% of this net figure.
-  const netFirstYearFee = Math.max(0, firstYearFee - preWaiverTotalForTerm("year_1"));
+  const netFirstYearFee = Math.max(0, firstYearFee - preWaiverTotalForTerm(firstOfferTerm));
 
   // Token fee defaults to 25% of net Year-1. Admissions can lower it while
   // issuing the offer, but never below the course-specific seat-block floor.
@@ -507,7 +493,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     if (!totalFee || totalFee <= 0) {
       toast({
         title: "No fee structure published",
-        description: "The selected course + session doesn't have an active fee structure with year-wise items. Publish one in Course & Campus master before issuing offers.",
+        description: "The selected course + session doesn't have an active fee structure with programme fee items. Publish one in Course & Campus master before issuing offers.",
         variant: "destructive",
       });
       return;
@@ -596,11 +582,15 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       // Only advance lead stage if the offer is approved (not pending)
       if (autoApproved) {
         const transition = resolveLeadTransitionCommand({ currentStage: "application_approved", command: "issueOffer" });
-        await applyResolvedLeadTransition(supabase as any, {
-          leadId,
-          transition,
-          extraPatch: { offer_amount: totalFee },
-        });
+        try {
+          await applyResolvedLeadTransition(supabase as any, {
+            leadId,
+            transition,
+            extraPatch: { offer_amount: totalFee },
+          });
+        } catch (e: any) {
+          console.warn("[OfferLetterDialog] lead stage transition failed after offer create:", e);
+        }
       }
       await supabase.from("lead_activities").insert({
         lead_id: leadId, user_id: user?.id || null, type: "offer",
@@ -674,11 +664,15 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       const offer = offers.find(o => o.id === offerId);
       if (offer) {
         const transition = resolveLeadTransitionCommand({ currentStage: "application_approved", command: "issueOffer" });
-        await applyResolvedLeadTransition(supabase as any, {
-          leadId,
-          transition,
-          extraPatch: { offer_amount: offer.net_fee },
-        });
+        try {
+          await applyResolvedLeadTransition(supabase as any, {
+            leadId,
+            transition,
+            extraPatch: { offer_amount: offer.net_fee },
+          });
+        } catch (e: any) {
+          console.warn("[OfferLetterDialog] lead stage transition failed after offer approval:", e);
+        }
       }
       await supabase.from("lead_activities").insert({
         lead_id: leadId, user_id: user?.id || null, type: "offer",
@@ -1069,7 +1063,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                     </div>
                   ) : (
                     <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
-                      No active fee structure published for this course + session. Publish one in Course & Campus master before issuing.
+                      No active programme fee structure published for this course + session. Publish one in Course & Campus master before issuing.
                     </div>
                   )}
                   <p className="mt-1.5 text-[10px] text-muted-foreground/70 leading-relaxed">

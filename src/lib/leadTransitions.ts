@@ -241,8 +241,8 @@ export function resolveLeadTransitionCommand(args: ResolveWorkflowLeadTransition
     return {
       name: command,
       currentStage,
-      newStage: "inactive",
-      activityDescription: "Stage changed to Inactive",
+      newStage: "cold",
+      activityDescription: "Stage changed to Cold after repeated inactive attempts",
       futureEligibleSession: null,
     };
   }
