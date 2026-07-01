@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { CahetRegistrationDetails } from "@/components/leads/CahetRegistrationDetails";
 import type { CahetRegistrationDetails as CahetRegistrationDetailsType } from "@/lib/cahet";
+import { displayValue } from "@/lib/displayValue";
 
 export type PreviewDoc = {
   name: string;
@@ -102,9 +103,11 @@ export function ApplicationPreview({ app, docs, cahetRegistration }: Props) {
                 <div key={i} className="flex items-center justify-between gap-2 rounded-lg border border-border p-2 text-xs">
                   <div>
                     <span className="text-muted-foreground">#{c.preference_order || i + 1}</span>{" "}
-                    <span className="font-medium">{c.course_name}</span>
+                    <span className="font-medium">{displayValue(c.course_name) || "Course"}</span>
                   </div>
-                  <Badge className="text-[10px] border-0 bg-muted text-muted-foreground">{c.campus_name}</Badge>
+                  <Badge className="text-[10px] border-0 bg-muted text-muted-foreground">
+                    {displayValue(c.campus_name) || "Campus"}
+                  </Badge>
                 </div>
               ))}
             </div>
@@ -173,13 +176,13 @@ export function ApplicationPreview({ app, docs, cahetRegistration }: Props) {
                     details.map((d: any, i: number) => (
                       <div key={i} className="text-[11px] text-muted-foreground mb-1">
                         {Object.entries(d).map(([k, v]) =>
-                          v ? <span key={k} className="mr-2">{k}: <span className="text-foreground">{String(v)}</span></span> : null
+                          v ? <span key={k} className="mr-2">{k}: <span className="text-foreground">{displayValue(v)}</span></span> : null
                         )}
                       </div>
                     ))
                   ) : (
                     Object.entries(details).map(([k, v]) =>
-                      v ? <Row key={k} label={k.replace(/_/g, " ")} value={String(v)} /> : null
+                      v ? <Row key={k} label={k.replace(/_/g, " ")} value={v} /> : null
                     )
                   )}
                 </div>
@@ -197,7 +200,7 @@ export function ApplicationPreview({ app, docs, cahetRegistration }: Props) {
               <Award className="h-3 w-3" />Extracurricular
             </p>
             {Object.entries(app.extracurricular).map(([k, v]) =>
-              v ? <Row key={k} label={k.replace(/_/g, " ")} value={String(v)} /> : null
+              v ? <Row key={k} label={k.replace(/_/g, " ")} value={v} /> : null
             )}
           </CardContent>
         </Card>
@@ -247,12 +250,13 @@ export function ApplicationPreview({ app, docs, cahetRegistration }: Props) {
   );
 }
 
-function Row({ label, value }: { label: string; value?: string | null }) {
-  if (!value) return null;
+function Row({ label, value }: { label: string; value?: unknown }) {
+  const text = displayValue(value);
+  if (!text) return null;
   return (
     <div className="flex items-baseline justify-between gap-3 py-1 text-xs border-b border-border/50 last:border-0">
       <span className="text-muted-foreground capitalize">{label}</span>
-      <span className="text-foreground text-right font-medium truncate max-w-[60%]">{value}</span>
+      <span className="text-foreground text-right font-medium truncate max-w-[60%]">{text}</span>
     </div>
   );
 }

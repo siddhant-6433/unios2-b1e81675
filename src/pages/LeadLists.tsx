@@ -18,6 +18,11 @@ import {
   Pause, PlayCircle, RefreshCw, XCircle, Phone, Check, ChevronDown,
 } from "lucide-react";
 import { WA_BULK_TEMPLATES, type WaBulkTemplate } from "@/config/waBulkTemplates";
+import {
+  WhatsAppTemplatePreviewBubble,
+  templateTextPreviewFromComponents,
+  type WhatsAppTemplateComponent,
+} from "@/components/templates/WhatsAppTemplatePreviewBubble";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
 import { decideBlockedRoleAccess } from "@/lib/accessPolicy";
 
@@ -191,6 +196,7 @@ const resolveBusinessNumber = (
 };
 
 const sampleValueForParam = (name: string) => {
+  if (/^\d+$/.test(name)) return `sample ${name}`;
   if (name === "student_name") return "Rahul Sharma";
   if (name === "course_name") return "BPT";
   if (name === "campus_name") return "NIMT Greater Noida";
@@ -201,10 +207,15 @@ const sampleValueForParam = (name: string) => {
   return name.replace(/_/g, " ");
 };
 
-const renderTemplatePreview = (preview: string, staticParams: Record<string, string>) =>
+const renderTemplatePreview = (
+  preview: string,
+  staticParams: Record<string, string>,
+  params: WaBulkTemplate["params"] = [],
+) =>
   preview.replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, (_match, name: string) => {
-    const typed = staticParams[name]?.trim();
-    return typed || sampleValueForParam(name);
+    const paramName = /^\d+$/.test(name) ? params[Number(name) - 1]?.name || name : name;
+    const typed = staticParams[paramName]?.trim();
+    return typed || sampleValueForParam(paramName);
   });
 
 const hasDynamicUrlButton = (components?: Array<{ type?: string; buttons?: Array<{ type?: string; url?: string }> }> | null) =>
@@ -287,11 +298,16 @@ export default function LeadLists() {
   const [waSenderError, setWaSenderError] = useState<string | null>(null);
   const [waSending, setWaSending] = useState(false);
   const [dynamicWaBulkTemplates, setDynamicWaBulkTemplates] = useState<WaBulkTemplate[]>([]);
+  const [waMetaTemplateOverrides, setWaMetaTemplateOverrides] = useState<Record<string, Partial<Pick<WaBulkTemplate, "description" | "preview">>>>({});
+  const [waTemplateComponentsByKey, setWaTemplateComponentsByKey] = useState<Record<string, WhatsAppTemplateComponent[]>>({});
 
   // Selected template definition — drives which static inputs we render.
   const availableWaBulkTemplates = useMemo(
-    () => [...WA_BULK_TEMPLATES, ...dynamicWaBulkTemplates],
-    [dynamicWaBulkTemplates]
+    () => [
+      ...WA_BULK_TEMPLATES.map((template) => ({ ...template, ...(waMetaTemplateOverrides[template.key] || {}) })),
+      ...dynamicWaBulkTemplates,
+    ],
+    [dynamicWaBulkTemplates, waMetaTemplateOverrides]
   );
   const waTemplateDef = useMemo(
     () => availableWaBulkTemplates.find(t => t.key === waTemplate) || availableWaBulkTemplates[0] || WA_BULK_TEMPLATES[0],
@@ -307,8 +323,8 @@ export default function LeadLists() {
     [waSenderOptions, waSenderValue]
   );
   const waRenderedPreview = useMemo(
-    () => renderTemplatePreview(waTemplateDef.preview, waStaticParams),
-    [waTemplateDef.preview, waStaticParams]
+    () => renderTemplatePreview(waTemplateDef.preview, waStaticParams, waTemplateDef.params),
+    [waTemplateDef.preview, waTemplateDef.params, waStaticParams]
   );
 
   // Send-Email dialog
@@ -506,6 +522,8 @@ export default function LeadLists() {
     if (role === "academic_partner") return;
     if (!waOpen) {
       setDynamicWaBulkTemplates([]);
+      setWaMetaTemplateOverrides({});
+      setWaTemplateComponentsByKey({});
       return;
     }
     (async () => {
@@ -525,12 +543,23 @@ export default function LeadLists() {
       const { data: approvedRows } = await (supabase as any)
         .from("whatsapp_templates")
         .select("name, components, placeholder_count, has_media, header_format")
-        .eq("status", "APPROVED")
-        .eq("placeholder_count", 0)
-        .eq("has_media", false);
+        .eq("status", "APPROVED");
+      const overrides: Record<string, Partial<Pick<WaBulkTemplate, "description" | "preview">>> = {};
+      const componentsByKey: Record<string, WhatsAppTemplateComponent[]> = {};
+      ((approvedRows || []) as Array<{
+        name: string;
+        components?: WhatsAppTemplateComponent[] | null;
+      }>).forEach((row) => {
+        if (row.name && row.components) componentsByKey[row.name] = row.components;
+        if (!row.name || !knownKeys.has(row.name)) return;
+        const preview = templateTextPreviewFromComponents(row.components);
+        if (preview) overrides[row.name] = { preview };
+      });
+      setWaMetaTemplateOverrides(overrides);
+      setWaTemplateComponentsByKey(componentsByKey);
       const dynamic = ((approvedRows || []) as Array<{
         name: string;
-        components?: Array<{ type?: string; text?: string; buttons?: Array<{ type?: string; url?: string }> }> | null;
+        components?: WhatsAppTemplateComponent[] | null;
         placeholder_count?: number | null;
         has_media?: boolean | null;
         header_format?: string | null;
@@ -550,7 +579,7 @@ export default function LeadLists() {
             key: row.name,
             label: setting?.display_name || row.name.replace(/_/g, " "),
             description: setting?.description || "Approved Meta template",
-            preview: row.components?.find((component) => component.type === "BODY")?.text || setting?.description || row.name,
+            preview: templateTextPreviewFromComponents(row.components) || setting?.description || row.name,
             params: [],
           };
         });
@@ -1205,9 +1234,13 @@ export default function LeadLists() {
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-foreground">Template preview</p>
                 <span className="text-[11px] text-muted-foreground">Sample values shown</span>
               </div>
-              <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-background px-3 py-2 text-xs leading-relaxed text-foreground">
-                {waRenderedPreview}
-              </pre>
+              <WhatsAppTemplatePreviewBubble
+                templateKey={waTemplateDef.key}
+                components={waTemplateComponentsByKey[waTemplateDef.key]}
+                bodyText={waRenderedPreview}
+                fallbackText={waRenderedPreview}
+                className="max-h-[360px] overflow-y-auto"
+              />
             </div>
 
             <p className="text-xs text-muted-foreground">

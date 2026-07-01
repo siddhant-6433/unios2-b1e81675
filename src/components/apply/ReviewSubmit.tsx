@@ -5,6 +5,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ApplicationData } from "./types";
 import { usePortal } from "@/components/apply/PortalContext";
 import { supabase } from "@/integrations/supabase/client";
+import { displayValue } from "@/lib/displayValue";
 
 interface Props {
   data: ApplicationData;
@@ -22,12 +23,14 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Row({ label, value }: { label: string; value?: string }) {
-  if (!value) return null;
+function Row({ label, value }: { label: unknown; value?: unknown }) {
+  const labelText = displayValue(label);
+  const text = displayValue(value);
+  if (!labelText || !text) return null;
   return (
     <div className="flex justify-between">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="text-foreground font-medium">{value}</span>
+      <span className="text-muted-foreground">{labelText}</span>
+      <span className="text-foreground font-medium text-right">{text}</span>
     </div>
   );
 }
@@ -149,7 +152,9 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
             {data.course_selections.map((cs, i) => (
               <div key={i} className="flex justify-between">
                 <span className="text-muted-foreground">Preference {cs.preference_order}</span>
-                <span className="text-foreground font-medium">{cs.course_name} — {cs.campus_name}</span>
+                <span className="text-foreground font-medium text-right">
+                  {[displayValue(cs.course_name), displayValue(cs.campus_name)].filter(Boolean).join(" - ")}
+                </span>
               </div>
             ))}
           </Section>
@@ -219,11 +224,11 @@ export function ReviewSubmit({ data, onBack, onSubmit, saving }: Props) {
           <Section title="Academic Details">
             {data.program_category === 'school' ? (
               <>
-                <Row label="Previous Class" value={(academic as any).previous_class} />
+                <Row label="Previous Class" value={(academic as any).previous_class ?? (academic as any).previous_school?.last_class} />
                 <Row label="Previous School" value={(academic as any).previous_school} />
-                <Row label="Board" value={(academic as any).previous_board} />
-                <Row label="Marks" value={(academic as any).previous_marks} />
-                <Row label="Year" value={(academic as any).previous_year} />
+                <Row label="Board" value={(academic as any).previous_board ?? (academic as any).previous_school?.board} />
+                <Row label="Marks" value={(academic as any).previous_marks ?? (academic as any).previous_school?.percentage} />
+                <Row label="Year" value={(academic as any).previous_year ?? (academic as any).previous_school?.academic_year} />
               </>
             ) : (
               <>
