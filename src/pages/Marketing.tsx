@@ -237,7 +237,7 @@ export default function Marketing() {
       await load();
       return;
     }
-    supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1, batch_size: 10 } }).catch(() => {});
+    supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1, batch_size: 30 } }).catch(() => {});
     setQueueingId(null);
     await load();
   };

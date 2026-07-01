@@ -715,7 +715,7 @@ export default function LeadLists() {
       title: "WhatsApp campaign queued",
       description: `${valid.length} recipients queued. You can close this screen; progress is tracked in Marketing.`,
     });
-    supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1 } }).catch(() => {});
+    supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1, batch_size: 30 } }).catch(() => {});
     await fetchLists();
     await fetchCampaignQueue();
   };

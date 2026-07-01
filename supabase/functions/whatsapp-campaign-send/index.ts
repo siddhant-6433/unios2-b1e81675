@@ -11,6 +11,7 @@ const corsHeaders = {
 
 const CUET_2026_COUNSELLING_IMAGE_URL =
   "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/whatsapp-media/template-assets/cuet_2026_counselling_open.jpeg";
+const CUET_COUNSELLING_BOOKING_IMAGE_URL = CUET_2026_COUNSELLING_IMAGE_URL;
 
 // Same template definitions as whatsapp-send
 const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl?: string }> = {
@@ -24,7 +25,7 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
   bpt_bmrit_cahet_deadline: { name: "bpt_bmrit_cahet_deadline", params: [] },
   cnet_not_qualified_bpt_bmrit: { name: "cnet_not_qualified_bpt_bmrit", params: ["student_name"] },
   cuet_2026_counselling_open: { name: "cuet_2026_counselling_open", params: [], headerImageUrl: CUET_2026_COUNSELLING_IMAGE_URL },
-  cuet_counselling_booking: { name: "cuet_counselling_booking", params: [] },
+  cuet_counselling_booking: { name: "cuet_counselling_booking", params: [], headerImageUrl: CUET_COUNSELLING_BOOKING_IMAGE_URL },
   course_details: { name: "course_details", params: ["student_name", "course_name"] },
   counsellor_lead_assigned: { name: "counsellor_lead_assigned", params: ["counsellor_name", "lead_name", "lead_phone_last4", "sla_hours"] },
   counsellor_sla_warning: { name: "counsellor_sla_warning", params: ["lead_name", "hours_remaining"] },
@@ -166,7 +167,7 @@ Deno.serve(async (req) => {
     }
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
-    const batchSize = Math.max(1, Math.min(Number(batch_size) || 20, 50));
+    const batchSize = Math.max(1, Math.min(Number(batch_size) || 30, 50));
 
     // Validate auth. Browser/manual sends use a user JWT; cron/dispatcher sends
     // use CRON_SECRET or the service-role key and are attributed below.
