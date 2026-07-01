@@ -4,6 +4,7 @@ import { Loader2, CreditCard, FileText, IndianRupee, Clock, Check, GraduationCap
 import {
   buildApplicantFeeBreakdownRows,
   buildApplicantOneTimePaymentOptions,
+  hasApplicantOneTimePaymentOptions,
   resolvePaidTowardCourse,
 } from "./feeBreakdown";
 import {
@@ -1665,7 +1666,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
            smaller alternative — visible but visually secondary so the
            full-course pitch lands first.
       */}
-      {(feeStatus.lump_sum_pct || 0) > 0 && (() => {
+      {(() => {
         const rows = buildApplicantFeeBreakdownRows({
           yearFeesNet: yearFees,
           offerWaivers,
@@ -1694,12 +1695,21 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         const surplusPaidVsY1 = Math.max(0, paid - y1Fee + y1Disc);
         const fmtRupee = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
         const hasFullCourse = paymentOptions.additionalYearsNetFee > 0;
+        const hasDiscount = y1Disc > 0 || fcDisc > 0;
+        const lumpSumPct = feeStatus.lump_sum_pct || 0;
+        const multiYearPct = feeStatus.multi_year_pct || 0;
+
+        if (!hasApplicantOneTimePaymentOptions(paymentOptions)) return null;
 
         return (
           <div className="space-y-3">
             <div>
-              <p className="text-xs font-bold uppercase tracking-wide text-gray-500">One-time payment waivers</p>
-              <p className="text-[11px] text-gray-500 mt-0.5">Calculated on fee after approved waiver.</p>
+              <p className="text-xs font-bold uppercase tracking-wide text-gray-500">One-time payment options</p>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                {hasDiscount
+                  ? "Calculated on fee after approved waiver."
+                  : "Pay remaining fee in one transaction."}
+              </p>
             </div>
 
             {/* ── HERO: Full course (Best Value) ──────────────────────────
@@ -1714,7 +1724,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
               }`}>
                 {!fcCovered && (
                   <div className="absolute -top-3 left-4 z-10 inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-[10px] font-bold text-white shadow-md">
-                    <Sparkles className="h-3 w-3" /> BEST VALUE
+                    <Sparkles className="h-3 w-3" /> {fcDisc > 0 ? "BEST VALUE" : "FULL COURSE"}
                   </div>
                 )}
 
@@ -1733,15 +1743,19 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                           Pay full course now
                         </p>
                         <p className="text-xs text-emerald-700 mt-1">
-                          One-time waiver: save {fmtRupee(fcDisc)} on the post-waiver course fee.
+                          {fcDisc > 0
+                            ? `One-time waiver: save ${fmtRupee(fcDisc)} on the post-waiver course fee.`
+                            : "Settle the full post-waiver course fee in one payment."}
                         </p>
-                        <p className="text-[11px] text-emerald-700 mt-0.5">
-                          {feeStatus.lump_sum_pct}% off year 1
-                          {inMultiYearWindow
-                            ? ` + extra ${feeStatus.multi_year_pct}% off all other years.`
-                            : ` + ${feeStatus.lump_sum_pct}% off other years.`}
-                        </p>
-                        {inMultiYearWindow && (
+                        {fcDisc > 0 && (
+                          <p className="text-[11px] text-emerald-700 mt-0.5">
+                            {lumpSumPct}% off year 1
+                            {inMultiYearWindow
+                              ? ` + extra ${multiYearPct}% off all other years.`
+                              : ` + ${lumpSumPct}% off other years.`}
+                          </p>
+                        )}
+                        {inMultiYearWindow && multiYearPct > 0 && (
                           <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-white/80 border border-emerald-200 px-2.5 py-1">
                             <CalendarDays className="h-3 w-3 text-emerald-700" />
                             <span className="text-[10px] font-semibold text-emerald-700">Additional scholarship available until</span>
@@ -1765,8 +1779,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                     <button
                       disabled={paying || !applicantPhone || fcDue <= 0}
                       onClick={() => {
-                        const lump  = (feeStatus.lump_sum_pct || 0) / 100;
-                        const multi = (feeStatus.multi_year_pct || 0) / 100;
+                        const lump  = lumpSumPct / 100;
+                        const multi = multiYearPct / 100;
                         const breakdown: Record<string, number> = {};
                         Object.entries(yearFees).forEach(([term, fee]) => {
                           const pct = term === "year_1" ? lump : lump + (inMultiYearWindow ? multi : 0);
@@ -1774,11 +1788,13 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                         });
                         startPayment(fcDue, {
                           paymentType: "other",
-                          productinfo: "Full course fee (with waivers)",
+                          productinfo: fcDisc > 0 ? "Full course fee (with waivers)" : "Full course fee",
                           concession: fcDisc,
-                          reason: inMultiYearWindow
-                            ? `Full course: ${feeStatus.lump_sum_pct}% lump + ${feeStatus.multi_year_pct}% multi-year (within window)`
-                            : `Full course: ${feeStatus.lump_sum_pct}% lump (window expired)`,
+                          reason: fcDisc > 0
+                            ? inMultiYearWindow
+                              ? `Full course: ${lumpSumPct}% lump + ${multiYearPct}% multi-year (within window)`
+                              : `Full course: ${lumpSumPct}% lump (window expired)`
+                            : "Full course fee",
                           concessionBreakdown: Object.keys(breakdown).length ? breakdown : undefined,
                         });
                       }}
@@ -1811,7 +1827,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                       )}
                       {y1Disc > 0 && (
                         <div className="flex justify-between text-emerald-700">
-                          <span>{feeStatus.lump_sum_pct}% one-time off year 1</span>
+                          <span>{lumpSumPct}% one-time off year 1</span>
                           <span>− {fmtRupee(y1Disc)}</span>
                         </div>
                       )}
@@ -1819,8 +1835,8 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                         <div className="flex justify-between text-emerald-700">
                           <span>
                             {inMultiYearWindow
-                              ? `${(feeStatus.lump_sum_pct || 0) + (feeStatus.multi_year_pct || 0)}% off years 2-N`
-                              : `${feeStatus.lump_sum_pct}% off years 2-N`}
+                              ? `${lumpSumPct + multiYearPct}% off years 2-N`
+                              : `${lumpSumPct}% off years 2-N`}
                           </span>
                           <span>− {fmtRupee(multiDisc)}</span>
                         </div>
@@ -1861,7 +1877,9 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                           Pay year 1 now
                         </p>
                         <p className="text-[11px] text-amber-700 mt-0.5">
-                          One-time waiver: save {fmtRupee(y1Disc)} · pay {fmtRupee(y1Due)}
+                          {y1Disc > 0
+                            ? `One-time waiver: save ${fmtRupee(y1Disc)} · pay ${fmtRupee(y1Due)}`
+                            : `Pay remaining first-year fee: ${fmtRupee(y1Due)}`}
                         </p>
                       </>
                     )}
@@ -1876,9 +1894,9 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                       disabled={paying || !applicantPhone || y1Due <= 0}
                       onClick={() => startPayment(y1Due, {
                         paymentType: "other",
-                        productinfo: "First-year fee (lump-sum)",
+                        productinfo: y1Disc > 0 ? "First-year fee (lump-sum)" : "First-year fee",
                         concession: y1Disc,
-                        reason: `Lump-sum first-year ${feeStatus.lump_sum_pct}%`,
+                        reason: y1Disc > 0 ? `Lump-sum first-year ${lumpSumPct}%` : "Full first-year fee",
                         concessionBreakdown: y1Disc > 0 ? { year_1: y1Disc } : undefined,
                       })}
                       className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-amber-700 active:scale-95 transition-all disabled:opacity-50 shadow-sm"
@@ -1909,7 +1927,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                       )}
                       {y1Disc > 0 && (
                         <div className="flex justify-between text-emerald-700">
-                          <span>{feeStatus.lump_sum_pct}% one-time off</span>
+                          <span>{lumpSumPct}% one-time off</span>
                           <span>− {fmtRupee(y1Disc)}</span>
                         </div>
                       )}
