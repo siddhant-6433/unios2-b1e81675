@@ -133,7 +133,9 @@ D Pharma:
 - Entrance: JEECUP / merit-based. Pathway to B Pharma lateral entry.
 
 NIMT Beacon School (K-12):
-- CBSE affiliated, Nursery to Grade XII | Campus: Ghaziabad (Avantika / Avantika II)
+- CBSE affiliated | Campuses: Ghaziabad Arthala, Avantika / Avantika II
+- Arthala monthly tuition: Nursery to Class I Rs 800, Class II-V Rs 950, Class VI-VIII Rs 1,150, Class IX-X Rs 1,450
+- Arthala admission fee: Rs 0 for new and existing parents
 - Smart classrooms, science labs, computer labs, sports, transport
 - Day boarding with lunch: Rs 4,000/month. Boarding options available.
 - Admission: Age-appropriate interaction/assessment
