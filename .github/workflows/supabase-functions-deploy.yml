@@ -82,7 +82,26 @@ jobs:
 
       - name: Deploy changed functions
         run: |
+          deploy_function() {
+            local fn="$1"
+            local attempt
+
+            for attempt in 1 2 3; do
+              echo "Deploying Supabase function: $fn (attempt $attempt/3)"
+              if supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF"; then
+                return 0
+              fi
+
+              if [ "$attempt" = "3" ]; then
+                echo "::error title=Supabase function deploy failed::$fn failed after 3 attempts. Re-running with --debug for the final log."
+                supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF" --debug
+                return 1
+              fi
+
+              sleep $((attempt * 10))
+            done
+          }
+
           for fn in $FUNCTIONS; do
-            echo "Deploying Supabase function: $fn"
-            supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF"
+            deploy_function "$fn"
           done
