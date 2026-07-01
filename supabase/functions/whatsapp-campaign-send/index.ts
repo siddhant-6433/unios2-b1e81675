@@ -112,7 +112,7 @@ async function syncCampaignCounts(admin: any, campaignId: string) {
       .from("whatsapp_campaign_recipients")
       .select("id", { count: "exact", head: true })
       .eq("campaign_id", campaignId)
-      .eq("status", "sent"),
+      .in("status", ["sent", "delivered", "read"]),
     admin
       .from("whatsapp_campaign_recipients")
       .select("id", { count: "exact", head: true })

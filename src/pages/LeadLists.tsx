@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -16,6 +16,7 @@ import {
 import {
   ListPlus, Loader2, Send, Mail, Trash2, Users, MessageSquare, AlertTriangle, Upload,
   Pause, PlayCircle, RefreshCw, XCircle, Phone, Check, ChevronDown,
+  Megaphone,
 } from "lucide-react";
 import { WA_BULK_TEMPLATES, type WaBulkTemplate } from "@/config/waBulkTemplates";
 import {
@@ -55,6 +56,30 @@ interface CampaignQueueItem {
   created_at: string;
   completed_at: string | null;
 }
+
+type CounsellorOption = {
+  id: string;
+  name: string;
+};
+
+type LeadListAssignmentReportRow = {
+  assignment_id: string;
+  batch_id: string | null;
+  lead_id: string;
+  lead_name: string | null;
+  lead_phone: string | null;
+  lead_stage: string | null;
+  course_name: string | null;
+  campus_name: string | null;
+  assigned_to: string;
+  assigned_to_name: string | null;
+  assigned_by_name: string | null;
+  previous_counsellor_name: string | null;
+  latest_call_disposition: string | null;
+  latest_call_response: string | null;
+  latest_call_at: string | null;
+  assigned_at: string;
+};
 
 type WaPhoneHealth = {
   phone_number_id: string;
@@ -344,6 +369,18 @@ export default function LeadLists() {
   const [previewMembers, setPreviewMembers] = useState<Array<{ id: string; name: string; phone: string; email: string | null; stage: string }>>([]);
   const [previewLoading, setPreviewLoading] = useState(false);
 
+  // List assignment + calling report
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [assignList, setAssignList] = useState<LeadList | null>(null);
+  const [counsellors, setCounsellors] = useState<CounsellorOption[]>([]);
+  const [selectedCounsellorIds, setSelectedCounsellorIds] = useState<string[]>([]);
+  const [assigning, setAssigning] = useState(false);
+  const [assignmentSummary, setAssignmentSummary] = useState<string | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportList, setReportList] = useState<LeadList | null>(null);
+  const [assignmentReport, setAssignmentReport] = useState<LeadListAssignmentReportRow[]>([]);
+  const [reportLoading, setReportLoading] = useState(false);
+
   // Delete confirm
   const [deleteList, setDeleteList] = useState<LeadList | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -425,7 +462,6 @@ export default function LeadLists() {
   useEffect(() => {
     if (role === "academic_partner") return;
     fetchLists();
-    fetchCampaignQueue();
   }, [role]);
 
   const loadWaSenders = async () => {
@@ -635,6 +671,111 @@ export default function LeadLists() {
         .filter(Boolean)
     );
     setPreviewLoading(false);
+  };
+
+  const loadAssignableCounsellors = async () => {
+    if (role === "counsellor" && profile?.id) {
+      const { data: ledTeams } = await supabase
+        .from("teams")
+        .select("id")
+        .eq("leader_id", profile.id);
+
+      if (!ledTeams || ledTeams.length === 0) {
+        setCounsellors([{ id: profile.id, name: profile.display_name || "Me" }]);
+        return;
+      }
+
+      const { data: teamMembers } = await supabase
+        .from("team_members")
+        .select("user_id")
+        .in("team_id", ledTeams.map((team: any) => team.id));
+
+      const memberUserIds = [...new Set((teamMembers || []).map((member: any) => member.user_id).filter(Boolean))];
+      const { data: memberProfiles } = memberUserIds.length > 0
+        ? await supabase
+          .from("profiles")
+          .select("id, display_name")
+          .in("user_id", memberUserIds)
+          .eq("login_disabled", false)
+        : { data: [] };
+
+      const scoped = new Map<string, string>([[profile.id, profile.display_name || "Me"]]);
+      (memberProfiles || []).forEach((memberProfile: any) => {
+        scoped.set(memberProfile.id, memberProfile.display_name || "Unknown");
+      });
+      setCounsellors(Array.from(scoped, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)));
+      return;
+    }
+
+    const { data: roleRows } = await supabase
+      .from("user_roles")
+      .select("user_id")
+      .eq("role", "counsellor");
+    const userIds = [...new Set((roleRows || []).map((row: any) => row.user_id).filter(Boolean))];
+    if (userIds.length === 0) {
+      setCounsellors([]);
+      return;
+    }
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, display_name")
+      .in("user_id", userIds)
+      .eq("login_disabled", false);
+    setCounsellors(((profiles || []) as any[])
+      .map((item) => ({ id: item.id, name: item.display_name || "Unknown" }))
+      .sort((a, b) => a.name.localeCompare(b.name)));
+  };
+
+  const openAssign = async (list: LeadList) => {
+    setAssignList(list);
+    setSelectedCounsellorIds([]);
+    setAssignmentSummary(null);
+    setAssignOpen(true);
+    await loadAssignableCounsellors();
+  };
+
+  const toggleCounsellor = (id: string) => {
+    setSelectedCounsellorIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+    );
+  };
+
+  const assignListRoundRobin = async () => {
+    if (!assignList || selectedCounsellorIds.length === 0) return;
+    setAssigning(true);
+    setAssignmentSummary(null);
+    const { data, error } = await supabase.rpc("assign_lead_list_round_robin" as any, {
+      _list_id: assignList.id,
+      _counsellor_ids: selectedCounsellorIds,
+    });
+    setAssigning(false);
+    if (error) {
+      toast({ title: "Could not assign list", description: error.message, variant: "destructive" });
+      return;
+    }
+    const rows = ((data as any[]) || []);
+    const total = rows.reduce((sum, row) => sum + Number(row.assigned_count || 0), 0);
+    setAssignmentSummary(`${total} lead${total === 1 ? "" : "s"} assigned across ${rows.length} counsellor${rows.length === 1 ? "" : "s"}.`);
+    toast({ title: "List assigned", description: `${total} leads reassigned in round-robin order.` });
+    await fetchLists();
+  };
+
+  const openAssignmentReport = async (list: LeadList) => {
+    setReportList(list);
+    setReportOpen(true);
+    setReportLoading(true);
+    const { data, error } = await supabase.rpc("get_lead_list_assignment_report" as any, {
+      _list_id: list.id,
+      _batch_id: null,
+      _limit: 500,
+    });
+    if (error) {
+      toast({ title: "Could not load calling report", description: error.message, variant: "destructive" });
+      setAssignmentReport([]);
+    } else {
+      setAssignmentReport(((data as any[]) || []) as LeadListAssignmentReportRow[]);
+    }
+    setReportLoading(false);
   };
 
   const handleSendWhatsApp = async () => {
@@ -910,109 +1051,22 @@ export default function LeadLists() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Lead Lists</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Reusable lead lists for bulk WhatsApp and email campaigns. Build a list from CSV import or from a filtered view in Lead Buckets.
+            Manage reusable lead lists, counsellor assignment, and list-level calling reports.
           </p>
         </div>
-        <Button onClick={() => setImportOpen(true)} className="gap-2 shrink-0 self-start">
-          <Upload className="h-4 w-4" />
-          Import CSV
-        </Button>
+        <div className="flex flex-wrap gap-2 shrink-0 self-start">
+          <Button asChild variant="outline" className="gap-2">
+            <Link to="/marketing">
+              <Megaphone className="h-4 w-4" />
+              Marketing Hub
+            </Link>
+          </Button>
+          <Button onClick={() => setImportOpen(true)} className="gap-2">
+            <Upload className="h-4 w-4" />
+            Import CSV
+          </Button>
+        </div>
       </div>
-
-      <Card className="border-border/60 shadow-none">
-        <CardContent className="p-0">
-          <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-            <div>
-              <p className="text-sm font-semibold text-foreground">Campaign Queue</p>
-              <p className="text-xs text-muted-foreground">Pause, resume, or terminate bulk message queues before old recipients are processed.</p>
-            </div>
-            <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={fetchCampaignQueue} disabled={queueLoading}>
-              {queueLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              Refresh
-            </Button>
-          </div>
-
-          {queueLoading ? (
-            <div className="flex h-24 items-center justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-            </div>
-          ) : campaignQueue.length === 0 ? (
-            <div className="px-4 py-8 text-center text-sm text-muted-foreground">No campaigns queued yet.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[820px] text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted/30">
-                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Campaign</th>
-                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Channel</th>
-                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Status</th>
-                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Progress</th>
-                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Created</th>
-                    <th className="px-4 py-2.5 text-right font-medium text-muted-foreground">Controls</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {campaignQueue.map((item) => {
-                    const busy = queueBusyId === item.id;
-                    const active = item.status === "pending" || item.status === "sending";
-                    const accounted = item.sent_count + item.failed_count;
-                    const pending = Math.max(item.total_recipients - accounted, 0);
-                    const canResume = (item.status === "paused" || item.status === "failed") && pending > 0;
-                    const canTerminate = ["pending", "sending", "paused", "failed"].includes(item.status);
-                    return (
-                      <tr key={`${item.channel}-${item.id}`} className="border-b border-border/50 last:border-0">
-                        <td className="px-4 py-3">
-                          <p className="font-medium text-foreground truncate max-w-[280px]">{item.name}</p>
-                          {item.template && <p className="text-[11px] text-muted-foreground mt-0.5">{item.template}</p>}
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge variant="outline" className="text-[10px] capitalize">{item.channel}</Badge>
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge className={`border-0 text-[10px] capitalize ${CAMPAIGN_STATUS_BADGE[item.status] || "bg-muted text-muted-foreground"}`}>
-                            {item.status}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3 text-xs text-muted-foreground">
-                          <span className="font-semibold text-foreground">{item.sent_count}</span> sent
-                          <span className="mx-1.5">/</span>
-                          <span className="font-semibold text-foreground">{pending}</span> pending
-                          {item.failed_count > 0 && <span className="ml-1.5 text-rose-600">({item.failed_count} failed)</span>}
-                        </td>
-                        <td className="px-4 py-3 text-xs text-muted-foreground">
-                          {new Date(item.created_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex justify-end gap-2">
-                            {active && (
-                              <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => pauseCampaign(item)} disabled={busy}>
-                                {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pause className="h-3.5 w-3.5" />}
-                                Pause
-                              </Button>
-                            )}
-                            {canResume && (
-                              <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => resumeCampaign(item)} disabled={busy}>
-                                {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlayCircle className="h-3.5 w-3.5" />}
-                                {item.status === "failed" ? "Retry" : "Resume"}
-                              </Button>
-                            )}
-                            {canTerminate && (
-                              <Button size="sm" variant="ghost" className="h-8 gap-1.5 text-destructive hover:text-destructive" onClick={() => terminateCampaign(item)} disabled={busy}>
-                                <XCircle className="h-3.5 w-3.5" />
-                                Terminate
-                              </Button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
       {loading ? (
         <div className="flex h-40 items-center justify-center">
@@ -1034,6 +1088,12 @@ export default function LeadLists() {
         </Card>
       ) : (
         <div className="rounded-xl border border-border overflow-hidden">
+          <div className="flex flex-col gap-1 border-b border-border bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Lists</p>
+              <p className="text-xs text-muted-foreground">Use Marketing Hub to initiate campaigns; use this page to maintain and assign lists.</p>
+            </div>
+          </div>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/40">
@@ -1072,11 +1132,16 @@ export default function LeadLists() {
                         <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => openPreview(list)}>
                           <Users className="h-3.5 w-3.5" /> Members
                         </Button>
-                        <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => openWa(list)} disabled={list.member_count === 0}>
-                          <MessageSquare className="h-3.5 w-3.5" /> WhatsApp
+                        <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => openAssign(list)} disabled={list.member_count === 0}>
+                          <Users className="h-3.5 w-3.5" /> Assign
                         </Button>
-                        <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => openEmail(list)} disabled={list.member_count === 0}>
-                          <Mail className="h-3.5 w-3.5" /> Email
+                        <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => openAssignmentReport(list)}>
+                          <Phone className="h-3.5 w-3.5" /> Calling Report
+                        </Button>
+                        <Button asChild size="sm" variant="outline" className="gap-1.5 h-8">
+                          <Link to={`/marketing?listId=${list.id}`}>
+                            <Megaphone className="h-3.5 w-3.5" /> New Campaign
+                          </Link>
                         </Button>
                         <Button size="sm" variant="ghost" className="gap-1.5 h-8 text-destructive hover:text-destructive" onClick={() => setDeleteList(list)}>
                           <Trash2 className="h-3.5 w-3.5" />
@@ -1387,6 +1452,114 @@ export default function LeadLists() {
                   Showing first {previewMembers.length} of {previewList.member_count} members.
                 </div>
               )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Assign "{assignList?.name}" to counsellors</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              All list members will be reassigned in round-robin order across the selected counsellors.
+            </p>
+            <div className="max-h-72 overflow-y-auto rounded-lg border border-border">
+              {counsellors.length === 0 ? (
+                <div className="px-4 py-8 text-center text-sm text-muted-foreground">No counsellors available.</div>
+              ) : (
+                counsellors.map((counsellor) => {
+                  const checked = selectedCounsellorIds.includes(counsellor.id);
+                  return (
+                    <label key={counsellor.id} className="flex cursor-pointer items-center gap-3 border-b border-border/50 px-4 py-3 last:border-b-0 hover:bg-muted/30">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleCounsellor(counsellor.id)}
+                        className="h-4 w-4"
+                      />
+                      <span className="text-sm font-medium text-foreground">{counsellor.name}</span>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+            {assignmentSummary && <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{assignmentSummary}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAssignOpen(false)}>Close</Button>
+            <Button onClick={assignListRoundRobin} disabled={assigning || selectedCounsellorIds.length === 0} className="gap-2">
+              {assigning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              Assign Round Robin
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+        <DialogContent className="max-w-6xl">
+          <DialogHeader>
+            <DialogTitle>{reportList?.name} — Calling Report</DialogTitle>
+          </DialogHeader>
+          {reportLoading ? (
+            <div className="flex h-40 items-center justify-center">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : assignmentReport.length === 0 ? (
+            <div className="py-10 text-center text-sm text-muted-foreground">No list assignment activity found.</div>
+          ) : (
+            <div className="max-h-[65vh] overflow-auto rounded-lg border border-border">
+              <table className="w-full min-w-[980px] text-sm">
+                <thead className="sticky top-0 border-b border-border bg-muted text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Lead</th>
+                    <th className="px-3 py-2 text-left">Counsellor</th>
+                    <th className="px-3 py-2 text-left">Assigned</th>
+                    <th className="px-3 py-2 text-left">Status</th>
+                    <th className="px-3 py-2 text-left">Latest Call</th>
+                    <th className="px-3 py-2 text-left">Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {assignmentReport.map((row) => (
+                    <tr key={row.assignment_id} className="border-b border-border/50 last:border-b-0">
+                      <td className="px-3 py-2">
+                        <p className="font-medium text-foreground">{row.lead_name || "Unknown lead"}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {row.lead_phone || "-"} {" | "} {row.course_name || "No course"}{row.campus_name ? ` | ${row.campus_name}` : ""}
+                        </p>
+                      </td>
+                      <td className="px-3 py-2">
+                        <p className="font-medium text-foreground">{row.assigned_to_name || "Unknown"}</p>
+                        {row.previous_counsellor_name && <p className="text-[11px] text-muted-foreground">from {row.previous_counsellor_name}</p>}
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {new Date(row.assigned_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                      </td>
+                      <td className="px-3 py-2">
+                        <Badge variant="outline" className="capitalize">{(row.lead_stage || "-").replace(/_/g, " ")}</Badge>
+                      </td>
+                      <td className="px-3 py-2">
+                        {row.latest_call_disposition ? (
+                          <>
+                            <Badge className="border-0 bg-blue-100 text-blue-700">{row.latest_call_disposition.replace(/_/g, " ")}</Badge>
+                            <p className="mt-1 text-[11px] text-muted-foreground">
+                              {row.latest_call_at ? new Date(row.latest_call_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "-"}
+                            </p>
+                          </>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">No call response yet</span>
+                        )}
+                      </td>
+                      <td className="max-w-md px-3 py-2 text-muted-foreground">
+                        <p className="line-clamp-2 text-xs">{row.latest_call_response || "-"}</p>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </DialogContent>

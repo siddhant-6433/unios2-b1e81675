@@ -99,7 +99,7 @@ const admissionSubMenu: MenuItem[] = [
 ];
 
 const marketingSubMenu: MenuItem[] = [
-  { title: "Overview", url: "/marketing", icon: Megaphone, permission: "leads:view", blockedRoles: ["academic_partner"] },
+  { title: "Marketing Hub", url: "/marketing", icon: Megaphone, permission: "leads:view", blockedRoles: ["academic_partner"] },
   { title: "Lists", url: "/lists", icon: ListPlus, permission: "leads:view", blockedRoles: ["academic_partner"] },
   { title: "Templates", url: "/template-manager", icon: Newspaper, permission: "templates:view", blockedRoles: ["academic_partner"] },
   { title: "WA Outbound", url: "/whatsapp-inbox?mode=outbound", icon: Send, permission: "whatsapp:view", blockedRoles: ["academic_partner"] },
@@ -462,7 +462,7 @@ export function AppSidebar() {
                       <SidebarMenuButton className={`${linkClass} justify-between`} isActive={isMarketingActive}>
                         <span className="flex items-center gap-3">
                           <Megaphone className="h-[17px] w-[17px]" />
-                          {!collapsed && <span>Marketing</span>}
+                          {!collapsed && <span>Marketing Hub</span>}
                         </span>
                         {!collapsed && (
                           <ChevronDown className="h-3.5 w-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />

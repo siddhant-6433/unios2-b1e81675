@@ -5,6 +5,7 @@ import {
   recordWhatsAppInboundEvent,
 } from "../_shared/whatsapp-inbound-events.ts";
 import { applyLeadTransition } from "../_shared/lead-transition.ts";
+import { loadLatestOutboundContext } from "../_shared/whatsapp-outbound-context.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -160,6 +161,53 @@ async function handleTemplateStatusEvent(
     }
   } catch (err) {
     console.error("handleTemplateStatusEvent error:", err);
+  }
+}
+
+async function markCampaignRecipientEngagement(
+  admin: any,
+  args: {
+    phone: string;
+    businessNumber: string | null;
+    messageType: string;
+    content: string;
+    rawMessage: any;
+  },
+): Promise<void> {
+  try {
+    const outboundContext = await loadLatestOutboundContext(admin, args.phone, args.businessNumber);
+    const recipientId = typeof outboundContext?.campaign_recipient_id === "string"
+      ? outboundContext.campaign_recipient_id
+      : null;
+    if (!recipientId) return;
+
+    const buttonReply = args.rawMessage?.interactive?.button_reply || null;
+    const listReply = args.rawMessage?.interactive?.list_reply || null;
+    const legacyButton = args.rawMessage?.button || null;
+    const buttonPayload = buttonReply?.id || listReply?.id || legacyButton?.payload || null;
+    const buttonTitle = buttonReply?.title || listReply?.title || legacyButton?.text || null;
+    const referralUrl = args.rawMessage?.referral?.source_url || null;
+    const nowIso = new Date().toISOString();
+    const patch: Record<string, unknown> = {};
+
+    if (buttonPayload || buttonTitle || args.messageType === "interactive" || args.messageType === "button") {
+      patch.clicked_button_at = nowIso;
+      patch.clicked_button_payload = buttonPayload || args.content || null;
+      patch.clicked_button_title = buttonTitle || args.content || null;
+    }
+    if (referralUrl) {
+      patch.clicked_link_at = nowIso;
+      patch.clicked_url = referralUrl;
+    }
+
+    if (Object.keys(patch).length > 0) {
+      await admin
+        .from("whatsapp_campaign_recipients")
+        .update(patch)
+        .eq("id", recipientId);
+    }
+  } catch (err) {
+    console.error("markCampaignRecipientEngagement error:", err);
   }
 }
 
@@ -592,6 +640,13 @@ Deno.serve(async (req) => {
               business_phone_number_id: businessPnId,
               business_phone_number: businessNumber,
             }).select("id").single();
+            await markCampaignRecipientEngagement(admin, {
+              phone,
+              businessNumber: businessPnId || businessNumber || null,
+              messageType: msgType,
+              content,
+              rawMessage: msg,
+            });
             await markWhatsAppInboundEvent(admin, inboundEventId, {
               leadId: lead.id,
               messageId: dncMsg?.id || null,
@@ -634,6 +689,13 @@ Deno.serve(async (req) => {
             business_phone_number: businessNumber,
           }).select("id").single();
           const inboundMessageId: string | null = insertedMsg?.id || null;
+          await markCampaignRecipientEngagement(admin, {
+            phone,
+            businessNumber: businessPnId || businessNumber || null,
+            messageType: msgType,
+            content,
+            rawMessage: msg,
+          });
           await markWhatsAppInboundEvent(admin, inboundEventId, {
             leadId: lead?.id || null,
             messageId: inboundMessageId,
@@ -1147,6 +1209,19 @@ Deno.serve(async (req) => {
               .from("whatsapp_messages")
               .update(updates)
               .eq("wa_message_id", waMessageId);
+
+            if (["sent", "delivered", "read", "failed"].includes(newStatus)) {
+              const recipientPatch: Record<string, unknown> = {
+                status: newStatus,
+              };
+              if (newStatus === "failed" && status.errors) {
+                recipientPatch.error_message = JSON.stringify(status.errors);
+              }
+              await admin
+                .from("whatsapp_campaign_recipients")
+                .update(recipientPatch)
+                .eq("message_id", waMessageId);
+            }
           }
         }
       }
