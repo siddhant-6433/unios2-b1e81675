@@ -127,3 +127,7 @@ export function buildApplicantOneTimePaymentOptions({
     fullCourseAmountDue: Math.max(0, roundMoney(totalNetFee - paid - fullCourseDiscount)),
   };
 }
+
+export function hasApplicantOneTimePaymentOptions(options: OneTimePaymentOptions): boolean {
+  return options.year1NetFee > 0 || options.totalNetFee > 0;
+}
