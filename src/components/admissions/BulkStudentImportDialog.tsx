@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { isSchoolSessionYear, sessionYearLabel } from "@/lib/sessionYears";
+import { normalizeStudentImportDate, resolveStudentImportAdmissionDate } from "@/lib/studentImportDate";
 import {
   Upload, FileText, Loader2, CheckCircle, XCircle, Download, AlertTriangle, Users,
 } from "lucide-react";
@@ -22,6 +23,7 @@ interface ParsedRow {
   grade: string;         // raw grade/course string from CSV
   current_term: string;
   section: string;
+  admission_date: string;
   admission_no: string;  // existing admission no from previous system
   father_name: string;
   father_phone: string;
@@ -237,6 +239,8 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
         const grade        = get("grade") || get("class") || get("course") || get("programme");
         const current_term = get("current_term") || get("current_semester") || get("semester") || get("year");
         const section      = get("section");
+        const rawAdmissionDate = get("admission_date") || get("admissiondate") || get("date_of_admission") || get("dateofadmission");
+        const admission_date = normalizeStudentImportDate(rawAdmissionDate);
         const admission_no = get("admission_no") || get("admissionno") || get("admission_number");
         const father_name  = get("father_name") || get("father");
         const father_phone = get("father_phone") || get("father_mobile");
@@ -255,6 +259,9 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
         else if (grade && !course_id) {
           valid = false;
           error = isSchool ? `Unknown grade: "${grade}"` : `Unknown course: "${grade}"`;
+        } else if (rawAdmissionDate && !admission_date) {
+          valid = false;
+          error = `Invalid admission date: "${rawAdmissionDate}"`;
         }
 
         const resolvedCourse = course_id ? courses.find(c => c.id === course_id) : undefined;
@@ -264,7 +271,7 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
           : isDaottCourse(resolvedCourse) ? "stetho_batch" : "standard";
 
         return {
-          name, dob, gender, grade, current_term, section, admission_no,
+          name, dob, gender, grade, current_term, section, admission_date, admission_no,
           father_name, father_phone, mother_name, mother_phone, fee_type,
           course_id, fee_version, valid, error,
         };
@@ -297,7 +304,7 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
         session_id: selectedSessionId || null,
         joining_academic_year: isSchool ? sessionYearLabel(selectedSession?.name) || null : null,
         semester: !isSchool ? (selectedCurrentTerm || r.current_term || null) : null,
-        admission_date: selectedAdmissionDate || null,
+        admission_date: resolveStudentImportAdmissionDate(r.admission_date, selectedAdmissionDate),
         admission_no: (isSchool && r.admission_no) ? r.admission_no : null,
         school_admission_no: (isSchool && r.admission_no) ? r.admission_no : null,
         pre_admission_no: (isSchool && r.admission_no)
@@ -326,15 +333,15 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
   };
 
   const downloadTemplate = () => {
-    const schoolHeader = "name,dob,gender,grade,section,admission_no,father_name,father_phone,mother_name,mother_phone,fee_type";
-    const collegeHeader = "name,dob,gender,course,current_term,section,father_name,father_phone,mother_name,mother_phone";
+    const schoolHeader = "name,dob,gender,grade,section,admission_date,admission_no,father_name,father_phone,mother_name,mother_phone,fee_type";
+    const collegeHeader = "name,dob,gender,course,current_term,section,admission_date,father_name,father_phone,mother_name,mother_phone";
     const header = isSchool ? schoolHeader : collegeHeader;
     const ex1 = isSchool
-      ? "Rohan Sharma,2016-06-12,Male,Grade III,A,1803188,Rajesh Sharma,9876543210,Priya Sharma,9876543211,existing"
-      : "Rohan Sharma,2004-06-12,Male,BCA,Sem 1,A,Rajesh Sharma,9876543210,Priya Sharma,9876543211";
+      ? "Rohan Sharma,2016-06-12,Male,Grade III,A,2024-04-01,1803188,Rajesh Sharma,9876543210,Priya Sharma,9876543211,existing"
+      : "Rohan Sharma,2004-06-12,Male,BCA,Sem 1,A,2024-04-01,Rajesh Sharma,9876543210,Priya Sharma,9876543211";
     const ex2 = isSchool
-      ? "Ananya Singh,2017-09-01,Female,Grade II,B,,Amit Singh,9876543212,Sunita Singh,9876543213,new"
-      : "Ananya Singh,2005-09-01,Female,B.Sc Computer Science,Year 1,,Amit Singh,9876543212,Sunita Singh,9876543213";
+      ? "Ananya Singh,2017-09-01,Female,Grade II,B,,,Amit Singh,9876543212,Sunita Singh,9876543213,new"
+      : "Ananya Singh,2005-09-01,Female,B.Sc Computer Science,Year 1,,,Amit Singh,9876543212,Sunita Singh,9876543213";
     const csv = [header, ex1, ex2].join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url  = URL.createObjectURL(blob);
@@ -443,8 +450,8 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
                 {selectedInstitution ? (
                   <p className="text-xs text-muted-foreground mb-1">
                     {isSchool
-                      ? <>Required: <code className="bg-muted px-1 rounded">name</code>. Optional: dob, gender, grade, section, admission_no, father_name, father_phone, mother_name, mother_phone, fee_type</>
-                      : <>Required: <code className="bg-muted px-1 rounded">name</code>. Optional: dob, gender, course, current_term, section, father_name, father_phone, mother_name, mother_phone</>
+                      ? <>Required: <code className="bg-muted px-1 rounded">name</code>. Optional: dob, gender, grade, section, admission_date, admission_no, father_name, father_phone, mother_name, mother_phone, fee_type</>
+                      : <>Required: <code className="bg-muted px-1 rounded">name</code>. Optional: dob, gender, course, current_term, section, admission_date, father_name, father_phone, mother_name, mother_phone</>
                     }
                   </p>
                 ) : (
@@ -494,6 +501,7 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
                           {isSchool ? "Grade" : "Course"}
                         </th>
                         {!isSchool && <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Current</th>}
+                        <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Admission Date</th>
                         {isSchool && <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Admission No.</th>}
                         {isSchool && <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Fee Structure</th>}
                         <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Father</th>
@@ -517,6 +525,7 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
                           {!isSchool && (
                             <td className="px-3 py-2 text-muted-foreground">{selectedCurrentTerm || r.current_term || "—"}</td>
                           )}
+                          <td className="px-3 py-2 text-muted-foreground">{r.admission_date || selectedAdmissionDate || "—"}</td>
                           {isSchool && (
                             <td className="px-3 py-2 font-mono text-muted-foreground">{r.admission_no || "—"}</td>
                           )}
