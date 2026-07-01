@@ -14,6 +14,7 @@ const corsHeaders = {
 
 const CUET_2026_COUNSELLING_IMAGE_URL =
   "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/whatsapp-media/template-assets/cuet_2026_counselling_open.jpeg";
+const CUET_COUNSELLING_BOOKING_IMAGE_URL = CUET_2026_COUNSELLING_IMAGE_URL;
 
 function cahetDeadlineMessage(): string {
   const bodyDate = "14th June 2026";
@@ -83,7 +84,7 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
   bpt_bmrit_cahet_deadline: { name: "bpt_bmrit_cahet_deadline", params: [] },
   cnet_not_qualified_bpt_bmrit: { name: "cnet_not_qualified_bpt_bmrit", params: ["student_name"] },
   cuet_2026_counselling_open: { name: "cuet_2026_counselling_open", params: [], headerImageUrl: CUET_2026_COUNSELLING_IMAGE_URL },
-  cuet_counselling_booking: { name: "cuet_counselling_booking", params: [] },
+  cuet_counselling_booking: { name: "cuet_counselling_booking", params: [], headerImageUrl: CUET_COUNSELLING_BOOKING_IMAGE_URL },
   // Counsellor utility — tap-to-call link sent to counsellor's own phone
   counsellor_call_lead: { name: "lead_queue_item", params: ["counsellor_name", "lead_name", "lead_phone", "course"] },
   // Call disposition auto-replies to leads

@@ -5,6 +5,11 @@ const migration = readFileSync("supabase/migrations/20260619114500_campaign_queu
 const whatsappSender = readFileSync("supabase/functions/whatsapp-campaign-send/index.ts", "utf8");
 const emailSender = readFileSync("supabase/functions/email-campaign-send/index.ts", "utf8");
 const leadLists = readFileSync("src/pages/LeadLists.tsx", "utf8");
+const marketing = readFileSync("src/pages/Marketing.tsx", "utf8");
+const dispatcher = readFileSync("supabase/functions/campaign-dispatcher/index.ts", "utf8");
+const supabaseConfig = readFileSync("supabase/config.toml", "utf8");
+const fasterDispatcherMigration = readFileSync("supabase/migrations/20260701090000_raise_marketing_dispatcher_batch_size.sql", "utf8");
+const dispatcherTimeoutMigration = readFileSync("supabase/migrations/20260701093000_extend_marketing_dispatcher_timeout.sql", "utf8");
 
 describe("campaign queue controls", () => {
   it("adds database states for paused and terminated campaign queues", () => {
@@ -32,9 +37,18 @@ describe("campaign queue controls", () => {
     expect(whatsappSender).toContain("isTrustedWorker");
     expect(whatsappSender).toContain('authHeader === `Bearer ${serviceRoleKey}`');
     expect(whatsappSender).toContain("const batchSize = Math.max");
+    expect(whatsappSender).toContain("Number(batch_size) || 30");
     expect(whatsappSender).toContain(".limit(batchSize)");
     expect(whatsappSender).toContain("const done = counts.pendingCount === 0");
     expect(whatsappSender).toContain('status: done ? "completed" : "sending"');
+    expect(dispatcher).toContain("Number(body?.batch_size) || 30");
+    expect(leadLists).toContain("batch_size: 30");
+    expect(marketing).toContain("batch_size: 30");
+    expect(fasterDispatcherMigration).toContain("'batch_size', 30");
+    expect(dispatcherTimeoutMigration).toContain("'batch_size', 30");
+    expect(dispatcherTimeoutMigration).toContain("timeout_milliseconds := 55000");
+    expect(supabaseConfig).toContain("[functions.campaign-dispatcher]");
+    expect(supabaseConfig).toContain("verify_jwt = false");
   });
 
   it("exposes queue controls in the lead-list campaign queue", () => {

@@ -48,7 +48,7 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json().catch(() => ({}));
     const limit = Math.max(1, Math.min(Number(body?.limit) || 4, 10));
-    const batchSize = Math.max(1, Math.min(Number(body?.batch_size) || 10, 50));
+    const batchSize = Math.max(1, Math.min(Number(body?.batch_size) || 30, 50));
 
     const { data: claimed, error: claimError } = await admin.rpc("claim_due_marketing_campaigns" as any, {
       _limit: limit,

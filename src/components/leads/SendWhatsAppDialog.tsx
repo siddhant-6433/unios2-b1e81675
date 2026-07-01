@@ -135,6 +135,7 @@ const TEMPLATES: WhatsAppPickerTemplate[] = [
     badge: "CUET",
     followUpMsg: null,
     buildParams: () => [],
+    headerImageUrl: CUET_2026_COUNSELLING_IMAGE_URL,
     preview: CUET_COUNSELLING_BOOKING_PREVIEW,
   },
   {

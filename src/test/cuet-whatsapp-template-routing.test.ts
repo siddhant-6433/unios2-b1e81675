@@ -35,11 +35,15 @@ describe("CUET 2026 counselling WhatsApp template routing", () => {
   it("is accepted by both WhatsApp send functions with an image header", () => {
     expect(whatsappSend).toContain("cuet_2026_counselling_open");
     expect(whatsappSend).toContain("cuet_counselling_booking");
+    expect(whatsappSend).toContain("CUET_COUNSELLING_BOOKING_IMAGE_URL");
+    expect(whatsappSend).toContain('cuet_counselling_booking: { name: "cuet_counselling_booking", params: [], headerImageUrl: CUET_COUNSELLING_BOOKING_IMAGE_URL }');
     expect(whatsappSend).toContain("Dynamic WhatsApp template lookup failed");
     expect(whatsappSend).toContain("templateHasDynamicUrlButton");
     expect(whatsappSend).toContain('type: "image"');
     expect(campaignSend).toContain("cuet_2026_counselling_open");
     expect(campaignSend).toContain("cuet_counselling_booking");
+    expect(campaignSend).toContain("CUET_COUNSELLING_BOOKING_IMAGE_URL");
+    expect(campaignSend).toContain('cuet_counselling_booking: { name: "cuet_counselling_booking", params: [], headerImageUrl: CUET_COUNSELLING_BOOKING_IMAGE_URL }');
     expect(campaignSend).toContain("Dynamic campaign template lookup failed");
     expect(campaignSend).toContain("templateHasDynamicUrlButton");
     expect(campaignSend).toContain('type: "image"');
