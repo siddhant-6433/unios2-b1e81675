@@ -56,6 +56,41 @@ function isOfferProgrammeFeeTerm(term: string | null | undefined): boolean {
   return /^year_\d+$/.test(normalized) || SCHOOL_OFFER_TERM_ORDER.includes(normalized);
 }
 
+type OfferFeeStructureRow = {
+  id: string;
+  version?: string | null;
+  created_at?: string | null;
+  fee_structure_items?: {
+    term: string;
+    amount: number;
+    fee_codes?: { code?: string | null; name?: string | null; category?: string | null } | null;
+  }[] | null;
+};
+
+function offerFeeStructureVersionRank(version: string | null | undefined): number {
+  const normalized = String(version || "").trim().toLowerCase();
+  if (normalized === "new_admission") return 0;
+  if (normalized === "standard") return 1;
+  if (normalized.includes("existing_parent")) return 3;
+  return 2;
+}
+
+function feeStructureHasOfferItems(structure: OfferFeeStructureRow): boolean {
+  return (structure.fee_structure_items || []).some((item) =>
+    isOfferProgrammeFeeTerm(item.term) && Number(item.amount || 0) > 0
+  );
+}
+
+function pickOfferFeeStructure(structures: OfferFeeStructureRow[] | null | undefined): OfferFeeStructureRow | null {
+  const usable = (structures || []).filter(feeStructureHasOfferItems);
+  if (usable.length === 0) return null;
+  return [...usable].sort((a, b) => {
+    const versionRank = offerFeeStructureVersionRank(a.version) - offerFeeStructureVersionRank(b.version);
+    if (versionRank !== 0) return versionRank;
+    return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+  })[0];
+}
+
 function offerFeeTermRank(term: string): number {
   const normalized = String(term || "").trim().toLowerCase();
   const yearMatch = normalized.match(/^year_(\d+)$/);
@@ -954,17 +989,18 @@ Deno.serve(async (req) => {
     // Programme fee breakdown from fee_structure_items. Keep both the grouped
     // term totals for token math and detailed fee-code rows for DAOTT offer
     // PDFs, where the seat-block fee must be shown explicitly.
-    const { data: yearRows } = await admin
+    const { data: feeStructures, error: feeStructureError } = await admin
       .from("fee_structures")
-      .select("id, fee_structure_items ( term, amount, fee_codes:fee_code_id ( code, name, category ) )")
+      .select("id, version, created_at, fee_structure_items ( term, amount, fee_codes:fee_code_id ( code, name, category ) )")
       .eq("course_id", offer.course_id)
       .eq("session_id", offer.session_id)
-      .eq("is_active", true)
-      .single();
+      .eq("is_active", true);
+    if (feeStructureError) throw feeStructureError;
+    const yearRows = pickOfferFeeStructure((feeStructures || []) as OfferFeeStructureRow[]);
 
     const yearMap = new Map<string, number>();
     const feeItems: FeeStructureItem[] = [];
-    for (const it of ((yearRows as any)?.fee_structure_items || []) as { term: string; amount: number; fee_codes?: { code?: string | null; name?: string | null; category?: string | null } | null }[]) {
+    for (const it of (yearRows?.fee_structure_items || []) as { term: string; amount: number; fee_codes?: { code?: string | null; name?: string | null; category?: string | null } | null }[]) {
       const term = String(it.term || "").trim().toLowerCase();
       if (!isOfferProgrammeFeeTerm(term)) continue;
       yearMap.set(term, (yearMap.get(term) || 0) + Number(it.amount));

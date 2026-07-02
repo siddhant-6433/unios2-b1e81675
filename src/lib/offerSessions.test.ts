@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { collectOfferFeeTermTotals, firstOfferFeeTerm } from "./offerFeeTerms";
-import { chooseOfferSessionId, feeBackedSessionIds, feeStructureHasOfferFeeItems } from "./offerSessions";
+import { chooseOfferSessionId, feeBackedSessionIds, feeStructureHasOfferFeeItems, pickOfferFeeStructure } from "./offerSessions";
 
 describe("offer session selection", () => {
   it("detects fee structures that have offer programme fee items", () => {
@@ -47,6 +47,32 @@ describe("offer session selection", () => {
       { session_id: "2027", fee_structure_items: [{ term: "q1", amount: 1 }] },
       { session_id: "2028", fee_structure_items: [{ term: "application_fee", amount: 1 }] },
     ])).toEqual(["2026", "2027"]);
+  });
+
+  it("picks new-admission fees when a school course also has existing-parent fees", () => {
+    expect(pickOfferFeeStructure([
+      {
+        version: "existing_parent",
+        fee_structure_items: [{ term: "admission", amount: 10000 }],
+      },
+      {
+        version: "new_admission",
+        fee_structure_items: [{ term: "admission", amount: 20000 }],
+      },
+    ])?.version).toBe("new_admission");
+  });
+
+  it("ignores active structures that only contain non-offer fee items", () => {
+    expect(pickOfferFeeStructure([
+      {
+        version: "new_admission",
+        fee_structure_items: [{ term: "application_fee", amount: 1000 }],
+      },
+      {
+        version: "standard",
+        fee_structure_items: [{ term: "year_1", amount: 100000 }],
+      },
+    ])?.version).toBe("standard");
   });
 
   it("prefers an active fee-backed session over a newer active session with no fees", () => {

@@ -9,6 +9,8 @@ export interface OfferSessionOption {
 
 interface FeeStructureLike {
   session_id?: string | null;
+  version?: string | null;
+  created_at?: string | null;
   fee_structure_items?: Array<{ term?: string | null; amount?: number | string | null }> | null;
 }
 
@@ -25,6 +27,25 @@ export function feeBackedSessionIds(structures: FeeStructureLike[]): string[] {
       .map((structure) => structure.session_id)
       .filter((sessionId): sessionId is string => !!sessionId),
   ));
+}
+
+function offerFeeStructureVersionRank(version: string | null | undefined): number {
+  const normalized = String(version || "").trim().toLowerCase();
+  if (normalized === "new_admission") return 0;
+  if (normalized === "standard") return 1;
+  if (normalized.includes("existing_parent")) return 3;
+  return 2;
+}
+
+export function pickOfferFeeStructure<T extends FeeStructureLike>(structures: T[] | null | undefined): T | null {
+  const usable = (structures || []).filter(feeStructureHasOfferFeeItems);
+  if (usable.length === 0) return null;
+
+  return [...usable].sort((a, b) => {
+    const versionRank = offerFeeStructureVersionRank(a.version) - offerFeeStructureVersionRank(b.version);
+    if (versionRank !== 0) return versionRank;
+    return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+  })[0];
 }
 
 export function chooseOfferSessionId(

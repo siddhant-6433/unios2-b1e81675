@@ -25,7 +25,7 @@ import {
   type SupabaseUpdeledClient,
   type UpdeledRegistrationDetails as UpdeledRegistrationDetailsType,
 } from "@/lib/updeled";
-import { chooseOfferSessionId, feeBackedSessionIds, type OfferSessionOption } from "@/lib/offerSessions";
+import { chooseOfferSessionId, feeBackedSessionIds, pickOfferFeeStructure, type OfferSessionOption } from "@/lib/offerSessions";
 import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 import { feeTermLabel } from "@/lib/feeTermLabels";
@@ -459,14 +459,14 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
     (async () => {
       const { data } = await supabase
         .from("fee_structures")
-        .select("id, metadata, fee_structure_items ( term, amount )")
+        .select("id, version, created_at, metadata, fee_structure_items ( term, amount )")
         .eq("course_id", courseId)
         .eq("session_id", sessionId)
-        .eq("is_active", true)
-        .maybeSingle();
+        .eq("is_active", true);
       if (cancelled) return;
-      const items: any[] = (data as any)?.fee_structure_items ?? [];
-      const metadata = (data as any)?.metadata as Record<string, unknown> | null;
+      const feeStructure = pickOfferFeeStructure((data || []) as any[]);
+      const items: any[] = feeStructure?.fee_structure_items ?? [];
+      const metadata = feeStructure?.metadata as Record<string, unknown> | null;
       const totals = collectOfferFeeTermTotals(items);
       const sorted = totals.map(({ term, total }) => ({ term, total, label: feeTermLabel(term, metadata) }));
       const firstTerm = firstOfferFeeTerm(totals);
@@ -555,14 +555,14 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
   const fetchCourseFeeSnapshot = async (nextCourseId: string, sessionId: string) => {
     const { data, error } = await supabase
       .from("fee_structures")
-      .select("id, fee_structure_items ( term, amount )")
+      .select("id, version, created_at, fee_structure_items ( term, amount )")
       .eq("course_id", nextCourseId)
       .eq("session_id", sessionId)
-      .eq("is_active", true)
-      .maybeSingle();
+      .eq("is_active", true);
     if (error) throw error;
 
-    const yearTotalsForCourse = collectOfferFeeTermTotals(((data as any)?.fee_structure_items || []) as any[]);
+    const feeStructure = pickOfferFeeStructure((data || []) as any[]);
+    const yearTotalsForCourse = collectOfferFeeTermTotals((feeStructure?.fee_structure_items || []) as any[]);
     const firstTerm = firstOfferFeeTerm(yearTotalsForCourse);
 
     return {
