@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const pendingFollowupsPage = readFileSync("src/pages/PendingFollowups.tsx", "utf8");
@@ -13,6 +13,12 @@ const guardMigration = readFileSync(
   "supabase/migrations/20260620126000_guard_followup_completion_by_disposition.sql",
   "utf8",
 );
+const latestDispositionMigrationFile = readdirSync("supabase/migrations")
+  .filter((file) => file.endsWith(".sql"))
+  .filter((file) => readFileSync(`supabase/migrations/${file}`, "utf8").includes("CREATE OR REPLACE FUNCTION public.record_disposition_writes"))
+  .sort()
+  .at(-1)!;
+const latestDispositionMigration = readFileSync(`supabase/migrations/${latestDispositionMigrationFile}`, "utf8");
 const cancelledCallLogGuardMigration = readFileSync(
   "supabase/migrations/20260620127000_exclude_cancelled_calls_from_call_logs.sql",
   "utf8",
@@ -63,6 +69,16 @@ describe("follow-up completion rules", () => {
     expect(guardMigration).toContain("DROP TRIGGER IF EXISTS trg_followup_for_manual_no_answer");
     expect(guardMigration).toContain("IF v_should_clear_followups THEN");
     expect(guardMigration).toContain("IF p_followup_at IS NOT NULL AND v_should_clear_followups THEN");
+  });
+
+  it("keeps the latest disposition RPC migration on the guarded implementation", () => {
+    expect(latestDispositionMigrationFile).toBe("20260702120000_restore_record_disposition_followup_guard.sql");
+    expect(latestDispositionMigration).toContain("p_cnet_appeared           boolean");
+    expect(latestDispositionMigration).toContain("p_cahet_registered        boolean");
+    expect(latestDispositionMigration).toContain("v_should_clear_followups := p_disposition <> 'not_answered'");
+    expect(latestDispositionMigration).toContain("SET scheduled_at = p_followup_at");
+    expect(latestDispositionMigration).toContain("GET DIAGNOSTICS v_rescheduled_count = ROW_COUNT");
+    expect(latestDispositionMigration).toContain("NOTIFY pgrst, 'reload schema'");
   });
 
   it("does not treat call cancellation as a disposition", () => {
