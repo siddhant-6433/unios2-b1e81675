@@ -384,6 +384,7 @@ export default function LeadLists() {
   // Delete confirm
   const [deleteList, setDeleteList] = useState<LeadList | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const canDeleteLists = role === "super_admin";
 
   const fetchLists = async () => {
     if (role === "academic_partner") {
@@ -1023,7 +1024,7 @@ export default function LeadLists() {
   };
 
   const handleDelete = async () => {
-    if (!deleteList) return;
+    if (!deleteList || !canDeleteLists) return;
     setDeleting(true);
     const { error } = await supabase.from("lead_lists" as any).delete().eq("id", deleteList.id);
     setDeleting(false);
@@ -1143,9 +1144,11 @@ export default function LeadLists() {
                             <Megaphone className="h-3.5 w-3.5" /> New Campaign
                           </Link>
                         </Button>
-                        <Button size="sm" variant="ghost" className="gap-1.5 h-8 text-destructive hover:text-destructive" onClick={() => setDeleteList(list)}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                        {canDeleteLists && (
+                          <Button size="sm" variant="ghost" className="gap-1.5 h-8 text-destructive hover:text-destructive" onClick={() => setDeleteList(list)}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </div>
                     </td>
                   </tr>

@@ -40,7 +40,7 @@ import {
   type ApplicationDossier,
 } from "@/lib/applicationDossier";
 import type { DatePreset } from "@/lib/datePresets";
-import { exportRowsXlsx, formatExportDateTime } from "@/lib/xlsxExport";
+import { exportRowsCsv, formatExportDateTime } from "@/lib/xlsxExport";
 import { useToast } from "@/hooks/use-toast";
 
 interface AppRow {
@@ -169,6 +169,7 @@ export default function Applications() {
   const { toast } = useToast();
   const isCounsellor = role === "counsellor";
   const isSuperAdmin = role === "super_admin";
+  const canExportApplications = isSuperAdmin || role === "principal";
   const [apps, setApps] = useState<AppRow[]>([]);
   const [offlinePaymentApp, setOfflinePaymentApp] = useState<AppRow | null>(null);
   const [offlineReceiptApp, setOfflineReceiptApp] = useState<AppRow | null>(null);
@@ -658,7 +659,7 @@ export default function Applications() {
   const handleExportApplications = async () => {
     setExporting(true);
     try {
-      const { count } = await exportRowsXlsx(
+      const { count } = exportRowsCsv(
         filtered.map((app) => {
           const courses = (app.course_selections || []).map((c: any) => c.course_name).filter(Boolean);
           const campuses = (app.course_selections || []).map((c: any) => c.campus_name).filter(Boolean);
@@ -690,7 +691,6 @@ export default function Applications() {
             "Created At": formatExportDateTime(app.created_at),
           };
         }),
-        "Applications",
         "applications-export",
       );
       toast({
@@ -719,7 +719,7 @@ export default function Applications() {
           <p className="text-sm text-muted-foreground mt-1">{isCounsellor ? "Applications for your assigned leads" : "All online applications with payment and document status"}</p>
         </div>
         <div className="flex items-center gap-2">
-          {isSuperAdmin && (
+          {canExportApplications && (
             <button
               onClick={handleExportApplications}
               disabled={exporting}
@@ -727,7 +727,7 @@ export default function Applications() {
               title="Export applications matching the current filters"
             >
               {exporting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
-              Export
+              Download CSV
             </button>
           )}
           {!isCounsellor && (

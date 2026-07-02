@@ -7,7 +7,7 @@ import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -27,6 +27,7 @@ import {
   Reply,
   Send,
   StopCircle,
+  Trash2,
   XCircle,
 } from "lucide-react";
 import { getDatePresetRange, getEndExclusiveIso, type DatePreset } from "@/lib/datePresets";
@@ -222,7 +223,10 @@ export default function Marketing() {
   const [emailInsertTarget, setEmailInsertTarget] = useState<"subject" | "body">("body");
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
+  const [deleteList, setDeleteList] = useState<LeadList | null>(null);
+  const [deletingList, setDeletingList] = useState(false);
   const requestedListId = searchParams.get("listId") || "";
+  const canDeleteLists = role === "super_admin";
 
   const selectedList = useMemo(
     () => lists.find((list) => list.id === selectedListId) || null,
@@ -592,6 +596,27 @@ export default function Marketing() {
     }
   };
 
+  const handleDeleteList = async () => {
+    if (!deleteList || !canDeleteLists) return;
+    setDeletingList(true);
+    const { error } = await supabase.from("lead_lists" as any).delete().eq("id", deleteList.id);
+    setDeletingList(false);
+
+    if (error) {
+      toast({ title: "Could not delete list", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    const deletedId = deleteList.id;
+    const nextLists = lists.filter((list) => list.id !== deletedId);
+    setLists(nextLists);
+    if (selectedListId === deletedId) {
+      setSelectedListId(nextLists[0]?.id || "");
+    }
+    setDeleteList(null);
+    toast({ title: "List deleted" });
+  };
+
   const openRecipients = async (campaign: CampaignRow) => {
     setDetailCampaign(campaign);
     setRecipientsLoading(true);
@@ -814,18 +839,32 @@ export default function Marketing() {
           <div className="grid gap-3 lg:grid-cols-[1.2fr_0.8fr_1fr]">
             <div>
               <label className="text-xs font-medium text-muted-foreground">Lead list</label>
-              <select
-                value={selectedListId}
-                onChange={(event) => setSelectedListId(event.target.value)}
-                className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              >
-                {lists.length === 0 && <option value="">No lists available</option>}
-                {lists.map((list) => (
-                  <option key={list.id} value={list.id}>
-                    {list.name} ({list.member_count})
-                  </option>
-                ))}
-              </select>
+              <div className="mt-1 flex gap-2">
+                <select
+                  value={selectedListId}
+                  onChange={(event) => setSelectedListId(event.target.value)}
+                  className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  {lists.length === 0 && <option value="">No lists available</option>}
+                  {lists.map((list) => (
+                    <option key={list.id} value={list.id}>
+                      {list.name} ({list.member_count})
+                    </option>
+                  ))}
+                </select>
+                {canDeleteLists && selectedList && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-10 w-10 shrink-0 text-destructive hover:text-destructive"
+                    onClick={() => setDeleteList(selectedList)}
+                    title="Delete selected list"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground">Channel</label>
@@ -1267,6 +1306,24 @@ export default function Marketing() {
               </table>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!deleteList} onOpenChange={(open) => { if (!open) setDeleteList(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete "{deleteList?.name}"?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            The list and its membership rows will be removed. Leads themselves and any campaigns already sent are not affected.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteList(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDeleteList} disabled={deletingList} className="gap-2">
+              {deletingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Delete
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
