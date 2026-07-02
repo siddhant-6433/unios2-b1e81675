@@ -86,6 +86,18 @@ interface CourseOption {
   code: string | null;
 }
 
+type FeeStructurePolicy = {
+  token_required_amount?: number | string | null;
+};
+
+type OfferFeeStructureRow = {
+  version?: string | null;
+  created_at?: string | null;
+  metadata?: Record<string, unknown> | null;
+  policy?: FeeStructurePolicy | null;
+  fee_structure_items?: { term: string; amount: number | string | null }[] | null;
+};
+
 interface OfferWaiver {
   id: string;
   offer_letter_id: string;
@@ -193,6 +205,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
   // Per-period totals from the active fee structure, used for the summary card
   // at offer-creation time and for stamping offer.total_fee.
   const [yearTotals, setYearTotals] = useState<{ term: string; total: number; label: string }[]>([]);
+  const [feePolicy, setFeePolicy] = useState<Record<string, unknown> | null>(null);
   // offer_id → waivers list, fetched alongside offers.
   const [waiversByOffer, setWaiversByOffer] = useState<Record<string, OfferWaiver[]>>({});
   // Which offer's add-waiver inline form is currently visible.
@@ -450,31 +463,33 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
   // picked course+session pair. firstYearFee drives token-fee defaults;
   // availableTerms drives the year picker in the Add-Waiver form.
   useEffect(() => {
-    if (!courseId) { setFirstYearFee(0); setAvailableTerms([]); setYearTotals([]); return; }
+    if (!courseId) { setFirstYearFee(0); setAvailableTerms([]); setYearTotals([]); setFeePolicy(null); return; }
     // For waiver picker, use the offer's session if any are loaded; otherwise
     // fall back to form.session_id (when the new-offer form is open).
     const sessionId = form.session_id || (offers.find(o => !!o.session_id)?.session_id || "");
-    if (!sessionId) { setFirstYearFee(0); setAvailableTerms([]); setYearTotals([]); return; }
+    if (!sessionId) { setFirstYearFee(0); setAvailableTerms([]); setYearTotals([]); setFeePolicy(null); return; }
     let cancelled = false;
     (async () => {
       const { data } = await supabase
         .from("fee_structures")
-        .select("id, version, created_at, metadata, fee_structure_items ( term, amount )")
+        .select("id, version, created_at, metadata, policy, fee_structure_items ( term, amount )")
         .eq("course_id", courseId)
         .eq("session_id", sessionId)
         .eq("is_active", true);
       if (cancelled) return;
-      const feeStructure = pickOfferFeeStructure((data || []) as any[]);
-      const items: any[] = feeStructure?.fee_structure_items ?? [];
-      const metadata = feeStructure?.metadata as Record<string, unknown> | null;
+      const feeStructure = pickOfferFeeStructure((data || []) as OfferFeeStructureRow[]);
+      const items = feeStructure?.fee_structure_items ?? [];
+      const metadata = feeStructure?.metadata ?? null;
+      const policy = feeStructure?.policy ?? null;
       const totals = collectOfferFeeTermTotals(items);
       const sorted = totals.map(({ term, total }) => ({ term, total, label: feeTermLabel(term, metadata) }));
       const firstTerm = firstOfferFeeTerm(totals);
       const firstPeriodFee = totals.find((item) => item.term === firstTerm)?.total || 0;
       setFirstYearFee(firstPeriodFee);
       setYearTotals(sorted);
+      setFeePolicy(policy || null);
       setAvailableTerms(sorted.length ? sorted.map(s => s.term) : ["year_1"]);
-    })().catch(() => { setFirstYearFee(0); setAvailableTerms([]); setYearTotals([]); });
+    })().catch(() => { setFirstYearFee(0); setAvailableTerms([]); setYearTotals([]); setFeePolicy(null); });
     return () => { cancelled = true; };
   }, [courseId, form.session_id, offers]);
 
@@ -555,19 +570,20 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
   const fetchCourseFeeSnapshot = async (nextCourseId: string, sessionId: string) => {
     const { data, error } = await supabase
       .from("fee_structures")
-      .select("id, version, created_at, fee_structure_items ( term, amount )")
+      .select("id, version, created_at, policy, fee_structure_items ( term, amount )")
       .eq("course_id", nextCourseId)
       .eq("session_id", sessionId)
       .eq("is_active", true);
     if (error) throw error;
 
-    const feeStructure = pickOfferFeeStructure((data || []) as any[]);
-    const yearTotalsForCourse = collectOfferFeeTermTotals((feeStructure?.fee_structure_items || []) as any[]);
+    const feeStructure = pickOfferFeeStructure((data || []) as OfferFeeStructureRow[]);
+    const yearTotalsForCourse = collectOfferFeeTermTotals(feeStructure?.fee_structure_items || []);
     const firstTerm = firstOfferFeeTerm(yearTotalsForCourse);
 
     return {
       firstYearFee: yearTotalsForCourse.find((item) => item.term === firstTerm)?.total || 0,
       totalFee: yearTotalsForCourse.reduce((sum, year) => sum + year.total, 0),
+      tokenRequiredAmount: Number(feeStructure?.policy?.token_required_amount || 0),
     };
   };
 
@@ -581,8 +597,11 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
 
   // Token fee defaults to 25% of net Year-1. Admissions can lower it while
   // issuing the offer, but never below the course-specific seat-block floor.
-  const tokenFloor = 5000;
-  const tokenDefault = netFirstYearFee > 0
+  const policyTokenRequiredAmount = Number(feePolicy?.token_required_amount || 0);
+  const tokenFloor = policyTokenRequiredAmount || 5000;
+  const tokenDefault = policyTokenRequiredAmount > 0
+    ? policyTokenRequiredAmount
+    : netFirstYearFee > 0
     ? Math.max(Math.round(netFirstYearFee * 0.25), tokenFloor)
     : 0;
 
@@ -1031,8 +1050,10 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applic
             throw new Error(cahetOfferBlockMessage);
           }
           const nextCourseCode = courseCodeForId(nextCourseId);
-          const nextTokenFloor = 5000;
-          const nextTokenDefault = feeSnapshot.firstYearFee > 0
+          const nextTokenFloor = feeSnapshot.tokenRequiredAmount || 5000;
+          const nextTokenDefault = feeSnapshot.tokenRequiredAmount > 0
+            ? feeSnapshot.tokenRequiredAmount
+            : feeSnapshot.firstYearFee > 0
             ? Math.max(Math.round(feeSnapshot.firstYearFee * 0.25), nextTokenFloor)
             : nextTokenFloor;
           const currentToken = Number(offer.token_fee_amount || 0);

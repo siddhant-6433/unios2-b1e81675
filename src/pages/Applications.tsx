@@ -40,7 +40,7 @@ import {
   type ApplicationDossier,
 } from "@/lib/applicationDossier";
 import type { DatePreset } from "@/lib/datePresets";
-import { exportRowsXlsx, formatExportDateTime } from "@/lib/xlsxExport";
+import { exportRowsCsv, formatExportDateTime } from "@/lib/xlsxExport";
 import { useToast } from "@/hooks/use-toast";
 
 interface AppRow {
@@ -169,6 +169,7 @@ export default function Applications() {
   const { toast } = useToast();
   const isCounsellor = role === "counsellor";
   const isSuperAdmin = role === "super_admin";
+  const canExportApplications = isSuperAdmin || role === "principal";
   const [apps, setApps] = useState<AppRow[]>([]);
   const [offlinePaymentApp, setOfflinePaymentApp] = useState<AppRow | null>(null);
   const [offlineReceiptApp, setOfflineReceiptApp] = useState<AppRow | null>(null);
@@ -326,6 +327,43 @@ export default function Applications() {
       const leadTokenFeePaidSet: Set<string> = new Set();
       const leadTokenCompleteMap: Record<string, boolean> = {};
       const appDocCountsMap: Record<string, { total: number; verified: number; rejected: number; pending: number }> = {};
+      const panDueMap: Record<string, number | null> = {};
+      const anDueMap: Record<string, number | null> = {};
+      const year1DueMap: Record<string, number | null> = {};
+
+      const mapRows = () => rows.map((a: any) => {
+        const leadId = a.lead_id || "";
+        const dossier = buildApplicationDossier(a, {
+          lead: {
+            hasLead: !!leadId && (
+              !!leadStageMap[leadId] ||
+              leadId in leadCounsellorIdMap ||
+              leadId in leadPanMap ||
+              leadId in leadAnMap
+            ),
+            leadStage: leadStageMap[leadId] || "",
+            counsellorId: leadCounsellorIdMap[leadId] || "",
+            counsellorName: counsellorMap[leadId] || "",
+            preAdmissionNo: leadPanMap[leadId] || null,
+            admissionNo: leadAnMap[leadId] || null,
+          },
+          hasOffer: !!leadOfferMap[leadId],
+          appFeePaid: appFeePaidMap[leadId] || 0,
+          hasTokenFeePaid: leadTokenFeePaidSet.has(leadId) || !!leadTokenCompleteMap[leadId],
+          docs: appDocCountsMap[a.application_id] || { total: 0, verified: 0, rejected: 0, pending: 0 },
+          panDue: panDueMap[leadId] ?? null,
+          anDue: anDueMap[leadId] ?? null,
+          year1Due: year1DueMap[leadId] ?? null,
+        });
+        return applyApplicationDossierToRow(a, dossier);
+      });
+
+      // Render the base application rows before secondary dashboard enrichment.
+      // Lifecycle badges and dues can update afterward; the initial dashboard
+      // should not stay blank while every related lookup finishes.
+      setApps(mapRows());
+      setLoading(false);
+
       if (leadIds.length > 0) {
         for (let i = 0; i < leadIds.length; i += RELATED_QUERY_BATCH_SIZE) {
           const batch = leadIds.slice(i, i + RELATED_QUERY_BATCH_SIZE);
@@ -429,9 +467,6 @@ export default function Applications() {
       // they have an offer letter or are already in the offer/payment lifecycle,
       // AND don't already have admission_no. The lead-stage fallback matters
       // when legacy/stale rows have stage='offer_sent' but no preloaded offer row.
-      const panDueMap: Record<string, number | null> = {};
-      const anDueMap: Record<string, number | null> = {};
-      const year1DueMap: Record<string, number | null> = {};
       const feeStatusLeadIds = leadIds.filter((lid: string) =>
         !leadAnMap[lid] && (
           leadOfferMap[lid] ||
@@ -440,35 +475,7 @@ export default function Applications() {
         )
       );
 
-      const mapRows = () => rows.map((a: any) => {
-        const leadId = a.lead_id || "";
-        const dossier = buildApplicationDossier(a, {
-          lead: {
-            hasLead: !!leadId && (
-              !!leadStageMap[leadId] ||
-              leadId in leadCounsellorIdMap ||
-              leadId in leadPanMap ||
-              leadId in leadAnMap
-            ),
-            leadStage: leadStageMap[leadId] || "",
-            counsellorId: leadCounsellorIdMap[leadId] || "",
-            counsellorName: counsellorMap[leadId] || "",
-            preAdmissionNo: leadPanMap[leadId] || null,
-            admissionNo: leadAnMap[leadId] || null,
-          },
-          hasOffer: !!leadOfferMap[leadId],
-          appFeePaid: appFeePaidMap[leadId] || 0,
-          hasTokenFeePaid: leadTokenFeePaidSet.has(leadId) || !!leadTokenCompleteMap[leadId],
-          docs: appDocCountsMap[a.application_id] || { total: 0, verified: 0, rejected: 0, pending: 0 },
-          panDue: panDueMap[leadId] ?? null,
-          anDue: anDueMap[leadId] ?? null,
-          year1Due: year1DueMap[leadId] ?? null,
-        });
-        return applyApplicationDossierToRow(a, dossier);
-      });
-
       setApps(mapRows());
-      setLoading(false);
 
       if (feeStatusLeadIds.length === 0) return;
 
@@ -658,7 +665,7 @@ export default function Applications() {
   const handleExportApplications = async () => {
     setExporting(true);
     try {
-      const { count } = await exportRowsXlsx(
+      const { count } = exportRowsCsv(
         filtered.map((app) => {
           const courses = (app.course_selections || []).map((c: any) => c.course_name).filter(Boolean);
           const campuses = (app.course_selections || []).map((c: any) => c.campus_name).filter(Boolean);
@@ -690,7 +697,6 @@ export default function Applications() {
             "Created At": formatExportDateTime(app.created_at),
           };
         }),
-        "Applications",
         "applications-export",
       );
       toast({
@@ -719,7 +725,7 @@ export default function Applications() {
           <p className="text-sm text-muted-foreground mt-1">{isCounsellor ? "Applications for your assigned leads" : "All online applications with payment and document status"}</p>
         </div>
         <div className="flex items-center gap-2">
-          {isSuperAdmin && (
+          {canExportApplications && (
             <button
               onClick={handleExportApplications}
               disabled={exporting}
@@ -727,7 +733,7 @@ export default function Applications() {
               title="Export applications matching the current filters"
             >
               {exporting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
-              Export
+              Download CSV
             </button>
           )}
           {!isCounsellor && (

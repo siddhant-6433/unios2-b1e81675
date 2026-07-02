@@ -1107,7 +1107,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
             </div>
           </div>
 
-          {/* Step 3 — Confirm Admission (25%) */}
+          {/* Step 3 — Confirm Admission */}
           {(() => {
             const done = feeStatus.twenty_five_complete;
             const active = isPreAdmitted && !done;
@@ -1137,7 +1137,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                       {!done && confirmUrgent && <span className="text-[10px] font-bold text-orange-700 bg-orange-100 border border-orange-200 px-2 py-0.5 rounded-full animate-pulse">URGENT</span>}
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5">
-                      Pay 25% of first-year fee (₹{feeStatus.twenty_five_pct.toLocaleString("en-IN")}) → Admission Number issued
+                      Pay the admission threshold (₹{feeStatus.twenty_five_pct.toLocaleString("en-IN")}) → Admission Number issued
                     </p>
                     {/* Deadline strip — always visible */}
                     {!done && (
@@ -1316,11 +1316,11 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                   {term === "year_1" && seatBlockCredit > 0 && (
                     <div className="mt-1.5 rounded-lg border border-emerald-100 bg-emerald-50/70 px-3 py-2 space-y-1">
                       <div className="flex justify-between items-center">
-                        <span className="text-xs text-emerald-700">Application fee adjusted against Sem 1 seat block</span>
+                        <span className="text-xs text-emerald-700">Application fee counted toward PAN amount</span>
                         <span className="text-xs font-semibold text-emerald-700">− {fmt(seatBlockCredit)}</span>
                       </div>
                       <div className="flex justify-between items-center pt-1 border-t border-emerald-100">
-                        <span className="text-xs font-semibold text-gray-700">Seat block net payable</span>
+                        <span className="text-xs font-semibold text-gray-700">Seat block balance payable</span>
                         <span className="text-xs font-bold text-gray-900">{fmt(seatBlockNet)}</span>
                       </div>
                     </div>
@@ -1382,7 +1382,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         const isUrgentConfirm = dLeft !== null && dLeft <= 2 && dLeft >= 0;
 
         if (tokenPaid && confirmDueDate) {
-          // Token paid — show countdown to 25% deadline
+          // Token paid — show countdown to admission-confirmation deadline
           return (
             <div className={`rounded-2xl px-4 py-3.5 flex gap-3 items-start ${
               isOverdue      ? "bg-red-50 border border-red-200"
@@ -1393,14 +1393,14 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
               <div className="min-w-0">
                 <p className={`text-sm font-bold ${isOverdue ? "text-red-800" : isUrgentConfirm ? "text-orange-800" : "text-amber-900"}`}>
                   {isOverdue
-                    ? "25% payment overdue — contact admissions immediately"
+                    ? "Admission confirmation payment overdue — contact admissions immediately"
                     : dLeft === 0
-                    ? "25% payment due today to confirm admission"
+                    ? "Admission confirmation payment due today"
                     : `Confirm admission by ${fmtDate(confirmDueDate)}`}
                 </p>
                 <p className={`text-xs mt-0.5 leading-snug ${isOverdue ? "text-red-700" : isUrgentConfirm ? "text-orange-700" : "text-amber-700"}`}>
                   {isOverdue
-                    ? "Your token fee holds the seat but admission is not confirmed until 25% is paid."
+                    ? "Your token fee holds the seat but admission is not confirmed until the admission threshold is paid."
                     : `Your token fee holds your seat for 5 days. Pay ₹${towardsAdmission.toLocaleString("en-IN")} by ${fmtDate(confirmDueDate)} to receive your Admission Number.${dLeft !== null && dLeft > 0 ? ` ${dLeft} day${dLeft !== 1 ? "s" : ""} remaining.` : ""}`}
                 </p>
               </div>
@@ -1413,11 +1413,11 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
           <div className="rounded-2xl bg-blue-50 border border-blue-200 px-4 py-3.5 flex gap-3 items-start">
             <Clock className="h-4 w-4 shrink-0 mt-0.5 text-blue-500" />
             <div className="min-w-0">
-              <p className="text-sm font-bold text-blue-900">Token fee holds your seat · 25% confirms it</p>
+              <p className="text-sm font-bold text-blue-900">Token fee holds your seat · admission threshold confirms it</p>
               <p className="text-xs text-blue-700 mt-0.5 leading-snug">
                 Paying the token fee reserves your seat for <span className="font-semibold">5 days</span>.
-                You must pay 25% within those 5 days to receive your Admission Number and confirm enrollment.
-                Admission is <span className="font-semibold">not confirmed</span> until 25% is paid.
+                You must pay the admission threshold within those 5 days to receive your Admission Number and confirm enrollment.
+                Admission is <span className="font-semibold">not confirmed</span> until the threshold is paid.
               </p>
             </div>
           </div>
@@ -1504,7 +1504,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
 
         return (
           <div className="space-y-3">
-            {/* ── Primary: confirm admission (25%) ── */}
+            {/* ── Primary: confirm admission ── */}
             <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-green-50 p-4 shadow-sm space-y-3">
               <div>
                 <div className="flex items-center gap-1.5 mb-1">
@@ -1512,7 +1512,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                 </div>
                 <p className="text-base font-bold text-emerald-900">Confirm Your Admission</p>
                 <p className="text-xs text-emerald-700 mt-0.5 leading-relaxed">
-                  Pay 25% of first-year fee and receive your Admission Number — your seat is fully secured.
+                  Pay the admission threshold and receive your Admission Number — your seat is fully secured.
                 </p>
               </div>
               <div className="flex items-center justify-between gap-3 rounded-xl bg-white border border-emerald-100 px-3.5 py-2.5">
@@ -1531,7 +1531,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                 disabled={paying || !applicantPhone}
                 onClick={() => startPayment(towardsAdmission, {
                   paymentType: "token_fee",
-                  productinfo: "Admission Confirmation Fee (25%)",
+                  productinfo: "Admission Confirmation Fee",
                 })}
                 className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3.5 text-sm font-bold text-white hover:bg-emerald-700 active:scale-[0.99] transition-all disabled:opacity-50 shadow-md shadow-emerald-200/60"
               >

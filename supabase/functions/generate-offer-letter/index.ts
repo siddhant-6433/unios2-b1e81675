@@ -60,6 +60,7 @@ type OfferFeeStructureRow = {
   id: string;
   version?: string | null;
   created_at?: string | null;
+  policy?: FeeStructurePolicy | null;
   fee_structure_items?: {
     term: string;
     amount: number;
@@ -485,6 +486,10 @@ interface FeeStructureItem {
   fee_code_name?: string | null;
   fee_code_category?: string | null;
 }
+
+type FeeStructurePolicy = {
+  token_required_amount?: number | string | null;
+};
 
 function drawFeeLedger(ctx: Ctx, rows: LedgerRow[]) {
   const hasWaiverCol = rows.some(r => r.waiver > 0);
@@ -991,7 +996,7 @@ Deno.serve(async (req) => {
     // PDFs, where the seat-block fee must be shown explicitly.
     const { data: feeStructures, error: feeStructureError } = await admin
       .from("fee_structures")
-      .select("id, version, created_at, fee_structure_items ( term, amount, fee_codes:fee_code_id ( code, name, category ) )")
+      .select("id, version, created_at, policy, fee_structure_items ( term, amount, fee_codes:fee_code_id ( code, name, category ) )")
       .eq("course_id", offer.course_id)
       .eq("session_id", offer.session_id)
       .eq("is_active", true);
@@ -1157,8 +1162,12 @@ Deno.serve(async (req) => {
         .filter(w => w.term === firstTerm)
         .reduce((s, w) => s + Number(w.amount || 0), 0);
       const postY1 = Math.max(0, firstTermTotal - scholarship - y1Waivers);
-      const tokenFloor = 5000;
-      tokenAmount = postY1 > 0
+      const policy = (yearRows as { policy?: FeeStructurePolicy | null } | null)?.policy;
+      const policyTokenAmount = Number(policy?.token_required_amount || 0);
+      const tokenFloor = policyTokenAmount || 5000;
+      tokenAmount = policyTokenAmount > 0
+        ? policyTokenAmount
+        : postY1 > 0
         ? Math.max(Math.round(postY1 * 0.25), tokenFloor)
         : Number(lead?.token_amount || 0);
     }

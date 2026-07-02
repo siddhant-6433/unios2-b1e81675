@@ -18,7 +18,7 @@ import { StudentDraftsPanel } from "@/components/admissions/StudentDraftsPanel";
 import { BulkStudentImportDialog } from "@/components/admissions/BulkStudentImportDialog";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { exportRowsXlsx } from "@/lib/xlsxExport";
+import { exportRowsCsv } from "@/lib/xlsxExport";
 import { getApplicationPhotoUrlsByLeadId } from "@/lib/applicationPhotos";
 
 interface StudentRow {
@@ -224,7 +224,7 @@ const Students = () => {
   const { can } = usePermissions();
   const { role } = useAuth();
   const canCreateStudents = can("students", "create");
-  const canExportStudents = role === "super_admin";
+  const canExportStudents = role === "super_admin" || role === "principal";
 
   const fetchStudents = useCallback(async () => {
     setLoading(true);
@@ -378,7 +378,7 @@ const Students = () => {
     if (!canExportStudents) return;
     setExporting(true);
     try {
-      await exportRowsXlsx(filtered.map((student) => ({
+      exportRowsCsv(filtered.map((student) => ({
         "Admission No": student.admission_no || "",
         "Pre Admission No": student.pre_admission_no || "",
         Name: student.name,
@@ -405,7 +405,7 @@ const Students = () => {
         "Guardian Phone": student.guardian_phone || "",
         Address: [student.address, student.city, student.state, student.pincode].filter(Boolean).join(", "),
         "Photo URL": student.photo_url || "",
-      })), "Students", "students-details");
+      })), "students-details");
     } finally {
       setExporting(false);
     }
@@ -459,7 +459,7 @@ const Students = () => {
           {canExportStudents && (
             <Button type="button" variant="outline" onClick={exportStudents} disabled={exporting || filtered.length === 0} className="h-10 rounded-xl gap-1.5 sm:ml-auto">
               {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-              Export Details
+              Download CSV
             </Button>
           )}
         </div>

@@ -37,7 +37,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ChevronDown } from "lucide-react";
 import { groupCourses, type CourseLike } from "@/lib/courseSort";
-import { exportRowsXlsx, formatExportDateTime } from "@/lib/xlsxExport";
+import { exportRowsCsv, formatExportDateTime } from "@/lib/xlsxExport";
 import type { DatePreset } from "@/lib/datePresets";
 import {
   ADMISSIONS_LEAD_LIST_SELECT,
@@ -327,6 +327,7 @@ const Admissions = () => {
   const [exporting, setExporting] = useState(false);
 
   const isSuperAdmin = role === "super_admin";
+  const canExportLeads = isSuperAdmin || role === "principal";
   const { myDefaults } = useTatDefaults();
   const canTransfer = isSuperAdmin || isTeamLeader
     || role === "admission_head" || role === "campus_admin" || role === "principal";
@@ -1195,7 +1196,7 @@ const Admissions = () => {
     setExporting(true);
     try {
       const rows = await fetchFilteredLeadsForExport();
-      const { count } = await exportRowsXlsx(
+      const { count } = exportRowsCsv(
         rows.map((lead) => ({
           "Lead Name": lead.name || "",
           Phone: lead.phone || "",
@@ -1214,7 +1215,6 @@ const Admissions = () => {
           AN: lead.admission_no || "",
           "Created At": formatExportDateTime(lead.created_at),
         })),
-        "Leads",
         "leads-export",
       );
       toast({
@@ -1684,7 +1684,7 @@ const Admissions = () => {
         </div>
         <div className="flex items-center gap-3">
           {role === "counsellor" && <CounsellorScoreBadge />}
-          {isSuperAdmin && (
+          {canExportLeads && (
             <Button
               variant="pill-outline"
               size="pill"
@@ -1694,7 +1694,7 @@ const Admissions = () => {
               title="Export leads matching the current filters"
             >
               {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-              Export
+              Download CSV
             </Button>
           )}
           <Button variant="pill-outline" size="pill" onClick={() => setShowBulkImport(true)} className="gap-2"><Upload className="h-4 w-4" />Import CSV</Button>

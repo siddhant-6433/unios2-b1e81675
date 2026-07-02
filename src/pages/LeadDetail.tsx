@@ -1037,7 +1037,7 @@ const LeadDetail = () => {
       ? {
           type: "academic_partner" as const,
           id: lead.academic_partner_id as string,
-          label: `Academic Partner: ${lead.lead_academic_partner?.name || "Assigned"}`,
+          label: `Admission Partner: ${lead.lead_academic_partner?.organization || lead.lead_academic_partner?.name || "Assigned"}`,
         }
       : {
           type: "none" as const,
