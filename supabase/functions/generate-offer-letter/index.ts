@@ -75,6 +75,16 @@ function sentenceCaseName(value?: string | null): string {
     .replace(/(^|[\s.'-])([a-z])/g, (_match, prefix: string, letter: string) => `${prefix}${letter.toLocaleUpperCase("en-IN")}`);
 }
 
+function isUuidLike(value?: string | null): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
+}
+
+function publicApplicationRef(value?: string | null): string | null {
+  const cleaned = String(value || "").trim();
+  if (!cleaned || isUuidLike(cleaned)) return null;
+  return cleaned;
+}
+
 function institutionNameForOffer(brandingName?: string | null, campusName?: string | null): string {
   const raw = String(brandingName || DEFAULT_INSTITUTION_NAME).trim() || DEFAULT_INSTITUTION_NAME;
   const base = raw
@@ -579,7 +589,7 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
     y: 0, contentStart: 0, contentEnd: 0,
     branding: { ...(opts.branding || {}), _lh: lh, _footer: ftr },
     hasLetterhead: !!lh,
-    appId: opts.applicationId || opts.lead.application_id,
+    appId: opts.applicationId || publicApplicationRef(opts.lead.application_id) || opts.lead.pre_admission_no,
     sessionName: opts.sessionName,
   };
 
@@ -618,7 +628,7 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
     { label: "Applicant Name",    value: applicantName },
     { label: "Phone",             value: opts.lead.phone || "-" },
     { label: "Email",             value: opts.lead.email || "-" },
-    { label: "Application ID",    value: opts.applicationId || opts.lead.application_id || "-" },
+    { label: "Application ID",    value: opts.applicationId || publicApplicationRef(opts.lead.application_id) || opts.lead.pre_admission_no || "-" },
   ]);
 
   if (opts.campus?.address) {
@@ -765,7 +775,7 @@ async function buildOfferPdf(opts: BuildOpts): Promise<Uint8Array> {
     { label: "Token Fee Payable",   value: fmtINR(opts.tokenAmount || 0) },
     { label: "Acceptance Deadline", value: fmtDeadline(opts.offer.acceptance_deadline) },
     { label: "Pay Online",          value: "uni.nimt.ac.in" },
-    { label: "Reference No.",       value: opts.applicationId || opts.lead.application_id || "-" },
+    { label: "Reference No.",       value: opts.applicationId || publicApplicationRef(opts.lead.application_id) || opts.lead.pre_admission_no || "-" },
   ]);
 
   ctx.y -= 4;
@@ -883,7 +893,7 @@ Deno.serve(async (req) => {
     const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
-    const { offer_letter_id } = await req.json();
+    const { offer_letter_id, application_id } = await req.json();
     if (!offer_letter_id) {
       return new Response(JSON.stringify({ error: "offer_letter_id required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -895,6 +905,7 @@ Deno.serve(async (req) => {
       .from("offer_letters")
       .select(`
         id, total_fee, scholarship_amount, net_fee, approval_status,
+        source_fee_proposal_id, source_fee_proposal_child_key,
         token_fee_amount, acceptance_deadline, created_at, admission_mode, entrance_exam_name,
         lead_id, course_id, campus_id, session_id,
         leads:lead_id ( id, name, phone, email, application_id, pre_admission_no, token_amount ),
@@ -963,22 +974,40 @@ Deno.serve(async (req) => {
       sessionName = sess?.name || null;
     }
 
-    // Resolve application_id directly from applications. leads.application_id
-    // is sometimes null (test data, manual SQL inserts, race conditions on
-    // the trigger that mirrors it). Pull the latest application linked to
-    // this lead — that's the authoritative source for the top-right badge.
-    let applicationId: string | null = lead?.application_id || null;
+    // Resolve the public application number directly from applications. Some
+    // legacy lead rows carry an internal application UUID in leads.application_id;
+    // never print that on the offer letter.
+    const requestedApplicationValue = String(application_id || "").trim();
+    const leadApplicationValue = String(lead?.application_id || "").trim();
+    let applicationId: string | null = publicApplicationRef(requestedApplicationValue) || publicApplicationRef(leadApplicationValue);
     let applicationRow: ApplicationCahetSource | null = null;
-    if (!applicationId && offer.lead_id) {
+    if (applicationId) {
       const { data: appRow } = await admin
         .from("applications")
         .select("application_id, academic_details")
+        .eq("application_id", applicationId)
+        .maybeSingle();
+      applicationRow = appRow || null;
+    }
+    if (!applicationRow && offer.lead_id) {
+      const { data: appRow } = await admin
+        .from("applications")
+        .select("id, application_id, academic_details")
         .eq("lead_id", offer.lead_id)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
       applicationRow = appRow || null;
-      applicationId = appRow?.application_id || null;
+      applicationId = publicApplicationRef(appRow?.application_id) || applicationId;
+    }
+    if (!applicationRow && isUuidLike(leadApplicationValue)) {
+      const { data: appRow } = await admin
+        .from("applications")
+        .select("id, application_id, academic_details")
+        .eq("id", leadApplicationValue)
+        .maybeSingle();
+      applicationRow = appRow || null;
+      applicationId = publicApplicationRef(appRow?.application_id) || applicationId;
     }
     if (!applicationRow && applicationId) {
       const { data: appRow } = await admin
@@ -999,7 +1028,7 @@ Deno.serve(async (req) => {
     // so Year 1 renders before Year 2 in the fee table.
     const { data: waiverRows } = await admin
       .from("offer_waivers")
-      .select("term, amount")
+      .select("term, amount, source_type, metadata")
       .eq("offer_letter_id", offer_letter_id)
       .eq("status", "approved")
       .order("term", { ascending: true });
