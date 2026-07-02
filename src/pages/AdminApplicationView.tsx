@@ -1030,7 +1030,7 @@ export default function AdminApplicationView() {
           open={showOfferLetter}
           onOpenChange={setShowOfferLetter}
           leadId={lead.id}
-          leadName={lead.name || app.full_name}
+          leadName={app.full_name || lead.name}
           applicationId={app.application_id || applicationId}
           courseId={lead.course_id}
           courseName={lead.course?.name}

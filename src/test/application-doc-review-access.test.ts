@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const adminApplicationView = readFileSync("src/pages/AdminApplicationView.tsx", "utf8");
+const applyPortal = readFileSync("src/pages/ApplyPortal.tsx", "utf8");
 const docReviewPanel = readFileSync("src/components/admissions/DocReviewPanel.tsx", "utf8");
 const listAppDocs = readFileSync("supabase/functions/list-app-docs/index.ts", "utf8");
 const applyPortalUploadDoc = readFileSync("supabase/functions/apply-portal-upload-doc/index.ts", "utf8");
@@ -86,6 +87,13 @@ describe("application document review access", () => {
     expect(adminApplicationView).toContain("activeDocsByLogicalKey");
     expect(adminApplicationView).toContain("docStatusRank");
     expect(adminApplicationView).toContain("if (activeDocPaths.has(r.file_path))");
+  });
+
+  it("surfaces rejected documents on the applicant dashboard", () => {
+    expect(applyPortal).toContain('supabase.functions.invoke("list-app-docs"');
+    expect(applyPortal).toContain("needsDocReupload");
+    expect(applyPortal).toContain("Re-upload Documents");
+    expect(applyPortal).toContain("rejectedDocCount");
   });
 
   it("uses fresh object keys and no-cache headers for document replacements", () => {

@@ -97,6 +97,14 @@ function parseCsv(text: string): string[][] {
   return rows;
 }
 
+function normalizeGender(value: string) {
+  const key = value.trim().toLowerCase();
+  if (key === "m" || key === "male") return "male";
+  if (key === "f" || key === "female") return "female";
+  if (key === "o" || key === "other") return "other";
+  return key;
+}
+
 export function BulkBeaconStudentImportDialog({ open, onOpenChange, onSuccess }: BulkBeaconStudentImportDialogProps) {
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -157,7 +165,7 @@ export function BulkBeaconStudentImportDialog({ open, onOpenChange, onSuccess }:
         const get = (col: string) => (cols[idx(col)] || "").trim();
         const name = get("name");
         const dob = get("dob");
-        const gender = get("gender");
+        const gender = normalizeGender(get("gender"));
         const grade = get("grade") || get("class");
         const section = get("section");
         const admission_no = get("admission_no") || get("admissionno") || get("admission_number");

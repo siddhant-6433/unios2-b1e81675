@@ -154,6 +154,7 @@ interface ApplicationEntranceExam {
 
 interface ApplicationCahetSource {
   application_id?: string | null;
+  full_name?: string | null;
   academic_details?: {
     entrance_exams?: ApplicationEntranceExam[] | null;
   } | null;
@@ -1002,12 +1003,13 @@ Deno.serve(async (req) => {
     // internal applications.id UUID there, while PDFs must show APP-... IDs.
     const requestedApplicationValue = String(application_id || "").trim();
     const leadApplicationValue = String(lead?.application_id || "").trim();
-    let applicationId: string | null = publicApplicationRef(requestedApplicationValue) || publicApplicationRef(leadApplicationValue);
+    let applicationId: string | null = null;
+    applicationId = publicApplicationRef(requestedApplicationValue) || publicApplicationRef(leadApplicationValue);
     let applicationRow: ApplicationCahetSource | null = null;
     if (applicationId) {
       const { data: appRow } = await admin
         .from("applications")
-        .select("application_id, academic_details")
+        .select("application_id, full_name, academic_details")
         .eq("application_id", applicationId)
         .maybeSingle();
       applicationRow = appRow || null;
@@ -1015,7 +1017,7 @@ Deno.serve(async (req) => {
     if (!applicationRow && offer.lead_id) {
       const { data: appRow } = await admin
         .from("applications")
-        .select("id, application_id, academic_details")
+        .select("id, application_id, full_name, academic_details")
         .eq("lead_id", offer.lead_id)
         .order("created_at", { ascending: false })
         .limit(1)
@@ -1026,7 +1028,7 @@ Deno.serve(async (req) => {
     if (!applicationRow && isUuidLike(leadApplicationValue)) {
       const { data: appRow } = await admin
         .from("applications")
-        .select("id, application_id, academic_details")
+        .select("id, application_id, full_name, academic_details")
         .eq("id", leadApplicationValue)
         .maybeSingle();
       applicationRow = appRow || null;
@@ -1035,7 +1037,7 @@ Deno.serve(async (req) => {
     if (!applicationRow && lead?.application_id && isUuidLike(lead.application_id)) {
       const { data: appRow } = await admin
         .from("applications")
-        .select("application_id, academic_details")
+        .select("application_id, full_name, academic_details")
         .eq("id", lead.application_id)
         .maybeSingle();
       applicationRow = appRow || null;
@@ -1044,12 +1046,14 @@ Deno.serve(async (req) => {
     if (!applicationRow && lead?.application_id && !isUuidLike(lead.application_id)) {
       const { data: appRow } = await admin
         .from("applications")
-        .select("application_id, academic_details")
+        .select("application_id, full_name, academic_details")
         .eq("application_id", lead.application_id)
         .maybeSingle();
       applicationRow = appRow || null;
       applicationId = appRow?.application_id || lead.application_id || null;
     }
+    const applicantName = String(applicationRow?.full_name || "").trim() || lead?.name || "Applicant";
+    const pdfLead = { ...lead, name: applicantName };
 
     // Branding (doc-type-aware: prefers a template tagged 'offer_letter',
     // then 'all', then default).
@@ -1129,7 +1133,7 @@ Deno.serve(async (req) => {
 
     const pdfBytes = await buildOfferPdf({
       offer,
-      lead,
+      lead: pdfLead,
       course,
       campus,
       yearItems,
