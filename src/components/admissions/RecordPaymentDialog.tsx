@@ -188,8 +188,8 @@ export function RecordPaymentDialog({
     });
 
     // Stage advancement is handled by the lead_payments AFTER trigger
-    // (handle_lead_payment_change). It checks the 10% / 25% thresholds and
-    // auto-issues PAN / AN. We don't flip stage from here anymore.
+    // (handle_lead_payment_change). It checks the PAN / AN thresholds and
+    // auto-issues numbers. We don't flip stage from here anymore.
 
     toast({ title: "Payment recorded", description: `₹${parseFloat(amount).toLocaleString("en-IN")} ${PAYMENT_TYPES.find((t) => t.value === type)?.label} recorded.` });
     setSaving(false);
@@ -224,7 +224,7 @@ export function RecordPaymentDialog({
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Towards 25% (admission)</span>
+              <span className="text-muted-foreground">Towards AN threshold</span>
               <span className="text-foreground">
                 ₹{feeStatus.total_paid.toLocaleString("en-IN")} / ₹{feeStatus.twenty_five_pct.toLocaleString("en-IN")}
                 {feeStatus.twenty_five_complete && <span className="ml-1 text-emerald-600">✓ complete</span>}

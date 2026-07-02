@@ -26,6 +26,11 @@ describe("apply portal course fee calculation", () => {
     expect(calculateFee([selection("unknown")])).toBe(1000);
   });
 
+  it("charges DAOTT the standard 1000 application fee", () => {
+    expect(determineProgramCategory("DAOTT-GN", "Diploma of Anesthesia & OT Technology (D.AOTT)")).toBe("undergraduate");
+    expect(calculateFee([selection("undergraduate", "Diploma of Anesthesia & OT Technology (D.AOTT)")])).toBe(1000);
+  });
+
   it("charges only the non-zero programme fee for mixed B.Ed and LLB selections", () => {
     expect(calculateFee([
       selection("bed", "Bachelor of Education (B.Ed)"),

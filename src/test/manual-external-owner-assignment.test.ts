@@ -50,6 +50,7 @@ describe("manual external owner assignment", () => {
     expect(migration).toContain("'lead_academic_partner'");
     expect(leadDetail).toContain("ExternalOwnerDialog");
     expect(leadDetail).toContain("Assign Owner");
+    expect(leadDetail).toContain('lead.lead_academic_partner?.organization || lead.lead_academic_partner?.name || "Assigned"');
     expect(leadDetail).toContain("{isSuperAdmin &&");
     expect(externalOwnerDialog).toContain("assign_lead_external_owner");
     expect(externalOwnerDialog).toContain("A lead can have only one external owner.");
