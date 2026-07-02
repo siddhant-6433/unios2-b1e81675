@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, FileText, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Gift, User, Trash2, Upload, UserPlus } from "lucide-react";
+import { ArrowLeft, FileText, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Gift, User, Trash2, Upload, UserPlus, GraduationCap, Pencil } from "lucide-react";
 import { ApplicationPreview, type PreviewDoc } from "@/components/applicant/ApplicationPreview";
 import { DocumentUpload } from "@/components/apply/DocumentUpload";
 import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
@@ -22,10 +22,15 @@ import { fetchUpdeledRegistration, isDeledCourseName, updeledRegistrationFromApp
 import { buildApplicationDossier } from "@/lib/applicationDossier";
 import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
+import { useCourseCampusLink } from "@/hooks/useCourseCampusLink";
+import { determineProgramCategory } from "@/components/apply/types";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 
 type DocStatus = "pending" | "verified" | "rejected";
 
@@ -41,8 +46,11 @@ interface DocReview {
 type ApplicationCourseSelection = {
   course_id?: string | null;
   campus_id?: string | null;
+  institution_id?: string | null;
   course_name?: string | null;
   campus_name?: string | null;
+  preference_order?: number | null;
+  program_category?: string | null;
 };
 
 type LeadCourse = {
@@ -161,6 +169,8 @@ export default function AdminApplicationView() {
   const canUploadDocuments = role === "super_admin" || role === "principal" || role === "counsellor";
   const canManageOffer = role === "super_admin" || role === "principal" || role === "counsellor" ||
     role === "admission_head" || role === "campus_admin";
+  const canEditProgram = canManageOffer;
+  const { courseOptions, loading: courseOptionsLoading } = useCourseCampusLink();
   const [loading, setLoading] = useState(true);
   const [app, setApp] = useState<any | null>(null);
   const [lead, setLead] = useState<{
@@ -190,6 +200,9 @@ export default function AdminApplicationView() {
   const [generatingFormPdf, setGeneratingFormPdf] = useState(false);
   const [repairingLead, setRepairingLead] = useState(false);
   const [applicationApproverName, setApplicationApproverName] = useState<string | null>(null);
+  const [programDialogOpen, setProgramDialogOpen] = useState(false);
+  const [editCourseId, setEditCourseId] = useState("");
+  const [savingProgram, setSavingProgram] = useState(false);
 
   // Async load can throw on any of N round-trips — wrap so a transient failure
   // shows a recoverable error instead of leaving the page in a permanent
@@ -603,6 +616,144 @@ export default function AdminApplicationView() {
     });
   }, [app, appFeePaid, canManageOffer, counts, hasOffer, lead]);
 
+  const primarySelection = useMemo<ApplicationCourseSelection | null>(() => {
+    const selections = Array.isArray(app?.course_selections) ? app.course_selections : [];
+    return (selections[0] as ApplicationCourseSelection | undefined) || null;
+  }, [app?.course_selections]);
+
+  const currentCourseOption = useMemo(() => {
+    if (!primarySelection && !lead?.course_id) return null;
+    if (primarySelection?.course_id || lead?.course_id) {
+      const byId = courseOptions.find((course) => course.id === (primarySelection?.course_id || lead?.course_id));
+      if (byId) return byId;
+    }
+    const courseName = (primarySelection?.course_name || lead?.course?.name || "").trim().toLowerCase();
+    const campusName = (primarySelection?.campus_name || "").trim().toLowerCase();
+    if (!courseName) return null;
+    return courseOptions.find((course) => {
+      const sameCourse = course.name.trim().toLowerCase() === courseName;
+      if (!sameCourse) return false;
+      if (!campusName) return true;
+      return course.campus_name.trim().toLowerCase() === campusName;
+    }) || null;
+  }, [courseOptions, lead?.course?.name, lead?.course_id, primarySelection]);
+
+  const currentCourseName = currentCourseOption?.name || lead?.course?.name || primarySelection?.course_name || "No program selected";
+  const currentCampusName = currentCourseOption?.campus_name || primarySelection?.campus_name || "";
+  const sortedCourseOptions = useMemo(() => (
+    [...courseOptions].sort((a, b) => {
+      const campusCmp = a.campus_name.localeCompare(b.campus_name);
+      if (campusCmp) return campusCmp;
+      const deptCmp = a.department_name.localeCompare(b.department_name);
+      if (deptCmp) return deptCmp;
+      return a.name.localeCompare(b.name);
+    })
+  ), [courseOptions]);
+
+  const openProgramEditor = () => {
+    setEditCourseId(currentCourseOption?.id || lead?.course_id || primarySelection?.course_id || "");
+    setProgramDialogOpen(true);
+  };
+
+  const saveProgramChange = async () => {
+    if (!app || !editCourseId || savingProgram) return;
+    const selectedCourse = courseOptions.find((course) => course.id === editCourseId);
+    if (!selectedCourse) {
+      toast({ title: "Select a valid program", description: "The selected course/class could not be found.", variant: "destructive" });
+      return;
+    }
+
+    const existingSelections = Array.isArray(app.course_selections) ? app.course_selections as ApplicationCourseSelection[] : [];
+    const previousPrimary = existingSelections[0] || null;
+    const programCategory = determineProgramCategory(selectedCourse.code || "", selectedCourse.name);
+    const nextPrimary: ApplicationCourseSelection = {
+      ...(previousPrimary || {}),
+      course_id: selectedCourse.id,
+      campus_id: selectedCourse.campus_id,
+      institution_id: selectedCourse.institution_id,
+      course_name: selectedCourse.name,
+      campus_name: selectedCourse.campus_name,
+      preference_order: 1,
+      program_category: programCategory,
+    };
+    const nextSelections = [
+      nextPrimary,
+      ...existingSelections.slice(1).filter((selection) => selection.course_id !== selectedCourse.id),
+    ].map((selection, index) => ({ ...selection, preference_order: index + 1 }));
+
+    setSavingProgram(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: profile } = user
+        ? await supabase.from("profiles").select("id, display_name").eq("user_id", user.id).maybeSingle()
+        : { data: null };
+
+      const appUpdates = {
+        course_selections: nextSelections,
+        program_category: programCategory,
+        institution_id: selectedCourse.institution_id,
+        form_pdf_url: null,
+      } as any;
+      const { error: appError } = await supabase.from("applications").update(appUpdates).eq("id", app.id);
+      if (appError) throw appError;
+
+      if (app.lead_id || lead?.id) {
+        const leadId = app.lead_id || lead?.id;
+        const { error: leadError } = await supabase
+          .from("leads")
+          .update({ course_id: selectedCourse.id, campus_id: selectedCourse.campus_id } as any)
+          .eq("id", leadId);
+        if (leadError) throw leadError;
+
+        await supabase.from("lead_activities").insert({
+          lead_id: leadId,
+          type: "system",
+          description: `Application program changed from ${previousPrimary?.course_name || lead?.course?.name || "Unassigned"} to ${selectedCourse.name}`,
+        } as any);
+      }
+
+      await insertApplicationAudit(
+        "course_preferences",
+        "course_selections.0",
+        previousPrimary ? {
+          course_id: previousPrimary.course_id || lead?.course_id || null,
+          course_name: previousPrimary.course_name || lead?.course?.name || null,
+          campus_id: previousPrimary.campus_id || lead?.campus_id || null,
+          campus_name: previousPrimary.campus_name || null,
+        } : null,
+        {
+          course_id: selectedCourse.id,
+          course_name: selectedCourse.name,
+          campus_id: selectedCourse.campus_id,
+          campus_name: selectedCourse.campus_name,
+        },
+        { auth_user_id: user?.id ?? null, display_name: profile?.display_name || null },
+      );
+
+      setProgramDialogOpen(false);
+      setApp((prev: any) => prev ? { ...prev, ...appUpdates } : prev);
+      setLead((prev) => prev ? {
+        ...prev,
+        course_id: selectedCourse.id,
+        campus_id: selectedCourse.campus_id,
+        course: {
+          name: selectedCourse.name,
+          code: selectedCourse.code,
+          duration_years: selectedCourse.duration_years,
+          eligibility: null,
+          entrance_exam: null,
+          entrance_mandatory: null,
+        },
+      } : prev);
+      toast({ title: "Program updated", description: `${app.full_name}'s application now points to ${selectedCourse.name}.` });
+      await refresh();
+    } catch (e: any) {
+      toast({ title: "Couldn't update program", description: e?.message || "Please try again.", variant: "destructive" });
+    } finally {
+      setSavingProgram(false);
+    }
+  };
+
   const deleteApplication = async () => {
     if (!app || role !== "super_admin") return;
     const paidDeleteConfirmation = app.payment_status === "paid"
@@ -806,6 +957,38 @@ export default function AdminApplicationView() {
         </div>
       </div>
 
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary">
+              <GraduationCap className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Program / Course</p>
+              <p className="text-sm font-semibold text-foreground truncate">{currentCourseName}</p>
+              {currentCampusName && <p className="text-xs text-muted-foreground truncate">{currentCampusName}</p>}
+              {hasOffer && (
+                <p className="mt-1 text-[11px] text-amber-700">
+                  Existing offer letters remain unchanged. Regenerate or edit the offer letter if it should use the new program.
+                </p>
+              )}
+            </div>
+          </div>
+          {canEditProgram && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              onClick={openProgramEditor}
+              disabled={courseOptionsLoading || savingProgram}
+            >
+              {savingProgram ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pencil className="h-3.5 w-3.5" />}
+              Edit Program
+            </Button>
+          )}
+        </div>
+      </div>
+
       {/* Lifecycle stepper — visual journey from submission → admission.
           Wrapped in a section-level error boundary so a single broken stage
           render doesn't white-screen the whole admin page. */}
@@ -976,6 +1159,62 @@ export default function AdminApplicationView() {
       />
 
       <ApplicationPreview app={app} docs={docs} cahetRegistration={cahetRegistration} />
+
+      <Dialog open={programDialogOpen} onOpenChange={(open) => {
+        if (!savingProgram) setProgramDialogOpen(open);
+      }}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Edit Program</DialogTitle>
+            <DialogDescription>
+              Change the primary course/class on this submitted application. The linked lead will be kept in sync.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-lg border border-border bg-muted/30 p-3 text-xs">
+              <p className="font-medium text-foreground">{currentCourseName}</p>
+              {currentCampusName && <p className="text-muted-foreground">{currentCampusName}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground" htmlFor="application-program-course">
+                New program / course
+              </label>
+              <select
+                id="application-program-course"
+                value={editCourseId}
+                onChange={(event) => setEditCourseId(event.target.value)}
+                disabled={courseOptionsLoading || savingProgram}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="">{courseOptionsLoading ? "Loading programs..." : "Select program"}</option>
+                {sortedCourseOptions.map((course) => (
+                  <option key={course.id} value={course.id}>
+                    {course.campus_name} - {course.department_name} - {course.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {app.form_pdf_url && (
+              <p className="text-[11px] text-muted-foreground">
+                The existing application form PDF link will be cleared so a corrected form PDF can be generated.
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setProgramDialogOpen(false)} disabled={savingProgram}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={saveProgramChange}
+              disabled={savingProgram || !editCourseId || editCourseId === currentCourseOption?.id}
+            >
+              {savingProgram && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+              Save Program
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={showDeleteConfirm} onOpenChange={(open) => {
         setShowDeleteConfirm(open);
