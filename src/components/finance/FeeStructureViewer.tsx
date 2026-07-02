@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, ChevronDown, ChevronUp, Building2 } from "lucide-react";
 import { ScholarshipPanel } from "./ScholarshipPanel";
+import { formatFeeTerm } from "@/lib/schoolFeeProposal";
 
 const categoryBadge: Record<string, string> = {
   tuition: "bg-pastel-blue", lab: "bg-pastel-purple", enrollment: "bg-pastel-green",
@@ -248,6 +249,12 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
   }
 
   const fmt = (n: number) => `₹${n.toLocaleString("en-IN")}`;
+
+  const sectionTotalLabel = (items: FeeItem[]) => {
+    const terms = Array.from(new Set(items.map((item) => String(item.term || "").trim().toLowerCase().replace(/[\s-]+/g, "_")).filter(Boolean)));
+    const isQuarterlyAnnual = terms.length > 1 && terms.every((term) => /^q[1-4]$/.test(term) || /^quarter_[1-4]$/.test(term));
+    return isQuarterlyAnnual ? "Annual total" : "Total";
+  };
 
   // Collect year-wise data from metadata (year_1, year_2, ... keys or years/year_wise array)
   type PeriodData = { year: number; label: string; fee: number; discount: number; discountCondition: string; installmentCount: number; paymentNote: string };
@@ -554,7 +561,7 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                 items.map((item, i) => (
                   <tr key={i} className="border-b border-border/40 last:border-0">
                     <td className="px-3 py-2 text-foreground">{item.name}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{item.term}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{formatFeeTerm(item.term)}</td>
                     <td className="px-3 py-2 text-right font-semibold text-foreground">{fmt(item.amount)}</td>
                   </tr>
                 ));
@@ -577,7 +584,8 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                       </thead>
                       <tbody>{renderItemRows(items)}</tbody>
                     </table>
-                    <div className="px-3 py-1.5 bg-muted/20 border-t border-border/40 flex items-center justify-end">
+                    <div className="px-3 py-1.5 bg-muted/20 border-t border-border/40 flex items-center justify-between">
+                      <span className="text-[11px] font-medium text-muted-foreground">{sectionTotalLabel(items)}</span>
                       <span className="text-[11px] font-semibold text-foreground">{fmt(total)}</span>
                     </div>
                   </div>
@@ -653,8 +661,9 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                                   </tr></thead>
                                   <tbody>{renderItemRows(selectedItems)}</tbody>
                                 </table>
-                                <div className="px-3 py-1.5 bg-pastel-mint/20 border-t border-border/40 flex items-center justify-end">
-                                  <span className="text-[11px] font-semibold text-foreground">{fmt(selectedTotal)}/year</span>
+                                <div className="px-3 py-1.5 bg-pastel-mint/20 border-t border-border/40 flex items-center justify-between">
+                                  <span className="text-[11px] font-medium text-muted-foreground">Annual total</span>
+                                  <span className="text-[11px] font-semibold text-foreground">{fmt(selectedTotal)}</span>
                                 </div>
                               </>
                             )}
@@ -740,8 +749,9 @@ export function FeeStructureViewer({ courseId, compact = false, showFilter = fal
                               </tr></thead>
                               <tbody>{renderItemRows(selectedZoneItems)}</tbody>
                             </table>
-                            <div className="px-3 py-1.5 bg-pastel-yellow/20 border-t border-border/40 flex items-center justify-end">
-                              <span className="text-[11px] font-semibold text-foreground">{fmt(selectedZoneTotal)}/year</span>
+                            <div className="px-3 py-1.5 bg-pastel-yellow/20 border-t border-border/40 flex items-center justify-between">
+                              <span className="text-[11px] font-medium text-muted-foreground">Annual total</span>
+                              <span className="text-[11px] font-semibold text-foreground">{fmt(selectedZoneTotal)}</span>
                             </div>
                           </>
                         )}

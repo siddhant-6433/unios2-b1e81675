@@ -46,6 +46,7 @@ const ScorePopup            = lazy(() => import("@/components/admissions/ScorePo
 // Lazy: dialogs — only loaded when the user opens them
 const InterviewScoringDialog       = lazy(() => import("@/components/admissions/InterviewScoringDialog").then(m => ({ default: m.InterviewScoringDialog })));
 const OfferLetterDialog            = lazy(() => import("@/components/admissions/OfferLetterDialog").then(m => ({ default: m.OfferLetterDialog })));
+const SchoolFeeProposalDialog      = lazy(() => import("@/components/admissions/SchoolFeeProposalDialog").then(m => ({ default: m.SchoolFeeProposalDialog })));
 const ConvertToStudentDialog       = lazy(() => import("@/components/admissions/ConvertToStudentDialog").then(m => ({ default: m.ConvertToStudentDialog })));
 const SendWhatsAppDialog           = lazy(() => import("@/components/leads/SendWhatsAppDialog").then(m => ({ default: m.SendWhatsAppDialog })));
 const AddSecondaryCounsellorDialog = lazy(() => import("@/components/leads/AddSecondaryCounsellorDialog").then(m => ({ default: m.AddSecondaryCounsellorDialog })));
@@ -113,6 +114,7 @@ const LeadDetail = () => {
   const [courses, setCourses] = useState<any[]>([]);
   const [showInterview, setShowInterview] = useState(false);
   const [showOfferLetter, setShowOfferLetter] = useState(false);
+  const [showFeeProposal, setShowFeeProposal] = useState(false);
   const [showConvert, setShowConvert] = useState(false);
   const [showWhatsApp, setShowWhatsApp] = useState(false);
   const [aiCalling, setAiCalling] = useState(false);
@@ -1215,6 +1217,7 @@ const LeadDetail = () => {
         const canIssueOffer = appSubmittedOrLater && (
           role === "super_admin" || role === "principal" || role === "counsellor" || role === "admission_head" || role === "campus_admin"
         );
+        const canCreateProposal = role === "super_admin" || role === "principal" || role === "counsellor" || role === "admission_head" || role === "campus_admin";
         const offerDisabledReason = !appSubmittedOrLater
           ? "Offer can only be issued after application is submitted"
           : !canIssueOffer
@@ -1249,6 +1252,13 @@ const LeadDetail = () => {
             action: () => setShowOfferLetter(true),
             disabled: !canIssueOffer,
             tooltip: offerDisabledReason,
+          },
+          {
+            icon: School, label: "Fee Proposal",
+            color: "text-lime-700 bg-lime-100 dark:bg-lime-900/30",
+            action: () => setShowFeeProposal(true),
+            disabled: !canCreateProposal,
+            tooltip: canCreateProposal ? undefined : "You do not have permission to create fee proposals",
           },
           // Payment only visible for super_admin
           ...(canRecordPayment ? [{
@@ -1596,6 +1606,11 @@ const LeadDetail = () => {
         leadId={lead.id} leadName={lead.name} currentScore={lead.interview_score} currentResult={lead.interview_result} onSuccess={() => fetchAll(true)} />
       <OfferLetterDialog open={showOfferLetter} onOpenChange={setShowOfferLetter}
         leadId={lead.id} leadName={lead.name} courseId={lead.course_id} courseName={courseName} campusId={lead.campus_id} onSuccess={() => fetchAll(true)} />
+      <SchoolFeeProposalDialog
+        open={showFeeProposal}
+        onOpenChange={setShowFeeProposal}
+        lead={{ id: lead.id, name: lead.name, phone: lead.phone }}
+      />
       <ConvertToStudentDialog open={showConvert} onOpenChange={setShowConvert} lead={lead} courseName={courseName} campusName={campusName} onSuccess={() => fetchAll(true)} />
       <SendWhatsAppDialog
         open={showWhatsApp}

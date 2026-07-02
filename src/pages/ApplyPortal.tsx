@@ -1523,7 +1523,6 @@ const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: Porta
   const [dashboardOpenAppId, setDashboardOpenAppId] = useState<string | null>(null);
   const [offerLetters, setOfferLetters] = useState<Record<string, { letter_url: string | null; approval_status: string }>>({});
   const [leadAdmissions, setLeadAdmissions] = useState<Record<string, { pre_admission_no: string | null; admission_no: string | null }>>({});
-  const [generatingApplicationPdf, setGeneratingApplicationPdf] = useState(false);
 
   // Auto-open the token fee panel for whichever app has an approved offer,
   // but only if the user hasn't manually toggled something already.

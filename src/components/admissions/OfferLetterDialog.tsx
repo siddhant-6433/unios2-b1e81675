@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -29,6 +29,13 @@ import { chooseOfferSessionId, feeBackedSessionIds, type OfferSessionOption } fr
 import { resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { applyResolvedLeadTransition } from "@/lib/leadTransitionCommands";
 import { feeTermLabel } from "@/lib/feeTermLabels";
+import {
+  buildOfferWaiversFromFeeProposalChild,
+  feeProposalChildKey,
+  feeProposalChildLabel,
+  proposalFeeSnapshotDiff,
+  type FeeProposalChildLike,
+} from "@/lib/feeProposalOfferMapping";
 import { collectOfferFeeTermTotals, firstOfferFeeTerm } from "@/lib/offerFeeTerms";
 
 interface OfferLetterDialogProps {
@@ -36,6 +43,7 @@ interface OfferLetterDialogProps {
   onOpenChange: (open: boolean) => void;
   leadId: string;
   leadName: string;
+  applicationId?: string | null;
   courseId: string | null;
   courseName?: string | null;
   campusId: string | null;
@@ -66,6 +74,8 @@ interface OfferLetter {
   token_fee_user_edited?: boolean | null;
   admission_mode?: "direct" | "entrance" | null;
   entrance_exam_name?: string | null;
+  source_fee_proposal_id?: string | null;
+  source_fee_proposal_child_key?: string | null;
 }
 
 type SessionOption = OfferSessionOption;
@@ -88,6 +98,28 @@ interface OfferWaiver {
   approved_by_name: string | null;
   rejection_reason: string | null;
   created_at: string;
+  source_type?: "manual" | "fee_proposal" | null;
+  source_fee_proposal_id?: string | null;
+  source_fee_proposal_child_key?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+interface ApprovedFeeProposal {
+  id: string;
+  lead_id: string | null;
+  linked_lead_ids?: string[] | null;
+  status: string;
+  proposal: {
+    children?: FeeProposalChildLike[];
+    full_year_payment?: {
+      extra_waiver_amount?: number | string | null;
+    } | null;
+  } | null;
+  annual_total?: number | string | null;
+  payable_at_admission?: number | string | null;
+  revision_number?: number | null;
+  is_current?: boolean | null;
+  created_at?: string | null;
 }
 
 interface OfferLetterEditRequest {
@@ -129,7 +161,7 @@ function parseTokenFeeFromEditReason(reason: string | null | undefined): number 
   return Number.isFinite(amount) && amount > 0 ? amount : null;
 }
 
-export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, courseId, courseName, campusId, cahetRegistration: cahetRegistrationProp, updeledRegistration: updeledRegistrationProp, onSuccess }: OfferLetterDialogProps) {
+export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, applicationId, courseId, courseName, campusId, cahetRegistration: cahetRegistrationProp, updeledRegistration: updeledRegistrationProp, onSuccess }: OfferLetterDialogProps) {
   const { user, role } = useAuth();
   const { toast } = useToast();
   const [offers, setOffers] = useState<OfferLetter[]>([]);
@@ -175,6 +207,9 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   const [preWaivers, setPreWaivers] = useState<{ term: string; amount: number; reason: string }[]>([]);
   const [showPreWaiverForm, setShowPreWaiverForm] = useState(false);
   const [preWaiverForm, setPreWaiverForm] = useState<{ term: string; amount: string; reason: string }>({ term: "year_1", amount: "", reason: "" });
+  const [approvedFeeProposals, setApprovedFeeProposals] = useState<ApprovedFeeProposal[]>([]);
+  const [selectedFeeProposalId, setSelectedFeeProposalId] = useState("");
+  const [selectedProposalChildKey, setSelectedProposalChildKey] = useState("");
   const [deletingOfferId, setDeletingOfferId] = useState<string | null>(null);
   const [courseOptions, setCourseOptions] = useState<CourseOption[]>([]);
   // Edit requests
@@ -223,7 +258,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       if (offerIds.length > 0) {
         const { data: waiverRows } = await supabase
           .from("offer_waivers")
-          .select("id, offer_letter_id, term, amount, reason, status, requested_by_name, requested_by_role, approved_by_name, rejection_reason, created_at")
+          .select("id, offer_letter_id, term, amount, reason, status, requested_by_name, requested_by_role, approved_by_name, rejection_reason, created_at, source_type, source_fee_proposal_id, source_fee_proposal_child_key, metadata")
           .in("offer_letter_id", offerIds)
           .order("created_at", { ascending: true });
         const grouped: Record<string, OfferWaiver[]> = {};
@@ -262,7 +297,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     setRegeneratingId(offerId);
     try {
       const { error } = await supabase.functions.invoke("generate-offer-letter", {
-        body: { offer_letter_id: offerId },
+        body: { offer_letter_id: offerId, application_id: applicationId || undefined },
       });
       if (error) {
         toast({ title: "Couldn't generate PDF", description: error.message, variant: "destructive" });
@@ -279,6 +314,41 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   };
 
   useEffect(() => { if (open) fetchOffers(); }, [open]);
+
+  useEffect(() => {
+    if (!open || !leadId) return;
+    let cancelled = false;
+    (async () => {
+      const selectCols = "id, lead_id, linked_lead_ids, status, proposal, annual_total, payable_at_admission, revision_number, is_current, created_at";
+      const [primary, linked] = await Promise.all([
+        supabase
+          .from("fee_proposals" as any)
+          .select(selectCols)
+          .eq("lead_id", leadId)
+          .eq("status", "approved")
+          .eq("is_current", true)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("fee_proposals" as any)
+          .select(selectCols)
+          .contains("linked_lead_ids", [leadId])
+          .eq("status", "approved")
+          .eq("is_current", true)
+          .order("created_at", { ascending: false }),
+      ]);
+
+      if (cancelled) return;
+      const byId = new Map<string, ApprovedFeeProposal>();
+      for (const row of ([...(primary.data || []), ...(linked.data || [])] as ApprovedFeeProposal[])) {
+        if (!row?.id) continue;
+        byId.set(row.id, row);
+      }
+      setApprovedFeeProposals(Array.from(byId.values()).sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || ""))));
+    })().catch(() => {
+      if (!cancelled) setApprovedFeeProposals([]);
+    });
+    return () => { cancelled = true; };
+  }, [open, leadId]);
 
   useEffect(() => {
     if (!open) return;
@@ -413,8 +483,41 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   // form no longer asks the user to type it.
   const programmeTotal = yearTotals.reduce((sum, y) => sum + y.total, 0);
   const preWaiverTotal = preWaivers.reduce((sum, waiver) => sum + Number(waiver.amount || 0), 0);
-  const previewNetFee = Math.max(0, programmeTotal - preWaiverTotal);
   const selectedSessionName = sessions.find(s => s.id === form.session_id)?.name || null;
+  const selectedFeeProposal = approvedFeeProposals.find(p => p.id === selectedFeeProposalId) || null;
+  const proposalChildOptions = useMemo(() => {
+    if (!selectedFeeProposal) return [];
+    return (selectedFeeProposal.proposal?.children || [])
+      .map((child, index) => ({
+        child,
+        index,
+        key: feeProposalChildKey(child, index),
+        label: feeProposalChildLabel(child, `Student ${index + 1}`),
+      }))
+      .filter(({ child }) => {
+        const leadMatches = !child.lead_id || child.lead_id === leadId;
+        const courseMatches = !courseId || !child.course_id || child.course_id === courseId;
+        return leadMatches && courseMatches;
+      });
+  }, [selectedFeeProposal, leadId, courseId]);
+  const selectedProposalChildOption =
+    proposalChildOptions.find(option => option.key === selectedProposalChildKey) ||
+    (proposalChildOptions.length === 1 ? proposalChildOptions[0] : null);
+  const importedProposalWaivers = selectedFeeProposal && selectedProposalChildOption
+    ? buildOfferWaiversFromFeeProposalChild({
+        proposalId: selectedFeeProposal.id,
+        revisionNumber: selectedFeeProposal.revision_number,
+        childKey: selectedProposalChildOption.key,
+        child: selectedProposalChildOption.child,
+      })
+    : [];
+  const importedProposalWaiverTotal = importedProposalWaivers.reduce((sum, waiver) => sum + waiver.amount, 0);
+  const proposalMismatch = selectedProposalChildOption
+    ? proposalFeeSnapshotDiff(selectedProposalChildOption.child, programmeTotal)
+    : null;
+  const proposalLevelFullYearWaiver = Number(selectedFeeProposal?.proposal?.full_year_payment?.extra_waiver_amount || 0);
+  const previewWaiverTotal = preWaiverTotal + importedProposalWaiverTotal;
+  const previewNetFee = Math.max(0, programmeTotal - previewWaiverTotal);
   const selectedEntranceName = form.entrance_exam_name === "Other"
     ? form.entrance_exam_other.trim()
     : form.entrance_exam_name.trim();
@@ -433,6 +536,9 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   /** Sum of pre-issuance waivers already queued for the same term in the new-offer form. */
   const preWaiverTotalForTerm = (term: string): number =>
     preWaivers.filter(w => w.term === term).reduce((s, w) => s + Number(w.amount || 0), 0);
+
+  const importedProposalWaiverTotalForTerm = (term: string): number =>
+    importedProposalWaivers.filter(w => w.term === term).reduce((s, w) => s + Number(w.amount || 0), 0);
 
   /** Sum of post-issuance waivers (approved + pending) on an offer for the same term. */
   const offerWaiverTotalForTerm = (offerId: string, term: string): number =>
@@ -468,7 +574,10 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
   // Net first-period fee = gross first-period fee minus any matching waivers
   // already staged in the pre-issuance waiver list. The loan-letter token fee
   // defaults to 25% of this net figure.
-  const netFirstYearFee = Math.max(0, firstYearFee - preWaiverTotalForTerm(firstOfferTerm));
+  const netFirstYearFee = Math.max(
+    0,
+    firstYearFee - preWaiverTotalForTerm(firstOfferTerm) - importedProposalWaiverTotalForTerm(firstOfferTerm),
+  );
 
   // Token fee defaults to 25% of net Year-1. Admissions can lower it while
   // issuing the offer, but never below the course-specific seat-block floor.
@@ -486,6 +595,19 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     setTokenFeeEdited(false);
     setForm(p => ({ ...p, token_fee_amount: String(tokenDefault) }));
   }, [showForm, netFirstYearFee, tokenDefault]);
+
+  useEffect(() => {
+    if (!selectedFeeProposalId) {
+      if (selectedProposalChildKey) setSelectedProposalChildKey("");
+      return;
+    }
+    if (proposalChildOptions.length === 1 && selectedProposalChildKey !== proposalChildOptions[0].key) {
+      setSelectedProposalChildKey(proposalChildOptions[0].key);
+    }
+    if (proposalChildOptions.length > 1 && selectedProposalChildKey && !proposalChildOptions.some(option => option.key === selectedProposalChildKey)) {
+      setSelectedProposalChildKey("");
+    }
+  }, [selectedFeeProposalId, selectedProposalChildKey, proposalChildOptions]);
 
   const handleCreate = async () => {
     // Total fee is auto-derived from the published fee structure — no user input.
@@ -516,6 +638,14 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
     }
     if (form.admission_mode === "entrance" && !entranceName) {
       toast({ title: "Entrance details required", description: "Select the entrance/counselling route or type it under Other.", variant: "destructive" });
+      return;
+    }
+    if (selectedFeeProposal && !selectedProposalChildOption) {
+      toast({
+        title: "Select proposal student",
+        description: "This approved proposal has multiple or no matching students for the selected course. Choose the student to map before issuing.",
+        variant: "destructive",
+      });
       return;
     }
 
@@ -564,6 +694,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       approval_status: approvalStatus,
       approved_by: autoApproved ? user?.id || null : null,
       approved_at: autoApproved ? new Date().toISOString() : null,
+      source_fee_proposal_id: selectedFeeProposal && selectedProposalChildOption ? selectedFeeProposal.id : null,
+      source_fee_proposal_child_key: selectedFeeProposal && selectedProposalChildOption ? selectedProposalChildOption.key : null,
     } as any).select("id").single();
 
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); }
@@ -578,6 +710,28 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
             reason: w.reason || null,
           })) as any
         );
+      }
+      if (insertedOffer?.id && importedProposalWaivers.length > 0) {
+        const { error: proposalWaiverError } = await supabase.from("offer_waivers").insert(
+          importedProposalWaivers.map(w => ({
+            offer_letter_id: insertedOffer.id,
+            term: w.term,
+            amount: w.amount,
+            reason: w.reason,
+            status: "approved",
+            source_type: w.source_type,
+            source_fee_proposal_id: w.source_fee_proposal_id,
+            source_fee_proposal_child_key: w.source_fee_proposal_child_key,
+            metadata: w.metadata,
+          })) as any
+        );
+        if (proposalWaiverError) {
+          toast({
+            title: "Offer created, proposal waivers not copied",
+            description: proposalWaiverError.message,
+            variant: "destructive",
+          });
+        }
       }
       // Only advance lead stage if the offer is approved (not pending)
       if (autoApproved) {
@@ -630,6 +784,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
       setPreWaivers([]);
       setShowPreWaiverForm(false);
       setPreWaiverForm({ term: "year_1", amount: "", reason: "" });
+      setSelectedFeeProposalId("");
+      setSelectedProposalChildKey("");
       fetchOffers();
       onSuccess();
     }
@@ -1071,6 +1227,103 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                   </p>
                 </div>
 
+                {approvedFeeProposals.length > 0 && (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-xs space-y-2 dark:border-emerald-900/40 dark:bg-emerald-950/20">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-emerald-900 dark:text-emerald-100">
+                          Apply approved fee proposal
+                        </label>
+                        <p className="mt-0.5 text-[10px] text-emerald-800/80 dark:text-emerald-200/80">
+                          Optional. Selected proposal waivers are copied as approved offer waivers.
+                        </p>
+                      </div>
+                      {importedProposalWaiverTotal > 0 && (
+                        <Badge className="border-emerald-200 bg-white text-emerald-700 dark:bg-emerald-950">
+                          −₹{importedProposalWaiverTotal.toLocaleString("en-IN")}
+                        </Badge>
+                      )}
+                    </div>
+                    <select
+                      value={selectedFeeProposalId}
+                      onChange={(e) => {
+                        setSelectedFeeProposalId(e.target.value);
+                        setSelectedProposalChildKey("");
+                      }}
+                      className="w-full rounded-md border border-emerald-200 bg-background px-2 py-1.5 text-xs"
+                    >
+                      <option value="">Do not apply proposal</option>
+                      {approvedFeeProposals.map((proposal) => {
+                        const children = proposal.proposal?.children || [];
+                        const childNames = children.slice(0, 2).map((child, index) => feeProposalChildLabel(child, `Student ${index + 1}`).split(" - ")[0]).join(", ");
+                        const more = children.length > 2 ? ` +${children.length - 2}` : "";
+                        return (
+                          <option key={proposal.id} value={proposal.id}>
+                            Revision {proposal.revision_number || 1}{childNames ? ` - ${childNames}${more}` : ""} · payable ₹{Number(proposal.payable_at_admission || proposal.annual_total || 0).toLocaleString("en-IN")}
+                          </option>
+                        );
+                      })}
+                    </select>
+
+                    {selectedFeeProposal && proposalChildOptions.length !== 1 && (
+                      <div>
+                        <label className="block text-[10px] font-medium text-emerald-900 dark:text-emerald-100 mb-0.5">
+                          Proposal student <span className="text-destructive">*</span>
+                        </label>
+                        <select
+                          value={selectedProposalChildKey}
+                          onChange={(e) => setSelectedProposalChildKey(e.target.value)}
+                          className="w-full rounded-md border border-emerald-200 bg-background px-2 py-1.5 text-xs"
+                        >
+                          <option value="">Select student from proposal</option>
+                          {proposalChildOptions.map(option => (
+                            <option key={option.key} value={option.key}>{option.label}</option>
+                          ))}
+                        </select>
+                        {proposalChildOptions.length === 0 && (
+                          <p className="mt-1 text-[10px] text-amber-700">
+                            No child in this proposal matches this lead and course. Issue without proposal or choose a matching proposal.
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {selectedFeeProposal && selectedProposalChildOption && (
+                      <div className="space-y-1">
+                        <div className="rounded-md border border-emerald-200/80 bg-white/70 p-2 dark:bg-background/40">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-medium text-emerald-950 dark:text-emerald-100">
+                              {selectedProposalChildOption.label}
+                            </span>
+                            <span className="tabular-nums font-semibold text-emerald-700">
+                              {importedProposalWaiverTotal > 0 ? `−₹${importedProposalWaiverTotal.toLocaleString("en-IN")}` : "No waiver"}
+                            </span>
+                          </div>
+                          {importedProposalWaivers.length > 0 && (
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {importedProposalWaivers.map((waiver, index) => (
+                                <span key={`${waiver.term}-${index}`} className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-100">
+                                  {labelForTerm(waiver.term)}: ₹{waiver.amount.toLocaleString("en-IN")}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        {proposalMismatch?.hasMismatch && (
+                          <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+                            Fee structure changed since proposal: proposal gross ₹{proposalMismatch.proposalGross.toLocaleString("en-IN")}, current gross ₹{proposalMismatch.currentGross.toLocaleString("en-IN")}. You can still issue; the offer gross fee uses the current active structure.
+                          </p>
+                        )}
+                        {proposalLevelFullYearWaiver > 0 && (selectedFeeProposal.proposal?.children?.length || 0) > 1 && (
+                          <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+                            This proposal also has a proposal-level yearly-payment waiver of ₹{proposalLevelFullYearWaiver.toLocaleString("en-IN")}. It is not auto-split across children; add it manually if applicable.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Pre-issuance waivers — staged locally, inserted after offer creation */}
                 {yearTotals.length > 0 && (
                   <div>
@@ -1109,7 +1362,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                           </div>
                         ))}
                         {(() => {
-                          const totalWaiver = preWaivers.reduce((s, w) => s + w.amount, 0);
+                          const totalWaiver = preWaivers.reduce((s, w) => s + w.amount, 0) + importedProposalWaiverTotal;
                           const netFee = programmeTotal - totalWaiver;
                           return (
                             <div className="flex items-center justify-between px-2 py-1 text-xs font-semibold border-t border-border/40 pt-1.5 mt-1">
@@ -1375,6 +1628,8 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                     setPreWaivers([]);
                     setShowPreWaiverForm(false);
                     setPreWaiverForm({ term: "year_1", amount: "", reason: "" });
+                    setSelectedFeeProposalId("");
+                    setSelectedProposalChildKey("");
                   }}>Cancel</Button>
                 </div>
               </CardContent>
@@ -1421,6 +1676,11 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                           )}
                           {isApprovedOffer && (
                             <Badge className={`text-[10px] border-0 ${statusColors[offer.status] || "bg-muted"}`}>{offer.status}</Badge>
+                          )}
+                          {offer.source_fee_proposal_id && (
+                            <Badge className="text-[10px] border border-emerald-200 bg-emerald-50 text-emerald-700">
+                              Fee proposal
+                            </Badge>
                           )}
                           {isSuperAdmin && (
                             <button
@@ -1488,6 +1748,11 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                       <span className="font-semibold">{yearLabel}</span>
                                       <span className="text-foreground/70">−₹{Number(w.amount).toLocaleString("en-IN")}</span>
                                       <Badge className={`text-[9px] border ${statusCls}`}>{w.status}</Badge>
+                                      {w.source_type === "fee_proposal" && (
+                                        <Badge className="text-[9px] border border-emerald-200 bg-emerald-50 text-emerald-700">
+                                          Fee proposal
+                                        </Badge>
+                                      )}
                                     </div>
                                     {w.status === "pending" && isSuperAdmin && (
                                       <div className="flex gap-1">
@@ -1511,6 +1776,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                                   {(w.reason || w.requested_by_name || w.approved_by_name || w.rejection_reason) && (
                                     <div className="text-[10px] text-muted-foreground space-y-0.5">
                                       {w.reason && <div>Reason: {w.reason}</div>}
+                                      {w.source_type === "fee_proposal" && <div>Source: approved fee proposal</div>}
                                       {w.requested_by_name && (
                                         <div>Requested by {w.requested_by_name}{w.requested_by_role ? ` (${w.requested_by_role})` : ""}</div>
                                       )}
@@ -1858,7 +2124,7 @@ export function OfferLetterDialog({ open, onOpenChange, leadId, leadName, course
                           ["Admission Route", form.admission_mode === "entrance" ? `Entrance / Counselling${selectedEntranceName ? ` - ${selectedEntranceName}` : ""}` : "Direct Admission"],
                           ["Academic Session", selectedSessionName || "-"],
                           ["Programme Fee", programmeTotal > 0 ? `₹${programmeTotal.toLocaleString("en-IN")}` : "-"],
-                          ["Waivers / Discounts", preWaiverTotal > 0 ? `₹${preWaiverTotal.toLocaleString("en-IN")}` : "None"],
+                          ["Waivers / Discounts", previewWaiverTotal > 0 ? `₹${previewWaiverTotal.toLocaleString("en-IN")}` : "None"],
                           ["Net Programme Fee", previewNetFee > 0 ? `₹${previewNetFee.toLocaleString("en-IN")}` : "-"],
                           ["Token Fee Payable", Number(form.token_fee_amount || tokenDefault || 0) > 0 ? `₹${Number(form.token_fee_amount || tokenDefault || 0).toLocaleString("en-IN")}` : "-"],
                           ["Acceptance Deadline", form.acceptance_deadline ? new Date(form.acceptance_deadline).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "-"],
