@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   GraduationCap, CheckCircle, Loader2, LogOut, MapPin, Pencil, ChevronDown, ChevronUp,
-  FileText, Receipt, Award, Clock, Plus, Wallet, ArrowLeft, KeyRound,
+  FileText, Receipt, Award, Clock, Plus, Wallet, ArrowLeft, KeyRound, AlertCircle,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -922,6 +922,10 @@ type DashboardApp = {
   created_at: string;
 };
 
+type DashboardDocState = {
+  rejected: number;
+};
+
 const APPLICATION_FORM_PDF_STATUSES = new Set(["submitted", "under_review", "approved", "rejected"]);
 
 function statusBadge(status: string, paymentStatus: string | null) {
@@ -1085,6 +1089,7 @@ function ApplicationDashboardView({
   const [receiptApp, setReceiptApp] = useState<any | null>(null);
   const [generatedPdfUrls, setGeneratedPdfUrls] = useState<Record<string, string>>({});
   const [generatingPdfFor, setGeneratingPdfFor] = useState<string | null>(null);
+  const [docStates, setDocStates] = useState<Record<string, DashboardDocState>>({});
   const buildReceiptData = (a: any): ReceiptData => {
     const nameIsEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.full_name || "");
     const courses = (a.course_selections as any[]) || [];
@@ -1125,6 +1130,39 @@ function ApplicationDashboardView({
     }
   };
 
+  useEffect(() => {
+    let cancelled = false;
+    const reviewableApps = apps.filter((a: DashboardApp) =>
+      a.application_id && APPLICATION_FORM_PDF_STATUSES.has(a.status)
+    );
+
+    if (reviewableApps.length === 0) {
+      setDocStates({});
+      return;
+    }
+
+    Promise.all(reviewableApps.map(async (a: DashboardApp) => {
+      const { data } = await supabase.functions.invoke("list-app-docs", {
+        body: { application_id: a.application_id },
+      });
+      const docs = ((data as any)?.docs || []) as PreviewDoc[];
+      return [
+        a.application_id,
+        { rejected: docs.filter(d => d.review_status === "rejected").length },
+      ] as const;
+    }))
+      .then(entries => {
+        if (!cancelled) setDocStates(Object.fromEntries(entries));
+      })
+      .catch(() => {
+        if (!cancelled) setDocStates({});
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apps]);
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -1152,10 +1190,13 @@ function ApplicationDashboardView({
           // Priority-ordered state detection across all apps.
           const admittedApp  = apps.find((a: any) => a.lead_id && leadAdmissions[a.lead_id]?.admission_no);
           const preAdmitted  = !admittedApp && apps.find((a: any) => a.lead_id && leadAdmissions[a.lead_id]?.pre_admission_no);
+          const docActionApp = !admittedApp && !preAdmitted && apps.find((a: DashboardApp) =>
+            (docStates[a.application_id]?.rejected || 0) > 0
+          );
           const offerApp     = !admittedApp && !preAdmitted && apps.find((a: any) =>
             (a.lead_id ? offerLetters[a.lead_id] : undefined)?.approval_status === "approved"
           );
-          const reviewApp    = !admittedApp && !preAdmitted && !offerApp &&
+          const reviewApp    = !admittedApp && !preAdmitted && !docActionApp && !offerApp &&
             apps.find((a: any) => a.status === "submitted" || a.status === "under_review");
           const feeApp       = !admittedApp && !preAdmitted && !offerApp && !reviewApp &&
             apps.find((a: any) => a.status === "draft" && Number(a.fee_amount) > 0 && a.payment_status !== "paid");
@@ -1191,6 +1232,19 @@ function ApplicationDashboardView({
               <button onClick={() => onContinue(preAdmitted)}
                 className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-white/20 hover:bg-white/30 active:bg-white/40 transition-colors px-4 py-2.5 text-sm font-bold text-white">
                 Pay token fee to complete admission →
+              </button>
+            );
+          } else if (docActionApp) {
+            const rejectedCount = docStates[docActionApp.application_id]?.rejected || 0;
+            gradient      = "bg-gradient-to-br from-rose-600 to-red-700";
+            eyebrowColor  = "text-rose-100";
+            subtitleColor = "text-rose-50";
+            subtitle      = `${rejectedCount} document${rejectedCount === 1 ? "" : "s"} need re-upload`;
+            cardIcon      = <AlertCircle className="h-10 w-10 text-white/30 shrink-0 mt-0.5" />;
+            cta = (
+              <button onClick={() => onContinue(docActionApp)}
+                className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-white/20 hover:bg-white/30 active:bg-white/40 transition-colors px-4 py-2.5 text-sm font-bold text-white">
+                Re-upload rejected documents →
               </button>
             );
           } else if (offerApp) {
@@ -1265,9 +1319,13 @@ function ApplicationDashboardView({
           const isUnderReview = a.status === "submitted" || a.status === "under_review";
           const formPdfUrl = generatedPdfUrls[a.id] || a.form_pdf_url;
           const isOpen = openAppId === a.id;
+          const rejectedDocCount = docStates[a.application_id]?.rejected || 0;
+          const needsDocReupload = rejectedDocCount > 0 && !isAdmitted;
 
           // Card accent colour by state
-          const accentClass = hasApprovedOffer
+          const accentClass = needsDocReupload
+            ? "border-rose-200 bg-white"
+            : hasApprovedOffer
             ? "border-blue-200 bg-white"
             : isUnderReview
             ? "border-emerald-200 bg-white"
@@ -1293,7 +1351,15 @@ function ApplicationDashboardView({
                   </a>
                 </div>
               )}
-              {!isAdmitted && hasApprovedOffer && (
+              {needsDocReupload && (
+                <div className="bg-gradient-to-r from-rose-600 to-red-600 px-4 py-2.5 flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-white shrink-0" />
+                  <span className="text-xs font-bold text-white tracking-wide">
+                    {rejectedDocCount} document{rejectedDocCount === 1 ? "" : "s"} need re-upload
+                  </span>
+                </div>
+              )}
+              {!needsDocReupload && !isAdmitted && hasApprovedOffer && (
                 <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2.5 flex items-center gap-2">
                   <Award className="h-4 w-4 text-yellow-300 shrink-0" />
                   <span className="text-xs font-bold text-white tracking-wide">
@@ -1301,7 +1367,7 @@ function ApplicationDashboardView({
                   </span>
                 </div>
               )}
-              {isUnderReview && !hasApprovedOffer && (
+              {!needsDocReupload && isUnderReview && !hasApprovedOffer && (
                 <div className="bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-2.5 flex items-center gap-2">
                   <CheckCircle className="h-4 w-4 text-white shrink-0" />
                   <span className="text-xs font-bold text-white tracking-wide">Application Submitted · Under Review</span>
@@ -1332,7 +1398,12 @@ function ApplicationDashboardView({
                 </div>
 
                 {/* What happens next hint */}
-                {isUnderReview && !hasApprovedOffer && (
+                {needsDocReupload && (
+                  <div className="rounded-xl bg-rose-50 border border-rose-100 px-3 py-2.5 text-xs text-rose-700">
+                    One or more documents were rejected by admissions. Re-upload the corrected file so review can continue.
+                  </div>
+                )}
+                {!needsDocReupload && isUnderReview && !hasApprovedOffer && (
                   <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2.5 text-xs text-emerald-700">
                     Our admissions team is reviewing your application. You'll be notified once an offer is issued.
                   </div>
@@ -1345,7 +1416,14 @@ function ApplicationDashboardView({
 
                 {/* Action buttons */}
                 <div className="flex flex-wrap gap-2">
-                  {isDraft ? (
+                  {needsDocReupload ? (
+                    <button
+                      onClick={() => onContinue(a)}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white hover:bg-rose-700 active:scale-95 transition-all"
+                    >
+                      <AlertCircle className="h-3.5 w-3.5" /> Re-upload Documents
+                    </button>
+                  ) : isDraft ? (
                     <button
                       onClick={() => onContinue(a)}
                       className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700 active:scale-95 transition-all"

@@ -154,6 +154,26 @@ const clean = (value?: string | null) => {
   return trimmed ? trimmed : null;
 };
 
+const normalizedPhone = (value?: string | null) => {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (!digits) return "";
+  return digits.length === 12 && digits.startsWith("91") ? digits.slice(2) : digits;
+};
+
+const comparableName = (value?: string | null) => String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+
+const sameName = (a?: string | null, b?: string | null) => {
+  const left = comparableName(a);
+  const right = comparableName(b);
+  return !!left && left === right;
+};
+
+const samePhone = (a?: string | null, b?: string | null) => {
+  const left = normalizedPhone(a);
+  const right = normalizedPhone(b);
+  return !!left && left === right;
+};
+
 const isGradeLike = (value?: string | null) =>
   !!clean(value) && /^(grade|class|std)\s*[0-9ivx]+$|^(toddler|nursery|lkg|ukg)$/i.test(clean(value)!);
 
@@ -184,10 +204,17 @@ interface SiblingRecord {
   id: string;
   name: string;
   admission_no: string | null;
+  pre_admission_no: string | null;
   section: string | null;
   status: string | null;
+  father_name: string | null;
+  father_phone: string | null;
   father_user_id: string | null;
+  mother_name: string | null;
+  mother_phone: string | null;
   mother_user_id: string | null;
+  guardian_name: string | null;
+  guardian_phone: string | null;
   guardian_user_id: string | null;
   courses?: { name: string | null } | null;
   relationship?: string;
@@ -399,27 +426,76 @@ const StudentProfile = () => {
       setStudentDocs((studentDocsRes.data ?? []) as StudentDocument[]);
       setAuditRows((auditRes.data ?? []) as StudentAuditRow[]);
 
-      // Sibling lookup
-      const orParts: string[] = [];
-      if (currentStudent.father_user_id) orParts.push(`father_user_id.eq.${currentStudent.father_user_id}`);
-      if (currentStudent.mother_user_id) orParts.push(`mother_user_id.eq.${currentStudent.mother_user_id}`);
-      if (currentStudent.guardian_user_id) orParts.push(`guardian_user_id.eq.${currentStudent.guardian_user_id}`);
-
-      if (orParts.length > 0) {
-        const { data: sibs } = await supabase.from("students")
-          .select("id, name, admission_no, course_id, section, status, father_user_id, mother_user_id, guardian_user_id, courses:course_id(name)")
-          .or(orParts.join(","))
-          .neq("id", currentStudent.id);
-        if (sibs) setSiblings((sibs as SiblingRecord[]).map(s => {
+      // Sibling lookup. Parent auth IDs are best, but bulk imports usually only
+      // have parent phones/names, so include those as family signals.
+      const siblingSelect = "id, name, admission_no, pre_admission_no, course_id, section, status, father_name, father_phone, father_user_id, mother_name, mother_phone, mother_user_id, guardian_name, guardian_phone, guardian_user_id, courses:course_id(name)";
+      const siblingMap = new Map<string, SiblingRecord>();
+      const addSiblingRows = (rows: unknown[] | null | undefined) => {
+        for (const row of (rows || []) as SiblingRecord[]) {
           const rels: string[] = [];
-          if (currentStudent.father_user_id && s.father_user_id === currentStudent.father_user_id) rels.push("Same Father");
-          if (currentStudent.mother_user_id && s.mother_user_id === currentStudent.mother_user_id) rels.push("Same Mother");
-          if (currentStudent.guardian_user_id && s.guardian_user_id === currentStudent.guardian_user_id) rels.push("Same Guardian");
-          return { ...s, relationship: rels.join(", ") || "Sibling" };
-        }));
-      } else {
-        setSiblings([]);
+          if (currentStudent.father_user_id && row.father_user_id === currentStudent.father_user_id) rels.push("Same Father Account");
+          if (currentStudent.mother_user_id && row.mother_user_id === currentStudent.mother_user_id) rels.push("Same Mother Account");
+          if (currentStudent.guardian_user_id && row.guardian_user_id === currentStudent.guardian_user_id) rels.push("Same Guardian Account");
+          if (samePhone(currentStudent.father_phone, row.father_phone)) rels.push("Same Father Phone");
+          if (samePhone(currentStudent.mother_phone, row.mother_phone)) rels.push("Same Mother Phone");
+          if (samePhone(currentStudent.guardian_phone, row.guardian_phone)) rels.push("Same Guardian Phone");
+          if (sameName(currentStudent.father_name, row.father_name) && sameName(currentStudent.mother_name, row.mother_name)) rels.push("Same Parent Names");
+          else if (sameName(currentStudent.guardian_name, row.guardian_name)) rels.push("Same Guardian Name");
+          siblingMap.set(row.id, { ...row, relationship: rels.join(", ") || "Sibling" });
+        }
+      };
+
+      const idParts: string[] = [];
+      if (currentStudent.father_user_id) idParts.push(`father_user_id.eq.${currentStudent.father_user_id}`);
+      if (currentStudent.mother_user_id) idParts.push(`mother_user_id.eq.${currentStudent.mother_user_id}`);
+      if (currentStudent.guardian_user_id) idParts.push(`guardian_user_id.eq.${currentStudent.guardian_user_id}`);
+      if (idParts.length > 0) {
+        const { data: byAccount } = await supabase.from("students")
+          .select(siblingSelect)
+          .or(idParts.join(","))
+          .neq("id", currentStudent.id);
+        addSiblingRows(byAccount);
       }
+
+      const phones = Array.from(new Set([
+        normalizedPhone(currentStudent.father_phone),
+        normalizedPhone(currentStudent.mother_phone),
+        normalizedPhone(currentStudent.guardian_phone),
+      ].filter(Boolean)));
+      if (phones.length > 0) {
+        const phoneParts = phones.flatMap(phone => [
+          `father_phone.eq.${phone}`,
+          `father_phone.eq.+91${phone}`,
+          `mother_phone.eq.${phone}`,
+          `mother_phone.eq.+91${phone}`,
+          `guardian_phone.eq.${phone}`,
+          `guardian_phone.eq.+91${phone}`,
+        ]);
+        const { data: byPhone } = await supabase.from("students")
+          .select(siblingSelect)
+          .or(phoneParts.join(","))
+          .neq("id", currentStudent.id);
+        addSiblingRows(byPhone);
+      }
+
+      if (clean(currentStudent.father_name) && clean(currentStudent.mother_name)) {
+        const { data: byParentNames } = await supabase.from("students")
+          .select(siblingSelect)
+          .eq("father_name", currentStudent.father_name)
+          .eq("mother_name", currentStudent.mother_name)
+          .neq("id", currentStudent.id);
+        addSiblingRows(byParentNames);
+      }
+
+      if (clean(currentStudent.guardian_name)) {
+        const { data: byGuardianName } = await supabase.from("students")
+          .select(siblingSelect)
+          .eq("guardian_name", currentStudent.guardian_name)
+          .neq("id", currentStudent.id);
+        addSiblingRows(byGuardianName);
+      }
+
+      setSiblings(Array.from(siblingMap.values()));
 
       // Lead documents + application documents
       if (currentStudent.lead_id) {
@@ -1051,7 +1127,7 @@ const StudentProfile = () => {
                       {siblings.map((sib) => (
                         <tr key={sib.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
                           <td className="px-4 py-2.5">
-                            <Link to={`/students/${sib.admission_no}`} className="font-medium text-primary hover:underline">
+                            <Link to={`/students/${sib.admission_no || sib.pre_admission_no}`} className="font-medium text-primary hover:underline">
                               {sib.name}
                             </Link>
                           </td>

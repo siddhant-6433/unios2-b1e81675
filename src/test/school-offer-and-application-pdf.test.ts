@@ -43,8 +43,8 @@ describe("school offer letter and application PDF recovery", () => {
     expect(offerFunction).toContain('.from("applications")');
     expect(offerFunction).toContain('.eq("lead_id", offer.lead_id)');
     expect(offerFunction).toContain('.eq("id", lead.application_id)');
-    expect(offerFunction).toContain('appId: opts.applicationId || (!isUuidLike(opts.lead.application_id) ? opts.lead.application_id : null)');
-    expect(offerFunction).toContain('value: opts.applicationId || (!isUuidLike(opts.lead.application_id) ? opts.lead.application_id : null) || "-"');
+    expect(offerFunction).toContain("appId: opts.applicationId || publicApplicationRef(opts.lead.application_id) || opts.lead.pre_admission_no");
+    expect(offerFunction).toContain('value: opts.applicationId || publicApplicationRef(opts.lead.application_id) || opts.lead.pre_admission_no || "-"');
     expect(offerFunction).not.toContain("let applicationId: string | null = lead?.application_id || null");
   });
 

@@ -143,7 +143,8 @@ const isGradeLike = (value?: string | null) =>
 const isSchoolStudent = (student: StudentRow) =>
   student.course_type === "school" ||
   !!gradeFromCourseCode(student.course_code) ||
-  isGradeLike(student.course_name);
+  isGradeLike(student.course_name) ||
+  isGradeLike(student.joining_class);
 
 const getClassLabel = (student: StudentRow) => {
   if (!isSchoolStudent(student)) return null;

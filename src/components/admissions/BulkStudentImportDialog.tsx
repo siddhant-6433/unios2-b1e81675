@@ -18,18 +18,84 @@ interface Session   { id: string; name: string; }
 
 interface ParsedRow {
   name: string;
+  first_name: string;
+  middle_name: string;
+  last_name: string;
   dob: string;
   gender: string;
   grade: string;         // raw grade/course string from CSV
   current_term: string;
   section: string;
+  class_roll_no: string;
   admission_date: string;
   admission_no: string;  // existing admission no from previous system
   father_name: string;
   father_phone: string;
+  father_email: string;
+  father_occupation: string;
+  father_qualification: string;
+  father_income: string;
+  father_aadhar: string;
   mother_name: string;
   mother_phone: string;
+  mother_email: string;
+  mother_occupation: string;
+  mother_aadhar: string;
+  guardian_name: string;
+  guardian_phone: string;
+  address: string;
+  city: string;
+  state: string;
+  country: string;
+  pincode: string;
+  student_aadhar: string;
+  nationality: string;
+  religion: string;
+  caste: string;
+  sub_caste: string;
+  caste_category: string;
+  mother_tongue: string;
+  student_type: string;
+  school_admission_no: string;
+  whatsapp_no: string;
+  student_email: string;
+  previous_school: string;
+  previous_class: string;
+  joining_academic_year: string;
+  house: string;
+  blood_group: string;
+  height: string;
+  weight: string;
+  identification_marks_1: string;
+  identification_marks_2: string;
+  food_habits: string;
+  state_enrollment_no: string;
+  birth_place: string;
+  language_spoken: string;
+  sports: string;
+  second_language: string;
+  third_language: string;
+  bank_name: string;
+  ifsc_code: string;
+  bank_account_no: string;
+  fee_remarks: string;
+  transport_required: boolean | null;
+  tc_submitted: boolean | null;
+  dob_certificate_submitted: boolean | null;
+  marksheet_submitted: boolean | null;
+  rte_student: boolean | null;
+  pen: string;
+  udise: string;
+  apaar_id: string;
+  is_asthmatic: boolean | null;
+  allergies_medicine: string;
+  allergies_food: string;
+  vision: string;
+  medical_ailments: string;
+  physical_handicap: string;
   fee_type: string;
+  family_key: string;
+  sibling_count: number;
   // Resolved
   course_id: string | null;
   fee_version: "new_admission" | "existing_parent" | "standard" | "stetho_batch";
@@ -47,6 +113,12 @@ interface BulkStudentImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
+}
+
+interface ImportResult {
+  success: number;
+  failed: number;
+  errors: string[];
 }
 
 // Grade name variants → course code suffix (for school institutions)
@@ -134,13 +206,73 @@ function parseCsv(text: string): string[][] {
   return rows;
 }
 
+function headerKey(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function compactName(parts: Array<string | null | undefined>) {
+  return parts.map(p => String(p || "").trim()).filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+}
+
+function normalizePhone(value: string) {
+  const digits = value.replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length === 12 && digits.startsWith("91")) return digits.slice(2);
+  return digits;
+}
+
+function normalizeGender(value: string) {
+  const key = value.trim().toLowerCase();
+  if (key === "m" || key === "male") return "male";
+  if (key === "f" || key === "female") return "female";
+  if (key === "o" || key === "other") return "other";
+  return key;
+}
+
+function normalizeStudentType(value: string) {
+  const key = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (key === "day_scholar" || key === "dayscholar") return "day_scholar";
+  if (key === "boarder" || key === "hosteller" || key === "hostel") return "boarder";
+  return value.trim();
+}
+
+function parseYesNo(value: string): boolean | null {
+  const key = value.trim().toLowerCase();
+  if (["yes", "y", "true", "1"].includes(key)) return true;
+  if (["no", "n", "false", "0"].includes(key)) return false;
+  return null;
+}
+
+function familyKeyFor(row: Pick<ParsedRow, "father_phone" | "mother_phone" | "guardian_phone" | "father_name" | "mother_name" | "guardian_name">) {
+  const phone = [row.father_phone, row.mother_phone, row.guardian_phone].map(normalizePhone).find(Boolean);
+  if (phone) return `phone:${phone}`;
+
+  const father = row.father_name.trim().toLowerCase();
+  const mother = row.mother_name.trim().toLowerCase();
+  const guardian = row.guardian_name.trim().toLowerCase();
+  if (father && mother) return `parents:${father}|${mother}`;
+  if (guardian) return `guardian:${guardian}`;
+  if (father.length > 4) return `father:${father}`;
+  if (mother.length > 4) return `mother:${mother}`;
+  return "";
+}
+
+function withSiblingCounts(rows: ParsedRow[]) {
+  const counts = new Map<string, number>();
+  rows.forEach(row => {
+    if (!row.family_key) return;
+    counts.set(row.family_key, (counts.get(row.family_key) || 0) + 1);
+  });
+  return rows.map(row => ({ ...row, sibling_count: row.family_key ? counts.get(row.family_key) || 1 : 1 }));
+}
+
 export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkStudentImportDialogProps) {
   const { user } = useAuth();
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const [parsed, setParsed] = useState<ParsedRow[]>([]);
   const [importing, setImporting] = useState(false);
-  const [result, setResult] = useState<{ success: number; failed: number } | null>(null);
+  const [result, setResult] = useState<ImportResult | null>(null);
 
   const [allCampuses,   setAllCampuses]   = useState<Campus[]>([]);
   const [institutions,  setInstitutions]  = useState<Institution[]>([]);
@@ -223,30 +355,106 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
         toast({ title: "Error", description: "CSV must have a header row and data rows", variant: "destructive" });
         return;
       }
-      const headers = rows[0].map(h => h.toLowerCase().replace(/\s+/g, "_"));
-      const idx = (col: string) => headers.indexOf(col);
+      const headers = rows[0].map(headerKey);
+      const idx = (col: string) => headers.indexOf(headerKey(col));
 
-      if (idx("name") === -1) {
-        toast({ title: "Error", description: "CSV must have a 'name' column", variant: "destructive" });
+      const hasAny = (...cols: string[]) => cols.some(col => idx(col) !== -1);
+      if (!hasAny("name", "full_name", "student_first_name", "first_name")) {
+        toast({ title: "Error", description: "CSV must have a name, full_name, or student_first_name column", variant: "destructive" });
         return;
       }
 
       const data: ParsedRow[] = rows.slice(1).map(cols => {
-        const get = (col: string) => (cols[idx(col)] || "").trim();
-        const name         = get("name");
-        const dob          = get("dob");
-        const gender       = get("gender");
-        const grade        = get("grade") || get("class") || get("course") || get("programme");
+        const get = (...names: string[]) => {
+          for (const col of names) {
+            const index = idx(col);
+            if (index !== -1) {
+              const value = (cols[index] || "").trim();
+              if (value) return value;
+            }
+          }
+          return "";
+        };
+        const first_name   = get("first_name", "student_first_name");
+        const middle_name  = get("middle_name");
+        const last_name    = get("last_name", "surname");
+        const name         = get("name", "full_name", "student_name") || compactName([first_name, middle_name, last_name]);
+        const rawDob       = get("dob", "date_of_birth", "birth_date");
+        const dob          = normalizeStudentImportDate(rawDob);
+        const gender       = normalizeGender(get("gender"));
+        const grade        = get("grade", "class", "class_name", "course", "programme", "admitted_class", "attendance_class", "joining_class");
         const current_term = get("current_term") || get("current_semester") || get("semester") || get("year");
         const section      = get("section");
+        const class_roll_no = get("class_roll_no", "class_roll_number");
         const rawAdmissionDate = get("admission_date") || get("admissiondate") || get("date_of_admission") || get("dateofadmission");
         const admission_date = normalizeStudentImportDate(rawAdmissionDate);
-        const admission_no = get("admission_no") || get("admissionno") || get("admission_number");
-        const father_name  = get("father_name") || get("father");
-        const father_phone = get("father_phone") || get("father_mobile");
-        const mother_name  = get("mother_name") || get("mother");
-        const mother_phone = get("mother_phone") || get("mother_mobile");
+        const admission_no = get("admission_no", "admissionno", "admission_number", "student_admission_number");
+        const school_admission_no = get("school_admission_no", "school_admission_number") || admission_no;
+        const father_name  = get("father_name", "father");
+        const father_phone = normalizePhone(get("father_phone", "father_mobile", "father_other_mobile"));
+        const father_email = get("father_email");
+        const father_occupation = get("father_occupation");
+        const father_qualification = get("father_qualification");
+        const father_income = get("father_income");
+        const father_aadhar = get("father_aadhar", "father_aadhaar", "father_aadhaar_number", "father_aadhar_number");
+        const mother_name  = get("mother_name", "mother");
+        const mother_phone = normalizePhone(get("mother_phone", "mother_mobile", "mother_other_mobile"));
+        const mother_email = get("mother_email");
+        const mother_occupation = get("mother_occupation");
+        const mother_aadhar = get("mother_aadhar", "mother_aadhaar", "mother_aadhaar_number", "mother_aadhar_number");
+        const guardian_name = get("guardian_name");
+        const guardian_phone = normalizePhone(get("guardian_phone", "guardian_mobile"));
+        const address = get("address", "residence_address", "correspondence_address");
+        const city = get("city");
+        const state = get("state");
+        const country = get("country");
+        const pincode = get("pincode", "pin_code");
+        const student_aadhar = get("student_aadhar", "student_aadhaar", "aadhar_number", "aadhaar_number");
+        const nationality = get("nationality");
+        const religion = get("religion");
+        const caste = get("caste");
+        const sub_caste = get("sub_caste");
+        const caste_category = get("caste_category");
+        const mother_tongue = get("mother_tongue");
+        const student_type = normalizeStudentType(get("student_type"));
+        const whatsapp_no = normalizePhone(get("whatsapp_no", "whatsapp"));
+        const student_email = get("student_email");
+        const previous_school = get("previous_school");
+        const previous_class = get("previous_class", "last_class_attended");
+        const joining_academic_year = get("joining_academic_year", "academic_year");
+        const house = get("house");
+        const blood_group = get("blood_group");
+        const height = get("height");
+        const weight = get("weight");
+        const identification_marks_1 = get("identification_marks", "identification_marks_1");
+        const identification_marks_2 = get("identification_marks1", "identification_marks_2");
+        const food_habits = get("food_habits", "food_habbits");
+        const state_enrollment_no = get("state_enrollment_number", "state_enrollment_no");
+        const birth_place = get("birth_place");
+        const language_spoken = get("language_spoken");
+        const sports = get("sports", "sports_games");
+        const second_language = get("ii_language", "second_language");
+        const third_language = get("iii_language", "third_language");
+        const bank_name = get("bank_name");
+        const ifsc_code = get("ifsc_code", "ifsc");
+        const bank_account_no = get("bank_account_number", "bank_account_no");
+        const fee_remarks = get("fee_remarks");
+        const transport_required = parseYesNo(get("transport_required", "transport_status"));
+        const tc_submitted = parseYesNo(get("tc_submitted", "check_transfer_certificate"));
+        const dob_certificate_submitted = parseYesNo(get("dob_certificate_submitted", "check_date_of_birth"));
+        const marksheet_submitted = parseYesNo(get("marksheet_submitted", "check_marksheet_of_previous_school", "check_report_card"));
+        const rte_student = parseYesNo(get("rte_student"));
+        const pen = get("pen", "pen_no");
+        const udise = get("udise", "udise_no");
+        const apaar_id = get("apaar_id");
+        const is_asthmatic = parseYesNo(get("asthmatic", "asthama", "asthma"));
+        const allergies_medicine = get("allergies_medicine");
+        const allergies_food = get("allergies_food");
+        const vision = compactName([get("vision"), get("vision_type"), get("vision_right") && `Right: ${get("vision_right")}`, get("vision_left") && `Left: ${get("vision_left")}`]);
+        const medical_ailments = get("medical_ailments", "physical_ailment", "asthamatic_details");
+        const physical_handicap = get("physical_handicap", "disability");
         const fee_type     = get("fee_type") || get("applicant_type");
+        const family_key = familyKeyFor({ father_phone, mother_phone, guardian_phone, father_name, mother_name, guardian_name });
 
         const course_id = grade
           ? isSchool
@@ -256,6 +464,7 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
 
         let valid = true, error = "";
         if (!name)               { valid = false; error = "Name required"; }
+        else if (rawDob && !dob)  { valid = false; error = `Invalid date of birth: "${rawDob}"`; }
         else if (grade && !course_id) {
           valid = false;
           error = isSchool ? `Unknown grade: "${grade}"` : `Unknown course: "${grade}"`;
@@ -271,13 +480,21 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
           : isDaottCourse(resolvedCourse) ? "stetho_batch" : "standard";
 
         return {
-          name, dob, gender, grade, current_term, section, admission_date, admission_no,
-          father_name, father_phone, mother_name, mother_phone, fee_type,
-          course_id, fee_version, valid, error,
+          name, first_name, middle_name, last_name, dob, gender, grade, current_term, section, class_roll_no, admission_date, admission_no,
+          father_name, father_phone, father_email, father_occupation, father_qualification, father_income, father_aadhar,
+          mother_name, mother_phone, mother_email, mother_occupation, mother_aadhar,
+          guardian_name, guardian_phone, address, city, state, country, pincode, student_aadhar, nationality, religion,
+          caste, sub_caste, caste_category, mother_tongue, student_type, school_admission_no, whatsapp_no, student_email,
+          previous_school, previous_class, joining_academic_year, house, blood_group, height, weight, identification_marks_1,
+          identification_marks_2, food_habits, state_enrollment_no, birth_place, language_spoken, sports, second_language,
+          third_language, bank_name, ifsc_code, bank_account_no, fee_remarks, transport_required, tc_submitted,
+          dob_certificate_submitted, marksheet_submitted, rte_student, pen, udise, apaar_id, is_asthmatic,
+          allergies_medicine, allergies_food, vision, medical_ailments, physical_handicap, fee_type, family_key,
+          sibling_count: 1, course_id, fee_version, valid, error,
         };
       });
 
-      setParsed(data);
+      setParsed(withSiblingCounts(data));
       setResult(null);
     };
     reader.readAsText(file);
@@ -293,41 +510,115 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
     if (!valid.length || !selectedCampusId || !selectedInstitutionId || !selectedSessionId) return;
     setImporting(true);
     let success = 0, failed = 0;
+    const errors: string[] = [];
 
     for (let i = 0; i < valid.length; i += 50) {
       const batch = valid.slice(i, i + 50).map((r, j) => ({
         name: r.name,
+        first_name: r.first_name || null,
+        middle_name: r.middle_name || null,
+        last_name: r.last_name || null,
         dob:  r.dob  || null,
         gender: r.gender || null,
         course_id: r.course_id,
         campus_id: selectedCampusId,
         session_id: selectedSessionId || null,
-        joining_academic_year: isSchool ? sessionYearLabel(selectedSession?.name) || null : null,
+        joining_academic_year: isSchool ? (r.joining_academic_year || sessionYearLabel(selectedSession?.name) || null) : null,
         semester: !isSchool ? (selectedCurrentTerm || r.current_term || null) : null,
         admission_date: resolveStudentImportAdmissionDate(r.admission_date, selectedAdmissionDate),
+        date_of_admission: resolveStudentImportAdmissionDate(r.admission_date, selectedAdmissionDate),
         admission_no: (isSchool && r.admission_no) ? r.admission_no : null,
-        school_admission_no: (isSchool && r.admission_no) ? r.admission_no : null,
+        school_admission_no: (isSchool && r.school_admission_no) ? r.school_admission_no : null,
         pre_admission_no: (isSchool && r.admission_no)
           ? null
           : `IMP-${Date.now().toString(36).toUpperCase()}-${i + j}`,
         section: r.section || null,
+        class_roll_no: r.class_roll_no || null,
         father_name:  r.father_name  || null,
         father_phone: r.father_phone || null,
+        father_email: r.father_email || null,
+        father_occupation: r.father_occupation || null,
+        father_qualification: r.father_qualification || null,
+        father_income: r.father_income || null,
+        father_aadhar: r.father_aadhar || null,
         mother_name:  r.mother_name  || null,
         mother_phone: r.mother_phone || null,
-        guardian_name:  r.father_name  || null,
-        guardian_phone: r.father_phone || null,
+        mother_email: r.mother_email || null,
+        mother_occupation: r.mother_occupation || null,
+        mother_aadhar: r.mother_aadhar || null,
+        guardian_name:  r.guardian_name || r.father_name || null,
+        guardian_phone: r.guardian_phone || r.father_phone || r.mother_phone || null,
+        address: r.address || null,
+        city: r.city || null,
+        state: r.state || null,
+        country: r.country || null,
+        pincode: r.pincode || null,
+        student_aadhar: r.student_aadhar || null,
+        nationality: r.nationality || null,
+        religion: r.religion || null,
+        caste: r.caste || null,
+        sub_caste: r.sub_caste || null,
+        caste_category: r.caste_category || null,
+        mother_tongue: r.mother_tongue || null,
+        student_type: r.student_type || null,
+        whatsapp_no: r.whatsapp_no || null,
+        student_email: r.student_email || null,
+        previous_school: r.previous_school || null,
+        previous_class: r.previous_class || null,
+        joining_class: isSchool ? r.grade || null : null,
+        house: r.house || null,
+        blood_group: r.blood_group || null,
+        identification_marks_1: r.identification_marks_1 || null,
+        identification_marks_2: r.identification_marks_2 || null,
+        food_habits: r.food_habits || null,
+        state_enrollment_no: r.state_enrollment_no || null,
+        birth_place: r.birth_place || null,
+        language_spoken: r.language_spoken || null,
+        sports: r.sports || null,
+        second_language: r.second_language || null,
+        third_language: r.third_language || null,
+        bank_name: r.bank_name || null,
+        ifsc_code: r.ifsc_code || null,
+        bank_account_no: r.bank_account_no || null,
+        fee_remarks: r.fee_remarks || null,
+        transport_required: r.transport_required ?? false,
+        tc_submitted: r.tc_submitted ?? false,
+        dob_certificate_submitted: r.dob_certificate_submitted ?? false,
+        marksheet_submitted: r.marksheet_submitted ?? false,
+        rte_student: r.rte_student ?? null,
+        pen: r.pen || null,
+        udise: r.udise || null,
+        apaar_id: r.apaar_id || null,
+        is_asthmatic: r.is_asthmatic ?? false,
+        allergies_medicine: r.allergies_medicine || null,
+        allergies_food: r.allergies_food || null,
+        vision: r.vision || null,
+        medical_ailments: r.medical_ailments || null,
+        physical_handicap: r.physical_handicap || null,
         fee_structure_version: r.fee_version,
         status: "active",
         created_by: user?.id || null,
       }));
 
       const { error, data } = await supabase.from("students").insert(batch as any).select("id");
-      if (error) { failed += batch.length; console.error(error); }
-      else { success += (data?.length || 0); }
+      if (error) {
+        failed += batch.length;
+        errors.push(error.message || `Batch ${Math.floor(i / 50) + 1} failed`);
+        console.error(error);
+      } else if (!data?.length) {
+        failed += batch.length;
+        errors.push(`Batch ${Math.floor(i / 50) + 1} returned no inserted student IDs.`);
+        console.error("[bulk-student-import] insert returned no rows", { batchStart: i, batchSize: batch.length });
+      } else {
+        success += data.length;
+        if (data.length !== batch.length) {
+          failed += batch.length - data.length;
+          errors.push(`Batch ${Math.floor(i / 50) + 1} inserted ${data.length} of ${batch.length} students.`);
+        }
+      }
     }
 
-    setResult({ success, failed });
+    setResult({ success, failed, errors });
     setImporting(false);
     if (success > 0) onSuccess();
   };
@@ -356,6 +647,7 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
   const invalidCount  = parsed.filter(r => !r.valid).length;
   const existingCount = parsed.filter(r => r.valid && r.fee_version === "existing_parent").length;
   const newCount      = parsed.filter(r => r.valid && r.fee_version === "new_admission").length;
+  const siblingGroupCount = new Set(parsed.filter(r => r.sibling_count > 1).map(r => r.family_key)).size;
 
   const canImport = validCount > 0 && !!selectedCampusId && !!selectedInstitutionId && !!selectedSessionId && !!selectedAdmissionDate && (
     isSchool || !!selectedCurrentTerm || parsed.filter(r => r.valid).every(r => !!r.current_term)
@@ -376,9 +668,21 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
 
         {result ? (
           <div className="text-center py-10 space-y-3">
-            <CheckCircle className="h-12 w-12 text-primary mx-auto" />
-            <p className="text-lg font-semibold text-foreground">Import Complete</p>
+            {result.failed > 0
+              ? <AlertTriangle className="h-12 w-12 text-amber-500 mx-auto" />
+              : <CheckCircle className="h-12 w-12 text-primary mx-auto" />}
+            <p className="text-lg font-semibold text-foreground">
+              {result.failed > 0 ? "Import Finished with Issues" : "Import Complete"}
+            </p>
             <p className="text-sm text-muted-foreground">{result.success} students imported · {result.failed} failed</p>
+            {result.errors.length > 0 && (
+              <div className="mx-auto max-w-lg rounded-lg border border-amber-200 bg-amber-50 p-3 text-left">
+                <p className="text-xs font-semibold text-amber-800">Database response</p>
+                <ul className="mt-2 space-y-1 text-xs text-amber-800">
+                  {result.errors.slice(0, 5).map((error, index) => <li key={index}>{error}</li>)}
+                </ul>
+              </div>
+            )}
             <Button onClick={() => { onOpenChange(false); setParsed([]); setResult(null); }}>Done</Button>
           </div>
         ) : (
@@ -450,7 +754,7 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
                 {selectedInstitution ? (
                   <p className="text-xs text-muted-foreground mb-1">
                     {isSchool
-                      ? <>Required: <code className="bg-muted px-1 rounded">name</code>. Optional: dob, gender, grade, section, admission_date, admission_no, father_name, father_phone, mother_name, mother_phone, fee_type</>
+                      ? <>Required: <code className="bg-muted px-1 rounded">name</code> or <code className="bg-muted px-1 rounded">full_name</code>. Optional: dob, gender, grade/class_name, section, admission_date, admission_no, parent phones, address, Aadhaar and profile columns</>
                       : <>Required: <code className="bg-muted px-1 rounded">name</code>. Optional: dob, gender, course, current_term, section, admission_date, father_name, father_phone, mother_name, mother_phone</>
                     }
                   </p>
@@ -480,6 +784,7 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
                   {invalidCount > 0 && <Badge className="bg-pastel-red text-foreground/70 border-0">{invalidCount} invalid</Badge>}
                   {isSchool && existingCount > 0 && <Badge className="bg-amber-100 text-amber-700 border-amber-200">{existingCount} existing parent rates</Badge>}
                   {isSchool && newCount > 0 && <Badge className="bg-blue-100 text-blue-700 border-blue-200">{newCount} new admission rates</Badge>}
+                  {siblingGroupCount > 0 && <Badge className="bg-violet-100 text-violet-700 border-violet-200">{siblingGroupCount} sibling groups detected</Badge>}
                   <span className="text-xs text-muted-foreground ml-auto">{parsed.length} rows total</span>
                 </div>
 
@@ -504,6 +809,7 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
                         <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Admission Date</th>
                         {isSchool && <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Admission No.</th>}
                         {isSchool && <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Fee Structure</th>}
+                        <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Siblings</th>
                         <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Father</th>
                         <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Error</th>
                       </tr>
@@ -536,6 +842,9 @@ export function BulkStudentImportDialog({ open, onOpenChange, onSuccess }: BulkS
                                 : <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-medium">New</span>}
                             </td>
                           )}
+                          <td className="px-3 py-2 text-muted-foreground">
+                            {r.sibling_count > 1 ? `${r.sibling_count} in family` : "—"}
+                          </td>
                           <td className="px-3 py-2 text-muted-foreground">
                             {r.father_name || "—"}{r.father_phone ? ` (${r.father_phone})` : ""}
                           </td>
