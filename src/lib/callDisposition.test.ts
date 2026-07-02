@@ -61,11 +61,20 @@ function makeMockFrom() {
   return { from, tableCalls };
 }
 
-function makeMockSupabase(opts?: { getSession?: () => Promise<unknown>; rpcError?: unknown; rpcErrors?: unknown[]; withFrom?: boolean }) {
+function makeMockSupabase(opts?: { getSession?: () => Promise<unknown>; rpcError?: unknown; rpcErrors?: unknown[]; withFrom?: boolean; fromRequiresThis?: boolean }) {
   const rpcCalls: RpcCall[] = [];
-  const { from, tableCalls } = makeMockFrom();
+  const { from: baseFrom, tableCalls } = makeMockFrom();
+  const from = opts?.fromRequiresThis
+    ? function(this: { rest?: unknown } | undefined, table: string) {
+        if (!this?.rest) {
+          throw new TypeError("Cannot read properties of undefined (reading 'rest')");
+        }
+        return baseFrom(table);
+      }
+    : baseFrom;
 
   const client = {
+    ...(opts?.fromRequiresThis ? { rest: {} } : {}),
     rpc: (name: string, params: Record<string, unknown>) => {
       rpcCalls.push({ name, params });
       const error = opts?.rpcErrors ? opts.rpcErrors[rpcCalls.length - 1] ?? null : opts?.rpcError ?? null;
@@ -243,6 +252,35 @@ describe("recordCallDisposition — single consolidated RPC", () => {
           op: "insert",
           payload: expect.objectContaining({ type: "stage_change", new_stage: "not_interested" }),
         }),
+      ]),
+    );
+  });
+
+  it("keeps the direct-write fallback bound to the Supabase client", async () => {
+    const missingRpc = {
+      code: "PGRST202",
+      message: "Could not find the function public.record_disposition_writes in the schema cache",
+    };
+    const { client, tableCalls } = makeMockSupabase({
+      withFrom: true,
+      fromRequiresThis: true,
+      rpcErrors: [missingRpc, missingRpc, null],
+    });
+
+    await expect(recordCallDisposition(baseArgs({
+      disposition: "not_interested",
+      duration_seconds: 52,
+      notes: "Not Interested",
+      schedule_followup: false,
+      suppress_auto_whatsapp: true,
+      send_course_info: false,
+    }, client))).resolves.toBeUndefined();
+
+    expect(tableCalls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ table: "lead_followups", op: "update" }),
+        expect.objectContaining({ table: "lead_activities", op: "insert" }),
+        expect.objectContaining({ table: "leads", op: "update" }),
       ]),
     );
   });
