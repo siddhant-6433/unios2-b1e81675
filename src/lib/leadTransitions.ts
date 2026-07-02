@@ -9,7 +9,8 @@ export type LeadCallDisposition =
   | "call_back"
   | "do_not_contact"
   | "voicemail"
-  | "busy";
+  | "busy"
+  | "course_not_listed";
 
 const LEAD_CALL_DISPOSITIONS = [
   "interested",
@@ -21,6 +22,7 @@ const LEAD_CALL_DISPOSITIONS = [
   "do_not_contact",
   "voicemail",
   "busy",
+  "course_not_listed",
 ] as const;
 
 export const isLeadCallDisposition = (disposition: string): disposition is LeadCallDisposition =>

@@ -11,7 +11,8 @@ const STAGE_LABELS: Record<string, string> = {
   new_lead: "New Lead", application_in_progress: "Application In Progress", application_submitted: "Application Submitted",
   ai_called: "AI Called", counsellor_call: "In Follow Up",
   visit_scheduled: "Visit Scheduled", interview: "Interview", offer_sent: "Offer Sent",
-  token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", rejected: "Rejected", ineligible: "Ineligible", dnc: "Do Not Contact", deferred: "Deferred (Next Session)", cold: "Cold",
+  token_paid: "Token Paid", pre_admitted: "Pre-Admitted", admitted: "Admitted", rejected: "Rejected",
+  not_interested: "Not Interested", ineligible: "Ineligible", dnc: "Do Not Contact", deferred: "Deferred (Next Session)", cold: "Cold",
 };
 
 // Pipeline stages can only be reached via their proper workflow (call log, visit
