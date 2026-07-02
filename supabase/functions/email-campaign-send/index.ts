@@ -47,19 +47,23 @@ async function syncCampaignCounts(admin: any, campaignId: string) {
 
 type LeadVars = {
   student_name: string;
+  lead_name: string;
+  phone: string;
+  email: string;
+  lead_source: string;
+  lead_stage: string;
+  guardian_name: string;
+  guardian_phone: string;
   course_name: string;
   campus_name: string;
-  // Reasonable defaults so templates expecting these vars don't render literal
-  // {{tokens}}; the counsellor can edit campaign templates later for richer
-  // per-lead values.
+  notes: string;
+  latest_note: string;
 };
 
 function substitute(text: string, vars: Record<string, string>): string {
-  let out = text;
-  for (const [k, v] of Object.entries(vars)) {
-    out = out.replace(new RegExp(`\\{\\{${k}\\}\\}`, "g"), v ?? "");
-  }
-  return out;
+  return text.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, key) =>
+    Object.prototype.hasOwnProperty.call(vars, key) ? vars[key] ?? "" : match
+  );
 }
 
 Deno.serve(async (req) => {
@@ -185,7 +189,7 @@ Deno.serve(async (req) => {
 
     const { data: recipients, error: recError } = await admin
       .from("email_campaign_recipients")
-      .select("id, campaign_id, lead_id, to_email, status, leads(name, stage, courses(name), campuses(name))")
+      .select("id, campaign_id, lead_id, to_email, status, leads(name, phone, email, source, stage, guardian_name, guardian_phone, courses(name), campuses(name), lead_notes(content, created_at))")
       .eq("campaign_id", campaign_id)
       .eq("status", "pending")
       .limit(batchSize);
@@ -280,8 +284,22 @@ Deno.serve(async (req) => {
 
       const vars: LeadVars = {
         student_name: lead.name || "Student",
+        lead_name: lead.name || "Student",
+        phone: lead.phone || "",
+        email: lead.email || r.to_email || "",
+        lead_source: lead.source || "",
+        lead_stage: lead.stage || "",
+        guardian_name: lead.guardian_name || "",
+        guardian_phone: lead.guardian_phone || "",
         course_name: lead.courses?.name || "your course",
         campus_name: lead.campuses?.name || "NIMT",
+        notes: ((lead.lead_notes || []) as Array<{ content?: string | null; created_at?: string | null }>)
+          .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")))
+          .map((note) => note.content)
+          .filter(Boolean)
+          .join("\n"),
+        latest_note: ((lead.lead_notes || []) as Array<{ content?: string | null; created_at?: string | null }>)
+          .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")))[0]?.content || "",
       };
 
       let subject = substitute(subjectTpl!, vars as any);

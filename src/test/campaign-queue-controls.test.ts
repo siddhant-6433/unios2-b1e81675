@@ -5,6 +5,7 @@ const migration = readFileSync("supabase/migrations/20260619114500_campaign_queu
 const whatsappSender = readFileSync("supabase/functions/whatsapp-campaign-send/index.ts", "utf8");
 const emailSender = readFileSync("supabase/functions/email-campaign-send/index.ts", "utf8");
 const leadLists = readFileSync("src/pages/LeadLists.tsx", "utf8");
+const marketingPage = readFileSync("src/pages/Marketing.tsx", "utf8");
 
 describe("campaign queue controls", () => {
   it("adds database states for paused and terminated campaign queues", () => {
@@ -37,15 +38,16 @@ describe("campaign queue controls", () => {
     expect(whatsappSender).toContain('status: done ? "completed" : "sending"');
   });
 
-  it("exposes queue controls in the lead-list campaign queue", () => {
-    expect(leadLists).toContain("Campaign Queue");
-    expect(leadLists).toContain("pauseCampaign");
-    expect(leadLists).toContain("resumeCampaign");
-    expect(leadLists).toContain("terminateCampaign");
-    expect(leadLists).toContain('.in("status", ["paused", "failed"])');
-    expect(leadLists).toContain('item.status === "failed" ? "Retry" : "Resume"');
-    expect(leadLists).toContain("whatsapp-campaign-send");
-    expect(leadLists).toContain("email-campaign-send");
+  it("exposes queue controls in Marketing Hub executed campaigns", () => {
+    expect(marketingPage).toContain("Executed Campaigns");
+    expect(marketingPage).toContain("pauseCampaign");
+    expect(marketingPage).toContain("resumeCampaign");
+    expect(marketingPage).toContain("terminateCampaign");
+    expect(marketingPage).toContain("campaign-dispatcher");
+    expect(marketingPage).toContain('status: "paused"');
+    expect(marketingPage).toContain('status: "terminated"');
+    expect(leadLists).toContain("New Campaign");
+    expect(leadLists).toContain("Marketing Hub");
   });
 
   it("keeps the bulk WhatsApp send dialog usable on short screens", () => {
