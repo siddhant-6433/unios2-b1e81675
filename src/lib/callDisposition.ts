@@ -192,8 +192,7 @@ async function legacyRecordCloudCallLog(args: RecordCallDispositionArgs, resolve
 }
 
 async function runLegacyDispositionWrites(args: RecordCallDispositionArgs, resolved: ResolvedDispositionWrites) {
-  const db = args.supabase.from;
-  if (!db) {
+  if (!args.supabase.from) {
     throw new Error("Disposition save RPC is unavailable and this client cannot run fallback writes.");
   }
 
@@ -201,14 +200,14 @@ async function runLegacyDispositionWrites(args: RecordCallDispositionArgs, resol
 
   const shouldClearFollowups = args.data.disposition !== "not_answered";
   if (shouldClearFollowups) {
-    const { error } = await db("lead_followups")
+    const { error } = await args.supabase.from("lead_followups")
       .update({ status: "completed", completed_at: new Date().toISOString() })
       .eq("lead_id", args.leadId)
       .eq("status", "pending");
     assertNoError(error, "Could not complete pending follow-ups");
   }
 
-  let result = await db("lead_activities").insert({
+  let result = await args.supabase.from("lead_activities").insert({
     lead_id: args.leadId,
     user_id: args.profileId,
     type: "call",
@@ -217,14 +216,14 @@ async function runLegacyDispositionWrites(args: RecordCallDispositionArgs, resol
   assertNoError(result.error, "Could not record call activity");
 
   if (args.data.cnet_appeared !== null && args.data.cnet_appeared !== undefined) {
-    result = await db("leads")
+    result = await args.supabase.from("leads")
       .update({ cnet_appeared: args.data.cnet_appeared, updated_at: new Date().toISOString() })
       .eq("id", args.leadId);
     assertNoError(result.error, "Could not save CNET answer");
   }
 
   if (args.data.cahet_registered !== null && args.data.cahet_registered !== undefined) {
-    result = await db("leads")
+    result = await args.supabase.from("leads")
       .update({ cahet_registered: args.data.cahet_registered, updated_at: new Date().toISOString() })
       .eq("id", args.leadId);
     assertNoError(result.error, "Could not save CAHET answer");
@@ -233,10 +232,10 @@ async function runLegacyDispositionWrites(args: RecordCallDispositionArgs, resol
   if (resolved.newStage) {
     const leadPatch: Record<string, unknown> = { stage: resolved.newStage };
     if (resolved.futureEligibleSession) leadPatch.future_eligible_session = resolved.futureEligibleSession;
-    result = await db("leads").update(leadPatch).eq("id", args.leadId);
+    result = await args.supabase.from("leads").update(leadPatch).eq("id", args.leadId);
     assertNoError(result.error, "Could not update lead stage");
 
-    result = await db("lead_activities").insert({
+    result = await args.supabase.from("lead_activities").insert({
       lead_id: args.leadId,
       user_id: args.profileId,
       type: "stage_change",
@@ -249,7 +248,7 @@ async function runLegacyDispositionWrites(args: RecordCallDispositionArgs, resol
 
   if (resolved.followupAt) {
     if (shouldClearFollowups) {
-      result = await db("lead_followups").insert({
+      result = await args.supabase.from("lead_followups").insert({
         lead_id: args.leadId,
         user_id: args.userId,
         scheduled_at: resolved.followupAt,
@@ -259,7 +258,7 @@ async function runLegacyDispositionWrites(args: RecordCallDispositionArgs, resol
       });
       assertNoError(result.error, "Could not schedule follow-up");
     } else {
-      result = await db("lead_followups")
+      result = await args.supabase.from("lead_followups")
         .update({ scheduled_at: resolved.followupAt, notes: resolved.followupNotes })
         .eq("lead_id", args.leadId)
         .eq("status", "pending")
@@ -267,7 +266,7 @@ async function runLegacyDispositionWrites(args: RecordCallDispositionArgs, resol
       assertNoError(result.error, "Could not reschedule follow-up");
 
       if (!Array.isArray(result.data) || result.data.length === 0) {
-        result = await db("lead_followups").insert({
+        result = await args.supabase.from("lead_followups").insert({
           lead_id: args.leadId,
           user_id: args.userId,
           scheduled_at: resolved.followupAt,
@@ -279,7 +278,7 @@ async function runLegacyDispositionWrites(args: RecordCallDispositionArgs, resol
       }
     }
 
-    result = await db("lead_activities").insert({
+    result = await args.supabase.from("lead_activities").insert({
       lead_id: args.leadId,
       user_id: args.profileId,
       type: "followup",
