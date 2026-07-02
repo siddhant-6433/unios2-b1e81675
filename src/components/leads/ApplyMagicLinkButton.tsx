@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link as LinkIcon, Copy, Check, MessageCircle, Loader2, LogIn } from "lucide-react";
+import { Link as LinkIcon, Copy, Check, MessageCircle, Loader2, LogIn, ExternalLink } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -26,6 +26,15 @@ const EXPIRY_OPTIONS: { label: string; hours: number }[] = [
   { label: "30 days", hours: 720 },
 ];
 
+const getErrorMessage = (err: unknown, fallback = "Unknown error") => {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "object" && err && "message" in err) {
+    const message = (err as { message?: unknown }).message;
+    if (typeof message === "string") return message;
+  }
+  return fallback;
+};
+
 export function ApplyMagicLinkButton({
   leadId,
   leadName,
@@ -47,17 +56,18 @@ export function ApplyMagicLinkButton({
   // supabase-js puts the function's response body on error.context for non-2xx
   // responses — extract the real server-side message instead of the generic
   // "Edge Function returned a non-2xx status code".
-  const extractFnError = async (err: any): Promise<string> => {
-    let detail = err?.message || "Unknown error";
+  const extractFnError = async (err: unknown): Promise<string> => {
+    let detail = getErrorMessage(err);
     try {
-      const ctx = err?.context;
+      const ctx = (err as { context?: { json?: () => Promise<unknown>; body?: string } })?.context;
       const body = typeof ctx?.json === "function"
         ? await ctx.json().catch(() => null)
         : ctx?.body
           ? JSON.parse(ctx.body)
           : null;
-      if (body?.error) detail = body.error;
-      else if (body?.message) detail = body.message;
+      const fnBody = body as { error?: unknown; message?: unknown } | null;
+      if (typeof fnBody?.error === "string") detail = fnBody.error;
+      else if (typeof fnBody?.message === "string") detail = fnBody.message;
     } catch { /* keep generic msg */ }
     return detail;
   };
@@ -81,8 +91,8 @@ export function ApplyMagicLinkButton({
       if (data?.error) throw new Error(data.error);
       const url = startNew ? `${data.url}${data.url.includes("?") ? "&" : "?"}start_new=1` : data.url;
       setGenerated({ url, expiresAt: data.expires_at });
-    } catch (err: any) {
-      toast({ title: "Failed to generate link", description: err.message || "Unknown error", variant: "destructive" });
+    } catch (err: unknown) {
+      toast({ title: "Failed to generate link", description: getErrorMessage(err), variant: "destructive" });
     } finally {
       setGenerating(false);
     }
@@ -110,9 +120,9 @@ export function ApplyMagicLinkButton({
       const url = startNew ? `${data.url}${data.url.includes("?") ? "&" : "?"}start_new=1` : data.url;
       if (tab) tab.location.href = url;
       else window.open(url, "_blank"); // popup-blocker fallback
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (tab) tab.close();
-      toast({ title: "Failed to open as student", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to open as student", description: getErrorMessage(err), variant: "destructive" });
     } finally {
       setOpening(false);
     }
@@ -123,6 +133,23 @@ export function ApplyMagicLinkButton({
     await navigator.clipboard.writeText(generated.url);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  };
+
+  const openGeneratedLink = async () => {
+    if (!generated) return;
+    const tab = window.open(generated.url, "_blank", "noopener,noreferrer");
+    if (tab) {
+      tab.opener = null;
+      return;
+    }
+
+    await navigator.clipboard.writeText(generated.url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+    toast({
+      title: "Popup blocked",
+      description: "Link copied. Open an incognito window and paste it there.",
+    });
   };
 
   const [sendingWa, setSendingWa] = useState(false);
@@ -155,10 +182,10 @@ export function ApplyMagicLinkButton({
       if (error) throw new Error(await extractFnError(error));
       if (data?.error) throw new Error(data.error);
       toast({ title: "Apply link sent on WhatsApp", description: `Delivered to ${leadPhone}.` });
-    } catch (err: any) {
+    } catch (err: unknown) {
       toast({
         title: "Couldn't send via WhatsApp",
-        description: err.message || "Template may still be pending Meta approval — try again in a few minutes.",
+        description: getErrorMessage(err, "Template may still be pending Meta approval - try again in a few minutes."),
         variant: "destructive",
       });
     } finally {
@@ -274,7 +301,10 @@ export function ApplyMagicLinkButton({
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <Button variant="pill-outline" size="pill" onClick={openGeneratedLink}>
+                  <ExternalLink className="h-4 w-4" /> Open
+                </Button>
                 <Button variant="pill-outline" size="pill" onClick={copy}>
                   {copied ? <><Check className="h-4 w-4" /> Copied</> : <><Copy className="h-4 w-4" /> Copy</>}
                 </Button>

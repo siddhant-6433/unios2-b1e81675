@@ -11,6 +11,7 @@ import { DocumentUpload } from "@/components/apply/DocumentUpload";
 import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
 import { AdmissionLifecycleStepper } from "@/components/admissions/AdmissionLifecycleStepper";
 import { DocReviewPanel } from "@/components/admissions/DocReviewPanel";
+import { ApplyMagicLinkButton } from "@/components/leads/ApplyMagicLinkButton";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -165,6 +166,7 @@ export default function AdminApplicationView() {
   const [app, setApp] = useState<any | null>(null);
   const [lead, setLead] = useState<{
     id: string; name: string; course_id: string | null; campus_id: string | null;
+    phone: string | null;
     pre_admission_no: string | null; admission_no: string | null;
     course?: { name: string; code: string | null; duration_years: number | null; eligibility: string | null; entrance_exam: string | null; entrance_mandatory: boolean | null } | null;
   } | null>(null);
@@ -241,7 +243,7 @@ export default function AdminApplicationView() {
         const primarySelection = ((appRow.course_selections || [])[0] as ApplicationCourseSelection | undefined) || null;
         const [{ data: leadRow }, { data: offerRows }, { data: pmtRows }, cahetRow, updeledRow] = await Promise.all([
           supabase.from("leads")
-            .select("id, name, course_id, campus_id, pre_admission_no, admission_no, course:course_id(name,code,duration_years,eligibility,entrance_exam,entrance_mandatory)")
+            .select("id, name, phone, course_id, campus_id, pre_admission_no, admission_no, course:course_id(name,code,duration_years,eligibility,entrance_exam,entrance_mandatory)")
             .eq("id", appRow.lead_id).maybeSingle(),
           supabase.from("offer_letters").select("id").eq("lead_id", appRow.lead_id).limit(1),
           supabase.from("lead_payments")
@@ -759,6 +761,13 @@ export default function AdminApplicationView() {
               <User className="h-3.5 w-3.5" />
               Open Lead
             </Button>
+          )}
+          {(lead?.id || app.lead_id) && (
+            <ApplyMagicLinkButton
+              leadId={lead?.id || app.lead_id}
+              leadName={lead?.name || app.full_name}
+              leadPhone={lead?.phone || app.phone}
+            />
           )}
           {!lead?.id && (
             <Button
