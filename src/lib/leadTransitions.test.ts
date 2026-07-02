@@ -165,7 +165,7 @@ describe("resolveLeadTransitionCommand", () => {
     expect(resolveLeadTransitionCommand({
       currentStage: "counsellor_call",
       command: "classifyInactive",
-    }).newStage).toBe("inactive");
+    }).newStage).toBe("cold");
 
     expect(resolveLeadTransitionCommand({
       currentStage: "application_fee_paid",

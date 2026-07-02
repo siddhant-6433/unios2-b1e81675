@@ -30,6 +30,8 @@ import { ReceiptDialog, type ReceiptData } from "@/components/receipts/ReceiptDi
 import { ApplicantDeadlineTicker } from "@/components/layout/ApplicantDeadlineTicker";
 import { leadTransitionStagePatch, resolveLeadTransitionCommand } from "@/lib/leadTransitions";
 import { captureAttribution, trackPixelLead } from "@/lib/analytics";
+import { PORTAL_CONFIGS, type PortalId } from "@/components/apply/portalConfig";
+import { displayValue } from "@/lib/displayValue";
 
 type OnBehalfContext = {
   mode: "academic_partner_on_behalf";
@@ -56,7 +58,11 @@ function OnBehalfBanner({ context, candidateName }: { context: OnBehalfContext |
 }
 
 // ─── OTP Login Screen ───
-function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: string, onBehalf?: OnBehalfContext | null) => void }) {
+function OtpLogin({
+  onAuthenticated,
+}: {
+  onAuthenticated: (phone: string, name: string, onBehalf?: OnBehalfContext | null, portalId?: PortalId | null) => void;
+}) {
   const { toast } = useToast();
   const [phone, setPhone] = useState("");
 
@@ -126,10 +132,14 @@ function OtpLogin({ onAuthenticated }: { onAuthenticated: (phone: string, name: 
         url.searchParams.delete("token");
         window.history.replaceState({}, "", url.toString());
 
+        const portalId = typeof data.portal === "string" && data.portal in PORTAL_CONFIGS
+          ? data.portal as PortalId
+          : null;
+
         // Mirror the OTP login flow: just hand phone+name to onAuthenticated.
         // The apply portal is session-less for applicants — RLS on `applications`
         // already permits anon writes scoped by phone.
-        onAuthenticated(data.phone, data.name || "Applicant", data.on_behalf || null);
+        onAuthenticated(data.phone, data.name || "Applicant", data.on_behalf || null, portalId);
       } catch (err: any) {
         toast({
           title: "Login link expired or invalid",
@@ -787,7 +797,7 @@ function CourseSummaryBanner({ app, leadName, onEdit }: { app: ApplicationData; 
   return (
     <div className="mb-6 space-y-3">
       <div>
-        <h1 className="text-xl font-bold text-foreground">Welcome, {app.full_name || leadName}</h1>
+        <h1 className="text-xl font-bold text-foreground">Welcome, {displayValue(app.full_name) || leadName}</h1>
         <p className="text-sm text-muted-foreground">Complete all steps to submit your application.</p>
         <p className="text-xs text-muted-foreground mt-1">
           Application ID: <span className="font-mono font-semibold text-primary">{app.application_id}</span>
@@ -830,12 +840,12 @@ function CourseSummaryBanner({ app, leadName, onEdit }: { app: ApplicationData; 
               <div key={s.course_id} className="flex items-center gap-3 py-2">
                 <Badge className="bg-primary/10 text-primary border-0 text-xs shrink-0">P{s.preference_order}</Badge>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{s.course_name}</p>
+                  <p className="text-sm font-medium text-foreground truncate">{displayValue(s.course_name) || "Course"}</p>
                   <p className="text-xs text-muted-foreground flex items-center gap-1">
-                    <MapPin className="h-3 w-3" /> {s.campus_name}
+                    <MapPin className="h-3 w-3" /> {displayValue(s.campus_name) || "Campus"}
                   </p>
                 </div>
-                <Badge variant="outline" className="text-[10px] shrink-0">{s.program_category}</Badge>
+                <Badge variant="outline" className="text-[10px] shrink-0">{displayValue(s.program_category) || "Program"}</Badge>
               </div>
             ))}
             {ageValidation && (
@@ -904,10 +914,15 @@ type DashboardApp = {
   course_selections: any[];
   form_pdf_url: string | null;
   fee_receipt_url: string | null;
+  payment_ref: string | null;
   phone: string;
   email: string | null;
+  submitted_at?: string | null;
+  updated_at?: string | null;
   created_at: string;
 };
+
+const APPLICATION_FORM_PDF_STATUSES = new Set(["submitted", "under_review", "approved", "rejected"]);
 
 function statusBadge(status: string, paymentStatus: string | null) {
   if (status === "approved") return { label: "Approved", className: "bg-green-100 text-green-700", Icon: CheckCircle };
@@ -1068,6 +1083,8 @@ function ApplicationDashboardView({
   // Which app's fee-receipt dialog is open. Builds the same modern receipt
   // the student gets via email — single canonical format.
   const [receiptApp, setReceiptApp] = useState<any | null>(null);
+  const [generatedPdfUrls, setGeneratedPdfUrls] = useState<Record<string, string>>({});
+  const [generatingPdfFor, setGeneratingPdfFor] = useState<string | null>(null);
   const buildReceiptData = (a: any): ReceiptData => {
     const nameIsEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.full_name || "");
     const courses = (a.course_selections as any[]) || [];
@@ -1087,6 +1104,25 @@ function ApplicationDashboardView({
       logo: portal.logo,
       primaryColor: portal.primaryColor,
     };
+  };
+
+  const generateApplicationPdf = async (a: DashboardApp) => {
+    if (generatingPdfFor || !a.application_id) return;
+    setGeneratingPdfFor(a.id);
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-application-form", {
+        body: { application_id: a.application_id },
+      });
+      if (error) throw error;
+      const url = (data as any)?.form_pdf_url;
+      if (!url) throw new Error("PDF URL was not returned");
+      setGeneratedPdfUrls(prev => ({ ...prev, [a.id]: url }));
+      window.open(url, "_blank");
+    } catch (e: any) {
+      console.error("generate-application-form failed:", e);
+    } finally {
+      setGeneratingPdfFor(null);
+    }
   };
 
   return (
@@ -1159,7 +1195,7 @@ function ApplicationDashboardView({
             );
           } else if (offerApp) {
             const courseLabel = (offerApp.course_selections as any[])
-              ?.map((c: any) => c.course_name).filter(Boolean).join(", ") || "your course";
+              ?.map((c: any) => displayValue(c.course_name)).filter(Boolean).join(", ") || "your course";
             subtitle = <>🎉 Offer approved for <span className="font-semibold">{courseLabel}</span></>;
             cta = (
               <button onClick={() => onContinue(offerApp)}
@@ -1216,7 +1252,7 @@ function ApplicationDashboardView({
         {/* Application cards */}
         {apps.map((app) => {
           const a = app as DashboardApp;
-          const courses = (a.course_selections || []).map((c: any) => c.course_name).filter(Boolean);
+          const courses = (a.course_selections || []).map((c: any) => displayValue(c.course_name)).filter(Boolean);
           const offer = a.lead_id ? offerLetters[a.lead_id] : undefined;
           const admInfo = a.lead_id ? leadAdmissions[a.lead_id] : undefined;
           const preAdmNo = admInfo?.pre_admission_no ?? null;
@@ -1227,6 +1263,7 @@ function ApplicationDashboardView({
           const isDraft = a.status === "draft";
           const isPaid = a.payment_status === "paid";
           const isUnderReview = a.status === "submitted" || a.status === "under_review";
+          const formPdfUrl = generatedPdfUrls[a.id] || a.form_pdf_url;
           const isOpen = openAppId === a.id;
 
           // Card accent colour by state
@@ -1323,13 +1360,22 @@ function ApplicationDashboardView({
                       <FileText className="h-3.5 w-3.5" /> View Application
                     </button>
                   )}
-                  {a.form_pdf_url && (
+                  {formPdfUrl ? (
                     <a
-                      href={a.form_pdf_url} target="_blank" rel="noreferrer"
+                      href={formPdfUrl} target="_blank" rel="noreferrer"
                       className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 active:scale-95 transition-all"
                     >
                       <FileText className="h-3.5 w-3.5" /> PDF
                     </a>
+                  ) : APPLICATION_FORM_PDF_STATUSES.has(a.status) && (
+                    <button
+                      onClick={() => generateApplicationPdf(a)}
+                      disabled={generatingPdfFor === a.id}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 active:scale-95 transition-all disabled:opacity-60"
+                    >
+                      {generatingPdfFor === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                      Generate PDF
+                    </button>
                   )}
                   {isPaid && (
                     <button
@@ -1376,7 +1422,7 @@ function ApplicationDashboardView({
                     applicantPhone={a.phone}
                     applicantEmail={a.email}
                     courseName={(a.course_selections || [])
-                      ?.map((c: any) => c.course_name)
+                      ?.map((c: any) => displayValue(c.course_name))
                       .filter(Boolean)
                       .join(", ") || null}
                     onBehalfContext={onBehalfContext}
@@ -1407,7 +1453,7 @@ function ApplicationDashboardView({
   );
 }
 
-const ApplyPortal = () => {
+const ApplyPortal = ({ onPortalResolved }: { onPortalResolved?: (portalId: PortalId) => void }) => {
   const { toast } = useToast();
   const portal = usePortal();
   const isSchool = portal.programCategories.includes("school");
@@ -1466,6 +1512,7 @@ const ApplyPortal = () => {
   const [app, setApp] = useState<ApplicationData | null>(null);
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [generatingApplicationPdf, setGeneratingApplicationPdf] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [showCourseSelector, setShowCourseSelector] = useState(true);
   // Dashboard listing all applications for the authenticated phone in this portal.
@@ -1492,14 +1539,23 @@ const ApplyPortal = () => {
   const steps = isSchool ? SCHOOL_STEPS : DEFAULT_STEPS;
   const totalSteps = steps.length;
 
-  const handleAuthenticated = async (phoneVal: string, name: string, onBehalf: OnBehalfContext | null = null) => {
+  const handleAuthenticated = async (
+    phoneVal: string,
+    name: string,
+    onBehalf: OnBehalfContext | null = null,
+    resolvedPortalId: PortalId | null = null,
+  ) => {
+    const activePortal = resolvedPortalId ? PORTAL_CONFIGS[resolvedPortalId] : portal;
+    if (resolvedPortalId && resolvedPortalId !== portal.id) {
+      onPortalResolved?.(resolvedPortalId);
+    }
     setPhone(phoneVal);
     setLeadName(name);
     setOnBehalfContext(onBehalf);
     setAuthed(true);
     // Persist so refreshes don't log the user out (TTL: 7 days)
     try {
-      localStorage.setItem(PORTAL_AUTH_KEY, JSON.stringify({
+      localStorage.setItem(`portal_auth_${activePortal.id}`, JSON.stringify({
         phone: phoneVal,
         name,
         onBehalf,
@@ -1533,7 +1589,7 @@ const ApplyPortal = () => {
     const portalApps = (existingApps || []).filter(app => {
       const flags = (app.flags as string[]) || [];
       if (onBehalf && app.lead_id !== onBehalf.lead_id) return false;
-      if (flags.includes(`portal:${portal.id}`)) return true;
+      if (flags.includes(`portal:${activePortal.id}`)) return true;
       const hasAnyPortalFlag = flags.some((f: string) => f.startsWith("portal:"));
       return !hasAnyPortalFlag;
     });
@@ -1544,11 +1600,11 @@ const ApplyPortal = () => {
     // this completing. RLS on applications permits anon writes scoped by phone.
     const needsTag = portalApps.filter(a => {
       const f = (a.flags as string[]) || [];
-      return !f.includes(`portal:${portal.id}`);
+      return !f.includes(`portal:${activePortal.id}`);
     });
     if (needsTag.length > 0) {
       void Promise.all(needsTag.map(a => {
-        const merged = [...((a.flags as string[]) || []), `portal:${portal.id}`];
+        const merged = [...((a.flags as string[]) || []), `portal:${activePortal.id}`];
         return supabase.from("applications").update({ flags: merged }).eq("id", a.id);
       })).catch(e => console.error("portal-flag self-heal failed:", e));
     }
@@ -1610,12 +1666,13 @@ const ApplyPortal = () => {
     // editing, current behaviour).
     const existingApp = portalApps[0];
     if (existingApp) {
-      loadAppIntoEditor(existingApp);
+      const activeSteps = activePortal.programCategories.includes("school") ? SCHOOL_STEPS : DEFAULT_STEPS;
+      loadAppIntoEditor(existingApp, activeSteps);
     }
   };
 
   // Load a row from the dashboard into the step-by-step editor.
-  const loadAppIntoEditor = (existingApp: any) => {
+  const loadAppIntoEditor = (existingApp: any, stepList = steps) => {
     const appData: ApplicationData = {
       ...DEFAULT_APPLICATION,
       ...existingApp,
@@ -1641,10 +1698,10 @@ const ApplyPortal = () => {
     if (existingApp.status === 'submitted' || existingApp.status === 'under_review' || existingApp.status === 'approved') {
       if (editUnlocked) {
         setSubmitted(false);
-        const stepKeys = steps.map(s => s.key);
+        const stepKeys = stepList.map(s => s.key);
         const preferredKey = unlockedSections?.find(key => stepKeys.includes(key)) || "documents";
         const preferredIdx = stepKeys.indexOf(preferredKey);
-        setStep(preferredIdx >= 0 ? preferredIdx : totalSteps - 2);
+        setStep(preferredIdx >= 0 ? preferredIdx : stepList.length - 2);
         return;
       }
       setSubmitted(true);
@@ -1656,11 +1713,38 @@ const ApplyPortal = () => {
         .catch(() => setPreviewDocs([]));
       return;
     }
-    const stepKeys = steps.map(s => s.key);
+    const stepKeys = stepList.map(s => s.key);
     const cs = appData.completed_sections as Record<string, boolean>;
     const firstIncomplete = stepKeys.findIndex(k => !cs[k]);
-    setStep(firstIncomplete >= 0 ? firstIncomplete : totalSteps - 1);
+    setStep(firstIncomplete >= 0 ? firstIncomplete : stepList.length - 1);
   };
+
+  const ensureApplicationPdf = async (applicationId: string) => {
+    if (!applicationId || generatingApplicationPdf) return;
+    setGeneratingApplicationPdf(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-application-form", {
+        body: { application_id: applicationId },
+      });
+      if (error) throw error;
+      const formPdfUrl = (data as any)?.form_pdf_url as string | undefined;
+      if (formPdfUrl) {
+        setApp(prev => prev?.application_id === applicationId ? { ...prev, form_pdf_url: formPdfUrl } : prev);
+        setAppsList(prev => prev?.map(item => item.application_id === applicationId ? { ...item, form_pdf_url: formPdfUrl } : item) ?? prev);
+      }
+    } catch (err) {
+      console.error("[ApplyPortal] application PDF generation failed:", err);
+    } finally {
+      setGeneratingApplicationPdf(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!submitted || !app || app.form_pdf_url) return;
+    if (!["submitted", "under_review", "approved"].includes(String(app.status))) return;
+    void ensureApplicationPdf(app.application_id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submitted, app?.application_id, app?.form_pdf_url, app?.status]);
 
   // Return to the dashboard from a submitted/preview view (only available
   // when the dashboard was previously shown — i.e. multiple apps).
@@ -2013,6 +2097,13 @@ const ApplyPortal = () => {
       }
     }
 
+    const submittedAt = new Date().toISOString();
+    setApp(prev => prev ? {
+      ...prev,
+      status: "submitted",
+      submitted_at: submittedAt,
+      completed_sections: { ...prev.completed_sections, review: true },
+    } : prev);
     setSubmitted(true);
     setSaving(false);
     toast({ title: "Application submitted!" });
@@ -2027,9 +2118,7 @@ const ApplyPortal = () => {
     // get the internal email. Brief delay so the form-PDF generator has a
     // chance to populate applications.form_pdf_url before notify-event
     // looks it up — keeps the WA button URL non-empty for most cases.
-    supabase.functions.invoke("generate-application-form", {
-      body: { application_id: app.application_id },
-    }).catch(() => {});
+    void ensureApplicationPdf(app.application_id);
     if (app.payment_status === "paid") {
       supabase.functions.invoke("generate-application-fee-receipt", {
         body: { application_id: app.application_id },
@@ -2039,6 +2128,32 @@ const ApplyPortal = () => {
     // (see 20260612120000_app_submitted_trigger.sql). The client used to invoke
     // notify-event directly but the function requires service-role auth and
     // the call always silently 401'd from anonymous applicants.
+  };
+
+  const generateSubmittedApplicationPdf = async () => {
+    if (!app?.application_id || generatingApplicationPdf) return;
+    setGeneratingApplicationPdf(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-application-form", {
+        body: { application_id: app.application_id },
+      });
+      if (error) throw error;
+      const url = (data as any)?.form_pdf_url;
+      if (!url) throw new Error("PDF URL was not returned");
+      setApp(prev => prev ? { ...prev, form_pdf_url: url } : prev);
+      setAppsList(prev => prev
+        ? prev.map(a => a.id === app.id ? { ...a, form_pdf_url: url } : a)
+        : prev);
+      window.open(url, "_blank");
+    } catch (e: any) {
+      toast({
+        title: "Couldn't generate application PDF",
+        description: e?.message || "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setGeneratingApplicationPdf(false);
+    }
   };
 
   const onChange = (updates: Partial<ApplicationData>) => {
@@ -2148,11 +2263,27 @@ const ApplyPortal = () => {
                   Paid
                 </span>
               )}
-              {app.form_pdf_url && (
+              {app.form_pdf_url ? (
                 <a href={app.form_pdf_url} target="_blank" rel="noreferrer"
                   className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20">
                   <FileText className="h-3.5 w-3.5" />Application PDF
                 </a>
+              ) : APPLICATION_FORM_PDF_STATUSES.has(app.status) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={generateSubmittedApplicationPdf}
+                  disabled={generatingApplicationPdf}
+                  className="gap-1.5"
+                >
+                  {generatingApplicationPdf ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                  Generate PDF
+                </Button>
+              )}
+              {!app.form_pdf_url && generatingApplicationPdf && (
+                <span className="inline-flex items-center gap-1.5 rounded-lg border border-muted bg-muted/50 px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />Preparing PDF
+                </span>
               )}
               <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-1.5">
                 <LogOut className="h-4 w-4" /> Logout
@@ -2403,7 +2534,7 @@ const ApplyPortal = () => {
       <Header appId={app.application_id} completedCount={completedCount} totalSteps={totalSteps} onLogout={handleLogout} />
 
       <div className="max-w-3xl mx-auto px-6 py-8">
-        <OnBehalfBanner context={onBehalfContext} candidateName={leadName || app.full_name} />
+        <OnBehalfBanner context={onBehalfContext} candidateName={leadName || displayValue(app.full_name) || "the candidate"} />
         <CourseSummaryBanner
           app={app}
           leadName={leadName}
@@ -2497,10 +2628,12 @@ function Header({ appId, completedCount, totalSteps, onLogout }: { appId: string
 
 // ─── Wrapped with PortalProvider ───
 function ApplyPortalWrapper() {
+  const [resolvedPortalId, setResolvedPortalId] = useState<PortalId | null>(null);
+
   return (
-    <PortalProvider>
+    <PortalProvider overridePortalId={resolvedPortalId}>
       <ApplicantDeadlineTicker audience="public" />
-      <ApplyPortal />
+      <ApplyPortal onPortalResolved={setResolvedPortalId} />
     </PortalProvider>
   );
 }

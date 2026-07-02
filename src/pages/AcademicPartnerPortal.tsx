@@ -57,6 +57,7 @@ type Partner = {
   company_address: string | null;
   pan_number: string | null;
   gst_number: string | null;
+  tan_number: string | null;
   authorised_signatory_name: string | null;
   authorised_signatory_contact: string | null;
   authorised_signatory_email: string | null;
@@ -202,11 +203,12 @@ type OnboardingForm = {
   company_address: string;
   pan_number: string;
   gst_number: string;
+  tan_number: string;
   authorised_signatory_name: string;
   authorised_signatory_contact: string;
   authorised_signatory_email: string;
 };
-type OnboardingDocType = "agreement" | "gst" | "pan" | "fee_structure" | "brochure" | "additional";
+type OnboardingDocType = "agreement" | "gst" | "pan" | "tan" | "fee_structure" | "brochure" | "additional";
 type OnboardingFiles = Record<OnboardingDocType, File[]>;
 type OperationError = { message: string };
 type OnboardingDataClient = {
@@ -234,6 +236,7 @@ type OnboardingDataClient = {
         _company_address: string;
         _pan_number: string;
         _gst_number: string;
+        _tan_number?: string;
         _authorised_signatory_name: string;
         _authorised_signatory_contact: string;
         _authorised_signatory_email: string;
@@ -325,6 +328,7 @@ const ONBOARDING_DOC_TYPES: { value: OnboardingDocType; label: string; required?
   { value: "agreement", label: "Agreement", required: true },
   { value: "gst", label: "GST Certificate" },
   { value: "pan", label: "PAN Card", required: true },
+  { value: "tan", label: "TAN Certificate" },
   { value: "fee_structure", label: "Fee Structure" },
   { value: "brochure", label: "Brochures" },
   { value: "additional", label: "Additional Documents" },
@@ -333,6 +337,7 @@ const emptyOnboardingFiles = (): OnboardingFiles => ({
   agreement: [],
   gst: [],
   pan: [],
+  tan: [],
   fee_structure: [],
   brochure: [],
   additional: [],
@@ -342,11 +347,16 @@ const onboardingFormFromPartner = (partner: Partner | null): OnboardingForm => (
   company_address: partner?.company_address || "",
   pan_number: partner?.pan_number || "",
   gst_number: partner?.gst_number || "",
+  tan_number: partner?.tan_number || "",
   authorised_signatory_name: partner?.authorised_signatory_name || "",
   authorised_signatory_contact: partner?.authorised_signatory_contact || "",
   authorised_signatory_email: partner?.authorised_signatory_email || "",
 });
 const safeFileName = (name: string) => name.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "document";
+const isTanSchemaCacheError = (error: OperationError | null) =>
+  Boolean(error?.message && /tan_number|_tan_number|schema cache|function .*save_academic_partner_onboarding/i.test(error.message));
+const isTanDocumentTypeConstraintError = (error: OperationError | null) =>
+  Boolean(error?.message && /document_type|academic_partner_documents_document_type_check|check constraint/i.test(error.message));
 const errorMessage = (error: unknown) => {
   if (error instanceof Error) return error.message;
   if (typeof error === "object" && error && "message" in error) {
@@ -619,7 +629,7 @@ export default function AcademicPartnerPortal() {
       if (uploadError) throw uploadError;
 
       const onboardingClient = supabase as unknown as OnboardingDataClient;
-      const { error: recordError } = await onboardingClient.from("academic_partner_documents").insert({
+      const documentRecord = {
         partner_id: partner.id,
         document_type: documentType,
         title: label,
@@ -629,9 +639,19 @@ export default function AcademicPartnerPortal() {
         file_size_bytes: file.size,
         visibility: "internal",
         uploaded_by: user.id,
-      });
+      } as const;
+      const { error: recordError } = await onboardingClient.from("academic_partner_documents").insert(documentRecord);
 
-      if (recordError) throw recordError;
+      if (recordError && documentType === "tan" && isTanDocumentTypeConstraintError(recordError)) {
+        const { error: fallbackError } = await onboardingClient.from("academic_partner_documents").insert({
+          ...documentRecord,
+          document_type: "additional",
+          title: "TAN Certificate",
+        });
+        if (fallbackError) throw fallbackError;
+      } else if (recordError) {
+        throw recordError;
+      }
     }
     setOnboardingFiles(emptyOnboardingFiles());
   };
@@ -676,6 +696,20 @@ export default function AcademicPartnerPortal() {
     }
   };
 
+  const onboardingRpcPayload = (status: OnboardingStatus, nextStep: number, includeTan = true) => ({
+    _partner_id: partner?.id || "",
+    _company_name: onboardingForm.company_name,
+    _company_address: onboardingForm.company_address,
+    _pan_number: onboardingForm.pan_number,
+    _gst_number: onboardingForm.gst_number,
+    ...(includeTan ? { _tan_number: onboardingForm.tan_number } : {}),
+    _authorised_signatory_name: onboardingForm.authorised_signatory_name,
+    _authorised_signatory_contact: onboardingForm.authorised_signatory_contact,
+    _authorised_signatory_email: onboardingForm.authorised_signatory_email,
+    _onboarding_status: status,
+    _onboarding_step: nextStep,
+  });
+
   const saveOnboarding = async (status: OnboardingStatus, nextStep = onboardingStep) => {
     if (!partner) return;
     const validationError = status === "completed" ? validateOnboardingForCompletion() : null;
@@ -688,18 +722,13 @@ export default function AcademicPartnerPortal() {
     try {
       await uploadOnboardingDocuments();
       const onboardingClient = supabase as unknown as OnboardingDataClient;
-      const { data, error } = await onboardingClient.rpc("save_academic_partner_onboarding", {
-        _partner_id: partner.id,
-        _company_name: onboardingForm.company_name,
-        _company_address: onboardingForm.company_address,
-        _pan_number: onboardingForm.pan_number,
-        _gst_number: onboardingForm.gst_number,
-        _authorised_signatory_name: onboardingForm.authorised_signatory_name,
-        _authorised_signatory_contact: onboardingForm.authorised_signatory_contact,
-        _authorised_signatory_email: onboardingForm.authorised_signatory_email,
-        _onboarding_status: status,
-        _onboarding_step: nextStep,
-      });
+      let { data, error } = await onboardingClient.rpc("save_academic_partner_onboarding", onboardingRpcPayload(status, nextStep));
+      const tanDeferred = Boolean(error && isTanSchemaCacheError(error));
+      if (tanDeferred) {
+        const retry = await onboardingClient.rpc("save_academic_partner_onboarding", onboardingRpcPayload(status, nextStep, false));
+        data = retry.data;
+        error = retry.error;
+      }
 
       if (error) throw error;
 
@@ -712,7 +741,9 @@ export default function AcademicPartnerPortal() {
       setShowOnboarding(status !== "completed" && status !== "skipped");
       toast({
         title: status === "completed" ? "Onboarding completed" : status === "skipped" ? "Onboarding skipped" : "Onboarding saved",
-        description: status === "skipped" ? "You can resume it from this dashboard anytime." : undefined,
+        description: tanDeferred && onboardingForm.tan_number.trim()
+          ? "TAN was not saved because the database migration is not applied yet."
+          : status === "skipped" ? "You can resume it from this dashboard anytime." : undefined,
       });
     } catch (error: unknown) {
       toast({ title: "Onboarding not saved", description: errorMessage(error), variant: "destructive" });
@@ -951,7 +982,7 @@ export default function AcademicPartnerPortal() {
               )}
 
               {onboardingStep === 1 && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-[11px] font-medium text-muted-foreground mb-1">PAN *</label>
                     <input value={onboardingForm.pan_number} onChange={(e) => updateOnboardingField("pan_number", e.target.value.toUpperCase())} className={inputCls} />
@@ -959,6 +990,10 @@ export default function AcademicPartnerPortal() {
                   <div>
                     <label className="block text-[11px] font-medium text-muted-foreground mb-1">GST</label>
                     <input value={onboardingForm.gst_number} onChange={(e) => updateOnboardingField("gst_number", e.target.value.toUpperCase())} className={inputCls} />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-muted-foreground mb-1">TAN</label>
+                    <input value={onboardingForm.tan_number} onChange={(e) => updateOnboardingField("tan_number", e.target.value.toUpperCase())} className={inputCls} />
                   </div>
                 </div>
               )}

@@ -12,6 +12,10 @@ import {
 } from "../_shared/whatsapp-conversation-state.ts";
 import { applyLeadTransition } from "../_shared/lead-transition.ts";
 import { recordOutboundConversationAction } from "../_shared/whatsapp-conversation-action.ts";
+import {
+  FEE_STRUCTURE_URL,
+  loadVerifiedAdmissionsContext,
+} from "../_shared/nimt-admissions-context.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -129,7 +133,9 @@ D Pharma:
 - Entrance: JEECUP / merit-based. Pathway to B Pharma lateral entry.
 
 NIMT Beacon School (K-12):
-- CBSE affiliated, Nursery to Grade XII | Campus: Ghaziabad (Avantika / Avantika II)
+- CBSE affiliated | Campuses: Ghaziabad Arthala, Avantika / Avantika II
+- Arthala monthly tuition: Nursery to Class I Rs 800, Class II-V Rs 950, Class VI-VIII Rs 1,150, Class IX-X Rs 1,450
+- Arthala admission fee: Rs 0 for new and existing parents
 - Smart classrooms, science labs, computer labs, sports, transport
 - Day boarding with lunch: Rs 4,000/month. Boarding options available.
 - Admission: Age-appropriate interaction/assessment
@@ -141,6 +147,7 @@ Mirai Experiential School (IB World School):
 - Admission: Age-appropriate interaction
 
 FEE STRUCTURE (First Year / Annual Fee):
+Canonical fee page: https://nimt.ac.in/admissions/fees/
 - B.Sc Nursing: ₹1,53,000/year | Greater Noida campus
 - GNM: ₹1,18,000/year | Greater Noida campus
 - BPT (Physiotherapy): ₹92,000/year | Greater Noida campus
@@ -158,7 +165,7 @@ FEE STRUCTURE (First Year / Annual Fee):
 - OTT / D-OTT / DAOTT (Operation Theater Technician): Stetho Batch total ₹1,85,000 across 5 semesters | Sem 1 ₹40,000, Sem 2 ₹40,000, Sem 3 ₹40,000, Sem 4 ₹40,000, Sem 5 ₹25,000 | Greater Noida campus | ISCO Code 3259
 - MPT (Masters Physiotherapy): ₹89,000/year | Greater Noida campus
 - MMRIT (M.Sc Radiology): ₹89,000/year | Greater Noida campus
-Note: These are first-year fees. Subsequent years may vary. Scholarships available for merit/SC/ST/OBC. Contact admissions for complete fee breakup.
+Note: These are first-year fees. Full year-wise programme fees are published at https://nimt.ac.in/admissions/fees/. Merit scholarships, category scholarships and education loan support may reduce the payable amount.
 
 ADMISSIONS:
 - Apply online: https://uni.nimt.ac.in/apply/nimt (also: apply.nimt.ac.in)
@@ -410,6 +417,7 @@ function buildSystemPrompt(
   hasCourse: boolean,
   courseBriefContext: string,
   replyExamplesContext: string,
+  verifiedAdmissionsContext: string,
 ): string {
   const introInstructions = `\n\nLEAD ENRICHMENT:
 ${!hasName ? "The student's name is not yet known. If they mention their name, extract it." : ""}
@@ -467,7 +475,15 @@ Always end with a helpful call to action (e.g., visit portal, call helpline, or 
 
 If you don't know something specific, say you'll have a counsellor share the details and provide the helpline number (+91 9555192192).
 
+FEE ANSWER RULES (strict):
+- If the user asks about fee, fees, fee structure, cost, total fee, yearly fee, scholarship, loan, "kitni fees", or similar, answer with the fee facts available in the knowledge base instead of only saying "contact admissions".
+- If the course is known from lead context or the current message, include that course's first-year fee, campus if known, and mention that full year-wise programme fees are published here: ${FEE_STRUCTURE_URL}
+- If the course is unknown, give a compact sample list of popular first-year fees, share ${FEE_STRUCTURE_URL}, and ask which course/campus they want so you can send the exact breakdown.
+- Mention scholarships/loan support when relevant, but do not promise a waiver amount unless it is in the verified brief or knowledge base.
+- Never invent fee amounts. If a requested course fee is absent from the knowledge base, share ${FEE_STRUCTURE_URL} and say a counsellor will confirm the exact breakup.
+
 Do NOT make up information not present in the knowledge base.${introInstructions}${classificationInstructions}
+${verifiedAdmissionsContext ? `\n\n${verifiedAdmissionsContext}` : ""}
 ${courseBriefContext ? `\n\nCOURSE-SPECIFIC VERIFIED BRIEF:\n${courseBriefContext}` : ""}
 ${replyExamplesContext ? `\n\nORGANISATION REPLY EXAMPLES:\nUse these as examples of how NIMT counsellors answer similar WhatsApp queries. Do not copy personal details, phone numbers, emails, or promises from examples. Verified course brief and knowledge base override examples if they conflict.\n${replyExamplesContext}` : ""}
 
@@ -711,9 +727,16 @@ Deno.serve(async (req) => {
 
     const courseBriefContext = await loadCourseAdmissionBrief(admin, existingCourseId, courseInterestForPrompt);
     const replyExamplesContext = await loadReplyExamplesContext(admin, message, existingCourseId);
+    const verifiedAdmissionsContext = await loadVerifiedAdmissionsContext(admin, existingCourseId, courseInterestForPrompt);
 
     // Call Gemini with dynamic system prompt
-    const systemPrompt = buildSystemPrompt(hasName, hasCourse, courseBriefContext, replyExamplesContext);
+    const systemPrompt = buildSystemPrompt(
+      hasName,
+      hasCourse,
+      courseBriefContext,
+      replyExamplesContext,
+      verifiedAdmissionsContext,
+    );
     const geminiRes = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${googleApiKey}`,
       {

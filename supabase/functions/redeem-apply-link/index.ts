@@ -15,10 +15,11 @@
  * Multi-use until expires_at; each redemption increments use_count for audit.
  *
  * Input:  { token: string }
- * Output: { phone, name, lead_id, on_behalf? }
+ * Output: { phone, name, lead_id, portal, on_behalf? }
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { resolveApplyPortal } from "../generate-apply-link/portal.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -65,10 +66,20 @@ Deno.serve(async (req) => {
     // without an extra round-trip.
     const { data: lead } = await db
       .from("leads")
-      .select("name, academic_partner_id")
+      .select("name, academic_partner_id, portal_brand, lead_institution_type, source, origin_domain, landing_page, campus_id")
       .eq("id", row.lead_id)
       .maybeSingle();
     const name = lead?.name || "Applicant";
+
+    const { data: applications, error: appErr } = await db
+      .from("applications")
+      .select("flags, program_category, course_selections")
+      .eq("lead_id", row.lead_id)
+      .order("created_at", { ascending: false })
+      .limit(5);
+    if (appErr) return json({ error: appErr.message }, 500);
+
+    const portal = resolveApplyPortal(lead, applications || []);
 
     let onBehalf: any = null;
     if (row.mode === "academic_partner_on_behalf") {
@@ -104,7 +115,7 @@ Deno.serve(async (req) => {
       use_count: (row.use_count || 0) + 1,
     }).eq("token", row.token);
 
-    return json({ phone, name, lead_id: row.lead_id, on_behalf: onBehalf });
+    return json({ phone, name, lead_id: row.lead_id, portal, on_behalf: onBehalf });
   } catch (err: any) {
     console.error("[redeem-apply-link]", err);
     return json({ error: err.message }, 500);

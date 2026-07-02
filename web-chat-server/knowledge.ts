@@ -243,6 +243,8 @@ export const COURSE_KNOWLEDGE: Record<string, {
   "Grade": {
     highlights: [
       "NIMT Beacon School — CBSE affiliated, Nursery to Grade XII",
+      "NIMT Beacon School Arthala monthly tuition: Nursery to Class I Rs 800, Class II-V Rs 950, Class VI-VIII Rs 1,150, Class IX-X Rs 1,450",
+      "No admission fee at Arthala for new or existing parents",
       "Smart classrooms with interactive boards",
       "Day boarding with after-school activities and lunch (Rs 4,000/month)",
       "Transport in 3 zones based on distance",
@@ -255,7 +257,8 @@ export const COURSE_KNOWLEDGE: Record<string, {
     eligibility: "Age-appropriate admission.",
     entrance: "Interaction and age-appropriate assessment",
     duration: "Academic year",
-    campus: "Ghaziabad (Avantika / Avantika II)",
+    campus: "Ghaziabad (Arthala / Avantika / Avantika II)",
+    fee: "Arthala monthly tuition: Nursery to Class I Rs 800, Class II-V Rs 950, Class VI-VIII Rs 1,150, Class IX-X Rs 1,450. No admission fee for new or existing parents.",
   },
   "MIR": {
     highlights: [
@@ -307,6 +310,7 @@ D.Pharma: Rs 95,000/year (Greater Noida)
 DPT (Diploma Physiotherapy): Rs 62,000/year (Greater Noida)
 OTT / D-OTT / DAOTT (Operation Theater Technician): Stetho Batch total fee Rs 1,85,000 across 5 semesters (Greater Noida), ISCO Code 3259
 D.El.Ed: Rs 45,000/year (Ghaziabad)
+NIMT Beacon School Arthala: monthly tuition Nursery-Class I Rs 800 | Class II-V Rs 950 | Class VI-VIII Rs 1,150 | Class IX-X Rs 1,450 | No admission fee for new or existing parents
 MPT: Rs 89,000/year (Greater Noida)
 MMRIT: Rs 89,000/year (Greater Noida)
 Note: These are first-year fees. Scholarships available for merit, SC/ST/OBC categories.`;

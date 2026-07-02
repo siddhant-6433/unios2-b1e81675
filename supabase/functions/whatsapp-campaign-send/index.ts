@@ -6,7 +6,7 @@ import { recordOutboundConversationAction } from "../_shared/whatsapp-conversati
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "authorization, x-client-info, apikey, content-type, x-cron-secret, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 const CUET_2026_COUNSELLING_IMAGE_URL =
@@ -24,6 +24,7 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
   bpt_bmrit_cahet_deadline: { name: "bpt_bmrit_cahet_deadline", params: [] },
   cnet_not_qualified_bpt_bmrit: { name: "cnet_not_qualified_bpt_bmrit", params: ["student_name"] },
   cuet_2026_counselling_open: { name: "cuet_2026_counselling_open", params: [], headerImageUrl: CUET_2026_COUNSELLING_IMAGE_URL },
+  cuet_counselling_booking: { name: "cuet_counselling_booking", params: [] },
   course_details: { name: "course_details", params: ["student_name", "course_name"] },
   counsellor_lead_assigned: { name: "counsellor_lead_assigned", params: ["counsellor_name", "lead_name", "lead_phone_last4", "sla_hours"] },
   counsellor_sla_warning: { name: "counsellor_sla_warning", params: ["lead_name", "hours_remaining"] },
@@ -31,6 +32,73 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
   counsellor_visit_confirmation: { name: "counsellor_visit_confirmation", params: ["lead_name", "visit_date", "campus_name"] },
   counsellor_followup_overdue: { name: "counsellor_followup_overdue", params: ["lead_name", "followup_date"] },
 };
+
+const DEAR_STUDENT_NAME_TEMPLATES = new Set([
+  "cnet_not_qualified_bpt_bmrit",
+]);
+
+function cleanPersonName(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim().replace(/\s+/g, " ");
+  return trimmed.includes("@") ? "" : trimmed;
+}
+
+function stringifyForClassification(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "";
+  }
+}
+
+function isSchoolRecipient(lead: any, application: any): boolean {
+  if ((lead?.lead_institution_type || "").toLowerCase() === "school") return true;
+  if ((application?.program_category || "").toLowerCase() === "school") return true;
+
+  const haystack = [
+    lead?.courses?.name,
+    lead?.campuses?.name,
+    application?.course_selections,
+  ].map(stringifyForClassification).join(" ").toLowerCase();
+
+  return /\b(school|beacon|mirai|nursery|kindergarten|grade|lkg|ukg|pyp|myp|cbse|icse)\b/.test(haystack);
+}
+
+function resolveLeadDisplayName(lead: any, application: any): string {
+  return cleanPersonName(application?.full_name) || cleanPersonName(lead?.name) || "Student";
+}
+
+function resolveDearRecipientName(lead: any, application: any): string {
+  const prefix = isSchoolRecipient(lead, application) ? "Parent" : "Applicant";
+  const displayName = cleanPersonName(application?.full_name) || cleanPersonName(lead?.name);
+  if (!displayName) return prefix;
+  if (new RegExp(`^${prefix}\\b`, "i").test(displayName)) return displayName;
+  return `${prefix} ${displayName}`;
+}
+
+function templateBodyFromComponents(components: unknown): string | null {
+  if (!Array.isArray(components)) return null;
+  const body = components.find((component) => {
+    const data = component as Record<string, unknown>;
+    return data.type === "BODY";
+  }) as Record<string, unknown> | undefined;
+  return typeof body?.text === "string" ? body.text : null;
+}
+
+function templateHasDynamicUrlButton(components: unknown): boolean {
+  if (!Array.isArray(components)) return false;
+  const buttons = components.find((component) => {
+    const data = component as Record<string, unknown>;
+    return data.type === "BUTTONS";
+  }) as Record<string, unknown> | undefined;
+  if (!Array.isArray(buttons?.buttons)) return false;
+  return buttons.buttons.some((button) => {
+    const data = button as Record<string, unknown>;
+    return data.type === "URL" && typeof data.url === "string" && data.url.includes("{{");
+  });
+}
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -44,7 +112,7 @@ async function syncCampaignCounts(admin: any, campaignId: string) {
       .from("whatsapp_campaign_recipients")
       .select("id", { count: "exact", head: true })
       .eq("campaign_id", campaignId)
-      .eq("status", "sent"),
+      .in("status", ["sent", "delivered", "read"]),
     admin
       .from("whatsapp_campaign_recipients")
       .select("id", { count: "exact", head: true })
@@ -88,27 +156,7 @@ Deno.serve(async (req) => {
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // Validate auth
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user }, error: authError } = await userClient.auth.getUser();
-    if (authError || !user) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const { campaign_id } = await req.json();
+    const { campaign_id, batch_size } = await req.json();
 
     if (!campaign_id) {
       return new Response(
@@ -118,6 +166,37 @@ Deno.serve(async (req) => {
     }
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
+    const batchSize = Math.max(1, Math.min(Number(batch_size) || 20, 50));
+
+    // Validate auth. Browser/manual sends use a user JWT; cron/dispatcher sends
+    // use CRON_SECRET or the service-role key and are attributed below.
+    const authHeader = req.headers.get("Authorization") || "";
+    const expectedCronSecret = Deno.env.get("CRON_SECRET") || "";
+    const isTrustedWorker =
+      (!!expectedCronSecret && req.headers.get("x-cron-secret") === expectedCronSecret) ||
+      authHeader === `Bearer ${serviceRoleKey}`;
+
+    let actorUserId: string | null = null;
+    if (!isTrustedWorker) {
+      if (!authHeader) {
+        return new Response(
+          JSON.stringify({ error: "Unauthorized" }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: { user }, error: authError } = await userClient.auth.getUser();
+      if (authError || !user) {
+        return new Response(
+          JSON.stringify({ error: "Unauthorized" }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      actorUserId = user.id;
+    }
 
     // Fetch the campaign record
     const { data: campaign, error: campaignError } = await adminClient
@@ -133,18 +212,44 @@ Deno.serve(async (req) => {
       );
     }
 
-    const templateDef = TEMPLATES[campaign.template_key];
+    if (!actorUserId && campaign.created_by) {
+      const { data: ownerProfile } = await adminClient
+        .from("profiles")
+        .select("user_id")
+        .eq("id", campaign.created_by)
+        .maybeSingle();
+      actorUserId = (ownerProfile as any)?.user_id || null;
+    }
+
+    let dynamicTemplateBody: string | null = null;
+    let templateDef = TEMPLATES[campaign.template_key];
     if (!templateDef) {
-      return new Response(
-        JSON.stringify({ error: `Unknown template: ${campaign.template_key}` }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      const { data: dynamicTemplate, error: dynamicErr } = await adminClient
+        .from("whatsapp_templates")
+        .select("name, status, placeholder_count, has_media, header_format, components")
+        .eq("name", campaign.template_key)
+        .eq("status", "APPROVED")
+        .maybeSingle();
+      if (dynamicErr) console.error("Dynamic campaign template lookup failed:", dynamicErr.message);
+      const canSendDynamic = dynamicTemplate
+        && (dynamicTemplate as any).placeholder_count === 0
+        && (dynamicTemplate as any).has_media !== true
+        && !["IMAGE", "VIDEO", "DOCUMENT"].includes(String((dynamicTemplate as any).header_format || "").toUpperCase())
+        && !templateHasDynamicUrlButton((dynamicTemplate as any).components);
+      if (!canSendDynamic) {
+        return new Response(
+          JSON.stringify({ error: `Unknown template: ${campaign.template_key}` }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      dynamicTemplateBody = templateBodyFromComponents((dynamicTemplate as any).components);
+      templateDef = { name: (dynamicTemplate as any).name, params: [] };
     }
 
     if (campaign.status === "paused" || campaign.status === "terminated") {
       return new Response(JSON.stringify({
         success: true,
-        done: true,
+        done: campaign.status === "terminated",
         paused: campaign.status === "paused",
         terminated: campaign.status === "terminated",
         message: campaign.status === "terminated" ? "Campaign terminated before send" : "Campaign paused before send",
@@ -165,9 +270,10 @@ Deno.serve(async (req) => {
     // template params per recipient — see substitution loop below.
     const { data: recipients, error: recipientsError } = await adminClient
       .from("whatsapp_campaign_recipients")
-      .select("id, campaign_id, lead_id, phone, status, leads(name, courses(name), campuses(name))")
+      .select("id, campaign_id, lead_id, phone, status, leads(name, lead_institution_type, courses(name), campuses(name))")
       .eq("campaign_id", campaign_id)
-      .eq("status", "pending");
+      .eq("status", "pending")
+      .limit(batchSize);
 
     if (recipientsError) {
       console.error("Failed to fetch recipients:", recipientsError);
@@ -182,18 +288,56 @@ Deno.serve(async (req) => {
     }
 
     if (!recipients || recipients.length === 0) {
+      const counts = await syncCampaignCounts(adminClient, campaign_id);
       await adminClient
         .from("whatsapp_campaigns")
-        .update({ status: "completed", completed_at: new Date().toISOString() })
+        .update({
+          sent_count: counts.totalSent,
+          failed_count: counts.totalFailed,
+          status: "completed",
+          completed_at: new Date().toISOString(),
+        })
         .eq("id", campaign_id);
       return new Response(
-        JSON.stringify({ success: true, sent: 0, failed: 0, message: "No pending recipients" }),
+        JSON.stringify({
+          success: true,
+          sent: 0,
+          failed: 0,
+          total_sent: counts.totalSent,
+          total_failed: counts.totalFailed,
+          pending: counts.pendingCount,
+          done: true,
+          message: "No pending recipients",
+        }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     let sentCount = 0;
     let failedCount = 0;
+
+    const leadIds = Array.from(new Set(
+      recipients
+        .map((recipient: any) => recipient.lead_id)
+        .filter((leadId: unknown): leadId is string => typeof leadId === "string" && leadId.length > 0)
+    ));
+    const latestApplicationByLeadId = new Map<string, any>();
+    if (leadIds.length > 0) {
+      const { data: applications, error: applicationsError } = await adminClient
+        .from("applications")
+        .select("lead_id, full_name, program_category, course_selections, created_at")
+        .in("lead_id", leadIds)
+        .order("created_at", { ascending: false });
+      if (applicationsError) {
+        console.error("Failed to fetch recipient applications:", applicationsError.message);
+      } else {
+        for (const application of applications || []) {
+          if (application?.lead_id && !latestApplicationByLeadId.has(application.lead_id)) {
+            latestApplicationByLeadId.set(application.lead_id, application);
+          }
+        }
+      }
+    }
 
     // Static params filled once at campaign-creation time (see Lists UI).
     // Used to plug params that aren't per-lead — visit_date, fee amount,
@@ -203,7 +347,9 @@ Deno.serve(async (req) => {
 
     for (const recipient of recipients) {
       const lead = (recipient as any).leads || {};
-      const leadName = lead.name || "Student";
+      const latestApplication = latestApplicationByLeadId.get((recipient as any).lead_id);
+      const leadName = resolveLeadDisplayName(lead, latestApplication);
+      const dearLeadName = resolveDearRecipientName(lead, latestApplication);
       const courseName = lead.courses?.name || "";
       const campusName = lead.campuses?.name || "";
       const waPhone = recipient.phone.replace(/[^0-9]/g, "");
@@ -213,7 +359,9 @@ Deno.serve(async (req) => {
       // course_name override at campaign level still loses to the actual
       // course the lead enquired about — that's the desired behavior).
       const resolveParam = (name: string): string => {
-        if (name === "student_name") return leadName;
+        if (name === "student_name") {
+          return DEAR_STUDENT_NAME_TEMPLATES.has(campaign.template_key) ? dearLeadName : leadName;
+        }
         if (name === "course_name")  return courseName || staticParams[name] || "";
         if (name === "campus_name")  return campusName || staticParams[name] || "";
         return staticParams[name] || "";
@@ -239,9 +387,16 @@ Deno.serve(async (req) => {
         if (liveCampaign?.status === "paused" || liveCampaign?.status === "terminated") {
           const finalCampaign = liveCampaign;
           const counts = await syncCampaignCounts(adminClient, campaign_id);
+          await adminClient
+            .from("whatsapp_campaigns")
+            .update({
+              sent_count: counts.totalSent,
+              failed_count: counts.totalFailed,
+            })
+            .eq("id", campaign_id);
           return new Response(JSON.stringify({
             success: true,
-            done: true,
+            done: finalCampaign.status === "terminated",
             paused: finalCampaign.status === "paused",
             terminated: finalCampaign.status === "terminated",
             message: finalCampaign.status === "terminated" ? "Campaign terminated before send" : "Campaign paused before send",
@@ -249,7 +404,7 @@ Deno.serve(async (req) => {
           }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
 
-        const sendResult = await sendWhatsAppTemplate(adminClient, {
+        const sendResult = await (sendWhatsAppTemplate as any)(adminClient, {
           route: "bulk",
           requireBulk: true,
           businessPhoneNumberId: campaignBusinessPhoneNumberId,
@@ -273,25 +428,38 @@ Deno.serve(async (req) => {
             })
             .eq("id", recipient.id);
 
+          const resolvedParams = templateDef.params.map(resolveParam);
+          const readableContent = dynamicTemplateBody || `[Campaign: ${campaign.name}] [Template: ${campaign.template_key.replace(/_/g, " ")}]`;
           await recordOutboundConversationAction(adminClient, {
             kind: "campaignSend",
             phone: waPhone,
             leadId: recipient.lead_id || null,
-            content: `[Campaign: ${campaign.name}] [Template: ${campaign.template_key.replace(/_/g, " ")}]`,
+            content: readableContent,
             messageType: "template",
             templateKey: campaign.template_key,
             status: "sent",
-            userId: user.id,
+            userId: actorUserId,
             sendResult,
-            campaignId: campaign_id,
-            campaignRecipientId: recipient.id,
             outboundKind: "bulk_campaign",
             expectedReplyType: expectedReplyTypeForTemplate(campaign.template_key),
             responsePolicy: "engine",
+            campaignId: campaign_id,
+            campaignRecipientId: recipient.id,
             metadata: {
               campaign_name: campaign.name,
               static_params: staticParams,
-              sent_by_user_id: user.id,
+              sent_by_user_id: actorUserId,
+              sent_by_profile_id: campaign.created_by || null,
+              params: resolvedParams,
+            },
+            renderMetadata: {
+              key: campaign.template_key,
+              label: campaign.template_key.replace(/_/g, " "),
+              body: readableContent,
+              params: resolvedParams,
+              provider_template_name: templateDef.name,
+              language: "en",
+              campaign_name: campaign.name,
             },
             expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
             activityDescription: recipient.lead_id
@@ -342,9 +510,16 @@ Deno.serve(async (req) => {
       .then(({ data }) => data);
     if (finalCampaign?.status === "paused" || finalCampaign?.status === "terminated") {
       const counts = await syncCampaignCounts(adminClient, campaign_id);
+      await adminClient
+        .from("whatsapp_campaigns")
+        .update({
+          sent_count: counts.totalSent,
+          failed_count: counts.totalFailed,
+        })
+        .eq("id", campaign_id);
       return new Response(JSON.stringify({
         success: true,
-        done: true,
+        done: finalCampaign.status === "terminated",
         paused: finalCampaign.status === "paused",
         terminated: finalCampaign.status === "terminated",
         message: finalCampaign.status === "terminated" ? "Campaign terminated before send" : "Campaign paused before send",
@@ -352,22 +527,16 @@ Deno.serve(async (req) => {
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const { data: updatedCampaign } = await adminClient
-      .from("whatsapp_campaigns")
-      .select("sent_count, failed_count")
-      .eq("id", campaign_id)
-      .single();
-
-    const totalSent = (updatedCampaign?.sent_count || 0) + sentCount;
-    const totalFailed = (updatedCampaign?.failed_count || 0) + failedCount;
+    const counts = await syncCampaignCounts(adminClient, campaign_id);
+    const done = counts.pendingCount === 0;
 
     await adminClient
       .from("whatsapp_campaigns")
       .update({
-        sent_count: totalSent,
-        failed_count: totalFailed,
-        status: "completed",
-        completed_at: new Date().toISOString(),
+        sent_count: counts.totalSent,
+        failed_count: counts.totalFailed,
+        status: done ? "completed" : "sending",
+        completed_at: done ? new Date().toISOString() : null,
       })
       .eq("id", campaign_id);
 
@@ -376,8 +545,10 @@ Deno.serve(async (req) => {
         success: true,
         sent: sentCount,
         failed: failedCount,
-        total_sent: totalSent,
-        total_failed: totalFailed,
+        total_sent: counts.totalSent,
+        total_failed: counts.totalFailed,
+        pending: counts.pendingCount,
+        done,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

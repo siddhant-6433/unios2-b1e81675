@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   Phone, CheckCircle, XCircle, PhoneMissed, PhoneOff, Clock3,
   BanIcon, Loader2, ArrowRight, MapPin, CalendarDays, ChevronDown, Clock,
-  AlertCircle, MessageSquare, GraduationCap, Globe, FileText, X,
+  AlertCircle, MessageSquare, GraduationCap, Globe, FileText, X, FileQuestion,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { SOURCE_LABELS, SOURCE_BADGE_COLORS } from "@/config/leadSources";
@@ -23,7 +23,8 @@ export type CallDisposition =
   | "call_back"
   | "do_not_contact"
   | "voicemail"
-  | "busy";
+  | "busy"
+  | "course_not_listed";
 
 export interface CallDispositionData {
   disposition: CallDisposition;
@@ -42,6 +43,9 @@ export interface CallDispositionData {
   cnet_appeared?: boolean | null;
   /** BPT/BMRIT-only qualifier captured when the lead/course requires CAHET context */
   cahet_registered?: boolean | null;
+  /** Free-text course name captured when disposition is "course_not_listed" —
+   *  compiled later to see which unlisted courses prospective leads are asking for. */
+  requested_course_text?: string | null;
 }
 
 /**
@@ -159,6 +163,9 @@ const DISPOSITIONS: {
     onlyWhenNotConnected: true },
   { value: "wrong_number", label: "Wrong Number", icon: BanIcon, color: "bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300", suggestsFollowup: false,
     help: "Number reached someone other than the lead, or is invalid. No further calls; flag for admin to clean the data." },
+  { value: "course_not_listed", label: "Course Not Listed", icon: FileQuestion, color: "bg-teal-100 text-teal-700 border-teal-300 hover:bg-teal-50 dark:bg-teal-900/30 dark:text-teal-400", suggestsFollowup: false,
+    help: "Lead wants a course NIMT doesn't currently offer. No follow-up — just capture the course they asked for so we can track unmet demand.",
+    requiresConnected: true },
   { value: "do_not_contact", label: "Do Not Contact", icon: BanIcon, color: "bg-red-100 text-red-700 border-red-300 hover:bg-red-50 dark:bg-red-900/30 dark:text-red-400", suggestsFollowup: false,
     help: "Lead requested to be removed from all outreach. Adds them to the DNC list — NO future calls or WhatsApp messages. Use only when the lead explicitly asks to be removed." },
 ];
@@ -253,6 +260,7 @@ export function CallDispositionDialog({
   const [sendCourseInfo, setSendCourseInfo] = useState(false);
   const [cnetAppeared, setCnetAppeared] = useState<"yes" | "no" | null>(null);
   const [cahetRegistered, setCahetRegistered] = useState<"yes" | "no" | null>(null);
+  const [requestedCourseText, setRequestedCourseText] = useState("");
   // Live elapsed timer for the connected phase. Starts when the parent flips
   // callStatus → "connected" and stops when the dialog closes. Pure UI; the
   // real call duration is whatever Plivo reports at hangup. Declared up here
@@ -332,12 +340,14 @@ export function CallDispositionDialog({
     setSendCourseInfo(false);
     setCnetAppeared(null);
     setCahetRegistered(null);
+    setRequestedCourseText("");
   };
 
   const handleSubmit = async (opts: { scheduleFollowup?: boolean; scheduleVisit?: boolean } = {}) => {
     if (!disposition) return;
     if (asksCnetAppeared && !cnetAppeared) return;
     if (asksCahetRegistered && !cahetRegistered) return;
+    if (disposition === "course_not_listed" && !requestedCourseText.trim()) return;
     setSaving(true);
     try {
       const visit = opts.scheduleVisit && visitDate && visitTime
@@ -358,6 +368,7 @@ export function CallDispositionDialog({
         send_course_info: sendCourseInfo,
         cnet_appeared: asksCnetAppeared ? cnetAppeared === "yes" : null,
         cahet_registered: asksCahetRegistered ? cahetRegistered === "yes" : null,
+        requested_course_text: disposition === "course_not_listed" ? requestedCourseText.trim() : null,
       });
       resetState();
       onOpenChange(false);
@@ -961,9 +972,27 @@ export function CallDispositionDialog({
             </div>
           )}
 
+          {disposition === "course_not_listed" && (
+            <div className="rounded-xl border border-teal-200 bg-teal-50/60 p-3 dark:border-teal-900/50 dark:bg-teal-950/20">
+              <label className="block text-xs font-semibold text-teal-900 dark:text-teal-200 mb-2">
+                Which course were they asking for? <span className="text-destructive">*</span>
+              </label>
+              <input
+                type="text"
+                value={requestedCourseText}
+                onChange={(e) => setRequestedCourseText(e.target.value)}
+                placeholder="e.g. B.Sc Aviation"
+                className="w-full rounded-lg border border-teal-200 bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-teal-500/30 dark:border-teal-900"
+              />
+              <p className="mt-1.5 text-[10px] text-teal-700 dark:text-teal-400">
+                Logged against this call so we can see which unlisted courses come up most often.
+              </p>
+            </div>
+          )}
+
           {/* Inline follow-up scheduling — mandatory for actionable dispositions */}
           {(() => {
-            const noFollowupRequired = ["not_interested", "ineligible", "wrong_number", "do_not_contact"];
+            const noFollowupRequired = ["not_interested", "ineligible", "wrong_number", "do_not_contact", "course_not_listed"];
             const requiresAction = disposition && !noFollowupRequired.includes(disposition);
 
             if (!requiresAction || !disposition) return null;
@@ -1043,11 +1072,12 @@ export function CallDispositionDialog({
 
           {/* Submit */}
           {(() => {
-            const noFollowupRequired = ["not_interested", "ineligible", "wrong_number", "do_not_contact"];
+            const noFollowupRequired = ["not_interested", "ineligible", "wrong_number", "do_not_contact", "course_not_listed"];
             const requiresAction = disposition && !noFollowupRequired.includes(disposition);
             const qualifierRequiredUnanswered =
               (asksCnetAppeared && !cnetAppeared) ||
-              (asksCahetRegistered && !cahetRegistered);
+              (asksCahetRegistered && !cahetRegistered) ||
+              (disposition === "course_not_listed" && !requestedCourseText.trim());
 
             return (
               <div className="flex flex-col gap-2 pt-1">

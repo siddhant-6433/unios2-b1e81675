@@ -31,6 +31,8 @@ const cnetNotQualifiedBptBmritPreview =
   "Dear {{student_name}}\n\nCNET result is declared. If you have NOT qualified, you can still choose healthcare career options: *BPT* or *BMRIT*.\n\nLast date: *14th June 2026*.\n\nBoth are mandatory:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667691872, 9555192192\n\n---\n\nप्रिय {{student_name}}\n\nCNET result आ गया है। यदि आप qualify नहीं हुए हैं, तब भी healthcare career के लिए *BPT* या *BMRIT* option है।\n\nLast date: *14th June 2026*.\n\nदोनों mandatory हैं:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667691872, 9555192192";
 const cuet2026CounsellingOpenPreview =
   "The CUET 2026 result is out, and admission counselling is now open at NIMT.\n\nIf you're planning your next step after CUET, we're here to help.\n\nDuring your counselling session, our admission expert will guide you with:\n\n• Choosing the right course for your career goals\n• Scholarship opportunities based on your CUET score\n• Admission process, eligibility, fees, and required documents\n• Placements, internships, and career opportunities\n\nWe look forward to helping you build a successful future.\n\nTeam NIMT Educational Institutions";
+const cuetCounsellingBookingPreview =
+  "CUET counselling booking is now open at NIMT. Share this approved Meta template with CUET leads so they can book a counselling session with the admissions team.";
 
 export const WA_BULK_TEMPLATES: WaBulkTemplate[] = [
   {
@@ -106,6 +108,13 @@ export const WA_BULK_TEMPLATES: WaBulkTemplate[] = [
     label: "CUET 2026 Counselling Open",
     description: "CUET result follow-up with counselling guidance and image header.",
     preview: cuet2026CounsellingOpenPreview,
+    params: [],
+  },
+  {
+    key: "cuet_counselling_booking",
+    label: "CUET Counselling Booking",
+    description: "CUET counselling booking template approved in Meta.",
+    preview: cuetCounsellingBookingPreview,
     params: [],
   },
   {

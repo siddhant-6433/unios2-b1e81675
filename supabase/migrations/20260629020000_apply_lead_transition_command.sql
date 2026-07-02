@@ -56,7 +56,7 @@ BEGIN
     WHEN 'classifyLead' THEN 'new_lead'::public.lead_stage
     WHEN 'classifyNotInterested' THEN 'not_interested'::public.lead_stage
     WHEN 'classifyIneligible' THEN 'ineligible'::public.lead_stage
-    WHEN 'classifyInactive' THEN 'inactive'::public.lead_stage
+    WHEN 'classifyInactive' THEN 'cold'::public.lead_stage
     WHEN 'submitApplication' THEN 'application_submitted'::public.lead_stage
     WHEN 'approveApplication' THEN 'application_approved'::public.lead_stage
     WHEN 'recordInterviewPending' THEN 'interview'::public.lead_stage
@@ -116,6 +116,7 @@ BEGIN
       WHEN 'recordDispositionDeferred' THEN 'Stage changed to Deferred'
       WHEN 'markDnc' THEN 'Lead marked as Do Not Contact (DNC)'
       WHEN 'restoreFromDnc' THEN 'Lead removed from DNC list and moved back to New Lead'
+      WHEN 'classifyInactive' THEN 'Stage changed to Cold after repeated inactive attempts'
       WHEN 'approveApplication' THEN 'Application approved'
       WHEN 'rescheduleVisit' THEN 'Stage changed to Visit Scheduled after visit reschedule'
       ELSE 'Lead transition command: ' || _command

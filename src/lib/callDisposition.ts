@@ -27,6 +27,7 @@ const DISPOSITION_LABELS: Record<string, string> = {
   do_not_contact: "Do Not Contact",
   voicemail: "Voicemail",
   busy: "Busy",
+  course_not_listed: "Course Not Listed",
 };
 
 const formatFollowupDate = (iso?: string) => {
@@ -370,6 +371,7 @@ export async function recordCallDisposition(args: RecordCallDispositionArgs): Pr
     p_future_eligible_session: futureEligibleSession,
     p_cnet_appeared:           data.cnet_appeared ?? null,
     p_cahet_registered:        data.cahet_registered ?? null,
+    p_requested_course_text:   data.requested_course_text ?? null,
     p_followup_at:             followupAt,
     p_followup_notes:          followupNotes,
     p_followup_activity_desc:  followupActivityDesc,
@@ -383,6 +385,7 @@ export async function recordCallDisposition(args: RecordCallDispositionArgs): Pr
     const legacyRpcParams = { ...rpcParams };
     delete legacyRpcParams.p_cnet_appeared;
     delete legacyRpcParams.p_cahet_registered;
+    delete legacyRpcParams.p_requested_course_text;
     console.warn("record_disposition_writes legacy signature detected; retrying without qualifier params.", error);
     const retry = await supabase.rpc("record_disposition_writes", legacyRpcParams);
     error = retry.error;

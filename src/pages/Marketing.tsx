@@ -1,29 +1,42 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
 import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   AlertTriangle,
   CheckCircle2,
+  Download,
   ListPlus,
   Loader2,
   Mail,
   Megaphone,
   MessageSquare,
+  MousePointerClick,
   PauseCircle,
+  PhoneCall,
   PlayCircle,
   RefreshCw,
+  Reply,
   Send,
   StopCircle,
   XCircle,
 } from "lucide-react";
 import { getDatePresetRange, getEndExclusiveIso, type DatePreset } from "@/lib/datePresets";
 import { decideBlockedRoleAccess } from "@/lib/accessPolicy";
+import { AUTO_FILLED_PARAMS, WA_BULK_TEMPLATES, type WaBulkTemplate } from "@/config/waBulkTemplates";
+import {
+  WhatsAppTemplatePreviewBubble,
+  templateTextPreviewFromComponents,
+  type WhatsAppTemplateComponent,
+} from "@/components/templates/WhatsAppTemplatePreviewBubble";
 
 type Channel = "whatsapp" | "email";
 
@@ -37,18 +50,45 @@ interface CampaignRow {
   sent: number;
   failed: number;
   pending: number;
+  responded: number;
+  called: number;
+  clickedLink: number;
+  clickedButton: number;
   status: string;
   createdAt: string;
   completedAt: string | null;
   workerError: string | null;
 }
 
-interface FailureRow {
+interface LeadList {
+  id: string;
+  name: string;
+  member_count: number;
+}
+
+interface EmailTemplate {
+  id: string;
+  slug: string;
+  name: string;
+  subject: string;
+  body_html: string;
+}
+
+interface RecipientRow {
   id: string;
   destination: string;
   leadName: string | null;
   status: string;
   error: string | null;
+  sentAt: string | null;
+  providerId: string | null;
+  respondedAt: string | null;
+  calledAt: string | null;
+  callDisposition: string | null;
+  clickedLinkAt: string | null;
+  clickedUrl: string | null;
+  clickedButtonAt: string | null;
+  clickedButtonTitle: string | null;
 }
 
 const statusTone = (status: string) => {
@@ -75,19 +115,158 @@ const fmtDate = (value: string | null) => {
   });
 };
 
+const csvCell = (value: unknown) => {
+  const text = value == null ? "" : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+};
+
+const downloadCsv = (filename: string, headers: string[], rows: unknown[][]) => {
+  const csv = [headers, ...rows]
+    .map((row) => row.map(csvCell).join(","))
+    .join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+};
+
+const sampleValueForParam = (name: string) => {
+  if (/^\d+$/.test(name)) return `sample ${name}`;
+  if (name === "student_name") return "Rahul Sharma";
+  if (name === "lead_name") return "Rahul Sharma";
+  if (name === "phone") return "+91 98765 43210";
+  if (name === "email") return "rahul@example.com";
+  if (name === "lead_source") return "CUET list";
+  if (name === "lead_stage") return "new";
+  if (name === "guardian_name") return "Sunita Sharma";
+  if (name === "guardian_phone") return "+91 98765 43211";
+  if (name === "course_name") return "BPT";
+  if (name === "campus_name") return "NIMT Greater Noida";
+  if (name === "notes") return "CUET score: 418\nPreferred city: Greater Noida";
+  if (name === "latest_note") return "CUET score: 418";
+  if (name === "visit_date") return "14 Jun 2026, 11:00 AM";
+  if (name === "amount") return "5,000";
+  if (name === "due_date") return "14 Jun 2026";
+  if (name === "application_id") return "NIMT-2026-001";
+  return name.replace(/_/g, " ");
+};
+
+const renderTemplatePreview = (
+  preview: string,
+  staticParams: Record<string, string>,
+  params: WaBulkTemplate["params"] = [],
+) =>
+  preview.replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, (_match, name: string) => {
+    const paramName = /^\d+$/.test(name) ? params[Number(name) - 1]?.name || name : name;
+    const typed = staticParams[paramName]?.trim();
+    return typed || sampleValueForParam(paramName);
+  });
+
+const hasDynamicUrlButton = (components?: Array<{ type?: string; buttons?: Array<{ type?: string; url?: string }> }> | null) =>
+  (components || []).some((component) =>
+    component.type === "BUTTONS" &&
+    (component.buttons || []).some((button) => button.type === "URL" && typeof button.url === "string" && button.url.includes("{{"))
+  );
+
+const renderEmailSample = (value: string) =>
+  value.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, name: string) => sampleValueForParam(name));
+
+const EMAIL_LIST_VALUE_TOKENS = [
+  { token: "student_name", label: "Student name" },
+  { token: "phone", label: "Phone" },
+  { token: "email", label: "Email" },
+  { token: "lead_source", label: "Source" },
+  { token: "lead_stage", label: "Stage" },
+  { token: "course_name", label: "Course" },
+  { token: "campus_name", label: "Campus" },
+  { token: "guardian_name", label: "Guardian name" },
+  { token: "guardian_phone", label: "Guardian phone" },
+  { token: "latest_note", label: "Latest note" },
+  { token: "notes", label: "All notes / imported extras" },
+];
+
 export default function Marketing() {
-  const { role, realRole, permissions, isImpersonating, user } = useAuth();
+  const { profile, role, realRole, permissions, isImpersonating, user } = useAuth();
+  const { toast } = useToast();
+  const [searchParams] = useSearchParams();
   const initialCustomRange = useMemo(() => getDatePresetRange("last_30"), []);
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
+  const [lists, setLists] = useState<LeadList[]>([]);
+  const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [datePreset, setDatePreset] = useState<DatePreset>("all");
   const [dateFrom, setDateFrom] = useState(initialCustomRange.from);
   const [dateTo, setDateTo] = useState(initialCustomRange.to);
   const [detailCampaign, setDetailCampaign] = useState<CampaignRow | null>(null);
-  const [failures, setFailures] = useState<FailureRow[]>([]);
-  const [failuresLoading, setFailuresLoading] = useState(false);
+  const [recipients, setRecipients] = useState<RecipientRow[]>([]);
+  const [recipientsLoading, setRecipientsLoading] = useState(false);
   const [queueingId, setQueueingId] = useState<string | null>(null);
   const [queueError, setQueueError] = useState<string | null>(null);
+  const [selectedListId, setSelectedListId] = useState("");
+  const [campaignChannel, setCampaignChannel] = useState<Channel>("whatsapp");
+  const [campaignName, setCampaignName] = useState("");
+  const [waTemplate, setWaTemplate] = useState(WA_BULK_TEMPLATES[0]?.key || "");
+  const [waStaticParams, setWaStaticParams] = useState<Record<string, string>>({});
+  const [dynamicWaBulkTemplates, setDynamicWaBulkTemplates] = useState<WaBulkTemplate[]>([]);
+  const [waMetaTemplateOverrides, setWaMetaTemplateOverrides] = useState<Record<string, Partial<Pick<WaBulkTemplate, "description" | "preview">>>>({});
+  const [waTemplateComponentsByKey, setWaTemplateComponentsByKey] = useState<Record<string, WhatsAppTemplateComponent[]>>({});
+  const [emailMode, setEmailMode] = useState<"template" | "custom">("template");
+  const [emailSlug, setEmailSlug] = useState("");
+  const [emailSubject, setEmailSubject] = useState("");
+  const [emailBody, setEmailBody] = useState("");
+  const [emailInsertTarget, setEmailInsertTarget] = useState<"subject" | "body">("body");
+  const [launching, setLaunching] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+  const requestedListId = searchParams.get("listId") || "";
+
+  const selectedList = useMemo(
+    () => lists.find((list) => list.id === selectedListId) || null,
+    [lists, selectedListId],
+  );
+  const availableWaBulkTemplates = useMemo(
+    () => [
+      ...WA_BULK_TEMPLATES.map((template) => ({ ...template, ...(waMetaTemplateOverrides[template.key] || {}) })),
+      ...dynamicWaBulkTemplates,
+    ],
+    [dynamicWaBulkTemplates, waMetaTemplateOverrides],
+  );
+  const selectedWaTemplate = useMemo(
+    () => availableWaBulkTemplates.find((template) => template.key === waTemplate) || availableWaBulkTemplates[0] || WA_BULK_TEMPLATES[0],
+    [availableWaBulkTemplates, waTemplate],
+  );
+  const waStaticFields = useMemo(
+    () => (selectedWaTemplate?.params || []).filter((param) => param.source === "static" && !AUTO_FILLED_PARAMS.includes(param.name as any)),
+    [selectedWaTemplate],
+  );
+  const waMissingStatic = waStaticFields.some((param) => !waStaticParams[param.name]?.trim());
+  const waRenderedPreview = useMemo(
+    () => renderTemplatePreview(selectedWaTemplate?.preview || "", waStaticParams, selectedWaTemplate?.params || []),
+    [selectedWaTemplate, waStaticParams],
+  );
+  const selectedEmailTemplate = useMemo(
+    () => emailTemplates.find((template) => template.slug === emailSlug) || null,
+    [emailSlug, emailTemplates],
+  );
+  const emailPreviewSubject = emailMode === "template"
+    ? renderEmailSample(selectedEmailTemplate?.subject || selectedEmailTemplate?.name || "Email subject")
+    : renderEmailSample(emailSubject || "Campaign subject");
+  const emailPreviewBody = emailMode === "template"
+    ? renderEmailSample(selectedEmailTemplate?.body_html || "<p>Select an email template to preview the message.</p>")
+    : renderEmailSample(emailBody || "<p>Write a custom email body to preview it here.</p>");
+
+  const insertEmailValueToken = (token: string) => {
+    const value = `{{${token}}}`;
+    if (emailInsertTarget === "subject") {
+      setEmailSubject((current) => current ? `${current} ${value}` : value);
+    } else {
+      setEmailBody((current) => current ? `${current}\n${value}` : value);
+    }
+  };
 
   const dateBounds = useMemo(() => {
     if (datePreset === "all") return { from: null, to: null };
@@ -109,12 +288,12 @@ export default function Marketing() {
     setLoading(true);
     let whatsappQuery = supabase
       .from("whatsapp_campaigns" as any)
-      .select("id,name,template_key,total_recipients,sent_count,failed_count,status,created_at,completed_at,worker_error,lead_lists(name)")
+      .select("id,name,template_key,total_recipients,sent_count,failed_count,response_count,called_count,link_click_count,button_click_count,status,created_at,completed_at,worker_error,lead_lists(name)")
       .order("created_at", { ascending: false })
       .limit(100);
     let emailQuery = supabase
       .from("email_campaigns" as any)
-      .select("id,name,template_slug,total_recipients,sent_count,failed_count,status,created_at,completed_at,worker_error,lead_lists(name)")
+      .select("id,name,template_slug,total_recipients,sent_count,failed_count,response_count,called_count,link_click_count,button_click_count,status,created_at,completed_at,worker_error,lead_lists(name)")
       .order("created_at", { ascending: false })
       .limit(100);
 
@@ -145,7 +324,11 @@ export default function Marketing() {
         total,
         sent,
         failed,
-        pending: row.status === "completed" || row.status === "failed" || row.status === "terminated" ? 0 : Math.max(0, total - sent - failed),
+        pending: row.status === "completed" || row.status === "terminated" ? 0 : Math.max(0, total - sent - failed),
+        responded: Number(row.response_count || 0),
+        called: Number(row.called_count || 0),
+        clickedLink: Number(row.link_click_count || 0),
+        clickedButton: Number(row.button_click_count || 0),
         status: row.status || "pending",
         createdAt: row.created_at,
         completedAt: row.completed_at,
@@ -166,7 +349,11 @@ export default function Marketing() {
         total,
         sent,
         failed,
-        pending: row.status === "completed" || row.status === "failed" || row.status === "terminated" ? 0 : Math.max(0, total - sent - failed),
+        pending: row.status === "completed" || row.status === "terminated" ? 0 : Math.max(0, total - sent - failed),
+        responded: Number(row.response_count || 0),
+        called: Number(row.called_count || 0),
+        clickedLink: Number(row.link_click_count || 0),
+        clickedButton: Number(row.button_click_count || 0),
         status: row.status || "pending",
         createdAt: row.created_at,
         completedAt: row.completed_at,
@@ -180,6 +367,98 @@ export default function Marketing() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    if (role === "academic_partner") return;
+    (async () => {
+      const [listsRes, templatesRes] = await Promise.all([
+        supabase
+          .from("lead_lists" as any)
+          .select("id,name,member_count")
+          .order("created_at", { ascending: false })
+          .limit(200),
+        supabase
+          .from("email_templates" as any)
+          .select("id,slug,name,subject,body_html")
+          .eq("is_active", true)
+          .order("name"),
+      ]);
+      const nextLists = ((listsRes.data as any[]) || []) as LeadList[];
+      const nextTemplates = ((templatesRes.data as any[]) || []) as EmailTemplate[];
+      setLists(nextLists);
+      setEmailTemplates(nextTemplates);
+      setSelectedListId((current) => {
+        if (requestedListId && nextLists.some((list) => list.id === requestedListId)) return requestedListId;
+        return current || nextLists[0]?.id || "";
+      });
+      setEmailSlug((current) => current || nextTemplates[0]?.slug || "");
+    })();
+  }, [requestedListId, role]);
+
+  useEffect(() => {
+    if (role === "academic_partner") return;
+    (async () => {
+      const knownKeys = new Set(WA_BULK_TEMPLATES.map((template) => template.key));
+      const { data: settings } = await (supabase as any)
+        .from("whatsapp_template_settings")
+        .select("template_key, display_name, description, category, show_in_lead_picker")
+        .eq("show_in_lead_picker", true);
+      const settingsRows = ((settings || []) as Array<{
+        template_key: string;
+        display_name?: string | null;
+        description?: string | null;
+      }>);
+      const settingsByKey = new Map(settingsRows.map((row) => [row.template_key, row]));
+      const enabledKeys = new Set(settingsRows.map((row) => row.template_key));
+      const { data: approvedRows } = await (supabase as any)
+        .from("whatsapp_templates")
+        .select("name, components, placeholder_count, has_media, header_format")
+        .eq("status", "APPROVED");
+
+      const overrides: Record<string, Partial<Pick<WaBulkTemplate, "description" | "preview">>> = {};
+      const componentsByKey: Record<string, WhatsAppTemplateComponent[]> = {};
+      ((approvedRows || []) as Array<{
+        name: string;
+        components?: WhatsAppTemplateComponent[] | null;
+      }>).forEach((row) => {
+        if (row.name && row.components) componentsByKey[row.name] = row.components;
+        if (!row.name || !knownKeys.has(row.name)) return;
+        const preview = templateTextPreviewFromComponents(row.components);
+        if (preview) overrides[row.name] = { preview };
+      });
+
+      const dynamic = ((approvedRows || []) as Array<{
+        name: string;
+        components?: WhatsAppTemplateComponent[] | null;
+        placeholder_count?: number | null;
+        has_media?: boolean | null;
+        header_format?: string | null;
+      }>)
+        .filter((row) =>
+          row.name &&
+          enabledKeys.has(row.name) &&
+          !knownKeys.has(row.name) &&
+          row.placeholder_count === 0 &&
+          row.has_media !== true &&
+          !["IMAGE", "VIDEO", "DOCUMENT"].includes(String(row.header_format || "").toUpperCase()) &&
+          !hasDynamicUrlButton(row.components)
+        )
+        .map((row) => {
+          const setting = settingsByKey.get(row.name);
+          return {
+            key: row.name,
+            label: setting?.display_name || row.name.replace(/_/g, " "),
+            description: setting?.description || "Approved Meta template",
+            preview: templateTextPreviewFromComponents(row.components) || setting?.description || row.name,
+            params: [],
+          };
+        });
+
+      setWaMetaTemplateOverrides(overrides);
+      setWaTemplateComponentsByKey(componentsByKey);
+      setDynamicWaBulkTemplates(dynamic);
+    })();
+  }, [role]);
+
   const totals = useMemo(() => {
     return campaigns.reduce(
       (acc, item) => {
@@ -187,35 +466,162 @@ export default function Marketing() {
         acc.sent += item.sent;
         acc.failed += item.failed;
         acc.pending += item.pending;
+        acc.responded += item.responded;
+        acc.called += item.called;
+        acc.clickedLink += item.clickedLink;
+        acc.clickedButton += item.clickedButton;
         if (item.channel === "whatsapp") acc.whatsapp += item.sent;
         if (item.channel === "email") acc.email += item.sent;
         return acc;
       },
-      { total: 0, sent: 0, failed: 0, pending: 0, whatsapp: 0, email: 0 },
+      { total: 0, sent: 0, failed: 0, pending: 0, responded: 0, called: 0, clickedLink: 0, clickedButton: 0, whatsapp: 0, email: 0 },
     );
   }, [campaigns]);
 
-  const openFailures = async (campaign: CampaignRow) => {
+  const launchCampaign = async () => {
+    if (!selectedList) {
+      setLaunchError("Pick a lead list first.");
+      return;
+    }
+    setLaunching(true);
+    setLaunchError(null);
+
+    try {
+      if (campaignChannel === "whatsapp") {
+        if (!waTemplate) throw new Error("Pick a WhatsApp template.");
+        if (waMissingStatic) throw new Error("Fill the required template fields.");
+
+        const { data: members, error: memErr } = await supabase
+          .from("lead_list_members" as any)
+          .select("lead_id, leads(id, phone, stage)")
+          .eq("list_id", selectedList.id);
+        if (memErr) throw memErr;
+
+        const valid = ((members as any[]) || [])
+          .map((member) => member.leads)
+          .filter((lead) => lead && lead.phone && lead.stage !== "dnc");
+        if (!valid.length) throw new Error("No reachable WhatsApp recipients on this list.");
+
+        const staticParamsToSend: Record<string, string> = {};
+        for (const field of waStaticFields) {
+          const value = (waStaticParams[field.name] || "").trim();
+          if (value) staticParamsToSend[field.name] = value;
+        }
+
+        const { data: campaign, error: campErr } = await supabase
+          .from("whatsapp_campaigns" as any)
+          .insert({
+            name: campaignName.trim() || `${selectedList.name} - WhatsApp`,
+            template_key: waTemplate,
+            list_id: selectedList.id,
+            total_recipients: valid.length,
+            static_params: staticParamsToSend,
+            created_by: profile?.id || null,
+            next_attempt_at: new Date().toISOString(),
+            worker_locked_at: null,
+            status: "pending",
+          })
+          .select("id")
+          .single();
+        if (campErr || !campaign) throw campErr || new Error("Could not create WhatsApp campaign.");
+
+        const rows = valid.map((lead) => ({
+          campaign_id: (campaign as any).id,
+          lead_id: lead.id,
+          phone: lead.phone,
+        }));
+        for (let i = 0; i < rows.length; i += 500) {
+          const { error } = await supabase.from("whatsapp_campaign_recipients" as any).insert(rows.slice(i, i + 500));
+          if (error) throw error;
+        }
+      } else {
+        if (emailMode === "template" && !emailSlug) throw new Error("Pick an email template.");
+        if (emailMode === "custom" && (!emailSubject.trim() || !emailBody.trim())) {
+          throw new Error("Subject and body are required for custom email.");
+        }
+
+        const { data: members, error: memErr } = await supabase
+          .from("lead_list_members" as any)
+          .select("lead_id, leads(id, email, stage)")
+          .eq("list_id", selectedList.id);
+        if (memErr) throw memErr;
+
+        const valid = ((members as any[]) || [])
+          .map((member) => member.leads)
+          .filter((lead) => lead && lead.email && lead.stage !== "dnc");
+        if (!valid.length) throw new Error("No reachable email recipients on this list.");
+
+        const { data: campaign, error: campErr } = await supabase
+          .from("email_campaigns" as any)
+          .insert({
+            name: campaignName.trim() || `${selectedList.name} - Email`,
+            list_id: selectedList.id,
+            template_slug: emailMode === "template" ? emailSlug : null,
+            custom_subject: emailMode === "custom" ? emailSubject.trim() : null,
+            custom_body: emailMode === "custom" ? emailBody : null,
+            total_recipients: valid.length,
+            created_by: profile?.id || null,
+            next_attempt_at: new Date().toISOString(),
+            worker_locked_at: null,
+            status: "pending",
+          })
+          .select("id")
+          .single();
+        if (campErr || !campaign) throw campErr || new Error("Could not create email campaign.");
+
+        const rows = valid.map((lead) => ({
+          campaign_id: (campaign as any).id,
+          lead_id: lead.id,
+          to_email: lead.email,
+        }));
+        for (let i = 0; i < rows.length; i += 500) {
+          const { error } = await supabase.from("email_campaign_recipients" as any).insert(rows.slice(i, i + 500));
+          if (error) throw error;
+        }
+      }
+
+      await supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1, batch_size: 10 } }).catch(() => {});
+      toast({ title: "Campaign queued", description: "Progress is tracked below in Executed Campaigns." });
+      setCampaignName("");
+      await load();
+    } catch (error: any) {
+      setLaunchError(error?.message || "Could not queue campaign.");
+      toast({ title: "Could not queue campaign", description: error?.message, variant: "destructive" });
+    } finally {
+      setLaunching(false);
+    }
+  };
+
+  const openRecipients = async (campaign: CampaignRow) => {
     setDetailCampaign(campaign);
-    setFailuresLoading(true);
+    setRecipientsLoading(true);
     const table = campaign.channel === "whatsapp" ? "whatsapp_campaign_recipients" : "email_campaign_recipients";
     const destinationColumn = campaign.channel === "whatsapp" ? "phone" : "to_email";
+    const providerColumn = campaign.channel === "whatsapp" ? "message_id" : "provider_id";
     const { data } = await supabase
       .from(table as any)
-      .select(`id,status,error_message,${destinationColumn},leads(name)`)
+      .select(`id,status,error_message,${providerColumn},sent_at,${destinationColumn},responded_at,called_at,call_disposition,clicked_link_at,clicked_url,clicked_button_at,clicked_button_title,leads(name)`)
       .eq("campaign_id", campaign.id)
-      .in("status", ["failed", "skipped"])
       .order("created_at", { ascending: false })
-      .limit(100);
+      .limit(500);
 
-    setFailures(((data as any[]) || []).map((row) => ({
+    setRecipients(((data as any[]) || []).map((row) => ({
       id: row.id,
       destination: row[destinationColumn] || "-",
       leadName: row.leads?.name || null,
       status: row.status,
       error: row.error_message || null,
+      sentAt: row.sent_at || null,
+      providerId: row[providerColumn] || null,
+      respondedAt: row.responded_at || null,
+      calledAt: row.called_at || null,
+      callDisposition: row.call_disposition || null,
+      clickedLinkAt: row.clicked_link_at || null,
+      clickedUrl: row.clicked_url || null,
+      clickedButtonAt: row.clicked_button_at || null,
+      clickedButtonTitle: row.clicked_button_title || null,
     })));
-    setFailuresLoading(false);
+    setRecipientsLoading(false);
   };
 
   const resumeCampaign = async (campaign: CampaignRow) => {
@@ -282,6 +688,77 @@ export default function Marketing() {
     await load();
   };
 
+  const downloadCampaignReport = () => {
+    downloadCsv(
+      `executed-campaigns-${new Date().toISOString().slice(0, 10)}.csv`,
+      [
+        "Campaign",
+        "Channel",
+        "Status",
+        "List",
+        "Template",
+        "Total recipients",
+        "Sent",
+        "Failed",
+        "Pending",
+        "Responded",
+        "Called",
+        "Clicked link",
+        "Clicked button",
+        "Response rate",
+        "Call rate",
+        "Success rate",
+        "Created",
+        "Completed",
+        "Worker error",
+      ],
+      campaigns.map((campaign) => [
+        campaign.name,
+        campaign.channel,
+        campaign.status,
+        campaign.listName || "",
+        campaign.template || "",
+        campaign.total,
+        campaign.sent,
+        campaign.failed,
+        campaign.pending,
+        campaign.responded,
+        campaign.called,
+        campaign.clickedLink,
+        campaign.clickedButton,
+        pct(campaign.responded, campaign.total),
+        pct(campaign.called, campaign.total),
+        pct(campaign.sent, campaign.sent + campaign.failed),
+        campaign.createdAt,
+        campaign.completedAt || "",
+        campaign.workerError || "",
+      ]),
+    );
+  };
+
+  const downloadRecipientReport = () => {
+    if (!detailCampaign) return;
+    downloadCsv(
+      `${detailCampaign.channel}-campaign-recipients-${detailCampaign.id}.csv`,
+      ["Lead", "Destination", "Status", "Sent at", "Responded at", "Called at", "Call disposition", "Clicked link at", "Clicked URL", "Clicked button at", "Button", "Provider/message id", "Error"],
+      recipients.map((recipient) => [
+        recipient.leadName || "",
+        recipient.destination,
+        recipient.status,
+        recipient.sentAt || "",
+        recipient.respondedAt || "",
+        recipient.calledAt || "",
+        recipient.callDisposition || "",
+        recipient.clickedLinkAt || "",
+        recipient.clickedUrl || "",
+        recipient.clickedButtonAt || "",
+        recipient.clickedButtonTitle || "",
+        recipient.providerId || "",
+        recipient.error || "",
+      ]),
+    );
+  };
+
   const accessDecision = decideBlockedRoleAccess({
     isAuthenticated: !!user,
     role,
@@ -295,9 +772,9 @@ export default function Marketing() {
     <div className="space-y-5 p-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Marketing</h1>
+          <h1 className="text-2xl font-bold text-foreground">Marketing Hub</h1>
           <p className="text-sm text-muted-foreground">
-            Campaign performance for WhatsApp and email outbound.
+            Start campaigns from saved lists and track every running or completed send in one place.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -313,7 +790,7 @@ export default function Marketing() {
             ariaPrefix="Campaign"
           />
           <Button asChild variant="outline" size="sm">
-            <Link to="/lists"><ListPlus className="mr-2 h-4 w-4" /> Lists</Link>
+            <Link to="/lists"><ListPlus className="mr-2 h-4 w-4" /> Manage Lists</Link>
           </Button>
           <Button asChild variant="outline" size="sm">
             <Link to="/template-manager"><Megaphone className="mr-2 h-4 w-4" /> Templates</Link>
@@ -324,39 +801,278 @@ export default function Marketing() {
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-4">
-        <Metric title="Total recipients" value={totals.total.toLocaleString("en-IN")} icon={Megaphone} />
-        <Metric title="Sent" value={totals.sent.toLocaleString("en-IN")} icon={CheckCircle2} tone="emerald" />
-        <Metric title="Failed" value={totals.failed.toLocaleString("en-IN")} icon={XCircle} tone="red" />
-        <Metric title="Success rate" value={pct(totals.sent, totals.sent + totals.failed)} icon={Send} tone="blue" />
-      </div>
+      <Card>
+        <CardContent className="space-y-4 p-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <ListPlus className="h-4 w-4 text-primary" />
+              <p className="font-semibold">Lists / Initiate New Campaign</p>
+            </div>
+            <p className="text-xs text-muted-foreground">Pick a saved lead list, choose the channel, and queue the campaign.</p>
+          </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        <Card>
-          <CardContent className="flex items-center justify-between p-4">
+          <div className="grid gap-3 lg:grid-cols-[1.2fr_0.8fr_1fr]">
             <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">WhatsApp sent</p>
-              <p className="mt-1 text-2xl font-bold">{totals.whatsapp.toLocaleString("en-IN")}</p>
+              <label className="text-xs font-medium text-muted-foreground">Lead list</label>
+              <select
+                value={selectedListId}
+                onChange={(event) => setSelectedListId(event.target.value)}
+                className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                {lists.length === 0 && <option value="">No lists available</option>}
+                {lists.map((list) => (
+                  <option key={list.id} value={list.id}>
+                    {list.name} ({list.member_count})
+                  </option>
+                ))}
+              </select>
             </div>
-            <MessageSquare className="h-8 w-8 text-emerald-600" />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center justify-between p-4">
             <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Email sent</p>
-              <p className="mt-1 text-2xl font-bold">{totals.email.toLocaleString("en-IN")}</p>
+              <label className="text-xs font-medium text-muted-foreground">Channel</label>
+              <select
+                value={campaignChannel}
+                onChange={(event) => setCampaignChannel(event.target.value as Channel)}
+                className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="whatsapp">WhatsApp</option>
+                <option value="email">Email</option>
+              </select>
             </div>
-            <Mail className="h-8 w-8 text-blue-600" />
-          </CardContent>
-        </Card>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Campaign name</label>
+              <Input
+                value={campaignName}
+                onChange={(event) => setCampaignName(event.target.value)}
+                placeholder={selectedList ? `${selectedList.name} - ${campaignChannel}` : "Campaign name"}
+                className="mt-1"
+              />
+            </div>
+          </div>
+
+          {campaignChannel === "whatsapp" ? (
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">WhatsApp template</label>
+                  <select
+                    value={waTemplate}
+                    onChange={(event) => {
+                      setWaTemplate(event.target.value);
+                      setWaStaticParams({});
+                    }}
+                    className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  >
+                    {availableWaBulkTemplates.map((template) => (
+                      <option key={template.key} value={template.key}>{template.label}</option>
+                    ))}
+                  </select>
+                  {selectedWaTemplate?.description && (
+                    <p className="mt-1 text-xs text-muted-foreground">{selectedWaTemplate.description}</p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  {waStaticFields.length === 0 ? (
+                    <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+                      This template uses only per-lead values.
+                    </div>
+                  ) : (
+                    waStaticFields.map((field) => (
+                      <div key={field.name}>
+                        <label className="text-xs font-medium text-muted-foreground">{field.name.replace(/_/g, " ")}</label>
+                        <Input
+                          value={waStaticParams[field.name] || ""}
+                          onChange={(event) => setWaStaticParams((current) => ({ ...current, [field.name]: event.target.value }))}
+                          placeholder={field.placeholder || field.name}
+                          className="mt-1"
+                        />
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">WhatsApp Preview</p>
+                <WhatsAppTemplatePreviewBubble
+                  templateKey={selectedWaTemplate?.key}
+                  components={waTemplateComponentsByKey[selectedWaTemplate?.key || ""]}
+                  bodyText={waRenderedPreview}
+                  fallbackText={waRenderedPreview}
+                  className="max-h-[420px] overflow-y-auto"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <Button type="button" variant={emailMode === "template" ? "default" : "outline"} size="sm" onClick={() => setEmailMode("template")}>
+                    Template
+                  </Button>
+                  <Button type="button" variant={emailMode === "custom" ? "default" : "outline"} size="sm" onClick={() => setEmailMode("custom")}>
+                    Custom
+                  </Button>
+                </div>
+                {emailMode === "template" ? (
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground">Email template</label>
+                    <select
+                      value={emailSlug}
+                      onChange={(event) => setEmailSlug(event.target.value)}
+                      className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    >
+                      {emailTemplates.length === 0 && <option value="">No active templates</option>}
+                      {emailTemplates.map((template) => (
+                        <option key={template.id} value={template.slug}>{template.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground">Subject</label>
+                      <Input
+                        value={emailSubject}
+                        onFocus={() => setEmailInsertTarget("subject")}
+                        onChange={(event) => setEmailSubject(event.target.value)}
+                        placeholder="Use values like {{student_name}}"
+                        className="mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground">Body HTML</label>
+                      <Textarea
+                        value={emailBody}
+                        onFocus={() => setEmailInsertTarget("body")}
+                        onChange={(event) => setEmailBody(event.target.value)}
+                        rows={8}
+                        placeholder={"<p>Hi {{student_name}},</p><p>Your course is {{course_name}}.</p>"}
+                        className="mt-1 font-mono"
+                      />
+                    </div>
+                    <div className="rounded-lg border border-border bg-muted/30 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <p className="text-xs font-semibold text-foreground">Insert list value</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            Adds a per-lead variable to the {emailInsertTarget === "subject" ? "subject" : "body"}.
+                          </p>
+                        </div>
+                        <div className="flex rounded-md border border-input bg-background p-0.5">
+                          <button
+                            type="button"
+                            onClick={() => setEmailInsertTarget("subject")}
+                            className={`rounded px-2 py-1 text-[11px] font-medium ${emailInsertTarget === "subject" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                          >
+                            Subject
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEmailInsertTarget("body")}
+                            className={`rounded px-2 py-1 text-[11px] font-medium ${emailInsertTarget === "body" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                          >
+                            Body
+                          </button>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {EMAIL_LIST_VALUE_TOKENS.map((item) => (
+                          <button
+                            key={item.token}
+                            type="button"
+                            onClick={() => insertEmailValueToken(item.token)}
+                            className="rounded-full border border-input bg-background px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:border-primary hover:text-primary"
+                            title={`Insert {{${item.token}}}`}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="mt-2 text-[11px] text-muted-foreground">
+                        Imported unmapped CSV columns are available inside notes when they were saved during import.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Email Preview</p>
+                <div className="max-h-[420px] overflow-y-auto rounded-xl border border-border bg-white p-4 shadow-sm">
+                  <div className="mb-3 border-b border-border pb-3">
+                    <p className="text-[11px] font-semibold uppercase text-muted-foreground">Subject</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-900">{emailPreviewSubject}</p>
+                  </div>
+                  <div className="prose prose-sm max-w-none text-slate-900" dangerouslySetInnerHTML={{ __html: emailPreviewBody }} />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {launchError && <p className="text-sm text-red-600">{launchError}</p>}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">
+              DNC leads and members without the selected channel destination are skipped at queue time.
+            </p>
+            <Button onClick={launchCampaign} disabled={launching || !selectedList || (campaignChannel === "whatsapp" && waMissingStatic)}>
+              {launching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+              Queue Campaign
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="space-y-3">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">Executed Campaigns</h2>
+          <p className="text-sm text-muted-foreground">Running, completed, paused, failed, and terminated campaign results.</p>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-4">
+          <Metric title="Total recipients" value={totals.total.toLocaleString("en-IN")} icon={Megaphone} />
+          <Metric title="Sent" value={totals.sent.toLocaleString("en-IN")} icon={CheckCircle2} tone="emerald" />
+          <Metric title="Failed" value={totals.failed.toLocaleString("en-IN")} icon={XCircle} tone="red" />
+          <Metric title="Success rate" value={pct(totals.sent, totals.sent + totals.failed)} icon={Send} tone="blue" />
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-4">
+          <Metric title="Responded" value={totals.responded.toLocaleString("en-IN")} icon={Reply} tone="blue" />
+          <Metric title="Called" value={totals.called.toLocaleString("en-IN")} icon={PhoneCall} tone="emerald" />
+          <Metric title="Clicked link" value={totals.clickedLink.toLocaleString("en-IN")} icon={MousePointerClick} tone="slate" />
+          <Metric title="Clicked button" value={totals.clickedButton.toLocaleString("en-IN")} icon={MousePointerClick} tone="slate" />
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <Card>
+            <CardContent className="flex items-center justify-between p-4">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">WhatsApp sent</p>
+                <p className="mt-1 text-2xl font-bold">{totals.whatsapp.toLocaleString("en-IN")}</p>
+              </div>
+              <MessageSquare className="h-8 w-8 text-emerald-600" />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="flex items-center justify-between p-4">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Email sent</p>
+                <p className="mt-1 text-2xl font-bold">{totals.email.toLocaleString("en-IN")}</p>
+              </div>
+              <Mail className="h-8 w-8 text-blue-600" />
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
       <Card>
         <CardContent className="p-0">
-          <div className="border-b border-border px-4 py-3">
-            <p className="font-semibold">Campaigns</p>
-            {queueError && <p className="mt-1 text-xs text-red-600">{queueError}</p>}
+          <div className="flex flex-col gap-3 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-semibold">Executed Campaigns</p>
+              {queueError && <p className="mt-1 text-xs text-red-600">{queueError}</p>}
+            </div>
+            <Button variant="outline" size="sm" onClick={downloadCampaignReport} disabled={campaigns.length === 0}>
+              <Download className="mr-2 h-4 w-4" />
+              Download CSV
+            </Button>
           </div>
           {loading ? (
             <div className="flex items-center justify-center py-12">
@@ -375,6 +1091,9 @@ export default function Marketing() {
                     <th className="px-4 py-3 text-right">Recipients</th>
                     <th className="px-4 py-3 text-right">Sent</th>
                     <th className="px-4 py-3 text-right">Failed</th>
+                    <th className="px-4 py-3 text-right">Responded</th>
+                    <th className="px-4 py-3 text-right">Called</th>
+                    <th className="px-4 py-3 text-right">Clicks</th>
                     <th className="px-4 py-3 text-right">Success</th>
                     <th className="px-4 py-3 text-left">Created</th>
                     <th className="px-4 py-3 text-right">Actions</th>
@@ -401,6 +1120,20 @@ export default function Marketing() {
                       <td className="px-4 py-3 text-right font-medium">{campaign.total.toLocaleString("en-IN")}</td>
                       <td className="px-4 py-3 text-right text-emerald-700">{campaign.sent.toLocaleString("en-IN")}</td>
                       <td className="px-4 py-3 text-right text-red-700">{campaign.failed.toLocaleString("en-IN")}</td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="font-medium">{campaign.responded.toLocaleString("en-IN")}</div>
+                        <div className="text-[11px] text-muted-foreground">{pct(campaign.responded, campaign.total)}</div>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="font-medium">{campaign.called.toLocaleString("en-IN")}</div>
+                        <div className="text-[11px] text-muted-foreground">{pct(campaign.called, campaign.total)}</div>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="font-medium">{(campaign.clickedLink + campaign.clickedButton).toLocaleString("en-IN")}</div>
+                        <div className="text-[11px] text-muted-foreground">
+                          {campaign.clickedLink.toLocaleString("en-IN")} link / {campaign.clickedButton.toLocaleString("en-IN")} button
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-right">{pct(campaign.sent, campaign.sent + campaign.failed)}</td>
                       <td className="px-4 py-3 text-muted-foreground">{fmtDate(campaign.createdAt)}</td>
                       <td className="px-4 py-3 text-right">
@@ -453,10 +1186,9 @@ export default function Marketing() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => openFailures(campaign)}
-                          disabled={campaign.failed === 0}
+                          onClick={() => openRecipients(campaign)}
                         >
-                          Failures
+                          Details
                         </Button>
                         </div>
                       </td>
@@ -470,19 +1202,25 @@ export default function Marketing() {
       </Card>
 
       <Dialog open={!!detailCampaign} onOpenChange={(open) => { if (!open) setDetailCampaign(null); }}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-5xl">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-red-600" />
-              Failed recipients
-            </DialogTitle>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <DialogTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                Campaign recipients
+              </DialogTitle>
+              <Button variant="outline" size="sm" onClick={downloadRecipientReport} disabled={recipients.length === 0}>
+                <Download className="mr-2 h-4 w-4" />
+                Download CSV
+              </Button>
+            </div>
           </DialogHeader>
-          {failuresLoading ? (
+          {recipientsLoading ? (
             <div className="flex items-center justify-center py-10">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
-          ) : failures.length === 0 ? (
-            <div className="py-8 text-center text-sm text-muted-foreground">No failed recipients found.</div>
+          ) : recipients.length === 0 ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">No recipients found.</div>
           ) : (
             <div className="max-h-[60vh] overflow-auto rounded-lg border border-border">
               <table className="w-full text-sm">
@@ -491,15 +1229,37 @@ export default function Marketing() {
                     <th className="px-3 py-2 text-left">Lead</th>
                     <th className="px-3 py-2 text-left">Destination</th>
                     <th className="px-3 py-2 text-left">Status</th>
+                    <th className="px-3 py-2 text-left">Sent</th>
+                    <th className="px-3 py-2 text-left">Responded</th>
+                    <th className="px-3 py-2 text-left">Called</th>
+                    <th className="px-3 py-2 text-left">Clicks</th>
+                    <th className="px-3 py-2 text-left">Provider ID</th>
                     <th className="px-3 py-2 text-left">Error</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {failures.map((row) => (
+                  {recipients.map((row) => (
                     <tr key={row.id} className="border-b border-border last:border-b-0">
                       <td className="px-3 py-2 font-medium">{row.leadName || "-"}</td>
                       <td className="px-3 py-2">{row.destination}</td>
-                      <td className="px-3 py-2">{row.status}</td>
+                      <td className="px-3 py-2">
+                        <Badge variant="outline" className="capitalize">{row.status}</Badge>
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground">{fmtDate(row.sentAt)}</td>
+                      <td className="px-3 py-2 text-muted-foreground">{fmtDate(row.respondedAt)}</td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        <div>{fmtDate(row.calledAt)}</div>
+                        {row.callDisposition && <div className="text-[11px]">{row.callDisposition}</div>}
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        <div>{row.clickedLinkAt ? `Link ${fmtDate(row.clickedLinkAt)}` : "-"}</div>
+                        {row.clickedButtonAt && (
+                          <div className="text-[11px]">
+                            Button {fmtDate(row.clickedButtonAt)}{row.clickedButtonTitle ? `: ${row.clickedButtonTitle}` : ""}
+                          </div>
+                        )}
+                      </td>
+                      <td className="max-w-[180px] truncate px-3 py-2 text-muted-foreground">{row.providerId || "-"}</td>
                       <td className="px-3 py-2 text-muted-foreground">{row.error || "-"}</td>
                     </tr>
                   ))}

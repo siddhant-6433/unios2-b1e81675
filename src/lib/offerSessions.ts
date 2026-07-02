@@ -1,3 +1,5 @@
+import { collectOfferFeeTermTotals } from "./offerFeeTerms";
+
 export interface OfferSessionOption {
   id: string;
   name: string;
@@ -10,17 +12,16 @@ interface FeeStructureLike {
   fee_structure_items?: Array<{ term?: string | null; amount?: number | string | null }> | null;
 }
 
-export function feeStructureHasYearWiseItems(structure: FeeStructureLike): boolean {
-  return (structure.fee_structure_items || []).some((item) => {
-    const term = String(item?.term || "");
-    return /^year_\d+$/.test(term) && Number(item?.amount || 0) > 0;
-  });
+export function feeStructureHasOfferFeeItems(structure: FeeStructureLike): boolean {
+  return collectOfferFeeTermTotals(structure.fee_structure_items).length > 0;
 }
+
+export const feeStructureHasYearWiseItems = feeStructureHasOfferFeeItems;
 
 export function feeBackedSessionIds(structures: FeeStructureLike[]): string[] {
   return Array.from(new Set(
     structures
-      .filter(feeStructureHasYearWiseItems)
+      .filter(feeStructureHasOfferFeeItems)
       .map((structure) => structure.session_id)
       .filter((sessionId): sessionId is string => !!sessionId),
   ));

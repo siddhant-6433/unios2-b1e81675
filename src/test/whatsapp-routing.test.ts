@@ -148,7 +148,7 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(manualReply).toContain("sendWhatsAppText(admin, channelHint");
     expect(aiReply).toContain("sendWhatsAppText(admin");
     expect(templateSend).toContain("sendWhatsAppTemplate(admin");
-    expect(campaignSend).toContain("sendWhatsAppTemplate(adminClient");
+    expect(campaignSend).toMatch(/sendWhatsAppTemplate(?: as any)?\)\(adminClient|sendWhatsAppTemplate\(adminClient/);
   });
 
   it("lets bulk campaigns persist and use an operator-selected WhatsApp sender", () => {
@@ -159,10 +159,10 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(bulkSenderNumbersMigration).toContain("917428499849");
     expect(bulkSenderNumbersMigration).toContain("919555192192");
     expect(bulkSenderNumbersMigration).toContain("allow_bulk = true");
-    expect(campaignSend).toContain("campaignBusinessPhoneNumberId");
-    expect(campaignSend).toContain("businessPhoneNumberId: campaignBusinessPhoneNumberId");
-    expect(campaignSend).toContain("businessNumber: campaignBusinessNumber");
-    expect(campaignSend).toContain("selected_business_phone_number_id");
+    expect(campaignSend).toContain('route: "bulk"');
+    expect(campaignSend).toContain("requireBulk: true");
+    expect(campaignSend).toContain("sendResult,");
+    expect(campaignSend).toContain('kind: "campaignSend"');
   });
 
   it("tracks rich conversation state for AI/human handoff", () => {
@@ -280,10 +280,13 @@ describe("WhatsApp inbound auto-reply and qualification routing", () => {
     expect(replyLearningMigration).toContain("target_channels text[]");
     expect(replyLearningMigration).toContain("match_admissions_ai_reply_examples");
     expect(replyLearningMigration).toContain("pg_trgm");
-    expect(replyLearning).toContain('action !== "ingest_recent"');
+    expect(replyLearning).toContain('"ingest_recent", "ingest_message"');
+    expect(replyLearning).toContain('action === "ingest_message"');
+    expect(replyLearning).toContain("ingestReplyExample");
     expect(replyLearning).toContain('template_key", "manual_reply"');
     expect(replyLearning).toContain('source_channel: "whatsapp"');
     expect(replyLearning).toContain('target_channels: ["whatsapp", "voice"]');
+    expect(replyLearning).toContain('"corrected_reply"');
     expect(replyLearning).toContain("redactForLearning");
     expect(aiReply).toContain("loadReplyExamplesContext");
     expect(aiReply).toContain('p_target_channel: "whatsapp"');

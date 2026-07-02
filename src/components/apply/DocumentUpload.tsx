@@ -31,7 +31,11 @@ const PARENT_AADHAAR_DOCS: DocSpec[] = [
   { key: 'guardian_aadhaar', label: 'Guardian Aadhaar Card', desc: 'JPEG / PNG / PDF (optional)', required: false },
 ];
 
-function getRequiredDocs(
+function isNurseryClass(courseNames: string): boolean {
+  return /\b(pre[-\s]?nursery|nursery)\b/i.test(courseNames);
+}
+
+export function getRequiredDocs(
   programCategory: string,
   academicDetails?: Record<string, any>,
   courseSelections?: { course_name: string }[],
@@ -47,9 +51,15 @@ function getRequiredDocs(
   if (programCategory === 'school') {
     const courseNames = courseSelections?.map(s => s.course_name.toLowerCase()).join(' ') || '';
     const isAboveKG = /grade|class\s*[1-9]/i.test(courseNames);
+    const needsBirthCertificate = isNurseryClass(courseNames);
 
     return [
-      { key: 'birth_certificate', label: 'Birth Certificate', desc: 'PDF or image', required: true },
+      {
+        key: 'birth_certificate',
+        label: 'Birth Certificate',
+        desc: needsBirthCertificate ? 'PDF or image' : 'Required for Nursery only',
+        required: needsBirthCertificate,
+      },
       { key: 'report_card', label: 'Previous Class Report Card', desc: 'Last year marksheet', required: isAboveKG },
       { key: 'student_photo', label: 'Student Photograph', desc: 'Passport size photo', required: true },
       { key: 'transfer_certificate', label: 'Transfer Certificate', desc: 'If applicable', required: false },
@@ -229,6 +239,24 @@ function docKeyForFile(name: string): string {
   return dashIdx > 0 ? name.substring(0, dashIdx) : name.replace(/\.[^.]+$/, "");
 }
 
+async function readFunctionErrorMessage(error: unknown, fallback = "Upload failed"): Promise<string> {
+  const context = (error as { context?: unknown } | null)?.context;
+  if (context && typeof (context as Response).json === "function") {
+    try {
+      const response = typeof (context as Response).clone === "function"
+        ? (context as Response).clone()
+        : (context as Response);
+      const body = await response.json();
+      if (body?.error) return String(body.error);
+      if (body?.message) return String(body.message);
+    } catch {
+      // Fall through to the SDK error message below.
+    }
+  }
+
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 export function DocumentUpload({
   data,
   onChange,
@@ -298,7 +326,7 @@ export function DocumentUpload({
     const { data: res, error } = await supabase.functions.invoke('apply-portal-upload-doc', { body: form });
 
     if (error || (res && res.error)) {
-      const msg = (res && res.error) || error?.message || 'Upload failed';
+      const msg = (res && res.error) || await readFunctionErrorMessage(error);
       toast({ title: 'Upload failed', description: msg, variant: 'destructive' });
     } else {
       setUploaded(prev => ({ ...prev, [docKey]: true }));
