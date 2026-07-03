@@ -64,8 +64,11 @@ describe("campaign queue controls", () => {
     expect(leadLists).toContain("dynamicWaBulkTemplates");
     expect(leadLists).toContain("availableWaBulkTemplates");
     expect(leadLists).toContain('from("whatsapp_templates")');
-    expect(leadLists).toContain("row.placeholder_count === 0");
+    expect(leadLists).toContain("dynamicWaTemplateParams(row.components, row.placeholder_count)");
+    expect(marketingPage).toContain("dynamicWaTemplateParams(row.components, row.placeholder_count)");
     expect(leadLists).toContain("hasDynamicUrlButton");
+    expect(whatsappSender).toContain("dynamicTemplateParamNames");
+    expect(whatsappSender).toContain("placeholder_count");
   });
 
   it("exposes the enabled admission payment nudge in Marketing Hub bulk campaigns", () => {

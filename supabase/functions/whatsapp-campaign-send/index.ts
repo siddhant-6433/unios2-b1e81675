@@ -101,6 +101,20 @@ function templateHasDynamicUrlButton(components: unknown): boolean {
   });
 }
 
+function dynamicTemplateParamNames(components: unknown, placeholderCount?: unknown): string[] {
+  const body = Array.isArray(components)
+    ? components.find((component) => {
+        const data = component as Record<string, unknown>;
+        return data.type === "BODY";
+      }) as Record<string, unknown> | undefined
+    : undefined;
+  const matches = typeof body?.text === "string"
+    ? [...body.text.matchAll(/\{\{(\d+)\}\}/g)].map((match) => Number(match[1]))
+    : [];
+  const maxIndex = Math.max(Number(placeholderCount || 0), ...matches.filter((index) => Number.isFinite(index) && index > 0), 0);
+  return Array.from({ length: maxIndex }, (_value, index) => `template_value_${index + 1}`);
+}
+
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function syncCampaignCounts(admin: any, campaignId: string) {
@@ -233,7 +247,6 @@ Deno.serve(async (req) => {
         .maybeSingle();
       if (dynamicErr) console.error("Dynamic campaign template lookup failed:", dynamicErr.message);
       const canSendDynamic = dynamicTemplate
-        && (dynamicTemplate as any).placeholder_count === 0
         && (dynamicTemplate as any).has_media !== true
         && !["IMAGE", "VIDEO", "DOCUMENT"].includes(String((dynamicTemplate as any).header_format || "").toUpperCase())
         && !templateHasDynamicUrlButton((dynamicTemplate as any).components);
@@ -244,7 +257,10 @@ Deno.serve(async (req) => {
         );
       }
       dynamicTemplateBody = templateBodyFromComponents((dynamicTemplate as any).components);
-      templateDef = { name: (dynamicTemplate as any).name, params: [] };
+      templateDef = {
+        name: (dynamicTemplate as any).name,
+        params: dynamicTemplateParamNames((dynamicTemplate as any).components, (dynamicTemplate as any).placeholder_count),
+      };
     }
 
     if (campaign.status === "paused" || campaign.status === "terminated") {
