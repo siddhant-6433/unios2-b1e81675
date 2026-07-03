@@ -27,6 +27,36 @@ export interface WaBulkTemplate {
 
 export const AUTO_FILLED_PARAMS = ["student_name", "course_name", "campus_name"] as const;
 
+interface WaTemplateComponentLike {
+  type?: string;
+  text?: string;
+}
+
+export function dynamicWaTemplateParams(
+  components?: WaTemplateComponentLike[] | null,
+  placeholderCount?: number | null,
+): WaBulkTemplate["params"] {
+  const body = components?.find((component) => String(component.type || "").toUpperCase() === "BODY");
+  const placeholderIndexes = Array.from(
+    new Set(
+      Array.from(String(body?.text || "").matchAll(/\{\{(\d+)\}\}/g))
+        .map((match) => Number(match[1]))
+        .filter((index) => Number.isFinite(index) && index > 0),
+    ),
+  ).sort((a, b) => a - b);
+  const count = Math.max(Number(placeholderCount || 0), placeholderIndexes.at(-1) || 0);
+
+  return Array.from({ length: count }, (_value, index) => {
+    const position = index + 1;
+    return {
+      name: `template_value_${position}`,
+      source: "static",
+      placeholder: `Template value ${position}`,
+      help: "This value is applied to every recipient in the campaign.",
+    };
+  });
+}
+
 const cnetNotQualifiedBptBmritPreview =
   "Dear {{student_name}}\n\nCNET result is declared. If you have NOT qualified, you can still choose healthcare career options: *BPT* or *BMRIT*.\n\nLast date: *14th June 2026*.\n\nBoth are mandatory:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667691872, 9555192192\n\n---\n\nप्रिय {{student_name}}\n\nCNET result आ गया है। यदि आप qualify नहीं हुए हैं, तब भी healthcare career के लिए *BPT* या *BMRIT* option है।\n\nLast date: *14th June 2026*.\n\nदोनों mandatory हैं:\n1. NIMT application: https://apply.nimt.ac.in\n2. *ABVMUP CAHET registration by 14th June, 11:59 PM*: https://www.abvmucet26.co.in/entrance2026/login?form=4\n\nHelp: 7428499849, 9667691872, 9555192192";
 const cuet2026CounsellingOpenPreview =

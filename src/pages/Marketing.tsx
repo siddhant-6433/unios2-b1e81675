@@ -32,7 +32,7 @@ import {
 } from "lucide-react";
 import { getDatePresetRange, getEndExclusiveIso, type DatePreset } from "@/lib/datePresets";
 import { decideBlockedRoleAccess } from "@/lib/accessPolicy";
-import { AUTO_FILLED_PARAMS, WA_BULK_TEMPLATES, type WaBulkTemplate } from "@/config/waBulkTemplates";
+import { AUTO_FILLED_PARAMS, WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from "@/config/waBulkTemplates";
 import {
   WhatsAppTemplatePreviewBubble,
   templateTextPreviewFromComponents,
@@ -441,7 +441,6 @@ export default function Marketing() {
           row.name &&
           enabledKeys.has(row.name) &&
           !knownKeys.has(row.name) &&
-          row.placeholder_count === 0 &&
           row.has_media !== true &&
           !["IMAGE", "VIDEO", "DOCUMENT"].includes(String(row.header_format || "").toUpperCase()) &&
           !hasDynamicUrlButton(row.components)
@@ -453,7 +452,7 @@ export default function Marketing() {
             label: setting?.display_name || row.name.replace(/_/g, " "),
             description: setting?.description || "Approved Meta template",
             preview: templateTextPreviewFromComponents(row.components) || setting?.description || row.name,
-            params: [],
+            params: dynamicWaTemplateParams(row.components, row.placeholder_count),
           };
         });
 
