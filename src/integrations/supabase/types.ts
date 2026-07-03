@@ -8818,6 +8818,11 @@ export type Database = {
           id: string
           otp_hash: string
           phone: string
+          wa_message_id: string | null
+          wa_sent_at: string | null
+          wa_status: string | null
+          wa_status_error: Json | null
+          wa_status_updated_at: string | null
           verified: boolean
         }
         Insert: {
@@ -8826,6 +8831,11 @@ export type Database = {
           id?: string
           otp_hash: string
           phone: string
+          wa_message_id?: string | null
+          wa_sent_at?: string | null
+          wa_status?: string | null
+          wa_status_error?: Json | null
+          wa_status_updated_at?: string | null
           verified?: boolean
         }
         Update: {
@@ -8834,6 +8844,11 @@ export type Database = {
           id?: string
           otp_hash?: string
           phone?: string
+          wa_message_id?: string | null
+          wa_sent_at?: string | null
+          wa_status?: string | null
+          wa_status_error?: Json | null
+          wa_status_updated_at?: string | null
           verified?: boolean
         }
         Relationships: []

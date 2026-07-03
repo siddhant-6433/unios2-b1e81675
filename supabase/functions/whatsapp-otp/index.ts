@@ -58,6 +58,18 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
 }
 
+function normalizeLoginPhone(phone: unknown): string | null {
+  if (typeof phone !== "string") return null;
+  const trimmed = phone.trim();
+  if (!trimmed) return null;
+
+  const digits = trimmed.replace(/\D/g, "");
+  if (digits.length === 10) return `+91${digits}`;
+  if (digits.length > 0 && trimmed.startsWith("+")) return `+${digits}`;
+  if (digits.length > 0) return `+${digits}`;
+  return null;
+}
+
 async function createSession(admin: SupabaseClient, userId: string) {
   const { data: userData } = await admin.auth.admin.getUserById(userId);
   if (!userData?.user?.email) return null;
@@ -195,30 +207,9 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const whatsappToken = Deno.env.get("WHATSAPP_OTP_API_TOKEN") || Deno.env.get("WHATSAPP_API_TOKEN");
-    const phoneNumberId = Deno.env.get("WHATSAPP_OTP_PHONE_NUMBER_ID") || Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
-    const otpTemplateName = Deno.env.get("WHATSAPP_OTP_TEMPLATE") || "unios2_login";
-
-    console.log("[whatsapp-otp] Secret diagnostics:", {
-      WHATSAPP_OTP_API_TOKEN: !!Deno.env.get("WHATSAPP_OTP_API_TOKEN"),
-      WHATSAPP_API_TOKEN: !!Deno.env.get("WHATSAPP_API_TOKEN"),
-      WHATSAPP_OTP_PHONE_NUMBER_ID: !!Deno.env.get("WHATSAPP_OTP_PHONE_NUMBER_ID"),
-      WHATSAPP_PHONE_NUMBER_ID: !!Deno.env.get("WHATSAPP_PHONE_NUMBER_ID"),
-      phoneNumberId_length: phoneNumberId?.length ?? 0,
-      templateName: otpTemplateName,
-    });
-
-    if (!whatsappToken || !phoneNumberId) {
-      return new Response(
-        JSON.stringify({ error: "WhatsApp API not configured. Contact administrator." }),
-        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
     const { action, phone, otp, intent_id, client_secret } = await req.json();
-
-    const normalizedPhone = phone?.startsWith("+") ? phone : `+${phone}`;
+    const normalizedPhone = normalizeLoginPhone(phone);
 
     // ── Start WhatsApp sign-in intent ────────────────────────────────────────
     if (action === "start_sign_in") {
@@ -381,6 +372,26 @@ Deno.serve(async (req) => {
 
     // ── Send OTP ──────────────────────────────────────────────────────────────
     if (action === "send") {
+      const whatsappToken = Deno.env.get("WHATSAPP_OTP_API_TOKEN") || Deno.env.get("WHATSAPP_API_TOKEN");
+      const phoneNumberId = Deno.env.get("WHATSAPP_OTP_PHONE_NUMBER_ID") || Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+      const otpTemplateName = Deno.env.get("WHATSAPP_OTP_TEMPLATE") || "unios2_login";
+
+      console.log("[whatsapp-otp] Secret diagnostics:", {
+        WHATSAPP_OTP_API_TOKEN: !!Deno.env.get("WHATSAPP_OTP_API_TOKEN"),
+        WHATSAPP_API_TOKEN: !!Deno.env.get("WHATSAPP_API_TOKEN"),
+        WHATSAPP_OTP_PHONE_NUMBER_ID: !!Deno.env.get("WHATSAPP_OTP_PHONE_NUMBER_ID"),
+        WHATSAPP_PHONE_NUMBER_ID: !!Deno.env.get("WHATSAPP_PHONE_NUMBER_ID"),
+        phoneNumberId_length: phoneNumberId?.length ?? 0,
+        templateName: otpTemplateName,
+      });
+
+      if (!whatsappToken || !phoneNumberId) {
+        return new Response(
+          JSON.stringify({ error: "WhatsApp API not configured. Contact administrator." }),
+          { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
       if (!normalizedPhone || normalizedPhone.length < 10) {
         return new Response(
           JSON.stringify({ error: "Valid phone number required" }),
@@ -408,11 +419,19 @@ Deno.serve(async (req) => {
       const otpHash = await hashOtp(otpCode);
 
       await adminClient.from("whatsapp_otps").delete().eq("phone", normalizedPhone).eq("verified", false);
-      await adminClient.from("whatsapp_otps").insert({
+      const { data: otpRecord, error: otpInsertError } = await adminClient.from("whatsapp_otps").insert({
         phone: normalizedPhone,
         otp_hash: otpHash,
         expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-      });
+      }).select("id").single();
+
+      if (otpInsertError || !otpRecord?.id) {
+        console.error("[whatsapp-otp] failed to create OTP record", otpInsertError);
+        return new Response(
+          JSON.stringify({ error: "Could not create OTP. Try again." }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
 
       const waPhone = normalizedPhone.replace(/[^0-9]/g, "");
       console.log("[whatsapp-otp] Sending to:", waPhone, "template:", otpTemplateName, "phoneNumberId:", phoneNumberId);
@@ -458,6 +477,14 @@ Deno.serve(async (req) => {
         const waCode = typeof waError?.code === "string" || typeof waError?.code === "number" ? waError.code : undefined;
         const waMessage = typeof waError?.message === "string" ? waError.message : undefined;
         const fbtrace = typeof waError?.fbtrace_id === "string" ? waError.fbtrace_id : undefined;
+        await adminClient
+          .from("whatsapp_otps")
+          .update({
+            wa_status: "failed",
+            wa_status_error: parsedWaError || { raw: waBody.slice(0, 1000) },
+            wa_status_updated_at: new Date().toISOString(),
+          })
+          .eq("id", otpRecord.id);
         return new Response(
           JSON.stringify({ error: waMessage || "Failed to send WhatsApp message. Try again.", meta_code: waCode, meta_fbtrace: fbtrace }),
           { status: waResponse.status >= 400 && waResponse.status < 500 ? 403 : 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -471,6 +498,16 @@ Deno.serve(async (req) => {
       const waContact = isRecord(waContacts[0]) ? waContacts[0] : null;
       const wamid = typeof waMessage?.id === "string" ? waMessage.id : undefined;
       console.log("[whatsapp-otp] Message sent, wamid:", wamid, "contact:", JSON.stringify(waContact));
+
+      await adminClient
+        .from("whatsapp_otps")
+        .update({
+          wa_message_id: wamid || null,
+          wa_status: wamid ? "accepted" : "accepted_without_message_id",
+          wa_sent_at: new Date().toISOString(),
+          wa_status_updated_at: new Date().toISOString(),
+        })
+        .eq("id", otpRecord.id);
 
       return new Response(
         JSON.stringify({ success: true, wamid, wa_id: waContact?.wa_id, input: waContact?.input }),

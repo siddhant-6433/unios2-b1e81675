@@ -79,4 +79,13 @@ describe("campaign queue controls", () => {
     expect(whatsappSender).toContain('"an_amount"');
     expect(whatsappSender).toContain('"year1_amount"');
   });
+
+  it("exposes the enabled admission payment nudge in Marketing Hub bulk campaigns", () => {
+    expect(marketingPage).toContain("WA_BULK_TEMPLATES");
+    expect(leadLists).toContain("WA_BULK_TEMPLATES");
+    expect(bulkTemplates).toContain('key: "admission_payment_nudge"');
+    expect(whatsappSender).toContain("admission_payment_nudge");
+    expect(whatsappSender).toContain('"an_amount"');
+    expect(whatsappSender).toContain('"year1_amount"');
+  });
 });
