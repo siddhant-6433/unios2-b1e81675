@@ -21,6 +21,7 @@ const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl
   // template is named `application_submitted` (see submit-wa-templates).
   application_received: { name: "application_submitted", params: ["student_name", "application_id"] },
   fee_reminder: { name: "fee_reminder", params: ["student_name", "amount", "due_date"] },
+  admission_payment_nudge: { name: "admission_payment_nudge", params: ["student_name", "course_name", "an_amount", "year1_amount", "due_date"] },
   bpt_bmrit_cahet_deadline: { name: "bpt_bmrit_cahet_deadline", params: [] },
   cnet_not_qualified_bpt_bmrit: { name: "cnet_not_qualified_bpt_bmrit", params: ["student_name"] },
   cuet_2026_counselling_open: { name: "cuet_2026_counselling_open", params: [], headerImageUrl: CUET_2026_COUNSELLING_IMAGE_URL },

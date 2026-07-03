@@ -88,6 +88,19 @@ export const WA_BULK_TEMPLATES: WaBulkTemplate[] = [
     ],
   },
   {
+    key: "admission_payment_nudge",
+    label: "Admission Payment Nudge",
+    description: "Reminds offer-stage candidates to pay AN balance now and clear Sem 1 fee by the configured due date.",
+    preview: "Hi {{student_name}}, your admission for {{course_name}} is almost complete. Please pay Rs. {{an_amount}} now to trigger your admission number, and clear the Year 1 balance of Rs. {{year1_amount}} by {{due_date}}.",
+    params: [
+      { name: "student_name", source: "auto" },
+      { name: "course_name",  source: "auto" },
+      { name: "an_amount",    source: "static", placeholder: "e.g. 12,500", help: "Same AN balance amount applied to every recipient." },
+      { name: "year1_amount", source: "static", placeholder: "e.g. 1,38,500", help: "Same Year 1 balance amount applied to every recipient." },
+      { name: "due_date",     source: "static", placeholder: "e.g. 15 June 2026" },
+    ],
+  },
+  {
     key: "bpt_bmrit_cahet_deadline",
     label: "BPT/BMRIT CAHET Deadline",
     description: cahetBulkDescription,
