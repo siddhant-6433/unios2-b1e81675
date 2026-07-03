@@ -12,8 +12,24 @@ const corsHeaders = {
 const CUET_2026_COUNSELLING_IMAGE_URL =
   "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/whatsapp-media/template-assets/cuet_2026_counselling_open.jpeg";
 
+type DynamicHeaderComponent =
+  | { kind: "media"; format: "image" | "video" | "document"; paramName: string }
+  | { kind: "text"; params: string[] };
+type DynamicButtonComponent = { index: number; params: string[] };
+type DynamicTemplateComponents = {
+  header?: DynamicHeaderComponent;
+  bodyParams: string[];
+  buttons: DynamicButtonComponent[];
+};
+type TemplateDef = {
+  name: string;
+  params: string[];
+  headerImageUrl?: string;
+  dynamicComponents?: DynamicTemplateComponents;
+};
+
 // Same template definitions as whatsapp-send
-const TEMPLATES: Record<string, { name: string; params: string[]; headerImageUrl?: string }> = {
+const TEMPLATES: Record<string, TemplateDef> = {
   lead_welcome: { name: "lead_welcome", params: ["student_name", "course_name"] },
   visit_confirmation: { name: "visit_confirmation", params: ["student_name", "visit_date", "campus_name"] },
   visit_reminder_24hr: { name: "visit_reminder_24hr", params: ["student_name", "visit_date"] },
@@ -88,31 +104,60 @@ function templateBodyFromComponents(components: unknown): string | null {
   return typeof body?.text === "string" ? body.text : null;
 }
 
-function templateHasDynamicUrlButton(components: unknown): boolean {
-  if (!Array.isArray(components)) return false;
-  const buttons = components.find((component) => {
-    const data = component as Record<string, unknown>;
-    return data.type === "BUTTONS";
-  }) as Record<string, unknown> | undefined;
-  if (!Array.isArray(buttons?.buttons)) return false;
-  return buttons.buttons.some((button) => {
-    const data = button as Record<string, unknown>;
-    return data.type === "URL" && typeof data.url === "string" && data.url.includes("{{");
-  });
+function numberedPlaceholders(text: unknown): number[] {
+  if (typeof text !== "string") return [];
+  return [...new Set(
+    [...text.matchAll(/\{\{(\d+)\}\}/g)]
+      .map((match) => Number(match[1]))
+      .filter((index) => Number.isFinite(index) && index > 0),
+  )].sort((a, b) => a - b);
 }
 
-function dynamicTemplateParamNames(components: unknown, placeholderCount?: unknown): string[] {
+function bodyTemplateParamNames(components: unknown, placeholderCount?: unknown): string[] {
   const body = Array.isArray(components)
     ? components.find((component) => {
         const data = component as Record<string, unknown>;
         return data.type === "BODY";
       }) as Record<string, unknown> | undefined
     : undefined;
-  const matches = typeof body?.text === "string"
-    ? [...body.text.matchAll(/\{\{(\d+)\}\}/g)].map((match) => Number(match[1]))
-    : [];
-  const maxIndex = Math.max(Number(placeholderCount || 0), ...matches.filter((index) => Number.isFinite(index) && index > 0), 0);
+  const matches = numberedPlaceholders(body?.text);
+  const maxIndex = Math.max(Number(placeholderCount || 0), ...matches, 0);
   return Array.from({ length: maxIndex }, (_value, index) => `template_value_${index + 1}`);
+}
+
+function dynamicTemplateComponents(
+  components: unknown,
+  placeholderCount?: unknown,
+  fallbackHeaderFormat?: unknown,
+): DynamicTemplateComponents {
+  const rows = Array.isArray(components) ? components as Record<string, unknown>[] : [];
+  const header = rows.find((component) => component.type === "HEADER");
+  const headerFormat = String(header?.format || fallbackHeaderFormat || "").toUpperCase();
+  const dynamicComponents: DynamicTemplateComponents = {
+    bodyParams: bodyTemplateParamNames(components, placeholderCount),
+    buttons: [],
+  };
+
+  if (["IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat)) {
+    dynamicComponents.header = {
+      kind: "media",
+      format: headerFormat.toLowerCase() as "image" | "video" | "document",
+      paramName: "template_header_media_url",
+    };
+  } else {
+    const headerParams = numberedPlaceholders(header?.text).map((position) => `template_header_value_${position}`);
+    if (headerParams.length > 0) dynamicComponents.header = { kind: "text", params: headerParams };
+  }
+
+  const buttons = rows.find((component) => component.type === "BUTTONS");
+  const buttonRows = Array.isArray(buttons?.buttons) ? buttons.buttons as Record<string, unknown>[] : [];
+  buttonRows.forEach((button, index) => {
+    if (button.type !== "URL" || typeof button.url !== "string" || !button.url.includes("{{")) return;
+    const params = numberedPlaceholders(button.url).map((position) => `template_button_${index}_url_value_${position}`);
+    if (params.length > 0) dynamicComponents.buttons.push({ index, params });
+  });
+
+  return dynamicComponents;
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -246,10 +291,7 @@ Deno.serve(async (req) => {
         .eq("status", "APPROVED")
         .maybeSingle();
       if (dynamicErr) console.error("Dynamic campaign template lookup failed:", dynamicErr.message);
-      const canSendDynamic = dynamicTemplate
-        && (dynamicTemplate as any).has_media !== true
-        && !["IMAGE", "VIDEO", "DOCUMENT"].includes(String((dynamicTemplate as any).header_format || "").toUpperCase())
-        && !templateHasDynamicUrlButton((dynamicTemplate as any).components);
+      const canSendDynamic = !!dynamicTemplate;
       if (!canSendDynamic) {
         return new Response(
           JSON.stringify({ error: `Unknown template: ${campaign.template_key}` }),
@@ -259,7 +301,12 @@ Deno.serve(async (req) => {
       dynamicTemplateBody = templateBodyFromComponents((dynamicTemplate as any).components);
       templateDef = {
         name: (dynamicTemplate as any).name,
-        params: dynamicTemplateParamNames((dynamicTemplate as any).components, (dynamicTemplate as any).placeholder_count),
+        params: bodyTemplateParamNames((dynamicTemplate as any).components, (dynamicTemplate as any).placeholder_count),
+        dynamicComponents: dynamicTemplateComponents(
+          (dynamicTemplate as any).components,
+          (dynamicTemplate as any).placeholder_count,
+          (dynamicTemplate as any).header_format,
+        ),
       };
     }
 
@@ -391,8 +438,31 @@ Deno.serve(async (req) => {
           parameters: [{ type: "image", image: { link: templateDef.headerImageUrl } }],
         });
       }
+      if (templateDef.dynamicComponents?.header) {
+        const header = templateDef.dynamicComponents.header;
+        if (header.kind === "media") {
+          const mediaUrl = resolveParam(header.paramName);
+          components.push({
+            type: "header",
+            parameters: [{ type: header.format, [header.format]: { link: mediaUrl } }],
+          });
+        } else {
+          components.push({
+            type: "header",
+            parameters: header.params.map((param) => ({ type: "text", text: resolveParam(param) })),
+          });
+        }
+      }
       if (bodyParams.length > 0) {
         components.push({ type: "body", parameters: bodyParams });
+      }
+      for (const button of templateDef.dynamicComponents?.buttons || []) {
+        components.push({
+          type: "button",
+          sub_type: "url",
+          index: String(button.index),
+          parameters: button.params.map((param) => ({ type: "text", text: resolveParam(param) })),
+        });
       }
 
       try {

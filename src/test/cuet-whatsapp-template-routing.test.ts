@@ -54,7 +54,7 @@ describe("CUET 2026 counselling WhatsApp template routing", () => {
     expect(campaignSend).toContain("cuet_2026_counselling_open");
     expect(campaignSend).toContain("cuet_counselling_booking");
     expect(campaignSend).toContain("Dynamic campaign template lookup failed");
-    expect(campaignSend).toContain("templateHasDynamicUrlButton");
+    expect(campaignSend).toContain("dynamicTemplateComponents");
     expect(campaignSend).toContain('type: "image"');
   });
 

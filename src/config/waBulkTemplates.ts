@@ -29,32 +29,76 @@ export const AUTO_FILLED_PARAMS = ["student_name", "course_name", "campus_name"]
 
 interface WaTemplateComponentLike {
   type?: string;
+  format?: string;
   text?: string;
+  buttons?: Array<{ type?: string; url?: string }>;
+}
+
+const MEDIA_HEADER_FORMATS = new Set(["IMAGE", "VIDEO", "DOCUMENT"]);
+
+function numberedPlaceholders(text?: string | null): number[] {
+  return Array.from(
+    new Set(
+      Array.from(String(text || "").matchAll(/\{\{(\d+)\}\}/g))
+        .map((match) => Number(match[1]))
+        .filter((index) => Number.isFinite(index) && index > 0),
+    ),
+  ).sort((a, b) => a - b);
 }
 
 export function dynamicWaTemplateParams(
   components?: WaTemplateComponentLike[] | null,
   placeholderCount?: number | null,
 ): WaBulkTemplate["params"] {
+  const params: WaBulkTemplate["params"] = [];
+  const header = components?.find((component) => String(component.type || "").toUpperCase() === "HEADER");
+  const headerFormat = String(header?.format || "").toUpperCase();
+  if (MEDIA_HEADER_FORMATS.has(headerFormat)) {
+    params.push({
+      name: "template_header_media_url",
+      source: "static",
+      placeholder: `${headerFormat.charAt(0)}${headerFormat.slice(1).toLowerCase()} URL`,
+      help: "Public media URL used for the template header in every send.",
+    });
+  } else {
+    numberedPlaceholders(header?.text).forEach((position) => {
+      params.push({
+        name: `template_header_value_${position}`,
+        source: "static",
+        placeholder: `Header value ${position}`,
+        help: "This header value is applied to every recipient in the campaign.",
+      });
+    });
+  }
+
   const body = components?.find((component) => String(component.type || "").toUpperCase() === "BODY");
-  const placeholderIndexes = Array.from(
-    new Set(
-      Array.from(String(body?.text || "").matchAll(/\{\{(\d+)\}\}/g))
-        .map((match) => Number(match[1]))
-        .filter((index) => Number.isFinite(index) && index > 0),
-    ),
-  ).sort((a, b) => a - b);
+  const placeholderIndexes = numberedPlaceholders(body?.text);
   const count = Math.max(Number(placeholderCount || 0), placeholderIndexes.at(-1) || 0);
 
-  return Array.from({ length: count }, (_value, index) => {
+  Array.from({ length: count }, (_value, index) => {
     const position = index + 1;
-    return {
+    params.push({
       name: `template_value_${position}`,
       source: "static",
       placeholder: `Template value ${position}`,
       help: "This value is applied to every recipient in the campaign.",
-    };
+    });
   });
+
+  const buttons = components?.find((component) => String(component.type || "").toUpperCase() === "BUTTONS");
+  (buttons?.buttons || []).forEach((button, buttonIndex) => {
+    if (String(button.type || "").toUpperCase() !== "URL" || !String(button.url || "").includes("{{")) return;
+    numberedPlaceholders(button.url).forEach((position) => {
+      params.push({
+        name: `template_button_${buttonIndex}_url_value_${position}`,
+        source: "static",
+        placeholder: `Button ${buttonIndex + 1} URL value ${position}`,
+        help: "This URL placeholder value is applied to every recipient in the campaign.",
+      });
+    });
+  });
+
+  return params;
 }
 
 const cnetNotQualifiedBptBmritPreview =
