@@ -15,6 +15,14 @@ const migration = readFileSync(
   "supabase/migrations/20260626082924_restrict_academic_partner_portal_permissions.sql",
   "utf8",
 );
+const offerRoleMigration = readFileSync(
+  "supabase/migrations/20260703133100_academic_partner_offer_letter_role.sql",
+  "utf8",
+);
+const offerRoleEnumMigration = readFileSync(
+  "supabase/migrations/20260703133000_add_academic_partner_offer_letter_enum.sql",
+  "utf8",
+);
 const leadAssociationMigration = readFileSync(
   "supabase/migrations/20260619121300_lead_association_approval_requests.sql",
   "utf8",
@@ -49,9 +57,28 @@ describe("academic partner access scope", () => {
     expect(canUsePermission(academicPartner, "templates:view")).toBe(false);
     expect(canSeePolicyItem(academicPartner, { url: "/academic-partner-portal?tab=applications" })).toBe(true);
     expect(canSeePolicyItem(academicPartner, { url: "/academic-partner-portal?tab=fees" })).toBe(true);
-    expect(canSeePolicyItem(academicPartner, { url: "/lists", permission: "leads:view", blockedRoles: ["academic_partner"] })).toBe(false);
-    expect(canSeePolicyItem(academicPartner, { url: "/marketing", permission: "leads:view", blockedRoles: ["academic_partner"] })).toBe(false);
-    expect(canSeePolicyItem(academicPartner, { url: "/template-manager", permission: "templates:view", blockedRoles: ["academic_partner"] })).toBe(false);
+    expect(canSeePolicyItem(academicPartner, { url: "/lists", permission: "leads:view", blockedRoles: ["academic_partner", "academic_partner_offer_letter"] })).toBe(false);
+    expect(canSeePolicyItem(academicPartner, { url: "/marketing", permission: "leads:view", blockedRoles: ["academic_partner", "academic_partner_offer_letter"] })).toBe(false);
+    expect(canSeePolicyItem(academicPartner, { url: "/template-manager", permission: "templates:view", blockedRoles: ["academic_partner", "academic_partner_offer_letter"] })).toBe(false);
+  });
+
+  it("lets the offer-letter partner role issue offers but keeps it in the partner portal", () => {
+    const offerPartner: AccessState = {
+      isAuthenticated: true,
+      role: "academic_partner_offer_letter",
+      realRole: "academic_partner_offer_letter",
+      permissions: ["academic_partner_portal:view", "academic_partner_offer_letters:issue"],
+    };
+
+    expect(decideStaffAppAccess(offerPartner, "/academic-partner-portal")).toEqual({ allowed: true });
+    expect(decideStaffAppAccess(offerPartner, "/applications")).toEqual({
+      allowed: false,
+      reason: "academic_partner_scope",
+      redirectTo: "/academic-partner-portal",
+    });
+    expect(canUsePermission(offerPartner, "academic_partner_portal:view")).toBe(true);
+    expect(canUsePermission(offerPartner, "academic_partner_offer_letters:issue")).toBe(true);
+    expect(canUsePermission(offerPartner, "leads:view")).toBe(false);
   });
 
   it("keeps academic partners inside their dedicated portal instead of full CRM lead detail", () => {
@@ -68,6 +95,13 @@ describe("academic partner access scope", () => {
     expect(portal).toContain("feeByStudent");
     expect(portal).toContain("attendanceByStudent");
     expect(portal).toContain("No fee collection found for assigned candidates");
+    expect(portal).toContain("assignmentMatchesStudent");
+    expect(portal).toContain('.eq("course_id", assignment.course_id)');
+    expect(portal).toContain('.eq("batch_id", assignment.batch_id)');
+    expect(portal).toContain('.in("student_id", scopedStudentIds)');
+    expect(portal).toContain('.in("student_id", feeStudentIds)');
+    expect(portal).not.toContain('supabase.from("students").select("id, name, admission_no, phone, status, courses:course_id(name), batches:batch_id(name)").order("created_at"');
+    expect(portal).not.toContain('supabase.from("fee_ledger").select("id, student_id, term, total_amount, paid_amount, balance, status, students:student_id(name, admission_no, pre_admission_no)").order("due_date"');
   });
 
   it("shows application status and a direct login link action for assigned leads", () => {
@@ -94,6 +128,9 @@ describe("academic partner access scope", () => {
     expect(portal).toContain("duplicate existing CRM leads");
     expect(portal).toContain("applicationLeads");
     expect(portal).toContain("No applications found for assigned leads");
+    expect(portal).toContain("academic_partner_paid_applications");
+    expect(portal).toContain("Attribution");
+    expect(portal).toContain("Not attributed to you");
     expect(leadAssociationMigration).toContain("v_existing_lead_id IS NULL");
     expect(leadAssociationMigration).toContain("CASE WHEN _requester_type = 'academic_partner' THEN _academic_partner_id ELSE NULL END");
     expect(leadAssociationMigration).toContain("'status', 'pending'");
@@ -104,7 +141,7 @@ describe("academic partner access scope", () => {
     expect(portal).toContain("placeCloudCall(lead)");
     expect(portal).toContain("Cloud Call");
     expect(manualCall).toContain('callerDb.auth.getUser()');
-    expect(manualCall).toContain('callerRole === "academic_partner"');
+    expect(manualCall).toContain('callerRole === "academic_partner" || callerRole === "academic_partner_offer_letter"');
     expect(manualCall).toContain("can_academic_partner_view_mapped_lead");
     expect(manualCall).toContain("You can call only leads assigned to your academic partner account.");
   });
@@ -131,5 +168,17 @@ describe("academic partner access scope", () => {
     expect(migration).toContain("public.is_academic_partner_scope(auth.uid(), course_id, batch_id)");
     expect(migration).toContain("public.can_academic_partner_view_fee_student(auth.uid(), student_id)");
     expect(migration).toContain("public.can_academic_partner_view_mapped_lead(auth.uid(), lead_id)");
+  });
+
+  it("adds server-side paid application and offer issuance gates for the offer-letter role", () => {
+    expect(offerRoleEnumMigration).toContain("ALTER TYPE public.app_role");
+    expect(offerRoleMigration).toContain("academic_partner_offer_letters");
+    expect(offerRoleMigration).toContain("CREATE OR REPLACE FUNCTION public.academic_partner_paid_applications");
+    expect(offerRoleMigration).toContain("a.payment_status = 'paid'");
+    expect(offerRoleMigration).toContain("CREATE OR REPLACE FUNCTION public.academic_partner_issue_offer");
+    expect(offerRoleMigration).toContain("Only academic partner offer-letter users can issue offers");
+    expect(offerRoleMigration).toContain("Application fee is not paid");
+    expect(offerRoleMigration).toContain("Application is outside academic partner assigned course scope");
+    expect(offerRoleMigration).toContain("'offer_issued_by_partner'");
   });
 });

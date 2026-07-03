@@ -16,7 +16,7 @@ import { useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/contexts/PermissionContext";
 import { supabase } from "@/integrations/supabase/client";
-import { canSeePolicyItem, type AccessState } from "@/lib/accessPolicy";
+import { canSeePolicyItem, isAcademicPartnerPortalRole, type AccessState } from "@/lib/accessPolicy";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
   SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem,
@@ -29,7 +29,7 @@ import { useCampus } from "@/contexts/CampusContext";
 type AppRole =
   | "super_admin" | "campus_admin" | "principal" | "admission_head"
   | "counsellor" | "accountant" | "faculty" | "teacher"
-  | "data_entry" | "office_admin" | "office_assistant" | "hostel_warden" | "consultant" | "academic_partner" | "student" | "parent"
+  | "data_entry" | "office_admin" | "office_assistant" | "hostel_warden" | "consultant" | "academic_partner" | "academic_partner_offer_letter" | "student" | "parent"
   | "ib_coordinator" | "video_editor" | "librarian";
 
 type MenuItem = {
@@ -59,14 +59,14 @@ const mainMenu: MenuItem[] = [
 ];
 
 const academicPartnerMenu: MenuItem[] = [
-  { title: "Overview", url: "/academic-partner-portal", icon: LayoutDashboard, roles: ["academic_partner"] },
-  { title: "Inbox", url: "/academic-partner-portal?tab=requests", icon: Inbox, roles: ["academic_partner"] },
-  { title: "Leads", url: "/academic-partner-portal?tab=leads", icon: GraduationCap, roles: ["academic_partner"] },
-  { title: "Applications", url: "/academic-partner-portal?tab=applications", icon: FileText, roles: ["academic_partner"] },
-  { title: "Students", url: "/academic-partner-portal?tab=students", icon: Users, roles: ["academic_partner"] },
-  { title: "Attendance", url: "/academic-partner-portal?tab=attendance", icon: ClipboardCheck, roles: ["academic_partner"] },
-  { title: "Finance", url: "/academic-partner-portal?tab=fees", icon: IndianRupee, roles: ["academic_partner"] },
-  { title: "Collections", url: "/academic-partner-portal?tab=fees", icon: Receipt, roles: ["academic_partner"] },
+  { title: "Overview", url: "/academic-partner-portal", icon: LayoutDashboard, roles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "Inbox", url: "/academic-partner-portal?tab=requests", icon: Inbox, roles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "Leads", url: "/academic-partner-portal?tab=leads", icon: GraduationCap, roles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "Applications", url: "/academic-partner-portal?tab=applications", icon: FileText, roles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "Students", url: "/academic-partner-portal?tab=students", icon: Users, roles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "Attendance", url: "/academic-partner-portal?tab=attendance", icon: ClipboardCheck, roles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "Finance", url: "/academic-partner-portal?tab=fees", icon: IndianRupee, roles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "Collections", url: "/academic-partner-portal?tab=fees", icon: Receipt, roles: ["academic_partner", "academic_partner_offer_letter"] },
 ];
 
 const admissionSubMenu: MenuItem[] = [
@@ -99,10 +99,10 @@ const admissionSubMenu: MenuItem[] = [
 ];
 
 const marketingSubMenu: MenuItem[] = [
-  { title: "Marketing Hub", url: "/marketing", icon: Megaphone, permission: "leads:view", blockedRoles: ["academic_partner"] },
-  { title: "Lists", url: "/lists", icon: ListPlus, permission: "leads:view", blockedRoles: ["academic_partner"] },
-  { title: "Templates", url: "/template-manager", icon: Newspaper, permission: "templates:view", blockedRoles: ["academic_partner"] },
-  { title: "WA Outbound", url: "/whatsapp-inbox?mode=outbound", icon: Send, permission: "whatsapp:view", blockedRoles: ["academic_partner"] },
+  { title: "Marketing Hub", url: "/marketing", icon: Megaphone, permission: "leads:view", blockedRoles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "Lists", url: "/lists", icon: ListPlus, permission: "leads:view", blockedRoles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "Templates", url: "/template-manager", icon: Newspaper, permission: "templates:view", blockedRoles: ["academic_partner", "academic_partner_offer_letter"] },
+  { title: "WA Outbound", url: "/whatsapp-inbox?mode=outbound", icon: Send, permission: "whatsapp:view", blockedRoles: ["academic_partner", "academic_partner_offer_letter"] },
 ];
 
 const academicsSubMenu: MenuItem[] = [
@@ -169,6 +169,7 @@ const roleLabels: Record<string, string> = {
   data_entry: "Data Entry", office_admin: "Office Administrator", office_assistant: "Office Assistant", hostel_warden: "Hostel Warden",
   consultant: "Consultant",
   academic_partner: "Academic Partner",
+  academic_partner_offer_letter: "Academic Partner + Offers",
   ib_coordinator: "IB Coordinator",
   video_editor: "Video Editor",
   librarian: "Librarian",
@@ -225,7 +226,7 @@ export function AppSidebar() {
   const hasPersonalDocs = role === "super_admin";
 
   const fetchAdmissionBadges = useCallback(async () => {
-    if (role === "academic_partner") return;
+    if (isAcademicPartnerPortalRole(role)) return;
     if (role === "counsellor" && !profile?.id) return;
 
     const { data, error } = await (supabase as any).rpc("action_badge_counts", {
@@ -257,7 +258,7 @@ export function AppSidebar() {
   }, [role]);
 
   useEffect(() => {
-    if (role === "academic_partner") {
+    if (isAcademicPartnerPortalRole(role)) {
       setWaUnread(0);
       setNewLeadCount(0);
       setTatDefaults(0);
@@ -299,13 +300,14 @@ export function AppSidebar() {
   }, [fetchAdmissionBadges, fetchPendingApprovals]);
 
   const inboxBadge = pendingApprovals + pendingFollowupCount + waUnread;
-  const visibleMainSource = role === "academic_partner" ? academicPartnerMenu : mainMenu;
+  const isPartnerPortalRole = isAcademicPartnerPortalRole(role);
+  const visibleMainSource = isPartnerPortalRole ? academicPartnerMenu : mainMenu;
   const visibleMain = visibleMainSource.filter(canSee).map(item => {
     if (item.url === "/" && pendingApprovals > 0) return { ...item, badge: pendingApprovals };
     if (item.url === "/inbox" && inboxBadge > 0) return { ...item, badge: inboxBadge };
     return item;
   });
-  const visibleAdmission = (role === "academic_partner" ? [] : admissionSubMenu.filter(canSee)).map(item => {
+  const visibleAdmission = (isPartnerPortalRole ? [] : admissionSubMenu.filter(canSee)).map(item => {
     if (item.url === "/whatsapp-inbox" && waUnread > 0) return { ...item, badge: waUnread };
     if (item.url === "/admissions" && newLeadCount > 0) return { ...item, badge: newLeadCount };
     if (item.url === "/counsellor-dashboard" && tatDefaults > 0) return { ...item, badge: tatDefaults };
@@ -315,13 +317,13 @@ export function AppSidebar() {
     return item;
   }
   );
-  const visibleMarketing = role === "academic_partner" ? [] : marketingSubMenu.filter(canSee);
+  const visibleMarketing = isPartnerPortalRole ? [] : marketingSubMenu.filter(canSee);
   const visibleAcademics = academicsSubMenu.filter(canSee);
   const visibleIB = ibAcademicsSubMenu.filter(canSee);
   const visibleHr = hrSubMenu.filter(canSee);
   const visibleMgmt = managementMenu.filter(canSee);
-  const isAdmissionActive = role !== "academic_partner" && admissionSubMenu.some(item => isActive(item.url));
-  const isMarketingActive = role !== "academic_partner" && marketingSubMenu.some(item => isActive(item.url));
+  const isAdmissionActive = !isPartnerPortalRole && admissionSubMenu.some(item => isActive(item.url));
+  const isMarketingActive = !isPartnerPortalRole && marketingSubMenu.some(item => isActive(item.url));
   const isAcademicsActive = academicsSubMenu.some(item => isActive(item.url) || location.pathname.startsWith("/library"));
   const isIBActive = ibAcademicsSubMenu.some(item => isActive(item.url) || location.pathname.startsWith("/ib/"));
   const isHrActive = hrSubMenu.some(item => isActive(item.url) || location.pathname.startsWith("/hr"));
@@ -352,7 +354,7 @@ export function AppSidebar() {
         </div>
 
         {/* Campus Selector */}
-        {!collapsed && role !== "academic_partner" && campuses.length > 0 && (
+        {!collapsed && !isPartnerPortalRole && campuses.length > 0 && (
           <div className="px-3 pb-3">
             <select
               value={selectedCampusId}

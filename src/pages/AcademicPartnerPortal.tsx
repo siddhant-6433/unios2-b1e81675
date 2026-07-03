@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ApplyMagicLinkButton } from "@/components/leads/ApplyMagicLinkButton";
 import { LeadPipeline } from "@/components/admissions/LeadPipeline";
 import { ApplicationFunnelStrip } from "@/components/admissions/ApplicationFunnelStrip";
+import { OfferLetterDialog } from "@/components/admissions/OfferLetterDialog";
 import {
   type LeadFunnelStage,
   leadStagesForBucket,
@@ -32,6 +33,7 @@ import {
   PhoneCall,
   Plus,
   FileText,
+  Gift,
   RotateCcw,
   TrendingUp,
   Upload,
@@ -41,6 +43,9 @@ import { LeadAssociationRequestsPanel } from "@/components/admissions/LeadAssoci
 
 // Derive up to two-letter initials from a partner's company/display name,
 // used as the logo fallback when no logo has been uploaded.
+const formatTermName = (term: string): string =>
+  term.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
 const getPartnerInitials = (name: string): string => {
   const words = name.trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return "?";
@@ -110,9 +115,15 @@ type Lead = {
   application_completed_sections: Record<string, boolean> | null;
   application_form_pdf_url: string | null;
   course_id: string | null;
+  campus_id: string | null;
   course_name: string;
   campus_name: string;
   created_at: string;
+  attribution_type?: string | null;
+  attribution_label?: string | null;
+  has_offer?: boolean;
+  latest_offer_id?: string | null;
+  latest_offer_letter_url?: string | null;
 };
 
 type Student = {
@@ -120,6 +131,9 @@ type Student = {
   name: string;
   admission_no: string | null;
   phone: string | null;
+  course_id: string | null;
+  batch_id: string | null;
+  lead_id: string | null;
   course_name: string;
   batch_name: string;
   status: string;
@@ -146,6 +160,8 @@ type FeeRow = {
   paid_amount: number;
   balance: number;
   status: string;
+  due_date?: string | null;
+  fee_code_name?: string | null;
 };
 
 type Payout = {
@@ -189,12 +205,42 @@ type AttendanceDataRow = Omit<AttendanceRow, "student_name" | "batch_name"> & {
 
 type FeeDataRow = Omit<FeeRow, "student_name" | "student_admission_no"> & {
   students?: { name: string | null; admission_no: string | null; pre_admission_no?: string | null } | null;
+  fee_codes?: { code: string | null; name: string | null } | null;
 };
 
 type PayoutRow = Payout & {
   leads?: { name: string | null } | null;
   students?: { name: string | null } | null;
   courses?: { name: string | null } | null;
+};
+
+type PaidApplicationRpcRow = {
+  lead_id: string;
+  name: string;
+  phone: string;
+  email: string | null;
+  stage: string;
+  source: string | null;
+  academic_partner_id: string | null;
+  counsellor_id: string | null;
+  application_uuid: string;
+  application_id: string;
+  application_status: string | null;
+  application_payment_status: string | null;
+  application_submitted_at: string | null;
+  application_created_at: string | null;
+  application_fee_amount: number | null;
+  application_completed_sections: Record<string, boolean> | null;
+  application_form_pdf_url: string | null;
+  course_id: string | null;
+  course_name: string | null;
+  campus_id: string | null;
+  campus_name: string | null;
+  attribution_type: "attributed_to_you" | "nimt_counsellor" | "direct" | "not_attributed_to_you";
+  attribution_label: string;
+  has_offer: boolean;
+  latest_offer_id: string | null;
+  latest_offer_letter_url: string | null;
 };
 
 type OnboardingStatus = Partner["onboarding_status"];
@@ -275,6 +321,28 @@ const statusBadge = (status: string) => {
   if (["pending", "due", "waitlisted"].includes(status)) return "bg-amber-100 text-amber-700";
   if (["cancelled", "overdue", "absent", "rejected"].includes(status)) return "bg-red-100 text-red-700";
   return "bg-muted text-muted-foreground";
+};
+
+const attributionBadge = (type: string | null | undefined) => {
+  if (type === "attributed_to_you") return "bg-emerald-100 text-emerald-700";
+  if (type === "nimt_counsellor") return "bg-blue-100 text-blue-700";
+  if (type === "not_attributed_to_you") return "bg-slate-100 text-slate-700";
+  return "bg-amber-100 text-amber-700";
+};
+
+const ATTRIBUTION_LABELS: Record<PaidApplicationRpcRow["attribution_type"], string> = {
+  attributed_to_you: "Attributed to you",
+  nimt_counsellor: "NIMT counsellor",
+  direct: "Direct",
+  not_attributed_to_you: "Not attributed to you",
+};
+
+const attributionLabel = (lead: Lead, partnerId: string) => {
+  if (lead.attribution_label) return lead.attribution_label;
+  if (lead.attribution_type && lead.attribution_type in ATTRIBUTION_LABELS) {
+    return ATTRIBUTION_LABELS[lead.attribution_type as PaidApplicationRpcRow["attribution_type"]];
+  }
+  return lead.academic_partner_id === partnerId ? ATTRIBUTION_LABELS.attributed_to_you : ATTRIBUTION_LABELS.direct;
 };
 
 const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
@@ -366,16 +434,26 @@ const errorMessage = (error: unknown) => {
   return "Please try again.";
 };
 
-const ACADEMIC_PARTNER_PIPELINE_LEAD_SELECT = "id, name, phone, email, stage, source, academic_partner_id, application_id, course_id, created_at, courses:course_id(name), campuses:campus_id(name), applications:applications(application_id, status, payment_status, fee_amount, completed_sections, submitted_at, created_at, form_pdf_url)";
+const ACADEMIC_PARTNER_PIPELINE_LEAD_SELECT = "id, name, phone, email, stage, source, academic_partner_id, application_id, course_id, campus_id, created_at, courses:course_id(name), campuses:campus_id(name), applications:applications(application_id, status, payment_status, fee_amount, completed_sections, submitted_at, created_at, form_pdf_url)";
 
 // Partner-created new leads are mapped on insert; duplicate existing CRM leads
 // remain pending requests and enter these pipelines only after admin approval.
 const scopePartnerPipelineLeads = (rows: LeadRow[], partnerId: string) =>
   rows.filter((lead) => lead.academic_partner_id === partnerId);
 
+const uniqueById = <T extends { id: string }>(rows: T[]) =>
+  Array.from(new Map(rows.map((row) => [row.id, row])).values());
+
+const assignmentMatchesStudent = (assignment: Assignment, student: Pick<StudentRow, "course_id" | "batch_id">) =>
+  assignment.course_id === student.course_id && (!assignment.batch_id || assignment.batch_id === student.batch_id);
+
+const assignedCourseIds = (assignments: Assignment[]) =>
+  Array.from(new Set(assignments.map((assignment) => assignment.course_id).filter(Boolean)));
+
 export default function AcademicPartnerPortal() {
-  const { user } = useAuth();
+  const { user, role, hasPermission, isImpersonating, realRole } = useAuth();
   const { toast } = useToast();
+  const canIssueOfferLetters = role === "academic_partner_offer_letter" && hasPermission("academic_partner_offer_letters:issue");
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab") || "leads";
   const activeTab = PORTAL_TAB_VALUES.has(requestedTab) ? requestedTab : "leads";
@@ -384,12 +462,15 @@ export default function AcademicPartnerPortal() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [paidApplications, setPaidApplications] = useState<Lead[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
   const [fees, setFees] = useState<FeeRow[]>([]);
   const [payouts, setPayouts] = useState<Payout[]>([]);
   const [showAddLead, setShowAddLead] = useState(false);
   const [detailsLead, setDetailsLead] = useState<Lead | null>(null);
+  const [offerLead, setOfferLead] = useState<Lead | null>(null);
+  const [feeDetailsStudentId, setFeeDetailsStudentId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
   const [savingAgentPhone, setSavingAgentPhone] = useState(false);
@@ -438,9 +519,16 @@ export default function AcademicPartnerPortal() {
     return map;
   }, [attendance]);
 
+  const feeDetailsRows = useMemo(
+    () => feeDetailsStudentId ? fees.filter((fee) => fee.student_id === feeDetailsStudentId) : [],
+    [feeDetailsStudentId, fees],
+  );
+  const feeDetailsSummary = feeDetailsStudentId ? feeByStudent.get(feeDetailsStudentId) : null;
+  const feeDetailsStudent = feeDetailsRows[0] || null;
+
   const applicationLeads = useMemo(
-    () => leads.filter((lead) => Boolean(lead.application_id || lead.application_status || lead.application_created_at)),
-    [leads],
+    () => paidApplications.filter((lead) => Boolean(lead.application_id || lead.application_status || lead.application_created_at)),
+    [paidApplications],
   );
   const onboardingComplete = partner?.onboarding_status === "completed";
   const onboardingSkipped = partner?.onboarding_status === "skipped";
@@ -498,24 +586,23 @@ export default function AcademicPartnerPortal() {
   }, []);
 
   const fetchPortal = useCallback(async (partnerId: string) => {
-    const [statsRes, assignmentsRes, leadsRes, studentsRes, attendanceRes, feesRes, payoutsRes] = await Promise.all([
+    const [statsRes, assignmentsRes, leadsRes, payoutsRes] = await Promise.all([
       supabase.from("academic_partner_dashboard").select("*").eq("partner_id", partnerId).single(),
       supabase.from("academic_partner_assignment_summary").select("*").eq("partner_id", partnerId).eq("is_active", true).order("course_name"),
       supabase.from("leads").select(ACADEMIC_PARTNER_PIPELINE_LEAD_SELECT).eq("academic_partner_id", partnerId).order("created_at", { ascending: false }).limit(200),
-      supabase.from("students").select("id, name, admission_no, phone, status, courses:course_id(name), batches:batch_id(name)").order("created_at", { ascending: false }).limit(200),
-      supabase.from("daily_attendance").select("id, student_id, date, status, subject, students:student_id(name, admission_no, pre_admission_no), batches:batch_id(name)").order("date", { ascending: false }).limit(200),
-      supabase.from("fee_ledger").select("id, student_id, term, total_amount, paid_amount, balance, status, students:student_id(name, admission_no, pre_admission_no)").order("due_date", { ascending: false }).limit(300),
       supabase.from("academic_partner_payouts").select("*, leads:lead_id(name), students:student_id(name), courses:course_id(name)").eq("partner_id", partnerId).order("created_at", { ascending: false }).limit(100),
     ]);
 
     if (statsRes.data) setStats(statsRes.data as DashboardStats);
-    setAssignments(((assignmentsRes.data || []) as unknown as Assignment[]).map((a) => ({
+    const activeAssignments = ((assignmentsRes.data || []) as unknown as Assignment[]).map((a) => ({
       ...a,
       effective_payout_percentage: Number(a.effective_payout_percentage || 0),
       candidates: Number(a.candidates || 0),
       fee_collected: Number(a.fee_collected || 0),
-    })));
-    setLeads(scopePartnerPipelineLeads((leadsRes.data || []) as unknown as LeadRow[], partnerId).map((l) => ({
+    }));
+    setAssignments(activeAssignments);
+
+    const mappedLeads = scopePartnerPipelineLeads((leadsRes.data || []) as unknown as LeadRow[], partnerId).map((l) => ({
       ...l,
       application_id: l.applications?.[0]?.application_id || l.application_id || null,
       application_status: l.applications?.[0]?.status || null,
@@ -528,8 +615,117 @@ export default function AcademicPartnerPortal() {
       application_form_pdf_url: l.applications?.[0]?.form_pdf_url || null,
       course_name: l.courses?.name || "-",
       campus_name: l.campuses?.name || "-",
-    })));
-    setStudents(((studentsRes.data || []) as unknown as StudentRow[]).map((s) => ({
+      attribution_type: "attributed_to_you",
+      attribution_label: "Attributed to you",
+      has_offer: false,
+      latest_offer_id: null,
+      latest_offer_letter_url: null,
+    }));
+    setLeads(mappedLeads);
+
+    if (canIssueOfferLetters) {
+      const { data: paidRows, error: paidError } = await supabase.rpc("academic_partner_paid_applications", {
+        _partner_id: isImpersonating && realRole === "super_admin" ? partnerId : null,
+      } as any);
+      if (paidError) {
+        toast({
+          title: "Paid applications not loaded",
+          description: paidError.message,
+          variant: "destructive",
+        });
+        setPaidApplications(mappedLeads.filter((lead) => lead.application_payment_status === "paid"));
+      } else {
+        setPaidApplications(((paidRows || []) as unknown as PaidApplicationRpcRow[]).map((row) => ({
+          id: row.lead_id,
+          name: row.name,
+          phone: row.phone,
+          email: row.email,
+          stage: row.stage,
+          source: row.source,
+          academic_partner_id: row.academic_partner_id,
+          application_id: row.application_id,
+          application_status: row.application_status,
+          application_payment_status: row.application_payment_status,
+          application_stage: applicationStageLabel({
+            application_id: row.application_id,
+            status: row.application_status,
+            payment_status: row.application_payment_status,
+            fee_amount: row.application_fee_amount,
+            completed_sections: row.application_completed_sections,
+            submitted_at: row.application_submitted_at,
+            created_at: row.application_created_at || "",
+            form_pdf_url: row.application_form_pdf_url,
+          }),
+          application_submitted_at: row.application_submitted_at,
+          application_created_at: row.application_created_at,
+          application_fee_amount: row.application_fee_amount,
+          application_completed_sections: row.application_completed_sections,
+          application_form_pdf_url: row.application_form_pdf_url,
+          course_id: row.course_id,
+          campus_id: row.campus_id,
+          course_name: row.course_name || "-",
+          campus_name: row.campus_name || "-",
+          created_at: row.application_created_at || row.application_submitted_at || new Date().toISOString(),
+          attribution_type: row.attribution_type,
+          attribution_label: row.attribution_label,
+          has_offer: row.has_offer,
+          latest_offer_id: row.latest_offer_id,
+          latest_offer_letter_url: row.latest_offer_letter_url,
+        })));
+      }
+    } else {
+      setPaidApplications(mappedLeads.filter((lead) => Boolean(lead.application_id || lead.application_status || lead.application_created_at)));
+    }
+
+    const studentSelect = "id, name, admission_no, phone, status, course_id, batch_id, lead_id, courses:course_id(name), batches:batch_id(name)";
+    const assignmentStudentQueries = activeAssignments.map((assignment) => {
+      let query = supabase
+        .from("students")
+        .select(studentSelect)
+        .eq("course_id", assignment.course_id)
+        .order("created_at", { ascending: false })
+        .limit(300);
+      if (assignment.batch_id) query = query.eq("batch_id", assignment.batch_id);
+      return query;
+    });
+    const assignmentStudentResponses = assignmentStudentQueries.length > 0
+      ? await Promise.all(assignmentStudentQueries)
+      : [];
+    const scopedStudentRows = uniqueById(
+      assignmentStudentResponses.flatMap((res) => ((res.data || []) as unknown as StudentRow[]))
+    ).filter((student) => activeAssignments.some((assignment) => assignmentMatchesStudent(assignment, student)));
+    const scopedStudentIds = scopedStudentRows.map((student) => student.id);
+
+    const mappedLeadIds = mappedLeads.map((lead) => lead.id);
+    const mappedStudentRows = mappedLeadIds.length > 0
+      ? ((await supabase
+        .from("students")
+        .select("id, lead_id")
+        .in("lead_id", mappedLeadIds)
+        .limit(500)).data || []) as Array<{ id: string; lead_id: string | null }>
+      : [];
+    const feeStudentIds = Array.from(new Set(mappedStudentRows.map((student) => student.id)));
+
+    const [attendanceRes, feesRes] = await Promise.all([
+      scopedStudentIds.length > 0
+        ? supabase
+          .from("daily_attendance")
+          .select("id, student_id, date, status, subject, students:student_id(name, admission_no, pre_admission_no), batches:batch_id(name)")
+          .in("student_id", scopedStudentIds)
+          .order("date", { ascending: false })
+          .limit(300)
+        : Promise.resolve({ data: [], error: null }),
+      feeStudentIds.length > 0
+        ? supabase
+          .from("fee_ledger")
+          .select("id, student_id, term, total_amount, paid_amount, balance, status, due_date, students:student_id(name, admission_no, pre_admission_no), fee_codes:fee_code_id(code, name)")
+          .in("student_id", feeStudentIds)
+          .order("due_date", { ascending: false })
+          .limit(300)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    setStudents(scopedStudentRows.map((s) => ({
       ...s,
       course_name: s.courses?.name || "-",
       batch_name: s.batches?.name || "-",
@@ -544,6 +740,7 @@ export default function AcademicPartnerPortal() {
       ...f,
       student_name: f.students?.name || "-",
       student_admission_no: f.students?.admission_no || f.students?.pre_admission_no || null,
+      fee_code_name: f.fee_codes?.name || null,
     })));
     setPayouts(((payoutsRes.data || []) as unknown as PayoutRow[]).map((p) => ({
       ...p,
@@ -551,7 +748,7 @@ export default function AcademicPartnerPortal() {
       student_name: p.students?.name,
       course_name: p.courses?.name,
     })));
-  }, []);
+  }, [canIssueOfferLetters, toast]);
 
   const fetchCallingAgentPhone = useCallback(async () => {
     if (!user?.id) return;
@@ -1158,6 +1355,7 @@ export default function AcademicPartnerPortal() {
                 <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Candidate</th>
                 <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Course</th>
                 <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Application</th>
+                <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Attribution</th>
                 <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Application Stage</th>
                 <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Payment</th>
                 <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Submitted</th>
@@ -1165,6 +1363,7 @@ export default function AcademicPartnerPortal() {
               <tbody>
                 {visibleApplicationLeads.map((lead) => {
                   const completed = isCompletedApplication(lead);
+                  const isPartnerAttributed = lead.academic_partner_id === partner.id;
                   return (
                   <tr key={lead.id} className="border-b last:border-0 hover:bg-muted/30">
                     <td className="px-4 py-3"><div className="font-medium">{lead.name}</div><div className="text-xs text-muted-foreground">{lead.phone}</div></td>
@@ -1178,20 +1377,30 @@ export default function AcademicPartnerPortal() {
                         <Button size="sm" variant="outline" onClick={() => setDetailsLead(lead)}>
                           View Application
                         </Button>
-                        <Button size="sm" variant="outline" className="gap-2" onClick={() => placeCloudCall(lead)} disabled={callingLeadId === lead.id}>
-                          {callingLeadId === lead.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5" />}
-                          Call
-                        </Button>
-                        <ApplyMagicLinkButton leadId={lead.id} leadName={lead.name} leadPhone={lead.phone} directOpen />
-                        <ApplyMagicLinkButton leadId={lead.id} leadName={lead.name} leadPhone={lead.phone} />
-                        <ApplyMagicLinkButton
-                          leadId={lead.id}
-                          leadName={lead.name}
-                          leadPhone={lead.phone}
-                          mode="academic_partner_on_behalf"
-                          label={completed ? "Open Application" : lead.application_id ? "Continue Application" : "Complete Application"}
-                          directOpen
-                        />
+                        {isPartnerAttributed && (
+                          <>
+                            <Button size="sm" variant="outline" className="gap-2" onClick={() => placeCloudCall(lead)} disabled={callingLeadId === lead.id}>
+                              {callingLeadId === lead.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PhoneCall className="h-3.5 w-3.5" />}
+                              Call
+                            </Button>
+                            <ApplyMagicLinkButton leadId={lead.id} leadName={lead.name} leadPhone={lead.phone} directOpen />
+                            <ApplyMagicLinkButton leadId={lead.id} leadName={lead.name} leadPhone={lead.phone} />
+                            <ApplyMagicLinkButton
+                              leadId={lead.id}
+                              leadName={lead.name}
+                              leadPhone={lead.phone}
+                              mode="academic_partner_on_behalf"
+                              label={completed ? "Open Application" : lead.application_id ? "Continue Application" : "Complete Application"}
+                              directOpen
+                            />
+                          </>
+                        )}
+                        {canIssueOfferLetters && lead.application_id && lead.course_id && (
+                          <Button size="sm" className="gap-2 bg-teal-600 hover:bg-teal-700" onClick={() => setOfferLead(lead)}>
+                            <Gift className="h-3.5 w-3.5" />
+                            {lead.has_offer ? "View Offer" : "Issue Offer"}
+                          </Button>
+                        )}
                         {completed && lead.application_form_pdf_url && (
                           <a
                             href={lead.application_form_pdf_url}
@@ -1203,7 +1412,7 @@ export default function AcademicPartnerPortal() {
                             View/Download PDF
                           </a>
                         )}
-                        {completed && (
+                        {completed && isPartnerAttributed && (
                           <ApplyMagicLinkButton
                             leadId={lead.id}
                             leadName={lead.name}
@@ -1215,6 +1424,11 @@ export default function AcademicPartnerPortal() {
                           />
                         )}
                       </div>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <Badge className={`border-0 text-[10px] ${attributionBadge(lead.attribution_type)}`}>
+                        {attributionLabel(lead, partner.id)}
+                      </Badge>
                     </td>
                     <td className="px-4 py-3 text-center">
                       <Badge className={`border-0 text-[10px] ${statusBadge(lead.application_status || lead.application_stage || "")}`}>
@@ -1232,7 +1446,7 @@ export default function AcademicPartnerPortal() {
                   </tr>
                   );
                 })}
-                {visibleApplicationLeads.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">{appFunnelStage ? "No applications at this stage" : "No applications found for assigned leads"}</td></tr>}
+                {visibleApplicationLeads.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">{appFunnelStage ? "No applications at this stage" : canIssueOfferLetters ? "No paid applications found for assigned courses" : "No applications found for assigned leads"}</td></tr>}
               </tbody>
             </table>
             </div>
@@ -1279,7 +1493,7 @@ export default function AcademicPartnerPortal() {
                 <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Total Fee</th>
                 <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Collected</th>
                 <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Balance</th>
-                <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Ledger Rows</th>
+                <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Terms</th>
               </tr></thead>
               <tbody>
                 {Array.from(feeByStudent.entries()).map(([studentId, summary]) => {
@@ -1290,37 +1504,15 @@ export default function AcademicPartnerPortal() {
                       <td className="px-4 py-3 text-right">{fmt(summary.total)}</td>
                       <td className="px-4 py-3 text-right font-semibold text-emerald-700">{fmt(summary.paid)}</td>
                       <td className="px-4 py-3 text-right">{fmt(summary.balance)}</td>
-                      <td className="px-4 py-3 text-center">{summary.rows}</td>
+                      <td className="px-4 py-3 text-center">
+                        <Button size="sm" variant="outline" onClick={() => setFeeDetailsStudentId(studentId)}>
+                          View {summary.rows}
+                        </Button>
+                      </td>
                     </tr>
                   );
                 })}
                 {feeByStudent.size === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">No fee collection found for assigned candidates</td></tr>}
-              </tbody>
-            </table>
-          </CardContent></Card>
-
-          <Card className="border-border/60 shadow-none overflow-hidden"><CardContent className="p-0">
-            <table className="w-full text-sm">
-              <thead><tr className="border-b bg-muted/50">
-                <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Student</th>
-                <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Term</th>
-                <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Total</th>
-                <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Paid</th>
-                <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Balance</th>
-                <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Status</th>
-              </tr></thead>
-              <tbody>
-                {fees.map((fee) => (
-                  <tr key={fee.id} className="border-b last:border-0">
-                    <td className="px-4 py-3"><div className="font-medium">{fee.student_name}</div><div className="text-xs text-muted-foreground">{fee.student_admission_no || "-"}</div></td>
-                    <td className="px-4 py-3">{fee.term}</td>
-                    <td className="px-4 py-3 text-right">{fmt(fee.total_amount)}</td>
-                    <td className="px-4 py-3 text-right">{fmt(fee.paid_amount)}</td>
-                    <td className="px-4 py-3 text-right">{fmt(fee.balance)}</td>
-                    <td className="px-4 py-3 text-center"><Badge className={`border-0 text-[10px] ${statusBadge(fee.status)}`}>{fee.status}</Badge></td>
-                  </tr>
-                ))}
-                {fees.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No fee records found</td></tr>}
               </tbody>
             </table>
           </CardContent></Card>
@@ -1517,6 +1709,12 @@ export default function AcademicPartnerPortal() {
                 <p className="mt-1 font-medium">{detailsLead.application_payment_status || "pending"}</p>
               </div>
               <div className="rounded-lg border border-border p-3">
+                <p className="text-[11px] uppercase text-muted-foreground">Attribution</p>
+                <Badge className={`mt-1 border-0 text-[10px] ${attributionBadge(detailsLead.attribution_type)}`}>
+                  {attributionLabel(detailsLead, partner.id)}
+                </Badge>
+              </div>
+              <div className="rounded-lg border border-border p-3">
                 <p className="text-[11px] uppercase text-muted-foreground">Application Fee</p>
                 <p className="mt-1 font-medium">{fmt(detailsLead.application_fee_amount)}</p>
               </div>
@@ -1552,16 +1750,98 @@ export default function AcademicPartnerPortal() {
           )}
           {detailsLead && (
             <DialogFooter className="gap-2 sm:gap-2">
-              <Button variant="outline" className="gap-2" onClick={() => placeCloudCall(detailsLead)} disabled={callingLeadId === detailsLead.id}>
-                {callingLeadId === detailsLead.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <PhoneCall className="h-4 w-4" />}
-                Cloud Call
-              </Button>
-              <ApplyMagicLinkButton leadId={detailsLead.id} leadName={detailsLead.name} leadPhone={detailsLead.phone} directOpen />
-              <ApplyMagicLinkButton leadId={detailsLead.id} leadName={detailsLead.name} leadPhone={detailsLead.phone} />
+              {detailsLead.academic_partner_id === partner.id && (
+                <>
+                  <Button variant="outline" className="gap-2" onClick={() => placeCloudCall(detailsLead)} disabled={callingLeadId === detailsLead.id}>
+                    {callingLeadId === detailsLead.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <PhoneCall className="h-4 w-4" />}
+                    Cloud Call
+                  </Button>
+                  <ApplyMagicLinkButton leadId={detailsLead.id} leadName={detailsLead.name} leadPhone={detailsLead.phone} directOpen />
+                  <ApplyMagicLinkButton leadId={detailsLead.id} leadName={detailsLead.name} leadPhone={detailsLead.phone} />
+                </>
+              )}
+              {canIssueOfferLetters && detailsLead.application_id && detailsLead.course_id && (
+                <Button className="gap-2 bg-teal-600 hover:bg-teal-700" onClick={() => setOfferLead(detailsLead)}>
+                  <Gift className="h-4 w-4" />
+                  {detailsLead.has_offer ? "View Offer" : "Issue Offer"}
+                </Button>
+              )}
             </DialogFooter>
           )}
         </DialogContent>
       </Dialog>
+
+      <Dialog open={!!feeDetailsStudentId} onOpenChange={(open) => { if (!open) setFeeDetailsStudentId(null); }}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Fee Terms</DialogTitle>
+            <DialogDescription>
+              {feeDetailsStudent?.student_name || "Candidate"} · {feeDetailsStudent?.student_admission_no || "No admission number"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="rounded-lg border border-border p-3">
+              <p className="text-[11px] uppercase text-muted-foreground">Total Fee</p>
+              <p className="mt-1 text-lg font-semibold">{fmt(feeDetailsSummary?.total)}</p>
+            </div>
+            <div className="rounded-lg border border-border p-3">
+              <p className="text-[11px] uppercase text-muted-foreground">Collected</p>
+              <p className="mt-1 text-lg font-semibold text-emerald-700">{fmt(feeDetailsSummary?.paid)}</p>
+            </div>
+            <div className="rounded-lg border border-border p-3">
+              <p className="text-[11px] uppercase text-muted-foreground">Balance</p>
+              <p className="mt-1 text-lg font-semibold">{fmt(feeDetailsSummary?.balance)}</p>
+            </div>
+          </div>
+          <div className="max-h-[60vh] overflow-auto rounded-lg border border-border">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-muted">
+                <tr className="border-b">
+                  <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Term</th>
+                  <th className="px-4 py-3 text-left text-xs uppercase text-muted-foreground">Due Date</th>
+                  <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Total</th>
+                  <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Paid</th>
+                  <th className="px-4 py-3 text-right text-xs uppercase text-muted-foreground">Balance</th>
+                  <th className="px-4 py-3 text-center text-xs uppercase text-muted-foreground">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {feeDetailsRows.map((fee) => (
+                  <tr key={fee.id} className="border-b last:border-0">
+                    <td className="px-4 py-3 font-medium">{fee.fee_code_name ? `${fee.fee_code_name} - ${formatTermName(fee.term)}` : formatTermName(fee.term)}</td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">{fee.due_date ? new Date(fee.due_date).toLocaleDateString("en-IN") : "-"}</td>
+                    <td className="px-4 py-3 text-right">{fmt(fee.total_amount)}</td>
+                    <td className="px-4 py-3 text-right">{fmt(fee.paid_amount)}</td>
+                    <td className="px-4 py-3 text-right">{fmt(fee.balance)}</td>
+                    <td className="px-4 py-3 text-center"><Badge className={`border-0 text-[10px] ${statusBadge(fee.status)}`}>{fee.status}</Badge></td>
+                  </tr>
+                ))}
+                {feeDetailsRows.length === 0 && (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No fee terms found</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {offerLead && (
+        <OfferLetterDialog
+          open={!!offerLead}
+          onOpenChange={(open) => !open && setOfferLead(null)}
+          leadId={offerLead.id}
+          leadName={offerLead.name}
+          applicationId={offerLead.application_id}
+          academicPartnerId={partner.id}
+          courseId={offerLead.course_id}
+          courseName={offerLead.course_name}
+          campusId={offerLead.campus_id}
+          onSuccess={() => {
+            setOfferLead(null);
+            void fetchPortal(partner.id);
+          }}
+        />
+      )}
 
       <Dialog open={showAddLead} onOpenChange={setShowAddLead}>
         <DialogContent className="max-w-md">

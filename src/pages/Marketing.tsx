@@ -31,7 +31,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { getDatePresetRange, getEndExclusiveIso, type DatePreset } from "@/lib/datePresets";
-import { decideBlockedRoleAccess } from "@/lib/accessPolicy";
+import { decideBlockedRoleAccess, isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
 import { AUTO_FILLED_PARAMS, WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from "@/config/waBulkTemplates";
 import {
   WhatsAppTemplatePreviewBubble,
@@ -303,7 +303,7 @@ export default function Marketing() {
   }, [dateFrom, datePreset, dateTo]);
 
   const load = useCallback(async () => {
-    if (role === "academic_partner") {
+    if (isAcademicPartnerPortalRole(role)) {
       setCampaigns([]);
       setLoading(false);
       return;
@@ -391,7 +391,7 @@ export default function Marketing() {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    if (role === "academic_partner") return;
+    if (isAcademicPartnerPortalRole(role)) return;
     (async () => {
       const [listsRes, templatesRes] = await Promise.all([
         supabase
@@ -418,7 +418,7 @@ export default function Marketing() {
   }, [requestedListId, role]);
 
   useEffect(() => {
-    if (role === "academic_partner") return;
+    if (isAcademicPartnerPortalRole(role)) return;
     (async () => {
       const knownKeys = new Set(WA_BULK_TEMPLATES.map((template) => template.key));
       const { data: settings } = await (supabase as any)

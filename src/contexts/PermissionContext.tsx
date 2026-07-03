@@ -2,9 +2,9 @@ import { createContext, useContext, useEffect, useState, useCallback, ReactNode 
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./AuthContext";
 import {
-  ACADEMIC_PARTNER_ALLOWED_PERMISSIONS,
   canUseModule,
   canUsePermissionParts,
+  permissionsForAcademicPartnerRole,
   type AccessState,
 } from "@/lib/accessPolicy";
 
@@ -50,8 +50,9 @@ export const PermissionProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
-    if (role === "academic_partner") {
-      setPermissions(new Set(ACADEMIC_PARTNER_ALLOWED_PERMISSIONS));
+    const partnerPermissions = permissionsForAcademicPartnerRole(role);
+    if (partnerPermissions) {
+      setPermissions(new Set(partnerPermissions));
       setLoading(false);
       return;
     }
