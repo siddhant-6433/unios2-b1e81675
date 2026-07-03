@@ -54,6 +54,8 @@ const DEAR_STUDENT_NAME_TEMPLATES = new Set([
   "cnet_not_qualified_bpt_bmrit",
 ]);
 
+const WA_PARAM_MAPPING_PREFIX = "__lead_field__:";
+
 function cleanPersonName(value: unknown): string {
   if (typeof value !== "string") return "";
   const trimmed = value.trim().replace(/\s+/g, " ");
@@ -93,6 +95,20 @@ function resolveDearRecipientName(lead: any, application: any): string {
   if (!displayName) return prefix;
   if (new RegExp(`^${prefix}\\b`, "i").test(displayName)) return displayName;
   return `${prefix} ${displayName}`;
+}
+
+function resolveMappedCampaignField(token: string, lead: any, application: any, recipientPhone: string): string {
+  const leadName = resolveLeadDisplayName(lead, application);
+  if (token === "student_name") return leadName;
+  if (token === "phone") return recipientPhone || lead?.phone || "";
+  if (token === "email") return lead?.email || "";
+  if (token === "course_name") return lead?.courses?.name || "";
+  if (token === "campus_name") return lead?.campuses?.name || "";
+  if (token === "lead_stage") return lead?.stage || "";
+  if (token === "lead_source") return lead?.source || "";
+  if (token === "guardian_name") return lead?.guardian_name || "";
+  if (token === "guardian_phone") return lead?.guardian_phone || "";
+  return "";
 }
 
 function templateBodyFromComponents(components: unknown): string | null {
@@ -334,7 +350,7 @@ Deno.serve(async (req) => {
     // template params per recipient — see substitution loop below.
     const { data: recipients, error: recipientsError } = await adminClient
       .from("whatsapp_campaign_recipients")
-      .select("id, campaign_id, lead_id, phone, status, leads(name, lead_institution_type, courses(name), campuses(name))")
+      .select("id, campaign_id, lead_id, phone, status, leads(name, phone, email, source, stage, guardian_name, guardian_phone, lead_institution_type, courses(name), campuses(name))")
       .eq("campaign_id", campaign_id)
       .eq("status", "pending")
       .limit(batchSize);
@@ -428,7 +444,12 @@ Deno.serve(async (req) => {
         }
         if (name === "course_name")  return courseName || staticParams[name] || "";
         if (name === "campus_name")  return campusName || staticParams[name] || "";
-        return staticParams[name] || "";
+        const configuredValue = staticParams[name] || "";
+        if (configuredValue.startsWith(WA_PARAM_MAPPING_PREFIX)) {
+          const token = configuredValue.slice(WA_PARAM_MAPPING_PREFIX.length);
+          return resolveMappedCampaignField(token, lead, latestApplication, waPhone);
+        }
+        return configuredValue;
       };
       const bodyParams = templateDef.params.map(p => ({ type: "text", text: resolveParam(p) }));
       const components: any[] = [];

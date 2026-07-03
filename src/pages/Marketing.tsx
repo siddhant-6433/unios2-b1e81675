@@ -42,6 +42,18 @@ import {
   enrichApprovedWhatsAppTemplateMetadata,
   type ApprovedWhatsAppTemplateMetadata,
 } from "@/lib/whatsappTemplateMeta";
+import {
+  WA_COMMON_VALUE,
+  WA_PARAM_FIELD_OPTIONS,
+  decodeWaParamFieldMapping,
+  effectiveWaParamValue,
+  encodeWaParamFieldMapping,
+  isWaMappableTemplateParam,
+  isWaMediaTemplateParam,
+  sampleValueForWaMappedField,
+  waBodyPreviewParams,
+  waParamFieldLabel,
+} from "@/lib/waCampaignParams";
 
 type Channel = "whatsapp" | "email";
 
@@ -167,8 +179,12 @@ const renderTemplatePreview = (
   params: WaBulkTemplate["params"] = [],
 ) =>
   preview.replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, (_match, name: string) => {
-    const paramName = /^\d+$/.test(name) ? params[Number(name) - 1]?.name || name : name;
-    const typed = staticParams[paramName]?.trim();
+    const bodyParams = waBodyPreviewParams(params);
+    const paramName = /^\d+$/.test(name) ? bodyParams[Number(name) - 1]?.name || name : name;
+    const value = effectiveWaParamValue(staticParams, paramName);
+    const mappedToken = decodeWaParamFieldMapping(value);
+    if (mappedToken) return sampleValueForWaMappedField(mappedToken);
+    const typed = value.trim();
     return typed || sampleValueForParam(paramName);
   });
 
@@ -209,6 +225,8 @@ export default function Marketing() {
   const [selectedListId, setSelectedListId] = useState("");
   const [campaignChannel, setCampaignChannel] = useState<Channel>("whatsapp");
   const [campaignName, setCampaignName] = useState("");
+  const [campaignScheduleMode, setCampaignScheduleMode] = useState<"now" | "scheduled">("now");
+  const [campaignScheduledAt, setCampaignScheduledAt] = useState("");
   const [waTemplate, setWaTemplate] = useState(WA_BULK_TEMPLATES[0]?.key || "");
   const [waStaticParams, setWaStaticParams] = useState<Record<string, string>>({});
   const [dynamicWaBulkTemplates, setDynamicWaBulkTemplates] = useState<WaBulkTemplate[]>([]);
@@ -245,7 +263,10 @@ export default function Marketing() {
     () => (selectedWaTemplate?.params || []).filter((param) => param.source === "static" && !AUTO_FILLED_PARAMS.includes(param.name as any)),
     [selectedWaTemplate],
   );
-  const waMissingStatic = waStaticFields.some((param) => !waStaticParams[param.name]?.trim());
+  const waMissingStatic = waStaticFields.some((param) => {
+    const value = effectiveWaParamValue(waStaticParams, param.name);
+    return !decodeWaParamFieldMapping(value) && !value.trim();
+  });
   const waRenderedPreview = useMemo(
     () => renderTemplatePreview(selectedWaTemplate?.preview || "", waStaticParams, selectedWaTemplate?.params || []),
     [selectedWaTemplate, waStaticParams],
@@ -479,6 +500,19 @@ export default function Marketing() {
     setLaunchError(null);
 
     try {
+      let nextAttemptAt = new Date().toISOString();
+      const isScheduled = campaignScheduleMode === "scheduled";
+      if (isScheduled) {
+        const scheduledDate = new Date(campaignScheduledAt);
+        if (!campaignScheduledAt || Number.isNaN(scheduledDate.getTime())) {
+          throw new Error("Choose a valid scheduled send time.");
+        }
+        if (scheduledDate.getTime() <= Date.now()) {
+          throw new Error("Scheduled send time must be in the future.");
+        }
+        nextAttemptAt = scheduledDate.toISOString();
+      }
+
       if (campaignChannel === "whatsapp") {
         if (!waTemplate) throw new Error("Pick a WhatsApp template.");
         if (waMissingStatic) throw new Error("Fill the required template fields.");
@@ -496,7 +530,7 @@ export default function Marketing() {
 
         const staticParamsToSend: Record<string, string> = {};
         for (const field of waStaticFields) {
-          const value = (waStaticParams[field.name] || "").trim();
+          const value = effectiveWaParamValue(waStaticParams, field.name).trim();
           if (value) staticParamsToSend[field.name] = value;
         }
 
@@ -509,7 +543,7 @@ export default function Marketing() {
             total_recipients: valid.length,
             static_params: staticParamsToSend,
             created_by: profile?.id || null,
-            next_attempt_at: new Date().toISOString(),
+            next_attempt_at: nextAttemptAt,
             worker_locked_at: null,
             status: "pending",
           })
@@ -553,7 +587,7 @@ export default function Marketing() {
             custom_body: emailMode === "custom" ? emailBody : null,
             total_recipients: valid.length,
             created_by: profile?.id || null,
-            next_attempt_at: new Date().toISOString(),
+            next_attempt_at: nextAttemptAt,
             worker_locked_at: null,
             status: "pending",
           })
@@ -572,9 +606,18 @@ export default function Marketing() {
         }
       }
 
-      await supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1, batch_size: 10 } }).catch(() => {});
-      toast({ title: "Campaign queued", description: "Progress is tracked below in Executed Campaigns." });
+      if (!isScheduled) {
+        await supabase.functions.invoke("campaign-dispatcher", { body: { limit: 1, batch_size: 10 } }).catch(() => {});
+      }
+      toast({
+        title: isScheduled ? "Campaign scheduled" : "Campaign queued",
+        description: isScheduled
+          ? `This campaign will start at ${new Date(nextAttemptAt).toLocaleString()}.`
+          : "Progress is tracked below in Executed Campaigns.",
+      });
       setCampaignName("");
+      setCampaignScheduleMode("now");
+      setCampaignScheduledAt("");
       await load();
     } catch (error: any) {
       setLaunchError(error?.message || "Could not queue campaign.");
@@ -876,6 +919,31 @@ export default function Marketing() {
             </div>
           </div>
 
+          <div className="grid gap-3 md:grid-cols-[220px_minmax(0,1fr)]">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Send time</label>
+              <select
+                value={campaignScheduleMode}
+                onChange={(event) => setCampaignScheduleMode(event.target.value as "now" | "scheduled")}
+                className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="now">Send now</option>
+                <option value="scheduled">Schedule for later</option>
+              </select>
+            </div>
+            {campaignScheduleMode === "scheduled" && (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Scheduled date and time</label>
+                <Input
+                  type="datetime-local"
+                  value={campaignScheduledAt}
+                  onChange={(event) => setCampaignScheduledAt(event.target.value)}
+                  className="mt-1"
+                />
+              </div>
+            )}
+          </div>
+
           {campaignChannel === "whatsapp" ? (
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
               <div className="space-y-3">
@@ -903,17 +971,53 @@ export default function Marketing() {
                       This template uses only per-lead values.
                     </div>
                   ) : (
-                    waStaticFields.map((field) => (
-                      <div key={field.name}>
-                        <label className="text-xs font-medium text-muted-foreground">{field.name.replace(/_/g, " ")}</label>
-                        <Input
-                          value={waStaticParams[field.name] || ""}
-                          onChange={(event) => setWaStaticParams((current) => ({ ...current, [field.name]: event.target.value }))}
-                          placeholder={field.placeholder || field.name}
-                          className="mt-1"
-                        />
-                      </div>
-                    ))
+                    waStaticFields.map((field) => {
+                      const value = effectiveWaParamValue(waStaticParams, field.name);
+                      const mappedToken = decodeWaParamFieldMapping(value);
+                      const canMap = isWaMappableTemplateParam(field.name);
+                      const label = isWaMediaTemplateParam(field.name)
+                        ? "Header media URL"
+                        : field.name.replace(/^template_value_(\d+)$/, "Body variable {{$1}}").replace(/_/g, " ");
+                      return (
+                        <div key={field.name}>
+                          <label className="text-xs font-medium text-muted-foreground">{label}</label>
+                          {canMap && (
+                            <select
+                              value={mappedToken ? value : WA_COMMON_VALUE}
+                              onChange={(event) => {
+                                const nextValue = event.target.value;
+                                setWaStaticParams((current) => ({
+                                  ...current,
+                                  [field.name]: nextValue === WA_COMMON_VALUE ? "" : nextValue,
+                                }));
+                              }}
+                              className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                            >
+                              {WA_PARAM_FIELD_OPTIONS.map((option) => (
+                                <option key={option.token} value={encodeWaParamFieldMapping(option.token)}>
+                                  Use list column: {option.label}
+                                </option>
+                              ))}
+                              <option value={WA_COMMON_VALUE}>Use one common value</option>
+                            </select>
+                          )}
+                          {(!canMap || !mappedToken) && (
+                            <Input
+                              value={canMap ? (waStaticParams[field.name] || "") : value}
+                              onChange={(event) => setWaStaticParams((current) => ({ ...current, [field.name]: event.target.value }))}
+                              placeholder={field.placeholder || field.name}
+                              className="mt-1"
+                            />
+                          )}
+                          {mappedToken && (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              Filled per recipient from {waParamFieldLabel(mappedToken)}.
+                            </p>
+                          )}
+                          {field.help && <p className="mt-1 text-xs text-muted-foreground">{field.help}</p>}
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               </div>

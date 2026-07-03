@@ -8,6 +8,7 @@ const leadLists = readFileSync("src/pages/LeadLists.tsx", "utf8");
 const marketingPage = readFileSync("src/pages/Marketing.tsx", "utf8");
 const bulkTemplates = readFileSync("src/config/waBulkTemplates.ts", "utf8");
 const whatsappTemplateMeta = readFileSync("src/lib/whatsappTemplateMeta.ts", "utf8");
+const waCampaignParams = readFileSync("src/lib/waCampaignParams.ts", "utf8");
 
 describe("campaign queue controls", () => {
   it("adds database states for paused and terminated campaign queues", () => {
@@ -85,6 +86,23 @@ describe("campaign queue controls", () => {
     expect(whatsappSender).toContain("bodyTemplateParamNames");
     expect(whatsappSender).toContain('sub_type: "url"');
     expect(whatsappSender).toContain("placeholder_count");
+  });
+
+  it("supports mapped template variables and scheduled campaign starts", () => {
+    expect(waCampaignParams).toContain('WA_PARAM_MAPPING_PREFIX = "__lead_field__:"');
+    expect(waCampaignParams).toContain('name === "template_value_1" ? encodeWaParamFieldMapping("student_name")');
+    expect(waCampaignParams).toContain("waBodyPreviewParams");
+    expect(marketingPage).toContain("campaignScheduleMode");
+    expect(marketingPage).toContain('type="datetime-local"');
+    expect(marketingPage).toContain("effectiveWaParamValue(waStaticParams, field.name)");
+    expect(marketingPage).toContain("Use list column:");
+    expect(leadLists).toContain("waScheduleMode");
+    expect(leadLists).toContain("emailScheduleMode");
+    expect(leadLists).toContain("resolveCampaignNextAttemptAt");
+    expect(leadLists).toContain("Use list column:");
+    expect(whatsappSender).toContain('WA_PARAM_MAPPING_PREFIX = "__lead_field__:"');
+    expect(whatsappSender).toContain("resolveMappedCampaignField");
+    expect(whatsappSender).toContain("lead?.phone");
   });
 
   it("exposes the enabled admission payment nudge in Marketing Hub bulk campaigns", () => {
