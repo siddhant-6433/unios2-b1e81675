@@ -1,5 +1,6 @@
 import { ArrowRight, ArrowLeft, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SelectField, TextAreaField } from "@/components/ui/state-fields";
 import { ApplicationData } from "./types";
 
 interface Props {
@@ -13,6 +14,17 @@ interface Props {
 
 const inputCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
 const textareaCls = "w-full rounded-xl border border-input bg-card py-2.5 px-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 min-h-[80px] resize-y";
+const transportOptions = [
+  { value: "school_bus", label: "School Bus" },
+  { value: "self_drop", label: "Self Drop & Pick-up" },
+  { value: "carpool", label: "Carpool" },
+  { value: "not_decided", label: "Not Decided Yet" },
+];
+const mediumOptions = [
+  { value: "english", label: "English" },
+  { value: "hindi", label: "Hindi" },
+  { value: "bilingual", label: "Bilingual (English + Hindi)" },
+];
 
 const QUESTIONS = [
   { key: "reason_for_choosing", label: "Why have you chosen our school for your child?" },
@@ -24,8 +36,8 @@ const QUESTIONS = [
 ];
 
 export function ParentQuestionnaire({ data, onChange, onNext, onBack, saving, readOnly }: Props) {
-  const schoolDetails = (data.school_details || {}) as Record<string, any>;
-  const questionnaire: Record<string, string> = schoolDetails.parent_questionnaire || {};
+  const schoolDetails = (data.school_details || {}) as Record<string, unknown>;
+  const questionnaire: Record<string, string> = (schoolDetails.parent_questionnaire || {}) as Record<string, string>;
 
   const updateAnswer = (key: string, value: string) => {
     onChange({
@@ -48,48 +60,36 @@ export function ParentQuestionnaire({ data, onChange, onNext, onBack, saving, re
       <fieldset disabled={readOnly} className={readOnly ? "pointer-events-none opacity-75" : ""}>
       <div className="space-y-4">
         {QUESTIONS.map(q => (
-          <div key={q.key}>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">{q.label}</label>
-            <textarea
-              value={questionnaire[q.key] || ""}
-              onChange={e => updateAnswer(q.key, e.target.value)}
-              className={textareaCls}
-              rows={3}
-            />
-          </div>
+          <TextAreaField
+            key={q.key}
+            label={q.label}
+            value={questionnaire[q.key] || ""}
+            onValueChange={(value) => updateAnswer(q.key, value)}
+            textareaClassName={textareaCls}
+            rows={3}
+          />
         ))}
       </div>
 
       {/* Transport preference */}
-      <div>
-        <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Transport Preference</label>
-        <select
-          value={schoolDetails.transport_preference || ""}
-          onChange={e => onChange({ school_details: { ...schoolDetails, transport_preference: e.target.value } })}
-          className={inputCls}
-        >
-          <option value="">Select</option>
-          <option value="school_bus">School Bus</option>
-          <option value="self_drop">Self Drop & Pick-up</option>
-          <option value="carpool">Carpool</option>
-          <option value="not_decided">Not Decided Yet</option>
-        </select>
-      </div>
+      <SelectField
+        label="Transport Preference"
+        value={String(schoolDetails.transport_preference || "")}
+        onValueChange={(value) => onChange({ school_details: { ...schoolDetails, transport_preference: value } })}
+        options={transportOptions}
+        placeholder="Select"
+        triggerClassName={inputCls}
+      />
 
       {/* Medium of instruction preference */}
-      <div>
-        <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Preferred Medium of Instruction</label>
-        <select
-          value={schoolDetails.medium_preference || ""}
-          onChange={e => onChange({ school_details: { ...schoolDetails, medium_preference: e.target.value } })}
-          className={inputCls}
-        >
-          <option value="">Select</option>
-          <option value="english">English</option>
-          <option value="hindi">Hindi</option>
-          <option value="bilingual">Bilingual (English + Hindi)</option>
-        </select>
-      </div>
+      <SelectField
+        label="Preferred Medium of Instruction"
+        value={String(schoolDetails.medium_preference || "")}
+        onValueChange={(value) => onChange({ school_details: { ...schoolDetails, medium_preference: value } })}
+        options={mediumOptions}
+        placeholder="Select"
+        triggerClassName={inputCls}
+      />
       </fieldset>
 
       <div className="flex justify-between">

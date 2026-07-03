@@ -1,4 +1,4 @@
-import { CalendarDays } from "lucide-react";
+import { DateRangeField } from "@/components/ui/state-fields";
 import { DATE_PRESETS, getDatePresetRange, type DatePreset } from "@/lib/datePresets";
 
 interface DateRangeFilterProps {
@@ -36,45 +36,25 @@ export function DateRangeFilter({
   };
 
   return (
-    <div className={className}>
-      <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
-      <select
-        value={preset}
-        onChange={(event) => applyPreset(event.target.value as DatePreset)}
-        className={selectClassName}
-        aria-label={`${ariaPrefix} range`}
-      >
-        {DATE_PRESETS.map((option) => (
-          <option key={option.key} value={option.key}>{option.label}</option>
-        ))}
-      </select>
-      {preset === "custom" && (
-        <>
-          <input
-            type="date"
-            value={fromDate}
-            max={toDate || undefined}
-            onChange={(event) => {
-              onPresetChange("custom");
-              onFromDateChange(event.target.value);
-            }}
-            className={inputClassName}
-            aria-label={`${ariaPrefix} start date`}
-          />
-          <span className="text-xs text-muted-foreground">to</span>
-          <input
-            type="date"
-            value={toDate}
-            min={fromDate || undefined}
-            onChange={(event) => {
-              onPresetChange("custom");
-              onToDateChange(event.target.value);
-            }}
-            className={inputClassName}
-            aria-label={`${ariaPrefix} end date`}
-          />
-        </>
-      )}
-    </div>
+    <DateRangeField
+      preset={preset}
+      fromDate={fromDate}
+      toDate={toDate}
+      presetOptions={DATE_PRESETS}
+      customPreset="custom"
+      onPresetChange={applyPreset}
+      onFromDateChange={(value) => {
+        onPresetChange("custom");
+        onFromDateChange(value);
+      }}
+      onToDateChange={(value) => {
+        onPresetChange("custom");
+        onToDateChange(value);
+      }}
+      className={className}
+      selectClassName={selectClassName}
+      inputClassName={inputClassName}
+      ariaPrefix={ariaPrefix}
+    />
   );
 }

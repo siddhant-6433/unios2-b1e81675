@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { TextField, FieldShell } from "@/components/ui/state-fields";
 import { Loader2, Upload, X, Plus, Image as ImageIcon, FileImage, Save, Star, Eye } from "lucide-react";
 
 interface Branding {
@@ -107,8 +110,6 @@ export function BrandingPanel() {
     load();
   };
 
-  const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
-
   const fetchPreview = async (slug: string, docType: string) => {
     setPreviewLoading(true);
     if (previewUrl) { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }
@@ -167,14 +168,8 @@ export function BrandingPanel() {
         <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
           <h3 className="text-sm font-semibold">New institution branding</h3>
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Slug</label>
-              <input value={newSlug} onChange={e => setNewSlug(e.target.value)} className={inputCls} placeholder="nimt_school" />
-            </div>
-            <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1">Display Name</label>
-              <input value={newName} onChange={e => setNewName(e.target.value)} className={inputCls} placeholder="NIMT School" />
-            </div>
+            <TextField value={newSlug} onValueChange={setNewSlug} label="Slug" placeholder="nimt_school" />
+            <TextField value={newName} onValueChange={setNewName} label="Display Name" placeholder="NIMT School" />
           </div>
           <div className="flex gap-2">
             <button onClick={addNew} disabled={!newSlug.trim() || !newName.trim()} className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">Create</button>
@@ -349,26 +344,24 @@ function BlurInput({ label, value, onSave, multiline, inline }: { label: string;
   const [v, setV] = useState(value || "");
   useEffect(() => { setV(value || ""); }, [value]);
   const dirty = v !== (value || "");
-  const cls = "w-full rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
   if (inline) {
     return (
-      <input
+      <Input
         value={v}
         onChange={e => setV(e.target.value)}
         onBlur={() => dirty && onSave(v.trim() || null)}
-        className="text-base font-semibold text-foreground bg-transparent border-b border-transparent hover:border-input focus:border-primary focus:outline-none px-0.5 min-w-[200px]"
+        className="-ml-1.5 text-base font-semibold border-0 border-b-2 border-transparent hover:border-input focus:border-primary rounded-none px-1 h-auto shadow-none bg-transparent min-w-[200px]"
         placeholder="Template name…"
       />
     );
   }
   return (
-    <div className="space-y-1">
-      <label className="block text-[11px] font-medium text-muted-foreground">{label}</label>
+    <FieldShell label={label}>
       {multiline ? (
-        <textarea value={v} onChange={e => setV(e.target.value)} onBlur={() => dirty && onSave(v.trim() || null)} className={`${cls} resize-none`} rows={2} />
+        <Textarea value={v} onChange={e => setV(e.target.value)} onBlur={() => dirty && onSave(v.trim() || null)} rows={2} />
       ) : (
-        <input value={v} onChange={e => setV(e.target.value)} onBlur={() => dirty && onSave(v.trim() || null)} className={cls} />
+        <Input value={v} onChange={e => setV(e.target.value)} onBlur={() => dirty && onSave(v.trim() || null)} />
       )}
-    </div>
+    </FieldShell>
   );
 }

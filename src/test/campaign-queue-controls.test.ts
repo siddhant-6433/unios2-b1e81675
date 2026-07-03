@@ -2,6 +2,9 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const migration = readFileSync("supabase/migrations/20260619114500_campaign_queue_controls.sql", "utf8");
+const cronAuthMigration = readFileSync("supabase/migrations/20260624100100_campaign_queue_controls_and_cron_auth.sql", "utf8");
+const dispatcherTimeoutMigration = readFileSync("supabase/migrations/20260701093100_extend_marketing_dispatcher_timeout.sql", "utf8");
+const campaignDispatcher = readFileSync("supabase/functions/campaign-dispatcher/index.ts", "utf8");
 const whatsappSender = readFileSync("supabase/functions/whatsapp-campaign-send/index.ts", "utf8");
 const emailSender = readFileSync("supabase/functions/email-campaign-send/index.ts", "utf8");
 const leadLists = readFileSync("src/pages/LeadLists.tsx", "utf8");
@@ -94,8 +97,12 @@ describe("campaign queue controls", () => {
     expect(waCampaignParams).toContain("Object.prototype.hasOwnProperty.call(params, name)");
     expect(waCampaignParams).toContain("waBodyPreviewParams");
     expect(marketingPage).toContain("campaignScheduleMode");
-    expect(marketingPage).toContain('type="datetime-local"');
-    expect(marketingPage).toContain("md:grid-cols-[180px_260px]");
+    expect(marketingPage).toContain("DatePickerField");
+    expect(marketingPage).toContain('type="time"');
+    expect(marketingPage).toContain("defaultFutureDateTime");
+    expect(marketingPage).toContain("next_attempt_at: nextAttemptAt");
+    expect(marketingPage).toContain("campaignDisplayStatus");
+    expect(marketingPage).toContain("scheduled");
     expect(marketingPage).toContain("effectiveWaParamValue(waStaticParams, field.name)");
     expect(marketingPage).toContain("selectedWaTemplateDefaultMediaUrl");
     expect(marketingPage).toContain("Override header media URL");
@@ -111,6 +118,19 @@ describe("campaign queue controls", () => {
     expect(whatsappSender).toContain("templateMediaUrlFromComponents");
     expect(whatsappSender).toContain("resolveMappedCampaignField");
     expect(whatsappSender).toContain("lead?.phone");
+  });
+
+  it("keeps scheduled campaigns pending until cron claims due work", () => {
+    expect(cronAuthMigration).toContain("CREATE OR REPLACE FUNCTION public.claim_due_marketing_campaigns");
+    expect(cronAuthMigration).toContain("coalesce(c.next_attempt_at, now()) <= now()");
+    expect(cronAuthMigration).toContain("SELECT cron.schedule(");
+    expect(cronAuthMigration).toContain("'marketing-campaign-dispatcher'");
+    expect(cronAuthMigration).toContain("'* * * * *'");
+    expect(cronAuthMigration).toContain("'x-cron-secret'");
+    expect(dispatcherTimeoutMigration).toContain("timeout_milliseconds := 55000");
+    expect(campaignDispatcher).toContain('admin.rpc("claim_due_marketing_campaigns"');
+    expect(campaignDispatcher).toContain('next_attempt_at: payload?.done ? null : new Date(Date.now() + 60 * 1000).toISOString()');
+    expect(campaignDispatcher).toContain('next_attempt_at: new Date(Date.now() + 10 * 60 * 1000).toISOString()');
   });
 
   it("exposes the enabled admission payment nudge in Marketing Hub bulk campaigns", () => {

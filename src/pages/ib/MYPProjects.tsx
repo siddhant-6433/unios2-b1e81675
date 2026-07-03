@@ -4,6 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { SelectField, TextField } from "@/components/ui/state-fields";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -208,44 +210,36 @@ const MYPProjects = () => {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 items-end">
-        <div>
-          <label className="block text-xs font-medium text-muted-foreground mb-1">Batch</label>
-          <select
-            value={batchId}
-            onChange={(e) => setBatchId(e.target.value)}
-            className={INPUT_CLASS + " w-48"}
-          >
-            {batches.map((b) => (
-              <option key={b.id} value={b.id}>{b.name}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-muted-foreground mb-1">Academic Year</label>
-          <input
-            value={academicYear}
-            onChange={(e) => setAcademicYear(e.target.value)}
-            className={INPUT_CLASS + " w-32"}
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-muted-foreground mb-1">Status</label>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className={INPUT_CLASS + " w-40"}
-          >
-            <option value="all">All Statuses</option>
-            {Object.entries(statusConfig).map(([key, { label }]) => (
-              <option key={key} value={key}>{label}</option>
-            ))}
-          </select>
-        </div>
+        <SelectField
+          label="Batch"
+          value={batchId}
+          onValueChange={setBatchId}
+          options={batches.map((b) => ({ value: b.id, label: b.name }))}
+          allowEmpty={false}
+          triggerClassName={INPUT_CLASS + " w-48"}
+        />
+        <TextField
+          label="Academic Year"
+          value={academicYear}
+          onValueChange={setAcademicYear}
+          inputClassName={INPUT_CLASS + " w-32"}
+        />
+        <SelectField
+          label="Status"
+          value={statusFilter}
+          onValueChange={setStatusFilter}
+          options={[
+            { value: "all", label: "All Statuses" },
+            ...Object.entries(statusConfig).map(([key, { label }]) => ({ value: key, label })),
+          ]}
+          allowEmpty={false}
+          triggerClassName={INPUT_CLASS + " w-40"}
+        />
         <div className="flex-1 min-w-[200px]">
           <label className="block text-xs font-medium text-muted-foreground mb-1">Search</label>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <input
+            <Input
               placeholder="Search by student or title..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}

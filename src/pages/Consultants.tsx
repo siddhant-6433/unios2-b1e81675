@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { SelectField } from "@/components/ui/state-fields";
 import {
   Plus, Search, Loader2, Users, Building2, Phone, Mail,
   IndianRupee, MapPin, MoreHorizontal, Edit, ChevronRight
@@ -185,11 +186,16 @@ const Consultants = () => {
           <input type="text" placeholder="Search consultants..." value={search} onChange={e => setSearch(e.target.value)}
             className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20" />
         </div>
-        <select value={stageFilter} onChange={e => setStageFilter(e.target.value)}
-          className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20">
-          <option value="all">All Stages</option>
-          {STAGES.map(s => <option key={s} value={s}>{stageLabels[s]}</option>)}
-        </select>
+        <SelectField
+          value={stageFilter}
+          onValueChange={setStageFilter}
+          options={[
+            { value: "all", label: "All Stages" },
+            ...STAGES.map(s => ({ value: s, label: stageLabels[s] })),
+          ]}
+          hideLabel
+          placeholder="All Stages"
+        />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

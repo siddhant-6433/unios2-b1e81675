@@ -6,6 +6,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { TextField, SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
 import { IndianRupee, Loader2, Upload, FileImage, X } from "lucide-react";
 
 const PAYMENT_TYPES = [
@@ -197,8 +199,6 @@ export function RecordPaymentDialog({
     onSuccess?.();
   };
 
-  const inputClass = "w-full rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
@@ -250,32 +250,28 @@ export function RecordPaymentDialog({
 
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">Payment Type</label>
-              <select value={type} onChange={(e) => setType(e.target.value)} className={inputClass}>
-                {PAYMENT_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>{t.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">
-                Amount <span className="text-destructive">*</span>
-              </label>
+            <SelectField
+              value={type}
+              onValueChange={setType}
+              options={PAYMENT_TYPES.map(t => ({ value: t.value, label: t.label }))}
+              label="Payment Type"
+              allowEmpty={false}
+            />
+            <FieldShell label="Amount" required>
               <div className="relative">
                 <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                <input
+                <Input
                   type="number"
                   step="0.01"
                   min="0"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   placeholder="0.00"
-                  className={`${inputClass} pl-8`}
+                  className="pl-8"
                   required
                 />
               </div>
-            </div>
+            </FieldShell>
           </div>
 
           <div>
@@ -298,26 +294,18 @@ export function RecordPaymentDialog({
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">Transaction Ref / UTR</label>
-              <input
-                type="text"
-                value={transactionRef}
-                onChange={(e) => setTransactionRef(e.target.value)}
-                placeholder="UPI / Cheque No"
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">Receipt No</label>
-              <input
-                type="text"
-                value={receiptNo}
-                onChange={(e) => setReceiptNo(e.target.value)}
-                placeholder="Optional"
-                className={inputClass}
-              />
-            </div>
+            <TextField
+              value={transactionRef}
+              onValueChange={setTransactionRef}
+              label="Transaction Ref / UTR"
+              placeholder="UPI / Cheque No"
+            />
+            <TextField
+              value={receiptNo}
+              onValueChange={setReceiptNo}
+              label="Receipt No"
+              placeholder="Optional"
+            />
           </div>
 
           <div>
@@ -347,16 +335,13 @@ export function RecordPaymentDialog({
             )}
           </div>
 
-          <div>
-            <label className="block text-xs font-medium text-muted-foreground mb-1">Notes</label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Optional notes..."
-              rows={2}
-              className={`${inputClass} resize-none`}
-            />
-          </div>
+          <TextAreaField
+            value={notes}
+            onValueChange={setNotes}
+            label="Notes"
+            placeholder="Optional notes..."
+            rows={2}
+          />
         </div>
 
         <DialogFooter>

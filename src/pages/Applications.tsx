@@ -8,6 +8,7 @@ import { RecordPaymentDialog } from "@/components/admissions/RecordPaymentDialog
 import { OfflinePaymentDialog } from "@/components/finance/OfflinePaymentDialog";
 import { NudgePaymentDialog } from "@/components/admissions/NudgePaymentDialog";
 import { DateRangeFilter } from "@/components/filters/DateRangeFilter";
+import { SelectField } from "@/components/ui/state-fields";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -1356,34 +1357,57 @@ export default function Applications() {
             placeholder="Search name, phone, app ID, course..."
             className="w-full rounded-xl border border-input bg-background pl-9 pr-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary" />
         </div>
-        <select value={courseFilter} onChange={e => setCourseFilter(e.target.value)}
-          className="min-w-[180px] max-w-[260px] rounded-xl border border-input bg-background px-3 py-2 text-sm">
-          <option value="all">All Courses</option>
-          {courseOptions.map(course => (
-            <option key={course} value={course}>{course}</option>
-          ))}
-        </select>
+        <SelectField
+          value={courseFilter}
+          onValueChange={setCourseFilter}
+          options={[
+            { value: "all", label: "All Courses" },
+            ...courseOptions.map((course) => ({ value: course, label: course })),
+          ]}
+          allowEmpty={false}
+          triggerClassName="min-w-[180px] max-w-[260px] rounded-xl border border-input bg-background px-3 py-2 text-sm"
+          ariaLabel="Filter applications by course"
+        />
         {!isCounsellor && (
-          <select value={counsellorFilter} onChange={e => setCounsellorFilter(e.target.value)}
-            className="min-w-[170px] max-w-[240px] rounded-xl border border-input bg-background px-3 py-2 text-sm">
-            <option value="all">All Counsellors</option>
-            {counsellorOptions.map(counsellor => (
-              <option key={counsellor.id} value={counsellor.id}>{counsellor.name}</option>
-            ))}
-          </select>
+          <SelectField
+            value={counsellorFilter}
+            onValueChange={setCounsellorFilter}
+            options={[
+              { value: "all", label: "All Counsellors" },
+              ...counsellorOptions.map((counsellor) => ({
+                value: counsellor.id,
+                label: counsellor.name,
+              })),
+            ]}
+            allowEmpty={false}
+            triggerClassName="min-w-[170px] max-w-[240px] rounded-xl border border-input bg-background px-3 py-2 text-sm"
+            ariaLabel="Filter applications by counsellor"
+          />
         )}
-        <select value={paymentFilter} onChange={e => setPaymentFilter(e.target.value as any)}
-          className="rounded-xl border border-input bg-background px-3 py-2 text-sm">
-          <option value="all">All Payments</option>
-          <option value="paid">Paid</option>
-          <option value="pending">Pending</option>
-        </select>
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)}
-          className="rounded-xl border border-input bg-background px-3 py-2 text-sm">
-          <option value="all">All Status</option>
-          <option value="draft">Draft</option>
-          <option value="submitted">Submitted</option>
-        </select>
+        <SelectField
+          value={paymentFilter}
+          onValueChange={(value) => setPaymentFilter(value as any)}
+          options={[
+            { value: "all", label: "All Payments" },
+            { value: "paid", label: "Paid" },
+            { value: "pending", label: "Pending" },
+          ]}
+          allowEmpty={false}
+          triggerClassName="rounded-xl border border-input bg-background px-3 py-2 text-sm"
+          ariaLabel="Filter applications by payment status"
+        />
+        <SelectField
+          value={statusFilter}
+          onValueChange={(value) => setStatusFilter(value as any)}
+          options={[
+            { value: "all", label: "All Status" },
+            { value: "draft", label: "Draft" },
+            { value: "submitted", label: "Submitted" },
+          ]}
+          allowEmpty={false}
+          triggerClassName="rounded-xl border border-input bg-background px-3 py-2 text-sm"
+          ariaLabel="Filter applications by application status"
+        />
         <DateRangeFilter
           preset={datePreset}
           fromDate={fromDate}

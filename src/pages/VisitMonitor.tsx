@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { SelectField, FieldShell } from "@/components/ui/state-fields";
+import { Input } from "@/components/ui/input";
 import {
   Calendar, MapPin, User, CheckCircle2, XCircle, Clock, Footprints,
   AlertCircle, Filter, RefreshCw, Loader2, ChevronRight, PhoneCall,
@@ -199,34 +201,38 @@ export default function VisitMonitor() {
           <Filter className="h-3.5 w-3.5" /> Filters
         </div>
 
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] text-muted-foreground">From</label>
-          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-            className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary" />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] text-muted-foreground">To</label>
-          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-            className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary" />
-        </div>
+        <FieldShell label="From" hideLabel>
+          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+        </FieldShell>
+        <FieldShell label="To" hideLabel>
+          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+        </FieldShell>
 
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] text-muted-foreground">Counsellor</label>
-          <select value={counsellorId} onChange={e => setCounsellorId(e.target.value)}
-            className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary min-w-[150px]">
-            <option value="">All Counsellors</option>
-            {counsellors.map(c => <option key={c.id} value={c.id}>{c.display_name}</option>)}
-          </select>
-        </div>
+        <SelectField
+          value={counsellorId}
+          onValueChange={setCounsellorId}
+          options={[
+            { value: "", label: "All Counsellors" },
+            ...counsellors.map(c => ({ value: c.id, label: c.display_name })),
+          ]}
+          label="Counsellor"
+          hideLabel
+          placeholder="All Counsellors"
+          className="min-w-[160px]"
+        />
 
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] text-muted-foreground">Campus / Location</label>
-          <select value={campusId} onChange={e => setCampusId(e.target.value)}
-            className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary min-w-[150px]">
-            <option value="">All Campuses</option>
-            {campuses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        </div>
+        <SelectField
+          value={campusId}
+          onValueChange={setCampusId}
+          options={[
+            { value: "", label: "All Campuses" },
+            ...campuses.map(c => ({ value: c.id, label: c.name })),
+          ]}
+          label="Campus / Location"
+          hideLabel
+          placeholder="All Campuses"
+          className="min-w-[160px]"
+        />
 
         {/* Quick date shortcuts */}
         <div className="flex gap-1.5 self-end flex-wrap">

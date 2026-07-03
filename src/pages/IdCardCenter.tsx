@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { SelectField } from "@/components/ui/state-fields";
 
 type CardMode = "students" | "employees";
 
@@ -317,7 +319,7 @@ const IdCardCenter = () => {
       <div className="print:hidden flex flex-wrap items-center gap-3">
         <div className="relative min-w-[240px] flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
+          <Input
             type="text"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
@@ -325,16 +327,17 @@ const IdCardCenter = () => {
             className="w-full rounded-xl border border-input bg-card py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
           />
         </div>
-        <select
+        <SelectField
           value={groupFilter}
-          onChange={(event) => setGroupFilter(event.target.value)}
-          className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
-        >
-          <option value="all">{mode === "students" ? "All grades / programmes" : "All departments"}</option>
-          {groups.map((group) => (
-            <option key={group} value={group}>{group}</option>
-          ))}
-        </select>
+          onValueChange={setGroupFilter}
+          options={[
+            { value: "all", label: mode === "students" ? "All grades / programmes" : "All departments" },
+            ...groups.map((group) => ({ value: group, label: group })),
+          ]}
+          allowEmpty={false}
+          triggerClassName="rounded-xl border border-input bg-card px-3 py-2.5 text-sm focus:ring-2 focus:ring-ring/20"
+          ariaLabel={mode === "students" ? "Filter by grade or programme" : "Filter by department"}
+        />
         <span className="text-sm text-muted-foreground">
           {selectedRows.length} selected from {filteredRows.length} visible
         </span>

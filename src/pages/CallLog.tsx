@@ -6,6 +6,8 @@ import { useCounsellorFilter } from "@/contexts/CounsellorFilterContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { SelectField, FieldShell } from "@/components/ui/state-fields";
 import {
   Phone, Clock, Search, Loader2, ExternalLink,
   CheckCircle, XCircle, AlertCircle, Play, PhoneCall, Calendar,
@@ -364,8 +366,6 @@ const CallLog = () => {
     return `${m}:${sec.toString().padStart(2, "0")}`;
   };
 
-  const inputCls = "rounded-xl border border-input bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20";
-
   return (
     <div className="space-y-5 animate-fade-in">
       <div>
@@ -460,33 +460,47 @@ const CallLog = () => {
 
         {/* Custom date range */}
         <div className="flex items-center gap-1.5">
-          <input type="date" value={customFrom} onChange={e => { setCustomFrom(e.target.value); setDatePreset("custom"); }} className={`${inputCls} w-[130px] text-xs`} />
+          <FieldShell hideLabel><Input type="date" value={customFrom} onChange={e => { setCustomFrom(e.target.value); setDatePreset("custom"); }} className="w-[130px]" /></FieldShell>
           <span className="text-xs text-muted-foreground">to</span>
-          <input type="date" value={customTo} onChange={e => { setCustomTo(e.target.value); setDatePreset("custom"); }} className={`${inputCls} w-[130px] text-xs`} />
+          <FieldShell hideLabel><Input type="date" value={customTo} onChange={e => { setCustomTo(e.target.value); setDatePreset("custom"); }} className="w-[130px]" /></FieldShell>
         </div>
 
         {/* Counsellor filter (admins only — counsellors are auto-filtered) */}
         {!isCounsellor && (
-          <select value={counsellorFilter} onChange={e => setCounsellorFilter(e.target.value)} className={inputCls}>
-            <option value="all">All Counsellors</option>
-            {counsellorOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          <SelectField
+            value={counsellorFilter}
+            onValueChange={setCounsellorFilter}
+            options={[
+              { value: "all", label: "All Counsellors" },
+              ...counsellorOptions.map(c => ({ value: c.id, label: c.name })),
+            ]}
+            hideLabel
+            placeholder="All Counsellors"
+            className="min-w-[160px]"
+          />
         )}
 
         {/* Disposition filter */}
-        <select value={dispositionFilter} onChange={e => setDispositionFilter(e.target.value)} className={inputCls}>
-          <option value="all">All Dispositions</option>
-          <option value="interested">Interested</option>
-          <option value="not_interested">Not Interested</option>
-          <option value="not_answered">Not Answered</option>
-          <option value="busy">Busy</option>
-          <option value="call_back">Call Back</option>
-          <option value="voicemail">Voicemail</option>
-          <option value="wrong_number">Wrong Number</option>
-          <option value="do_not_contact">DNC</option>
-          <option value="ineligible">Ineligible</option>
-          <option value="timeout">Timeout</option>
-        </select>
+        <SelectField
+          value={dispositionFilter}
+          onValueChange={setDispositionFilter}
+          options={[
+            { value: "all", label: "All Dispositions" },
+            { value: "interested", label: "Interested" },
+            { value: "not_interested", label: "Not Interested" },
+            { value: "not_answered", label: "Not Answered" },
+            { value: "busy", label: "Busy" },
+            { value: "call_back", label: "Call Back" },
+            { value: "voicemail", label: "Voicemail" },
+            { value: "wrong_number", label: "Wrong Number" },
+            { value: "do_not_contact", label: "DNC" },
+            { value: "ineligible", label: "Ineligible" },
+            { value: "timeout", label: "Timeout" },
+          ]}
+          hideLabel
+          placeholder="All Dispositions"
+          className="min-w-[160px]"
+        />
 
         {/* Search */}
         <div className="relative flex-1 min-w-[180px] max-w-xs">

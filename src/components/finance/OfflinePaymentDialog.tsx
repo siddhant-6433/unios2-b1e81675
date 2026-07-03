@@ -12,6 +12,8 @@ import { useToast } from "@/hooks/use-toast";
 import { combineIndiaDateTimeInput, getCurrentIndiaDateTimeInput } from "@/lib/indiaDateTime";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { TextField, SelectField, TextAreaField, FieldShell } from "@/components/ui/state-fields";
 import { Loader2, IndianRupee, Upload, X as XIcon, FileText } from "lucide-react";
 
 const PAY_TYPES: { value: string; label: string }[] = [
@@ -178,8 +180,6 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
     onRecorded?.();
   };
 
-  const inputCls = "w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20";
-
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v); }}>
       <DialogContent className="max-w-lg">
@@ -193,97 +193,103 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
         <div className="space-y-3 py-2">
           {/* Type + amount row */}
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Fee Type</label>
-              <select className={inputCls} value={type} onChange={e => setType(e.target.value)}>
-                {PAY_TYPES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Amount (₹)</label>
-              <input
-                className={inputCls}
+            <SelectField
+              value={type}
+              onValueChange={setType}
+              options={PAY_TYPES.map(p => ({ value: p.value, label: p.label }))}
+              label="Fee Type"
+              allowEmpty={false}
+            />
+            <FieldShell label="Amount (₹)">
+              <Input
                 type="number" min="1" step="1" inputMode="numeric"
                 value={amount}
                 onChange={e => setAmount(e.target.value)}
                 placeholder="0"
                 autoFocus
               />
-            </div>
+            </FieldShell>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Transaction Date</label>
-              <input className={inputCls} type="date" value={date} onChange={e => setDate(e.target.value)} />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Transaction Time</label>
-              <input className={inputCls} type="time" value={time} onChange={e => setTime(e.target.value)} />
-            </div>
+            <FieldShell label="Transaction Date">
+              <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
+            </FieldShell>
+            <FieldShell label="Transaction Time">
+              <Input type="time" value={time} onChange={e => setTime(e.target.value)} />
+            </FieldShell>
           </div>
 
-          <div>
-            <label className="text-xs font-medium text-muted-foreground">Payment Mode</label>
-            <select className={inputCls} value={mode} onChange={e => { setMode(e.target.value); setTxnRef(""); setBank(""); setWallet(""); }}>
-              {MODE_OPTIONS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-            </select>
-          </div>
+          <SelectField
+            value={mode}
+            onValueChange={value => { setMode(value); setTxnRef(""); setBank(""); setWallet(""); }}
+            options={MODE_OPTIONS.map(m => ({ value: m.value, label: m.label }))}
+            label="Payment Mode"
+            allowEmpty={false}
+          />
 
           {/* Mode-specific fields */}
           {mode === "cheque" && (
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Cheque / DD Number</label>
-                <input className={inputCls} value={txnRef} onChange={e => setTxnRef(e.target.value)} placeholder="e.g. 123456" />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Bank</label>
-                <select className={inputCls} value={bank} onChange={e => setBank(e.target.value)}>
-                  <option value="">Select Bank</option>
-                  {BANK_OPTIONS.map(b => <option key={b} value={b}>{b}</option>)}
-                </select>
-              </div>
+              <TextField
+                value={txnRef}
+                onValueChange={setTxnRef}
+                label="Cheque / DD Number"
+                placeholder="e.g. 123456"
+              />
+              <SelectField
+                value={bank}
+                onValueChange={setBank}
+                options={[{ value: "", label: "Select Bank" }, ...BANK_OPTIONS.map(b => ({ value: b, label: b }))]}
+                label="Bank"
+                placeholder="Select Bank"
+              />
             </div>
           )}
 
           {mode === "bank_transfer" && (
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">UTR / Reference Number</label>
-                <input className={inputCls} value={txnRef} onChange={e => setTxnRef(e.target.value)} placeholder="e.g. NEFT123456" />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Bank</label>
-                <select className={inputCls} value={bank} onChange={e => setBank(e.target.value)}>
-                  <option value="">Select Bank</option>
-                  {BANK_OPTIONS.map(b => <option key={b} value={b}>{b}</option>)}
-                </select>
-              </div>
+              <TextField
+                value={txnRef}
+                onValueChange={setTxnRef}
+                label="UTR / Reference Number"
+                placeholder="e.g. NEFT123456"
+              />
+              <SelectField
+                value={bank}
+                onValueChange={setBank}
+                options={[{ value: "", label: "Select Bank" }, ...BANK_OPTIONS.map(b => ({ value: b, label: b }))]}
+                label="Bank"
+                placeholder="Select Bank"
+              />
             </div>
           )}
 
           {mode === "upi" && (
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">UPI / Txn Reference</label>
-                <input className={inputCls} value={txnRef} onChange={e => setTxnRef(e.target.value)} placeholder="UPI ref / txn id" />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Wallet / App</label>
-                <select className={inputCls} value={wallet} onChange={e => setWallet(e.target.value)}>
-                  <option value="">Select</option>
-                  {WALLET_OPTIONS.map(w => <option key={w} value={w}>{w}</option>)}
-                </select>
-              </div>
+              <TextField
+                value={txnRef}
+                onValueChange={setTxnRef}
+                label="UPI / Txn Reference"
+                placeholder="UPI ref / txn id"
+              />
+              <SelectField
+                value={wallet}
+                onValueChange={setWallet}
+                options={[{ value: "", label: "Select" }, ...WALLET_OPTIONS.map(w => ({ value: w, label: w }))]}
+                label="Wallet / App"
+                placeholder="Select"
+              />
             </div>
           )}
 
           {mode === "online" && (
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Reference / Receipt Number</label>
-              <input className={inputCls} value={txnRef} onChange={e => setTxnRef(e.target.value)} placeholder="External ref no" />
-            </div>
+            <TextField
+              value={txnRef}
+              onValueChange={setTxnRef}
+              label="Reference / Receipt Number"
+              placeholder="External ref no"
+            />
           )}
 
           {/* Cash needs no extra fields */}
@@ -326,15 +332,12 @@ export function OfflinePaymentDialog({ open, onOpenChange, leadId, applicationId
             )}
           </div>
 
-          <div>
-            <label className="text-xs font-medium text-muted-foreground">Remarks (optional)</label>
-            <textarea
-              className={`${inputCls} min-h-[60px]`}
-              value={remarks}
-              onChange={e => setRemarks(e.target.value)}
-              placeholder="Internal note for finance / counsellor"
-            />
-          </div>
+          <TextAreaField
+            value={remarks}
+            onValueChange={setRemarks}
+            label="Remarks (optional)"
+            placeholder="Internal note for finance / counsellor"
+          />
 
           <p className="text-[11px] text-muted-foreground">
             Marking this confirmed will trigger receipt-number allocation, fee-ledger credit, and applicant + finance notifications.

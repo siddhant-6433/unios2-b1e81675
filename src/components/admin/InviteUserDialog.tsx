@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, UserPlus, X, ChevronDown } from "lucide-react";
 import { PhoneInput } from "@/components/ui/phone-input";
+import { TextField, SelectField } from "@/components/ui/state-fields";
 import type { Database } from "@/integrations/supabase/types";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
@@ -239,32 +240,21 @@ const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublis
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-              Email <span className="text-destructive">*</span>
-            </label>
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="user@example.com"
-              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-            />
-          </div>
+          <TextField
+            value={email}
+            onValueChange={setEmail}
+            label="Email"
+            required
+            type="email"
+            placeholder="user@example.com"
+          />
 
-          <div>
-            <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-              Full Name
-            </label>
-            <input
-              type="text"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="John Doe"
-              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-            />
-          </div>
+          <TextField
+            value={displayName}
+            onValueChange={setDisplayName}
+            label="Full Name"
+            placeholder="John Doe"
+          />
 
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1.5">
@@ -317,39 +307,26 @@ const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublis
             )}
           </div>
 
-          <div>
-            <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-              Role <span className="text-destructive">*</span>
-            </label>
-            <select
-              value={role}
-              onChange={(e) => setRole(e.target.value as AppRole)}
-              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-            >
-              {ALL_ROLES.map((r) => (
-                <option key={r.value} value={r.value}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          <SelectField
+            value={role}
+            onValueChange={value => setRole(value as AppRole)}
+            options={ALL_ROLES.map(r => ({ value: r.value, label: r.label }))}
+            label="Role"
+            required
+            placeholder="Select role"
+            allowEmpty={false}
+          />
 
           {role === "publisher" && (
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-                Lead Source <span className="text-destructive">*</span>
-                <span className="ml-1 text-muted-foreground/60 font-normal">— must match the source on their leads</span>
-              </label>
-              <select
-                value={publisherSource}
-                onChange={(e) => setPublisherSource(e.target.value)}
-                className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-              >
-                {PUBLISHER_SOURCES.map((s) => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
-                ))}
-              </select>
-            </div>
+            <SelectField
+              value={publisherSource}
+              onValueChange={setPublisherSource}
+              options={PUBLISHER_SOURCES.map(s => ({ value: s.value, label: s.label }))}
+              label="Lead Source"
+              required
+              description="Must match the source on their leads"
+              allowEmpty={false}
+            />
           )}
 
           {role === "counsellor" && (
@@ -402,18 +379,14 @@ const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublis
             </div>
           )}
 
-          <div>
-            <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-              Password <span className="text-muted-foreground/60 font-normal">(optional — skips email invite)</span>
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Set a password to create account immediately"
-              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
-            />
-          </div>
+          <TextField
+            value={password}
+            onValueChange={setPassword}
+            label="Password"
+            type="password"
+            placeholder="Set a password to create account immediately"
+            description="Optional — skips email invite"
+          />
 
           <div className="flex gap-3 pt-2">
             <button
