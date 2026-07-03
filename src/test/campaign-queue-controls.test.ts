@@ -63,8 +63,16 @@ describe("campaign queue controls", () => {
   it("can load enabled approved templates dynamically for bulk campaigns", () => {
     expect(leadLists).toContain("dynamicWaBulkTemplates");
     expect(leadLists).toContain("availableWaBulkTemplates");
+    expect(leadLists).toContain('from("whatsapp_template_settings")');
     expect(leadLists).toContain('from("whatsapp_templates")');
+    expect(leadLists).toContain("const approvedTemplateByName = new Map");
+    expect(leadLists).toContain(".filter((setting) => setting.template_key && !knownKeys.has(setting.template_key))");
+    expect(leadLists).toContain("Meta details are not available locally");
     expect(leadLists).toContain("dynamicWaTemplateParams(row.components, row.placeholder_count)");
+    expect(marketingPage).toContain('from("whatsapp_template_settings")');
+    expect(marketingPage).toContain("const approvedTemplateByName = new Map");
+    expect(marketingPage).toContain(".filter((setting) => setting.template_key && !knownKeys.has(setting.template_key))");
+    expect(marketingPage).toContain("Meta details are not available locally");
     expect(marketingPage).toContain("dynamicWaTemplateParams(row.components, row.placeholder_count)");
     expect(bulkTemplates).toContain("template_header_media_url");
     expect(bulkTemplates).toContain("template_button_${buttonIndex}_url_value_${position}");
