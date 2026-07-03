@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, useCallback, Re
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
-import { ACADEMIC_PARTNER_ALLOWED_PERMISSIONS, canUsePermission, type AccessState } from "@/lib/accessPolicy";
+import { canUsePermission, permissionsForAcademicPartnerRole, type AccessState } from "@/lib/accessPolicy";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
 
@@ -123,8 +123,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       // Fetch permissions — non-critical, errors are safe to ignore
       supabase.rpc("get_user_permissions", { _user_id: userId })
         .then((res) => {
-          if (roleRes.data === "academic_partner") {
-            setPermissions(Array.from(ACADEMIC_PARTNER_ALLOWED_PERMISSIONS));
+          const partnerPermissions = permissionsForAcademicPartnerRole(roleRes.data as AppRole | null);
+          if (partnerPermissions) {
+            setPermissions(Array.from(partnerPermissions));
           } else if (Array.isArray(res?.data)) {
             setPermissions(res.data);
           }
@@ -192,8 +193,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     ]);
 
     const targetRole = (roleRes.data as AppRole) || null;
-    const targetPermissions = targetRole === "academic_partner"
-      ? Array.from(ACADEMIC_PARTNER_ALLOWED_PERMISSIONS)
+    const partnerPermissions = permissionsForAcademicPartnerRole(targetRole);
+    const targetPermissions = partnerPermissions
+      ? Array.from(partnerPermissions)
       : Array.isArray(permissionRes.data)
         ? permissionRes.data
         : [];

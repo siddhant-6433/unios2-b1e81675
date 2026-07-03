@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Loader2, HandCoins, X } from "lucide-react";
+import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 
 interface ConcessionDialogProps {
   open: boolean;
@@ -148,7 +149,7 @@ export function ConcessionDialog({ open, onOpenChange, studentId, feeItems, onSu
                 <option value="">Select a fee item to add...</option>
                 {availableItems.map((f: any) => (
                   <option key={f.id} value={f.id}>
-                    {f.fee_codes?.code} — {f.term} — ₹{Number(f.total_amount).toLocaleString("en-IN")}
+                    {f.fee_codes?.code} — {defaultFeeTermLabel(f.term)} — ₹{Number(f.total_amount).toLocaleString("en-IN")}
                   </option>
                 ))}
               </select>
@@ -171,7 +172,7 @@ export function ConcessionDialog({ open, onOpenChange, studentId, feeItems, onSu
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="text-sm font-semibold text-foreground">{fee.fee_codes?.code}</span>
-                        <span className="text-xs text-muted-foreground">{fee.term}</span>
+                        <span className="text-xs text-muted-foreground">{defaultFeeTermLabel(fee.term)}</span>
                         <span className="text-xs text-muted-foreground">·</span>
                         <span className="text-xs text-foreground font-medium">₹{Number(fee.total_amount).toLocaleString("en-IN")}</span>
                       </div>

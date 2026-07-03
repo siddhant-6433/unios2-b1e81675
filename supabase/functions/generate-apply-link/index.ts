@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
     const { data: roles } = await db.from("user_roles").select("role").eq("user_id", user.id);
     const isStaff = (roles || []).some((r: any) => !["student", "parent"].includes(r.role));
     if (!isStaff) return json({ error: "Forbidden" }, 403);
-    const callerRole = (roles || []).find((r: any) => r.role === "academic_partner")?.role
+    const callerRole = (roles || []).find((r: any) => ["academic_partner", "academic_partner_offer_letter"].includes(r.role))?.role
       || (roles || [])[0]?.role
       || null;
 
@@ -77,7 +77,7 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (mode === "academic_partner_on_behalf") {
-      if (callerRole !== "academic_partner" || !partner?.id) {
+      if (!["academic_partner", "academic_partner_offer_letter"].includes(String(callerRole)) || !partner?.id) {
         return json({ error: "Only academic partners can generate on-behalf application links" }, 403);
       }
       const { data: canOpen, error: scopeErr } = await db.rpc("can_academic_partner_view_mapped_lead", {
@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
       created_by: profile?.id || null,
       mode,
       actor_user_id: mode === "academic_partner_on_behalf" ? user.id : null,
-      actor_role: mode === "academic_partner_on_behalf" ? "academic_partner" : null,
+      actor_role: mode === "academic_partner_on_behalf" ? callerRole : null,
       academic_partner_id: mode === "academic_partner_on_behalf" ? partner?.id : null,
     }).select("token, expires_at").single();
     if (insErr) return json({ error: insErr.message }, 500);

@@ -52,9 +52,12 @@ const ALL_ROLES: { value: AppRole; label: string }[] = [
   { value: "librarian", label: "Librarian" },
   { value: "consultant", label: "Consultant" },
   { value: "academic_partner", label: "Academic Partner" },
+  { value: "academic_partner_offer_letter", label: "Academic Partner + Offers" },
   { value: "student", label: "Student" },
   { value: "parent", label: "Parent" },
 ];
+
+const PARTNER_PORTAL_ROLES: AppRole[] = ["academic_partner", "academic_partner_offer_letter"];
 
 interface UserWithRole {
   user_id: string;
@@ -253,8 +256,8 @@ const AdminPanel = () => {
         }
       }
 
-      // Auto-create academic partner profile when role is set to academic_partner
-      if (newRole === "academic_partner") {
+      // Auto-create academic partner profile when role is set to a partner portal role.
+      if (PARTNER_PORTAL_ROLES.includes(newRole as AppRole)) {
         const { data: existing } = await supabase.from("academic_partners").select("id").eq("user_id", userId).maybeSingle();
         if (!existing) {
           const { error: apErr } = await supabase.from("academic_partners").insert({
@@ -273,8 +276,8 @@ const AdminPanel = () => {
         await supabase.from("consultants").update({ user_id: null }).eq("user_id", userId);
       }
 
-      // Unlink academic partner profile if role changed away from academic_partner
-      if (user.role === "academic_partner" && newRole !== "academic_partner") {
+      // Unlink academic partner profile if role changed away from partner portal roles.
+      if (user.role && PARTNER_PORTAL_ROLES.includes(user.role) && !PARTNER_PORTAL_ROLES.includes(newRole as AppRole)) {
         await supabase.from("academic_partners").update({ user_id: null }).eq("user_id", userId);
       }
 
@@ -535,7 +538,7 @@ const AdminPanel = () => {
                   className="rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
                 >
                   <option value="all">All Roles</option>
-                  {ALL_ROLES.filter((r) => !["student", "parent", "consultant", "academic_partner"].includes(r.value)).map((r) => (
+                  {ALL_ROLES.filter((r) => !["student", "parent", "consultant", "academic_partner", "academic_partner_offer_letter"].includes(r.value)).map((r) => (
                     <option key={r.value} value={r.value}>{r.label} ({users.filter((u) => u.role === r.value).length})</option>
                   ))}
                 </select>
@@ -550,17 +553,17 @@ const AdminPanel = () => {
 
             {(() => {
               const subFiltered = filtered.filter((u) => {
-                if (userSubTab === "employees") return u.role && !["student", "parent", "consultant", "academic_partner", "publisher"].includes(u.role);
+                if (userSubTab === "employees") return u.role && !["student", "parent", "consultant", "academic_partner", "academic_partner_offer_letter", "publisher"].includes(u.role);
                 if (userSubTab === "consultants") return u.role === "consultant";
-                if (userSubTab === "academic_partners") return u.role === "academic_partner";
+                if (userSubTab === "academic_partners") return !!u.role && PARTNER_PORTAL_ROLES.includes(u.role);
                 if (userSubTab === "publishers") return u.role === "publisher";
                 if (userSubTab === "families") return u.role === "student" || u.role === "parent";
                 return !u.role;
               });
               const allSubUsers = users.filter((u) => {
-                if (userSubTab === "employees") return u.role && !["student", "parent", "consultant", "academic_partner", "publisher"].includes(u.role);
+                if (userSubTab === "employees") return u.role && !["student", "parent", "consultant", "academic_partner", "academic_partner_offer_letter", "publisher"].includes(u.role);
                 if (userSubTab === "consultants") return u.role === "consultant";
-                if (userSubTab === "academic_partners") return u.role === "academic_partner";
+                if (userSubTab === "academic_partners") return !!u.role && PARTNER_PORTAL_ROLES.includes(u.role);
                 if (userSubTab === "publishers") return u.role === "publisher";
                 if (userSubTab === "families") return u.role === "student" || u.role === "parent";
                 return !u.role;

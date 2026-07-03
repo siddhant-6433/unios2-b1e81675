@@ -52,6 +52,40 @@ describe("accessPolicy", () => {
     expect(canSeePolicyItem(academicPartner, { url: "/academic-partner-portal?tab=fees" })).toBe(true);
   });
 
+  it("keeps offer-letter academic partners portal-scoped with only the issue-offer capability added", () => {
+    const baseAcademicPartner = state({
+      role: "academic_partner",
+      realRole: "academic_partner",
+      permissions: ["academic_partner_portal:view", "academic_partner_offer_letters:issue", "leads:view"],
+    });
+    const offerAcademicPartner = state({
+      role: "academic_partner_offer_letter",
+      realRole: "academic_partner_offer_letter",
+      permissions: ["academic_partner_portal:view", "academic_partner_offer_letters:issue", "leads:view"],
+    });
+
+    expect(canUsePermission(baseAcademicPartner, "academic_partner_portal:view")).toBe(true);
+    expect(canUsePermission(baseAcademicPartner, "academic_partner_offer_letters:issue")).toBe(false);
+    expect(canUsePermission(baseAcademicPartner, "leads:view")).toBe(false);
+    expect(decidePermissionAccess(baseAcademicPartner, "academic_partner_offer_letters:issue")).toEqual({
+      allowed: false,
+      reason: "academic_partner_scope",
+      redirectTo: "/academic-partner-portal",
+    });
+
+    expect(canUsePermission(offerAcademicPartner, "academic_partner_portal:view")).toBe(true);
+    expect(canUsePermission(offerAcademicPartner, "academic_partner_offer_letters:issue")).toBe(true);
+    expect(canUsePermission(offerAcademicPartner, "leads:view")).toBe(false);
+    expect(decidePermissionAccess(offerAcademicPartner, "academic_partner_offer_letters:issue")).toEqual({ allowed: true });
+    expect(decideStaffAppAccess(offerAcademicPartner, "/applications")).toEqual({
+      allowed: false,
+      reason: "academic_partner_scope",
+      redirectTo: "/academic-partner-portal",
+    });
+    expect(canSeePolicyItem(offerAcademicPartner, { url: "/applications", permission: "students:view" })).toBe(false);
+    expect(canSeePolicyItem(offerAcademicPartner, { url: "/academic-partner-portal?tab=applications" })).toBe(true);
+  });
+
   it("allows counsellors to use admissions and call-log surfaces without admin access", () => {
     const counsellor = state({
       role: "counsellor",

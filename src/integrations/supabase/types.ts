@@ -10499,6 +10499,54 @@ export type Database = {
           lead_id: string
         }[]
       }
+      academic_partner_issue_offer: {
+        Args: {
+          _acceptance_deadline: string
+          _admission_mode?: string
+          _application_id: string
+          _entrance_exam_name?: string | null
+          _net_fee: number
+          _partner_id?: string | null
+          _session_id: string
+          _token_fee_amount: number
+          _token_fee_user_edited?: boolean
+          _total_fee: number
+        }
+        Returns: Json
+      }
+      academic_partner_paid_applications: {
+        Args: {
+          _partner_id?: string | null
+        } | void
+        Returns: {
+          academic_partner_id: string | null
+          application_completed_sections: Json | null
+          application_created_at: string | null
+          application_fee_amount: number | null
+          application_form_pdf_url: string | null
+          application_id: string
+          application_payment_status: string | null
+          application_status: string | null
+          application_submitted_at: string | null
+          application_uuid: string
+          attribution_label: string
+          attribution_type: string
+          campus_id: string | null
+          campus_name: string | null
+          counsellor_id: string | null
+          course_id: string | null
+          course_name: string | null
+          email: string | null
+          has_offer: boolean
+          latest_offer_id: string | null
+          latest_offer_letter_url: string | null
+          lead_id: string
+          name: string
+          phone: string
+          source: string | null
+          stage: string
+        }[]
+      }
       get_unassigned_leads_bucket: {
         Args: never
         Returns: {
@@ -10630,6 +10678,7 @@ export type Database = {
         | "publisher"
         | "video_editor"
         | "academic_partner"
+        | "academic_partner_offer_letter"
         | "librarian"
       ib_programme: "pyp" | "myp"
       lead_source:
@@ -10830,6 +10879,7 @@ export const Constants = {
         "publisher",
         "video_editor",
         "academic_partner",
+        "academic_partner_offer_letter",
         "librarian",
       ],
       ib_programme: ["pyp", "myp"],

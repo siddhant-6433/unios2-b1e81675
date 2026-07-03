@@ -50,15 +50,34 @@ export interface AccessPolicyItem {
 }
 
 export const ACADEMIC_PARTNER_PORTAL_PERMISSION = "academic_partner_portal:view";
+export const ACADEMIC_PARTNER_OFFER_ISSUE_PERMISSION = "academic_partner_offer_letters:issue";
 export const ACADEMIC_PARTNER_ALLOWED_PERMISSIONS = new Set([ACADEMIC_PARTNER_PORTAL_PERMISSION]);
+export const ACADEMIC_PARTNER_OFFER_LETTER_ALLOWED_PERMISSIONS = new Set([
+  ACADEMIC_PARTNER_PORTAL_PERMISSION,
+  ACADEMIC_PARTNER_OFFER_ISSUE_PERMISSION,
+]);
+export const ACADEMIC_PARTNER_PORTAL_ROLES = new Set<AppRole>([
+  "academic_partner",
+  "academic_partner_offer_letter",
+]);
+
+export function isAcademicPartnerPortalRole(role: AppRole | null): boolean {
+  return role !== null && ACADEMIC_PARTNER_PORTAL_ROLES.has(role);
+}
+
+export function permissionsForAcademicPartnerRole(role: AppRole | null): readonly string[] | null {
+  if (role === "academic_partner") return Array.from(ACADEMIC_PARTNER_ALLOWED_PERMISSIONS);
+  if (role === "academic_partner_offer_letter") return Array.from(ACADEMIC_PARTNER_OFFER_LETTER_ALLOWED_PERMISSIONS);
+  return null;
+}
 
 export const STAFF_ROUTE_POLICIES: readonly RoutePolicy[] = [
   { path: "/", permission: "dashboard:view", staffOnly: true },
   { path: "/admissions", permission: "leads:view", staffOnly: true },
   { path: "/lead-buckets", permission: "lead_buckets:view", staffOnly: true },
   { path: "/lead-assignments", permission: "leads:view", staffOnly: true },
-  { path: "/lists", permission: "leads:view", blockedRoles: ["academic_partner"], staffOnly: true },
-  { path: "/marketing", permission: "leads:view", blockedRoles: ["academic_partner"], staffOnly: true },
+  { path: "/lists", permission: "leads:view", blockedRoles: ["academic_partner", "academic_partner_offer_letter"], staffOnly: true },
+  { path: "/marketing", permission: "leads:view", blockedRoles: ["academic_partner", "academic_partner_offer_letter"], staffOnly: true },
   { path: "/pending-followups", permission: "leads:view", staffOnly: true },
   { path: "/fresh-leads", permission: "leads:view", staffOnly: true },
   { path: "/visit-monitor", permission: "leads:view", staffOnly: true },
@@ -89,14 +108,14 @@ export const STAFF_ROUTE_POLICIES: readonly RoutePolicy[] = [
   { path: "/inbox", permission: "leads:view", staffOnly: true },
   { path: "/whatsapp-inbox", permission: "whatsapp:view", staffOnly: true },
   { path: "/whatsapp-health", permission: "user_management:view", staffOnly: true },
-  { path: "/template-manager", permission: "templates:view", blockedRoles: ["academic_partner"], staffOnly: true },
+  { path: "/template-manager", permission: "templates:view", blockedRoles: ["academic_partner", "academic_partner_offer_letter"], staffOnly: true },
   { path: "/admission-analytics", permission: "analytics:view", staffOnly: true },
   { path: "/counsellor-dashboard", permission: "performance:view", staffOnly: true },
   { path: "/reports", permission: "reports:view", staffOnly: true },
   { path: "/consultants", permission: "consultants:view", staffOnly: true },
   { path: "/academic-partners", permission: "academic_partners:view", staffOnly: true },
   { path: "/consultant-portal", permission: "consultant_portal:view", staffOnly: true },
-  { path: "/academic-partner-portal", permission: ACADEMIC_PARTNER_PORTAL_PERMISSION, roles: ["academic_partner"], staffOnly: true },
+  { path: "/academic-partner-portal", permission: ACADEMIC_PARTNER_PORTAL_PERMISSION, roles: ["academic_partner", "academic_partner_offer_letter"], staffOnly: true },
   { path: "/consultant-guide", permission: "consultant_portal:view", staffOnly: true },
   { path: "/publisher-portal", permission: "publisher_portal:view", staffOnly: true },
   { path: "/publisher-analytics", permission: "publisher_portal:view", staffOnly: true },
@@ -134,7 +153,8 @@ export function isActingAsSuperAdmin(state: Pick<AccessState, "role">) {
 
 export function canUsePermission(state: AccessState, permission: string): boolean {
   if (isActingAsSuperAdmin(state)) return true;
-  if (state.role === "academic_partner") return ACADEMIC_PARTNER_ALLOWED_PERMISSIONS.has(permission);
+  const partnerPermissions = permissionsForAcademicPartnerRole(state.role);
+  if (partnerPermissions) return partnerPermissions.includes(permission);
   return permissionSet(state.permissions).has(permission);
 }
 
@@ -144,8 +164,9 @@ export function canUseAnyPermission(state: AccessState, permissions: readonly st
 
 export function canUseModule(state: AccessState, module: string): boolean {
   if (isActingAsSuperAdmin(state)) return true;
-  if (state.role === "academic_partner") {
-    for (const permission of ACADEMIC_PARTNER_ALLOWED_PERMISSIONS) {
+  const partnerPermissions = permissionsForAcademicPartnerRole(state.role);
+  if (partnerPermissions) {
+    for (const permission of partnerPermissions) {
       if (permission.startsWith(`${module}:`)) return true;
     }
     return false;
@@ -185,7 +206,7 @@ export function decideStaffAppAccess(state: AccessState, path: string): AccessDe
   if (state.role === null) {
     return { allowed: false, reason: "applicant_scope", redirectTo: "/my-applications" };
   }
-  if (state.role === "academic_partner" && normalizedPath(path) !== "/academic-partner-portal") {
+  if (isAcademicPartnerPortalRole(state.role) && normalizedPath(path) !== "/academic-partner-portal") {
     return { allowed: false, reason: "academic_partner_scope", redirectTo: "/academic-partner-portal" };
   }
   return { allowed: true };
@@ -215,7 +236,7 @@ export function decideApplicantAccess(state: AccessState): AccessDecision {
 }
 
 export function decidePermissionAccess(state: AccessState, permission: string): AccessDecision {
-  if (state.role === "academic_partner" && permission !== ACADEMIC_PARTNER_PORTAL_PERMISSION) {
+  if (isAcademicPartnerPortalRole(state.role) && !canUsePermission(state, permission)) {
     return { allowed: false, reason: "academic_partner_scope", redirectTo: "/academic-partner-portal" };
   }
   if (canUsePermission(state, permission)) return { allowed: true };
@@ -237,7 +258,7 @@ export function decideBlockedRoleAccess(state: AccessState, roles: readonly stri
 export function canSeePolicyItem(state: AccessState, item: AccessPolicyItem): boolean {
   if (item.hideForSuperAdmin && state.realRole === "super_admin" && !state.isImpersonating) return false;
   if (item.blockedRoles?.includes(state.role as AppRole)) return false;
-  if (state.role === "academic_partner") {
+  if (isAcademicPartnerPortalRole(state.role)) {
     const path = normalizedPath(item.url);
     return path === "/academic-partner-portal" || item.permission === ACADEMIC_PARTNER_PORTAL_PERMISSION;
   }
