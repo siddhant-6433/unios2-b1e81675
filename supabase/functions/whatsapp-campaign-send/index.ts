@@ -13,7 +13,7 @@ const CUET_2026_COUNSELLING_IMAGE_URL =
   "https://deylhigsisuexszsmypq.supabase.co/storage/v1/object/public/whatsapp-media/template-assets/cuet_2026_counselling_open.jpeg";
 
 type DynamicHeaderComponent =
-  | { kind: "media"; format: "image" | "video" | "document"; paramName: string }
+  | { kind: "media"; format: "image" | "video" | "document"; paramName: string; defaultUrl?: string | null }
   | { kind: "text"; params: string[] };
 type DynamicButtonComponent = { index: number; params: string[] };
 type DynamicTemplateComponents = {
@@ -55,6 +55,11 @@ const DEAR_STUDENT_NAME_TEMPLATES = new Set([
 ]);
 
 const WA_PARAM_MAPPING_PREFIX = "__lead_field__:";
+
+const KNOWN_TEMPLATE_MEDIA: Record<string, string> = {
+  cuet_2026_counselling_open: CUET_2026_COUNSELLING_IMAGE_URL,
+  cuet_counselling_booking: CUET_2026_COUNSELLING_IMAGE_URL,
+};
 
 function cleanPersonName(value: unknown): string {
   if (typeof value !== "string") return "";
@@ -120,6 +125,17 @@ function templateBodyFromComponents(components: unknown): string | null {
   return typeof body?.text === "string" ? body.text : null;
 }
 
+function templateMediaUrlFromComponents(templateKey: string, components: unknown): string | null {
+  if (KNOWN_TEMPLATE_MEDIA[templateKey]) return KNOWN_TEMPLATE_MEDIA[templateKey];
+  if (!Array.isArray(components)) return null;
+  const header = components.find((component) => {
+    const data = component as Record<string, unknown>;
+    return data.type === "HEADER";
+  }) as Record<string, any> | undefined;
+  const handle = header?.example?.header_handle?.[0];
+  return typeof handle === "string" && /^https?:\/\//i.test(handle) ? handle : null;
+}
+
 function numberedPlaceholders(text: unknown): number[] {
   if (typeof text !== "string") return [];
   return [...new Set(
@@ -145,6 +161,7 @@ function dynamicTemplateComponents(
   components: unknown,
   placeholderCount?: unknown,
   fallbackHeaderFormat?: unknown,
+  templateKey = "",
 ): DynamicTemplateComponents {
   const rows = Array.isArray(components) ? components as Record<string, unknown>[] : [];
   const header = rows.find((component) => component.type === "HEADER");
@@ -159,6 +176,7 @@ function dynamicTemplateComponents(
       kind: "media",
       format: headerFormat.toLowerCase() as "image" | "video" | "document",
       paramName: "template_header_media_url",
+      defaultUrl: templateMediaUrlFromComponents(templateKey, components),
     };
   } else {
     const headerParams = numberedPlaceholders(header?.text).map((position) => `template_header_value_${position}`);
@@ -322,6 +340,7 @@ Deno.serve(async (req) => {
           (dynamicTemplate as any).components,
           (dynamicTemplate as any).placeholder_count,
           (dynamicTemplate as any).header_format,
+          campaign.template_key,
         ),
       };
     }
@@ -462,7 +481,7 @@ Deno.serve(async (req) => {
       if (templateDef.dynamicComponents?.header) {
         const header = templateDef.dynamicComponents.header;
         if (header.kind === "media") {
-          const mediaUrl = resolveParam(header.paramName);
+          const mediaUrl = resolveParam(header.paramName) || header.defaultUrl || "";
           components.push({
             type: "header",
             parameters: [{ type: header.format, [header.format]: { link: mediaUrl } }],

@@ -91,16 +91,24 @@ describe("campaign queue controls", () => {
   it("supports mapped template variables and scheduled campaign starts", () => {
     expect(waCampaignParams).toContain('WA_PARAM_MAPPING_PREFIX = "__lead_field__:"');
     expect(waCampaignParams).toContain('name === "template_value_1" ? encodeWaParamFieldMapping("student_name")');
+    expect(waCampaignParams).toContain("Object.prototype.hasOwnProperty.call(params, name)");
     expect(waCampaignParams).toContain("waBodyPreviewParams");
     expect(marketingPage).toContain("campaignScheduleMode");
     expect(marketingPage).toContain('type="datetime-local"');
+    expect(marketingPage).toContain("md:grid-cols-[180px_260px]");
     expect(marketingPage).toContain("effectiveWaParamValue(waStaticParams, field.name)");
+    expect(marketingPage).toContain("selectedWaTemplateDefaultMediaUrl");
+    expect(marketingPage).toContain("Override header media URL");
     expect(marketingPage).toContain("Use list column:");
     expect(leadLists).toContain("waScheduleMode");
     expect(leadLists).toContain("emailScheduleMode");
     expect(leadLists).toContain("resolveCampaignNextAttemptAt");
+    expect(leadLists).toContain("sm:grid-cols-[170px_240px]");
+    expect(leadLists).toContain("waTemplateDefaultMediaUrl");
     expect(leadLists).toContain("Use list column:");
     expect(whatsappSender).toContain('WA_PARAM_MAPPING_PREFIX = "__lead_field__:"');
+    expect(whatsappSender).toContain("defaultUrl?: string | null");
+    expect(whatsappSender).toContain("templateMediaUrlFromComponents");
     expect(whatsappSender).toContain("resolveMappedCampaignField");
     expect(whatsappSender).toContain("lead?.phone");
   });

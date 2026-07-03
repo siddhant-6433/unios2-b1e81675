@@ -21,6 +21,7 @@ import {
 import { WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from "@/config/waBulkTemplates";
 import {
   WhatsAppTemplatePreviewBubble,
+  templateMediaUrlFromComponents,
   templateTextPreviewFromComponents,
   type WhatsAppTemplateComponent,
 } from "@/components/templates/WhatsAppTemplatePreviewBubble";
@@ -370,8 +371,16 @@ export default function LeadLists() {
     () => waTemplateDef.params.filter(p => p.source === "static"),
     [waTemplateDef]
   );
+  const waTemplateDefaultMediaUrl = useMemo(
+    () => templateMediaUrlFromComponents(
+      waTemplateDef.key,
+      waTemplateComponentsByKey[waTemplateDef.key],
+    ),
+    [waTemplateDef.key, waTemplateComponentsByKey]
+  );
   const waMissingStatic = waStaticFields.some((p) => {
     const value = effectiveWaParamValue(waStaticParams, p.name);
+    if (isWaMediaTemplateParam(p.name) && waTemplateDefaultMediaUrl) return false;
     return !decodeWaParamFieldMapping(value) && !value.trim();
   });
   const waSelectedSender = useMemo(
@@ -1243,7 +1252,7 @@ export default function LeadLists() {
                 className="mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
               />
             </div>
-            <div className="grid gap-3 sm:grid-cols-[180px_minmax(0,1fr)]">
+            <div className="grid max-w-xl gap-3 sm:grid-cols-[170px_240px]">
               <div>
                 <label className="text-xs font-medium text-muted-foreground">Send time</label>
                 <select
@@ -1355,13 +1364,15 @@ export default function LeadLists() {
                   const value = effectiveWaParamValue(waStaticParams, p.name);
                   const mappedToken = decodeWaParamFieldMapping(value);
                   const canMap = isWaMappableTemplateParam(p.name);
-                  const label = isWaMediaTemplateParam(p.name)
-                    ? "Header media URL"
+                  const isMediaParam = isWaMediaTemplateParam(p.name);
+                  const hasDefaultMedia = isMediaParam && !!waTemplateDefaultMediaUrl;
+                  const label = isMediaParam
+                    ? hasDefaultMedia ? "Override header media URL" : "Header media URL"
                     : p.name.replace(/^template_value_(\d+)$/, "Body variable {{$1}}").replace(/_/g, " ");
                   return (
                     <div key={p.name}>
                       <label className="text-xs font-medium text-muted-foreground capitalize">
-                        {label} <span className="text-rose-600">*</span>
+                        {label} {!hasDefaultMedia && <span className="text-rose-600">*</span>}
                       </label>
                       {canMap && (
                         <select
@@ -1388,7 +1399,7 @@ export default function LeadLists() {
                           type="text"
                           value={canMap ? (waStaticParams[p.name] || "") : value}
                           onChange={(e) => setWaStaticParams(s => ({ ...s, [p.name]: e.target.value }))}
-                          placeholder={p.placeholder || ""}
+                          placeholder={hasDefaultMedia ? "Leave blank to use the approved template image" : p.placeholder || ""}
                           className="mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
                         />
                       )}
@@ -1397,7 +1408,12 @@ export default function LeadLists() {
                           Filled per recipient from {waParamFieldLabel(mappedToken)}.
                         </p>
                       )}
-                      {p.help && <p className="text-[11px] text-muted-foreground mt-1">{p.help}</p>}
+                      {hasDefaultMedia && !value.trim() && (
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          Uses the approved template image by default. Add a public URL here only to replace it for this campaign.
+                        </p>
+                      )}
+                      {p.help && !hasDefaultMedia && !mappedToken && <p className="text-[11px] text-muted-foreground mt-1">{p.help}</p>}
                     </div>
                   );
                 })}
@@ -1451,7 +1467,7 @@ export default function LeadLists() {
                 className="mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
               />
             </div>
-            <div className="grid gap-3 sm:grid-cols-[180px_minmax(0,1fr)]">
+            <div className="grid max-w-xl gap-3 sm:grid-cols-[170px_240px]">
               <div>
                 <label className="text-xs font-medium text-muted-foreground">Send time</label>
                 <select

@@ -35,6 +35,7 @@ import { decideBlockedRoleAccess } from "@/lib/accessPolicy";
 import { AUTO_FILLED_PARAMS, WA_BULK_TEMPLATES, dynamicWaTemplateParams, type WaBulkTemplate } from "@/config/waBulkTemplates";
 import {
   WhatsAppTemplatePreviewBubble,
+  templateMediaUrlFromComponents,
   templateTextPreviewFromComponents,
   type WhatsAppTemplateComponent,
 } from "@/components/templates/WhatsAppTemplatePreviewBubble";
@@ -263,8 +264,16 @@ export default function Marketing() {
     () => (selectedWaTemplate?.params || []).filter((param) => param.source === "static" && !AUTO_FILLED_PARAMS.includes(param.name as any)),
     [selectedWaTemplate],
   );
+  const selectedWaTemplateDefaultMediaUrl = useMemo(
+    () => templateMediaUrlFromComponents(
+      selectedWaTemplate?.key,
+      waTemplateComponentsByKey[selectedWaTemplate?.key || ""],
+    ),
+    [selectedWaTemplate?.key, waTemplateComponentsByKey],
+  );
   const waMissingStatic = waStaticFields.some((param) => {
     const value = effectiveWaParamValue(waStaticParams, param.name);
+    if (isWaMediaTemplateParam(param.name) && selectedWaTemplateDefaultMediaUrl) return false;
     return !decodeWaParamFieldMapping(value) && !value.trim();
   });
   const waRenderedPreview = useMemo(
@@ -919,7 +928,7 @@ export default function Marketing() {
             </div>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-[220px_minmax(0,1fr)]">
+          <div className="grid max-w-2xl gap-3 md:grid-cols-[180px_260px]">
             <div>
               <label className="text-xs font-medium text-muted-foreground">Send time</label>
               <select
@@ -975,8 +984,10 @@ export default function Marketing() {
                       const value = effectiveWaParamValue(waStaticParams, field.name);
                       const mappedToken = decodeWaParamFieldMapping(value);
                       const canMap = isWaMappableTemplateParam(field.name);
-                      const label = isWaMediaTemplateParam(field.name)
-                        ? "Header media URL"
+                      const isMediaParam = isWaMediaTemplateParam(field.name);
+                      const hasDefaultMedia = isMediaParam && !!selectedWaTemplateDefaultMediaUrl;
+                      const label = isMediaParam
+                        ? hasDefaultMedia ? "Override header media URL" : "Header media URL"
                         : field.name.replace(/^template_value_(\d+)$/, "Body variable {{$1}}").replace(/_/g, " ");
                       return (
                         <div key={field.name}>
@@ -1005,7 +1016,7 @@ export default function Marketing() {
                             <Input
                               value={canMap ? (waStaticParams[field.name] || "") : value}
                               onChange={(event) => setWaStaticParams((current) => ({ ...current, [field.name]: event.target.value }))}
-                              placeholder={field.placeholder || field.name}
+                              placeholder={hasDefaultMedia ? "Leave blank to use the approved template image" : field.placeholder || field.name}
                               className="mt-1"
                             />
                           )}
@@ -1014,7 +1025,12 @@ export default function Marketing() {
                               Filled per recipient from {waParamFieldLabel(mappedToken)}.
                             </p>
                           )}
-                          {field.help && <p className="mt-1 text-xs text-muted-foreground">{field.help}</p>}
+                          {hasDefaultMedia && !value.trim() && (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              Uses the approved template image by default. Add a public URL here only to replace it for this campaign.
+                            </p>
+                          )}
+                          {field.help && !hasDefaultMedia && !mappedToken && <p className="mt-1 text-xs text-muted-foreground">{field.help}</p>}
                         </div>
                       );
                     })
