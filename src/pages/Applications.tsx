@@ -42,6 +42,7 @@ import {
   type ApplicationDossier,
 } from "@/lib/applicationDossier";
 import type { DatePreset } from "@/lib/datePresets";
+import { compareCourses, type CourseLike } from "@/lib/courseSort";
 import { exportRowsCsv, formatExportDateTime } from "@/lib/xlsxExport";
 import { useToast } from "@/hooks/use-toast";
 
@@ -186,6 +187,16 @@ const primaryCourseName = (app: Pick<AppRow, "course_selections">) => {
     String(course?.course_name || "").trim()
   );
   return String(firstNamed?.course_name || "No course").trim();
+};
+
+const primaryCourseSelection = (app: Pick<AppRow, "course_selections">) => {
+  const firstNamed = (app.course_selections || []).find((course: any) =>
+    String(course?.course_name || "").trim()
+  );
+  return {
+    course: String(firstNamed?.course_name || "No course").trim(),
+    campus: String(firstNamed?.campus_name || "No campus").trim(),
+  };
 };
 
 export default function Applications() {
@@ -723,6 +734,7 @@ export default function Applications() {
 
   const courseStatusRows = useMemo(() => {
     const courseMap = new Map<string, {
+      campus: string;
       course: string;
       stageCounts: Record<FunnelStage, number>;
       stageApps: Record<FunnelStage, AppRow[]>;
@@ -730,8 +742,10 @@ export default function Applications() {
     }>();
 
     for (const app of dashboardApps) {
-      const course = primaryCourseName(app);
-      const existing = courseMap.get(course) || {
+      const { campus, course } = primaryCourseSelection(app);
+      const key = `${campus}::${course}`;
+      const existing = courseMap.get(key) || {
+        campus,
         course,
         stageCounts: {
           in_progress: 0, submitted: 0, paid: 0, approved: 0,
@@ -747,14 +761,19 @@ export default function Applications() {
       existing.stageCounts[stage]++;
       existing.stageApps[stage].push(app);
       if (stage !== "in_progress") existing.totalBeyondInProgress++;
-      courseMap.set(course, existing);
+      courseMap.set(key, existing);
     }
 
-    return Array.from(courseMap.values()).sort((a, b) =>
-      b.totalBeyondInProgress - a.totalBeyondInProgress ||
-      b.stageCounts.in_progress - a.stageCounts.in_progress ||
-      a.course.localeCompare(b.course)
-    );
+    return Array.from(courseMap.values()).sort((a, b) => {
+      if (a.campus !== b.campus) return a.campus.localeCompare(b.campus);
+      const courseOrder = compareCourses(
+        { id: `${a.campus}-${a.course}`, name: a.course, campus_name: a.campus } satisfies CourseLike,
+        { id: `${b.campus}-${b.course}`, name: b.course, campus_name: b.campus } satisfies CourseLike,
+      );
+      return courseOrder ||
+        b.totalBeyondInProgress - a.totalBeyondInProgress ||
+        b.stageCounts.in_progress - a.stageCounts.in_progress;
+    });
   }, [dashboardApps]);
 
   useEffect(() => {
@@ -1083,17 +1102,6 @@ export default function Applications() {
               <span className="text-xs text-muted-foreground">{totalApps} total · big number = currently at stage · click to see who's stuck</span>
             </div>
             <div className="flex items-center gap-2">
-              {canViewCourseBreakup && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 gap-1.5 rounded-full text-xs"
-                  onClick={() => setShowCourseBreakup((current) => !current)}
-                >
-                  <Filter className="h-3.5 w-3.5" />
-                  {showCourseBreakup ? "Hide course status" : "Show course status"}
-                </Button>
-              )}
               {paidNoOffer > 0 && (
                 <button
                   onClick={() => {
@@ -1187,94 +1195,111 @@ export default function Applications() {
             })}
           </div>
 
-          {canViewCourseBreakup && showCourseBreakup && (
+          {canViewCourseBreakup && (
             <div className="mt-4 rounded-xl border border-border/60 bg-muted/10 overflow-hidden">
               <div className="flex items-center justify-between gap-3 border-b border-border/60 px-3 py-2">
                 <div>
                   <p className="text-xs font-semibold text-foreground">Course-wise application status</p>
-                  <p className="text-[11px] text-muted-foreground">Total excludes In Progress. Click any count to select that cohort for a lead list.</p>
+                  <p className="text-[11px] text-muted-foreground">Campus-wise courses. Total excludes In Progress. Click any count to select that cohort for a lead list.</p>
                 </div>
-                {selectedListApps.length > 0 && (
+                <div className="flex items-center gap-2">
+                  {selectedListApps.length > 0 && (
+                    <Button
+                      size="sm"
+                      className="h-8 gap-1.5 text-xs"
+                      onClick={() => openAddToListDialog("selected")}
+                    >
+                      <ListPlus className="h-3.5 w-3.5" />
+                      Add selected ({selectedListApps.length})
+                    </Button>
+                  )}
                   <Button
+                    variant="outline"
                     size="sm"
                     className="h-8 gap-1.5 text-xs"
-                    onClick={() => openAddToListDialog("selected")}
+                    onClick={() => setShowCourseBreakup((current) => !current)}
                   >
-                    <ListPlus className="h-3.5 w-3.5" />
-                    Add selected ({selectedListApps.length})
+                    <Filter className="h-3.5 w-3.5" />
+                    {showCourseBreakup ? "Hide course status" : "Show course status"}
                   </Button>
-                )}
+                </div>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-border/50 bg-background/70">
-                      <th className="sticky left-0 z-10 min-w-[220px] bg-background/95 px-3 py-2 text-left font-medium text-muted-foreground">Course</th>
-                      <th className="px-2 py-2 text-right font-medium text-muted-foreground whitespace-nowrap">Total excl. In Progress</th>
-                      {FUNNEL_ORDER.map((stage) => (
-                        <th key={stage} className="px-2 py-2 text-right font-medium text-muted-foreground whitespace-nowrap">
-                          {FUNNEL_META[stage].label}
-                        </th>
+              {showCourseBreakup && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-border/50 bg-background/70">
+                        <th className="sticky left-0 z-10 min-w-[190px] bg-background/95 px-3 py-2 text-left font-medium text-muted-foreground">Campus</th>
+                        <th className="sticky left-[190px] z-10 min-w-[220px] bg-background/95 px-3 py-2 text-left font-medium text-muted-foreground">Course</th>
+                        <th className="px-2 py-2 text-right font-medium text-muted-foreground whitespace-nowrap">Total excl. In Progress</th>
+                        {FUNNEL_ORDER.map((stage) => (
+                          <th key={stage} className="px-2 py-2 text-right font-medium text-muted-foreground whitespace-nowrap">
+                            {FUNNEL_META[stage].label}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {courseStatusRows.map((row) => (
+                        <tr key={`${row.campus}::${row.course}`} className="border-b border-border/40 last:border-0 hover:bg-muted/20">
+                          <td className="sticky left-0 z-10 max-w-[220px] bg-background/95 px-3 py-2 text-muted-foreground">
+                            <span className="block truncate" title={row.campus}>{row.campus}</span>
+                          </td>
+                          <td className="sticky left-[190px] z-10 max-w-[260px] bg-background/95 px-3 py-2 font-medium text-foreground">
+                            <span className="block truncate" title={row.course}>{row.course}</span>
+                          </td>
+                          <td className="px-2 py-2 text-right">
+                            <button
+                              disabled={row.totalBeyondInProgress === 0}
+                              onClick={() => {
+                                const rows = FUNNEL_ORDER
+                                  .filter((stage) => stage !== "in_progress")
+                                  .flatMap((stage) => row.stageApps[stage]);
+                                selectApplicationCohort(rows, `${row.course} beyond In Progress`);
+                                setCourseFilter(row.course);
+                                setStageFilter(null);
+                              }}
+                              className="rounded-md px-2 py-1 font-semibold tabular-nums text-primary hover:bg-primary/10 disabled:pointer-events-none disabled:text-muted-foreground/40"
+                              title={`Select ${row.course} applications beyond In Progress`}
+                            >
+                              {row.totalBeyondInProgress}
+                            </button>
+                          </td>
+                          {FUNNEL_ORDER.map((stage) => {
+                            const count = row.stageCounts[stage];
+                            const meta = FUNNEL_META[stage];
+                            return (
+                              <td key={stage} className="px-2 py-2 text-right">
+                                <button
+                                  disabled={count === 0}
+                                  onClick={() => {
+                                    selectApplicationCohort(row.stageApps[stage], `${row.course} · ${meta.label}`);
+                                    setCourseFilter(row.course);
+                                    setStageFilter(stage);
+                                    setPaymentFilter("all");
+                                    setStatusFilter("all");
+                                  }}
+                                  className={`rounded-md px-2 py-1 font-medium tabular-nums hover:bg-muted disabled:pointer-events-none disabled:text-muted-foreground/30 ${count > 0 ? "text-foreground" : "text-muted-foreground/30"}`}
+                                  title={`Select ${count} ${row.course} application${count === 1 ? "" : "s"} at ${meta.label}`}
+                                >
+                                  {count}
+                                </button>
+                              </td>
+                            );
+                          })}
+                        </tr>
                       ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {courseStatusRows.map((row) => (
-                      <tr key={row.course} className="border-b border-border/40 last:border-0 hover:bg-muted/20">
-                        <td className="sticky left-0 z-10 max-w-[260px] bg-background/95 px-3 py-2 font-medium text-foreground">
-                          <span className="block truncate" title={row.course}>{row.course}</span>
-                        </td>
-                        <td className="px-2 py-2 text-right">
-                          <button
-                            disabled={row.totalBeyondInProgress === 0}
-                            onClick={() => {
-                              const rows = FUNNEL_ORDER
-                                .filter((stage) => stage !== "in_progress")
-                                .flatMap((stage) => row.stageApps[stage]);
-                              selectApplicationCohort(rows, `${row.course} beyond In Progress`);
-                              setCourseFilter(row.course);
-                              setStageFilter(null);
-                            }}
-                            className="rounded-md px-2 py-1 font-semibold tabular-nums text-primary hover:bg-primary/10 disabled:pointer-events-none disabled:text-muted-foreground/40"
-                            title={`Select ${row.course} applications beyond In Progress`}
-                          >
-                            {row.totalBeyondInProgress}
-                          </button>
-                        </td>
-                        {FUNNEL_ORDER.map((stage) => {
-                          const count = row.stageCounts[stage];
-                          const meta = FUNNEL_META[stage];
-                          return (
-                            <td key={stage} className="px-2 py-2 text-right">
-                              <button
-                                disabled={count === 0}
-                                onClick={() => {
-                                  selectApplicationCohort(row.stageApps[stage], `${row.course} · ${meta.label}`);
-                                  setCourseFilter(row.course);
-                                  setStageFilter(stage);
-                                  setPaymentFilter("all");
-                                  setStatusFilter("all");
-                                }}
-                                className={`rounded-md px-2 py-1 font-medium tabular-nums hover:bg-muted disabled:pointer-events-none disabled:text-muted-foreground/30 ${count > 0 ? "text-foreground" : "text-muted-foreground/30"}`}
-                                title={`Select ${count} ${row.course} application${count === 1 ? "" : "s"} at ${meta.label}`}
-                              >
-                                {count}
-                              </button>
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                    {courseStatusRows.length === 0 && (
-                      <tr>
-                        <td colSpan={FUNNEL_ORDER.length + 2} className="px-3 py-8 text-center text-muted-foreground">
-                          No applications match the current dashboard scope.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                      {courseStatusRows.length === 0 && (
+                        <tr>
+                          <td colSpan={FUNNEL_ORDER.length + 3} className="px-3 py-8 text-center text-muted-foreground">
+                            No applications match the current dashboard scope.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
         </CardContent>
