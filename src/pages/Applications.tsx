@@ -242,6 +242,8 @@ export default function Applications() {
   const [existingListId, setExistingListId] = useState("");
   const [existingLists, setExistingLists] = useState<ExistingList[]>([]);
   const [savingList, setSavingList] = useState(false);
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const handleOfflinePaymentSuccess = async () => {
     if (!offlinePaymentApp) return;
@@ -991,6 +993,47 @@ export default function Applications() {
     });
   };
 
+  const handleBulkDelete = async () => {
+    if (!isSuperAdmin) return;
+    const targetIds = new Set(selectedIds);
+    const targets = apps.filter(a => targetIds.has(a.id));
+    if (!targets.length) return;
+    setBulkDeleting(true);
+    let deleted = 0;
+    let failed = 0;
+    let skippedPaid = 0;
+    for (const app of targets) {
+      if (app.payment_status === "paid") {
+        skippedPaid++;
+        continue;
+      }
+      const { error } = await deleteApplicationRequest({
+        id: app.id,
+        applicationId: app.application_id,
+        paymentStatus: app.payment_status,
+      });
+      if (error) {
+        failed++;
+        console.error("Bulk delete failed:", app.application_id, error);
+      } else {
+        deleted++;
+      }
+    }
+    setBulkDeleting(false);
+    setBulkDeleteConfirmOpen(false);
+    setSelectedIds(new Set());
+    setApps(prev => prev.filter(a => !targetIds.has(a.id) || a.payment_status === "paid"));
+    const parts: string[] = [];
+    if (deleted > 0) parts.push(`${deleted} deleted`);
+    if (skippedPaid > 0) parts.push(`${skippedPaid} paid skipped`);
+    if (failed > 0) parts.push(`${failed} failed`);
+    toast({
+      title: "Bulk delete complete",
+      description: parts.join(" · ") || "Nothing to delete.",
+      variant: failed > 0 ? "destructive" : undefined,
+    });
+  };
+
   const handleExportApplications = async () => {
     setExporting(true);
     try {
@@ -1351,30 +1394,17 @@ export default function Applications() {
           ariaPrefix="Application created"
         />
         {canManageApplicationLists && (
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-9 gap-1.5 text-xs"
-              disabled={selectedListApps.length === 0}
-              onClick={() => openAddToListDialog("selected")}
-              title="Add selected applications to a reusable lead list for bulk WhatsApp/email"
-            >
-              <ListPlus className="h-3.5 w-3.5" />
-              Add selected ({selectedListApps.length})
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-9 gap-1.5 text-xs"
-              disabled={filteredListApps.length === 0}
-              onClick={() => openAddToListDialog("filtered")}
-              title="Save the current filtered application view as a reusable lead list for bulk WhatsApp/email"
-            >
-              <Send className="h-3.5 w-3.5" />
-              Save filter ({filteredListApps.length})
-            </Button>
-          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 text-xs"
+            disabled={filteredListApps.length === 0}
+            onClick={() => openAddToListDialog("filtered")}
+            title="Save the current filtered application view as a reusable lead list for bulk WhatsApp/email"
+          >
+            <Send className="h-3.5 w-3.5" />
+            Save filter ({filteredListApps.length})
+          </Button>
         )}
         {(courseFilter !== "all" || (!isCounsellor && counsellorFilter !== "all") || paymentFilter !== "all" || statusFilter !== "all" || stageFilter || fromDate || toDate) && (
           <Button variant="ghost" size="sm" onClick={() => { setCourseFilter("all"); setCounsellorFilter("all"); setPaymentFilter("all"); setStatusFilter("all"); setStageFilter(null); setDatePreset("all"); setFromDate(""); setToDate(""); }}>
@@ -1382,6 +1412,37 @@ export default function Applications() {
           </Button>
         )}
       </div>
+
+      {/* Bulk action bar — appears when applications are selected */}
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
+          <span className="text-sm font-medium text-foreground">{selectedIds.size} application{selectedIds.size > 1 ? "s" : ""} selected</span>
+          <div className="ml-auto flex flex-wrap gap-2">
+            {canManageApplicationLists && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                disabled={selectedListApps.length === 0}
+                onClick={() => openAddToListDialog("selected")}
+              >
+                <ListPlus className="h-4 w-4" /> Add to List
+              </Button>
+            )}
+            {isSuperAdmin && (
+              <Button
+                variant="destructive"
+                size="sm"
+                className="gap-2"
+                onClick={() => setBulkDeleteConfirmOpen(true)}
+              >
+                <Trash2 className="h-4 w-4" /> Delete
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>Clear</Button>
+          </div>
+        </div>
+      )}
 
       {/* Table */}
       <Card className="border-border/60 shadow-none">
@@ -1973,6 +2034,40 @@ export default function Applications() {
             >
               {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Trash2 className="h-4 w-4 mr-1.5" />}
               Delete permanently
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk delete confirmation dialog */}
+      <AlertDialog open={bulkDeleteConfirmOpen} onOpenChange={(o) => {
+        if (!o && !bulkDeleting) setBulkDeleteConfirmOpen(false);
+      }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedIds.size} application{selectedIds.size > 1 ? "s" : ""}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete {selectedIds.size} selected application{selectedIds.size > 1 ? "s" : ""}.
+              This action cannot be undone. Paid applications will be skipped.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+            <p className="text-xs text-muted-foreground">
+              Only non-paid applications will be deleted. Paid applications require individual confirmation and will be skipped in bulk mode.
+            </p>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={bulkDeleting}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleBulkDelete();
+              }}
+            >
+              {bulkDeleting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Trash2 className="h-4 w-4 mr-1.5" />}
+              Delete {selectedIds.size} application{selectedIds.size > 1 ? "s" : ""}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
