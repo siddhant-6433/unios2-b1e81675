@@ -2,6 +2,7 @@ import { lazy, Suspense, useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCampus } from "@/contexts/CampusContext";
+import { isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
 import {
   Users, IndianRupee, GraduationCap,
   ClipboardCheck, BookOpen, CalendarDays, Bell,
@@ -422,7 +423,7 @@ const Dashboard = () => {
 
   // Redirect consultant to their portal
   if (role === "consultant") return <Navigate to="/consultant-portal" replace />;
-  if (role === "academic_partner") return <Navigate to="/academic-partner-portal" replace />;
+  if (isAcademicPartnerPortalRole(role)) return <Navigate to="/academic-partner-portal" replace />;
   // Video editors land on their portal — they have no access to the staff dashboard.
   if (role === "video_editor") return <Navigate to="/video-editor" replace />;
   // Counsellors land on the cloud dialer — their prioritized queue is the day's work

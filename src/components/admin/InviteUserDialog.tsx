@@ -24,6 +24,7 @@ const ALL_ROLES: { value: AppRole; label: string }[] = [
   { value: "librarian", label: "Librarian" },
   { value: "consultant", label: "Consultant" },
   { value: "academic_partner", label: "Academic Partner" },
+  { value: "academic_partner_offer_letter", label: "Academic Partner + Offers" },
   { value: "video_editor", label: "Video Editor (Consultant)" },
   { value: "publisher", label: "Publisher (Lead Aggregator)" },
   { value: "student", label: "Student" },
@@ -150,8 +151,8 @@ const InviteUserDialog = ({ open, onClose, onSuccess, defaultRole, defaultPublis
         }
       }
 
-      // Auto-create academic partner profile when inviting with academic partner role
-      if (role === "academic_partner" && data?.user_id) {
+      // Auto-create academic partner profile when inviting with either partner portal role.
+      if ((role === "academic_partner" || role === "academic_partner_offer_letter") && data?.user_id) {
         const { data: existing } = await supabase.from("academic_partners").select("id").eq("user_id", data.user_id).maybeSingle();
         if (!existing) {
           await supabase.from("academic_partners").insert({

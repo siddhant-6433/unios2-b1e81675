@@ -8,7 +8,25 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
     ? (value as Record<string, unknown>)
     : null;
 
-export const defaultFeeTermLabel = (term: string) => titleCase(term || "Term");
+const TERM_PATTERNS = [
+  { regex: /^year[_\s-]?(\d+)$/i, label: (n: string) => `Year ${n}` },
+  { regex: /^sem(?:ester)?[_\s-]?(\d+)$/i, label: (n: string) => `Sem ${n}` },
+  { regex: /^q(?:uarter)?[_\s-]?(\d+)$/i, label: (n: string) => `Q${n}` },
+  { regex: /^term[_\s-]?(\d+)$/i, label: (n: string) => `Term ${n}` },
+  { regex: /^installment[_\s-]?(\d+)$/i, label: (n: string) => `Installment ${n}` },
+];
+
+export const defaultFeeTermLabel = (term: string, periodLabel?: string) => {
+  const normalized = String(term || "").trim().toLowerCase();
+  for (const { regex, label } of TERM_PATTERNS) {
+    const match = normalized.match(regex);
+    if (match) {
+      if (periodLabel) return `${periodLabel} ${match[1]}`;
+      return label(match[1]);
+    }
+  }
+  return titleCase(normalized || "Term");
+};
 
 export const feeTermLabel = (term: string, metadata?: FeeStructureMetadata) => {
   const meta = asRecord(metadata);
@@ -19,10 +37,17 @@ export const feeTermLabel = (term: string, metadata?: FeeStructureMetadata) => {
     return explicitLabel.trim();
   }
 
-  const match = term.match(/^year_(\d+)$/);
+  const normalized = String(term || "").trim().toLowerCase();
   const periodLabel = meta?.period_label;
-  if (match && typeof periodLabel === "string" && periodLabel.trim()) {
-    return `${periodLabel.trim()} ${match[1]}`;
+
+  for (const { regex, label } of TERM_PATTERNS) {
+    const match = normalized.match(regex);
+    if (match) {
+      if (typeof periodLabel === "string" && periodLabel.trim()) {
+        return `${periodLabel.trim()} ${match[1]}`;
+      }
+      return label(match[1]);
+    }
   }
 
   return defaultFeeTermLabel(term);

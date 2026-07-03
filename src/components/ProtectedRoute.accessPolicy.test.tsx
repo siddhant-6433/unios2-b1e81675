@@ -65,6 +65,34 @@ describe("ProtectedRoute access policy wiring", () => {
     expect(screen.queryByText("Marketing")).not.toBeInTheDocument();
   });
 
+  it("keeps an offer-letter academic partner in the partner portal", async () => {
+    mocks.auth.role = "academic_partner_offer_letter";
+    mocks.auth.realRole = "academic_partner_offer_letter";
+    mocks.auth.permissions = ["academic_partner_portal:view", "academic_partner_offer_letters:issue"];
+    mocks.permission.permissions = new Set(["academic_partner_portal:view", "academic_partner_offer_letters:issue"]);
+
+    renderAt("/applications", <StaffRoute><div>Applications</div></StaffRoute>);
+
+    expect(await screen.findByText("Academic partner portal")).toBeInTheDocument();
+    expect(screen.queryByText("Applications")).not.toBeInTheDocument();
+  });
+
+  it("allows an offer-letter academic partner to use the issue-offer permission", () => {
+    mocks.auth.role = "academic_partner_offer_letter";
+    mocks.auth.realRole = "academic_partner_offer_letter";
+    mocks.auth.permissions = ["academic_partner_portal:view", "academic_partner_offer_letters:issue"];
+    mocks.permission.permissions = new Set(["academic_partner_portal:view", "academic_partner_offer_letters:issue"]);
+
+    renderAt(
+      "/academic-partner-portal",
+      <RequirePermission module="academic_partner_offer_letters" action="issue">
+        <div>Issue offer</div>
+      </RequirePermission>,
+    );
+
+    expect(screen.getByText("Issue offer")).toBeInTheDocument();
+  });
+
   it("allows an admission head through RequirePermission when the effective permission is present", () => {
     mocks.auth.role = "admission_head";
     mocks.auth.realRole = "admission_head";

@@ -18,7 +18,7 @@ describe("admin user directory", () => {
     expect(migration).toContain("p.deleted_at IS NULL");
     expect(migration).toContain("p.archived_at IS NULL");
     expect(adminPanel).toContain('supabase.rpc("admin_user_directory" as any');
-    expect(adminPanel).toContain('if (userSubTab === "employees") return u.role && !["student", "parent", "consultant", "academic_partner", "publisher"].includes(u.role);');
+    expect(adminPanel).toContain('if (userSubTab === "employees") return u.role && !["student", "parent", "consultant", "academic_partner", "academic_partner_offer_letter", "publisher"].includes(u.role);');
     expect(adminPanel).toContain('{ value: "counsellor", label: "Counsellor" }');
   });
 

@@ -10,6 +10,7 @@ import {
   Receipt, FileText, RefreshCw,
 } from "lucide-react";
 import { ConcessionDialog } from "./ConcessionDialog";
+import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 
 interface StudentFeePanelProps {
   student: any;
@@ -247,7 +248,7 @@ export function StudentFeePanel({ student, onRefresh }: StudentFeePanelProps) {
                   <span className="font-medium text-foreground">{f.fee_codes?.code || "—"}</span>
                   <span className="block text-[10px] text-muted-foreground">{f.fee_codes?.name}</span>
                 </td>
-                <td className="px-4 py-3 text-muted-foreground">{isStethoBatch && /^year_\d+$/.test(f.term) ? `Sem ${f.term.replace("year_", "")}` : f.term}</td>
+                <td className="px-4 py-3 text-muted-foreground">{defaultFeeTermLabel(f.term, isStethoBatch ? "Semester" : undefined)}</td>
                 <td className="px-4 py-3 text-right text-foreground">₹{Number(f.total_amount).toLocaleString("en-IN")}</td>
                 <td className="px-4 py-3 text-right text-muted-foreground">
                   {Number(f.concession) > 0 ? `₹${Number(f.concession).toLocaleString("en-IN")}` : "—"}

@@ -113,7 +113,7 @@ export function classifyCourse(c: CourseLike): Classification {
   if (raw === "TOD" || (isBeacon && /toddler/i.test(lowerName))) {
     return { section: "toddler_beacon", sectionLabel: SECTION_LABEL.toddler_beacon, orderInSection: 0, campusGroup, institutionGroup };
   }
-  if (raw === "NUR" || /^(pre[-\s]?nursery|nursery)/i.test(lowerName)) {
+  if (raw === "NUR" || /^(pre[-\s]?(nursery|nur)|nursery)/i.test(lowerName)) {
     return { section: "pre_nursery", sectionLabel: SECTION_LABEL.pre_nursery, orderInSection: 0, campusGroup, institutionGroup };
   }
   if (raw === "LKG" || /\blkg\b/i.test(lowerName)) {

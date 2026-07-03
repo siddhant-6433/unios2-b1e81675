@@ -13,6 +13,7 @@ import {
 } from "@/lib/deadlineRollover";
 import { preferredGateway, useScopedPaymentGateways } from "@/lib/paymentGatewayResolver";
 import { buildRazorpayReceipt, openRazorpayCheckout } from "@/lib/razorpayCheckout";
+import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 
 // Fallbacks if the get_applicant_deadlines RPC is unreachable.
 // The single source of truth is _app_config — these are last-resort
@@ -1272,11 +1273,6 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
         const hasAnyDeduction = grandDeductions > 0;
 
         const fmt = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
-        const termLabel = (t: string) => {
-          const n = t.replace("year_", "");
-          return n === "1" ? "Year 1" : `Year ${n}`;
-        };
-
         return (
           <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
             <div className="px-4 pt-4 pb-3 border-b border-gray-50">
@@ -1289,7 +1285,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                 <div key={term} className="px-4 py-3 space-y-1.5">
                   {/* Year header */}
                   <div className="flex justify-between items-center">
-                    <span className="text-sm font-semibold text-gray-800">{termLabel(term)} Fee</span>
+                    <span className="text-sm font-semibold text-gray-800">{defaultFeeTermLabel(term)} Fee</span>
                     <span className="text-sm font-semibold text-gray-900">{fmt(raw)}</span>
                   </div>
                   {/* Scholarship */}
@@ -1309,7 +1305,7 @@ export function TokenFeePanel({ applicationId, leadId: leadIdProp, applicantName
                   {/* Net for this year */}
                   {totalDeduction > 0 && (
                     <div className="flex justify-between items-center pl-3 pt-0.5 border-t border-dashed border-gray-100">
-                      <span className="text-xs font-semibold text-gray-600">{termLabel(term)} Net</span>
+                      <span className="text-xs font-semibold text-gray-600">{defaultFeeTermLabel(term)} Net</span>
                       <span className="text-xs font-bold text-gray-800">{fmt(net)}</span>
                     </div>
                   )}

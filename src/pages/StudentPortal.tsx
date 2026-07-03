@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { PortalLayout } from "@/components/layout/PortalLayout";
+import { defaultFeeTermLabel } from "@/lib/feeTermLabels";
 import { getStudentClaimToken } from "@/lib/studentClaim";
 import { brandForStudentOwner, type StudentBrand } from "@/lib/studentBranding";
 import {
@@ -162,7 +163,7 @@ export default function StudentPortal() {
       if (feeRes.data) {
         setFees(feeRes.data.map((f: any) => ({
           id: f.id,
-          fee_code_name: f.fee_codes?.name || f.term || "Fee",
+          fee_code_name: f.fee_codes?.name || defaultFeeTermLabel(f.term) || "Fee",
           total_amount: Number(f.total_amount),
           paid_amount: Number(f.paid_amount),
           balance: Number(f.balance || 0),

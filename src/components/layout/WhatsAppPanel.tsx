@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
 import { CheckCheck, Loader2, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -52,7 +53,7 @@ export function WhatsAppPanel() {
   // every counsellor lead ID here; this component is mounted on every CRM page.
   const fetchNotifications = useCallback(async () => {
     if (!user?.id) return;
-    if (role === "academic_partner") return;
+    if (isAcademicPartnerPortalRole(role)) return;
     setLoading(true);
 
     const q = supabase
@@ -76,7 +77,7 @@ export function WhatsAppPanel() {
   // their lead IDs in the client.
   const fetchUnreplied = useCallback(async () => {
     if (!role || (isCounsellor && !profile?.id)) return;
-    if (role === "academic_partner") {
+    if (isAcademicPartnerPortalRole(role)) {
       setUnrepliedCount(0);
       return;
     }
@@ -92,7 +93,7 @@ export function WhatsAppPanel() {
   }, [role, isCounsellor, profile?.id]);
 
   useEffect(() => {
-    if (role === "academic_partner") {
+    if (isAcademicPartnerPortalRole(role)) {
       setNotifications([]);
       setUnreadNotifCount(0);
       setUnrepliedCount(0);
@@ -105,7 +106,7 @@ export function WhatsAppPanel() {
   // Realtime: new whatsapp_message notifications
   useEffect(() => {
     if (!user?.id) return;
-    if (role === "academic_partner") return;
+    if (isAcademicPartnerPortalRole(role)) return;
     const notifChannel = supabase
       .channel("wa-notifications-realtime")
       .on("postgres_changes", {

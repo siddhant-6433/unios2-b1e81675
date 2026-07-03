@@ -290,8 +290,8 @@ const App = () => (
                       <Route path="/admissions/:id" element={<RequirePermission module="leads" action="view"><LeadDetail /></RequirePermission>} />
                       <Route path="/lead-buckets" element={<RequirePermission module="lead_buckets" action="view"><LeadBuckets /></RequirePermission>} />
                       <Route path="/lead-assignments" element={<RequirePermission module="leads" action="view"><LeadAssignmentHistoryPage /></RequirePermission>} />
-                      <Route path="/lists" element={<BlockRole roles={["academic_partner"]}><RequirePermission module="leads" action="view"><LeadLists /></RequirePermission></BlockRole>} />
-                      <Route path="/marketing" element={<BlockRole roles={["academic_partner"]}><RequirePermission module="leads" action="view"><Marketing /></RequirePermission></BlockRole>} />
+                      <Route path="/lists" element={<BlockRole roles={["academic_partner", "academic_partner_offer_letter"]}><RequirePermission module="leads" action="view"><LeadLists /></RequirePermission></BlockRole>} />
+                      <Route path="/marketing" element={<BlockRole roles={["academic_partner", "academic_partner_offer_letter"]}><RequirePermission module="leads" action="view"><Marketing /></RequirePermission></BlockRole>} />
                       <Route path="/pending-followups" element={<RequirePermission module="leads" action="view"><PendingFollowups /></RequirePermission>} />
                       <Route path="/fresh-leads" element={<RequirePermission module="leads" action="view"><FreshLeads /></RequirePermission>} />
                       <Route path="/visit-monitor" element={<RequirePermission module="leads" action="view"><VisitMonitor /></RequirePermission>} />
@@ -338,7 +338,7 @@ const App = () => (
                       <Route path="/inbox" element={<Inbox />} />
                       <Route path="/whatsapp-inbox" element={<RequirePermission module="whatsapp" action="view"><WhatsAppInbox /></RequirePermission>} />
                       <Route path="/whatsapp-health" element={<RequirePermission module="user_management" action="view"><WhatsAppHealth /></RequirePermission>} />
-                      <Route path="/template-manager" element={<BlockRole roles={["academic_partner"]}><RequirePermission module="templates" action="view"><TemplateManager /></RequirePermission></BlockRole>} />
+                      <Route path="/template-manager" element={<BlockRole roles={["academic_partner", "academic_partner_offer_letter"]}><RequirePermission module="templates" action="view"><TemplateManager /></RequirePermission></BlockRole>} />
 
                       {/* Analytics & reporting */}
                       <Route path="/admission-analytics" element={<RequirePermission module="analytics" action="view"><AdmissionAnalytics /></RequirePermission>} />

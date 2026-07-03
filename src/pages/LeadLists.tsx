@@ -42,7 +42,7 @@ import {
   waParamFieldLabel,
 } from "@/lib/waCampaignParams";
 import nimtLogo from "@/assets/nimt-edu-inst-logo.svg";
-import { decideBlockedRoleAccess } from "@/lib/accessPolicy";
+import { decideBlockedRoleAccess, isAcademicPartnerPortalRole } from "@/lib/accessPolicy";
 
 const BulkLeadImportDialog = lazy(() =>
   import("@/components/admissions/BulkLeadImportDialog").then((m) => ({ default: m.BulkLeadImportDialog })));
@@ -429,7 +429,7 @@ export default function LeadLists() {
   const canDeleteLists = role === "super_admin";
 
   const fetchLists = async () => {
-    if (role === "academic_partner") {
+    if (isAcademicPartnerPortalRole(role)) {
       setLists([]);
       setLoading(false);
       return;
@@ -445,7 +445,7 @@ export default function LeadLists() {
   };
 
   const fetchCampaignQueue = async () => {
-    if (role === "academic_partner") {
+    if (isAcademicPartnerPortalRole(role)) {
       setCampaignQueue([]);
       setQueueLoading(false);
       return;
@@ -503,7 +503,7 @@ export default function LeadLists() {
   };
 
   useEffect(() => {
-    if (role === "academic_partner") return;
+    if (isAcademicPartnerPortalRole(role)) return;
     fetchLists();
   }, [role]);
 
@@ -593,12 +593,12 @@ export default function LeadLists() {
   };
 
   useEffect(() => {
-    if (role === "academic_partner") return;
+    if (isAcademicPartnerPortalRole(role)) return;
     if (waOpen) loadWaSenders();
   }, [role, waOpen]);
 
   useEffect(() => {
-    if (role === "academic_partner") return;
+    if (isAcademicPartnerPortalRole(role)) return;
     if (!waOpen) {
       setDynamicWaBulkTemplates([]);
       setWaMetaTemplateOverrides({});
@@ -657,7 +657,7 @@ export default function LeadLists() {
   }, [role, waOpen]);
 
   useEffect(() => {
-    if (role === "academic_partner") return;
+    if (isAcademicPartnerPortalRole(role)) return;
     if (!emailOpen) return;
     (async () => {
       const { data } = await supabase
