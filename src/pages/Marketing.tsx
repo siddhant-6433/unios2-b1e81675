@@ -405,8 +405,6 @@ export default function Marketing() {
         display_name?: string | null;
         description?: string | null;
       }>);
-      const settingsByKey = new Map(settingsRows.map((row) => [row.template_key, row]));
-      const enabledKeys = new Set(settingsRows.map((row) => row.template_key));
       const { data: approvedRows } = await (supabase as any)
         .from("whatsapp_templates")
         .select("name, components, placeholder_count, has_media, header_format")
@@ -424,26 +422,24 @@ export default function Marketing() {
         if (preview) overrides[row.name] = { preview };
       });
 
-      const dynamic = ((approvedRows || []) as Array<{
+      const approvedTemplateByName = new Map(((approvedRows || []) as Array<{
         name: string;
         components?: WhatsAppTemplateComponent[] | null;
         placeholder_count?: number | null;
         has_media?: boolean | null;
         header_format?: string | null;
-      }>)
-        .filter((row) =>
-          row.name &&
-          enabledKeys.has(row.name) &&
-          !knownKeys.has(row.name)
-        )
-        .map((row) => {
-          const setting = settingsByKey.get(row.name);
+      }>).map((row) => [row.name, row] as const));
+      const dynamic = settingsRows
+        .filter((setting) => setting.template_key && !knownKeys.has(setting.template_key))
+        .map((setting) => {
+          const row = approvedTemplateByName.get(setting.template_key);
+          const metaMissingDescription = "Enabled in Template Visibility. Meta details are not available locally; dispatch will validate approval before sending.";
           return {
-            key: row.name,
-            label: setting?.display_name || row.name.replace(/_/g, " "),
-            description: setting?.description || "Approved Meta template",
-            preview: templateTextPreviewFromComponents(row.components) || setting?.description || row.name,
-            params: dynamicWaTemplateParams(row.components, row.placeholder_count),
+            key: setting.template_key,
+            label: setting.display_name || setting.template_key.replace(/_/g, " "),
+            description: row ? setting.description || "Approved Meta template" : setting.description || metaMissingDescription,
+            preview: templateTextPreviewFromComponents(row?.components) || setting.description || setting.template_key,
+            params: row ? dynamicWaTemplateParams(row.components, row.placeholder_count) : [],
           };
         });
 
