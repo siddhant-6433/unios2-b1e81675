@@ -15,9 +15,11 @@ import {
   FileText, Download, Eye, Loader2, Search, Filter, ExternalLink,
   CheckCircle, Clock, CreditCard, Upload, AlertCircle, ChevronDown, ChevronUp, ChevronRight, X,
   Sparkles, Send, Gift, Wallet, UserCheck, GraduationCap, Receipt, RefreshCw, ClipboardCheck, Trash2, MessageCircle,
+  ListPlus,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -87,6 +89,9 @@ interface AppRow {
   year1_due?: number | null;
   dossier?: ApplicationDossier;
 }
+
+type ExistingList = { id: string; name: string; member_count: number };
+type ApplicationListScope = "selected" | "filtered";
 
 // Mutually-exclusive funnel stages. Each app is bucketed by the FURTHEST
 // stage it has reached, so counts never overlap. The funnel below renders
@@ -173,11 +178,23 @@ const LEAD_STAGE_BADGE: Record<string, string> = {
 const applicationActivityTime = (app: Pick<AppRow, "updated_at" | "submitted_at" | "created_at">) =>
   new Date(app.updated_at || app.submitted_at || app.created_at).getTime();
 
+const canRegenerateFormPdf = (app: Pick<AppRow, "status">) =>
+  app.status === "submitted" || app.status === "under_review" || app.status === "approved";
+
+const primaryCourseName = (app: Pick<AppRow, "course_selections">) => {
+  const firstNamed = (app.course_selections || []).find((course: any) =>
+    String(course?.course_name || "").trim()
+  );
+  return String(firstNamed?.course_name || "No course").trim();
+};
+
 export default function Applications() {
   const { role, profile } = useAuth();
   const { toast } = useToast();
   const isCounsellor = role === "counsellor";
   const isSuperAdmin = role === "super_admin";
+  const canManageApplicationLists = role === "super_admin" || role === "admission_head";
+  const canViewCourseBreakup = canManageApplicationLists;
   const canExportApplications = isSuperAdmin || role === "principal";
   const [apps, setApps] = useState<AppRow[]>([]);
   const [offlinePaymentApp, setOfflinePaymentApp] = useState<AppRow | null>(null);
@@ -206,6 +223,14 @@ export default function Applications() {
   const [nudgeTarget, setNudgeTarget] = useState<AppRow | null>(null);
   const [exporting, setExporting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [showCourseBreakup, setShowCourseBreakup] = useState(true);
+  const [showAddToList, setShowAddToList] = useState(false);
+  const [listMode, setListMode] = useState<"new" | "existing">("new");
+  const [listScope, setListScope] = useState<ApplicationListScope>("selected");
+  const [newListName, setNewListName] = useState("");
+  const [existingListId, setExistingListId] = useState("");
+  const [existingLists, setExistingLists] = useState<ExistingList[]>([]);
+  const [savingList, setSavingList] = useState(false);
 
   const handleOfflinePaymentSuccess = async () => {
     if (!offlinePaymentApp) return;
@@ -239,11 +264,12 @@ export default function Applications() {
 
   const regenerateAll = async () => {
     const eligible = (a: AppRow) => a.status === "submitted" || a.status === "under_review" || a.status === "approved";
-    const targets = selectedIds.size > 0
-      ? apps.filter(a => selectedIds.has(a.id) && eligible(a))
+    const selectedPdfIds = new Set(selectedPdfApps.map((app) => app.id));
+    const targets = selectedPdfIds.size > 0
+      ? apps.filter(a => selectedPdfIds.has(a.id) && eligible(a))
       : apps.filter(eligible);
     if (!targets.length) return;
-    const scope = selectedIds.size > 0 ? "selected" : "all";
+    const scope = selectedPdfIds.size > 0 ? "selected" : "all";
     if (!window.confirm(`Regenerate ${targets.length} ${scope} application form PDFs? This may take a few minutes.`)) return;
     setBulkRegen({ done: 0, total: targets.length });
     for (let i = 0; i < targets.length; i++) {
@@ -555,13 +581,16 @@ export default function Applications() {
 
   const courseOptions = useMemo(() => {
     const courses = new Set<string>();
+    let hasNoCourse = false;
     apps.forEach((app) => {
+      if (primaryCourseName(app) === "No course") hasNoCourse = true;
       (app.course_selections || []).forEach((course: any) => {
         const name = String(course?.course_name || "").trim();
         if (name) courses.add(name);
       });
     });
-    return Array.from(courses).sort((a, b) => a.localeCompare(b));
+    const sorted = Array.from(courses).sort((a, b) => a.localeCompare(b));
+    return hasNoCourse ? ["No course", ...sorted] : sorted;
   }, [apps]);
 
   const counsellorOptions = useMemo(() => {
@@ -586,6 +615,7 @@ export default function Applications() {
 
   const matchesCourseFilter = useCallback((app: AppRow) =>
     courseFilter === "all" ||
+    (courseFilter === "No course" && primaryCourseName(app) === "No course") ||
     app.course_selections?.some((course: any) => course?.course_name === courseFilter),
     [courseFilter],
   );
@@ -672,11 +702,207 @@ export default function Applications() {
   const pageStart = (safeCurrentPage - 1) * APPLICATION_TABLE_PAGE_SIZE;
   const pageEnd = Math.min(pageStart + APPLICATION_TABLE_PAGE_SIZE, filtered.length);
   const visibleApps = filtered.slice(pageStart, pageEnd);
+  const selectedListApps = useMemo(
+    () => apps.filter((app) => selectedIds.has(app.id) && !!app.lead_id),
+    [apps, selectedIds],
+  );
+  const selectedPdfApps = useMemo(
+    () => apps.filter((app) => selectedIds.has(app.id) && canRegenerateFormPdf(app)),
+    [apps, selectedIds],
+  );
+  const filteredListApps = useMemo(
+    () => filtered.filter((app) => !!app.lead_id),
+    [filtered],
+  );
+  const selectableApps = useMemo(
+    () => canManageApplicationLists ? filteredListApps : filtered.filter(canRegenerateFormPdf),
+    [canManageApplicationLists, filtered, filteredListApps],
+  );
+  const allSelectableAppsSelected = selectableApps.length > 0 &&
+    selectableApps.every((app) => selectedIds.has(app.id));
+
+  const courseStatusRows = useMemo(() => {
+    const courseMap = new Map<string, {
+      course: string;
+      stageCounts: Record<FunnelStage, number>;
+      stageApps: Record<FunnelStage, AppRow[]>;
+      totalBeyondInProgress: number;
+    }>();
+
+    for (const app of dashboardApps) {
+      const course = primaryCourseName(app);
+      const existing = courseMap.get(course) || {
+        course,
+        stageCounts: {
+          in_progress: 0, submitted: 0, paid: 0, approved: 0,
+          offer_sent: 0, token_paid: 0, pre_admitted: 0, admitted: 0,
+        },
+        stageApps: {
+          in_progress: [], submitted: [], paid: [], approved: [],
+          offer_sent: [], token_paid: [], pre_admitted: [], admitted: [],
+        },
+        totalBeyondInProgress: 0,
+      };
+      const stage = funnelStageOf(app);
+      existing.stageCounts[stage]++;
+      existing.stageApps[stage].push(app);
+      if (stage !== "in_progress") existing.totalBeyondInProgress++;
+      courseMap.set(course, existing);
+    }
+
+    return Array.from(courseMap.values()).sort((a, b) =>
+      b.totalBeyondInProgress - a.totalBeyondInProgress ||
+      b.stageCounts.in_progress - a.stageCounts.in_progress ||
+      a.course.localeCompare(b.course)
+    );
+  }, [dashboardApps]);
 
   useEffect(() => {
     setCurrentPage(1);
     setExpandedId(null);
   }, [courseFilter, counsellorFilter, fromDate, paymentFilter, search, sortMode, stageFilter, statusFilter, toDate]);
+
+  const selectApplicationCohort = (rows: AppRow[], label: string) => {
+    if (!canManageApplicationLists) return;
+    const ids = rows.filter((app) => !!app.lead_id).map((app) => app.id);
+    setSelectedIds(new Set(ids));
+    toast({
+      title: "Applications selected",
+      description: ids.length > 0
+        ? `${ids.length} lead-linked application${ids.length === 1 ? "" : "s"} selected from ${label}.`
+        : `No lead-linked applications found in ${label}.`,
+    });
+  };
+
+  const resetListDialog = () => {
+    setNewListName("");
+    setExistingListId("");
+    setListMode("new");
+    setListScope("selected");
+  };
+
+  const openAddToListDialog = async (scope: ApplicationListScope) => {
+    if (!canManageApplicationLists) return;
+    setListScope(scope);
+    setShowAddToList(true);
+
+    const { data, error } = await supabase
+      .from("lead_lists" as any)
+      .select("id, name, member_count")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      toast({ title: "Lists could not load", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    setExistingLists(((data || []) as any[]).map((list) => ({
+      id: list.id,
+      name: list.name,
+      member_count: list.member_count || 0,
+    })));
+  };
+
+  const listRowsForScope = () => listScope === "filtered" ? filteredListApps : selectedListApps;
+
+  const currentFilterSnapshot = () => ({
+    source: "applications_dashboard",
+    courseFilter,
+    counsellorFilter,
+    paymentFilter,
+    statusFilter,
+    stageFilter,
+    fromDate: fromDate || null,
+    toDate: toDate || null,
+    search: search || null,
+    sortMode,
+  });
+
+  const handleAddApplicationsToList = async () => {
+    if (!canManageApplicationLists) return;
+    const rows = listRowsForScope();
+    const leadIds = Array.from(new Set(rows.map((app) => app.lead_id).filter(Boolean))) as string[];
+
+    if (!leadIds.length) {
+      toast({
+        title: "No applications to add",
+        description: listScope === "filtered"
+          ? "The current filters do not match any applications with linked leads."
+          : "Select at least one application with a linked lead first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    let listId = existingListId;
+    let listName = existingLists.find((list) => list.id === existingListId)?.name || "";
+    setSavingList(true);
+
+    if (listMode === "new") {
+      const name = newListName.trim();
+      if (!name) {
+        toast({ title: "Name required", description: "Give the list a name first.", variant: "destructive" });
+        setSavingList(false);
+        return;
+      }
+
+      const { data: list, error: listErr } = await supabase
+        .from("lead_lists" as any)
+        .insert({
+          name,
+          source: listScope === "filtered" ? "filter" : "manual",
+          filters_snapshot: listScope === "filtered" ? currentFilterSnapshot() : { source: "applications_dashboard_selection" },
+          description: `Saved from Applications — ${leadIds.length} ${listScope === "filtered" ? "filtered" : "selected"} applications`,
+          created_by: profile?.id || null,
+        })
+        .select("id, name")
+        .single();
+
+      if (listErr || !list) {
+        toast({ title: "Could not create list", description: listErr?.message || "Unknown error", variant: "destructive" });
+        setSavingList(false);
+        return;
+      }
+
+      listId = (list as any).id;
+      listName = (list as any).name;
+    } else if (!listId) {
+      toast({ title: "Choose a list", description: "Select an existing list first.", variant: "destructive" });
+      setSavingList(false);
+      return;
+    }
+
+    const members = leadIds.map((lead_id) => ({ list_id: listId, lead_id }));
+    let memberErrors = 0;
+    for (let i = 0; i < members.length; i += 500) {
+      const chunk = members.slice(i, i + 500);
+      const { error: memberErr } = await supabase
+        .from("lead_list_members" as any)
+        .upsert(chunk, { onConflict: "list_id,lead_id", ignoreDuplicates: true } as any);
+      if (memberErr) {
+        memberErrors++;
+        console.error("Application list member insert failed:", memberErr);
+      }
+    }
+
+    setSavingList(false);
+    if (memberErrors > 0) {
+      toast({
+        title: "List partially updated",
+        description: `"${listName}" was saved, but some applications could not be added. Check console.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    toast({
+      title: listMode === "new" ? "List created" : "List updated",
+      description: `"${listName}" — ${leadIds.length} application lead${leadIds.length === 1 ? "" : "s"} added. Use Lists for bulk WhatsApp or email.`,
+    });
+    setShowAddToList(false);
+    resetListDialog();
+    if (listScope === "selected") setSelectedIds(new Set());
+  };
 
   const fetchDocs = async (appId: string, applicationId: string) => {
     setDocsDialog({ appId, applicationId });
@@ -826,8 +1052,8 @@ export default function Applications() {
               {bulkRegen ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
               {bulkRegen
                 ? `Regenerating ${bulkRegen.done}/${bulkRegen.total}`
-                : selectedIds.size > 0
-                  ? `Regenerate Selected (${selectedIds.size})`
+                : selectedPdfApps.length > 0
+                  ? `Regenerate Selected (${selectedPdfApps.length})`
                   : "Regenerate All PDFs"}
             </button>
           )}
@@ -856,20 +1082,41 @@ export default function Applications() {
               <h2 className="text-sm font-semibold text-foreground">Application Pipeline</h2>
               <span className="text-xs text-muted-foreground">{totalApps} total · big number = currently at stage · click to see who's stuck</span>
             </div>
-            {paidNoOffer > 0 && (
-              <button
-                onClick={() => { setStageFilter(stageFilter === "paid_no_offer" ? null : "paid_no_offer"); setPaymentFilter("all"); setStatusFilter("all"); }}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-all ${
-                  stageFilter === "paid_no_offer"
-                    ? "border-rose-400 bg-rose-100 text-rose-800 ring-2 ring-rose-300"
-                    : "border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 animate-pulse"
-                }`}
-                title="Paid candidates with no offer letter yet — counsellor action needed"
-              >
-                <AlertCircle className="h-3.5 w-3.5" />
-                {paidNoOffer} paid · offer not issued
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {canViewCourseBreakup && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 rounded-full text-xs"
+                  onClick={() => setShowCourseBreakup((current) => !current)}
+                >
+                  <Filter className="h-3.5 w-3.5" />
+                  {showCourseBreakup ? "Hide course status" : "Show course status"}
+                </Button>
+              )}
+              {paidNoOffer > 0 && (
+                <button
+                  onClick={() => {
+                    const isActive = stageFilter === "paid_no_offer";
+                    setStageFilter(isActive ? null : "paid_no_offer");
+                    setPaymentFilter("all");
+                    setStatusFilter("all");
+                    if (!isActive) {
+                      selectApplicationCohort(dashboardApps.filter(isPaidBeforeOfferStage), "paid applications without offer");
+                    }
+                  }}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-all ${
+                    stageFilter === "paid_no_offer"
+                      ? "border-rose-400 bg-rose-100 text-rose-800 ring-2 ring-rose-300"
+                      : "border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 animate-pulse"
+                  }`}
+                  title="Paid candidates with no offer letter yet — counsellor action needed"
+                >
+                  <AlertCircle className="h-3.5 w-3.5" />
+                  {paidNoOffer} paid · offer not issued
+                </button>
+              )}
+            </div>
           </div>
 
           {/* `overflow-x-auto` also clips Y in CSS, so the ring-2 on the active
@@ -905,7 +1152,14 @@ export default function Applications() {
                     </div>
                   )}
                   <button
-                    onClick={() => { setStageFilter(isActive ? null : stage); setPaymentFilter("all"); setStatusFilter("all"); }}
+                    onClick={() => {
+                      setStageFilter(isActive ? null : stage);
+                      setPaymentFilter("all");
+                      setStatusFilter("all");
+                      if (!isActive) {
+                        selectApplicationCohort(dashboardApps.filter((app) => funnelStageOf(app) === stage), meta.label);
+                      }
+                    }}
                     className={`group relative rounded-xl border transition-all text-left p-3 shrink-0 overflow-hidden ${
                       isActive
                         ? `${meta.tint} ring-2 ${meta.ring} border-transparent`
@@ -932,6 +1186,97 @@ export default function Applications() {
               );
             })}
           </div>
+
+          {canViewCourseBreakup && showCourseBreakup && (
+            <div className="mt-4 rounded-xl border border-border/60 bg-muted/10 overflow-hidden">
+              <div className="flex items-center justify-between gap-3 border-b border-border/60 px-3 py-2">
+                <div>
+                  <p className="text-xs font-semibold text-foreground">Course-wise application status</p>
+                  <p className="text-[11px] text-muted-foreground">Total excludes In Progress. Click any count to select that cohort for a lead list.</p>
+                </div>
+                {selectedListApps.length > 0 && (
+                  <Button
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs"
+                    onClick={() => openAddToListDialog("selected")}
+                  >
+                    <ListPlus className="h-3.5 w-3.5" />
+                    Add selected ({selectedListApps.length})
+                  </Button>
+                )}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border/50 bg-background/70">
+                      <th className="sticky left-0 z-10 min-w-[220px] bg-background/95 px-3 py-2 text-left font-medium text-muted-foreground">Course</th>
+                      <th className="px-2 py-2 text-right font-medium text-muted-foreground whitespace-nowrap">Total excl. In Progress</th>
+                      {FUNNEL_ORDER.map((stage) => (
+                        <th key={stage} className="px-2 py-2 text-right font-medium text-muted-foreground whitespace-nowrap">
+                          {FUNNEL_META[stage].label}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {courseStatusRows.map((row) => (
+                      <tr key={row.course} className="border-b border-border/40 last:border-0 hover:bg-muted/20">
+                        <td className="sticky left-0 z-10 max-w-[260px] bg-background/95 px-3 py-2 font-medium text-foreground">
+                          <span className="block truncate" title={row.course}>{row.course}</span>
+                        </td>
+                        <td className="px-2 py-2 text-right">
+                          <button
+                            disabled={row.totalBeyondInProgress === 0}
+                            onClick={() => {
+                              const rows = FUNNEL_ORDER
+                                .filter((stage) => stage !== "in_progress")
+                                .flatMap((stage) => row.stageApps[stage]);
+                              selectApplicationCohort(rows, `${row.course} beyond In Progress`);
+                              setCourseFilter(row.course);
+                              setStageFilter(null);
+                            }}
+                            className="rounded-md px-2 py-1 font-semibold tabular-nums text-primary hover:bg-primary/10 disabled:pointer-events-none disabled:text-muted-foreground/40"
+                            title={`Select ${row.course} applications beyond In Progress`}
+                          >
+                            {row.totalBeyondInProgress}
+                          </button>
+                        </td>
+                        {FUNNEL_ORDER.map((stage) => {
+                          const count = row.stageCounts[stage];
+                          const meta = FUNNEL_META[stage];
+                          return (
+                            <td key={stage} className="px-2 py-2 text-right">
+                              <button
+                                disabled={count === 0}
+                                onClick={() => {
+                                  selectApplicationCohort(row.stageApps[stage], `${row.course} · ${meta.label}`);
+                                  setCourseFilter(row.course);
+                                  setStageFilter(stage);
+                                  setPaymentFilter("all");
+                                  setStatusFilter("all");
+                                }}
+                                className={`rounded-md px-2 py-1 font-medium tabular-nums hover:bg-muted disabled:pointer-events-none disabled:text-muted-foreground/30 ${count > 0 ? "text-foreground" : "text-muted-foreground/30"}`}
+                                title={`Select ${count} ${row.course} application${count === 1 ? "" : "s"} at ${meta.label}`}
+                              >
+                                {count}
+                              </button>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                    {courseStatusRows.length === 0 && (
+                      <tr>
+                        <td colSpan={FUNNEL_ORDER.length + 2} className="px-3 py-8 text-center text-muted-foreground">
+                          No applications match the current dashboard scope.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -980,6 +1325,32 @@ export default function Applications() {
           onToDateChange={setToDate}
           ariaPrefix="Application created"
         />
+        {canManageApplicationLists && (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1.5 text-xs"
+              disabled={selectedListApps.length === 0}
+              onClick={() => openAddToListDialog("selected")}
+              title="Add selected applications to a reusable lead list for bulk WhatsApp/email"
+            >
+              <ListPlus className="h-3.5 w-3.5" />
+              Add selected ({selectedListApps.length})
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1.5 text-xs"
+              disabled={filteredListApps.length === 0}
+              onClick={() => openAddToListDialog("filtered")}
+              title="Save the current filtered application view as a reusable lead list for bulk WhatsApp/email"
+            >
+              <Send className="h-3.5 w-3.5" />
+              Save filter ({filteredListApps.length})
+            </Button>
+          </div>
+        )}
         {(courseFilter !== "all" || (!isCounsellor && counsellorFilter !== "all") || paymentFilter !== "all" || statusFilter !== "all" || stageFilter || fromDate || toDate) && (
           <Button variant="ghost" size="sm" onClick={() => { setCourseFilter("all"); setCounsellorFilter("all"); setPaymentFilter("all"); setStatusFilter("all"); setStageFilter(null); setDatePreset("all"); setFromDate(""); setToDate(""); }}>
             <X className="h-3.5 w-3.5 mr-1" />Clear
@@ -999,17 +1370,13 @@ export default function Applications() {
                     <input
                       type="checkbox"
                       className="cursor-pointer accent-primary"
-                      title="Select all eligible"
-                      checked={(() => {
-                        const eligible = filtered.filter(a => a.status === "submitted" || a.status === "under_review" || a.status === "approved");
-                        return eligible.length > 0 && eligible.every(a => selectedIds.has(a.id));
-                      })()}
+                      title={canManageApplicationLists ? "Select all filtered lead-linked applications" : "Select all eligible for PDF regeneration"}
+                      checked={allSelectableAppsSelected}
                       onChange={(e) => {
-                        const eligible = filtered.filter(a => a.status === "submitted" || a.status === "under_review" || a.status === "approved");
                         setSelectedIds(prev => {
                           const next = new Set(prev);
-                          if (e.target.checked) eligible.forEach(a => next.add(a.id));
-                          else eligible.forEach(a => next.delete(a.id));
+                          if (e.target.checked) selectableApps.forEach(a => next.add(a.id));
+                          else selectableApps.forEach(a => next.delete(a.id));
                           return next;
                         });
                       }}
@@ -1057,7 +1424,7 @@ export default function Applications() {
                     </td>
                     {!isCounsellor && (
                       <td className="px-2 py-2.5">
-                        {(app.status === "submitted" || app.status === "under_review" || app.status === "approved") ? (
+                        {(canManageApplicationLists ? !!app.lead_id : canRegenerateFormPdf(app)) ? (
                           <input
                             type="checkbox"
                             className="cursor-pointer accent-primary"
@@ -1342,6 +1709,107 @@ export default function Applications() {
           </div>
         )}
       </Card>
+
+      {/* Add selected / filtered applications to a reusable lead list */}
+      <Dialog open={showAddToList} onOpenChange={(open) => {
+        if (savingList) return;
+        setShowAddToList(open);
+        if (!open) resetListDialog();
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ListPlus className="h-4 w-4" />
+              Add applications to list
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              {listScope === "filtered"
+                ? `${filteredListApps.length} currently filtered application lead${filteredListApps.length === 1 ? "" : "s"} will be saved to a static list for bulk WhatsApp or email campaigns.`
+                : `${selectedListApps.length} selected application lead${selectedListApps.length === 1 ? "" : "s"} will be saved to a static list for bulk WhatsApp or email campaigns.`}
+            </p>
+            {filteredListApps.length > 0 && selectedListApps.length > 0 && (
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant={listScope === "selected" ? "default" : "outline"}
+                  onClick={() => setListScope("selected")}
+                >
+                  Selected ({selectedListApps.length})
+                </Button>
+                <Button
+                  type="button"
+                  variant={listScope === "filtered" ? "default" : "outline"}
+                  onClick={() => setListScope("filtered")}
+                >
+                  Current filter ({filteredListApps.length})
+                </Button>
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant={listMode === "new" ? "default" : "outline"}
+                onClick={() => setListMode("new")}
+              >
+                New list
+              </Button>
+              <Button
+                type="button"
+                variant={listMode === "existing" ? "default" : "outline"}
+                onClick={() => setListMode("existing")}
+              >
+                Existing list
+              </Button>
+            </div>
+            {listMode === "new" ? (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">List name</label>
+                <input
+                  type="text"
+                  value={newListName}
+                  onChange={(e) => setNewListName(e.target.value)}
+                  placeholder={`Applications — ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`}
+                  className="mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                  autoFocus
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Choose list</label>
+                <select
+                  value={existingListId}
+                  onChange={(e) => setExistingListId(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
+                >
+                  <option value="">Select a list...</option>
+                  {existingLists.map((list) => (
+                    <option key={list.id} value={list.id}>{list.name} ({list.member_count})</option>
+                  ))}
+                </select>
+                {existingLists.length === 0 && (
+                  <p className="mt-2 text-xs text-muted-foreground">No existing lists yet. Create a new list instead.</p>
+                )}
+              </div>
+            )}
+            <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              After saving, open <a href="/lists" className="font-medium text-primary underline">Lists</a> to preview recipients and send bulk WhatsApp or email.
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddToList(false)} disabled={savingList}>Cancel</Button>
+            <Button
+              onClick={handleAddApplicationsToList}
+              disabled={savingList || (listMode === "new" ? !newListName.trim() : !existingListId)}
+              className="gap-2"
+            >
+              {savingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
+              {listMode === "new" ? "Create List" : "Add to List"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Documents Dialog */}
       <Dialog open={!!docsDialog} onOpenChange={() => setDocsDialog(null)}>
