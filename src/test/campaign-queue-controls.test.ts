@@ -7,6 +7,7 @@ const emailSender = readFileSync("supabase/functions/email-campaign-send/index.t
 const leadLists = readFileSync("src/pages/LeadLists.tsx", "utf8");
 const marketingPage = readFileSync("src/pages/Marketing.tsx", "utf8");
 const bulkTemplates = readFileSync("src/config/waBulkTemplates.ts", "utf8");
+const whatsappTemplateMeta = readFileSync("src/lib/whatsappTemplateMeta.ts", "utf8");
 
 describe("campaign queue controls", () => {
   it("adds database states for paused and terminated campaign queues", () => {
@@ -66,14 +67,18 @@ describe("campaign queue controls", () => {
     expect(leadLists).toContain('from("whatsapp_template_settings")');
     expect(leadLists).toContain('from("whatsapp_templates")');
     expect(leadLists).toContain("const approvedTemplateByName = new Map");
+    expect(leadLists).toContain("enrichApprovedWhatsAppTemplateMetadata");
     expect(leadLists).toContain(".filter((setting) => setting.template_key && !knownKeys.has(setting.template_key))");
     expect(leadLists).toContain("Meta details are not available locally");
     expect(leadLists).toContain("dynamicWaTemplateParams(row.components, row.placeholder_count)");
     expect(marketingPage).toContain('from("whatsapp_template_settings")');
     expect(marketingPage).toContain("const approvedTemplateByName = new Map");
+    expect(marketingPage).toContain("enrichApprovedWhatsAppTemplateMetadata");
     expect(marketingPage).toContain(".filter((setting) => setting.template_key && !knownKeys.has(setting.template_key))");
     expect(marketingPage).toContain("Meta details are not available locally");
     expect(marketingPage).toContain("dynamicWaTemplateParams(row.components, row.placeholder_count)");
+    expect(whatsappTemplateMeta).toContain('invokeEdge<{ templates?: MetaTemplateRow[] }>("whatsapp-templates"');
+    expect(whatsappTemplateMeta).toContain('body: { action: "list" }');
     expect(bulkTemplates).toContain("template_header_media_url");
     expect(bulkTemplates).toContain("template_button_${buttonIndex}_url_value_${position}");
     expect(whatsappSender).toContain("dynamicTemplateComponents");
